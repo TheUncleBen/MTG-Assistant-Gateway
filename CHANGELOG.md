@@ -99,6 +99,11 @@ to the Android app coming back to the app by itself, and faster pages and deck d
   test by Forge".
 - **A commander** among the cards the quick solo test lists says "commander" instead of "drawn 0%":
   it starts in the command zone, so it is never drawn.
+- **Android install and update steps** say that on a Samsung Galaxy phone Auto Blocker must be off
+  to install the app or its updates, and that letting Play Protect scan the app or not are both
+  fine. The release notes say the same beside the app's files.
+- **Fewer obvious lines.** The Archidekt profile switches and default settings no longer say that
+  each one saves when you change it.
 
 ### Fixed
 - **The Claude logo** beside a Claude connection: Claude registers sign-in addresses on both

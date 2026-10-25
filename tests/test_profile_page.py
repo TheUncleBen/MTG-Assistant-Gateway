@@ -109,7 +109,8 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
         ("Archidekt notifications", "Shows Archidekt's notifications in the bell."),
     ):
         assert _said(mail, label) and _said(mail, help_text), label
-    assert "Each switch saves to Archidekt when you press it." in mail
+    # Ben (25 Oct): the switches say what they do; no line telling a member that a switch saves
+    assert "saves to Archidekt" not in mail and "when you press it" not in mail
     # the switches show Archidekt's values: contactable on, newsletter off, notifications on
     assert "id='pr-contactable' type='checkbox' name='on' value='1' checked" in mail
     assert "id='pr-newsletter' type='checkbox' name='on' value='1'>" in mail
@@ -118,9 +119,9 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
     defs = _card(page, "defaults")
     assert _said(
         defs,
-        "What Archidekt starts with on a device you haven't set up yet. "
-        "Each choice saves when you change it.",
+        "What Archidekt starts with on a device you haven't set up yet.",
     )
+    assert "saves when you change it" not in defs
     for label in (
         "Deck view",
         "Group by",

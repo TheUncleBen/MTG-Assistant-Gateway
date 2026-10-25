@@ -56,15 +56,20 @@ download button. Then:
    SHA-256 only shows the download arrived intact, not who made it. For a
    stronger check, run `apksigner verify --print-certs mtg-assistant-gateway.apk` on a computer
    and compare the `certificate SHA-256 digest` line with the published value.
-2. Open the downloaded `mtg-assistant-gateway.apk`. Android asks you to allow installs from
+2. On a Samsung Galaxy phone, turn **Auto Blocker** off first (Settings >
+   Security and privacy > Auto Blocker). While it is on, the phone won't
+   install apps that don't come from an app store, so neither the app nor its
+   updates ([Updates](#updates) below). Other phones have no such switch.
+3. Open the downloaded `mtg-assistant-gateway.apk`. Android asks you to allow installs from
    that browser once. Allow it and tap **Install**.
-3. Play Protect may warn that the developer is unknown or unverified, because
+4. Play Protect may warn that the developer is unknown or unverified, because
    the app is signed by whoever runs your gateway, not by an app store; the
-   exact wording varies by phone and Android version. Only continue if you got
+   exact wording varies by phone and Android version. It may also offer to
+   scan the app first: scanning it or not are both fine. Only continue if you got
    the file from your gateway's setup page and the certificate fingerprint
    matched in step 1. If Play Protect says the app is harmful, or you are
    unsure, don't install it and ask the gateway's owner.
-4. On first launch the app asks for your **gateway address**: type the hostname
+5. On first launch the app asks for your **gateway address**: type the hostname
    the owner gave you, for example `mtg.example.com`. The app checks that the
    address answers as a gateway, saves it, and opens the site. Sign-in then
    opens in your phone's browser ([Sign-in](#2-using-it) below).
@@ -96,7 +101,10 @@ the app is available**:
    certificate as the app you have. If any of that fails, nothing is installed
    and the app says why.
 2. The first time, Android asks you to allow installs from MTG Assistant
-   Gateway ("Install unknown apps"). Allow it, go back, and confirm.
+   Gateway ("Install unknown apps"). Allow it, go back, and confirm. On a
+   Samsung Galaxy phone, Auto Blocker must be off for this, as for the first
+   install. If Play Protect offers to scan the update, scanning it or not are
+   both fine.
 3. Android installs the update over the app and closes it. Open the app again
    from its icon. Your gateway address and sign-in are kept.
 

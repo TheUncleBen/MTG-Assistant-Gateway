@@ -436,7 +436,7 @@ def account_cards(
     email = (
         f"<div class='card' id='email'><h2>Email and notifications on Archidekt</h2>{note('email')}"
         + "".join(email_rows)
-        + "<p class='muted small'>Each switch saves to Archidekt when you press it.</p></div>"
+        + "</div>"
     )
     pref_rows = []
     for name, label, help_text, choices in PREF_ROWS:
@@ -468,8 +468,8 @@ def account_cards(
             pref_rows.append(_row(f"<label for='pr-{name}'>{esc(label)}</label>", help_text, ctl))
     defaults = (
         "<div class='card' id='defaults'><h2>New device default settings</h2>"
-        "<p class='muted small'>What Archidekt starts with on a device you haven't set up yet. Each choice "
-        f"saves when you change it.</p>{note('defaults')}" + "".join(pref_rows) + "</div>"
+        "<p class='muted small'>What Archidekt starts with on a device you haven't set up yet.</p>"
+        f"{note('defaults')}" + "".join(pref_rows) + "</div>"
     )
     only = (
         "<div class='card' id='archidekt-only'><h2>On Archidekt only</h2>"
