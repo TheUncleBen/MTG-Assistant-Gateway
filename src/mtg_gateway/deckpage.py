@@ -3611,9 +3611,11 @@ ul.decklist .thumb .cbar{position:absolute;left:0;right:0;bottom:0;height:15px;b
   gap:0}
 ul.decklist .thumb .cbar.empty{display:none}
 ul.decklist .info{display:flex;gap:.6rem;align-items:center;min-height:75px;padding:.5rem .75rem}
-ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem}
-ul.decklist .info .name{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
+ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem;flex:1}
+/* a deck's name: up to two lines, then an ellipsis (one line cut "Meren Graveyard Value" to
+   "Meren Grave…" on a computer's tiles) */
+ul.decklist .info .name{font-size:16px;font-weight:700;overflow:hidden;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 ul.decklist .deck a:hover .name{text-decoration:underline}
 ul.decklist .info .fmt,ul.decklist .info .sub{font-size:.86rem;color:var(--text-muted);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
