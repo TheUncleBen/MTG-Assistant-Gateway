@@ -601,7 +601,7 @@ def test_saved_descriptions_and_remove_fit_and_read(
         kept.scroll_into_view_if_needed()
         if shots:
             kept.screenshot(path=f"{shots}/report-saved-{width}-{scheme}.png")
-            page.locator(".report .coverage").screenshot(path=f"{shots}/report-coverage-{width}-{scheme}.png")
+            page.locator(".report .ig-sum").screenshot(path=f"{shots}/report-coverage-{width}-{scheme}.png")
         state = page.evaluate(
             """(contrast) => {
               const ratio = eval(contrast);
@@ -624,8 +624,10 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert state["right"] <= state["innerWidth"] + 0.5, state
         assert not state["low"], state["low"]
         assert len(state["buttons"]) == 1 and state["buttons"][0] >= 44, state["buttons"]
-        coverage = page.locator(".report .coverage").inner_text()
-        assert "Played with their effect:" in coverage and "Known:" in coverage
+        coverage = (
+            page.locator(".report .ig-sum").inner_text() + page.locator(".report .ig-foot").inner_text()
+        )
+        assert "Played with their effect" in coverage and "Known:" in coverage
         # Remove asks first (2026-10-21, POPUP-INVENTORY): the red outline opens a box whose solid
         # red button removes
         page.get_by_role("button", name="Remove the saved description of Sol Ring").click()

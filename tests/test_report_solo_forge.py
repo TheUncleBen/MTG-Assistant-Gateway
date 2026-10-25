@@ -84,7 +84,7 @@ def test_the_section_is_a_heading_over_a_divider_with_its_label_and_jump_chip() 
     sec = _section(html)
     assert sec.startswith("<section class='rv-sec rv-flat solo-forge' id='rv-solo-forge'")
     assert "ui-card" not in sec.split("<div class='rv-sh'>")[0]
-    assert "<h2 id='rv-solo-forge-h'>Solo test, played by Forge (300 games)</h2>" in sec
+    assert "<h2 id='rv-solo-forge-h'>Full-rules solo test by Forge (300 games)</h2>" in sec
     assert "<span class='ui-lbl green'>" in sec and ">300 of 300 played</span>" in sec
     assert (
         "Against opponents that do nothing, up to turn 10: how fast the deck works on its own, not how it "
@@ -93,7 +93,7 @@ def test_the_section_is_a_heading_over_a_divider_with_its_label_and_jump_chip() 
     # the first section link, before Forge games; the section itself sits before them
     chips = html.split("aria-label='Sections of this report'>")[1].split("</nav>")[0]
     assert chips.index("#rv-solo-forge'") < chips.index("#rv-forge'") < chips.index("#rv-solo'")
-    assert ">Solo test by Forge</a>" in chips
+    assert ">Full-rules solo test</a>" in chips
     assert html.index("id='rv-solo-forge'") < html.index("id='rv-forge'") < html.index("id='rv-solo'")
     # the Mystic Forge solo test keeps its own section, now flat too
     assert "<section class='rv-sec rv-flat' id='rv-solo'" in html
