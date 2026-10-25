@@ -937,8 +937,8 @@ def _rows(cards: list[dict[str, Any]]) -> str:
         drawn = f"<span class='v'>drawn {_pct(c['drawn'])}</span>" if c.get("drawn") is not None else ""
         drawn = "<span class='v'>commander</span>" if c.get("commander") else drawn
         items.append(
-            f"<li><span class='nm'>{copies}<button type='button' class='cardlink' data-card='{_esc(name)}'>"
-            f"{_esc(name)}</button></span>{drawn}</li>"
+            f"<li><span class='nm'><button type='button' class='cardlink' data-card='{_esc(name)}'>"
+            f"{copies}{_esc(name)}</button></span>{drawn}</li>"
         )
     # an odd last row keeps its partner cell on the two-column desktop grid
     if len(items) % 2:
@@ -991,7 +991,7 @@ def model_section_html(
             + "<ul class='ig-list'>"
             + row("m", "Played with their effect", cov["modeled"])
             + row("u", UNMODELED_HEADING, blanks, "#rv-g-unmodeled")
-            + row("o", "Needs opponents", aside, "#rv-g-opp")
+            + row("o", OUT_OF_SCOPE_HEADING, aside, "#rv-g-opp")
             + f"</ul></div><p class='ig-foot'>{_esc(KNOWN_TEXT.format(**cov))}</p>"
         )
     if unrec:
@@ -1289,6 +1289,8 @@ REPORT_PAGE_CSS = (
 .rv-page .ig-list a:hover .nm{text-decoration:underline}
 .rv-page .ig-list .dot{width:12px;height:12px;border-radius:50%;flex:none}
 .rv-page .ig-cards .cardlink{display:block;width:100%;min-height:44px;text-align:left}
+.rv-page .ig .cardlink:focus-visible,.rv-page .ig-list a:focus-visible{outline:2px solid var(--focus);
+  outline-offset:-2px}
 .rv-page .ig-sum .bar-split{margin:16px 16px 8px}
 .rv-page .ig-foot{margin:.4rem 16px 0;font-size:.85rem;line-height:1.4;color:var(--text-muted)}
 .rv-page .ig-sec{margin:1.75rem 0 0}

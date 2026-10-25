@@ -822,7 +822,10 @@ UNMODELED_TEXT = (
     "model, such as opponents to interact with."
 )
 # Said only when the report has a finished Forge solo test (Forge plays nearly every card).
-UNMODELED_FORGE_TEXT = "Forge's full-rules solo test above played them with their real rules."
+UNMODELED_FORGE_TEXT = (
+    "Forge's full-rules solo test above played them with their real rules, except any it lists under "
+    "“Cards Forge left out”."
+)
 # The other groups' explanations, shared by the signed-in page and the export.
 OUT_OF_SCOPE_TEXT = (
     "The simulator plays against opponents who do nothing, so removal, board wipes, counterspells and "
@@ -982,10 +985,7 @@ def _ask_context(honesty: dict[str, Any] | None) -> str:
     parts: list[str] = []
     left = [front_face(c["name"]) for grp in h.get("out_of_scope") or [] for c in grp.get("cards") or []]
     if left:
-        parts.append(
-            "These cards need opponents, so the solo test left them out: it has no opponent for them to "
-            f"act on: {', '.join(left)}."
-        )
+        parts.append(f"These cards need opponents, which the solo test does not have: {', '.join(left)}.")
     low = [front_face(n) for n in h.get("low_impact") or []]
     if low:
         parts.append(f"These were played with their effect but never mattered: {', '.join(low)}.")
@@ -1082,7 +1082,8 @@ def honesty_groups(
     """The groups of the "what the quick solo test leaves out" panel, in order, as (key, heading,
     count words, body): the cards played without their effect (with ``ask`` under their names),
     those that need opponents, those played but never mattered, and the model's shortcuts. The
-    export draws them as headed blocks (honesty_html), the signed-in page as folds, with the card
+    export draws them as headed blocks (honesty_html); the signed-in page has its own inset lists
+    (report_page.model_section_html), with the card
     menu on every name (``menu``). ``forge_full``: the report has a finished Forge solo test,
     which plays the cards the quick test has no model for."""
     h = g.get("honesty") or {}
@@ -2037,25 +2038,32 @@ def report_markdown(r: dict[str, Any]) -> str:
     if g:
         h = g["honesty"]
         size = g.get("deck_size")
-        if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
+        approx = [a for a in h.get("approximations") or [] if a.get("cards")]
+        if h["unrecognized"] or h["out_of_scope"] or h["low_impact"] or approx:
             lines += [f"## {MODEL_HEADING}", ""]
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         if h["unrecognized"]:
             lines.append(f"{UNMODELED_HEADING}: {_share(_copies(h['unrecognized']), size)}.")
+            lines.append(UNMODELED_TEXT)
             lines.append(", ".join(_md_name(c) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
             lines.append(f"{OUT_OF_SCOPE_HEADING}: {_share(total, size)}.")
+            lines.append(OUT_OF_SCOPE_TEXT)
             for grp in h["out_of_scope"]:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(
-                f"Played with their effect but never mattered: {_share(len(h['low_impact']), size)}."
-            )
+            lines.append(f"{LOW_IMPACT_HEADING}: {_share(len(h['low_impact']), size)}.")
+            lines.append(LOW_IMPACT_TEXT)
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
+            lines.append("")
+        if approx:
+            lines.append(f"{APPROX_HEADING}: {len(approx)}.")
+            lines.append(APPROX_TEXT)
+            lines += [f"- {a['label']}: {a['cards']}" for a in approx]
             lines.append("")
     if s["constructed"]:
         lines += ["## Validation", "", CONSTRUCTED_VALIDATION, ""]

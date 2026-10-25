@@ -381,7 +381,7 @@ def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
     h = g["honesty"]
     assert h.get("out_of_scope") and h.get("low_impact") and h.get("approximations")
     text = rv.report_body_html(r).split("id='ask-model'")[1].split("</textarea>")[0]
-    assert "These cards need opponents, so the solo test left them out" in text
+    assert "These cards need opponents, which the solo test does not have" in text
     assert rv.front_face(h["out_of_scope"][0]["cards"][0]["name"]) in text
     assert "never mattered: " + rv.front_face(h["low_impact"][0]) in text
     assert h["approximations"][0]["label"] in text
@@ -435,3 +435,15 @@ def test_the_export_draws_labels_with_icons_like_the_live_report() -> None:
     assert "<span class='ui-lbl red'>" in failed and ">Not run</span>" in failed
     # the export stays scriptless: no card menus on its names
     assert "cardlink" not in doc and "<script" not in doc
+
+
+def test_markdown_explains_each_group_and_lists_the_shortcuts() -> None:
+    """The Markdown export says what the page's Details say, group by group, and lists the
+    shortcuts as the page does."""
+    md = rv.report_markdown(report())
+    part = md.split(f"## {rv.MODEL_HEADING}")[1].split("## Validation")[0]
+    for text in (rv.UNMODELED_TEXT, rv.OUT_OF_SCOPE_TEXT, rv.LOW_IMPACT_TEXT, rv.APPROX_TEXT):
+        assert text in part, text
+    assert f"{rv.APPROX_HEADING}: " in part and "\n- " in part.split(rv.APPROX_HEADING)[1]
+    text = rv.report_body_html(report()).split("id='ask-model'")[1].split("</textarea>")[0]
+    assert "These cards need opponents, which the solo test does not have: " in text
