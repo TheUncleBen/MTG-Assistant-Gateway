@@ -471,18 +471,27 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
 /* Disclosure controls (Ben, 10-25: never bare blue text): a Details drop-down or a Show all is a
-   grey capsule with its words and a chevron that turns when open; .disc.round is the icon-only
-   form for a tight row. The capsule is 32px; its tap area reaches 44px. */
-.disc{position:relative;display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 10px 0 12px;
-  border-radius:999px;background:var(--surface-2);color:var(--text);font-size:.85rem;font-weight:600;
-  line-height:1.1;white-space:nowrap;cursor:pointer;-webkit-user-select:none;user-select:none}
-.disc::after{content:"";position:absolute;inset:-6px 0}
-.disc svg{width:14px;height:14px;flex:none;transition:transform .15s}
-.disc.round{width:32px;padding:0;justify-content:center}
-.disc.round svg{width:16px;height:16px}
-summary:hover .disc{background:var(--surface-3)}
-[open] > summary .disc svg{transform:rotate(180deg)}
-summary:focus-visible .disc{outline:2px solid var(--focus);outline-offset:2px}
+   grey capsule with its words and a chevron that turns when open, 36px inside a 44px tap area.
+   summary.fold-btn is the capsule as a fold's own summary; .disc is the same capsule inside a
+   summary that holds more (a heading, a count); .disc.round is its icon-only form for a tight row. */
+.disc,details > summary.fold-btn{list-style:none;cursor:pointer;display:inline-flex;align-items:center;
+  gap:8px;box-sizing:border-box;max-width:100%;min-height:44px;margin:0;padding:6px 14px;
+  border:4px solid transparent;border-radius:22px;background:var(--surface-2) padding-box;
+  color:var(--text);font-weight:600;font-size:.9rem;line-height:1.2;text-align:left;
+  -webkit-user-select:none;user-select:none}
+details > summary.fold-btn{margin-inline-start:-4px} /* the capsule's edge lines up with the text */
+details > summary.fold-btn::-webkit-details-marker{display:none}
+.disc::after,details > summary.fold-btn::after{content:"";flex:none;width:6px;height:6px;
+  margin-left:auto;border:solid currentColor;border-width:0 2px 2px 0;
+  transform:translateY(-2px) rotate(45deg);transition:transform .15s}
+[open] > summary .disc::after,details[open] > summary.fold-btn::after{
+  transform:translateY(2px) rotate(-135deg)}
+.disc.round{width:44px;padding:0;justify-content:center}
+.disc.round::after{margin:0}
+summary:hover .disc,details > summary.fold-btn:hover{background:var(--surface-3) padding-box}
+summary:focus-visible .disc,details > summary.fold-btn:focus-visible{outline:2px solid var(--focus);
+  outline-offset:-2px}
+details > summary.fold-btn svg.i{width:16px;height:16px;flex:none}
 /* Account › Approval mode: a tight list, one row per mode (radio and name) with the same fixed
    padding, its meaning in a fold opened by the chevron at the row's end. The radio, the name and
    the chevron share the first line at any text size; the fold's text lines up with the name. */
@@ -839,8 +848,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   .banner .social a.soc,.banner .social button.soc{height:44px;min-height:44px;border-radius:22px}
   /* :not(._) only raises specificity: the pages' own rules (same selectors, loaded later) set
      2rem and 30px and would otherwise win */
-  .hrow details > summary:not(._),.report details summary:not(._){min-height:44px;display:flex;
-    align-items:center}
+  .hrow details > summary:not(.fold-btn),.report details summary:not(.fold-btn){min-height:44px;
+    display:flex;align-items:center}
   ul.rows .row:not(._){--rowh:44px}
 }
 /* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
@@ -1554,32 +1563,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
 /* a fold-out under a row or a section (a report's details, a watched card's history) */
-/* A fold-out's summary as the shared disclosure capsule (see .disc): its words, then a chevron that
-   turns when open; a 36px capsule in a 44px tap area. Every Details or Show more fold uses it. */
-details.rv-det > summary,details > summary.fold-btn,details.disclosure > summary,
-details.disclosure-detail > summary,details.raw > summary,details.identity > summary,
-details.tdata > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
-  box-sizing:border-box;max-width:100%;min-height:44px;margin:0;padding:6px 14px;
-  border:4px solid transparent;border-radius:22px;background:var(--surface-2) padding-box;
-  color:var(--text);font-weight:600;font-size:.9rem;line-height:1.2;text-align:left}
-details.rv-det > summary::-webkit-details-marker,details > summary.fold-btn::-webkit-details-marker,
-details.disclosure > summary::-webkit-details-marker,
-details.disclosure-detail > summary::-webkit-details-marker,
-details.raw > summary::-webkit-details-marker,details.identity > summary::-webkit-details-marker,
-details.tdata > summary::-webkit-details-marker{display:none}
-details.rv-det > summary::after,details > summary.fold-btn::after,details.disclosure > summary::after,
-details.disclosure-detail > summary::after,details.raw > summary::after,details.identity > summary::after,
-details.tdata > summary::after{content:"";flex:none;width:6px;height:6px;margin-left:auto;
-  border:solid currentColor;border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);
-  transition:transform .15s}
-details[open] > summary.fold-btn::after,details.rv-det[open] > summary::after,
-details.disclosure[open] > summary::after,details.disclosure-detail[open] > summary::after,
-details.raw[open] > summary::after,details.identity[open] > summary::after,
-details.tdata[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
-details.rv-det > summary:hover,details > summary.fold-btn:hover,details.disclosure > summary:hover,
-details.disclosure-detail > summary:hover,details.raw > summary:hover,details.identity > summary:hover,
-details.tdata > summary:hover{background:var(--surface-3) padding-box}
-details > summary.fold-btn svg.i{width:16px;height:16px;flex:none}
+
 
 /* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
    and each event as a short label then its name as plain text that wraps. Each page sets its own

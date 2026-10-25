@@ -115,11 +115,6 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .guide kbd{border:1px solid var(--border);font-weight:700;white-space:nowrap}
 .guide .nomatch{margin:1rem 0}
 .guide .gadv{margin:1.5rem 0 0;border-top:1px solid var(--border-soft);padding-top:1rem}
-.guide .gadv > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;
-  min-height:44px;width:auto}
-.guide .gadv > summary::-webkit-details-marker{display:none}
-.guide .gadv > summary svg{transition:transform .15s}
-.guide .gadv[open] > summary svg{transform:rotate(180deg)}
 .guide .gadv > p{color:var(--text-muted)}
 .guide .gadv code{white-space:nowrap}
 .gtop{position:fixed;right:1rem;bottom:1.5rem;z-index:7;display:inline-flex;align-items:center;gap:.4rem;
@@ -782,8 +777,8 @@ def guide_body(
         "“Run a test report” and “Compare two decks” for the assistant, same engine and settings.</p>"
     )
     advanced = (
-        "<details class='gadv' id='adv-tools'><summary class='btn'>"
-        f"{icon('chev')} {_esc(ADVANCED_TITLE)}</summary>"
+        "<details class='gadv' id='adv-tools'><summary class='fold-btn'>"
+        f"{_esc(ADVANCED_TITLE)}</summary>"
         f"<p>{_esc(ADVANCED_INTRO)}</p>"
         "<div class='tbl'><table><thead><tr><th>Ask</th><th>Tool name</th></tr></thead><tbody>"
         + "".join(

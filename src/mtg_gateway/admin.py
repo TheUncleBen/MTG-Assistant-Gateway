@@ -672,8 +672,8 @@ ADMIN_CSS = """
 .ao .ui-row .lab .muted{font-weight:400;margin-left:.35rem}
 .ao .ui-card .notice{margin:.75rem 0 0}
 .ao .ui-card details{margin:.5rem 0 0}
-.ao .ui-card details > summary{display:flex;align-items:center;gap:.4rem;min-height:44px;cursor:pointer;
-  font-weight:700;list-style:none}
+.ao .ui-card details > summary:not(.fold-btn){display:flex;align-items:center;gap:.4rem;min-height:44px;
+  cursor:pointer;font-weight:700;list-style:none}
 .ao .ui-card details > summary::-webkit-details-marker{display:none}
 .ao .ui-card details > summary svg.i{width:18px;height:18px;flex:none}
 .ao .ui-card details[open] > summary svg.i{transform:rotate(180deg)}
