@@ -380,12 +380,14 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 ],
                 filters["show"],
             )
+            # New deck first, the one orange button, then New folder and New package (Ben,
+            # 2026-10-25: "New deck / New folder / New package")
             + "<span class='acts'>"
+            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
+            f"{icon('plus')} New deck</a>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
             f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
             f"{icon('package')} New package</a>"
-            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
-            f"{icon('plus')} New deck</a>"
             "</span></div>"
         )
         notice = ""

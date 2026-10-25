@@ -83,6 +83,7 @@ _card_size: ContextVar[str] = ContextVar("mtg_card_size", default="m")
 _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
     --group-bg:#ffffff; /* an inset grouped list's card (iOS style), white on the page */
+    --seg-track:var(--surface-3); --seg-on:var(--surface); /* a switch's track and its chosen part */
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
     --text:#383838; --link:#1d55b3; /* 5.2:1 on --surface-2 (the menu); Archidekt's #4183c4 is 3.8:1 */
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
@@ -162,6 +163,8 @@ CSS = (
 :root{
   /* Archidekt dark-mode set (body.dark-mode) */
   --bg:#181818; --surface:#232323; --surface-2:#383838; --surface-3:#4b4b4b; --group-bg:#232323;
+  /* a switch's chosen part is lighter than its track, raised as on iOS: #e3e3e3 on it 5.4:1 */
+  --seg-track:#2f2f2f; --seg-on:#5a5a5a;
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
   --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
   --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */
@@ -1232,12 +1235,12 @@ UI_CSS = """
 main.wrap.ui-wide{max-width:1200px}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
-.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--surface-3);max-width:100%}
+.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%}
 .hubseg a{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;flex:1 1 0;min-height:38px;
   padding:0 1.1rem;border-radius:9px;color:var(--text);text-decoration:none;font-weight:700}
 .hubseg a{white-space:nowrap}
 .hubseg a:hover{background:var(--surface-2)}
-.hubseg a[aria-current=page]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.hubseg a[aria-current=page]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
 @media (pointer:coarse){ .hubseg a{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%;overflow-x:auto;scrollbar-width:none}

@@ -2883,17 +2883,20 @@ def deck_list_controls_html(
         + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
         + ("<input type='hidden' name='show' value='packages'>" if show == "packages" else "")
         + sp.name_row(
-            label="Filter deck name",
+            label="Filter package name" if show == "packages" else "Filter deck name",
             name="q",
             value=q,
-            placeholder="Example deck name",
+            placeholder="Example package name" if show == "packages" else "Example deck name",
             input_id="q",
             search_label="Filter",
             attrs=" maxlength='80'",
         )
         + sp.filters_sheet(
             groups,
-            show_html="<button type='submit' class='btn-primary sp-show'>Show decks</button>",
+            show_html=(
+                "<button type='submit' class='btn-primary sp-show'>"
+                f"Show {'packages' if show == 'packages' else 'decks'}</button>"
+            ),
             clear_html=f"<a class='btn sp-clear' href='{esc(here)}'>Clear filters</a>",
         )
         + bar
@@ -2946,6 +2949,10 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deltatable th{text-align:left;font-weight:500;padding:.3rem 1rem .3rem 0}
 .deltatable td{text-align:right;font-variant-numeric:tabular-nums}
 .banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
+/* a phone: the four pills (Like, Bookmark, then Comments and Proposals, or Follow and Comments)
+   two by two, even, instead of three and a lone fourth */
+@media (max-width:599.98px){ .banner .social{display:grid;grid-template-columns:1fr 1fr}
+  .banner .social .soc{justify-content:center} .banner .social .confirm{grid-column:1/-1} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
   font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1}
