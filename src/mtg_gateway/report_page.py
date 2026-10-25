@@ -22,6 +22,7 @@ from .report_view import (
     ENDED_TEXT,
     FORGE_HEADING,
     FORGE_STATE_TEXT,
+    MODEL_HEADING,
     MORE_DID_NOT_START,
     PREFLIGHT_ONLY,
     _copies,
@@ -72,9 +73,15 @@ FORGE_SUB = (
     "the stack and every player's interaction, all piloted by Forge's AI. Treat the result as a test of "
     "the deck against these opponents, not a prediction for your table."
 )
+# The quick solo test's panel: what its simple card model leaves out, and where the full rules are.
 MODEL_SUB = (
-    "Read the numbers above with this in mind: the more of the deck sits here, the less the solo test "
-    "says about it."
+    "The quick test uses a simple card model so it can play {games} games in seconds. The more of the "
+    "deck sits here, the less these numbers say about it."
+)
+MODEL_SUB_FORGE = (
+    "The quick test uses a simple card model so it can play {games} games in seconds. Forge's "
+    "full-rules solo test above played these cards with their real rules, except any it names in its "
+    "own list."
 )
 ABOUT_FORGE = "About these Forge games"
 
@@ -432,7 +439,7 @@ def more_html(f: Any, csrf: str, report_id: str) -> str:
 
 
 # -- the solo test played by Forge (the report's ``forge_solo`` block; None when Forge is off) ----
-SOLO_FORGE_NAME = "Solo test, played by Forge"
+SOLO_FORGE_NAME = "Full-rules solo test by Forge"
 SOLO_FORGE_SUB = (
     "Against opponents that do nothing, up to turn {turns}: how fast the deck works on its own, not how "
     "it fares against interaction."
@@ -908,8 +915,11 @@ def solo_section_html(
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
     if ask and models_opener:
-        ask += f"<div class='rv-models'>{models_opener}</div>"
-    groups = honesty_groups(g, ask, menu=True)
+        # the request and the saved descriptions it leads to share one row (it wraps on a phone)
+        ask = f"<div class='rv-askrow'>{ask}{models_opener}</div>"
+    fs = r.get("forge_solo")
+    forge_full = isinstance(fs, dict) and fs.get("state") == "done"
+    groups = honesty_groups(g, ask, menu=True, forge_full=forge_full)
     if not groups:
         return solo, ""
     h = g.get("honesty") or {}
@@ -921,8 +931,8 @@ def solo_section_html(
         legend = (
             "<ul class='legend rv-legend'>"
             f"<li><i class='m'></i>Played with their effect <b>{cov['modeled']}</b></li>"
-            f"<li><i class='o'></i>Left out on purpose <b>{aside}</b></li>"
-            f"<li><i class='u'></i>Played without their effect <b>{blanks}</b></li></ul>"
+            f"<li><i class='o'></i>Needs opponents <b>{aside}</b></li>"
+            f"<li><i class='u'></i>Not in the quick model yet <b>{blanks}</b></li></ul>"
         )
         head = (
             "<div class='rv-cov'>"
@@ -939,10 +949,11 @@ def solo_section_html(
         + f"</summary>{body}</details>"
         for i, (key, heading, count, body) in enumerate(groups)
     )
+    model_sub = (MODEL_SUB_FORGE if forge_full else MODEL_SUB).format(games=g.get("games") or 300)
     model = _sec(
         "rv-model",
-        "What the solo test could not model",
-        f"<p class='ui-sub'>{_esc(MODEL_SUB)}</p>{head}{folds}",
+        MODEL_HEADING,
+        f"<p class='ui-sub'>{_esc(model_sub)}</p>{head}{folds}",
     )
     return solo, model
 
@@ -975,13 +986,13 @@ def _jump_html(
     forge = isinstance(f, dict) and f.get("state") != "skipped"
     items = []
     if isinstance(r.get("forge_solo"), dict) and r.get("forge_solo"):
-        items.append(ui.Chip("Solo test by Forge", None, "#rv-solo-forge"))
+        items.append(ui.Chip("Full-rules solo test", None, "#rv-solo-forge"))
     # a report without Forge games starts with its preflight-only section: no link to it
     if forge:
         items.append(ui.Chip("Forge games", None, "#rv-forge"))
-    items.append(ui.Chip("Solo test", None, "#rv-solo"))
+    items.append(ui.Chip("Quick solo test", None, "#rv-solo"))
     if model:
-        items.append(ui.Chip("What it could not model", n or None, "#rv-model"))
+        items.append(ui.Chip("What the quick test leaves out", n or None, "#rv-model"))
     if valid:
         items.append(ui.Chip("Validation", None, "#rv-valid"))
     if stats:
@@ -1205,6 +1216,12 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-cov .b{margin:.5rem 0 0}
 .rv-page .ask{margin:.5rem 0 .75rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .rv-page .ask button{display:inline-flex;align-items:center;gap:.4rem;margin:0}
+.rv-page .rv-askrow{display:grid;grid-template-columns:repeat(2,minmax(0,max-content));gap:.5rem;
+  margin:.5rem 0 .75rem}
+.rv-page .rv-askrow>*{margin:0;min-width:0}
+.rv-page .rv-askrow .ask{display:flex;flex-wrap:nowrap;align-items:stretch;gap:0}
+@media (max-width:480px){.rv-page .rv-askrow{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}}
+.rv-page .rv-askrow button,.rv-page .rv-askrow .btn{margin:0;white-space:normal;text-align:left}
 .rv-page .kept .names button{min-height:44px;margin:0}
 /* the deck statistics: the six numbers as a strip, the curve and colours side by side */
 .rv-page .rv-dstats .tiles{grid-template-columns:repeat(auto-fit,minmax(min(100%,8rem),1fr));gap:0;

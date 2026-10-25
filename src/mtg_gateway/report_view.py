@@ -44,7 +44,10 @@ APPROXIMATIONS = {
     "conditional-tapland": "Lands that sometimes enter tapped enter untapped",
     "dfc-back-face": "Two-faced cards are played as their front face only",
     "lifelink": "Life from lifelink is not counted",
-    "unused-option": "Optional costs and other ways to cast (kicker, cycling, flashback) are not used",
+    "unused-option": "Optional costs and other ways to cast (kicker, cycling, miracle, convoke) are not used",
+    "graveyard-shuffle": "A graveyard shuffled back into the library is skipped",
+    "discount-ignored": "Discounts on an ability are not counted",
+    "land-from-hand": "A land put from your hand comes from the library, tapped",
     "library-order": "Scry and surveil do not change the order of the library",
     "no-deaths": "Nothing dies in a solo test, so death triggers never happen",
     "attack-trigger": "Attack triggers happen whenever you attack",
@@ -799,29 +802,32 @@ def coverage_text(g: dict[str, Any]) -> str:
         return ""
     # both figures, as scripts/measure_recognition.py prints them (measured now on precons and test
     # decks, on real decks at deploy)
+    size = c["deck_size"]
     return (
-        f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
-        f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
-        "cards played with their effect and those left out on purpose. The rest are listed below."
+        f"Of {size} cards, {c['modeled']} played with their effect ({c['pct']}% of the deck), "
+        f"{c['known'] - c['modeled']} need opponents, and {size - c['known']} are not in the quick "
+        "model yet. Each group is listed below."
     )
 
 
 # The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
-UNMODELED_HEADING = "Played without their effect"
+UNMODELED_HEADING = "Not in the quick model yet"
 # An assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
 # text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
 UNMODELED_TEXT = (
-    "The solo test found these cards and their exact text, but has no description yet of what they "
-    "do, so it drew and cast them without their effect. Whatever they would do in a real game is "
-    "missing from the numbers above. Your assistant may be able to describe some of them from their "
-    "exact text, in a form the solo test can play. Many cards need things the solo test does not "
-    "model, such as opponents to interact with."
+    "The quick solo test has no model yet for what these cards do, so it cast them for their mana "
+    "cost and body only, and whatever they would add is missing from its numbers. Your assistant may "
+    "be able to describe some of them from their exact text, in a form the quick test can play."
 )
+# Said only when the report has a finished Forge solo test (Forge plays nearly every card).
+UNMODELED_FORGE_TEXT = "Forge's full-rules solo test above played them with their real rules."
 UNMODELED_SAVED_TEXT = (
     "The gateway can keep up to 200 of these descriptions for you once they pass its check, and your "
     "later solo tests then play those cards with them. Your saved descriptions play only in your own "
     "solo tests."
 )
+OUT_OF_SCOPE_HEADING = "Needs opponents"
+MODEL_HEADING = "What the quick solo test leaves out"
 KEPT_HEADING = "Played with saved card descriptions"
 KEPT_TEXT = (
     "Your assistant described each of these cards in a form the solo test can play, and the gateway "
@@ -1040,7 +1046,7 @@ def ask_html(
 
 # The 300 automatic games are the "solo test"; "Goldfish" is the page where the member
 # plays a hand. Forge's games always seat bundled precons (forge.start_run).
-SOLO_NAME = "Solo test"
+SOLO_NAME = "Quick solo test"
 FORGE_HEADING = "Forge games (against precons)"
 
 
@@ -1053,13 +1059,14 @@ def solo_heading(g: dict[str, Any] | None) -> str:
 
 
 def honesty_groups(
-    g: dict[str, Any], ask: str = "", *, menu: bool = False
+    g: dict[str, Any], ask: str = "", *, menu: bool = False, forge_full: bool = False
 ) -> list[tuple[str, str, str, str]]:
     """The groups of the "what the simulation could not model" panel, in order, as (key, heading,
     count words, body): the cards played without their effect (with ``ask`` under their names),
     those left out on purpose, those played but never mattered, and the model's shortcuts. The
     export draws them as headed blocks (honesty_html), the signed-in page as folds, with the card
-    menu on every name (``menu``)."""
+    menu on every name (``menu``). ``forge_full``: the report has a finished Forge solo test,
+    which plays the cards the quick test has no model for."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
     out: list[tuple[str, str, str, str]] = []
@@ -1073,6 +1080,7 @@ def honesty_groups(
                 UNMODELED_HEADING,
                 _share(_copies(unrec), size),
                 f"<p>{UNMODELED_TEXT}"
+                + (f" {UNMODELED_FORGE_TEXT}" if forge_full else "")
                 + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else "")
                 + "</p>"
                 + _names(unrec, menu=menu)
@@ -1090,7 +1098,7 @@ def honesty_groups(
         out.append(
             (
                 "",
-                "Left out on purpose",
+                OUT_OF_SCOPE_HEADING,
                 _share(total, size),
                 "<p>The simulator plays against opponents who do nothing, so removal, board wipes, "
                 "counterspells and protection have nothing to act on. Spells that only do that stayed in "
@@ -1909,7 +1917,7 @@ def report_body_html(
         honesty = s["honesty"] if standalone else honesty_html(g, ask)
         if honesty:
             body += (
-                "<div class='card honesty'><h2>What the solo test could not model</h2>"
+                f"<div class='card honesty'><h2>{MODEL_HEADING}</h2>"
                 "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
                 "here, the less the solo test says about it.</p>" + honesty + "</div>"
             )
@@ -1998,7 +2006,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         h = g["honesty"]
         size = g.get("deck_size")
         if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
-            lines += ["## What the solo test could not model", ""]
+            lines += [f"## {MODEL_HEADING}", ""]
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         if h["unrecognized"]:
@@ -2007,7 +2015,7 @@ def report_markdown(r: dict[str, Any]) -> str:
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
-            lines.append(f"Left out on purpose: {_share(total, size)}.")
+            lines.append(f"{OUT_OF_SCOPE_HEADING}: {_share(total, size)}.")
             for grp in h["out_of_scope"]:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
