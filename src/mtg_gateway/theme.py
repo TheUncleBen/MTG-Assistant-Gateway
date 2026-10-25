@@ -486,6 +486,7 @@ details > summary.fold-btn::-webkit-details-marker{display:none}
   transform:translateY(-2px) rotate(45deg);transition:transform .15s}
 [open] > summary .disc::after,details[open] > summary.fold-btn::after{
   transform:translateY(2px) rotate(-135deg)}
+.disc{gap:6px;padding:6px 10px} /* beside a count: a little narrower, so it stays on the line */
 .disc.round{width:44px;padding:0;justify-content:center}
 .disc.round::after{margin:0}
 summary:hover .disc,details > summary.fold-btn:hover{background:var(--surface-3) padding-box}
