@@ -42,6 +42,8 @@ research service has the current rules from the moment it starts.
 - **Which printing a card gets** when no set is given is now described as it works, in the
   assistant's tool description and [docs/SCANNING.md](docs/SCANNING.md): Scryfall's own default
   printing when it is out on paper, which is not always the newest one, else the newest that is.
+- **A pasted list's name.** A test run or deck check of a pasted list named it "pasted list", which
+  an assistant could show as the deck's name; it now reads "Unnamed deck", like any deck without a name.
 
 ## [0.7.44] - 2026-10-24
 
