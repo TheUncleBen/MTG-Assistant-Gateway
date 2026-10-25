@@ -181,7 +181,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert page.status_code == 200 and "<span class='ui-lbl blue'>" in page.text
         assert "Open report</a>" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
-        assert detail.status_code == 200 and "Solo test (" in detail.text
+        assert detail.status_code == 200 and "Quick solo test (" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert gone.status_code == 200
         assert (await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)).status_code == 404
@@ -788,7 +788,7 @@ async def test_deck_pages(stack: Stack) -> None:
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
-        assert shown.status_code == 200 and "Solo test (" in shown.text and "## Metrics" in shown.text
+        assert shown.status_code == 200 and "Quick solo test (" in shown.text and "## Metrics" in shown.text
         # the page speaks to a person: no assistant tool names, exports in one row of buttons
         assert "goldfish_" not in shown.text and "run_deck_report" not in shown.text
         assert (
