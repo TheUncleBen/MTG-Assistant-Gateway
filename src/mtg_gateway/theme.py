@@ -1580,15 +1580,16 @@ CSS += UI_CSS
 # styles in deck.css. Kept before the first 900 px rule (test_social_layout).
 CARD_MENU_CSS = """
 /* the card menu: the shared .menu panel, fixed where the pointer or finger was; a bottom sheet
-   over a dimmed page on a phone (.cs-menu) */
+   over a dimmed page on a phone (.cs-menu). Its icons take --orange-text: the bright orange was
+   1.8:1 on the light menu, under the 3:1 an icon needs */
 .ctxmenu{position:fixed;z-index:58;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
   overscroll-behavior:contain;border:1px solid var(--border)}
 .ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
   overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
 .ctxmenu .ghead{padding:.55rem 1rem .15rem;font-size:.75rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.04em;color:var(--menu-head)}
-.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
-  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange-text);fill:none;
+  stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
 /* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
    "Move to" list opened near the bottom of the window was squeezed to 2 px and could not be used) */
@@ -1696,7 +1697,7 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
   border-radius:var(--radius);cursor:pointer;overflow-wrap:anywhere}
 .mtgbox .tree label:hover{background:var(--surface-2)}
 .mtgbox .tree input{margin:0;flex:none}
-.mtgbox .tree svg{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+.mtgbox .tree svg{width:18px;height:18px;flex:none;color:var(--orange-text);fill:none;stroke:currentColor;
   stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .mtgbox .boxnote{margin:.75rem 0 0}
 .mtgbox .acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.5rem;margin-top:1rem}
@@ -1807,7 +1808,7 @@ _TOPSEARCH_CSS = """
 .suggest-list li.head:not(:first-child){border-top:1px solid var(--border-soft);margin-top:.25rem;
   padding-top:.6rem}
 .suggest-list li.go{display:flex;align-items:center;gap:.6rem}
-.suggest-list li.go svg.i{color:var(--orange);flex:none}
+.suggest-list li.go svg.i{color:var(--orange-text);flex:none}
 """
 CSS += _TOPSEARCH_CSS
 
