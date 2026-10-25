@@ -2727,7 +2727,9 @@
     // a note left from an earlier launch would sit above the box: the box says it all again
     var old = document.querySelector(".edhplay-toast");
     if (old) old.remove();
-    back = link;
+    // focus goes back to what was pressed: the link, or the Test and play button whose menu
+    // pressed it (the link itself is in the drop-down the button replaces)
+    back = link.getClientRects().length ? link : (document.querySelector(".banner .decktestbtn") || link);
     var data = null;  // the list, once the gateway has sent it
     dialog = make("div", "picker edhplay-dialog");
     var mine = dialog;
@@ -2926,61 +2928,111 @@
     }, function () { failed(box); });
   }
 
+  // A group's name in a menu (This deck, Look into it, ...)
+  function head(text) { return el("div", "ghead", text); }
+  // The deck menu, the same on every screen (Ben, 2026-10-25): what the banner's buttons do (Edit
+  // deck, Clone deck, Test and play) is not repeated here, and the deck's proposals are the
+  // banner's Proposals pill. Items that change the deck show on your own decks only.
   function items() {
     var id = enc(d.id), out = [];
-    out.push(link("Open in a new tab", "external", "/decks/" + id, { ext: true }));
-    if (d.own) out.push(link("Edit deck", "edit", "/decks/" + id + "/edit"));
-    out.push(sep());
-    out.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
-    if (d.can) out.push(item("Run full test", "stats", function () {
-      // the report form without the Forge switch (found by hand: a has-selector throws on older browsers)
-      var forms = banner.querySelectorAll("form[action$='/report']");
-      for (var i = 0; i < forms.length; i++) {
-        if (!forms[i].querySelector("input[name=forge]")) {
-          var f = forms[i];
-          Menu.whenClosed(function () { if (f.requestSubmit) f.requestSubmit(); else f.submit(); });
-          return;
-        }
-      }
-    }));
-    if (d.forge) out.push(item("Solo test only", "stats", submit("#solof")));
-    if (d.can) out.push(item(d.own ? "Clone…" : "Clone into my decks…", "clone", openBox("clone")));
     if (d.own) {
+      out.push(head("This deck"));
       out.push(item("Rename…", "edit", renameDeck));
       out.push(item("Move to folder…", "folder", moveDeck));
-    }
-    if (d.can) {
-      out.push(item("Export…", "download", openBox("export")));
-      out.push(item("Compare with…", "layers", openBox("compare")));
-    }
-    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) out.push(item("Watch deck price", "eye", function () { window.MtgDeckWatch(d.id); }));
-    if (d.own) out.push(link("Deck settings", "settings", "/decks/" + id + "/settings"));
-    out.push(sep());
-    out.push(link("Deck stats", "report", "/decks/" + id + "#stats"));
-    out.push(link("History and snapshots", "history", "/history?deck_id=" + id));
-    out.push(link("Proposals for this deck", "proposals", "/proposals?deck_id=" + id));
-    // the release-2 boxes (deck_extras.py, static/deckextras.js): a package, the registration
-    // sheet, a help request and a contest entry on your own deck; a report on any deck
-    if (d.can && document.getElementById("pdf")) {
+      if (d.can && document.getElementById("package")) out.push(item("Add a package…", "package", extras("package")));
+      out.push(link("Deck settings", "settings", "/decks/" + id + "/settings"));
       out.push(sep());
-      if (d.own) out.push(item("Add a package…", "package", extras("package")));
-      out.push(item("Registration PDF…", "pdf", extras("pdf")));
-      if (d.own) {
-        out.push(item("Request deck help…", "hand", extras("help")));
-        out.push(item("Enter in a contest…", "trophy", extras("contest")));
-        out.push(item("Withdraw from a contest…", "trophy", extras("withdraw")));
-      }
     }
+    out.push(head("Look into it"));
+    out.push(link("Deck stats", "report", "/decks/" + id + "#stats"));
+    out.push(link("Deck reports", "stats", "/reports?deck_id=" + id));
+    if (d.can) out.push(item("Compare with…", "layers", openBox("compare")));
+    out.push(link("History and snapshots", "history", "/history?deck_id=" + id));
+    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) out.push(item("Watch deck price", "eye", function () { window.MtgDeckWatch(d.id); }));
     out.push(sep());
-    out.push(item("Copy link", "link", function () { Menu.copyAndSay(location.origin + "/decks/" + id, "Link copied."); }));
+    out.push(head("Share and print"));
+    out.push(item("Share…", "send", share));
+    if (d.can) out.push(item("Export…", "download", openBox("export")));
+    if (d.can && document.getElementById("pdf")) out.push(item("Registration PDF…", "pdf", extras("pdf")));
     out.push(link("Open on Archidekt", "external", "https://archidekt.com/decks/" + id, { ext: true }));
-    if (d.can && document.getElementById("report")) out.push(item("Report deck…", "flag", extras("report")));
+    var community = [];
+    if (d.own && d.can && document.getElementById("help")) {
+      community.push(item("Request deck help…", "hand", extras("help")));
+      community.push(item("Enter in a contest…", "trophy", extras("contest")));
+      community.push(item("Withdraw from a contest…", "trophy", extras("withdraw")));
+    }
+    if (d.can && document.getElementById("report")) community.push(item("Report deck…", "flag", extras("report")));
+    if (community.length) { out.push(sep()); out.push(head("Community")); out = out.concat(community); }
     if (d.own) {
       out.push(sep());
       out.push(item("Delete deck…", "trash", openBox("delete"), { danger: true }));
     }
     return out;
   }
+
+  // Share: in the app, the phone's own share sheet (MainActivity's MtgNative.share, with Open on
+  // Archidekt, Copy gateway link and Copy deck list as its own actions); in a browser, a box with
+  // the deck's links and list, and the system's share sheet where the browser has one.
+  function deckList() {
+    return fetch("/decks/" + enc(d.id) + "/edhplay.json", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { return j && j.ok && typeof j.list === "string" ? j.list : ""; }, function () { return ""; });
+  }
+  function share() {
+    var gw = location.origin + "/decks/" + enc(d.id), ar = "https://archidekt.com/decks/" + enc(d.id);
+    var N = window.MtgNative;
+    if (N && typeof N.share === "function") {
+      deckList().then(function (list) { N.share(d.name, ar, gw, list); });
+      return;
+    }
+    var rows = el("div", "sharebox");
+    function row(text, ic, note, run) {
+      var b = el("button", "btn sharerow", "");
+      b.type = "button";
+      b.appendChild(Menu.icon(ic));
+      b.appendChild(el("span", "t", text));
+      if (note) b.appendChild(el("small", "", note));
+      b.addEventListener("click", run);
+      rows.appendChild(b);
+    }
+    if (navigator.share) row("Share…", "send", "", function () {
+      navigator.share({ title: d.name, text: d.name, url: ar }).catch(function () { /* closed */ });
+    });
+    row("Copy gateway link", "link", "for members", function () { Menu.copyAndSay(gw, "Gateway link copied."); });
+    row("Copy Archidekt link", "link", "anyone can open it", function () { Menu.copyAndSay(ar, "Archidekt link copied."); });
+    row("Copy deck list", "copy", "EDHPlay and most sites", function () {
+      deckList().then(function (list) {
+        if (list) Menu.copyAndSay(list, "Deck list copied.");
+        else Menu.toast("The deck list couldn't be loaded. Use Export instead.");
+      });
+    });
+    Box.open({ title: "Share “" + d.name + "”", body: rows, actions: [cancelButton("Close")], returnFocus: btn });
+  }
+
+  // Test and play: the banner's drop-down becomes the shared menu (a sheet on a phone)
+  var testDd = $("details.decktest", banner);
+  var testBtn = null;
+  if (testDd) {
+    testBtn = el("button", "btn decktestbtn", "");
+    testBtn.type = "button";
+    testBtn.setAttribute("aria-haspopup", "menu");
+    testBtn.appendChild(Menu.icon("play"));
+    testBtn.appendChild(document.createTextNode(" Test and play"));
+    testDd.parentNode.insertBefore(testBtn, testDd);
+    testBtn.addEventListener("click", function () {
+      var id = enc(d.id), t = [head("On the gateway"), link("Goldfish", "layers", "/decks/" + id + "/goldfish")];
+      if (d.can) t.push(item("Run full test", "stats", submit("#fullf")));
+      if (d.forge) t.push(item("Solo test only", "stats", submit("#solof")));
+      t.push(sep());
+      t.push(head("On other sites"));
+      t.push(link("Playtest on Archidekt", "play", "https://archidekt.com/playtester-v2/" + id, { ext: true }));
+      var edh = $("a[data-edhplay]", testDd);
+      if (edh) t.push(item("Play on EDHPlay", "play", function () { Menu.whenClosed(function () { edh.click(); }); }));
+      var r = testBtn.getBoundingClientRect();
+      Menu.open({ head: "Test and play", label: "Test and play: " + d.name, items: t, focusBack: testBtn }, r.left, r.bottom + 4);
+    });
+  }
+
   function extras(which) {
     return function () {
       var X = window.MtgDeckExtras;

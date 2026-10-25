@@ -216,7 +216,7 @@ async def test_the_logos_are_served_as_static_files_with_a_long_cache(stack: Sta
     b = Browser(h)
     await b.login()
     try:
-        page = await b.http.get("/account", headers=NAV)
+        page = await b.http.get("/account/details", headers=NAV)
         assert page.status_code == 200
         assert "img-src 'self'" in page.headers.get("content-security-policy", "")
     finally:

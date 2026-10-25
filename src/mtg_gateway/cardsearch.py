@@ -372,6 +372,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            sub=sub,
             wide=True,
             current="/search",
             head_extra=(
@@ -568,7 +569,8 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         if not linked:
             body += (
                 f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "
-                "account is linked.</span><a href='/account'>Link it on the Account page</a></p>"
+                "account is linked.</span>"
+                "<a href='/account/details#archidekt'>Link it under Account details</a></p>"
             )
         body += "</section>"
         more = (

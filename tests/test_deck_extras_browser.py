@@ -510,19 +510,8 @@ def test_the_add_a_package_box_has_chips_filters_and_a_load_more_button(
     assert errors == []
 
 
-def _show(page, width: int, value: str) -> None:
-    """Pick a Show choice: on a phone the filters are a sheet behind the Filters button."""
-    if width < 600:
-        page.locator(".sp-open").click()
-        page.locator("#f-show").wait_for(state="visible")
-    page.locator("#f-show").select_option(value)
-    if width < 600:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
-
-
 @pytest.mark.parametrize("width,theme", [(390, "dark"), (1366, "light")])
-def test_my_decks_show_filter_marks_package_tiles_and_adds_one_to_a_deck(
+def test_my_decks_and_packages_mark_package_tiles_and_add_one_to_a_deck(
     server: Server, width: int, theme: str
 ) -> None:
     from playwright.sync_api import sync_playwright
@@ -531,31 +520,27 @@ def test_my_decks_show_filter_marks_package_tiles_and_adds_one_to_a_deck(
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
+        # My Decks lists the decks only (Ben, 2026-10-25): the package waits under Packages
         page.goto(f"{server.base}/decks", wait_until="networkidle")
         tile = page.locator("li.deck[data-deck-id='50']")
-        page.locator("li.deck[data-deck-id='50'][data-package='1']").wait_for(state="visible")
-        assert "Package" in tile.locator(".fmt").inner_text() and "$$" in tile.locator(".fmt").inner_text()
-        assert tile.locator(".thumb .ini svg").count() == 1
+        page.locator("li.deck[data-deck-id='50'][data-package='1']").wait_for(state="hidden")
         assert page.locator("li.deck[data-deck-id='42']").get_attribute("data-package") is None
-        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TILE_TEXT) == []
-        # Show applies on selection, in place: no second listing, the address follows
-        _show(page, width, "packages")
-        page.locator("li.deck[data-deck-id='42']").wait_for(state="hidden")
-        assert tile.is_visible() and page.locator("#decks-total").inner_text() == "1 package"
-        assert "show=packages" in page.url
-        assert page.locator("#fv-decks").inner_text().startswith("Packages")
-        _show(page, width, "decks")
-        tile.wait_for(state="hidden")
         assert page.locator("li.deck[data-deck-id='42']").is_visible()
         assert page.locator("#decks-total").inner_text() == "1 deck"
-        _show(page, width, "")
-        tile.wait_for(state="visible")
-        assert page.locator("li.deck[data-deck-id='42']").is_visible() and "show=" not in page.url
-        # the package tile's menu: Add to a deck… (a plain deck's has none), from ⋮, a right-click
-        # and a press and hold
+        # a plain deck's menu has no Add to a deck…
         page.locator("li.deck[data-deck-id='42'] button.kebab").click()
         assert "Add to a deck…" not in _menu_items(page)
         _close_menu(page)
+        # the switch's Packages: the package tiles only
+        page.locator("nav.hubseg a", has_text="Packages").click()
+        page.wait_for_url("**/decks?show=packages")
+        tile.wait_for(state="visible")
+        assert page.locator("li.deck[data-deck-id='42']").is_hidden()
+        assert page.locator("#decks-total").inner_text() == "1 package"
+        assert "Package" in tile.locator(".fmt").inner_text() and "$$" in tile.locator(".fmt").inner_text()
+        assert tile.locator(".thumb .ini svg").count() == 1
+        assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TILE_TEXT) == []
+        # the package tile's menu: Add to a deck…, from ⋮, a right-click and a press and hold
         tile.locator(".name").click(button="right")
         assert "Add to a deck…" in _menu_items(page)
         _close_menu(page)
@@ -630,7 +615,7 @@ def test_my_decks_draws_a_package_the_deck_list_left_out_and_says_when_it_cannot
         _close_menu(page)
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TILE_TEXT) == []
         page.unroute("**/decks/api/packages**")
-        # the read fails: one muted line, every deck shown, Show still usable
+        # the read fails: one muted line, every deck shown, the switch still there
         page.route("**/decks/api/packages**", lambda r: r.abort())
         page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
         note = page.locator("#pk-note")
@@ -640,7 +625,7 @@ def test_my_decks_draws_a_package_the_deck_list_left_out_and_says_when_it_cannot
         )
         assert page.locator("li.deck[data-deck-id='42']").is_visible()
         assert page.locator("li.deck[data-deck-id='50']").is_visible()
-        assert page.locator("#f-show").is_enabled()
+        assert page.locator("nav.hubseg a[href='/decks']").is_visible()
         assert page.evaluate(CONTRAST, TILE_TEXT) == []
         browser.close()
     assert errors == []

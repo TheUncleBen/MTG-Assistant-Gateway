@@ -65,4 +65,25 @@
     for (var i = 0; i < feet.length; i++) watch.observe(feet[i]);
   }
   window.addEventListener("resize", fit);
+  // On the rail, More's menu opens beside its tab (the stylesheet alone puts it at the rail's foot,
+  // where it is without this script): its top on the tab's, moved up as far as it must to fit.
+  var more = tabs && tabs.querySelector("details.more");
+  if (more) more.addEventListener("toggle", function () {
+    var sheet = more.querySelector(".menu.sheet");
+    if (!sheet) return;
+    sheet.style.top = sheet.style.bottom = "";
+    if (!more.open || getComputedStyle(tabs).flexDirection !== "column") return;
+    var top = more.getBoundingClientRect().top, h = sheet.getBoundingClientRect().height;
+    sheet.style.bottom = "auto";
+    sheet.style.top = Math.max(8, Math.min(top, window.innerHeight - h - 8)) + "px";
+  });
+})();
+/* A place's switch (theme.hub_switch) scrolls sideways on a narrow phone at large text: it opens
+   scrolled to the page's own part. */
+(function () {
+  "use strict";
+  var seg = document.querySelector(".hubseg"), cur = seg && seg.querySelector("[aria-current=page]");
+  if (!cur || seg.scrollWidth <= seg.clientWidth) return;
+  var a = seg.getBoundingClientRect(), b = cur.getBoundingClientRect();
+  seg.scrollLeft += b.left - a.left - (a.width - b.width) / 2;
 })();

@@ -211,10 +211,12 @@ MEASURE = """
     .map(el => ({ el, r: el.getBoundingClientRect(), pinned: pinned(el) }));
   for (const { el, r } of ctrls) {
     if (r.right <= 0 || r.left >= vw) continue; // parked off screen on purpose (a hidden file input)
-    if (r.left < -1 || r.right > vw + 1)
+    const c = clipper(el);
+    // a control in a row that scrolls sideways (the filter chips, as iOS draws them) is scrolled to
+    const scrolls = c && c.scrollWidth > c.clientWidth && /(auto|scroll)/.test(getComputedStyle(c).overflowX);
+    if (!scrolls && (r.left < -1 || r.right > vw + 1))
       out.push(name(el) + ' outside the window (' + Math.round(r.left) + '..' + Math.round(r.right) +
         ' of ' + vw + ')');
-    const c = clipper(el);
     if (c) {
       const cr = c.getBoundingClientRect();
       if (r.left < cr.left - 1 || r.right > cr.right + 1)

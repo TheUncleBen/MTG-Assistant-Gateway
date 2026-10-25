@@ -177,15 +177,20 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
         assert "<meta name='theme-color' media='(prefers-color-scheme: dark)' content='#111111'>" in page
         assert page.index("<a class='skip' href='#main'>Skip to content</a>") < page.index("<header")
         assert "<main class='wrap' id='main' tabindex='-1'>" in page
-        assert "Signed in as <b>alice</b>" in page
-        assert "<button name='theme' value='system' class=on aria-pressed='true'>" in page
-        assert "<button name='theme' value='light' aria-pressed='false'>" in page
-        activity = page.split("<a href='/activity'>")[1][:120]
+        # the picture opens the Account page; the theme and My activity are rows there
+        assert (
+            "<a class='icon-btn acct' href='/account' aria-label='Account' title='Account' data-who=" in page
+        )
+        hub = (await b.http.get("/account", headers=NAV)).text
+        assert "<b>alice</b>" in hub
+        assert "<button name='theme' value='system' aria-pressed='true' class=on>" in hub
+        assert "<button name='theme' value='light' aria-pressed='false'>" in hub
+        activity = hub.split("<a class='yrow' href='/activity'>")[1][:120]
         assert "<path d='M3 12h4l3-7 4 14 3-7h4'/>" in activity  # its own icon, not History's
         assert (
             "<span class='mark'><svg class='i' viewBox='0 0 24 24' aria-hidden='true'><g transform=" in page
         )
-        assert "title='Search cards and decks'" in page and "title='Account menu'" in page
+        assert "title='Search cards and decks'" in page and "title='Account'" in page
         b.http.cookies.set("mtg_theme", "light")
         light = (await b.http.get("/decks", headers=NAV)).text
         assert (
@@ -198,7 +203,9 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
         # an error page keeps the member's navigation and account menu
         missing = await b.http.get("/no-such-page", headers=NAV)
         assert (
-            missing.status_code == 404 and "class='tabbar'" in missing.text and "Signed in as" in missing.text
+            missing.status_code == 404
+            and "class='tabbar'" in missing.text
+            and "class='icon-btn acct'" in missing.text
         )
         # the admin pages name their area in the tab
         assert "<title>Page not found · MTG Assistant Gateway</title>" in missing.text
@@ -218,10 +225,10 @@ async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Sta
         "changes can be reviewed but not applied.</p>"
     )
     try:
-        page = (await b.http.get("/account", headers=NAV)).text
+        page = (await b.http.get("/account/details", headers=NAV)).text
         assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl green'>" in page and note in page
         decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
-        page = (await b.http.get("/account", headers=NAV)).text
+        page = (await b.http.get("/account/details", headers=NAV)).text
         assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl grey'>" in page and note in page
         for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
             assert old not in page, old
@@ -248,7 +255,7 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         )
         assert "aria-label='Archidekt import text'" in export
         proposals = (await b.http.get("/proposals", headers=NAV)).text
-        assert "<a href='/proposals' aria-current='page' class=fold>Proposals</a>" in proposals
+        assert "<a href='/proposals' aria-current='page'>Assistant<" in proposals
         compare = (await b.http.get("/decks/42/compare", headers=NAV)).text
         assert "<input id='cmp-with' type='text' name='with' data-suggest='static'" in compare
         search = (await b.http.get("/search", headers=NAV)).text

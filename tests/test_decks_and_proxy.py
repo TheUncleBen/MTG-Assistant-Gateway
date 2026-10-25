@@ -85,7 +85,7 @@ class Browser:
         assert r2.headers["location"] == next_path
         return r2
 
-    async def csrf(self, path: str = "/account") -> str:
+    async def csrf(self, path: str = "/account/details") -> str:
         r = await self.http.get(path)
         assert r.status_code == 200, r.text
         m = re.search(r"name='csrf' value='([0-9a-f]+)'", r.text)
@@ -162,7 +162,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     h = stack.h
     b = Browser(h)
     await b.login()
-    page = await b.http.get("/account")
+    page = await b.http.get("/account/details")
     assert "Link your Archidekt account" in page.text
     assert "default-src 'none'" in page.headers["content-security-policy"]
 
@@ -171,12 +171,12 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     assert not h.db.get_link("user-1")
 
     ok = await b.link("alice", "pw-alice")
-    assert ok.status_code == 303 and ok.headers["location"] == "/account?ok=linked"
+    assert ok.status_code == 303 and ok.headers["location"] == "/account/details?ok=linked"
     row = h.db.get_link("user-1")
     assert row and row["archidekt_username"] == "alice"
     # encrypted, no password
     assert "pw-alice" not in row["secret_enc"] and "tok-alice" not in row["secret_enc"]
-    page = await b.http.get("/account?ok=linked")
+    page = await b.http.get("/account/details?ok=linked")
     assert "Linked to <strong>alice</strong>" in page.text
 
     token = await mcp_token(h)
@@ -207,14 +207,14 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     assert out_resp.headers["location"] == "/signed-out"
     signed_out = await b.http.get("/signed-out")
     assert signed_out.status_code == 200 and "Sign out" not in signed_out.text
-    assert (await b.http.get("/account")).status_code == 302  # back to sign-in
+    assert (await b.http.get("/account/details")).status_code == 302  # back to sign-in
     await b.aclose()
 
 
 async def test_account_form_requires_csrf_and_session(stack: Stack) -> None:
     h = stack.h
     anon = Browser(h)
-    r = await anon.http.get("/account")
+    r = await anon.http.get("/account/details")
     assert r.status_code == 302 and r.headers["location"].startswith("/login?next=")
     r = await anon.http.post(
         "/account", data={"action": "link", "archidekt_login": "alice", "archidekt_password": "x"}
@@ -976,7 +976,7 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
     tokens = await h.tokens_for(client)
     b = Browser(h)
     await b.login()
-    assert (await b.http.get("/account")).status_code == 200
+    assert (await b.http.get("/account/details")).status_code == 200
     r = await h.http.post(
         "/revoke",
         data={
@@ -986,7 +986,7 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
         },
     )
     assert r.status_code == 200, r.text
-    r = await b.http.get("/account")
+    r = await b.http.get("/account/details")
     assert r.status_code == 200
     await b.aclose()
 

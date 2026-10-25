@@ -31,16 +31,18 @@ you the exact change first.
    research, simulate or edit for you. Every edit still comes back to you
    as a proposal.
 
-On a phone the five tabs at the bottom are Home, Decks, Scan, Collection
-and More; Search is the magnifier in the top bar, and More opens a sheet
-with Proposals, History, Reports, Watchlist (when watchlists are on), Guide
-and Account, and Admin for administrators. On a wider touch screen, such as an unfolded foldable or a
-tablet, and in the Android app from 600 px, a rail down the left edge lists
-every page, so it has no More. A desktop browser shows Home, Decks, Search,
-Collection, Scan, Proposals and History in the top bar. The layout follows
-the window as you fold, rotate or split the screen. The account menu is your
-profile picture (or your initials) at the top right; a tap anywhere else
-closes it. Large text works too: the
+On a phone the tabs at the bottom are Home, Decks, Binder (your
+collection), Assistant and More. Assistant opens Proposals, with a switch at
+the top to History and Reports, and shows how many proposals are waiting.
+More opens Search, Precons, Scan, Watchlist (when watchlists are on) and My
+lists; Search is also the magnifier in the top bar. On a wider touch screen,
+such as an unfolded foldable or a tablet, and in the Android app from 600 px,
+the same places are on a rail down the left edge, with Alerts. A desktop
+browser shows them in the top bar, with More as a drop-down and a search box
+that fills the free space. The layout follows the window as you fold, rotate
+or split the screen. Your profile picture (or your initials) at the top right
+opens the Account page: Account details, My activity, Forum, Theme and
+Layout, the Guide, the assistant skill and the apps, and Sign out. Large text works too: the
 pages follow the phone's font size (the Android app included) and a
 browser's text zoom up to 200%, wrapping rather than running off the screen.
 
@@ -402,7 +404,7 @@ Watchlists are on unless the operator turns them off; then the page, the
 card viewer's price buttons and your assistant's watchlist abilities are not
 there.
 
-The **Watchlist** page (in the account menu, and under More on a phone)
+The **Watchlist** page (under More)
 keeps the price of cards and decks you choose, once a day:
 
 - **Watch a card** by name, or one printing by its set code and number, in
@@ -488,8 +490,8 @@ what only one of the two paths can do.
 
 The [Android app](ANDROID.md) shows these same pages as a native-feeling
 app with the phone camera built in. The app's own actions (Scan with the
-app's camera, Reload, Open in browser, Change gateway) sit in the account
-menu. On a foldable, the folded screen has the tabs at the bottom and the
+app's camera, Reload, Open a copied link, Change gateway, Check for app
+updates) are under This app on the Account page. On a foldable, the folded screen has the tabs at the bottom and the
 unfolded screen moves them to a rail down the left edge. No Android phone? Add the site to your home screen from the
 browser and it opens like an app, scanning included.
 
@@ -575,7 +577,7 @@ mentioned at the end.
 
 *How long it lasts and how to end it*
 
-- The access token lasts about an hour and is renewed with the refresh token. The refresh token stops working about 40 days after you link (measured October 2026; Archidekt can change this). Then you link again. Your Account page shows your date.
+- The access token lasts about an hour and is renewed with the refresh token. The refresh token stops working about 40 days after you link (measured October 2026; Archidekt can change this). Then you link again. Account details shows your date.
 - Unlink, Delete my data, or an admin's Unlink or Disable deletes the gateway's copy at once, also from the copies saved before database upgrades.
 - If you're removed from this gateway's group, or your sign-in account is deactivated or deleted, you lose access at once. If the hourly clean-up is on (it needs an extra setting at the sign-in service), your stored session is usually deleted within about an hour, later while the sign-in service gives no clear answer. Without it, the session is deleted when an admin presses Disable or Unlink, when it expires, or (after a group removal) the next time you or one of your apps uses the gateway.
 - Unlinking deletes only the gateway's copy. Whether the session also stops working at Archidekt, or ends when you change your Archidekt password, is not known, so a copy someone already took may keep working until it expires.

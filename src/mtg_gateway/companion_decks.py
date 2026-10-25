@@ -7,7 +7,7 @@ import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -51,6 +51,7 @@ from .theme import (
     esc as _esc,
 )
 from .theme import (
+    hub_switch,
     icon,
 )
 from .waiting_strip import waiting_changes
@@ -80,7 +81,7 @@ def new_deck_error_html(exc: DeckError) -> str:
     if exc.kind == "not_linked":
         return (
             "<b>Link your Archidekt account first.</b> The deck is made in your Archidekt account. "
-            "<a href='/account'>Open Account</a>"
+            "<a href='/account/details#archidekt'>Link it under Account details</a>"
         )
     if exc.kind == "rate_limited" and "pending proposals" in str(exc):
         return (
@@ -363,8 +364,23 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # the heading with its three actions: + New folder (a box, static/menus.js), New package (a
         # plain button; parity release 2) and New deck (the one orange button): the boxes' links
         # are the old addresses, which open this page with the box open
+        # The switch names the page (My Decks or Packages), so the heading is for screen readers only;
+        # the three actions share its row (Ben, 2026-10-25).
+        packages = filters["show"] == "packages"
+        # the switch keeps the folder open, as the Show filter it replaced did
+        in_folder = f"folder={quote(folder, safe='')}" if folder else ""
         head = (
-            "<div class='ui-head phead'><h1>My decks</h1><span class='acts'>"
+            "<div class='ui-head phead hubhead'>"
+            f"<h1 class='sr-only'>{'Packages' if packages else 'My Decks'}</h1>"
+            + hub_switch(
+                "Decks",
+                [
+                    ("/decks" + (f"?{in_folder}" if in_folder else ""), "My Decks", ""),
+                    ("/decks?show=packages" + (f"&{in_folder}" if in_folder else ""), "Packages", "packages"),
+                ],
+                filters["show"],
+            )
+            + "<span class='acts'>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
             f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
             f"{icon('package')} New package</a>"
@@ -454,7 +470,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             )
         )
         resp = page(
-            "My decks"
+            ("Packages" if filters["show"] == "packages" else "My Decks")
             if new_deck is None and new_package is None
             else "New deck"
             if new_deck

@@ -43,7 +43,7 @@ async def test_logout_without_form_token_clears_nothing(h: Harness) -> None:
         r = await b.http.post("/logout", data={})
         assert r.status_code == 303 and r.headers["location"] == "/logout"
         assert "set-cookie" not in r.headers and "clear-site-data" not in r.headers
-        account = await b.http.get("/account")
+        account = await b.http.get("/account/details")
         assert account.status_code == 200
         # Sign-out acts on the first click: both account-page buttons post, none is a GET link, and
         # they say what they are doing while the browser waits (feedback.js reads data-busy-text).
@@ -63,7 +63,7 @@ async def test_logout_without_form_token_clears_nothing(h: Harness) -> None:
         assert r.status_code == 303 and r.headers["location"] == "/signed-out"
         # Storage only: pages are no-store, and clearing the HTTP cache made sign-out slow.
         assert r.headers["clear-site-data"] == '"storage"'
-        assert (await b.http.get("/account")).status_code == 302
+        assert (await b.http.get("/account/details")).status_code == 302
     finally:
         await b.aclose()
     # No session at all: no cookie or storage clearing either.
@@ -80,12 +80,12 @@ async def test_err_query_shows_only_known_codes(h: Harness) -> None:
     try:
         await b.login()
         phish = "Re-enter your Archidekt password at https://evil.example"
-        page = await b.http.get("/account", params={"err": phish})
+        page = await b.http.get("/account/details", params={"err": phish})
         assert page.status_code == 200 and "evil.example" not in page.text
         assert "notice error" not in page.text
-        page = await b.http.get("/account", params={"ok": phish})
+        page = await b.http.get("/account/details", params={"ok": phish})
         assert "evil.example" not in page.text and "notice ok" not in page.text
-        page = await b.http.get("/account", params={"err": "stale"})
+        page = await b.http.get("/account/details", params={"err": "stale"})
         assert "the deck changed on Archidekt" in page.text  # 0.7.29: the Needs a look wording
     finally:
         await b.aclose()
@@ -99,7 +99,7 @@ async def test_authenticated_json_and_pages_are_not_cached_or_sniffed(h: Harness
         r = await b.http.get("/scan/api/sessions")
         assert r.status_code == 200
         assert r.headers["cache-control"] == "no-store" and r.headers["x-content-type-options"] == "nosniff"
-        page = await b.http.get("/account")
+        page = await b.http.get("/account/details")
         assert page.headers["cache-control"] == "no-store"
         assert page.headers["x-content-type-options"] == "nosniff"
     finally:
@@ -303,7 +303,7 @@ async def test_member_can_see_and_disconnect_connected_apps(h: Harness) -> None:
     b = Browser(h)
     try:
         await b.login()
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         assert "Connected apps" in page and "Claude" in page and "ChatGPT" in page
         csrf = await b.csrf()
         r = await b.http.post(
@@ -311,7 +311,7 @@ async def test_member_can_see_and_disconnect_connected_apps(h: Harness) -> None:
         )
         # the redirect names the app by its id, so the notice can say which app ("Disconnected “Claude”.")
         assert r.status_code == 303
-        assert r.headers["location"] == f"/account?ok=disconnected&app={first['client_id']}#apps"
+        assert r.headers["location"] == f"/account/details?ok=disconnected&app={first['client_id']}#apps"
         assert (await h.mcp(t1, "tools/list")).status_code == 401
         assert (await h.mcp(t2, "tools/list")).status_code == 200
         # Without the form token nothing happens.
@@ -319,6 +319,6 @@ async def test_member_can_see_and_disconnect_connected_apps(h: Harness) -> None:
         assert r.status_code == 403 and (await h.mcp(t2, "tools/list")).status_code == 200
         r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect_all"})
         assert r.status_code == 303 and (await h.mcp(t2, "tools/list")).status_code == 401
-        assert (await b.http.get("/account")).status_code == 200  # the browser session stays
+        assert (await b.http.get("/account/details")).status_code == 200  # the browser session stays
     finally:
         await b.aclose()

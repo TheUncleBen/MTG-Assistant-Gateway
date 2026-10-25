@@ -96,12 +96,12 @@ async def test_browser_sign_in_hands_a_code_only_the_app_can_use(harness: Harnes
         assert page.headers["cache-control"] == "no-store"
         assert page.headers["referrer-policy"] == "no-referrer"
         code = code_from(page)
-        assert (await browser.get("/account")).status_code == 302
+        assert (await browser.get("/account/details")).status_code == 302
 
         done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
         assert done.status_code == 303 and done.headers["location"] == "/decks"
         assert "mtg_session=" in done.headers["set-cookie"]
-        assert (await app.get("/account")).status_code == 200
+        assert (await app.get("/account/details")).status_code == 200
         rows = harness.db.audit_recent(5)
         assert any(
             r["event"] == "browser_login" and (r["detail"] or {}).get("via") == "android_app" for r in rows

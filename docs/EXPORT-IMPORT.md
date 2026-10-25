@@ -48,7 +48,7 @@ The **New deck** page has a **From a file** picker beside the text box: choose a
 and sets "The text above is" from the extension, so the form posts plain text and the gateway
 handles no uploads. **Confirmed** that the page carries the picker and that each kind posts into
 the same import; the picker itself is browser behaviour, exercised in the headless browser used
-for the screenshots, not on a phone. The Collection page's **Import a list** has the same picker.
+for the screenshots, not on a phone. The Binder page's **Import a list** has the same picker.
 
 ## Collection import
 

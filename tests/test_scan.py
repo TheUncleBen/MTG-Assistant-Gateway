@@ -167,7 +167,7 @@ async def test_scan_page_requires_login_and_sets_scan_csp(stack: Stack) -> None:
     csp = r.headers["content-security-policy"]
     assert "script-src 'self' 'wasm-unsafe-eval'" in csp and "connect-src 'self'" in csp
     assert "cdn." not in r.text and "https://cards.scryfall.io" in csp
-    assert "/scan/static/scan.js?v=" in r.text and "<a href='/scan'>Scan</a>" in r.text
+    assert "/scan/static/scan.js?v=" in r.text and "<a href='/scan' aria-current=page>" in r.text
     assert r.headers["permissions-policy"] == "camera=(self)"
     for path, ctype in [
         ("/scan/app.webmanifest", "application/manifest+json"),

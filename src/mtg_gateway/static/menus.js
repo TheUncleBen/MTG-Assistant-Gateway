@@ -364,11 +364,13 @@
       box.focusFirst();
     }, function () { failed(box); });
   }
+  function inApp() { return !!window.MtgNative; }  // the Android app's bridge
   function deckItems(d) {
     var id = enc(d.id), items = [];
     var archidekt = "https://archidekt.com/decks/" + id;
     items.push(link("Open", "eye", d.href));
-    items.push(link("Open in a new tab", "external", d.href, { ext: true }));
+    // the app has no tabs (Ben, 2026-10-25): a website-only item
+    if (!inApp()) items.push(link("Open in a new tab", "external", d.href, { ext: true }));
     if (d.own) items.push(link("Edit deck", "edit", "/decks/" + id + "/edit"));
     items.push(sep());
     if (!d.own) items.push(item("Clone into my decks", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
@@ -574,7 +576,7 @@
     var id = enc(f.id);
     var items = [
       link("Open", "folder", f.href),
-      link("Open in a new tab", "external", f.href, { ext: true }),
+      inApp() ? null : link("Open in a new tab", "external", f.href, { ext: true }),
       sep(),
       item("New folder inside…", "plus", function () { newFolder(f.id, f.focus); }),
       item("Rename…", "edit", function () { renameFolder(f); })

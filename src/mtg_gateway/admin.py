@@ -111,7 +111,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=True,
-            user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
+            sub=sid_sub,
             head_extra=ADMIN_HEAD + head_extra,
             heading=False,
             main_class="ui-wide",

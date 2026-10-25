@@ -85,19 +85,17 @@ def test_quick_access_in_the_side_bar_order(server: Server) -> None:
     page = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}).get("/").text
     assert _labels(page) == [
         "Decks",
-        "Search",
-        "Scan",
-        "Collection",
+        "Binder",
         "Proposals",
         "History",
         "Reports",
+        "Search",
+        "Scan",
         "Watchlist",
         "Guide",
         "Account",
     ]
-    assert (
-        "<h2>Quick access</h2><span class='ui-sub'>The same sections, in the same order, as the app" in page
-    )
+    assert "<h2>Quick access</h2><span class='ui-sub'>In the same order as the navigation" in page
     assert ">Card search</a>" in page and "href='/precons'>Precons</a>" in page
     # one History tile, in the one approved wording
     quick = page.split("aria-label='Quick access'>")[1].split("</section>")[0]

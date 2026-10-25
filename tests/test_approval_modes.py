@@ -110,21 +110,21 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
 
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account")).text
+    page = (await b.http.get("/account/details")).text
     assert "Approval mode" in page and page.count("name='mode'") == 3 and "value='manual' checked" in page
     assert "tricked by text it reads" in page  # the cost of the auto modes, said plainly
     await b.aclose()
 
-    assert await _set_mode(h, "auto") == "/account?ok=mode_auto"
+    assert await _set_mode(h, "auto") == "/account/details?ok=mode_auto"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
     assert h.db.get_user("user-1")["approval_mode"] == "auto"
     events = [a for a in h.db.audit_for_user("user-1", 50) if a["event"] == "approval_mode_set"]
     assert events and events[0]["detail"] == {"from": "manual", "to": "auto", "by": "user"}
 
-    assert await _set_mode(h, "bogus") == "/account?err=mode_invalid"
-    assert await _set_mode(h, "") == "/account?err=mode_invalid"
+    assert await _set_mode(h, "bogus") == "/account/details?err=mode_invalid"
+    assert await _set_mode(h, "") == "/account/details?err=mode_invalid"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
-    assert await _set_mode(h, "manual") == "/account?ok=mode_manual"
+    assert await _set_mode(h, "manual") == "/account/details?ok=mode_manual"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "manual"
 
 
@@ -137,7 +137,7 @@ async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -
     await linked_user(stack)
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account")).text
+    page = (await b.http.get("/account/details")).text
     await b.aclose()
     card = page[page.index("<div class='card' id='mode'>") :]
     card = card[: card.index("</form></div>")]
@@ -217,9 +217,9 @@ async def test_a_cap_changed_on_the_settings_page_applies_at_once(stack: Stack) 
     h = stack.h
     await linked_user(stack)
     h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
-    assert await _set_mode(h, "auto") == "/account?err=mode_invalid"
+    assert await _set_mode(h, "auto") == "/account/details?err=mode_invalid"
     assert h.db.get_user("user-1")["approval_mode"] is None
-    assert await _set_mode(h, "semi") == "/account?ok=mode_semi"
+    assert await _set_mode(h, "semi") == "/account/details?ok=mode_semi"
 
 
 async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_more(stack: Stack) -> None:
@@ -228,7 +228,7 @@ async def test_a_lowered_cap_and_row_limit_apply_at_once_to_a_member_who_chose_m
     lowered row limit makes a 3-row edit high risk at once."""
     h = stack.h
     token = await linked_user(stack)
-    assert await _set_mode(h, "auto") == "/account?ok=mode_auto"
+    assert await _set_mode(h, "auto") == "/account/details?ok=mode_auto"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "auto"
     h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
     assert h.db.get_user("user-1")["approval_mode"] == "auto"  # the stored choice is kept
@@ -246,14 +246,14 @@ async def test_the_cap_limits_what_members_may_choose(capped: Stack) -> None:
     h = capped.h
     token = await linked_user(capped)
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "semi"
-    assert await _set_mode(h, "auto") == "/account?err=mode_invalid"
+    assert await _set_mode(h, "auto") == "/account/details?err=mode_invalid"
     assert h.db.get_user("user-1")["approval_mode"] is None
     b = Browser(h)
     await b.login()
-    page = (await b.http.get("/account")).text
+    page = (await b.http.get("/account/details")).text
     assert "value='auto' disabled" in page and "not allowed on this gateway" in page
     await b.aclose()
-    assert await _set_mode(h, "manual") == "/account?ok=mode_manual"
+    assert await _set_mode(h, "manual") == "/account/details?ok=mode_manual"
     assert structured(await call(h, token, "account_status"))["approval_mode"] == "manual"
 
 
@@ -436,7 +436,7 @@ async def test_one_members_mode_never_applies_to_another(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     alice = await linked_user(stack, ALICE, "alice", "pw-alice")
     amy = await linked_user(stack, AMY, "amy", "pw-amy")
-    assert await _set_mode(h, "auto", user=ALICE) == "/account?ok=mode_auto"
+    assert await _set_mode(h, "auto", user=ALICE) == "/account/details?ok=mode_auto"
     assert h.db.get_user("user-1")["approval_mode"] == "auto"
     assert h.db.get_user("user-2")["approval_mode"] is None
 
@@ -469,7 +469,7 @@ async def test_one_members_mode_never_applies_to_another(stack: Stack) -> None:
     )
 
     # Amy choosing semi changes Amy only.
-    assert await _set_mode(h, "semi", user=AMY) == "/account?ok=mode_semi"
+    assert await _set_mode(h, "semi", user=AMY) == "/account/details?ok=mode_semi"
     assert h.db.get_user("user-1")["approval_mode"] == "auto"
     assert h.db.get_user("user-2")["approval_mode"] == "semi"
     assert structured(await call(h, amy, "account_status"))["approval_mode"] == "semi"
@@ -559,7 +559,7 @@ async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> N
     b = Browser(h)
     try:
         await b.login()
-        page = _flat((await b.http.get("/account")).text)
+        page = _flat((await b.http.get("/account/details")).text)
     finally:
         await b.aclose()
     guide = _flat(guide_body(site="Gateway", writes_enabled=True, has_collection=True, max_rows=3))

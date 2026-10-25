@@ -350,7 +350,9 @@ COPIED = (
 
 
 def _open_dialog(page, *, ready: bool = True):
-    page.locator(".banner a[data-edhplay]").click()
+    # Test and play (the banner's menu) → Play on EDHPlay
+    page.locator(".banner .decktestbtn").click()
+    page.locator(".ctxmenu [role=menuitem]", has_text="Play on EDHPlay").click()
     dialog = page.locator(".edhplay-dialog")
     dialog.wait_for()
     if ready:  # the list has come: the button is on
@@ -453,7 +455,8 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         # Escape, a press on the backdrop and × each close it; focus goes back to the button
         page.keyboard.press("Escape")
         assert page.locator(".edhplay-dialog").count() == 0
-        assert page.evaluate("() => document.activeElement.hasAttribute('data-edhplay')")
+        # (the Test and play button, whose menu opened it)
+        assert page.evaluate("() => document.activeElement.classList.contains('decktestbtn')")
         _open_dialog(page)
         page.mouse.click(3, 3)
         assert page.locator(".edhplay-dialog").count() == 0

@@ -36,7 +36,7 @@ from .plugin_page import (
     claude_connect_link,
     plugin_slug,
 )
-from .theme import display_name, icon, render
+from .theme import icon, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -911,7 +911,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             current="/install",
             heading=False,
             main_class="ui-wide",

@@ -92,9 +92,11 @@
     if (window.MtgMenu && window.MtgMenu.icon) return window.MtgMenu.icon("package");
     return el("span", null, "P");
   }
+  // My Decks (decks only) or Packages (packages only), the switch at the top of the page (Ben,
+  // 2026-10-25; its value rides in the form)
   function showMode() {
-    var s = form.querySelector("select[name=show]");
-    return s ? s.value : "";
+    var s = form.querySelector("input[name=show]");
+    return s && s.value === "packages" ? "packages" : "decks";
   }
   function pkgNote() {
     var n = document.getElementById("pk-note");
@@ -262,7 +264,6 @@
     var t = e.target;
     if (!t || t.closest(".sortcw")) return; // the phone's combined sort sets the real boxes, which change
     if (t.type === "search") return;
-    if (t.name === "show") { mark(); setAddress(); return; } // applied here, nothing asked again
     if (t.type === "checkbox" || t.type === "radio" || t.tagName === "SELECT") { clearTimeout(timer); refresh(); }
   });
 })();

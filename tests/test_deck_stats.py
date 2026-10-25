@@ -1137,7 +1137,7 @@ def test_the_full_test_button_has_the_approved_texts() -> None:
     )
     assert " Run full test</button>" in html
     assert "Run simulation" not in html and "Simulating" not in html and "goldfish games" not in html
-    assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept
+    assert " Goldfish</a>" in html and "Playtest on Archidekt</a>" in html  # names kept
 
 
 def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:

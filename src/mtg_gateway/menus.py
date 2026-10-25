@@ -38,6 +38,15 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 .ui-head.phead{align-items:center;justify-content:space-between;margin:0 0 12px}
 .ui-head.phead .acts{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .ui-head.phead .acts .btn,.ui-head.phead .acts button{margin:0}
+/* My decks: the switch starts the row, the actions end it; on a phone the switch takes the width and
+   the three actions share the row under it, one third each */
+.ui-head.hubhead{gap:12px}
+@media (max-width:599.98px){
+  .ui-head.hubhead{display:grid;grid-template-columns:1fr}
+  .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .ui-head.hubhead .acts .btn,.ui-head.hubhead .acts button{width:100%;padding:0 .4rem;gap:.3rem;
+    font-size:.93rem;white-space:normal;text-align:center;line-height:1.1}
+  .ui-head.hubhead .acts svg{display:none} }
 /* the Collection menu's quantity row: one fewer, the count, one more; the menu stays open */
 .ctxmenu .mqty{display:flex;align-items:center;gap:.25rem;padding:.15rem .5rem .15rem 1rem;min-height:38px}
 .ctxmenu .mqty .lbl{flex:1;color:var(--text-muted)}

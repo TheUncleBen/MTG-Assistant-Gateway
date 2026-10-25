@@ -450,7 +450,7 @@ def reports_page_html(
     count under the search and filters; ``apps``: client id to app name."""
     now = time.time() if now is None else now
     seen = sorted({asked_by(r, apps) for r in index} - {""}, key=lambda n: (n != YOU, n.casefold()))
-    head = ui.page_head("Reports", SUB_LINE)
+    head = ui.assistant_head("/reports", "Reports", SUB_LINE)
     wid = ui.widgets(
         [
             forge_widget(runs),

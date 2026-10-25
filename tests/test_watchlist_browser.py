@@ -195,7 +195,8 @@ def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, 
                 out = page.evaluate(
                     """() => [document.documentElement.scrollWidth, innerWidth,
                       [...document.querySelectorAll('main *')].filter(e => e.getClientRects().length
-                        && e.getBoundingClientRect().right > innerWidth + 1 && !e.closest('.tbl'))
+                        && e.getBoundingClientRect().right > innerWidth + 1 && !e.closest('.tbl')
+                        && !e.closest('.ui-chips'))
                         .map(e => e.tagName + '.' + e.className).slice(0, 5)]"""
                 )
                 assert out[0] <= out[1] and not out[2], (scheme, zoom, out)

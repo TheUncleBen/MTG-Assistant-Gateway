@@ -32,7 +32,7 @@ async def test_an_uploaded_picture_is_shown_in_the_account_icon(tmp_path: Path, 
     async with running(Harness(live(tmp_path), idp)) as h:
         b = Browser(h)
         await b.login()
-        page = await b.http.get("/account")
+        page = await b.http.get("/account/details")
         assert "src='/account/avatar'" in page.text
         assert "img-src 'self'" in page.headers["content-security-policy"]
         r = await b.http.get("/account/avatar")
@@ -42,7 +42,7 @@ async def test_an_uploaded_picture_is_shown_in_the_account_icon(tmp_path: Path, 
         assert r.headers["x-content-type-options"] == "nosniff"
         # Changed at the provider: the next membership check picks it up.
         idp.directory[SUB]["picture"] = ""
-        await b.http.get("/account")
+        await b.http.get("/account/details")
         r = await b.http.get("/account/avatar")
         assert r.headers["content-type"].startswith("image/svg+xml") and b">A<" in r.content
         await b.aclose()
@@ -143,11 +143,11 @@ async def test_an_uploaded_picture_comes_once_and_never_rides_in_tokens(tmp_path
         assert (await b.http.get("/account/avatar")).content == PNG
         assert idp.picture_fetches == 1
         for _ in range(3):  # membership checks: the version is unchanged, nothing is fetched
-            await b.http.get("/account")
+            await b.http.get("/account/details")
             await settle(h)
         assert idp.picture_fetches == 1
         idp.uploaded[SUB] = data_uri("image/jpeg", JPEG)  # a new upload in Authentik
-        await b.http.get("/account")
+        await b.http.get("/account/details")
         await settle(h)
         assert idp.picture_fetches == 2
         r = await b.http.get("/account/avatar")

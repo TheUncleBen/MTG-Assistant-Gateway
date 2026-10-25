@@ -108,7 +108,7 @@ from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .summary import Summaries, add_summary_tool
 from .sync import DeckSync
-from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
+from .theme import NoSniffMiddleware, ThemeMiddleware, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .upgrade_backup import folder_for
@@ -996,6 +996,7 @@ def create_app(
     ui.use_client_info(db.get_client)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
+    theme.WAITING_COUNT = db.count_pending_proposals  # the Assistant place's count
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,
         settings.oidc_client_id,
@@ -1103,7 +1104,7 @@ def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
         user = state.db.get_user(sub) or {}
         admin = bool(state.settings.admin_group and state.settings.admin_group in (user.get("groups") or []))
         csrf = _csrf(state.settings, sid)
-        return {"signed_in": True, "csrf": csrf, "admin": admin, "user": display_name(user)}
+        return {"signed_in": True, "csrf": csrf, "admin": admin, "sub": sub}
     except Exception:
         return {}
 

@@ -115,5 +115,11 @@
             android:name="local.mtgassistantgateway.app.Updater$InstallResultReceiver"
             android:exported="false" />
 
+        <!-- The share sheet's Copy gateway link and Copy deck list (DeckShare.kt). Not exported:
+             only the sheet's own PendingIntents reach it. -->
+        <receiver
+            android:name="local.mtgassistantgateway.app.DeckShare$CopyReceiver"
+            android:exported="false" />
+
     </application>
 </manifest>

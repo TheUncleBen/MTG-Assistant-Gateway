@@ -384,7 +384,7 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        page.goto(f"{server.base}/account#mode", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details#mode", wait_until="networkidle")
         page.locator("#mode .mode-opt .mode-pick").first.wait_for(state="visible")
         page.wait_for_timeout(200)
         rows = page.evaluate(MODE_LINES)

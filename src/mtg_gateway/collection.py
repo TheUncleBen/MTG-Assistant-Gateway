@@ -57,8 +57,8 @@ from .pages import (
 from .profile_page import COLLECTION_CSS as VISIBILITY_CSS
 from .profile_page import collection_visibility, profile_or_none
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
+from .theme import icon, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -1018,7 +1018,7 @@ CONDITION_LABELS = {
     "DMG": "Damaged (DMG)",
 }
 DIRECTION_WORDS = {"desc": "newest set first", "asc": "oldest set first"}
-PURPOSE = "The cards you own, kept on Archidekt."
+PURPOSE = "The cards you own: your collection on Archidekt."
 TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 8.5rem var(--ctl)"
 TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
 TABLE_SM = "minmax(0,1fr) var(--ctl)"
@@ -1638,7 +1638,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             wide=True,
             heading=heading,
             body_class="collection",
@@ -1763,7 +1763,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         return strip(msgs[code], "ok" if code in ("added", "removed", "updated", "imported") else "error")
 
     def head(actions_html: str = "") -> str:
-        return ui.page_head("My collection", PURPOSE, actions_html=actions_html)
+        return ui.page_head("Binder", PURPOSE, actions_html=actions_html)
 
     def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):
@@ -1771,7 +1771,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
                 "<p>Link your Archidekt account to see it here. Nothing about your cards is stored on this "
                 "gateway.</p><div class='actions'>"
-                + ui.button_link("Link Archidekt", "/account", kind="primary", icon_name="account")
+                + ui.button_link(
+                    "Link Archidekt", "/account/details#archidekt", kind="primary", icon_name="account"
+                )
                 + "</div></section>"
             )
         return (
@@ -1878,7 +1880,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
             notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
             return page(
-                "My collection",
+                "Binder",
                 head() + notes_html + problem(exc),
                 sub=sub,
                 sid=sid,
@@ -1952,7 +1954,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 + add_box
                 + details_box
             )
-        resp = page("My collection", body, sub=sub, sid=sid, scripts=True, heading=False)
+        resp = page("Binder", body, sub=sub, sid=sid, scripts=True, heading=False)
         if remember:
             prefs.remember_view(
                 state.db, sub, resp, "collection", view, secure=s.public_url.startswith("https://")
