@@ -4,8 +4,8 @@ Signed-in people download the Claude skill as a ZIP here; its steps and the Chat
 to copy are the setup hub's skill section (``/install?for=skill``, setup_hub.py), where ``/skill``
 leads. Both live in the assistant plugin, ``plugin/mtg-gateway`` in the repository
 (``skills/mtg-gateway/SKILL.md`` and ``chatgpt-instructions.md``), which the image copies under
-``/usr/share/mtg-gateway/plugin``; ``MTG_PLUGIN_DIR`` overrides the location, as it does for the
-plugin routes. The ZIP is built in memory on first request (plugin_page's ZIP builder) and cached.
+``/usr/share/mtg-gateway/plugin``, as for the plugin routes. The ZIP is built in memory on first
+request (plugin_page's ZIP builder) and cached.
 """
 
 from __future__ import annotations

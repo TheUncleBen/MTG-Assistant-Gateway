@@ -17,7 +17,7 @@ form we could verify: on 2026-10-04 a live run at 100 ms spacing drew 429s with
 ``Retry-After: 60`` after roughly 25 single-card lookups. So the client has two
 pacers, shared gateway-wide: ``min_interval`` (default 100 ms) for the batched
 ``/cards/collection`` call and a slower ``lookup_interval`` (default 500 ms,
-``MTG_SCRYFALL_LOOKUP_INTERVAL``) for ``named``, ``autocomplete`` and printing
+the scryfall_lookup_interval setting) for ``named``, ``autocomplete`` and printing
 lookups. After a 429 every call fails fast with ``rate_limited`` until the
 Retry-After window has passed; ``retry_in()`` tells callers how long that is.
 Responses are cached in memory for a day so a scan session of 100 cards costs
@@ -268,7 +268,7 @@ class ScryfallClient:
         self.headers = {"User-Agent": user_agent, "Accept": "application/json"}
         self.min_interval = min_interval
         # Single-card lookups are paced more slowly than the batch endpoint (the gateway passes
-        # MTG_SCRYFALL_LOOKUP_INTERVAL, default 0.5 s); None means "same as min_interval".
+        # scryfall_lookup_interval, default 0.5 s); None means "same as min_interval".
         slow = min_interval if lookup_interval is None else lookup_interval
         self.lookup_interval = max(min_interval, slow)
         self._lock = asyncio.Lock()

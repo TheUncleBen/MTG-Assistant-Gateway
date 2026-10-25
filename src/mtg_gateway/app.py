@@ -480,7 +480,7 @@ _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
 
 # What an app shows about the connector itself (MCP ``serverInfo``: description, website, icons).
 # Only signed-in clients see it (``initialize`` needs a token), so naming the project here doesn't
-# undo the anonymity of the public pages under an owner's own MTG_SERVER_NAME. The icons are this
+# undo the anonymity of the public pages under an owner's own gateway name. The icons are this
 # gateway's own files on its own origin, as the MCP spec asks clients to require. The description is
 # SERVER_DESCRIPTION (plugin_page.py), which the install page also offers to copy into ChatGPT.
 ICON_SIZES = (512, 192, 128, 64)

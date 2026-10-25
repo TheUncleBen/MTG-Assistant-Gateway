@@ -161,7 +161,7 @@ class _Live:
 def test_the_backup_texts_follow_the_backup_settings() -> None:
     """The save bar box, the approve step and Delete deck say what this gateway does: the box
     ticked or unticked by default, and no backup copy at all with backups off."""
-    folder = "MTG Gateway backups"
+    folder = "MTG Gateway Backups"
     copy_step = (
         f"saves a snapshot and puts a backup copy of the deck in a “{folder}” folder on your "
         "Archidekt account"

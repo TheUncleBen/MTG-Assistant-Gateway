@@ -1168,8 +1168,8 @@ class ReportService:
                 section = {"state": "failed", "error": "Forge gave an unexpected answer."}
         if section.get("error") == SOLO_TOO_OLD:
             logger.warning(
-                "Forge solo test skipped: the Forge image is older than it needs; update "
-                "FORGE_TAG to the version the stack file names"
+                "Forge solo test skipped: the Forge image is older than it needs; redeploy "
+                "with this version's stack file"
             )
         # only over the mark read above: a report deleted, or a mark given up, while it started
         # keeps that, and the new job is stopped

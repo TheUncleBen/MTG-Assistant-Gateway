@@ -23,7 +23,7 @@ REPO_PLUGIN = REPO / "plugin"
 
 @pytest.fixture
 async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
 
@@ -108,7 +108,7 @@ async def test_owner_named_gateway_serves_no_project_name_or_link(
 ) -> None:
     """With MTG_SERVER_NAME set, nothing a stranger can fetch names this project or links to
     its repository: the plugin, its connector and skills take the owner's name."""
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path, server_name="Deck Helper"), idp)) as h:
         mp = (await h.http.get("/plugin/marketplace.json")).json()
         (entry,) = mp["plugins"]
@@ -240,7 +240,7 @@ async def test_chatgpt_steps_offer_the_name_description_url_and_icon_to_copy(
 ) -> None:
     """The ChatGPT steps hand over what its form asks for, the name taken from
     MTG_SERVER_NAME, and the icon downloads without signing in (on a phone too)."""
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path, server_name="Deck Helper"), idp)) as h:
         icon = await h.http.get(plugin_page.CONNECTOR_ICON_PATH)  # no session cookie
         assert icon.status_code == 200 and icon.headers["content-type"] == "image/png"
@@ -276,7 +276,7 @@ async def test_chatgpt_steps_offer_the_name_description_url_and_icon_to_copy(
 async def test_missing_plugin_folder_gives_503(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (tmp_path / "nowhere",))
     assert plugin_page.plugin_dir() is None
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         assert (await h.http.get("/plugin/marketplace.json")).status_code == 503

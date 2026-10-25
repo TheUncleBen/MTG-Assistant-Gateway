@@ -35,7 +35,7 @@ def server(tmp_path: Path):
         {"id": 502, "name": "Precons", "private": True, "parent": 501},
         {"id": 503, "name": LONG, "private": False, "parent": 501},
         {"id": 504, "name": "Archive", "private": False},
-        {"id": 505, "name": "MTG Gateway backups", "private": True},
+        {"id": 505, "name": "MTG Gateway Backups", "private": True},
     ]
     for did, name, folder in (
         (61, "Atraxa precon", 502),
@@ -103,7 +103,7 @@ def test_folders_open_the_breadcrumb_goes_back_and_the_filter_searches_everywher
         )
         assert rows["Atraxa precon"].startswith("Commander › Precons"), rows
         assert rows["Old aggro list"].startswith("Archive"), rows
-        assert "MTG Gateway backups" not in page.content()
+        assert "MTG Gateway Backups" not in page.content()
         assert errors == [], errors
         browser.close()
 

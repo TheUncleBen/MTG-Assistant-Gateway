@@ -339,7 +339,6 @@ def test_config_reads_the_token_file_and_a_bad_one_does_not_stop_the_gateway(
 ) -> None:
     _write_secrets(tmp_path, monkeypatch)
     monkeypatch.delenv("MTG_AUTHENTIK_API_TOKEN_FILE", raising=False)
-    monkeypatch.delenv("MTG_AUTHENTIK_API_URL", raising=False)
     s = load_settings()
     assert s.authentik_api_token is None and s.authentik_api_token_problem is None
     assert s.authentik_api_url == "https://auth.example.test"
@@ -355,13 +354,9 @@ def test_config_reads_the_token_file_and_a_bad_one_does_not_stop_the_gateway(
     monkeypatch.setenv("MTG_AUTHENTIK_API_TOKEN_FILE", str(tmp_path / "tok"))
     s = load_settings()
     assert s.authentik_api_token == TOKEN and TOKEN not in repr(s)
-    monkeypatch.setenv("MTG_AUTHENTIK_API_URL", "http://auth.internal")
-    from mtg_gateway.config import ConfigError
-
-    with pytest.raises(ConfigError, match="https"):
-        load_settings()
-    monkeypatch.setenv("MTG_AUTHENTIK_API_URL", "https://auth.internal/")
-    assert load_settings().authentik_api_url == "https://auth.internal"
+    # The address is always the issuer's own: an old MTG_AUTHENTIK_API_URL is not read.
+    monkeypatch.setenv("MTG_AUTHENTIK_API_URL", "https://elsewhere.test")
+    assert load_settings().authentik_api_url == "https://auth.example.test"
 
 
 async def test_the_token_never_reaches_the_logs(db: Database, caplog: pytest.LogCaptureFixture) -> None:
@@ -442,7 +437,7 @@ async def test_every_successful_round_logs_one_line_and_the_status_follows_it(
 
 def test_status_when_off_gives_the_reason() -> None:
     off = AuthentikSweep(_settings(token=None), None, None).status()
-    assert off["state"] == "off" and "MTG_AUTHENTIK_API_TOKEN_FILE" in off["reason"]
+    assert off["state"] == "off" and "mtg_authentik_api_token secret" in off["reason"]
     assert off["cause"] == "no-token"
     problem = _settings(token=None, authentik_api_token_problem="secret file is empty")
     bad = AuthentikSweep(problem, None, None)
@@ -463,7 +458,7 @@ def test_status_when_off_gives_the_reason() -> None:
 
 # Every reason a round deletes nothing has its own next step for the admin overview.
 NEXT_STEP_CASES = {
-    "Authentik could not be reached (ConnectError)": "can reach Authentik's address",
+    "Authentik could not be reached (ConnectError)": "can reach Authentik at the issuer's address",
     "Authentik answered HTTP 403": "Make a new token and Docker secret",
     "Authentik answered HTTP 401": "Make a new token and Docker secret",
     "Authentik answered HTTP 502": "It tries again by itself",
@@ -472,7 +467,7 @@ NEXT_STEP_CASES = {
     "nobody the gateway knows is among the members Authentik lists: check ...": "Subject mode",
     "it would delete 9 of 10 stored Archidekt sessions at once; check ...": "press Disable",
     "unexpected error": "gateway's log",
-    "Authentik's answer was split into pages": "MTG_AUTHENTIK_API_URL",
+    "Authentik's answer was split into pages": "MTG_OIDC_ISSUER",
 }
 
 

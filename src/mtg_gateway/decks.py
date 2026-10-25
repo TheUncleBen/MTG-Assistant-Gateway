@@ -248,7 +248,7 @@ DECK_LIST_PARTIAL = 60.0
 DECK_LIST_COLD_WAIT = 1.5
 # A deck page shows the deck as read for its last view for this long (DeckService.page_deck):
 # long enough for a run of view switches and a Back, short enough that a change made on
-# archidekt.com shows on the next view soon after. MTG_ARCHIDEKT_CACHE_SECONDS=0 turns it off.
+# archidekt.com shows on the next view soon after. archidekt_cache_seconds 0 turns it off.
 PAGE_DECK_SECONDS = 20.0
 # While Archidekt cannot be asked (a 429 pause, the breaker, the member's Archidekt work still
 # running), My decks and Home show the member's deck list as last read, for up to this long, with a
@@ -3285,7 +3285,7 @@ class DeckService:
         tree can't be read now the rows keep ``folder`` None and the list's
         ``folder_names_unread`` is True."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
-        folder = self.settings.archidekt_backup_folder  # with backups on or off
+        folder = self.backup_folder  # with backups on or off
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call(
@@ -3301,7 +3301,7 @@ class DeckService:
         # Archidekt's owner listing can leave a folder's name out and give only its id
         unnamed = any(d.get("folder_id") is not None and not d.get("folder") for d in rows)
         info = None
-        if unnamed and (folder_names or self.settings.archidekt_backup_folder):
+        if unnamed:
             info = await self._folder_tree_now(sub, wait=wait)
         out = self._marked(sub, rows, self._backup_folder_ids(sub, info))
         if folder_names and unnamed:
@@ -3347,7 +3347,7 @@ class DeckService:
         tree = self.folder_trees.last(sub, DECK_LIST_LAST)  # never a read: Archidekt is busy
         backup_ids = (
             {f["id"] for f in self._flatten_folders(tree[1]).get("folders", []) if f.get("backup")}
-            if tree is not None and tree[1] is not None and self.settings.archidekt_backup_folder
+            if tree is not None and tree[1] is not None
             else set()
         )
         rows = self._marked(sub, held[1], backup_ids, last_read=held[0])
@@ -3378,8 +3378,6 @@ class DeckService:
         from ``info`` (``_folder_tree_now``), else from the tree as last read (the backup folder's
         id doesn't change). Empty when neither is there (the name check and the snapshots' own
         records still apply)."""
-        if not self.settings.archidekt_backup_folder:
-            return set()
         if info is None:
             held = self.folder_trees.last(sub, DECK_LIST_LAST)
             info = self._flatten_folders(held[1]) if held is not None and held[1] is not None else None
@@ -3607,7 +3605,7 @@ class DeckService:
             return [dict(d) for d in value]
         self._sync_spend(sub)
         _token, row = self._token(sub)
-        folder = self.settings.archidekt_backup_folder  # with backups on or off
+        folder = self.backup_folder  # with backups on or off
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call_unslotted(
@@ -6069,7 +6067,7 @@ class DeckService:
             f"{snapshot_id}. To undo the change, ask the assistant to restore snapshot {snapshot_id}, or "
             f"copy this deck back by hand. Original deck: https://archidekt.com/decks/{deck.id}"
         )
-        folder_name = self.settings.archidekt_backup_folder
+        folder_name = self.backup_folder
         with backup_writes():  # the backup copy is not a change to the deck
             folder = await self._call(
                 sub,
@@ -7879,14 +7877,17 @@ class DeckService:
             tree = held[1]
         return None if tree is None else self._flatten_folders(tree)
 
+    @property
+    def backup_folder(self) -> str:
+        """The name of the members' backup folder on Archidekt, as the Settings page has it now."""
+        return str(self.live.get("archidekt_backup_folder"))
+
     def _is_backup_folder(self, name: str, depth: int) -> bool:
         """The gateway's backup folder: the folder the deck list treats as it (its exact name, as
         archidekt.list_decks compares), or the one ensure_folder would reuse (the same name in
         other capitals, directly under the top level). Also while backups are switched off: the
         folder never shows, and a deck in it is a backup copy either way."""
-        wanted = self.settings.archidekt_backup_folder
-        if not wanted:
-            return False
+        wanted = self.backup_folder
         return name == wanted or (depth == 1 and name.casefold() == wanted.casefold())
 
     def _flatten_folders(self, tree: dict[str, Any]) -> dict[str, Any]:

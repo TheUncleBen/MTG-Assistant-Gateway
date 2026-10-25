@@ -38,7 +38,7 @@ INFO = _info(
     (11, "Precons", 10, False),
     (12, "Brews", 10, True),
     (20, "Archive", ROOT, False),
-    (30, "MTG Gateway backups", ROOT, True),
+    (30, "MTG Gateway Backups", ROOT, True),
     (31, "Old copies", 30, False),
     backup={30, 31},
 )
@@ -196,7 +196,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
     ark.folders["alice"] = [
         {"id": 501, "name": "Commander", "private": False},
         {"id": 502, "name": "Precons", "private": True, "parent": 501},
-        {"id": 503, "name": "MTG Gateway backups", "private": True},
+        {"id": 503, "name": "MTG Gateway Backups", "private": True},
     ]
     ark.decks[46] = dict(ark.decks[42], id=46, name="Precon in a folder")
     ark.deck_folder[46] = 502
@@ -204,7 +204,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
     try:
         top = (await b.http.get("/decks", headers=NAV)).text
         assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
-        assert "MTG Gateway backups" not in top and "folder-field" not in top
+        assert "MTG Gateway Backups" not in top and "folder-field" not in top
         assert "data-new-folder" in top and "Precon in a folder" not in top
         inside = (await b.http.get("/decks?folder=502", headers=NAV)).text
         assert re.search(r"<li><a href='/decks\?folder=501'>Commander</a></li>", inside)
@@ -231,7 +231,7 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
     ark = stack.ark
     ark.folders["alice"] = [
         {"id": 501, "name": "Commander", "private": False},
-        {"id": 503, "name": "MTG Gateway backups", "private": True},
+        {"id": 503, "name": "MTG Gateway Backups", "private": True},
     ]
     ark.decks[46] = dict(ark.decks[42], id=46, name="Copy in the backup folder")
     ark.deck_folder[46] = 503
@@ -241,8 +241,8 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
     try:
         top = (await b.http.get("/decks", headers=NAV)).text
         assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
-        assert "MTG Gateway backups" not in top and "Copy in the backup folder" not in top
-        assert "MTG Gateway backups" not in (await b.http.get("/decks?folder=503", headers=NAV)).text
+        assert "MTG Gateway Backups" not in top and "Copy in the backup folder" not in top
+        assert "MTG Gateway Backups" not in (await b.http.get("/decks?folder=503", headers=NAV)).text
         tree = (await b.http.get("/decks/api/folders")).json()
         assert [f["name"] for f in tree["folders"] if f["depth"]] == ["Commander"]
         assert [d["id"] for d in await decks.backup_copies("user-1")] == ["46"]  # conftest's member
@@ -261,7 +261,7 @@ async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) ->
     ark = stack.ark
     ark.folders["alice"] = [
         {"id": 501, "name": "Commander", "private": False},
-        {"id": 503, "name": "MTG Gateway backups", "private": True},
+        {"id": 503, "name": "MTG Gateway Backups", "private": True},
         {"id": 504, "name": "Old copies", "private": True, "parent": 503},
     ]
     ark.decks[46] = dict(ark.decks[42], id=46, name="Copy in the backup folder")
@@ -282,14 +282,14 @@ async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) ->
             assert r.status_code == 400 and "No folder is called" in r.text, (path, data, r.text[:300])
         assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
         assert ark.deck_folder.get(42) is None
-        assert [f["name"] for f in ark.folders["alice"]] == ["Commander", "MTG Gateway backups", "Old copies"]
+        assert [f["name"] for f in ark.folders["alice"]] == ["Commander", "MTG Gateway Backups", "Old copies"]
     finally:
         await b.aclose()
     decks = stack.h.app.state.gateway.decks
     sub = "user-1"  # the signed-in member (conftest)
     with pytest.raises(DeckError) as exc:
         await decks.move_deck(sub, "42", 503)
-    assert str(exc.value) == "No folder is called 'MTG Gateway backups'. Your folders: Commander"
+    assert str(exc.value) == "No folder is called 'MTG Gateway Backups'. Your folders: Commander"
     assert (await decks.move_deck(sub, "46", 503))["changed"] is False
 
 
@@ -308,12 +308,12 @@ async def test_a_folder_cannot_be_named_like_the_backup_folder(stack: Stack) -> 
         csrf = await b.csrf()
         calls = len(ark.calls)
         for data in (
-            {"action": "rename", "folder_id": "501", "name": "MTG Gateway backups"},
+            {"action": "rename", "folder_id": "501", "name": "MTG Gateway Backups"},
             {"action": "rename", "folder_id": "501", "name": "mtg gateway BACKUPS"},
-            {"action": "rename", "folder_id": "502", "name": "MTG Gateway backups"},
-            {"action": "create", "name": "MTG Gateway backups", "confirmed": "1"},
+            {"action": "rename", "folder_id": "502", "name": "MTG Gateway Backups"},
+            {"action": "create", "name": "MTG Gateway Backups", "confirmed": "1"},
             {"action": "create", "name": "Mtg Gateway Backups", "confirmed": "1"},
-            {"action": "create", "name": "MTG Gateway backups", "parent_id": "501", "confirmed": "1"},
+            {"action": "create", "name": "MTG Gateway Backups", "parent_id": "501", "confirmed": "1"},
         ):
             r = await b.http.post("/folders", data={"csrf": csrf, **data})
             assert r.status_code == 400, (data, r.text[:300])

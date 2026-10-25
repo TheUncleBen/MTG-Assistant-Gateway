@@ -3,7 +3,7 @@
 A backup is a consistent copy of the gateway database made with SQLite's
 online backup API, written to ``MTG_BACKUP_DIR`` as
 ``mtg-gateway-<UTC timestamp>.sqlite``. Copies older than
-``MTG_BACKUP_KEEP_DAYS`` are deleted after each run. The database holds user
+the backup_keep_days setting are deleted after each run. The database holds user
 records, registered OAuth clients, hashed tokens and the audit log. It never
 holds the Fernet key, which lives in a Docker secret and must be kept
 separately: a restored database without that key cannot decrypt anything that

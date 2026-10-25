@@ -4,11 +4,12 @@ This is the simplest way to run the gateway: one machine with Docker, four
 containers (three with Forge turned off), a reverse proxy for HTTPS, and an OpenID Connect identity
 provider for sign-in. No Swarm, no Portainer needed. (Portainer's **Stacks**
 page on a standalone Docker environment can run this Compose file too, but
-then set `MTG_DATA_DIR`, `MTG_BACKUP_DIR` and `MTG_SECRETS_DIR` to absolute
-paths on the host: relative ones resolve inside Portainer's own folder.)
+then set `MTG_DATA_DIR` and `MTG_BACKUP_DIR` to absolute paths on the host:
+relative ones resolve inside Portainer's own folder.)
 
 Running a Swarm? Use [DEPLOY.md](DEPLOY.md) instead. Both run the same
-images with the same settings; only the plumbing differs.
+images with the same settings; only the plumbing differs. Everything not in
+`.env` is on the gateway's Settings page (`/admin/settings`).
 
 How the pieces fit is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -31,17 +32,19 @@ Everything below runs from a copy of this repository's
 the repository on the server:
 
 ```bash
-mkdir -p ~/mtg-gateway && cd ~/mtg-gateway
-base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
-curl -fsSLO "$base/docker-compose.yml"
-curl -fsSL -o .env "$base/.env.example"
-curl -fsSLO "$base/make-secrets.sh" && chmod +x make-secrets.sh
-# Only if you'll use the bundled Caddy for HTTPS (step 5):
-proxy=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/proxy/caddy
-curl -fsSLO "$proxy/compose.caddy.yml" && curl -fsSLO "$proxy/Caddyfile"
+mkdir -p ~/mtg-gateway/compose && cd ~/mtg-gateway/compose
+base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy
+curl -fsSLO "$base/compose/docker-compose.yml"
+curl -fsSL -o .env "$base/compose/.env.example"
+curl -fsSLO "$base/compose/make-secrets.sh" && chmod +x make-secrets.sh
+# Only if you'll use the bundled Caddy for HTTPS (step 5). It must sit in ../proxy/caddy/:
+mkdir -p ../proxy/caddy
+curl -fsSL -o ../proxy/caddy/compose.caddy.yml "$base/proxy/caddy/compose.caddy.yml"
+curl -fsSL -o ../proxy/caddy/Caddyfile "$base/proxy/caddy/Caddyfile"
 ```
 
-(Or clone the repository and work in `deploy/compose/`.)
+(Or clone the repository and work in `deploy/compose/`. Either way the
+commands below run from that folder.)
 
 ## 1. Identity provider
 
@@ -96,7 +99,7 @@ Edit `.env`. The lines marked **REQUIRED**:
 | `MTG_OIDC_ISSUER` | The issuer URL from step 1 |
 | `MTG_OIDC_CLIENT_ID` | The client ID from step 1 |
 | `MTG_REQUIRED_GROUP` | The group from step 1, exactly as your provider sends it. Required unless you set `MTG_ALLOW_ANY_IDP_USER=true` (see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
-| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, written `X.Y.Z` (the versions are in [VERSIONS.md](VERSIONS.md)) |
+| `MTG_ADMIN_GROUP` | A group whose members also get the admin pages, the Settings page among them. Empty means no admin pages |
 
 Worth a look:
 
@@ -105,24 +108,24 @@ Worth a look:
 | `PUID`, `PGID` | `1000` | Who owns the data folders and secret files. `id -u` and `id -g` show yours |
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
-| `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
-| `MTG_APPROVAL_MODE_DEFAULT` | `manual` | Same as the code default: a person who has not chosen an approval mode has every change wait for their own press, on the card in the chat or the Apply button on the review page. Each person picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
-| `MTG_APPROVAL_MODE_MAX` | `auto` | No cap on what people may choose; `semi` or `manual` caps it. `MTG_AUTO_APPLY_MAX_ROWS` (`5`) is the row limit of a low-risk edit |
-| `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal (only its one-time code can apply) and the other cards in the chat: the waiting changes and the two pickers (printings, recognised cards). `false` removes them all, leaving the review page |
-| `MTG_UPDATE_CHECK` | `true` | Admins see a notice when a newer release is out, with the update steps on the admin overview. The gateway never updates itself. `false` turns the check off |
+| `MTG_TAG` | `latest` | `latest` follows every new version; one version, written `X.Y.Z`, stays on it (the versions are in [VERSIONS.md](VERSIONS.md)) |
+| `FORGE_REPLICAS` | `1` | Forge simulations; `0` turns them off |
+| `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt |
 
 Every other variable is explained in `.env` and in the
-[environment reference](DEPLOY.md#environment-reference). `.env.example`
-lists every variable `docker-compose.yml` and the proxy overrides read, and
-says for each one whether it is required or optional and whether it is on the
-Settings page when `.env` doesn't set it.
+[environment reference](DEPLOY.md#environment-reference).
 
-Lines in `.env` that start `# MTG_` (the approval modes, `MTG_APPLY_IN_CHAT`,
-`MTG_UPDATE_CHECK` and the other tuning settings) are left to the gateway's
-admin Settings page (`/admin/settings`, since 0.7.29), starting from the
-default shown. Remove the `# ` to lock one in `.env` instead; the page then
-shows it greyed out with its value, and you change it in `.env`
-([OPERATIONS.md](OPERATIONS.md#the-settings-page)).
+The feature switches in `.env` (watchlists, backup copies on Archidekt, the
+Approve buttons in the chat, the scanner's artwork check, the new-version
+check, background deck checks) are left empty, which means on. An admin can
+then turn each one on or off on the Settings page (`/admin/settings`), along
+with the approval modes, the gateway's name and every other setting. `false`
+(`0` for `MTG_DECK_SYNC_MINUTES`) turns a feature off in `.env` instead; the
+page then shows it greyed out, and you change it in `.env`
+([OPERATIONS.md](OPERATIONS.md#the-settings-page)). Approvals start safe: a
+person who hasn't chosen an approval mode has every change wait for their own
+press, on the card in the chat or the Apply button on the review page. Each
+person picks their own mode on their Account page.
 
 Create the folders and give them to `PUID:PGID`:
 
@@ -151,8 +154,8 @@ docker build -t mtg-gateway:local .
 docker build -f docker/mystic-forge/Dockerfile -t mtg-mysticforge:local .
 ```
 
-and set `MTG_IMAGE=mtg-gateway`, `MTG_TAG=local`, `MF_IMAGE=mtg-mysticforge`,
-`MF_TAG=local` in `.env`.
+and put those names (`mtg-gateway:local`, `mtg-mysticforge:local`) in the
+`image:` lines of `docker-compose.yml`.
 
 ### Hardening already in the Compose file
 
@@ -186,15 +189,10 @@ docker compose up -d
 ```
 
 **No proxy yet:** add Caddy, which fetches a certificate by itself. Put your
-hostname in the Caddyfile first, then:
+hostname in `../proxy/caddy/Caddyfile` first, then:
 
 ```bash
-# From a clone, in deploy/compose/:
 docker compose -f docker-compose.yml -f ../proxy/caddy/compose.caddy.yml up -d
-
-# With the downloaded files, all in one folder:
-echo 'CADDYFILE=./Caddyfile' >> .env
-docker compose -f docker-compose.yml -f compose.caddy.yml up -d
 ```
 
 **Traefik already running:** see
@@ -241,9 +239,9 @@ copy of it in `backups/before-upgrade/` first, and going back to an older versio
 
 ## Backups
 
-- The gateway copies its database into `backups/` every night at
-  `MTG_BACKUP_HOUR_UTC` (UTC) and keeps `MTG_BACKUP_KEEP_DAYS` days. Copy
-  that folder off the machine with whatever you use for the rest.
+- The gateway copies its database into `backups/` every night and keeps 14
+  days of them by default (the hour and the days are on the Settings page). Copy that
+  folder off the machine with whatever you use for the rest.
 - For a copy right now (use your `PUID:PGID`):
   `docker compose exec --user 1000:1000 gateway mtg-gateway backup`.
 - For a second copy of every backup on another disk or a network mount, set
@@ -255,7 +253,7 @@ copy of it in `backups/before-upgrade/` first, and going back to an older versio
   Archidekt.
 - Before a new version upgrades the database, the gateway saves a full copy of it (Archidekt
   sessions included, still encrypted with the Fernet key) in `backups/before-upgrade/`, and keeps
-  the newest 3, and deletes any older than `MTG_BACKUP_KEEP_DAYS`. It is what going back to an
+  the newest 3, and deletes any older than the Settings page's **Days of nightly backups kept**. It is what going back to an
   older version uses
   ([UPGRADING.md](UPGRADING.md#going-back-to-an-older-version)).
 - Keep the Fernet key (`secrets/mtg_fernet_key.txt`) somewhere safe as well.

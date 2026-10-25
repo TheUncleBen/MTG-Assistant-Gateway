@@ -19,7 +19,7 @@ REPO_SKILL = REPO_PLUGIN / "mtg-gateway"
 
 @pytest.fixture
 async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
 
@@ -90,7 +90,7 @@ def test_zip_is_reproducible_and_skips_links_and_hidden_files(tmp_path: Path) ->
 async def test_missing_skill_files_give_a_clear_503(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (tmp_path / "nowhere",))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         b = Browser(h)
         try:

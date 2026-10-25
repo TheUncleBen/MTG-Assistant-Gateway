@@ -3,7 +3,7 @@
 Each gateway can hand out the MTG Assistant Gateway Android app itself, so people get it from the
 deployment they use and never need an app store. The image ships the APK that the
 release build produced under ``/usr/share/mtg-gateway/app`` (``docker/app-dist`` at
-build time); ``MTG_APP_DIR`` overrides the location. Next to the APK the build writes
+build time). Next to the APK the build writes
 ``mtg-assistant-gateway.json`` with the version, size, the file's SHA-256 and the SHA-256 of the
 signing certificate, which the page shows. Both come from the same place as the APK,
 so they prove nothing on their own: the file checksum only shows the download is
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import html
 import json
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,13 +45,8 @@ LATEST_PATH = "/app/latest.json"
 
 def app_dir() -> Path | None:
     """The folder holding ``mtg-assistant-gateway.apk``, or None when this gateway ships no app."""
-    override = os.environ.get("MTG_APP_DIR", "").strip()
-    candidates = [Path(override)] if override else [IMAGE_APP_DIR]
-    for d in candidates:
-        apk = d / APK_NAME
-        if apk.is_file() and not apk.is_symlink():
-            return d
-    return None
+    apk = IMAGE_APP_DIR / APK_NAME
+    return IMAGE_APP_DIR if apk.is_file() and not apk.is_symlink() else None
 
 
 def app_meta(base: Path) -> dict[str, Any]:

@@ -216,7 +216,7 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
                 "(file is empty); it is optional (docs/IDP-AUTHENTIK.md)",
             },
             "Off: the Authentik API token can't be read (file is empty). Check the "
-            "mtg_authentik_api_token Docker secret and MTG_AUTHENTIK_API_TOKEN_FILE, then redeploy "
+            "mtg_authentik_api_token Docker secret, then redeploy "
             "(docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
         ),
         (
@@ -232,9 +232,7 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             "MTG_AUTHENTIK_API_TOKEN_FILE: [Errno 2] No such file or directory: "
             "'/run/secrets/mtg_authentik_api_token'). The likely cause: the mtg_authentik_api_token "
             "secret isn't attached to the gateway, as with a stack file from before 0.7.37. Use the "
-            "current stack file, check that MTG_AUTHENTIK_API_TOKEN_FILE is "
-            "/run/secrets/mtg_authentik_api_token or not set, then redeploy (docs/IDP-AUTHENTIK.md "
-            "section 12, steps 6 and 7).",
+            "current stack file, then redeploy (docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
         ),
         (
             {"state": "off", "cause": "no-group", "reason": "x"},
@@ -260,8 +258,8 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
                 "error": "Authentik could not be reached (ConnectError)",
             },
             f"Not working. The last check {_AT} failed and deleted nothing: Authentik could not be "
-            "reached (ConnectError). To fix: Check that the gateway can reach Authentik's address "
-            "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
+            "reached (ConnectError). To fix: Check that the gateway can reach Authentik at the "
+            "issuer's address (MTG_OIDC_ISSUER). It tries again by itself.",
         ),
         ({"state": "not started"}, "Not started yet. Reload this page to see its first result."),
     ],
@@ -584,7 +582,7 @@ def test_admin_group_and_assetlinks_settings(tmp_path: Path, monkeypatch: pytest
     _env(tmp_path, monkeypatch)
     s = load_settings()
     assert s.admin_group is None and s.android_assetlinks is None
-    assert s.cimd_enabled is True and s.writes_enabled is False and s.archidekt_backups is True
+    assert s.cimd_enabled is True and s.writes_enabled is True and s.archidekt_backups is True
     monkeypatch.setenv("MTG_ADMIN_GROUP", "mtg-admins")
     monkeypatch.setenv(
         "MTG_ANDROID_ASSETLINKS", '[{"relation": ["delegate_permission/common.handle_all_urls"]}]'

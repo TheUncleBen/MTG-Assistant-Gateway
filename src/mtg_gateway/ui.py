@@ -159,7 +159,10 @@ def app_name(name: str | None) -> str:
 # review 2026-10-22): its metadata document's own https address (a URL client id, which the
 # gateway fetched from that host and whose document names that same address), or, for a
 # registered app, sign-in addresses that all send the member back to that company's hosts.
-BRAND_HOSTS = {"claude": ("claude.ai", "anthropic.com"), "openai": ("chatgpt.com", "openai.com")}
+BRAND_HOSTS = {
+    "claude": ("claude.ai", "claude.com", "anthropic.com"),
+    "openai": ("chatgpt.com", "openai.com"),
+}
 CLAUDE_LOGO = "/static/logos/claude.svg"
 OPENAI_LOGO_LIGHT = "/static/logos/openai-black.svg"  # black on the light theme
 OPENAI_LOGO_DARK = "/static/logos/openai-white.svg"  # white on the dark theme

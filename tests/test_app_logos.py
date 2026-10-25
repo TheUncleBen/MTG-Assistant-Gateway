@@ -91,6 +91,18 @@ def test_each_known_app_gets_its_own_mark_and_every_other_app_the_neutral_icon()
         ("https://platform.openai.com/c.json", None, "openai"),
         ("reg-1", {"redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"]}, "openai"),
         ("reg-2", {"redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]}, "claude"),
+        # Claude's own registration lists both of its sign-in addresses, claude.ai and claude.com
+        (
+            "reg-2b",
+            {
+                "redirect_uris": [
+                    "https://claude.ai/api/mcp/auth_callback",
+                    "https://claude.com/api/mcp/auth_callback",
+                ]
+            },
+            "claude",
+        ),
+        ("https://claude.com/oauth/mcp-oauth-client-metadata", None, "claude"),
         # named like the app but sent back somewhere else, or partly: never the mark
         ("reg-3", {"client_name": "Claude", "redirect_uris": ["https://evil.example/cb"]}, None),
         (

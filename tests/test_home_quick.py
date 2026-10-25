@@ -112,7 +112,7 @@ def test_quick_access_in_the_side_bar_order(server: Server) -> None:
 
 
 def test_no_watchlist_widget_with_watchlists_off(tmp_path: Path) -> None:
-    s = Server(tmp_path)
+    s = Server(tmp_path, watchlists_enabled=False)
     s.start()
     try:
         sid = s.sign_in()

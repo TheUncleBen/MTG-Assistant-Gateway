@@ -393,12 +393,11 @@ async def test_a_deletion_never_says_its_backup_copy_is_there_once_it_is_gone(st
 async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(stack: Stack) -> None:
     """The assistant's new-folder proposal with the backup folder's name is
     refused when it is made, so the assistant can pick another name at once; the apply checks again."""
-    import dataclasses
 
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "semi")
-    for name in ("MTG Gateway backups", "mtg gateway backups"):
+    for name in ("MTG Gateway Backups", "mtg gateway backups"):
         p = structured(await call(h, token, "propose_create_folder", {"name": name}))
         assert p["ok"] is False and p["message"] == (
             f"'{name}' is the name of the gateway's backup folder. Pick another name."
@@ -413,8 +412,7 @@ async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(st
     # at apply: a name that became the backup folder's after the proposal was made is refused there
     p = structured(await call(h, token, "propose_create_folder", {"name": "Archive"}))
     assert p["ok"] is True, p
-    decks = h.app.state.gateway.decks
-    decks.settings = dataclasses.replace(decks.settings, archidekt_backup_folder="Archive")
+    h.app.state.gateway.decks.live.set("archidekt_backup_folder", "Archive", by=None)
     out = await _browser_apply(h, p["proposal_id"])
     assert out.get("state") != "applied", out
     assert not any(f["name"] == "Archive" for f in ark.folders["alice"])

@@ -14,7 +14,7 @@ import httpx
 import pytest
 from PIL import Image, ImageDraw
 
-from mtg_gateway.config import ConfigError, load_settings
+from mtg_gateway.config import load_settings
 from mtg_gateway.db import Database
 from mtg_gateway.scan import art
 from mtg_gateway.scan.art import MAX_PENDING_BUILDS
@@ -316,16 +316,12 @@ def test_art_settings_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert (s.scan_art_enabled, s.scan_art_max_distance, s.scan_art_min_margin) == (True, 380, 40)
     assert (s.scan_art_max_printings, s.scan_art_image_interval) == (250, 0.1)
     assert (s.scan_art_max_galleries, s.scan_art_gallery_idle_days) == (500, 180)
+    # only the on/off switch is an env variable; the tuning is on the Settings page
     monkeypatch.setenv("MTG_SCAN_ART_ENABLED", "false")
-    monkeypatch.setenv("MTG_SCAN_ART_MAX_GALLERIES", "50")
     monkeypatch.setenv("MTG_SCAN_ART_MIN_MARGIN", "60")
-    monkeypatch.setenv("MTG_SCAN_ART_MAX_PRINTINGS", "2000")
     s = load_settings()
-    assert (s.scan_art_enabled, s.scan_art_min_margin, s.scan_art_max_printings) == (False, 60, 2000)
-    assert s.scan_art_max_galleries == 50
-    monkeypatch.setenv("MTG_SCAN_ART_MAX_PRINTINGS", "5000")
-    with pytest.raises(ConfigError, match="MTG_SCAN_ART_MAX_PRINTINGS"):
-        load_settings()
+    assert (s.scan_art_enabled, s.scan_art_min_margin) == (False, 40)
+    assert s.env_set == {"scan_art_enabled"}
 
 
 # -- caps and hardening from the review -------------------------------------------------

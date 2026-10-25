@@ -109,6 +109,13 @@ def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server
         a, b = _two_menus(page)
         _tap(page, a)
         assert page.evaluate(STATE) == {"menu": True, "open": 1}
+        # the account menu ends above the tab bar, so B's button is still there to tap
+        assert (
+            page.evaluate(
+                "() => document.querySelector('details.dd[open] .menu').getBoundingClientRect().bottom"
+            )
+            <= b.bounding_box()["y"]
+        )
         _tap(page, b)
         page.wait_for_timeout(200)  # A's back() lands and B takes the entry again
         assert page.evaluate(STATE) == {"menu": True, "open": 1}, page.evaluate(OPEN)

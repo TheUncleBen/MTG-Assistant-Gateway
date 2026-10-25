@@ -52,16 +52,20 @@ anything that isn't the default:
 | --- | --- | --- |
 | Public hostname of the gateway | none | `MTG_PUBLIC_URL`, NPM host, Authentik redirect URI |
 | Identity provider and its hostname | Authentik | the issuer URL; other providers: `docs/IDP-OTHERS.md` |
-| Swarm node that will run the stack | none, ask | `MTG_NODE`, `MF_NODE`, host folders |
+| Swarm node that will run the stack, and the one for Forge | none, ask | `MTG_NODE`, `FORGE_NODE` (can be the same; needed even with Forge off), host folders |
 | How the operator reaches a Swarm manager from this machine | `ssh <manager>` | whether you can run commands or must hand them over |
 | `PUID:PGID` the operator uses in other stacks | `1000:1000` | folder ownership |
 | Overlay network name | `mtg-gateway` | shared with the proxy |
 | Allow Archidekt writes now? | `true` | `MTG_WRITES_ENABLED`, as in the example files; `false` stops all writes (proposals can still be made and reviewed). Recommend making the first edit on a deck the operator doesn't care about |
-| Default approval mode for members who have not chosen one? | `manual` | `MTG_APPROVAL_MODE_DEFAULT`; recommend `manual` (every change waits for the member's own press). Each member picks their own mode (`manual`, `semi`: low-risk changes, such as a small edit or a private copy of a deck, apply without asking, `auto`: most changes apply without asking, but some still wait for the member) on their Account page |
-| Cap the approval mode members may choose? | `auto` (no cap) | `MTG_APPROVAL_MODE_MAX`; `semi` or `manual` to stop members choosing looser modes. `MTG_AUTO_APPLY_MAX_ROWS` (default 5) is the row limit of a low-risk edit |
-| Show the Approve/Reject card in the chat? | `true` | `MTG_APPLY_IN_CHAT`; recommend `true`: Claude and ChatGPT show each proposal as a card whose Approve button carries a one-time code the assistant never sees; the same switch gives the other cards in the chat (the waiting changes, and the two pickers: printings and recognised cards); `false` leaves only the review page |
+| Admin group | empty | `MTG_ADMIN_GROUP`; its members get the admin pages, the Settings page among them. Recommend setting it |
+| Forge simulations on? | `1` | `FORGE_REPLICAS`; `0` turns Forge off |
 
-Everything else uses the values in `deploy/stack.env.example`.
+Everything else uses the values in `deploy/stack.env.example`. Leave its
+feature lines empty: the features are on, and an admin manages them on the
+Settings page (`/admin/settings`), with the approval modes, the gateway's
+name and the other tuning. Approvals start at `manual` for members who have
+not chosen a mode (every change waits for the member's own press); each
+member picks their own mode on their Account page.
 
 ## Steps
 
@@ -131,8 +135,9 @@ and pipe the values; the Fernet key is also shown once so the operator
 can keep a copy (without it every linked Archidekt account has to be
 relinked and everyone signs in once more), which is exactly why it must not
 run from here. The third reads the Authentik client secret from the keyboard at a
-silent prompt. The fourth makes the token for the stack's own ntfy server;
-the stack does not deploy without it:
+silent prompt. The fourth makes the token for the stack's own ntfy server,
+and the fifth turns the optional Authentik clean-up off (`docs/IDP-AUTHENTIK.md`
+section 12 turns it on later); the stack does not deploy without either:
 
 ```bash
 python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())' | tee /dev/stderr | docker secret create mtg_fernet_key -
@@ -140,10 +145,11 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(48))' | docker secret cr
 # Paste the Authentik client secret at the (silent) prompt and press Enter:
 read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
 printf 'tk_%s' "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 29)" | docker secret create mtg_ntfy_token -
+printf off | docker secret create mtg_authentik_api_token -
 docker secret ls
 ```
 
-Check, which you may run: `docker secret ls` shows exactly those four
+Check, which you may run: `docker secret ls` shows exactly those five
 names and no values. If a manager has
 no `python3`, `openssl rand -base64 32 | tr '+/' '-_'` produces a valid
 Fernet key and `openssl rand -base64 48` a session secret.
@@ -165,10 +171,10 @@ or use the repository as a git source with that path). Environment
 variables: produce the full list for the operator from
 `deploy/stack.env.example` with the collected facts filled in. The ones
 that must change from the example are `MTG_PUBLIC_URL`, `MTG_OIDC_ISSUER`,
-`MTG_OIDC_CLIENT_ID`, `MTG_NODE`, `MF_NODE`, `MTG_DATA_DIR`, `MTG_BACKUP_DIR`
+`MTG_OIDC_CLIENT_ID`, `MTG_NODE`, `FORGE_NODE`, `MTG_DATA_DIR`, `MTG_BACKUP_DIR`
 (if the folders differ from step 2's example), `MTG_REQUIRED_GROUP`, `PUID`, `PGID`, `TIMEZONE`
-and, if chosen, `MTG_WRITES_ENABLED`, `MTG_APPROVAL_MODE_DEFAULT`, `MTG_APPROVAL_MODE_MAX`
-and `MTG_APPLY_IN_CHAT`.
+and, if chosen, `MTG_ADMIN_GROUP`, `MTG_NETWORK_NAME`, `FORGE_REPLICAS` and
+`MTG_WRITES_ENABLED`.
 
 Check (manager):
 

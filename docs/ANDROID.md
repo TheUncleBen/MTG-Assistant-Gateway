@@ -152,18 +152,17 @@ For operators whose image has no app, or who build their own:
    sudo chown -R 1000:1000 /srv/mtg-gateway/app
    ```
 
-3. Mount the folder into the gateway service read-only and point
-   `MTG_APP_DIR` at it. In the stack file, under the gateway's `volumes:`:
+3. Mount the folder into the gateway service read-only, over the image's own
+   copy. In the stack file (or `docker-compose.yml`), under the gateway's `volumes:`:
 
    ```yaml
          - type: bind
            source: /srv/mtg-gateway/app
-           target: /app-dist
+           target: /usr/share/mtg-gateway/app
            read_only: true
    ```
 
-   and set `MTG_APP_DIR=/app-dist` in your variables (Portainer's variables, `mtg.env`, or `.env`
-   with Docker Compose). Redeploy.
+   Redeploy.
 4. Open `/app` signed in: it now shows the version, checksums and the
    download button. If you built the app yourself, give your users your
    signing certificate SHA-256 some way other than the gateway (step 1 of
@@ -368,7 +367,7 @@ The app talks only to pages and endpoints the gateway already serves:
 | Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `POST /login/app` with the one-time code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
-| App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
+| App Links (optional) | `GET /.well-known/assetlinks.json` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
 | Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
 | Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
 | Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
@@ -394,8 +393,8 @@ Nothing here costs money or needs an account with anyone:
   produced and serves it at `/app/mtg-assistant-gateway.apk` behind the normal sign-in, with the
   setup page's Android section (`/install?for=android`; `/app` leads there) showing the version,
   the file checksum and the signing certificate fingerprint. Self-hosters therefore give out
-  the app from their own deployment. `MTG_APP_DIR` points the gateway at a
-  different folder if you build your own ([DEPLOY.md](DEPLOY.md#environment-reference)).
+  the app from their own deployment. If you build your own, mount it over the image's copy
+  ([Adding the app to a gateway](#adding-the-app-to-a-gateway)).
 - **From the GitHub release.** The release workflow attaches
   `mtg-assistant-gateway-release.apk`, `mtg-assistant-gateway-release.aab` and `mtg-assistant-gateway.json` to the version's
   GitHub release when the release signing secrets are set
@@ -621,9 +620,8 @@ The usual convention is a domain you control, reversed, plus a name. This app is
 sideloaded, not published in a store, so it doesn't need one:
 `local.mtgassistantgateway.app` is a neutral name that belongs to no domain or person.
 It lives in one file, `android/app/application-id.txt`; the Gradle build reads it from
-there. Change it and rebuild, and set `MTG_ANDROID_PACKAGE` on your gateway to the same
-ID so the browser sign-in hands back to your build
-([DEPLOY.md](DEPLOY.md#environment-reference)). The launcher shortcuts in
+there. Change it and rebuild. The package ID the gateway names for the browser sign-in
+hand-back is not an environment variable setting. The launcher shortcuts in
 `android/app/src/main/res/xml/shortcuts.xml` name the ID too (Android reads them without the
 app's resources, so it is written out there): change it there as well; the app's unit tests
 fail until both match. The Kotlin package name
@@ -644,10 +642,9 @@ matching statement on the gateway:
 1. Build with `APP_LINKS_HOST=mtg.example.com` (or set the
    `ANDROID_APP_LINKS_HOST` repository variable for the CI build). The
    resulting APK claims `https://mtg.example.com/...`.
-2. Put the signing certificate's SHA-256 fingerprint
-   ([section 8](#8-signing-your-release-key)) in `MTG_ANDROID_ASSETLINKS`
-   ([DEPLOY.md](DEPLOY.md#environment-reference)), which the gateway serves at
-   `/.well-known/assetlinks.json`:
+2. The statement the gateway serves at `/.well-known/assetlinks.json` names the
+   signing certificate's SHA-256 fingerprint ([section 8](#8-signing-your-release-key)).
+   It is not an environment variable setting. It looks like this:
 
    ```json
    [{"relation": ["delegate_permission/common.handle_all_urls"],
@@ -703,8 +700,7 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   each sign-in, keeps it on the phone, and sends only its SHA-256 with the
   browser's `/login`. After the sign-in service, the gateway sets no cookie in
   the browser; it keeps a one-time code for two minutes and shows a page whose
-  button opens the app through an `intent:` link naming the app's package ID
-  (`MTG_ANDROID_PACKAGE`, [DEPLOY.md](DEPLOY.md#environment-reference)), so
+  button opens the app through an `intent:` link naming the app's package ID, so
   Android hands it only to the installed app with that ID; that relies on the
   browser honouring the package in `intent:` links, which Chrome does (other
   browsers not checked), so the button waits for your tap and names the app.

@@ -86,7 +86,7 @@ In plain terms:
   description or change your watchlist: `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
   `amend_proposal`, `withdraw_proposal`, `combine_proposals`,
   `run_deck_report`, `play_more_games`, `save_scan_session` and
-  `remove_card_model`, and, when the operator has turned watchlists on,
+  `remove_card_model`, and, unless the operator has turned watchlists off,
   `watch_card`, `watch_deck` and `unwatch`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
@@ -317,9 +317,8 @@ buttons for the name, description and URL, and the icon to download.
 4. Open **Plugins** in the sidebar and press **+** (reported, OpenAI
    developer docs seen 2026-10-05; older pages call this Apps, then Create).
 5. Name: the gateway's name as the owner set it (`MTG Assistant Gateway`
-   unless they changed it; the install page shows the right one). An owner
-   can set `MTG_CHATGPT_NAME` to give the ChatGPT connector a different name
-   from `MTG_SERVER_NAME` ([DEPLOY.md](DEPLOY.md)).
+   unless they changed it; the install page shows the right one, cut at a
+   word to 80 characters, the most ChatGPT takes).
 6. Description: `Magic: The Gathering deck research, goldfish testing and
    safe Archidekt deck edits, from a self-hosted gateway.` This is the
    description the gateway also gives apps itself.
@@ -344,9 +343,8 @@ buttons for the name, description and URL, and the icon to download.
 **Download the ChatGPT plugin (ZIP)** from the ChatGPT section of the
 gateway's setup hub, or directly at
 `https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the file name
-follows the owner's `MTG_SERVER_NAME`, as the Claude plugin's does; the
-connector name inside it is their `MTG_CHATGPT_NAME` when set, otherwise
-their `MTG_SERVER_NAME`). It holds the
+and the connector name inside it follow the owner's gateway name, as the
+Claude plugin's do; the connector name is cut at a word to 80 characters). It holds the
 connector (this gateway's address) and the MTG skill in one file, in the
 Agent Plugins format that OpenAI's plugins use. It needs no sign-in to
 download: it holds nothing secret.

@@ -210,39 +210,18 @@ def test_trusted_proxies_default_and_override(tmp_path: Path, monkeypatch: pytes
             load_settings()
 
 
-def test_load_settings_scryfall_lookup_interval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_settings_page_values_are_not_read_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Tuning values live on the Settings page only: a variable left from an old stack changes
+    nothing and locks nothing."""
     _write_secrets(tmp_path, monkeypatch)
-    assert load_settings().scryfall_lookup_interval == 0.5
     monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "1.25")
-    assert load_settings().scryfall_lookup_interval == 1.25
-    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "0")
-    with pytest.raises(ConfigError, match="MTG_SCRYFALL_LOOKUP_INTERVAL"):
-        load_settings()
-    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "fast")
-    with pytest.raises(ConfigError, match="MTG_SCRYFALL_LOOKUP_INTERVAL"):
-        load_settings()
-
-
-def test_load_settings_scan_thresholds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    _write_secrets(tmp_path, monkeypatch)
-    s = load_settings()
-    assert (s.scan_fuzzy_min_similarity, s.scan_ambiguity_margin) == (0.65, 0.05)
-    assert (s.scan_fuzzy_confident_similarity, s.scan_auto_add_confidence) == (0.8, 80.0)
-    assert (s.scan_glare_ratio, s.scan_min_ocr_confidence) == (0.08, 50.0)
-    monkeypatch.setenv("MTG_SCAN_FUZZY_MIN_SIMILARITY", "0.8")
-    monkeypatch.setenv("MTG_SCAN_AUTO_ADD_CONFIDENCE", "90")
-    monkeypatch.setenv("MTG_SCAN_GLARE_RATIO", "0.2")
     monkeypatch.setenv("MTG_SCAN_MIN_OCR_CONFIDENCE", "35")
+    monkeypatch.setenv("MTG_FORGE_GAMES", "9")
     s = load_settings()
-    assert (s.scan_fuzzy_min_similarity, s.scan_auto_add_confidence) == (0.8, 90.0)
-    assert (s.scan_glare_ratio, s.scan_min_ocr_confidence) == (0.2, 35.0)
-    monkeypatch.setenv("MTG_SCAN_MIN_OCR_CONFIDENCE", "120")
-    with pytest.raises(ConfigError, match="MTG_SCAN_MIN_OCR_CONFIDENCE"):
-        load_settings()
-    monkeypatch.delenv("MTG_SCAN_MIN_OCR_CONFIDENCE")
-    monkeypatch.setenv("MTG_SCAN_FUZZY_MIN_SIMILARITY", "0.1")
-    with pytest.raises(ConfigError, match="MTG_SCAN_FUZZY_MIN_SIMILARITY"):
-        load_settings()
+    assert (s.scryfall_lookup_interval, s.scan_min_ocr_confidence, s.forge_games) == (0.5, 50.0, 4)
+    assert s.env_set == frozenset()
 
 
 def test_backup_is_owner_only_even_with_a_loose_umask(tmp_path: Path):
