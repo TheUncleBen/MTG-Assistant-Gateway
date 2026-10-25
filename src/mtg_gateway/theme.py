@@ -564,6 +564,13 @@ button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;
 button.danger,.btn-danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.danger:hover,.btn-danger:hover{background:var(--danger-fill);color:#fff;filter:brightness(1.1)}
 button.secondary,.btn-ghost{background:transparent;border-color:transparent}
+/* A Show all or Show more button is the disclosure capsule (.disc) too (Ben, 10-25); its chevron
+   turns once the list is open (aria-expanded). */
+button.disc{min-height:44px;border:4px solid transparent;background:var(--surface-2) padding-box;
+  color:var(--text);font-weight:600;font-size:.9rem;border-radius:22px}
+button.disc:hover{background:var(--surface-3) padding-box;color:var(--text)}
+button.disc[aria-expanded=true]::after{transform:translateY(2px) rotate(-135deg)}
+button.disc:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 button.secondary:hover,.btn-ghost:hover{background:var(--surface-2)}
 .btn-lg,button.btn-lg{height:48px;padding:0 1.4rem;font-size:1.1rem}
 button.mini{width:2.25rem;min-width:2.25rem;height:2.25rem;padding:0;font-size:1.1rem;line-height:1}

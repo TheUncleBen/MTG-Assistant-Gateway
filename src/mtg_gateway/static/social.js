@@ -441,7 +441,7 @@
     // voted on and replied to, not only the first).
     var showMore = function (pg) {
       var wrap = el("p", "more-comments");
-      var btn = el("button", "btn", "Show more comments");
+      var btn = el("button", "disc", "Show more comments");
       btn.type = "button";
       wrap.appendChild(btn);
       thread.appendChild(wrap);

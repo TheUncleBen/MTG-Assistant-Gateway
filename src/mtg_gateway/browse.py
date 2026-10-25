@@ -470,7 +470,7 @@ def precon_group_html(group: dict[str, Any], *, view: str, open: bool) -> str:
         + (
             ""
             if open
-            else f"<button type='button' class='btn btn-plain pre-all' data-n='{n}' hidden "
+            else f"<button type='button' class='disc pre-all' data-n='{n}' hidden "
             f"aria-expanded='false'>Show all {n}</button>"
         )
         + "</div>"

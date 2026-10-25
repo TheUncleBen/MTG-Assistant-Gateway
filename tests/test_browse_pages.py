@@ -50,7 +50,7 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
         assert "class='avatar" not in tiles and "class='tags'" not in tiles and "No deck tags" not in tiles
         assert "<span class='info plain'>" in tiles and "<time class='ui-when'" in tiles
         assert (
-            "class='btn btn-plain pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>"
+            "class='disc pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>"
             in page
         )
         assert "All 1 set shown." in page and "data-load-more" not in page
@@ -62,7 +62,7 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
         # the filter: the count says how many of all, every matching set is open
         r = await b.http.get("/precons?q=sample", headers=NAV)
         assert "id='pre-count' aria-live='polite'>1 of 1 decks</h2>" in r.text
-        assert "<section class='pre-grp open'" in r.text and "class='btn btn-plain pre-all'" not in r.text
+        assert "<section class='pre-grp open'" in r.text and "class='disc pre-all'" not in r.text
         r = await b.http.get("/precons?set=Sample+Set+(SMP)", headers=NAV)
         assert "1 of 1 decks" in r.text and "<option value='Sample Set (SMP)' selected>" in r.text
         r = await b.http.get("/precons?q=zzzz", headers=NAV)

@@ -134,6 +134,8 @@ Account page behind your picture, and a tidier deck page.
   sign-in shares, the Archidekt link details), the collection's CSV help, card search's More
   filters, the new deck and compare pages, a contest's entries, the History page's numbers, a
   proposal's technical details and diff, a watched card's price table and the admin update steps.
+  The Show all and Show more buttons (a precon set's decks, the goldfish game's steps, a deck's
+  comments and a proposal card's changes) are the same capsule.
 - **A commander** among the cards the quick solo test lists says "commander" instead of "drawn 0%":
   it starts in the command zone, so it is never drawn.
 - **Android install and update steps** say that on a Samsung Galaxy phone Auto Blocker must be off

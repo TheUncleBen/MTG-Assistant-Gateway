@@ -2418,7 +2418,7 @@ def goldfish_guide_html(*, hidden: bool = False) -> str:
         f"{' hidden' if hidden else ''}>"
         "<div class='gf-guide-head'><h2 id='gf-guide-h'>How to play</h2>"
         "<span class='gf-guide-btns'>"
-        "<button type='button' class='btn small gf-allsteps' aria-expanded='false' aria-controls='gf-steps' "
+        "<button type='button' class='disc gf-allsteps' aria-expanded='false' aria-controls='gf-steps' "
         f"data-all='{esc(GOLDFISH_GUIDE_ALL)}' data-current='{esc(GOLDFISH_GUIDE_CURRENT)}'>"
         f"{esc(GOLDFISH_GUIDE_ALL)}</button>"
         f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button>"
