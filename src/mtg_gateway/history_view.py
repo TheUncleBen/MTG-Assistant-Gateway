@@ -779,8 +779,7 @@ h2.hy-backups{font-size:1.2rem}
 .tmetric p{margin:.3rem 0 0;font-size:.88rem;overflow-wrap:anywhere}
 .tmetric .now b{font-size:1.2rem;font-variant-numeric:tabular-nums}
 .tmetric .now span,.tmetric .delta{color:var(--text-muted)}
-.tdata{margin-top:.75rem} .tdata > summary{cursor:pointer;color:var(--link);min-height:2rem;display:flex;
-  align-items:center}
+.tdata{margin-top:.75rem}
 .tdata .tbl{overflow-x:auto;max-width:100%;margin-top:.4rem}
 .tdata table{border-collapse:collapse;font-size:.86rem;font-variant-numeric:tabular-nums}
 .tdata th,.tdata td{padding:.3rem .5rem;border-bottom:1px solid var(--border-soft);text-align:right;

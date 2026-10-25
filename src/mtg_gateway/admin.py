@@ -1081,7 +1081,7 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     )
     tag = html.escape(found["version"]) if found else "&lt;new version&gt;"
     steps = (
-        f"<details id='how-to-update'><summary>{icon('chev')}How to update</summary>"
+        f"<details id='how-to-update'><summary class='fold-btn'>How to update</summary>"
         "<p>The gateway never updates itself. An update is a fresh install on top of your data "
         "(docs/UPGRADING.md has every step): take the newest stack file and the newest example "
         "variables file, copy your own values into the example, and deploy. Your data, backups and "

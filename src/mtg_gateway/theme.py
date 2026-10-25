@@ -355,7 +355,6 @@ h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
 details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
-details.identity > summary{cursor:pointer;color:var(--text-muted);font-size:.86rem;padding:.3rem 0}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700} .orange{color:var(--orange-text)}
 ul.plain{list-style:none;margin:0;padding:0}
 
@@ -673,15 +672,8 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .disclosure li{margin:.2rem 0;line-height:1.45;overflow-wrap:anywhere}
 .disclosure p{margin:0 0 .4rem;overflow-wrap:anywhere}
 details.disclosure{margin:.75rem 0 0;border-top:1px solid var(--border);padding-top:.6rem}
-details.disclosure > summary{cursor:pointer;font-weight:700;min-height:2rem;display:flex;align-items:center}
 /* the folded full detail inside the link-form disclosure (link_disclosure.form_html) */
 details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);padding-top:.4rem}
-details.disclosure-detail > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
-  align-items:center}
-details.disclosure-detail > summary::before{content:'\\25B8';margin-right:.5rem}
-details.disclosure-detail[open] > summary::before{content:'\\25BE'}
-details.disclosure > summary::before{content:'\\25B8';margin-right:.5rem}
-details.disclosure[open] > summary::before{content:'\\25BE'}
 .toast{position:fixed;right:2rem;bottom:2rem;z-index:20;width:350px;max-width:calc(100% - 2rem);
   border:1px solid var(--border);border-radius:var(--radius-sheet);background:var(--surface);padding:1rem;
   box-shadow:var(--shadow)}
@@ -769,7 +761,7 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
   .changes .qty{grid-column:2;text-align:right}
   .changes li.action .qty,.changes li.chg .qty{grid-column:1/-1;text-align:left}
 }
-details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--text-muted);font-size:.9rem}
+details.raw{margin:.5rem 0 0}
 .apply{margin-top:1rem;padding:1rem;border:2px solid var(--orange);border-radius:var(--radius-panel);
   background:var(--orange-tint)}
 .apply h2{margin:0 0 .4rem;font-size:1.25rem;font-weight:900} .apply p{margin:0 0 .25rem}
@@ -1562,15 +1554,32 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
 /* a fold-out under a row or a section (a report's details, a watched card's history) */
-details.rv-det > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
-  box-sizing:border-box;min-height:44px;margin:0;padding:0 14px;border:4px solid transparent;
-  border-radius:999px;background:var(--surface-2) padding-box;color:var(--text);font-weight:600;
-  font-size:.9rem;line-height:1.2} /* a 36px capsule in a 44px tap area */
-.rv-det > summary::-webkit-details-marker{display:none}
-.rv-det > summary::after{content:"";flex:none;width:6px;height:6px;border:solid currentColor;
-  border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);transition:transform .15s}
-.rv-det[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
-.rv-det > summary:hover{background:var(--surface-3) padding-box}
+/* A fold-out's summary as the shared disclosure capsule (see .disc): its words, then a chevron that
+   turns when open; a 36px capsule in a 44px tap area. Every Details or Show more fold uses it. */
+details.rv-det > summary,details > summary.fold-btn,details.disclosure > summary,
+details.disclosure-detail > summary,details.raw > summary,details.identity > summary,
+details.tdata > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+  box-sizing:border-box;max-width:100%;min-height:44px;margin:0;padding:6px 14px;
+  border:4px solid transparent;border-radius:22px;background:var(--surface-2) padding-box;
+  color:var(--text);font-weight:600;font-size:.9rem;line-height:1.2;text-align:left}
+details.rv-det > summary::-webkit-details-marker,details > summary.fold-btn::-webkit-details-marker,
+details.disclosure > summary::-webkit-details-marker,
+details.disclosure-detail > summary::-webkit-details-marker,
+details.raw > summary::-webkit-details-marker,details.identity > summary::-webkit-details-marker,
+details.tdata > summary::-webkit-details-marker{display:none}
+details.rv-det > summary::after,details > summary.fold-btn::after,details.disclosure > summary::after,
+details.disclosure-detail > summary::after,details.raw > summary::after,details.identity > summary::after,
+details.tdata > summary::after{content:"";flex:none;width:6px;height:6px;margin-left:auto;
+  border:solid currentColor;border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);
+  transition:transform .15s}
+details[open] > summary.fold-btn::after,details.rv-det[open] > summary::after,
+details.disclosure[open] > summary::after,details.disclosure-detail[open] > summary::after,
+details.raw[open] > summary::after,details.identity[open] > summary::after,
+details.tdata[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
+details.rv-det > summary:hover,details > summary.fold-btn:hover,details.disclosure > summary:hover,
+details.disclosure-detail > summary:hover,details.raw > summary:hover,details.identity > summary:hover,
+details.tdata > summary:hover{background:var(--surface-3) padding-box}
+details > summary.fold-btn svg.i{width:16px;height:16px;flex:none}
 
 /* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
    and each event as a short label then its name as plain text that wraps. Each page sets its own

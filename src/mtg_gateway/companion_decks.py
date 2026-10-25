@@ -191,7 +191,7 @@ def new_deck_box_html(
         f"<option value='csv'{' selected' if kind == 'csv' else ''}>Archidekt CSV export</option>"
         f"<option value='json'{' selected' if kind == 'json' else ''}>Gateway .json export</option>"
         "</select></span></div>"
-        f"<details class='nd-help'><summary>{icon('guide')} What can I paste?</summary>"
+        f"<details class='nd-help'><summary class='fold-btn'>{icon('guide')} What can I paste?</summary>"
         f"<p class='small'>{NEW_DECK_HELP}</p></details></div>"
         "</div></div></div>"
         "<aside class='nd-prev' aria-label='How it will look in My decks'>"
@@ -268,9 +268,6 @@ NEW_DECK_CSS = """
 .nd-as{display:flex;align-items:center;gap:.5rem}
 .nd-as label{margin:0}
 .nd-help{min-width:0}
-.nd-help summary{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;cursor:pointer;
-  color:var(--link);font-size:.92rem;font-weight:700}
-.nd-help summary svg.i{width:16px;height:16px}
 .nd-help p{margin:.2rem 0 0;max-width:30rem}
 /* the tile at the top of its column, level with the fields (0.7.43: it floated mid-column) */
 .nd-prev{display:flex;flex-direction:column;justify-content:flex-start;padding-left:1.1rem;

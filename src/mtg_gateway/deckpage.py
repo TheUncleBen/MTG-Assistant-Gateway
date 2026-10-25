@@ -631,7 +631,7 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
         "<div class='field'><label for='cmp-with'>Other deck</label>"
         "<input id='cmp-with' type='text' name='with' placeholder='Precon name, deck link or deck ID' "
         "autocomplete='off'></div>"
-        "<details class='fold'><summary>…or paste a decklist</summary>"
+        "<details class='fold'><summary class='fold-btn'>…or paste a decklist</summary>"
         "<textarea name='paste' rows='5' aria-label='Paste a decklist' "
         "placeholder='1 Sol Ring&#10;1 Arcane Signet'></textarea></details></form>"
     )
@@ -911,8 +911,6 @@ DECK_CSS_A = (
 @media (max-width:599.98px){ #export.mtgbox .body{display:flex;flex-direction:column}
   #export.mtgbox .body > .xpane:not([hidden]){flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
   #export.mtgbox .xpane textarea{flex:1 1 auto;min-height:8rem} }
-.mtgbox .body .fold summary{display:inline-flex;align-items:center;min-height:44px;cursor:pointer;
-  color:var(--link);font-weight:700}
 .mtgbox .body .fold textarea{min-height:7rem;margin-top:.5rem}
 .mtgbox .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .mtgbox .body .field input:not([type=file]),.mtgbox .body .field select{width:100%}
@@ -2185,7 +2183,7 @@ def compare_page_html(
         f"<input id='cmp-with' type='text' name='with' data-suggest='static' data-options='{options}' "
         f"value='{esc(other_ref)}' placeholder='Precon name, deck link or deck ID' autocomplete='off'></div>"
         f"<button type='submit' class='{compare_kind}'>{icon('swap')} Compare</button></div>"
-        f"<details class='fold'{' open' if paste else ''}><summary>{icon('chev')} …or paste a decklist"
+        f"<details class='fold'{' open' if paste else ''}><summary class='fold-btn'>…or paste a decklist"
         "</summary><textarea name='paste' rows='5' aria-label='Paste a decklist' "
         "placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
         f"{esc(paste)}</textarea></details></form>"
@@ -2307,9 +2305,6 @@ COMPARE_CSS = """
 .cmp-form .fld input{width:100%}
 .cmp-form .row button{margin:0;flex:none}
 .cmp-form .fold{margin-top:.5rem}
-.cmp-form .fold summary{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;cursor:pointer;
-  color:var(--link);font-weight:700}
-.cmp-form .fold summary svg.i{width:16px;height:16px}
 .cmp-form textarea{width:100%;min-height:6rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:.9rem}
 .cmp-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1rem;
@@ -3761,7 +3756,6 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 /* --danger-fill is for button backgrounds: as text on the dark panel it is 2.55:1 */
 .panel.danger h2{color:var(--danger-text)}
 .pastebox{margin:.75rem 0 0}
-.pastebox summary{cursor:pointer;font-weight:700;padding:.4rem 0}
 .pastebox textarea{width:100%;font-family:ui-monospace,monospace;margin:.5rem 0}
 .pastebox .actions{margin-top:.25rem}
 .erow .thumb{width:40px;height:56px;border-radius:3px;object-fit:cover;background:var(--surface-3);

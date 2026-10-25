@@ -1387,7 +1387,8 @@ def forge_results_html(f: dict[str, Any]) -> str:
             for g in listed
         )
         games_html = (
-            f"<details class='games'><summary>Each game ({len(listed)})</summary><div class='scroll'>"
+            f"<details class='games'><summary class='fold-btn'>Each game ({len(listed)})</summary>"
+            "<div class='scroll'>"
             "<table class='qty stack'><thead><tr><th scope='col' class='num'>Game</th>"
             "<th scope='col'>Winner</th>"
             "<th scope='col' class='num'>Turn</th><th scope='col' class='num'>Time</th>"
@@ -2212,7 +2213,7 @@ REPORT_CSS = """
 .report .forge-results .ended li:first-child{border-top:0}
 .report .forge-results .ended b{font-variant-numeric:tabular-nums}
 .report .forge-results details.games{margin-top:.75rem}
-.report .forge-results details.games > summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+
 /* phones: each row of a results table becomes a small block, every value with its column's name */
 @media (max-width:600px){
   .report .forge-results table.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;
