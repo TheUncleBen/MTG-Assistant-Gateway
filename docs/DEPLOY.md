@@ -526,7 +526,7 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from nine patches in
+Upstream code is unchanged apart from ten patches in
 `docker/mystic-forge/patches/`, which is where the `-mag6` in the image tag
 `1.3.2-mag6` comes from:
 
@@ -582,6 +582,12 @@ Upstream code is unchanged apart from nine patches in
 - `0010-goldfish-short-run-turn-labels.patch`: a run shorter than five turns
   said "made every land drop through T5" (and "by T6", "by T4" elsewhere);
   the text and the report tiles now name the last turn the run played.
+- `0011-rules-download-at-start-and-labelled-card-faces.patch`: the
+  research service starts downloading the current Comprehensive Rules when
+  it starts, not on the first rules question, so answers right after a
+  restart don't come from the older copy built into the image; and in card
+  search results a card's second face is headed "Other face of …" instead
+  of a bare `---`, which read like the start of another result.
 
 What to know about it:
 

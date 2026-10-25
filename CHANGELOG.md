@@ -10,7 +10,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 ## [0.7.45] - 2026-10-24
 
 An assistant now reads the same Forge seed the report page shows, Forge's load problems leave out
-Java's own warnings, and a solo test shorter than five turns no longer talks about turn 5.
+Java's own warnings, a solo test shorter than five turns no longer talks about turn 5, and the
+research service has the current rules from the moment it starts.
 
 ### Upgrade notes
 - Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
@@ -33,6 +34,11 @@ Java's own warnings, and a solo test shorter than five turns no longer talks abo
 - **Short solo tests.** A solo test played to turn 3 said "made every land drop through T5" and
   gave the commander's cast "by T4, T5, T6". The text and the research service's own report now
   name the last turn the run played.
+- **Rules right after a restart.** For a short while after the research service started, the rules
+  tools answered from the older copy of the Comprehensive Rules built into its image, so two answers
+  a minute apart could name different dates. It now starts fetching the current rules as soon as it starts.
+- **Two-face cards in card search.** A card's second face (for example Swords to Plowshares on
+  Emeritus of Truce) read like a separate search result; it is now headed "Other face of …".
 - **Which printing a card gets** when no set is given is now described as it works, in the
   assistant's tool description and [docs/SCANNING.md](docs/SCANNING.md): Scryfall's own default
   printing when it is out on paper, which is not always the newest one, else the newest that is.
