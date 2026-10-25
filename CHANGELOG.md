@@ -44,6 +44,11 @@ research service has the current rules from the moment it starts.
   printing when it is out on paper, which is not always the newest one, else the newest that is.
 - **A pasted list's name.** A test run or deck check of a pasted list named it "pasted list", which
   an assistant could show as the deck's name; it now reads "Unnamed deck", like any deck without a name.
+- **A Forge game with no result.** When Forge ended a game without printing its result, the
+  report said "Games played: 4 of 5" and nothing about the missing game. It now names the game,
+  says the results count only the games that came back, and keeps the end of Forge's log.
+- **Validation wording.** The deck check said "All 82 unique cards verified on Scryfall"; it now
+  says "found on Scryfall" in new answers, and on the pages of reports saved before.
 
 ## [0.7.44] - 2026-10-24
 
