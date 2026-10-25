@@ -400,7 +400,11 @@
     var pad = 8, w = m.offsetWidth, h = m.offsetHeight;
     if (anchor && anchor.right - w >= pad) x = anchor.right - w;
     m.style.left = Math.max(pad, Math.min(x, window.innerWidth - w - pad)) + "px";
-    m.style.top = Math.max(pad, Math.min(y, window.innerHeight - h - pad)) + "px";
+    // never over the sticky top bar: a menu taller than the room under it scrolls instead
+    var bar = document.querySelector("header.topbar"), barEnd = bar ? bar.getBoundingClientRect().bottom : 0;
+    var top = Math.max(pad, barEnd + pad);
+    if (top > window.innerHeight / 2) top = pad;  // a window shorter than twice the bar
+    m.style.top = Math.max(top, Math.min(y, window.innerHeight - h - pad)) + "px";
     m.style.maxHeight = (window.innerHeight - parseFloat(m.style.top) - pad) + "px";
     m.style.visibility = "";
     menu = m;

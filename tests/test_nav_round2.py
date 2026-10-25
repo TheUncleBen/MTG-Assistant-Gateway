@@ -286,3 +286,29 @@ def test_the_deck_pills_go_two_by_two_on_a_phone() -> None:
     from mtg_gateway.deckpage import DECK_CSS
 
     assert ".banner .social{display:grid;grid-template-columns:1fr 1fr}" in DECK_CSS
+
+
+def test_menu_icons_read_at_3_to_1_on_the_light_menu() -> None:
+    """The bright orange was 1.8:1 on the light menu's #dedede; --orange-text (#944b00) is 4:1."""
+    assert ".ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange-text);" in theme.CSS
+    assert ".mtgbox .tree svg{width:18px;height:18px;flex:none;color:var(--orange-text);" in theme.CSS
+
+
+def test_the_decks_heading_leaves_the_count_to_the_results_bar() -> None:
+    from mtg_gateway import folderview
+
+    src = Path(folderview.__file__).read_text(encoding="utf-8")
+    assert "f\"<h2 id='fv-decks'>{heading}</h2>{listing}</section>\"" in src
+    js = (Path(theme.__file__).parent / "static" / "decks.js").read_text(encoding="utf-8")
+    assert 'head.textContent = "Decks";' in js and 'head.textContent = "Packages";' in js
+
+
+def test_a_menu_never_opens_over_the_sticky_top_bar() -> None:
+    js = (Path(theme.__file__).parent / "static" / "cardmenu.js").read_text(encoding="utf-8")
+    assert "var top = Math.max(pad, barEnd + pad);" in js
+
+
+def test_a_deck_tiles_name_takes_two_lines_before_its_ellipsis() -> None:
+    from mtg_gateway.deckpage import DECK_CSS
+
+    assert "-webkit-line-clamp:2;line-clamp:2}" in DECK_CSS

@@ -221,10 +221,10 @@
     if (empty) empty.hidden = mode !== "packages" || shownPk > 0;
     if (mode === "packages") {
       if (total) total.textContent = plural(shownPk, "package");
-      if (head) { head.textContent = "Packages "; head.appendChild(el("span", "n", String(shownPk))); }
+      if (head) head.textContent = "Packages";  // the results bar carries the count
     } else if (mode === "decks") {
       if (total) total.textContent = plural(shownDk, "deck");
-      if (head) { head.textContent = "Decks "; head.appendChild(el("span", "n", String(shownDk))); }
+      if (head) head.textContent = "Decks";
     }
     list.dispatchEvent(new CustomEvent("decks:marked", { bubbles: true }));
   }
