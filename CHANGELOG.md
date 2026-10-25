@@ -115,6 +115,16 @@ to the Android app coming back to the app by itself, and faster pages and deck d
 - **A Forge game with no result.** When Forge ended a game without printing its result, the
   report said "Games played: 4 of 5" and nothing about the missing game. It now names the game,
   says the results count only the games that came back, and keeps the end of Forge's log.
+- **Cards the solo test lists.** Cards that only act on opponents or their creatures (votes,
+  returning every creature to its owner's hand, a creature dealing damage equal to its power to
+  another, Auras that shut a creature down, regeneration) are now listed under "left out on
+  purpose", not with the cards it played without their effect. A creature whose ability exiled a
+  creature and then did more (for example Displacer Kitten) counted as played with its effect
+  while that ability never played; it is now listed as played without its effect.
+- **More card text in the solo test.** It now reads landcycling and the other options it never
+  uses (miracle, convoke, undaunted and similar: the full cost is paid), a graveyard shuffled back
+  into the library, a land put onto the battlefield from your hand, and an equip cost for one
+  creature type. Each shortcut is named in the report.
 - **Validation wording.** The deck check said "All 82 unique cards verified on Scryfall"; it now
   says "found on Scryfall" in new answers, and on the pages of reports saved before.
 
