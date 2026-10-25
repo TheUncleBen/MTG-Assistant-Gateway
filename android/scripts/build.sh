@@ -148,9 +148,12 @@ VERSION_NAME="$(head -1 "$ROOT/../VERSION" | tr -d '[:space:]')"
 VERSION_CODE="$(python3 -c 'import sys; a,b,c=map(int,sys.argv[1].split(".")); print(a*1000000+b*1000+c)' "$VERSION_NAME" 2>/dev/null \
   || awk -F. '{print $1*1000000+$2*1000+$3}' <<< "$VERSION_NAME")"
 APK_SHA="$(sha256sum "$OUT/$NAME-release.apk" | cut -d' ' -f1)"
-printf '{"version_name": "%s", "version_code": %s, "sha256": "%s", "cert_sha256": "%s", "size": %s, "min_sdk": 29, "target_sdk": 36, "flavor": "%s"}\n' \
-  "$VERSION_NAME" "$VERSION_CODE" "$APK_SHA" "$CERT_SHA" "$(stat -c %s "$OUT/$NAME-release.apk")" "$FLAVOR" > "$OUT/$NAME.json"
+# package_name and cert_sha256 are also what the gateway vouches for in /.well-known/assetlinks.json
+# and what its browser sign-in hands back to (app_page.py), so a build with its own package ID needs no setting.
+PACKAGE_NAME="$(head -1 "$ROOT/app/application-id.txt" | tr -d '[:space:]')"
+printf '{"version_name": "%s", "version_code": %s, "sha256": "%s", "cert_sha256": "%s", "package_name": "%s", "size": %s, "min_sdk": 29, "target_sdk": 36, "flavor": "%s"}\n' \
+  "$VERSION_NAME" "$VERSION_CODE" "$APK_SHA" "$CERT_SHA" "$PACKAGE_NAME" "$(stat -c %s "$OUT/$NAME-release.apk")" "$FLAVOR" > "$OUT/$NAME.json"
 log "App bundle: $OUT/$NAME-release.aab"
 
-log "Certificate fingerprint (for assetlinks.json / MTG_ANDROID_ASSETLINKS)"
+log "Certificate fingerprint (the gateway publishes it in /.well-known/assetlinks.json)"
 SIGN_STORE_PASS="$RELEASE_STORE_PASS" keytool -list -v -keystore "$RELEASE_KEYSTORE" -storepass:env SIGN_STORE_PASS -alias "$RELEASE_KEY_ALIAS" 2>/dev/null | grep -E 'SHA256:' || true

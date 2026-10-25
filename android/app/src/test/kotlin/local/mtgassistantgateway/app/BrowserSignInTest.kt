@@ -41,6 +41,35 @@ class BrowserSignInTest {
         assertEquals("code=$code&verifier=$code", String(BrowserSignIn.finishBody(code, code)))
     }
 
+    @Test fun anAuthTabReturnsOnlyOnThePlainHttpsGateway() {
+        assertEquals("mtg.example.com", BrowserSignIn.authTabHost("https://mtg.example.com"))
+        for (bad in listOf("http://mtg.example.com", "https://mtg.example.com:8443", "https://u@mtg.example.com", "https://mtg.example.com/x", "not a url", "")) {
+            assertNull(bad, BrowserSignIn.authTabHost(bad))
+        }
+    }
+
+    @Test fun onlyTheGatewaysReturnAddressWithAWellFormedCodeCounts() {
+        val g = "https://mtg.example.com"
+        val code = "a".repeat(43)
+        assertEquals(code, BrowserSignIn.codeOfReturn(g, "$g/login/app-return?code=$code"))
+        for (bad in listOf(
+            null,
+            "https://evil.test/login/app-return?code=$code",
+            "http://mtg.example.com/login/app-return?code=$code",
+            "https://mtg.example.com:444/login/app-return?code=$code",
+            "https://u@mtg.example.com/login/app-return?code=$code",
+            "$g/login/app-returns?code=$code",
+            "$g/login/app-return?code=short",
+            "$g/login/app-return?code=$code&code=$code",
+            "$g/login/app-return?x=1&code=$code",
+            "$g/login/app-return",
+            "mtgassistant-signin://signin?code=$code",
+        )) {
+            assertNull(bad, BrowserSignIn.codeOfReturn(g, bad))
+        }
+        assertNull(BrowserSignIn.codeOfReturn("https://mtg.example.com:8443", "https://mtg.example.com:8443/login/app-return?code=$code"))
+    }
+
     @Test(expected = IllegalArgumentException::class) fun finishBodyRefusesOddValues() {
         BrowserSignIn.finishBody("a".repeat(43), "x&y=1")
     }

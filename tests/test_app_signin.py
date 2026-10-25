@@ -3,6 +3,7 @@ managers work there, and only the app that started the sign-in can finish it."""
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
 from pathlib import Path
@@ -11,11 +12,10 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from mtg_gateway.app_signin import AppSignins, challenge_of, intent_url
-from mtg_gateway.config import ConfigError, load_settings
+from mtg_gateway.app_page import app_package
+from mtg_gateway.app_signin import RETURN_PATH, AppSignins, challenge_of, intent_url
 
 from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
-from .test_admin import _env
 
 APP_UA = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 16; wv) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.7.9"
@@ -45,7 +45,14 @@ async def browser_leg(
     r = await browser.get("/login", params={"next": next_path, "app_challenge": challenge})
     assert r.status_code == 302, r.text
     cb = urlparse(await h.idp_leg(r))
-    return await browser.get(f"{cb.path}?{cb.query}")
+    back = await browser.get(f"{cb.path}?{cb.query}")
+    if back.status_code != 303:
+        return back
+    # The callback hands over at the gateway's own address (RETURN_PATH): the Auth Tab the app
+    # opened closes there by itself; any other browser shows the page with the button.
+    to = urlparse(back.headers["location"])
+    assert to.path == RETURN_PATH and not to.netloc, back.headers["location"]
+    return await browser.get(f"{to.path}?{to.query}")
 
 
 def code_from(page: httpx.Response) -> str:
@@ -158,15 +165,24 @@ def test_codes_expire_and_are_bounded() -> None:
     assert intent_url("abc", "a.b").endswith("scheme=mtgassistant-signin;package=a.b;end")
 
 
-def test_package_setting(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _env(tmp_path, monkeypatch)
-    assert load_settings().android_package == "local.mtgassistantgateway.app"
-    monkeypatch.setenv("MTG_ANDROID_PACKAGE", "com.example.mtg")
-    assert load_settings().android_package == "com.example.mtg"
-    for bad in ("nodots", "com.example.mtg;end", "1com.example", "com..example"):
-        monkeypatch.setenv("MTG_ANDROID_PACKAGE", bad)
-        with pytest.raises(ConfigError, match="MTG_ANDROID_PACKAGE"):
-            load_settings()
+def test_the_package_id_comes_from_the_app_the_gateway_ships(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No setting: the package ID the build recorded next to the APK, else the project's own."""
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", tmp_path / "nowhere")
+    assert app_package() == "local.mtgassistantgateway.app"
+    app_dir = tmp_path / "app-dist"
+    app_dir.mkdir()
+    (app_dir / "mtg-assistant-gateway.apk").write_bytes(b"PK")
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", app_dir)
+    meta = app_dir / "mtg-assistant-gateway.json"
+    meta.write_text('{"package_name": "com.example.mtg"}')
+    assert app_package() == "com.example.mtg"
+    for bad in ("nodots", "com.example.mtg;end", "1com.example", "com..example", "a." * 120 + "b"):
+        meta.write_text(json.dumps({"package_name": bad}))
+        assert app_package() == "local.mtgassistantgateway.app", bad
+    meta.write_text("{}")
+    assert app_package() == "local.mtgassistantgateway.app"
 
 
 async def test_only_the_app_can_finish_a_sign_in(harness: Harness) -> None:
@@ -209,3 +225,67 @@ async def test_return_page_waits_for_a_tap_and_names_the_app(harness: Harness) -
         page = await browser_leg(harness, browser, challenge)
         assert "Open the MTG Assistant Gateway app" in page.text
         assert "app-signin.js" not in page.text
+
+
+async def test_the_callback_returns_through_the_gateways_own_address(harness: Harness) -> None:
+    """Android's Auth Tab closes itself on an https address the gateway vouches for the app on
+    (assetlinks.json), so the callback sends the code there instead of drawing the page itself."""
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await browser.get("/login", params={"next": "/decks", "app_challenge": challenge})
+        cb = urlparse(await harness.idp_leg(r))
+        back = await browser.get(f"{cb.path}?{cb.query}")
+        assert back.status_code == 303, back.text
+        assert back.headers["cache-control"] == "no-store"
+        assert back.headers["referrer-policy"] == "no-referrer"
+        assert "mtg_session=" not in back.headers.get("set-cookie", "")
+        loc = urlparse(back.headers["location"])
+        assert loc.path == RETURN_PATH
+        code = parse_qs(loc.query)["code"][0]
+        page = await browser.get(f"{loc.path}?{loc.query}")
+        assert page.status_code == 200
+        assert page.headers["cache-control"] == "no-store"
+        assert page.headers["referrer-policy"] == "no-referrer"
+        # the page shows the code only; looking at it does not use it up
+        assert code_from(page) == code
+        assert code_from(await browser.get(f"{loc.path}?{loc.query}")) == code
+
+
+async def test_the_return_address_refuses_anything_but_a_code(harness: Harness) -> None:
+    async with client(harness) as browser:
+        for q in ("", "?code=short", "?code=" + "a" * 43 + "%27"):
+            r = await browser.get(RETURN_PATH + q)
+            assert r.status_code == 400, q
+            assert "intent://" not in r.text
+
+
+async def test_assetlinks_vouch_for_the_bundled_app_without_a_setting(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no MTG_ANDROID_ASSETLINKS, the gateway vouches for the app it ships (the signing
+    certificate and package ID the build recorded next to the APK): nothing to set up."""
+    app_dir = tmp_path / "app-dist"
+    app_dir.mkdir()
+    (app_dir / "mtg-assistant-gateway.apk").write_bytes(b"PK\x03\x04" + b"\0" * 100)
+    cert = "ab" * 32
+    (app_dir / "mtg-assistant-gateway.json").write_text(
+        json.dumps({"cert_sha256": cert, "package_name": "local.mtgassistantgateway.app"})
+    )
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", app_dir)
+    async with running(Harness(make_settings(tmp_path), idp)) as h, client(h) as web:
+        r = await web.get("/.well-known/assetlinks.json")
+        assert r.status_code == 200
+        assert r.json() == [
+            {
+                "relation": ["delegate_permission/common.handle_all_urls"],
+                "target": {
+                    "namespace": "android_app",
+                    "package_name": "local.mtgassistantgateway.app",
+                    "sha256_cert_fingerprints": [":".join(["AB"] * 32)],
+                },
+            }
+        ]
+    # no app shipped (or no certificate recorded): nothing is vouched for
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", tmp_path / "nowhere")
+    async with running(Harness(make_settings(tmp_path / "b"), idp)) as h, client(h) as web:
+        assert (await web.get("/.well-known/assetlinks.json")).json() == []

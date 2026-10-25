@@ -952,13 +952,31 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return small("Sign-in canceled", smallpage.signin_canceled(f"/login?next={nxt}"))
         challenge = session["params"].get("app_challenge")
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
-            # The Android app's sign-in: no session in this browser, a one-time code for the app.
+            # The Android app's sign-in: no session in this browser, a one-time code for the app,
+            # handed over at the gateway's own address, where the app's Auth Tab closes by itself.
             code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
-            resp = small("Signed in", app_signin.return_body(code, s.android_package))
-            resp.headers["Cache-Control"] = "no-store"
-            resp.headers["Referrer-Policy"] = "no-referrer"
-            return resp
+            return RedirectResponse(
+                f"{app_signin.RETURN_PATH}?code={code}",
+                status_code=303,
+                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+            )
         return start_session(identity.sub, nxt, via=None)
+
+    @server.custom_route(app_signin.RETURN_PATH, methods=["GET"], include_in_schema=False)
+    async def login_app_return(request: Request) -> Response:
+        """Where the browser sign-in hands the code back (app_signin.py). The app's Auth Tab takes
+        this address and closes before it loads; any other browser shows the page whose button
+        opens the app. Showing it does not use the code up: only /login/app does."""
+        from . import app_page  # imports this module
+
+        code = request.query_params.get("code", "")
+        if app_signin.CODE.fullmatch(code):
+            resp = small("Signed in", app_signin.return_body(code, app_page.app_package()))
+        else:
+            resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        return resp
 
     def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
         sid = secrets.token_urlsafe(32)
