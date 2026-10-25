@@ -16,15 +16,25 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from . import card_models_view, ui
+from . import card_models, card_models_view, ui
 from .report_view import (
+    APPROX_HEADING,
+    APPROX_TEXT,
     CONSTRUCTED_VALIDATION,
     ENDED_TEXT,
     FORGE_HEADING,
     FORGE_STATE_TEXT,
+    LOW_IMPACT_HEADING,
+    LOW_IMPACT_TEXT,
     MODEL_HEADING,
     MORE_DID_NOT_START,
+    OUT_OF_SCOPE_HEADING,
+    OUT_OF_SCOPE_TEXT,
     PREFLIGHT_ONLY,
+    UNMODELED_FORGE_TEXT,
+    UNMODELED_HEADING,
+    UNMODELED_SAVED_TEXT,
+    UNMODELED_TEXT,
     _copies,
     _esc,
     _float,
@@ -34,16 +44,15 @@ from .report_view import (
     _losses_text,
     _pct,
     _seconds_text,
+    _share,
     _tile,
     _turn,
     ask_html,
     coverage,
-    coverage_text,
     forge_lines,
     forge_stopped_early,
     forge_stopped_text,
     front_face,
-    honesty_groups,
     kept_models,
     kept_models_html,
     model_box_id,
@@ -73,15 +82,15 @@ FORGE_SUB = (
     "the stack and every player's interaction, all piloted by Forge's AI. Treat the result as a test of "
     "the deck against these opponents, not a prediction for your table."
 )
-# The quick solo test's panel: what its simple card model leaves out, and where the full rules are.
-MODEL_SUB = (
-    "The quick test uses a simple card model so it can play {games} games in seconds. The more of the "
-    "deck sits here, the less these numbers say about it."
+# The summary card's footer: the known share (the cards played with their effect and those
+# that need opponents), as coverage_text says it on the export.
+KNOWN_TEXT = (
+    "Known: {known} of {deck_size} cards ({known_pct}% of the deck), counting the cards played with "
+    "their effect and those that need opponents."
 )
-MODEL_SUB_FORGE = (
-    "The quick test uses a simple card model so it can play {games} games in seconds. Forge's "
-    "full-rules solo test above played these cards with their real rules, except any it names in its "
-    "own list."
+MODEL_SUB = (
+    "Read the numbers above with this in mind: the more of the deck sits here, the less the solo test "
+    "says about it."
 )
 ABOUT_FORGE = "About these Forge games"
 
@@ -914,48 +923,131 @@ def solo_section_html(
         cls="btn-plain",
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
-    if ask and models_opener:
-        # the request and the saved descriptions it leads to share one row (it wraps on a phone)
-        ask = f"<div class='rv-askrow'>{ask}{models_opener}</div>"
     fs = r.get("forge_solo")
     forge_full = isinstance(fs, dict) and fs.get("state") == "done"
-    groups = honesty_groups(g, ask, menu=True, forge_full=forge_full)
-    if not groups:
-        return solo, ""
-    h = g.get("honesty") or {}
-    head = ""
-    cov = coverage(g)
-    if cov and (h.get("unrecognized") or h.get("out_of_scope")):
-        aside = _copies([c for grp in h.get("out_of_scope") or [] for c in grp["cards"]])
-        blanks = _copies(h.get("unrecognized") or [])
-        legend = (
-            "<ul class='legend rv-legend'>"
-            f"<li><i class='m'></i>Played with their effect <b>{cov['modeled']}</b></li>"
-            f"<li><i class='o'></i>Needs opponents <b>{aside}</b></li>"
-            f"<li><i class='u'></i>Not in the quick model yet <b>{blanks}</b></li></ul>"
-        )
-        head = (
-            "<div class='rv-cov'>"
-            + _coverage_bar(cov["modeled"], aside, blanks, cov["deck_size"], cls="big")
-            + legend
-            + f"<p class='b coverage'>{_esc(coverage_text(g))}</p></div>"
-        )
-    elif coverage_text(g) and (h.get("unrecognized") or h.get("out_of_scope")):
-        head = f"<p class='b coverage'>{_esc(coverage_text(g))}</p>"
-    folds = "".join(
-        f"<details class='rv-grp{' unmodeled' if key == 'unmodeled' else ''}'{' open' if i == 0 else ''}>"
-        f"<summary><span>{_esc(heading)}</span>"
-        + (f"<span class='n'>{_esc(count)}</span>" if count else "")
-        + f"</summary>{body}</details>"
-        for i, (key, heading, count, body) in enumerate(groups)
-    )
-    model_sub = (MODEL_SUB_FORGE if forge_full else MODEL_SUB).format(games=g.get("games") or 300)
-    model = _sec(
-        "rv-model",
-        MODEL_HEADING,
-        f"<p class='ui-sub'>{_esc(model_sub)}</p>{head}{folds}",
-    )
+    model = model_section_html(g, ask, models_opener, forge_full=forge_full)
     return solo, model
+
+
+# -- what the quick solo test leaves out: an inset grouped list (the account settings look) -------
+def _rows(cards: list[dict[str, Any]]) -> str:
+    """Card rows: the name opens the shared card menu (static/menus.js), its draw rate trails."""
+    items = []
+    for c in cards:
+        copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
+        name = front_face(c["name"])
+        drawn = f"<span class='v'>drawn {_pct(c['drawn'])}</span>" if c.get("drawn") is not None else ""
+        items.append(
+            f"<li><span class='nm'>{copies}<button type='button' class='cardlink' data-card='{_esc(name)}'>"
+            f"{_esc(name)}</button></span>{drawn}</li>"
+        )
+    return "".join(items)
+
+
+def _group(gid: str, heading: str, count: str, info: str, body: str) -> str:
+    """One group: its heading and count, with Details opening the group's explanation in an
+    outlined box (the whole heading is the toggle), then its list."""
+    return (
+        f"<section class='ig-sec' id='{gid}' aria-labelledby='{gid}-h'>"
+        f"<details class='ig-info'><summary><h3 id='{gid}-h'>{_esc(heading)}</h3>"
+        f"<span class='n'>{_esc(count)}</span><span class='more'>Details{icon('chev')}</span></summary>"
+        f"<div class='ig-blurb'>{info}</div></details>{body}</section>"
+    )
+
+
+def model_section_html(
+    g: dict[str, Any], ask: str = "", models_opener: str = "", *, forge_full: bool = False
+) -> str:
+    """The quick solo test's "leaves out" section: a summary card (the bar and the three counts),
+    then one group per kind of card, each a heading with Details and a list of rows; the request
+    and My card models as two even buttons under the cards played without their effect."""
+    h = g.get("honesty") or {}
+    size = g.get("deck_size")
+    unrec = h.get("unrecognized") or []
+    oos = h.get("out_of_scope") or []
+    low = h.get("low_impact") or []
+    approx = [a for a in h.get("approximations") or [] if a.get("cards")]
+    if not (unrec or oos or low or approx):
+        return ""
+    parts: list[str] = []
+    cov = coverage(g)
+    if cov and (unrec or oos):
+        aside = _copies([c for grp in oos for c in grp["cards"]])
+        blanks = _copies(unrec)
+        size_n = cov["deck_size"]
+
+        def row(dot: str, label: str, n: int, href: str = "") -> str:
+            val = f"<span class='v'><b>{n}</b> · {round(100 * n / size_n)}%</span>"
+            inner = f"<i class='dot {dot}'></i><span class='nm'>{label}</span>{val}"
+            if href and n:
+                return f"<li><a href='{href}'>{inner}{icon('chev')}</a></li>"
+            return f"<li>{inner}</li>"
+
+        parts.append(
+            "<div class='ig ig-sum'>"
+            + _coverage_bar(cov["modeled"], aside, blanks, size_n, cls="big")
+            + "<ul class='ig-list'>"
+            + row("m", "Played with their effect", cov["modeled"])
+            + row("o", "Needs opponents", aside, "#rv-g-opp")
+            + row("u", UNMODELED_HEADING, blanks, "#rv-g-unmodeled")
+            + f"</ul></div><p class='ig-foot'>{_esc(KNOWN_TEXT.format(**cov))}</p>"
+        )
+    if unrec:
+        info = f"<p>{UNMODELED_TEXT}"
+        info += f" {UNMODELED_FORGE_TEXT}" if forge_full else ""
+        info += f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else ""
+        actions = ""
+        if ask:
+            actions = f"<div class='ig-actions{' two' if models_opener else ''}'>{ask}{models_opener}</div>"
+        parts.append(
+            _group(
+                "rv-g-unmodeled",
+                UNMODELED_HEADING,
+                _share(_copies(unrec), size),
+                info + "</p>",
+                f"<ul class='ig ig-list ig-cards'>{_rows(unrec)}</ul>{actions}",
+            )
+        )
+    if oos:
+        total = _copies([c for grp in oos for c in grp["cards"]])
+        lists = "".join(
+            f"<h4 class='ig-sub'>{_esc(grp['label'])} <span>{_copies(grp['cards'])}</span></h4>"
+            f"<ul class='ig ig-list ig-cards'>{_rows(grp['cards'])}</ul>"
+            for grp in oos
+        )
+        parts.append(
+            _group(
+                "rv-g-opp", OUT_OF_SCOPE_HEADING, _share(total, size), f"<p>{OUT_OF_SCOPE_TEXT}</p>", lists
+            )
+        )
+    if low:
+        parts.append(
+            _group(
+                "rv-g-low",
+                LOW_IMPACT_HEADING,
+                _share(len(low), size),
+                f"<p>{LOW_IMPACT_TEXT}</p>",
+                f"<ul class='ig ig-list ig-cards'>{_rows([{'name': n} for n in low])}</ul>",
+            )
+        )
+    if approx:
+        rows = "".join(
+            f"<li><span class='nm'>{_esc(a['label'])}</span>"
+            f"<span class='cards'>{_esc(a['cards'])}</span></li>"
+            for a in approx
+        )
+        parts.append(
+            _group(
+                "rv-g-approx",
+                APPROX_HEADING,
+                f"{len(approx)} shortcut{'s' if len(approx) != 1 else ''}",
+                f"<p>{APPROX_TEXT}</p>",
+                f"<ul class='ig ig-list ig-approx'>{rows}</ul>",
+            )
+        )
+    return _sec(
+        "rv-model", MODEL_HEADING, f"<p class='ui-sub'>{_esc(MODEL_SUB)}</p>{''.join(parts)}", flat=True
+    )
 
 
 def validation_section_html(s: dict[str, Any]) -> str:
@@ -1129,11 +1221,10 @@ REPORT_PAGE_CSS = (
   background:var(--surface-2)}
 .rv-page .ci-w i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--orange)}
 .rv-page .wdg .det .bar-split{width:100%}
-.rv-page .bar-split .m,.rv-page .rv-legend .m{background:var(--green)}
-.rv-page .bar-split .o,.rv-page .rv-legend .o{background:var(--surface-3)}
-.rv-page .bar-split .u,.rv-page .rv-legend .u{background:var(--orange)}
+.rv-page .bar-split .m,.rv-page .dot.m{background:var(--green)}
+.rv-page .bar-split .o,.rv-page .dot.o{background:var(--surface-3)}
+.rv-page .bar-split .u,.rv-page .dot.u{background:var(--orange)}
 .rv-page .bar-split.big{height:14px}
-.rv-page .rv-legend i{width:12px;height:12px;border-radius:2px}
 .rv-page .rv-jump{position:sticky;top:0;z-index:5;background:var(--bg);padding:.5rem 0;margin:0 0 .75rem;
   border-bottom:1px solid var(--border-soft)}
 .rv-page .rv-jump .ui-chips{margin:0}
@@ -1177,12 +1268,63 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-ended b{font-variant-numeric:tabular-nums;white-space:nowrap}
 .rv-page .rv-notes{margin:.25rem 0 .5rem;padding-left:1.1rem}
 .rv-page .rv-notes li{margin:.2rem 0;overflow-wrap:anywhere}
-.rv-page .rv-det,.rv-page .rv-grp{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
-.rv-page .rv-grp > summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem;
-  min-height:44px;font-weight:700;font-size:1.02rem}
-.rv-page .rv-grp > summary .n{color:var(--text-muted);font-weight:400;font-size:.9rem}
-.rv-page .rv-grp h4{margin:.6rem 0 0;font-size:.95rem}
-.rv-page .rv-grp h4 small{color:var(--text-muted);font-weight:400}
+.rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
+/* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */
+.rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--surface);
+  border:1px solid var(--border-soft);border-radius:12px;overflow:hidden}
+.rv-page .ig-list{list-style:none;margin:0;padding:0}
+.rv-page .ig.ig-list{margin:.5rem 0 0}
+.rv-page .ig-list li{display:flex;align-items:center;gap:.75rem;min-height:44px;padding:0 16px;
+  border-top:1px solid var(--border-soft)}
+.rv-page .ig-list li:first-child{border-top:0}
+.rv-page .ig-list .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.rv-page .ig-list .v{color:var(--text-muted);font-size:.9rem;font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+.rv-page .ig-list .v b{color:var(--text)}
+.rv-page .ig-list a{display:flex;align-items:center;gap:.75rem;flex:1;align-self:stretch;color:inherit;
+  text-decoration:none}
+.rv-page .ig-list a svg{transform:rotate(-90deg);color:var(--text-muted);width:16px;height:16px;flex:none}
+.rv-page .ig-list a:hover .nm{text-decoration:underline}
+.rv-page .ig-list .dot{width:12px;height:12px;border-radius:50%;flex:none}
+.rv-page .ig-cards .cardlink{display:block;width:100%;min-height:44px;text-align:left}
+.rv-page .ig-sum .bar-split{margin:16px 16px 8px}
+.rv-page .ig-foot{margin:.4rem 16px 0;font-size:.85rem;line-height:1.4;color:var(--text-muted)}
+.rv-page .ig-sec{margin:1.75rem 0 0}
+.rv-page .ig-info > summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:baseline;
+  gap:.1rem .6rem;padding:.35rem 4px;min-height:44px;align-content:center;box-sizing:border-box}
+.rv-page .ig-info > summary::-webkit-details-marker{display:none}
+.rv-page .ig-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
+.rv-page .ig-info h3{margin:0;font-size:1.05rem;font-weight:700;flex-basis:100%}
+.rv-page .ig-info .n{color:var(--text-muted);font-size:.9rem}
+.rv-page .ig-info .more{display:inline-flex;align-items:center;gap:2px;color:var(--link);font-size:.9rem}
+.rv-page .ig-info .more svg{width:14px;height:14px;transition:transform .15s}
+.rv-page .ig-info[open] .more svg{transform:rotate(180deg)}
+.rv-page .ig-blurb{margin:.25rem 0 .5rem;padding:10px 14px;border:1px solid var(--border);border-radius:12px;
+  font-size:.92rem;line-height:1.45}
+.rv-page .ig-blurb p{margin:0}
+.rv-page .ig-sub{margin:1rem 16px .35rem;font-size:.78rem;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--text-muted)}
+.rv-page .ig-sub span{font-weight:400}
+.rv-page .ig-info + .ig-sub{margin-top:.35rem}
+.rv-page .ig-approx li{flex-direction:column;align-items:stretch;gap:.15rem;padding:10px 16px}
+.rv-page .ig-approx .cards{color:var(--text-muted);font-size:.9rem;line-height:1.4}
+.rv-page .ig-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:.75rem auto 0;
+  max-width:46rem}
+.rv-page .ig-actions.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.rv-page .ig-actions .ask{position:relative;display:flex;margin:0}
+.rv-page .ig-actions .ask [role=status]{position:absolute;top:100%;left:0;right:0;text-align:center}
+.rv-page .ig-actions button,.rv-page .ig-actions .btn{display:flex;align-items:center;justify-content:center;
+  gap:.4rem;width:100%;min-height:48px;margin:0;padding:6px 10px;white-space:normal;text-align:center;
+  line-height:1.25;box-sizing:border-box}
+.rv-page .ig-actions svg{flex:none}
+@media (min-width:600px){.rv-page .ig-info h3{flex-basis:auto}}
+@media (min-width:900px){
+  .rv-page .ig-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rv-page .ig-cards li:nth-child(2){border-top:0}
+  .rv-page .ig-cards li:nth-child(even){border-left:1px solid var(--border-soft)}
+  .rv-page .ig-approx li{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:1rem;
+    align-items:center}
+}
 .rv-page .rv-games .tr{grid-template-columns:var(--cols)!important}
 @media (max-width:599.98px){.rv-page .rv-games .tr{grid-template-columns:var(--cols-sm)!important}
   .rv-page .rv-games .th{display:grid!important}}
@@ -1212,16 +1354,8 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-chart .ui-hint{margin:0 0 .35rem}
 .rv-page .rv-chart svg{max-height:15rem}
 @media (max-width:599.98px){.rv-page .rv-chart svg{font-size:18px;padding-left:1.25rem}}
-.rv-page .rv-cov{margin:.5rem 0 .75rem}
-.rv-page .rv-cov .b{margin:.5rem 0 0}
 .rv-page .ask{margin:.5rem 0 .75rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .rv-page .ask button{display:inline-flex;align-items:center;gap:.4rem;margin:0}
-.rv-page .rv-askrow{display:grid;grid-template-columns:repeat(2,minmax(0,max-content));gap:.5rem;
-  margin:.5rem 0 .75rem}
-.rv-page .rv-askrow>*{margin:0;min-width:0}
-.rv-page .rv-askrow .ask{display:flex;flex-wrap:nowrap;align-items:stretch;gap:0}
-@media (max-width:480px){.rv-page .rv-askrow{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}}
-.rv-page .rv-askrow button,.rv-page .rv-askrow .btn{margin:0;white-space:normal;text-align:left}
 .rv-page .kept .names button{min-height:44px;margin:0}
 /* the deck statistics: the six numbers as a strip, the curve and colours side by side */
 .rv-page .rv-dstats .tiles{grid-template-columns:repeat(auto-fit,minmax(min(100%,8rem),1fr));gap:0;
