@@ -36,7 +36,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
-from . import smallpage
+from . import masked, smallpage
 from .cimd import (
     CimdBusy,
     CimdError,
@@ -466,18 +466,21 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             logger.error("identity provider unreachable during authorize: %s", exc)
             raise AuthorizeError("temporarily_unavailable", "identity provider unavailable") from exc
 
-    def consent_csrf(self, login_id: str, browser_key: str | None) -> str:
-        """Token bound to one pending MCP login and the browser that started it, carried by the
-        consent form's buttons."""
+    def _consent_key(self, login_id: str, browser_key: str | None) -> bytes:
         return hmac.new(
             self.settings.session_secret.encode(),
             f"consent:{login_id}:{self.binding_hash(browser_key or '')}".encode(),
             hashlib.sha256,
-        ).hexdigest()
+        ).digest()
+
+    def consent_csrf(self, login_id: str, browser_key: str | None) -> str:
+        """Token bound to one pending MCP login and the browser that started it, carried by the
+        consent form's buttons; masked afresh on every load (masked.py)."""
+        return masked.mask(self._consent_key(login_id, browser_key))
 
     def check_consent_csrf(self, login_id: str, token: str | None, browser_key: str | None) -> bool:
-        return bool(login_id and token and browser_key) and _eq(
-            self.consent_csrf(login_id, browser_key), token or ""
+        return bool(login_id and token and browser_key) and masked.matches(
+            self._consent_key(login_id, browser_key), token or ""
         )
 
     async def _consent_session(

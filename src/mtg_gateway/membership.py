@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 
 # The provider access token is renewed this long before its stated expiry.
 EXPIRY_MARGIN = 30
+# After a check that let someone in, the gateway renews their provider access token in the
+# background this long before a request would have to (EXPIRY_MARGIN before its expiry), so no
+# request waits for a refresh and then userinfo: only for userinfo. Only for a token that runs out
+# within RENEW_WINDOW of that check, so an idle member's tokens are renewed at most once.
+RENEW_LEAD = 10
+RENEW_WINDOW = 15 * 60
 MAX_CACHED = 10_000
 
 
@@ -57,6 +63,8 @@ class MembershipChecker:
         self.fernet = Fernet(settings.fernet_key.encode())
         self._checked: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._renewals: dict[str, asyncio.Task[None]] = {}
+        self._refreshing: set[str] = set()  # renewals asking the provider right now
         self._warned_no_refresh = False
         # The member's profile picture follows the provider's answer (avatars.py).
         self.avatars = AvatarStore(settings.data_dir / "avatars")
@@ -117,10 +125,13 @@ class MembershipChecker:
                 if len(self._checked) >= MAX_CACHED:
                     self._checked.clear()
                 self._checked[sub] = time.monotonic()
+                self._plan_renewal(sub)
             else:
                 self._checked.pop(sub, None)
         if len(self._locks) > MAX_CACHED:
-            self._locks.clear()
+            # only the free ones: a lock still held (a check, a renewal) must stay the one used
+            for key in [k for k, v in self._locks.items() if not v.locked()]:
+                del self._locks[key]
         return outcome
 
     async def _ask(self, sub: str) -> Membership:
@@ -198,6 +209,79 @@ class MembershipChecker:
             self.db.audit("groups_changed", sub=sub, detail={"groups": groups[:50]})
         await self.avatars.update(sub, info, self.picture_fetcher(current))
         return Membership.ALLOWED
+
+    # -- renewing ahead of time ----------------------------------------------------
+    def _plan_renewal(self, sub: str) -> None:
+        """Renew ``sub``'s provider access token in the background RENEW_LEAD seconds before a
+        request would have to, when that falls within RENEW_WINDOW. Replaces a renewal planned
+        before. The membership check is not changed by this: it still asks before the request."""
+        grant = self.db.get_idp_grant(sub) or {}
+        expires_at = int(grant.get("access_expires_at") or 0)
+        if not expires_at or not grant.get("refresh_enc"):
+            return
+        delay = expires_at - EXPIRY_MARGIN - RENEW_LEAD - time.time()
+        if delay <= 0 or delay > RENEW_WINDOW:
+            return  # too close to gain anything (a request soon renews it as before), or too far
+        old = self._renewals.pop(sub, None)
+        if old is not None and old is not asyncio.current_task():
+            old.cancel()
+        if len(self._renewals) >= MAX_CACHED:
+            return  # never a task per member without bound; requests then renew as before
+        task = asyncio.create_task(self._renew_later(sub, delay))
+        self._renewals[sub] = task
+        task.add_done_callback(lambda t: self._renewals.get(sub) is t and self._renewals.pop(sub, None))
+
+    async def _renew_later(self, sub: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        lock = self._locks.setdefault(sub, asyncio.Lock())
+        async with lock:  # never beside a check, which may rotate the same refresh token
+            user = self.db.get_user(sub)
+            grant = self.db.get_idp_grant(sub) or {}
+            expires_at = int(grant.get("access_expires_at") or 0)
+            if user is None or user.get("disabled_at") or not expires_at:
+                return
+            if expires_at - EXPIRY_MARGIN - time.time() > RENEW_LEAD + 1:
+                return  # a check renewed it meanwhile
+            old = grant.get("refresh_enc") or ""
+            refresh = self._open(old)
+            if not refresh:
+                return
+            # From here a refresh may rotate the token at the provider: shutdown lets it finish
+            # (aclose) so the new one is kept.
+            self._refreshing.add(sub)
+            try:
+                tokens = await self.oidc.refresh(refresh)
+            except IdPUnavailable as exc:
+                logger.info("renewing the provider token ahead of time failed: %s", exc)
+                return
+            finally:
+                self._refreshing.discard(sub)
+            # A refused refresh decides nothing here: the next request's own check asks the
+            # provider and acts on its answer, as it always has. Written only over the grant
+            # renewed: one revoked or deleted meanwhile (an admin, Delete my data) stays gone.
+            if tokens is not None:
+                self.db.replace_idp_grant(
+                    sub,
+                    old_refresh_enc=old,
+                    refresh_enc=self._seal(tokens.refresh_token),
+                    access_enc=self._seal(tokens.access_token),
+                    access_expires_at=int(tokens.access_expires_at or 0),
+                )
+
+    async def aclose(self, grace: float = 5.0) -> None:
+        """At shutdown: renewals still waiting are cancelled; one already asking the provider gets
+        ``grace`` seconds to finish, so a refresh token the provider just rotated is not lost."""
+        tasks = dict(self._renewals)
+        self._renewals.clear()
+        busy = [t for sub, t in tasks.items() if sub in self._refreshing]
+        for t in tasks.values():
+            if t not in busy:
+                t.cancel()
+        if busy:
+            await asyncio.wait(busy, timeout=grace)
+        for t in tasks.values():
+            t.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     def picture_fetcher(self, access: str | None) -> Callable[[], Awaitable[str | None]] | None:
         """Fetch the member's uploaded picture with the provider token that just worked."""

@@ -1941,6 +1941,19 @@ class Database:
                 (sub, refresh_enc, access_enc, access_expires_at, int(time.time())),
             )
 
+    def replace_idp_grant(
+        self, sub: str, *, old_refresh_enc: str, refresh_enc: str, access_enc: str, access_expires_at: int
+    ) -> bool:
+        """save_idp_grant for a renewal ahead of time (membership.py): only over the grant it
+        renewed, never bringing back one revoked or deleted meanwhile. False: nothing written."""
+        with self.tx() as c:
+            cur = c.execute(
+                """UPDATE idp_grants SET refresh_enc=?, access_enc=?, access_expires_at=?, updated_at=?
+                   WHERE sub = ? AND refresh_enc = ?""",
+                (refresh_enc, access_enc, access_expires_at, int(time.time()), sub, old_refresh_enc),
+            )
+            return cur.rowcount == 1
+
     def get_idp_grant(self, sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM idp_grants WHERE sub = ?", (sub,))
         return dict(row) if row else None

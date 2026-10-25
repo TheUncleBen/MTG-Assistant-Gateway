@@ -13,8 +13,8 @@ Shorter stack and example variables files with every feature on by default, the 
 the Settings page only, a new Settings row for the Archidekt backup folder, the Claude logo beside
 Claude's connection, an assistant reading the same Forge seed the report page shows, Forge's
 load problems leaving out Java's own warnings, a solo test shorter than five turns no longer talking
-about turn 5, the research service having the current rules from the moment it starts, and signing
-in to the Android app coming back to the app by itself.
+about turn 5, the research service having the current rules from the moment it starts, signing in
+to the Android app coming back to the app by itself, and faster pages and deck deletes.
 
 ### Upgrade notes
 - **Start from the new stack file and example variables file**, as in
@@ -76,6 +76,13 @@ in to the Android app coming back to the app by itself.
   are gone.
 - **"Backup folder on Archidekt"** is a new row on the Settings page; a new name applies to the next
   backup copy.
+- **Faster pages.** Pages go out compressed, so a long deck page is about a sixth of the size
+  over the network. The gateway renews its Authentik token in the background before it runs out,
+  so a page no longer waits for that renewal. It still asks Authentik whether you are allowed in
+  before each page, exactly as before. Deleting a deck from its Delete box now waits for four
+  Archidekt calls instead of six: the box reads the deck and finds the backup folder while you
+  type the name. The backup copy is still Archidekt's own copy of the deck as it is when you press
+  Delete.
 - **Android sign-in returns to the app by itself.** After signing in, the browser no longer stops
   on a "Signed in" page waiting for you to tap **Open the MTG Assistant Gateway app**. Where your
   browser supports it (Chrome's Auth Tab), it closes and you are back in the app, signed in. The
