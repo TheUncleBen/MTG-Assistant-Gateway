@@ -49,10 +49,7 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
         tiles = page.split("<ul class='plain decklist", 1)[1]
         assert "class='avatar" not in tiles and "class='tags'" not in tiles and "No deck tags" not in tiles
         assert "<span class='info plain'>" in tiles and "<time class='ui-when'" in tiles
-        assert (
-            "class='disc pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>"
-            in page
-        )
+        assert "class='disc pre-all' data-n='1' hidden aria-expanded='false'>Show all 1</button>" in page
         assert "All 1 set shown." in page and "data-load-more" not in page
         assert "No preconstructed deck matches that filter." not in page
         # by name is one grid without headings
