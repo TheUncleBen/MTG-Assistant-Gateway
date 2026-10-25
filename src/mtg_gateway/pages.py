@@ -1973,7 +1973,7 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
                 "<p><strong>New description</strong></p>"
                 f"<pre class='diff'>{html.escape(after) if after else '(empty)'}</pre>"
                 + _formatted_preview(r)
-                + "<details><summary>Current description</summary>"
+                + "<details><summary class='fold-btn'>Current description</summary>"
                 f"<pre class='diff'>{html.escape(before) if before else '(empty)'}</pre></details></div>"
             )
             items.append(_li("chg", "description", html.escape(summary) + full))

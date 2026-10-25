@@ -87,12 +87,6 @@ CARDS_CSS = """
 .cs .checks{display:flex;flex-wrap:wrap;gap:.5rem 1.25rem}
 /* More filters: opened from the results bar (its own summary shows without scripts and on phones) */
 details.cs-more{margin:0;border-top:1px solid var(--border-soft);padding-top:.25rem}
-details.cs-more > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
-  align-items:center;gap:.4rem;
-  list-style:none;width:max-content;max-width:100%}
-details.cs-more > summary::-webkit-details-marker{display:none}
-details.cs-more > summary .chev{transition:transform .15s;transform:rotate(-90deg)}
-details.cs-more[open] > summary .chev{transform:none}
 details.cs-more > .cs-grid{margin:.5rem 0 0}
 @media (min-width:600px){ details.cs-more.jsx{border-top:0;padding-top:0}
   details.cs-more.jsx > summary{display:none} details.cs-more.jsx:not([open]){display:none} }
@@ -389,7 +383,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
     more = (
         "<details class='cs-more' id='cs-more-filters'"
         + (" open" if _more_used(f) else "")
-        + f"><summary>{icon('chev', cls='i chev')} More filters</summary><div class='cs-grid'>"
+        + "><summary class='fold-btn'>More filters</summary><div class='cs-grid'>"
         "<h3 class='sub'>Card text</h3>"
         + _text_field(
             "o", "Rules text", f.oracle, placeholder="draw a card", hint="Use ~ for the card's own name."

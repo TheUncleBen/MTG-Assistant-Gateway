@@ -936,9 +936,9 @@ def export_help_html() -> str:
         f"<tr><th scope='row'>{_esc(col)}</th><td>{_esc(kind)}</td></tr>" for col, kind in EXPORT_COLUMN_TYPES
     )
     return (
-        f"<details class='csvhelp'><summary>{icon('download')} "
-        "<span class='t'>Importing the CSV on archidekt.com</span>"
-        "<span class='chev'>column types</span></summary><section class='panel'>"
+        f"<details class='csvhelp'><summary class='fold-btn'>{icon('download')} "
+        "<span class='t'>Importing the CSV on archidekt.com: column types</span></summary>"
+        "<section class='panel'>"
         "<p>Archidekt does not read the column names. When you import the file on archidekt.com, pick "
         "each column's type as below and leave <strong>Skip first line</strong> on.</p>"
         "<div class='tbl'><table><thead><tr><th scope='col'>Column in this file</th>"
@@ -1589,15 +1589,7 @@ ul.colllist .th .qc{justify-self:start}
 @media (max-width:420px){ .mtgbox .body .fl{grid-template-columns:1fr} }
 /* how to import the Export CSV on archidekt.com: a fold under the list with a two-column table */
 .collection details.csvhelp{margin:0 0 1rem}
-.collection details.csvhelp > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
-  align-items:center;gap:.5rem;list-style:none;flex-wrap:wrap;padding-right:.35rem}
-.collection details.csvhelp > summary::-webkit-details-marker{display:none}
-.collection details.csvhelp > summary::before{content:'\\25B8';color:var(--orange)}
-.collection details.csvhelp[open] > summary::before{content:'\\25BE'}
 .collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
-.collection details.csvhelp > summary .chev{margin-left:auto;color:var(--text-muted);font-weight:400;
-  font-size:.86rem}
-@media (max-width:600px){ .collection details.csvhelp > summary .chev{display:none} }
 .csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
 .csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
 .csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
