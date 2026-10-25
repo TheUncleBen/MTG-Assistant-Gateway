@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
-from . import theme
+from . import app_page, theme
 from .companion import (
     ICON_HEADERS,
     OFFLINE_SCRIPT,
@@ -149,14 +149,7 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
 
     @server.custom_route("/.well-known/assetlinks.json", methods=["GET"], include_in_schema=False)
     async def assetlinks(_request: Request) -> Response:
-        raw = getattr(s, "android_assetlinks", None)
-        if not raw:
-            return JSONResponse([], headers={"Cache-Control": "public, max-age=3600"})
-        try:
-            data = json.loads(raw)
-        except ValueError:
-            return JSONResponse([], headers={"Cache-Control": "no-store"})
-        return JSONResponse(data, headers={"Cache-Control": "public, max-age=3600"})
+        return JSONResponse(app_page.assetlinks(), headers={"Cache-Control": "public, max-age=3600"})
 
     # Browsers, and apps that show a connector's icon from its site, ask for these at the root.
     @server.custom_route("/favicon.ico", methods=["GET"], include_in_schema=False)

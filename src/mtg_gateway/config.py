@@ -8,11 +8,9 @@ environment; every secret comes from a file (Docker Swarm mounts secrets under
 from __future__ import annotations
 
 import ipaddress
-import json
 import logging
 import math
 import os
-import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -130,32 +128,6 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes")
 
 
-def _assetlinks_env(name: str) -> str | None:
-    """The Android App Links statement list served at /.well-known/assetlinks.json: a JSON list,
-    returned re-serialised, or None when unset."""
-    raw = _env(name)
-    if raw is None:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except ValueError as exc:
-        raise ConfigError(f"{name} must be a JSON list (the assetlinks.json statement list)") from exc
-    if not isinstance(parsed, list):
-        raise ConfigError(f"{name} must be a JSON list (the assetlinks.json statement list)")
-    return json.dumps(parsed, separators=(",", ":"))
-
-
-_PACKAGE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+")
-
-
-def _package_env(name: str, default: str) -> str:
-    """An Android package ID (``com.example.app``): the app the browser sign-in hands back to."""
-    raw = _env(name, default) or default
-    if len(raw) > 200 or not _PACKAGE_ID.fullmatch(raw):
-        raise ConfigError(f"{name} must be an Android package ID such as local.mtgassistantgateway.app")
-    return raw
-
-
 def _groups_claim_env(name: str, default: str) -> str:
     """Dot-path into the ID token claims naming the group list (see oidc.validate_groups_claim)."""
     raw = _env(name, default) or default
@@ -236,10 +208,6 @@ class Settings:
     oidc_groups_claim: str = "groups"
     # How the gateway authenticates at the token endpoint: client_secret_post or client_secret_basic.
     oidc_token_auth_method: str = "client_secret_post"
-    # JSON statement list for /.well-known/assetlinks.json (Android App Links); unset: not served.
-    android_assetlinks: str | None = None
-    # The Android app's package ID: the app the browser sign-in hands back to (app_signin.py).
-    android_package: str = "local.mtgassistantgateway.app"
     mystic_forge_url: str | None = None
     # The Forge simulation service (docker/forge/); unset, reports run the goldfish only.
     forge_url: str | None = None
@@ -491,8 +459,6 @@ def load_settings() -> Settings:
         admin_group=_env("MTG_ADMIN_GROUP") or None,
         oidc_groups_claim=_groups_claim_env("MTG_OIDC_GROUPS_CLAIM", "groups"),
         oidc_token_auth_method=_token_auth_method_env("MTG_OIDC_TOKEN_AUTH_METHOD", "client_secret_post"),
-        android_assetlinks=_assetlinks_env("MTG_ANDROID_ASSETLINKS"),
-        android_package=_package_env("MTG_ANDROID_PACKAGE", "local.mtgassistantgateway.app"),
         session_secret=session_secret,
         fernet_key=fernet_key,
         data_dir=data_dir,

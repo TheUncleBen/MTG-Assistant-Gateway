@@ -255,9 +255,11 @@ else your gateway serves. A few things are native:
 - **Sign-in** happens in your phone's browser, shown over the app (a Custom
   Tab), not in the app's own web view: that is where passkeys, your password
   manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
-  work, exactly as they do on the website. When you are done there, tap **Open
-  the MTG Assistant Gateway app** on the last page and you are back in the
-  app, signed in. The browser itself stays signed out of the gateway.
+  work, exactly as they do on the website. When you are done there, the
+  browser closes and you are back in the app, signed in (where the browser
+  offers an Auth Tab, as Chrome does; otherwise tap **Open the MTG Assistant
+  Gateway app** on the last page). The browser itself stays signed out of the
+  gateway.
   Whether a passkey or autofill works is up to your browser and password
   manager: if it works on the website in that browser, it works here. If you
   would rather sign in inside the app, the sign-in page has a link for that;
@@ -365,10 +367,10 @@ The app talks only to pages and endpoints the gateway already serves:
 | Used for | Endpoint |
 |---|---|
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
-| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `POST /login/app` with the one-time code ([section 13](#13-privacy-and-security-notes)) |
+| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
-| App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
+| Sign-in return and App Links | `GET /.well-known/assetlinks.json`: the gateway vouches for the app it ships (its package ID and signing certificate), with no setting |
 | Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
 | Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
 | Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
@@ -621,9 +623,8 @@ The usual convention is a domain you control, reversed, plus a name. This app is
 sideloaded, not published in a store, so it doesn't need one:
 `local.mtgassistantgateway.app` is a neutral name that belongs to no domain or person.
 It lives in one file, `android/app/application-id.txt`; the Gradle build reads it from
-there. Change it and rebuild, and set `MTG_ANDROID_PACKAGE` on your gateway to the same
-ID so the browser sign-in hands back to your build
-([DEPLOY.md](DEPLOY.md#environment-reference)). The launcher shortcuts in
+there. Change it and rebuild: the build records the ID next to the APK, and a gateway that
+ships your build (`MTG_APP_DIR`) hands the browser sign-in back to that ID by itself. The launcher shortcuts in
 `android/app/src/main/res/xml/shortcuts.xml` name the ID too (Android reads them without the
 app's resources, so it is written out there): change it there as well; the app's unit tests
 fail until both match. The Kotlin package name
@@ -644,18 +645,10 @@ matching statement on the gateway:
 1. Build with `APP_LINKS_HOST=mtg.example.com` (or set the
    `ANDROID_APP_LINKS_HOST` repository variable for the CI build). The
    resulting APK claims `https://mtg.example.com/...`.
-2. Put the signing certificate's SHA-256 fingerprint
-   ([section 8](#8-signing-your-release-key)) in `MTG_ANDROID_ASSETLINKS`
-   ([DEPLOY.md](DEPLOY.md#environment-reference)), which the gateway serves at
-   `/.well-known/assetlinks.json`:
-
-   ```json
-   [{"relation": ["delegate_permission/common.handle_all_urls"],
-     "target": {"namespace": "android_app",
-                "package_name": "local.mtgassistantgateway.app",
-                "sha256_cert_fingerprints": ["D4:F7:32:...:97:1E"]}}]
-   ```
-
+2. Ship that APK from the gateway (`MTG_APP_DIR`, [section 1](#1-getting-the-app)).
+   The gateway serves `/.well-known/assetlinks.json` itself, naming the
+   package ID and the signing certificate the build
+   recorded in `mtg-assistant-gateway.json` next to the APK; nothing to set.
    The package name must match `android/app/application-id.txt`.
 3. Install the app. Android checks the statement at install time; after that a
    tap on a gateway link opens the page in the app. If verification fails
@@ -702,20 +695,27 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
   each sign-in, keeps it on the phone, and sends only its SHA-256 with the
   browser's `/login`. After the sign-in service, the gateway sets no cookie in
-  the browser; it keeps a one-time code for two minutes and shows a page whose
-  button opens the app through an `intent:` link naming the app's package ID
-  (`MTG_ANDROID_PACKAGE`, [DEPLOY.md](DEPLOY.md#environment-reference)), so
-  Android hands it only to the installed app with that ID; that relies on the
-  browser honouring the package in `intent:` links, which Chrome does (other
-  browsers not checked), so the button waits for your tap and names the app.
+  the browser; it keeps a one-time code for two minutes and sends the browser
+  to `/login/app-return?code=...` on the gateway's own address. Where the
+  browser has an Auth Tab, the app opened the sign-in in one, and the Auth Tab
+  hands that address back to the app and closes, but only to an app the
+  gateway vouches for at `/.well-known/assetlinks.json`: the package ID and
+  the signing certificate of the app the gateway ships, as its build recorded
+  them next to the APK. Any other browser shows a page whose button opens the
+  app through an `intent:` link naming the app's package ID, so Android hands
+  it only to the installed app with that ID; that relies on the browser
+  honouring the package in `intent:` links, which Chrome does (other browsers
+  not checked), so the button waits for your tap and names the app. The
+  one-time code is in that address, so a reverse proxy that logs full
+  addresses (many do by default) may keep it in its access log;
+  the gateway's own log never records it, and it is useless there: it works
+  only with the app's secret, once, within two minutes.
   The app then posts the code with its secret to `/login/app`, and only then
   is the session created, in the app. The code is worthless without the
   secret, works once, and one wrong try burns it. `/login/app` accepts posts
   only from the app (its user agent, never from another site's page), so
   nobody can sign your browser in to their account with a code of theirs.
-  A verified App Link ([section 12](#12-app-links-opening-gateway-links-in-the-app))
-  would not depend on the browser for the hand-back; it is not used for this
-  yet because it needs per-gateway setup. The browser's own sign-in at the
+  The browser's own sign-in at the
   sign-in service stays signed in, as on the website; the app's **Sign out**
   makes the next sign-in ask for your credentials again.
 - JavaScript runs only for pages the WebView loads, and the native bridge the

@@ -11,7 +11,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 An assistant now reads the same Forge seed the report page shows, Forge's load problems leave out
 Java's own warnings, a solo test shorter than five turns no longer talks about turn 5, and the
-research service has the current rules from the moment it starts.
+research service has the current rules from the moment it starts. Signing in to the Android app
+now comes back to the app by itself.
 
 ### Upgrade notes
 - Update as usual ([docs/UPGRADING.md](docs/UPGRADING.md)): the newest stack file and example
@@ -22,7 +23,19 @@ research service has the current rules from the moment it starts.
   it never casts).
 - No database change, so this update saves no before-upgrade copy, and going back to 0.7.44 needs
   only the `MTG_TAG` and `MF_TAG` changes.
-- No new settings or secrets.
+- No new settings or secrets. `MTG_ANDROID_ASSETLINKS` and `MTG_ANDROID_PACKAGE` are gone: the
+  gateway now takes the Android app's package ID and signing certificate from the app it ships. A
+  value left in your variables file is ignored, and you can delete the line.
+- The Android app's automatic sign-in return needs this version of the app as well as of the
+  gateway: the app offers the update itself (or download it from the gateway's Android app page).
+
+### Changed
+- **Android sign-in returns to the app by itself.** After signing in, the browser no longer stops
+  on a "Signed in" page waiting for you to tap **Open the MTG Assistant Gateway app**. Where your
+  browser supports it (Chrome's Auth Tab), it closes and you are back in the app, signed in. The
+  browser hands the sign-in back only to the app the gateway ships, checked against the app's
+  signing certificate, which the gateway now publishes at `/.well-known/assetlinks.json` with no
+  setting. Other browsers, or an app the gateway didn't ship, still get the page with the button.
 
 ### Fixed
 - **Forge seeds in Claude and ChatGPT.** The seed the gateway picks for a report's Forge games and

@@ -14,12 +14,7 @@ from .track_a_helpers import apply_any
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
 
-COMPANION = AUTO_PROXY.but(
-    settings={
-        **AUTO_PROXY.settings,
-        "android_assetlinks": '[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
-    }
-)
+COMPANION = AUTO_PROXY
 stack_options = stack_with(COMPANION)
 
 
@@ -829,7 +824,7 @@ async def test_app_shell_routes(stack: Stack) -> None:
     assert "script-src 'self'; connect-src 'self';" in sw.text
     links = await h.http.get("/.well-known/assetlinks.json")
     assert links.status_code == 200
-    assert links.json()[0]["relation"] == ["delegate_permission/common.handle_all_urls"]
+    assert links.json() == []  # no app shipped here (test_app_signin covers the statement)
     assert (await h.http.get("/static/../app.py")).status_code == 404
     assert (await h.http.get("/static/nope.js")).status_code == 404
 

@@ -11,8 +11,13 @@ and autofill work, and the browser hands the result back to the app.
 2. The app makes a random verifier, keeps it, and opens
    ``/login?next=...&app_challenge=<SHA-256 of the verifier>`` in the browser.
 3. After the identity provider, ``/auth/callback`` sets no cookie in the browser. It keeps a
-   one-time code (two minutes, in memory) bound to the challenge, and shows a page whose button
-   opens the app through an ``intent:`` link pinned to the app's package ID.
+   one-time code (two minutes, in memory) bound to the challenge and sends the browser to
+   ``RETURN_PATH?code=...`` on the gateway's own address. The app opened the sign-in in an Auth
+   Tab where the browser has one: the Auth Tab hands that address back to the app and closes, with
+   no tap, but only to an app the gateway vouches for in ``/.well-known/assetlinks.json`` (the app
+   this gateway ships, signed with the certificate its build recorded; app_page.py). Any other
+   browser, or an app the gateway does not vouch for, loads the address: a page whose button opens
+   the app through an ``intent:`` link pinned to the app's package ID.
 4. The app posts the code with its verifier to ``/login/app`` from its WebView; only then is the
    browser session created, with its cookie set in the WebView.
 
@@ -20,11 +25,11 @@ The code alone is useless: without the verifier, which never leaves the app that
 sign-in, ``/login/app`` refuses it, and ``/login/app`` takes posts only from the app (its user
 agent, not from another site's page), so nobody can push their own code into someone else's
 browser. An app on the phone that starts a sign-in of its own (and so knows its own verifier)
-should not receive the code either: the ``intent:`` link names the gateway's app by package ID,
-and Android lets only one installed app hold a package ID. That relies on the browser honouring
-``package=`` in ``intent:`` links (Chrome documents it; other browsers are not verified), so the
-link also waits for a tap and says which app it opens. A verified https App Link would not rely
-on the browser; it needs per-gateway setup (docs/ANDROID.md, section 12).
+should not receive the code either. The Auth Tab returns the address only to an app whose
+package ID and signing certificate the gateway's assetlinks.json names. The ``intent:`` link
+names the gateway's app by package ID, and Android lets only one installed app hold a package
+ID; that relies on the browser honouring ``package=`` in ``intent:`` links (Chrome documents
+it; other browsers are not verified), so the link also waits for a tap and says which app it opens.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ VERIFIER = re.compile(r"[A-Za-z0-9_-]{43,128}")
 CODE = re.compile(r"[A-Za-z0-9_-]{43}")
 SCHEME = "mtgassistant-signin"
 SCRIPT = "/static/app-signin.js"
+RETURN_PATH = "/login/app-return"  # where the Auth Tab hands back; BrowserSignIn.RETURN_PATH in the app
 CODE_TTL = 120
 MAX_PENDING = 500
 
@@ -153,6 +159,8 @@ def expired_body(next_path: str) -> str:
 __all__ = [
     "AppSignins",
     "CHALLENGE",
+    "CODE",
+    "RETURN_PATH",
     "challenge_of",
     "expired_body",
     "handoff_body",
