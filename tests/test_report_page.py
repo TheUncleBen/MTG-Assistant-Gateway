@@ -221,11 +221,11 @@ def test_long_lists_show_six_rows_then_show_all_and_categories_open_on_tap() -> 
     unmodeled = model.split("id='rv-g-unmodeled'")[1].split("<section")[0]
     first = unmodeled.split("<details class='ig-more'>")[0]
     assert first.count("class='cardlink'") == rp.SHOW_FIRST
-    assert "<summary><span class='disc'>Show all 32 cards<svg" in unmodeled
+    assert "<summary><span class='disc'>Show all 32 cards</span>" in unmodeled
     opp = model.split("id='rv-g-opp'")[1].split("<section")[0]
     cats = re.findall(r"<details class='ig-dis'><summary><span class='nm'>([^<]+)</span>", opp)
     assert cats and "Removal and other interaction" in cats and "ig-sub" not in opp
-    assert model.count("<span class='disc'>Details<svg") == 4 and "class='more'" not in model
+    assert model.count("<span class='disc'>Details</span>") == 4 and "class='more'" not in model
     short = rp.model_section_html(
         {"deck_size": 100, "honesty": {"unrecognized": [{"name": f"C{i}"} for i in range(8)]}}
     )

@@ -1453,7 +1453,7 @@ async def test_each_forge_game_shows_as_it_finishes(tmp_path: Path, monkeypatch:
     section = reports.get("alice", rid)["forge"]
     assert section["state"] == "running" and forge_status(section)["games_done"] == 2
     page = forge_html(section, live=True, report_id=rid)
-    assert "<summary>Each game (2)</summary>" in page and "data-forge-live" in page
+    assert "<summary class='fold-btn'>Each game (2)</summary>" in page and "data-forge-live" in page
     fake.finish(jid, [1, 3, 1, 1])
     await asyncio.wait_for(reports._forge_task, timeout=20)
     assert reports.get("alice", rid)["forge"]["state"] == "done"
