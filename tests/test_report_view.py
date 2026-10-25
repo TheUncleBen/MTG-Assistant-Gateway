@@ -172,15 +172,15 @@ def test_a_short_run_claims_no_turn_it_did_not_play() -> None:
 def test_page_speaks_plainly_and_shows_every_panel() -> None:
     html = rv.report_body_html(report(), stats_html="<div class='tiles'>stats</div>", reused=True)
     for text in (
-        "Solo test (300 games, no opponents)",
+        "Quick solo test (300 games, no opponents)",
         "class='tiles wide rv-stats'",
         "class='ci'",
         "class='charts rv-charts'",
         "<svg",
-        "What the solo test could not model",
+        "What the quick solo test leaves out",
         "Played without their effect",
         "32 of 98 cards (33% of the deck)",
-        "Left out on purpose",
+        "Needs opponents",
         "Removal and other interaction",
         "Issues found</span>",
         "Deck statistics",
@@ -218,7 +218,7 @@ def test_markdown_and_html_exports() -> None:
     assert md.startswith("# Deck report: Immortal Reckoning\n")
     assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
     assert (
-        "## Solo test (300 games, no opponents)" in md
+        "## Quick solo test (300 games, no opponents)" in md
         and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
     )
     assert (
@@ -296,9 +296,11 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
     assert "underperforms" not in html and "says nothing about how the card does" in html
     assert (
         "Played with their effect: 49 of 98 cards (50% of the deck). Known: 66 of 98 cards (67% of the "
-        "deck), counting the cards played with their effect and those left out on purpose. The rest are "
-        "listed below." in html
+        "deck), counting the cards played with their effect and those that need opponents. The rest "
+        "are listed below." in rv.report_body_html(report(), standalone=True)
     )
+    # the signed-in page says the same as the summary card's rows and footer
+    assert "Known: 66 of 98 cards (67% of the deck), counting the cards played with their effect" in html
     md = rv.report_markdown(report())
     assert "underperforms" not in md and "Played with their effect: 49 of 98 cards (50% of the deck)" in md
     g = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
@@ -372,14 +374,14 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
 
 def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
     """Ben, 0.7.31 test round: the request for the assistant covers not only the cards played
-    without their effect but also those left out on purpose, those that never mattered and the
+    without their effect but also those that need opponents, those that never mattered and the
     shortcuts, so the assistant can say where any of them matters."""
     r = report(deck_url="https://archidekt.com/decks/42")
     g = rv.parse_goldfish(r["goldfish"], deck_size=100)
     h = g["honesty"]
     assert h.get("out_of_scope") and h.get("low_impact") and h.get("approximations")
     text = rv.report_body_html(r).split("id='ask-model'")[1].split("</textarea>")[0]
-    assert "left out on purpose" in text
+    assert "These cards need opponents, so the solo test left them out" in text
     assert rv.front_face(h["out_of_scope"][0]["cards"][0]["name"]) in text
     assert "never mattered: " + rv.front_face(h["low_impact"][0]) in text
     assert h["approximations"][0]["label"] in text
@@ -390,7 +392,7 @@ def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
 
 
 def test_left_out_groups_count_copies_as_their_heading_does() -> None:
-    """A group under "Left out on purpose" counts copies, like the heading."""
+    """A group under "Needs opponents" counts copies, like the heading."""
     g = {
         "deck_size": 60,
         "honesty": {

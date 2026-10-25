@@ -6,7 +6,7 @@ PASSED" or "ISSUES FOUND" with the problems under it. This module reads those te
 data (never raising on odd or partial input: a report of a failed run is still a page) and
 draws the page from that data: summary tiles with their confidence intervals, small inline-SVG
 charts coloured by the theme (no script), a plain-language account of what the simulation
-could not model, the validation verdict, and the raw output folded away. The same data makes
+leaves out, the validation verdict, and the raw output folded away. The same data makes
 the Markdown and the self-contained HTML exports.
 """
 
@@ -751,6 +751,7 @@ def _names(cards: list[dict[str, Any]], *, menu: bool = False) -> str:
     for c in cards:
         copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
         drawn = f" <i>drawn {_pct(c['drawn'])}</i>" if c.get("drawn") is not None else ""
+        drawn = " <i>commander</i>" if c.get("commander") else drawn
         name = front_face(c["name"])
         shown = (
             f"<button type='button' class='cardlink' data-card='{_esc(name)}'>{_esc(name)}</button>"
@@ -975,15 +976,15 @@ ASK_LABEL = "Copy a request for your assistant"
 
 
 def _ask_context(honesty: dict[str, Any] | None) -> str:
-    """The request's closing context: the solo test's other groups (left out on purpose, played
+    """The request's closing context: the solo test's other groups (need opponents, played
     but never mattered, shortcuts), so the assistant can say where any of those cards matters."""
     h = honesty if isinstance(honesty, dict) else {}
     parts: list[str] = []
     left = [front_face(c["name"]) for grp in h.get("out_of_scope") or [] for c in grp.get("cards") or []]
     if left:
         parts.append(
-            "These cards were left out on purpose, because the solo test has no opponent for them to act "
-            f"on: {', '.join(left)}."
+            "These cards need opponents, so the solo test left them out: it has no opponent for them to "
+            f"act on: {', '.join(left)}."
         )
     low = [front_face(n) for n in h.get("low_impact") or []]
     if low:
@@ -1078,9 +1079,9 @@ def solo_heading(g: dict[str, Any] | None) -> str:
 def honesty_groups(
     g: dict[str, Any], ask: str = "", *, menu: bool = False, forge_full: bool = False
 ) -> list[tuple[str, str, str, str]]:
-    """The groups of the "what the simulation could not model" panel, in order, as (key, heading,
+    """The groups of the "what the quick solo test leaves out" panel, in order, as (key, heading,
     count words, body): the cards played without their effect (with ``ask`` under their names),
-    those left out on purpose, those played but never mattered, and the model's shortcuts. The
+    those that need opponents, those played but never mattered, and the model's shortcuts. The
     export draws them as headed blocks (honesty_html), the signed-in page as folds, with the card
     menu on every name (``menu``). ``forge_full``: the report has a finished Forge solo test,
     which plays the cards the quick test has no model for."""
@@ -1144,15 +1145,21 @@ def honesty_groups(
     return out
 
 
-def honesty_html(g: dict[str, Any], ask: str = "") -> str:
-    """The "what the simulation could not model" panel body, or '' when there is nothing to say.
+def forge_solo_done(r: dict[str, Any]) -> bool:
+    """The report has a finished Forge solo test, which plays the cards the quick test cannot."""
+    fs = r.get("forge_solo")
+    return isinstance(fs, dict) and fs.get("state") == "done"
+
+
+def honesty_html(g: dict[str, Any], ask: str = "", *, forge_full: bool = False) -> str:
+    """The "what the quick solo test leaves out" panel body, or '' when there is nothing to say.
     ``ask`` is the copy-a-request block (ask_html) the signed-in page puts under the cards played
     without their effect."""
     h = g.get("honesty") or {}
     parts: list[str] = []
     if (h.get("unrecognized") or h.get("out_of_scope")) and coverage_text(g):
         parts.append(f"<p class='b coverage'>{_esc(coverage_text(g))}</p>")
-    for key, heading, count, body in honesty_groups(g, ask):
+    for key, heading, count, body in honesty_groups(g, ask, forge_full=forge_full):
         cls = "group unmodeled" if key == "unmodeled" else "group"
         # the shortcuts' count is the page's fold summary only
         small = f" <small>{_esc(count)}</small>" if count and key != "approx" else ""
@@ -1795,6 +1802,18 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _mark_commanders(g: dict[str, Any], names: list[Any]) -> None:
+    """Mark the commanders among the honesty groups' cards: a commander starts in the command zone,
+    so it is never drawn, and its row says "commander" instead of "drawn 0%"."""
+    cmd = {front_face(n).casefold() for n in names if isinstance(n, str) and n}
+    h = g.get("honesty") or {}
+    aside = [c for grp in h.get("out_of_scope") or [] for c in grp["cards"]]
+    cards = list(h.get("unrecognized") or []) + aside
+    for c in cards:
+        if isinstance(c, dict) and front_face(c.get("name")).casefold() in cmd:
+            c["commander"] = True
+
+
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     """Everything the page, the Markdown and the HTML export share, computed once."""
     stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
@@ -1805,6 +1824,8 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     # deck is not sent to it, and one an older report sent is not shown.
     v = None if constructed else parse_validation(r.get("validation"))
     commander = (g or {}).get("commander") or ((stats.get("commanders") or [None])[0] if stats else None)
+    if g:
+        _mark_commanders(g, [commander, *(stats.get("commanders") or [])])
     return {
         "goldfish": g,
         "validation": v,
@@ -1812,7 +1833,7 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
         "commander": commander,
         "tiles": tiles_for(g) if g else [],
         "charts": charts_for(g) if g else [],
-        "honesty": honesty_html(g) if g else "",
+        "honesty": honesty_html(g, forge_full=forge_solo_done(r)) if g else "",
         "unmodeled": ((g or {}).get("honesty") or {}).get("unrecognized") or [],
         "triggers": _triggers_html(g) if g else "",
     }
@@ -1925,7 +1946,7 @@ def report_body_html(
             + "</div>"
         )
         ask = "" if standalone else ask_html(r, s["unmodeled"], (g or {}).get("honesty"))
-        honesty = s["honesty"] if standalone else honesty_html(g, ask)
+        honesty = s["honesty"] if standalone else honesty_html(g, ask, forge_full=forge_solo_done(r))
         if honesty:
             body += (
                 f"<div class='card honesty'><h2>{MODEL_HEADING}</h2>"
