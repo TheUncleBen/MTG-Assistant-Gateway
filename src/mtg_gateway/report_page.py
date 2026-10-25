@@ -307,7 +307,7 @@ def _games_html(res: dict[str, Any], seats: list[dict[str, Any]]) -> str:
         cls="rv-games",
     )
     return (
-        f"<details class='rv-det games'><summary>Each game ({len(listed)})</summary>"
+        f"<details class='rv-det games'><summary class='fold-btn'>Each game ({len(listed)})</summary>"
         f"{table}{head}{rows}</div></details>"
     )
 
@@ -892,7 +892,8 @@ def solo_section_html(
     summary = ""
     if g.get("summary"):
         summary = (
-            "<details class='rv-det'><summary>The simulator's own summary</summary><ul class='rv-notes'>"
+            "<details class='rv-det'><summary class='fold-btn'>The simulator's own summary</summary>"
+            "<ul class='rv-notes'>"
             + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
             + "</ul></details>"
         )
@@ -964,7 +965,7 @@ def _card(rows: list[str], kind: str, noun: str) -> str:
         return f"<div class='ig'>{ul(rows)}</div>"
     return (
         f"<div class='ig'>{ul(rows[:SHOW_FIRST])}<details class='ig-more'>"
-        f"<summary><span class='disc'>Show all {len(rows)} {noun}{icon('chev')}</span></summary>"
+        f"<summary><span class='disc'>Show all {len(rows)} {noun}</span></summary>"
         f"{ul(rows[SHOW_FIRST:])}</details></div>"
     )
 
@@ -975,7 +976,7 @@ def _group(gid: str, heading: str, count: str, info: str, body: str) -> str:
     return (
         f"<section class='ig-sec' id='{gid}' aria-labelledby='{gid}-h'>"
         f"<details class='ig-info'><summary><h3 id='{gid}-h'>{_esc(heading)}</h3>"
-        f"<span class='n'>{_esc(count)}</span><span class='disc'>Details{icon('chev')}</span></summary>"
+        f"<span class='n'>{_esc(count)}</span><span class='disc'>Details</span></summary>"
         f"<div class='ig-blurb'>{info}</div></details>{body}</section>"
     )
 
@@ -1202,8 +1203,8 @@ def report_page_html(
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:
         raw = (
-            "<details class='ui-card rv-det rv-raw raw' id='rv-raw'><summary>Raw output from the research "
-            f"service</summary>{raw}</details>"
+            "<details class='ui-card rv-det rv-raw raw' id='rv-raw'><summary class='fold-btn'>"
+            f"Raw output from the research service</summary>{raw}</details>"
         )
     jump = _jump_html(r, s, model=bool(model), valid=bool(valid), stats=bool(stats), raw=bool(raw))
     return (

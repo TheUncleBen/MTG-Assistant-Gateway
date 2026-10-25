@@ -733,7 +733,7 @@ def trend_html(trend: dict[str, Any] | None) -> str:
         "from the reports that ran a simulation.</p>"
         + changed
         + f"<ul class='plain tmetrics'>{''.join(items)}</ul>"
-        "<details class='tdata'><summary>The numbers by report</summary>"
+        "<details class='tdata'><summary class='fold-btn'>The numbers by report</summary>"
         "<div class='tbl' role='region' aria-label='Report numbers, oldest first' tabindex='0'>"
         f"<table><caption class='sr-only'>Each report's numbers, oldest first</caption><thead><tr>"
         f"<th scope='col'>Report</th>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"

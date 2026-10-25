@@ -1545,7 +1545,7 @@ def _identity_details(user: dict[str, Any]) -> str:
     ]
     facts = "".join(f"<dt>{k}</dt><dd>{html.escape(str(v))}</dd>" for k, v in rows if v)
     return (
-        "<details class='identity'><summary>What your sign-in shares</summary>"
+        "<details class='identity'><summary class='fold-btn'>What your sign-in shares</summary>"
         f"<dl class='meta'>{facts or '<dt>Nothing</dt><dd></dd>'}</dl>"
         "<p class='muted small'>The gateway uses your groups only to check you may use it. "
         "Your assistant is told your name and nothing else from this list.</p></details>"
@@ -1589,7 +1589,7 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
             f"{'' if allowed else ' disabled'}><span>{label}"
             f"{'' if allowed else NOT_ALLOWED}</span></label>"
             f"<details class='mode-info'><summary title='What this mode does'>"
-            f"<span class='disc round'>{icon('chev')}</span>"
+            "<span class='disc round'></span>"
             f"<span class='sr-only'>What this mode does: {label}</span></summary>"
             f"<div class='mode-body'>{body}</div></details></div>"
         )
@@ -2225,7 +2225,7 @@ def _lists_before(p: dict[str, Any]) -> str:
         f"<li>{html.escape(_before_line(kind, e))}</li>" for e in before[:200] if isinstance(e, dict)
     )
     return (
-        "<details class='raw'><summary>Before: your list as it was just before</summary>"
+        "<details class='raw'><summary class='fold-btn'>Before: your list as it was just before</summary>"
         f"<ul class='small'>{items}</ul></details>"
     )
 
@@ -2406,7 +2406,7 @@ def _proposal_body(
         + f"<h3 class='ui-section'>{heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
-        f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
+        f"<details class='raw'><summary class='fold-btn'>Plain-text diff</summary>{raw}</details>"
         + _lists_before(p)
         + _also_waiting(p, others)
     )
@@ -2532,7 +2532,7 @@ def _proposal_body(
     if result:
         # the raw record stays one tap away, not as member text (approved: "Technical details")
         body += (
-            "<details class='raw pr-tech'><summary>Technical details</summary>"
+            "<details class='raw pr-tech'><summary class='fold-btn'>Technical details</summary>"
             f"<pre>{html.escape(_pretty(result))}</pre></details>"
         )
     return body

@@ -1927,7 +1927,7 @@ def report_body_html(
         summary = ""
         if g.get("summary"):
             summary = (
-                "<details class='disclosure'><summary>The simulator's own summary</summary>"
+                "<details class='disclosure'><summary class='fold-btn'>The simulator's own summary</summary>"
                 "<ul class='sumlines'>"
                 + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
                 + "</ul></details>"
@@ -1970,9 +1970,8 @@ def report_body_html(
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:
         body += (
-            "<details class='card raw disclosure'><summary>Raw output from the research service</summary>"
-            + raw
-            + "</details>"
+            "<details class='card raw disclosure'><summary class='fold-btn'>Raw output from the research "
+            "service</summary>" + raw + "</details>"
         )
     return f"<div class='report'>{body}</div>"
 
