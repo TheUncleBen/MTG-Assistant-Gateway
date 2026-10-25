@@ -2146,7 +2146,7 @@ def report_status(goldfish: Any, validation: Any, forge: Any, solo: Any = None) 
     """One word for where a report stands: "queued" or "running" while its Forge games or its
     Forge solo test wait or play, else "complete" when every part asked for came back, "partial"
     when some did not (a failed simulation or validation, Forge games that failed or found no
-    place), "failed" when none did. Forge left out on purpose (not asked for, or a 60-card deck)
+    place), "failed" when none did. Forge not run on purpose (not asked for, or a 60-card deck)
     is not a failure, nor is a Forge solo test skipped (Forge busy or too old)."""
     going = [
         x.get("state") for x in (forge, solo) if isinstance(x, dict) and x.get("state") not in FINAL_STATES

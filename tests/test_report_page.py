@@ -138,6 +138,11 @@ def test_card_lists_keep_even_rows_and_name_the_commander() -> None:
     html = rp.model_section_html(g)
     assert html.count("<li class='fill' aria-hidden='true'></li>") == 2  # 3 cards, then 1 card
     assert "Liesa, Forgotten Archangel</button></span><span class='v'>commander</span>" in html
+    # a copy count stays on the name's line, inside its button
+    two = rp.model_section_html(
+        {"deck_size": 60, "honesty": {"unrecognized": [{"name": "Opt", "copies": 4}]}}
+    )
+    assert "class='cardlink' data-card='Opt'>4× Opt</button>" in two
     assert "drawn 0%" not in html
     # the commanders are marked from the report's own data: the run's commander (Liesa, drawn 0% in
     # the fixture) and the deck's commanders

@@ -385,7 +385,7 @@ def add_history_routes(
     @server.custom_route("/history/reports/{rid}", methods=["GET"], include_in_schema=False)
     async def report_page(request: Request) -> Response:
         """One stored report as a page a person reads: the deck, the headline numbers of the goldfish
-        simulation with their confidence intervals, charts, what the simulation could not model,
+        simulation with their confidence intervals, charts, what the quick solo test leaves out,
         the validation verdict and the deck statistics; the service's raw text folded away."""
         sub, sid = browser_session(state, request)
         if not sub:
