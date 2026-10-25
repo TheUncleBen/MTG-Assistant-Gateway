@@ -466,7 +466,7 @@ def guide_body(
         "as tiles with their 95% intervals (the turn the commander lands, the chance of 40 damage or a "
         "lethal board by the last turn, mulligans, land drops); four small charts (milestones reached by "
         "turn, the turn the commander was cast, mana available and damage per turn); in plain words what "
-        "the solo test could not model, with each group's share of the deck; and the validation verdict "
+        "the quick solo test leaves out, with each group's share of the deck; and the validation verdict "
         "as a badge with the problems listed. The raw output stays, folded away at the end.</span></li>"
         "<li><span>Keep it: the buttons download the report as <strong>Markdown</strong> or as a "
         "self-contained <strong>HTML page</strong> (light and dark, no scripts) and <strong>Copy as "

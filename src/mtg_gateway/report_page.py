@@ -2,8 +2,8 @@
 
 Crumbs, a header (the deck as the title, the status as a label, the meta line, the export
 buttons), six key-number widgets, a sticky row of section links, then the sections as flat blocks
-with one heading each: Forge games, Solo test, What the solo test could not model (its groups
-folded, the first open), Validation, Deck statistics and the raw output (folded). One orange
+with one heading each: Forge games, Quick solo test, What the quick solo test leaves out (inset
+lists, each group with Details), Validation, Deck statistics and the raw output (folded). One orange
 button: Play more games.
 
 Every number and sentence comes from report_view, which also draws the Markdown and the
@@ -50,6 +50,7 @@ from .report_view import (
     ask_html,
     coverage,
     forge_lines,
+    forge_solo_done,
     forge_stopped_early,
     forge_stopped_text,
     front_face,
@@ -778,8 +779,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                 f"{cov['pct']}%",
                 unit=f"{cov['modeled']} of {size} cards",
                 detail_html=_coverage_bar(cov["modeled"], aside, blanks, size)
-                + f"<span class='tx'>{blanks} played without their effect · {aside} left out on "
-                "purpose</span>",
+                + f"<span class='tx'>{blanks} played without their effect · {aside} need opponents</span>",
                 actions=[_go("See the cards", "#rv-model")],
                 tone="accent" if cov["pct"] < COVERAGE_WARN else "",
             )
@@ -861,7 +861,7 @@ def solo_section_html(
     csrf: str,
     models_opener: str = "",
 ) -> tuple[str, str]:
-    """The solo test section and the "what it could not model" section ('' when none).
+    """The solo test section and the "what the quick solo test leaves out" section ('' when none).
     ``models_opener``: the My card models button, placed where saved descriptions are mentioned
     (under the ones this run played, and beside the request for cards played without effect)."""
     g, v = s["goldfish"], s["validation"]
@@ -923,9 +923,7 @@ def solo_section_html(
         cls="btn-plain",
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
-    fs = r.get("forge_solo")
-    forge_full = isinstance(fs, dict) and fs.get("state") == "done"
-    model = model_section_html(g, ask, models_opener, forge_full=forge_full)
+    model = model_section_html(g, ask, models_opener, forge_full=forge_solo_done(r))
     return solo, model
 
 
@@ -937,6 +935,7 @@ def _rows(cards: list[dict[str, Any]]) -> str:
         copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
         name = front_face(c["name"])
         drawn = f"<span class='v'>drawn {_pct(c['drawn'])}</span>" if c.get("drawn") is not None else ""
+        drawn = "<span class='v'>commander</span>" if c.get("commander") else drawn
         items.append(
             f"<li><span class='nm'>{copies}<button type='button' class='cardlink' data-card='{_esc(name)}'>"
             f"{_esc(name)}</button></span>{drawn}</li>"

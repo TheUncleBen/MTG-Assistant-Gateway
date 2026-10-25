@@ -89,6 +89,16 @@ to the Android app coming back to the app by itself, and faster pages and deck d
   browser hands the sign-in back only to the app the gateway ships, checked against the app's
   signing certificate, which the gateway now publishes at `/.well-known/assetlinks.json` with no
   setting. Other browsers, or an app the gateway didn't ship, still get the page with the button.
+- **What the quick solo test leaves out**, on a report's page, is laid out like the account
+  settings lists. A summary card shows the bar and the three counts; the two left-out counts lead
+  to their groups. Each group's explanation is folded under **Details** after its count. The cards
+  are rows, in two columns on a wide screen, and the shortcuts are a list. **Copy a request for
+  your assistant** and **My card models** are two even buttons under the cards played without their
+  effect. "Left out on purpose" is now "Needs opponents", here, in the downloaded report and in the
+  request for your assistant. The two solo tests are named "Quick solo test" and "Full-rules solo
+  test by Forge".
+- **A commander** among the cards the quick solo test lists says "commander" instead of "drawn 0%":
+  it starts in the command zone, so it is never drawn.
 
 ### Fixed
 - **The Claude logo** beside a Claude connection: Claude registers sign-in addresses on both
@@ -117,8 +127,8 @@ to the Android app coming back to the app by itself, and faster pages and deck d
   says the results count only the games that came back, and keeps the end of Forge's log.
 - **Cards the solo test lists.** Cards that only act on opponents or their creatures (votes,
   returning every creature to its owner's hand, a creature dealing damage equal to its power to
-  another, Auras that shut a creature down, regeneration) are now listed under "left out on
-  purpose", not with the cards it played without their effect. A creature whose ability exiled a
+  another, Auras that shut a creature down, regeneration) are now listed under "Needs
+  opponents", not with the cards it played without their effect. A creature whose ability exiled a
   creature and then did more (for example Displacer Kitten) counted as played with its effect
   while that ability never played; it is now listed as played without its effect.
 - **More card text in the solo test.** It now reads landcycling and the other options it never
