@@ -287,6 +287,11 @@ async def test_a_game_without_a_result_is_named() -> None:
 
     assert "game 3 of the 5 gave no result" in forge_html(done)
     assert "game 3 of the 5 gave no result" in forge_section_html(done)
+    # the count of games is the gateway's own: a service that answers with a huge count names
+    # only the games the gateway asked for
+    fake.jobs[section["job_id"]]["games_requested"] = 1000
+    assert (await refresh(client, section))["no_result_games"] == [3]
+    fake.jobs[section["job_id"]]["games_requested"] = 5
     # every game back: nothing extra
     fake.jobs[section["job_id"]]["results"] = [{"game": g, "winner": 1} for g in range(1, 6)]
     whole = await refresh(client, section)

@@ -94,6 +94,10 @@ async def test_sign_in_pages_are_never_compressed(stack: Stack) -> None:
     try:
         r = await _raw(b, "/login/app-return?code=" + "a" * 43, PAGE)
         assert r.status_code == 200 and "content-encoding" not in r.headers
+        # nor the Account pages: inside the app, Account details carries the notification topic
+        for path in ("/account", "/account/details", "/account?ok=saved"):
+            r = await _raw(b, path, PAGE)
+            assert r.status_code == 200 and "content-encoding" not in r.headers, path
     finally:
         await b.http.aclose()
 

@@ -708,12 +708,13 @@ async def refresh(
         out["load_problems"] = problems
     if job["state"] in ("failed", "timeout"):
         out["log_tail"] = (job.get("log_tail") or [])[-15:]
-    elif job["state"] == "done" and isinstance(asked, int):
+    elif job["state"] == "done" and isinstance(own := section.get("games_requested"), int):
         # Forge can end a game without printing its result (seen on a Pi 4): name the games that
-        # never came back, and keep the end of Forge's log, which may say why.
+        # never came back, and keep the end of Forge's log, which may say why. The count is the
+        # gateway's own record of what it asked for, never the number the service sends back.
         back = {r["game"] for r in played if isinstance(r.get("game"), int)}
-        missing = [g for g in range(1, asked + 1) if g not in back]
-        if missing and len(back) < asked:
+        missing = [g for g in range(1, own + 1) if g not in back]
+        if missing and len(back) < own:
             out["no_result_games"] = missing
             out["log_tail"] = (job.get("log_tail") or [])[-15:]
     return out

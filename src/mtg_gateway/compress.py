@@ -18,8 +18,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 # Level 6: nearly the size of 9 for a fraction of the CPU on a Raspberry Pi.
 LEVEL = 6
 # The sign-in's pages carry one-time values (the consent form's token, the Android app's
-# hand-back code) and are small: never compressed.
-UNCOMPRESSED = ("/login", "/logout", "/auth/", "/authorize")
+# hand-back code) and are small: never compressed. Neither are the Account pages: inside the app
+# Account details carries the member's notification topic, a lasting secret that is not masked.
+UNCOMPRESSED = ("/login", "/logout", "/auth/", "/authorize", "/account")
 
 
 class PageGzip:

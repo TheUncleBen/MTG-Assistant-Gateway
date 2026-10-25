@@ -7,7 +7,7 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.45] - 2026-10-24
+## [0.7.45] - 2026-10-25
 
 Shorter stack and example variables files with every feature on by default, the tuning settings on
 the Settings page only, a new Settings row for the Archidekt backup folder, the Claude logo beside
