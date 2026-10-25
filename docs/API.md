@@ -227,7 +227,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/admin/models` (GET, POST) | Admin: the simulator's kept card models, who added each and when, with a Remove button per model |
 | `/admin/settings` (GET, POST) | Admin: the gateway's settings, grouped, with where each value comes from; a value set in the deployment is shown read-only, the others can be changed here |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |
-| `/.well-known/assetlinks.json` | Android App Links statement from `MTG_ANDROID_ASSETLINKS` (empty list when unset) |
+| `/.well-known/assetlinks.json` | Android statement vouching for the app the gateway ships (its package ID and signing certificate); an empty list when it ships none |
 
 The pages keep the strict CSP (`default-src 'none'`); the deck page and editor allow card images
 from `cards.scryfall.io` and `connect-src 'self'`, and the deck, deck list and editor pages allow
