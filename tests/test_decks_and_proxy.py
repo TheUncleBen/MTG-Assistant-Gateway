@@ -1825,6 +1825,8 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     text = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
     assert rep["ok"] and rep["stored"] is False and rep["deck"]["id"] is None, rep
+    # A pasted list has no name: it reads "Unnamed deck", like any deck without one.
+    assert rep["deck"]["name"] == "Unnamed deck", rep["deck"]
     assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
     assert rep["validation"]["ok"] is True, rep["validation"]
     assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
@@ -1855,7 +1857,7 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
             {"deck_ref": "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Main\n2 Opt\n97 Island\n"},
         )
     )
-    assert stats["ok"] and stats["deck"]["id"] is None, stats
+    assert stats["ok"] and stats["deck"]["id"] is None and stats["deck"]["name"] == "Unnamed deck", stats
     checks = stats["stats"]["checks"]
     assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}] and checks["ok"] is False
     bad = structured(await call(h, token, "deck_stats", {"deck_ref": "not a list at all"}))

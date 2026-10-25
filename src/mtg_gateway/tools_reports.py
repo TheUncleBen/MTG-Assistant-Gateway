@@ -98,7 +98,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             stats = deck_stats.compute_from_text(cards)
             out: dict[str, object] = {
                 "ok": True,
-                "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+                "deck": {"id": None, "name": "Unnamed deck", "card_count": stats["card_count"]},
                 "stats": stats,
                 "note": "A pasted list has names and counts only; for card-level checks use "
                 "validate_decklist, or read an Archidekt deck.",

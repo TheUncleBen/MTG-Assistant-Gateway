@@ -338,7 +338,7 @@ class ReportService:
                 _keep_quantities(goldfish, sim_text)
         return {
             "stored": False,
-            "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+            "deck": {"id": None, "name": "Unnamed deck", "card_count": stats["card_count"]},
             "stats": stats,
             "goldfish": goldfish,
             "validation": validation,
