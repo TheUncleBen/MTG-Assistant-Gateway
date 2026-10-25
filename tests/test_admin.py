@@ -14,7 +14,7 @@ from starlette.routing import Route
 from mtg_gateway import db as dbmod
 from mtg_gateway import ui
 from mtg_gateway.admin import add_admin_routes
-from mtg_gateway.config import ConfigError, load_settings
+from mtg_gateway.config import load_settings
 from mtg_gateway.db import Database
 
 from .conftest import FakeIdP, Harness, make_settings, running
@@ -578,26 +578,20 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MTG_REQUIRED_GROUP", "mtg-users")
 
 
-def test_admin_group_and_assetlinks_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_admin_group_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _env(tmp_path, monkeypatch)
     s = load_settings()
-    assert s.admin_group is None and s.android_assetlinks is None
+    assert s.admin_group is None
     assert s.cimd_enabled is True and s.writes_enabled is True and s.archidekt_backups is True
     monkeypatch.setenv("MTG_ADMIN_GROUP", "mtg-admins")
-    monkeypatch.setenv(
-        "MTG_ANDROID_ASSETLINKS", '[{"relation": ["delegate_permission/common.handle_all_urls"]}]'
-    )
+    # gone in 0.7.45 (the gateway vouches for its own app): a value left set is ignored
+    monkeypatch.setenv("MTG_ANDROID_ASSETLINKS", "not json")
     monkeypatch.setenv("MTG_WRITES_ENABLED", "YES")
     monkeypatch.setenv("MTG_CIMD_ENABLED", "0")
     monkeypatch.setenv("MTG_ARCHIDEKT_BACKUPS", "")
     s = load_settings()
-    assert s.admin_group == "mtg-admins"
-    assert s.android_assetlinks == '[{"relation":["delegate_permission/common.handle_all_urls"]}]'
+    assert s.admin_group == "mtg-admins" and not hasattr(s, "android_assetlinks")
     assert s.writes_enabled is True and s.cimd_enabled is False and s.archidekt_backups is True
-    for bad in ("not json", '{"a": 1}', "42"):
-        monkeypatch.setenv("MTG_ANDROID_ASSETLINKS", bad)
-        with pytest.raises(ConfigError, match="MTG_ANDROID_ASSETLINKS must be a JSON list"):
-            load_settings()
 
 
 async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:

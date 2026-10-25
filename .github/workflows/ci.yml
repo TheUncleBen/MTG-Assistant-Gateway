@@ -214,7 +214,7 @@ jobs:
         run: |
           set -eu
           android/scripts/build.sh release --throwaway
-          python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert re.fullmatch(r"[0-9a-f]{64}", d["cert_sha256"]), d' android/out/mtg-assistant-gateway.json
+          python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert re.fullmatch(r"[0-9a-f]{64}", d["cert_sha256"]) and d["package_name"] == open("android/app/application-id.txt").read().strip(), d' android/out/mtg-assistant-gateway.json
           rm -f android/out/throwaway.keystore android/out/throwaway.keystore.password
 
   android:

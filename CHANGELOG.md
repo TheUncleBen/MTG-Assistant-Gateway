@@ -13,7 +13,8 @@ Shorter stack and example variables files with every feature on by default, the 
 the Settings page only, a new Settings row for the Archidekt backup folder, the Claude logo beside
 Claude's connection, an assistant reading the same Forge seed the report page shows, Forge's
 load problems leaving out Java's own warnings, a solo test shorter than five turns no longer talking
-about turn 5, and the research service having the current rules from the moment it starts.
+about turn 5, the research service having the current rules from the moment it starts, and signing
+in to the Android app coming back to the app by itself.
 
 ### Upgrade notes
 - **Start from the new stack file and example variables file**, as in
@@ -61,7 +62,10 @@ about turn 5, and the research service having the current rules from the moment 
   Archidekt" changes the name.
 - No database change, so this update saves no before-upgrade copy. Going back to 0.7.44 needs its
   stack file and example variables file, with your values copied back in.
-- No new secrets.
+- No new secrets. The two `MTG_ANDROID_*` lines are gone because the gateway now takes the Android
+  app's package ID and signing certificate from the app it ships.
+- The Android app's automatic sign-in return needs this version of the app as well as of the
+  gateway: the app offers the update itself (or download it from the gateway's Android app page).
 
 ### Changed
 - **Shorter deployment files.** The example variables files and stack files list only what a
@@ -72,6 +76,12 @@ about turn 5, and the research service having the current rules from the moment 
   are gone.
 - **"Backup folder on Archidekt"** is a new row on the Settings page; a new name applies to the next
   backup copy.
+- **Android sign-in returns to the app by itself.** After signing in, the browser no longer stops
+  on a "Signed in" page waiting for you to tap **Open the MTG Assistant Gateway app**. Where your
+  browser supports it (Chrome's Auth Tab), it closes and you are back in the app, signed in. The
+  browser hands the sign-in back only to the app the gateway ships, checked against the app's
+  signing certificate, which the gateway now publishes at `/.well-known/assetlinks.json` with no
+  setting. Other browsers, or an app the gateway didn't ship, still get the page with the button.
 
 ### Fixed
 - **The Claude logo** beside a Claude connection: Claude registers sign-in addresses on both
