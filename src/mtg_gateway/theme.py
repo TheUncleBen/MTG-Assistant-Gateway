@@ -1563,13 +1563,14 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
 /* a fold-out under a row or a section (a report's details, a watched card's history) */
 details.rv-det > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
-  min-height:36px;margin:4px 0;padding:0 14px;border-radius:999px;background:var(--surface-2);
-  color:var(--text);font-weight:600;font-size:.9rem;line-height:1.2}
+  box-sizing:border-box;min-height:44px;margin:0;padding:0 14px;border:4px solid transparent;
+  border-radius:999px;background:var(--surface-2) padding-box;color:var(--text);font-weight:600;
+  font-size:.9rem;line-height:1.2} /* a 36px capsule in a 44px tap area */
 .rv-det > summary::-webkit-details-marker{display:none}
 .rv-det > summary::after{content:"";flex:none;width:6px;height:6px;border:solid currentColor;
   border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);transition:transform .15s}
 .rv-det[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
-.rv-det > summary:hover{background:var(--surface-3)}
+.rv-det > summary:hover{background:var(--surface-3) padding-box}
 
 /* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
    and each event as a short label then its name as plain text that wraps. Each page sets its own
