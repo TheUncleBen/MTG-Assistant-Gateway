@@ -2,7 +2,6 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@+id/menu_scan" android:title="@string/menu_scan" />
     <item android:id="@+id/menu_reload" android:title="@string/menu_reload" />
-    <item android:id="@+id/menu_browser" android:title="@string/menu_browser" />
     <item android:id="@+id/menu_paste" android:title="@string/menu_paste" />
     <item android:id="@+id/menu_gateway" android:title="@string/menu_gateway" />
     <item android:id="@+id/menu_update" android:title="@string/menu_update" />

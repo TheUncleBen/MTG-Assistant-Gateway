@@ -24,7 +24,7 @@ from starlette.responses import Response
 
 from . import modes, tool_labels
 from .pages import _csrf, browser_session, login_redirect
-from .theme import display_name, icon, render
+from .theme import icon, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -371,18 +371,18 @@ def guide_body(
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
         "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More; "
-        "the magnifier at the top opens the search box for cards and decks. More opens Proposals, History, "
-        "Guide and Account (and Admin). "
-        "Unfolded or on a tablet the tabs move to a rail down the left edge with every page on it, Search "
-        "among them, and no More. "
-        "Your account menu is your picture at the top right, and a tap anywhere else closes it.</p>"
+        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant and More; "
+        "the magnifier at the top opens the search box for cards and decks. Assistant holds Proposals, "
+        "History and Reports, switched at its top; More opens Search, Precons, Scan, Watchlist and My "
+        "lists. Unfolded or on a tablet the same tabs move to a rail down the left edge, with Alerts. "
+        "Your picture at the top right opens the <a href='/account'>Account</a> page.</p>"
     )
     tut_link = (
         "<p>Linking gives this site your Archidekt decks, your collection and the right to save for you. "
         "It takes a minute and you do it once.</p>"
         "<ol class='steps'>"
-        "<li><span>Open the <a href='/account'>Account</a> page and find <strong>Archidekt</strong>.</span>"
+        "<li><span>Open <a href='/account/details'>Account details</a> and find <strong>Archidekt</strong>."
+        "</span>"
         "</li>"
         "<li><span>Read the note there first: Archidekt has no official way for other apps to reach decks, "
         "so the site uses the same requests archidekt.com's own pages use, and Archidekt's terms restrict "
@@ -395,7 +395,7 @@ def guide_body(
         "their cover art, private ones included.</span></li></ol>"
         "<p>Unlinking on the same page removes the stored Archidekt session at once. The Account page "
         "spells out exactly what linking gives this site, its admins and the person who runs it "
-        "(<a href='/account#archidekt-disclosure'>What linking gives this gateway</a>); "
+        "(<a href='/account/details#archidekt-disclosure'>What linking gives this gateway</a>); "
         "<a href='#exp-privacy'>Privacy and what is stored</a> has the short version.</p>"
     )
     tut_connect = (
@@ -667,13 +667,13 @@ def guide_body(
         "or save the scan for later (your assistant can pick it up too).</span></li></ol>"
         "<p>You can also type or paste names instead of using the camera, and earlier scans are listed "
         "under <strong>Sessions</strong>. On the Android app the <strong>Scan with the app's camera</strong> "
-        "button in the account menu uses the app's own camera panel.</p>"
+        "button on the Scan page and the Account page uses the app's own camera panel.</p>"
         "<p>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
         "printings and quantities first, then send it to your collection or a deck, which removes the "
         "draft. Nothing expires; you delete what you do not want.</p>"
     )
     how_collection = (
-        "<p><a href='/collection'>Collection</a> is the list of cards you own. It is your Collection on "
+        "<p><a href='/collection'>Binder</a> is the list of cards you own. It is your Collection on "
         "Archidekt, shown and edited here through the account you linked: nothing about your cards is "
         "stored on this gateway, and what you add here appears on archidekt.com at once. Scan a pile and "
         "save it, or add cards by name; each card keeps its printing, finish, condition and count.</p><ul>"
@@ -713,9 +713,9 @@ def guide_body(
     )
     how_layout = (
         "<ul>"
-        "<li><strong>Light, Dark or System theme</strong> is in the account menu (your picture at the top "
-        "right) and applies in the app too.</li>"
-        "<li><strong>Desktop layout</strong>, in the same menu and remembered per device, shows the "
+        "<li><strong>Light, Dark or System theme</strong> is under Look on the <a href='/account'>Account"
+        "</a> page (your picture at the top right) and applies in the app too.</li>"
+        "<li><strong>Desktop layout</strong>, under Look too and remembered per device, shows the "
         "computer layout on a phone or in the app, like a browser's Desktop site switch; <strong>Fit the "
         "screen</strong> goes back to the adaptive layout.</li>"
         "<li>No Android phone? Add this site to your home screen from the browser (Chrome and Samsung "
@@ -726,8 +726,9 @@ def guide_body(
         "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
         "native-feeling app with the phone "
         "camera built in. Sign in once, then it opens on your home page. The app's own actions (Scan with "
-        "the app's camera, Reload, Open in browser, Change gateway) sit in the account menu at the top "
-        "right. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
+        "the app's camera, Reload, Open a copied link, Change gateway, Check for app updates) are under "
+        "This app on the <a href='/account'>Account</a> page. A deck's Share opens the phone's own share "
+        "sheet. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
         "open in the app.</p>"
         "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
         "to a rail down the left edge, like other Android apps; the layout follows the window, so split "
@@ -735,13 +736,13 @@ def guide_body(
         "the top half and the list on the bottom.</p>"
     )
     how_signout = (
-        "<p>The <a href='/account'>Account</a> page shows who you are signed in as and has two buttons: "
-        "<strong>Sign out</strong> ends this device's session, <strong>Sign out on all my devices</strong> "
-        "ends every browser and Android app session. Both act on the first press (the button says "
-        "“Signing out…” and locks at once). The account menu's Sign out does the same for this "
-        "device.</p><ul>"
+        "<p>The <a href='/account'>Account</a> page shows who you are signed in as, with "
+        "<strong>Sign out</strong> at its foot: it ends this device's session. <strong>Sign out on all my "
+        "devices</strong>, on <a href='/account/details'>Account details</a>, ends every browser and "
+        "Android app session. Both act on the first press (the button says “Signing out…” and locks at "
+        "once).</p><ul>"
         "<li>Connected assistants keep working until you disconnect them under <strong>Connected "
-        "apps</strong> on the same page; disconnecting one rejects its pending proposals.</li>"
+        "apps</strong> on Account details; disconnecting one rejects its pending proposals.</li>"
         "<li><strong>Unlink Archidekt</strong> removes the stored Archidekt session at once.</li>"
         "<li><strong>Delete my data</strong> removes everything this gateway keeps for your account "
         "(proposals, snapshots, reports, scan sessions, your Archidekt link, connected apps and your "
@@ -854,7 +855,7 @@ def guide_body(
             "camera or photos to a draft; Sessions; save to a deck or the collection",
         ),
         (
-            "Collection",
+            "Binder",
             "<code>/collection</code>",
             "the Archidekt Collection: filter, sort, grid or list, add, quantity, details, remove, CSV "
             "export and import",
@@ -899,10 +900,11 @@ def guide_body(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
-        "<p>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More (Proposals, "
-        "History, Reports, Watchlist when it is on, Guide, Account and Admin); Search is the magnifier "
-        "at the top. From 600 px on a touch screen every page is a tab on a rail down the left edge, "
-        "with no More; a wider browser has the links in the top bar, Home first.</p>"
+        "<p>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant (Proposals, History and "
+        "Reports) and More (Search, Precons, Scan, Watchlist when it is on, and My lists); Search is also "
+        "the magnifier at the top, and your picture opens Account (Guide, and Admin for admins, are "
+        "there). From 600 px on a touch screen the same tabs are on a rail down the left edge, with "
+        "Alerts; a wider browser has them in the top bar, Home first.</p>"
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
@@ -910,9 +912,9 @@ def guide_body(
         "comment that has formatting: on its review page only)</td>"
     )
     ref_approval = (
-        "<p>Your approval mode on the <a href='/account'>Account</a> page says how much your assistant "
-        "may change on Archidekt without asking you first. It is your own setting and applies to nobody "
-        "else; the gateway may cap the choices.</p>"
+        "<p>Your approval mode on <a href='/account/details'>Account details</a> says how much your "
+        "assistant may change on Archidekt without asking you first. It is your own setting and applies to "
+        "nobody else; the gateway may cap the choices.</p>"
         "<div class='tbl'><table><thead><tr><th>Mode</th><th>Low-risk proposal</th><th>High-risk proposal"
         "</th><th>Account action or deck deletion</th></tr></thead><tbody>"
         f"<tr><td><strong>Manual</strong> (default): {_esc(modes.MODE_LABELS['manual'])}</td>"
@@ -1112,7 +1114,7 @@ def guide_body(
         "Archidekt. The key that opens it is on the same server, so whoever runs the server can use it "
         "to act as you on Archidekt until it expires. The Account page spells out exactly what linking "
         "gives this site, its admins and the person who runs it "
-        "(<a href='/account#archidekt-disclosure'>What linking gives this gateway</a>).</li>"
+        "(<a href='/account/details#archidekt-disclosure'>What linking gives this gateway</a>).</li>"
         "<li>Nothing about the cards in your collection is stored on this gateway: it is read from and "
         "written to Archidekt through your link.</li>"
         "<li>Your assistant's access can be withdrawn at any time from the Account page (the "
@@ -1228,7 +1230,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             wide=True,
             current="/guide",
             head_extra=f"<style>{GUIDE_CSS}</style><script src='/static/guide.js' defer></script>",

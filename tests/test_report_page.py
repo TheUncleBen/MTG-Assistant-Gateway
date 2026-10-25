@@ -204,7 +204,8 @@ def test_the_page_marks_reports_in_the_nav_and_is_wide(server: Server) -> None:
     store_report(server.db, "user-1", "rep_nav")
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
     page = h.get("/history/reports/rep_nav").text
-    assert re.search(r"<a href='/reports'[^>]*aria-current=.?page", page), "Reports is the current section"
+    # a report is under Assistant (Proposals, History, Reports): the place is marked in the nav
+    assert re.search(r"<a href='/proposals'[^>]*aria-current=.?page", page), "Assistant is the current place"
     assert not re.search(r"<a href='/history'[^>]*aria-current", page)
     assert "class='wrap ui-wide'" in page
     # the live status route draws the same label and section as the page

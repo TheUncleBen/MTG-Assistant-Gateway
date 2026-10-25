@@ -453,7 +453,7 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             page.goto(f"{server.base}/decks", wait_until="networkidle")
             # the heading: + New folder beside New deck, the one orange button
             head = page.locator(".ui-head.phead")
-            assert head.locator("h1").inner_text() == "My decks"
+            assert head.locator("h1").inner_text() == "My Decks"
             assert head.locator(".acts .btn-primary").inner_text().strip() == "New deck"
             assert page.locator(".listbar a[href='/folders']").count() == 0
             assert page.locator("form.openform").count() == 0

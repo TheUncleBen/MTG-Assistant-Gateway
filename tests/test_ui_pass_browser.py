@@ -105,11 +105,13 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
         ctx = _context(browser, server, sid, 344, touch=True)
         page = ctx.new_page()
         rows = []
-        for path in ("/admin/users", "/account"):
+        for path in ("/admin/users", "/account", "/account/details"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             rows += page.evaluate(
-                # the approval mode's own chevron fold (mode-info) is drawn by its own rules
-                "() => [...document.querySelectorAll('details:not(.dd):not(.mode-info) > summary')]"
+                # the approval mode's own chevron fold (mode-info) and the Account page's rows that
+                # open in place (yrow, a settings list's chevron) are drawn by their own rules
+                "() => [...document.querySelectorAll("
+                "'details:not(.dd):not(.mode-info):not(.yrow) > summary')]"
                 ".filter(s => s.innerText.trim() && !getComputedStyle(s, '::before').content.includes('▸'))"
                 ".map(s => [s.innerText.trim().slice(0, 24), getComputedStyle(s).display,"
                 " Math.round(s.getBoundingClientRect().height)])"

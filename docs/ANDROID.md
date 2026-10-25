@@ -71,8 +71,8 @@ download button. Then:
 
 **Updates** come to the app by themselves ([Updates](#updates) below): when a
 newer version is out, a bar at the top offers it and **Update** installs it over
-the one you have, keeping your settings and sign-in. **Change gateway** in the
-account menu (the person icon, top right) brings the address screen back; over
+the one you have, keeping your settings and sign-in. **Change gateway** on the
+Account page (your picture, top right), under This app, brings the address screen back; over
 a page that isn't the gateway's (the sign-in page, say) it is in the round
 button's menu at the bottom right.
 
@@ -213,11 +213,15 @@ only; a release build never does. A 24 hour battery test needs a real phone.
 The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
-- **The App section of the account menu** (the person icon, top right):
-  *Scan with the app's camera*, *Reload*, *Open in browser*, *Change gateway*.
-  *Open a copied link* and *Check for app updates* are on the Account page's
-  **App** card and in the round button's menu (the round button shows only
-  over pages that aren't the gateway's).
+- **This app, on the Account page** (your picture, top right):
+  *Scan with the app's camera*, *Reload*, *Open a copied link*, *Change gateway*
+  and *Check for app updates* (with the installed version). They are in the
+  app's own menu too, and in the round button's menu (the round button shows
+  only over pages that aren't the gateway's).
+- **Share** on a deck's More menu opens the phone's own share sheet with the
+  deck's Archidekt link; from Android 14 the sheet also offers *Open on
+  Archidekt*, *Copy gateway link* and *Copy deck list*, and on older Androids
+  the gateway link is added to the shared text.
   The same actions sit on a round button at the bottom right while a
   page that is not the gateway's is showing (the sign-in service, say); on
   the gateway's own pages the button stays out of the way of the bottom tab
@@ -227,7 +231,8 @@ else your gateway serves. A few things are native:
   website footer. Navigation follows Android's window size classes: under
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
-  down the left edge with every page on it (Home first) and no More menu. The rules track the live
+  down the left edge with the same places (Home, Decks, Binder, Assistant),
+  Alerts and More, which opens beside the rail. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
 - **Back** goes back a page; on the first page it leaves the app.
@@ -285,7 +290,7 @@ else your gateway serves. A few things are native:
   phone's Light / Dark setting. A switch while the app is open re-themes the
   app's own screens at the next page you open, so the page in use (an editor
   with unsaved edits, an open camera panel) is never reloaded under you. The pages follow the setting too unless you pick Light
-  or Dark in the account menu on the page, which wins inside the app as well.
+  or Dark under Look on the Account page, which wins inside the app as well.
   The camera screen is always dark, over the black viewfinder.
 - **Launcher.** The icon's label is "MTG Gateway" (the full name does not fit
   most launchers). Long-press the icon for shortcuts to **My decks**, **Scan

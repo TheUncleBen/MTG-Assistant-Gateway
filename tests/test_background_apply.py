@@ -199,7 +199,7 @@ async def test_a_member_s_own_large_new_deck_opens_its_progress_not_applied(stac
     r = await b.http.post(
         "/decks/new",
         data={
-            "csrf": await b.csrf("/account"),
+            "csrf": await b.csrf("/account/details"),
             "name": "Slow",
             "format": "commander",
             "source": "1 Sol Ring\n1 Island",

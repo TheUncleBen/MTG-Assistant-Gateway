@@ -43,7 +43,7 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
     b = Browser(gw)
     try:
         await b.login()
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         assert "<div class='acc'>" in page and ".acc .apps" in page and "/static/pages.js" in page
         # the writes badge is the shared label (On green, Off grey); the note is the approved short one
         writes = "<span class='ui-lbl green'>" if gw.settings.writes_enabled else "<span class='ui-lbl grey'>"
@@ -70,7 +70,10 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         delete = card(page, "delete-data")
         assert f"<p>Delete everything this gateway keeps for your account: {pages.DELETED_LIST}." in delete
         assert "your simulator card models" in delete and "deck covers" in delete and "view choices" in delete
-        assert "<a class='btn btn-outline-danger' href='/account?delete=1' data-box-open='delete'>" in delete
+        assert (
+            "<a class='btn btn-outline-danger' href='/account/details?delete=1'"
+            " data-box-open='delete'>" in delete
+        )
         assert "Delete my data…</a>" in delete and "<button class='danger'>" not in delete
         dbox = box(page, "delete")
         assert "<h2 id='delete-title'>Delete my data?</h2>" in dbox
@@ -98,14 +101,15 @@ async def test_the_old_addresses_open_the_page_with_the_box_open(gw: Harness) ->
     b = Browser(gw)
     try:
         await b.login()
-        page = (await b.http.get("/account?delete=1")).text
+        page = (await b.http.get("/account/details?delete=1")).text
         opened = page.split("id='delete' role='dialog'", 1)[1][:200]
         assert "data-open" in opened and "hidden" not in opened
-        assert "<a class='bx' href='/account' aria-label='Close'" in page
+        assert "<a class='bx' href='/account/details' aria-label='Close'" in page
         # a stray press without the tick comes back to the box, with the notice
         csrf = await b.csrf()
         r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data"})
-        assert r.status_code == 303 and r.headers["location"] == "/account?delete=1&err=confirm_delete"
+        assert r.status_code == 303
+        assert r.headers["location"] == "/account/details?delete=1&err=confirm_delete"
     finally:
         await b.aclose()
 
@@ -118,7 +122,7 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
     b = Browser(gw)
     try:
         await b.login()
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         apps = card(page, "apps")
         assert "<p class='muted small'>Disconnect any you don't recognize.</p>" in apps
         assert "Assistants that can use your account now" not in apps
@@ -131,7 +135,7 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
         assert first["client_id"] not in shown and "<code class='small'>" not in apps
         assert "<span class='sub'>Last signed in or refreshed <time class='ui-when'" in apps
         # Disconnect: red outline, the old form's address, the box with its solid red final button
-        href = f"/account?disconnect={first['client_id']}"
+        href = f"/account/details?disconnect={first['client_id']}"
         m = re.search(
             rf"<a class='btn btn-outline-danger' href='{re.escape(href)}' data-box-open='(disc\d)'>", apps
         )
@@ -149,7 +153,8 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
         assert "Disconnect “Unnamed app”?" in page
         # Disconnect all apps: the same pattern
         assert (
-            "<a class='btn btn-outline-danger' href='/account?disconnect_all=1' data-box-open='discall'>"
+            "<a class='btn btn-outline-danger' href='/account/details?disconnect_all=1'"
+            " data-box-open='discall'>"
             "Disconnect all apps</a>" in apps
         )
         dall = box(page, "discall")
@@ -184,7 +189,7 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
 async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_box(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         arch = card(page, "archidekt")
         assert (
             "<p>Linked to <strong>alice</strong> <span class='ui-lbl green'>" in arch
@@ -195,7 +200,10 @@ async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_b
         assert "<p class='muted small'>Linked <time class='ui-when' datetime=" in arch
         assert "data-fmt='rel'" in arch
         # Unlink: red outline, then the box; the fold stays under its divider line
-        assert "<a class='btn btn-outline-danger' href='/account?unlink=1' data-box-open='unlink'>" in arch
+        assert (
+            "<a class='btn btn-outline-danger' href='/account/details?unlink=1'"
+            " data-box-open='unlink'>" in arch
+        )
         assert "Unlink and delete stored session</a>" in arch
         ubox = box(page, "unlink")
         assert "<h2 id='unlink-title'>Unlink Archidekt?</h2>" in ubox
@@ -213,12 +221,12 @@ async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_b
         assert "<button class='primary'>Save approval mode</button>" in page
         assert orange(page) == 1, re.findall(r"class='primary'[^>]*>[^<]*", page)
         # the old address opens the box; unlinking says so in the new words
-        opened = (await b.http.get("/account?unlink=1")).text
+        opened = (await b.http.get("/account/details?unlink=1")).text
         assert "data-open" in opened.split("id='unlink' role='dialog'", 1)[1][:120]
         csrf = await b.csrf()
         r = await b.http.post("/account", data={"csrf": csrf, "action": "unlink"})
-        assert r.status_code == 303 and r.headers["location"] == "/account?ok=unlinked"
-        after = (await b.http.get("/account?ok=unlinked")).text
+        assert r.status_code == 303 and r.headers["location"] == "/account/details?ok=unlinked"
+        after = (await b.http.get("/account/details?ok=unlinked")).text
         assert (
             "<div class='notice ok'>Unlinked. The gateway&#x27;s copy of the session was deleted.</div>"
             in after
@@ -240,7 +248,7 @@ async def test_the_disconnected_notice_names_only_the_members_own_app(stack: Sta
     try:
         db = stack.h.app.state.gateway.db
         db.save_client("someone-elses", {"client_name": "Secret Helper"})
-        page = (await b.http.get("/account?ok=disconnected&app=someone-elses")).text
+        page = (await b.http.get("/account/details?ok=disconnected&app=someone-elses")).text
         assert "Secret Helper" not in page
         assert "<div class='notice ok'>Disconnected “Unnamed app”.</div>" in page
     finally:

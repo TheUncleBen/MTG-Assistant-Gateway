@@ -41,7 +41,7 @@ def _deck() -> Any:
 async def _browser_with_csrf(h: Harness) -> tuple[Browser, str]:
     b = Browser(h)
     await b.login()
-    return b, await b.csrf("/account")
+    return b, await b.csrf("/account/details")
 
 
 # -- 1/5: reports use the member's Mystic Forge cap and run once per deck at a time ------------

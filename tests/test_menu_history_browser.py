@@ -33,17 +33,19 @@ STATE = "() => ({ menu: !!(history.state && history.state.menu), open: document.
 
 
 def _two_menus(page):
-    """The first two dropdown menus with a visible button on the page (the account menu and the
-    tab bar's More at phone width), as locators of their summaries."""
-    summaries = page.locator("details.dd > summary")
+    """Two dropdown menus with a visible button on the page (the deck page's first category menu,
+    scrolled into the window, and the tab bar's More at phone width), as locators of their
+    summaries."""
+    summaries = page.locator("details.dd:not(.more) > summary")
     found = []
     for i in range(summaries.count()):
         s = summaries.nth(i)
         if s.is_visible() and (s.bounding_box() or {}).get("width", 0) > 0:
+            s.scroll_into_view_if_needed()  # a tap lands only inside the window
             found.append(s)
-        if len(found) == 2:
             break
-    assert len(found) == 2, "the page needs two visible menus"
+    found.append(page.locator(".tabbar details.more > summary"))
+    assert len(found) == 2 and found[1].is_visible(), "the page needs two visible menus"
     return found
 
 
@@ -71,10 +73,12 @@ def _open(server: Server):
     page = ctx.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    # /account first, so that one Back too many has somewhere to go, and the test can tell "went back
-    # once" (still on /decks) from "went back twice" (on /account) with a real navigation
-    page.goto(f"{server.base}/account", wait_until="networkidle")
-    page.goto(f"{server.base}/decks", wait_until="networkidle")
+    # Account details first, so that one Back too many has somewhere to go, and the test can tell
+    # "went back once" (still on the deck) from "went back twice" (on Account details) with a real
+    # navigation. The deck page: its category menus are two visible menus on a phone (the account
+    # menu left the top bar in navigation round 2)
+    page.goto(f"{server.base}/account/details", wait_until="networkidle")
+    page.goto(f"{server.base}/decks/42", wait_until="networkidle")
     return p, browser, page, errors
 
 
@@ -124,7 +128,7 @@ def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
-        assert page.url.endswith("/account"), "the menus left exactly one entry behind"
+        assert page.url.endswith("/account/details"), "the menus left exactly one entry behind"
         assert errors == []
     finally:
         browser.close()
@@ -151,7 +155,7 @@ def test_closing_one_menu_and_opening_another_quickly_goes_back_once(server: Ser
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
-        assert page.url.endswith("/account"), "a second Back should leave the deck list, not stay"
+        assert page.url.endswith("/account/details"), "a second Back should leave the deck list, not stay"
         assert errors == []
     finally:
         browser.close()
@@ -217,7 +221,7 @@ def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(serv
             _settled(page)
             assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
-        assert page.url.endswith("/account"), "one more Back leaves the deck list exactly once"
+        assert page.url.endswith("/account/details"), "one more Back leaves the deck list exactly once"
         assert errors == []
     finally:
         browser.close()
@@ -234,7 +238,7 @@ def test_back_with_a_menu_open_closes_it_and_stays(server: Server) -> None:
         page.wait_for_timeout(200)
         assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
-        assert page.url.endswith("/account"), "closing by Back gave nothing back a second time"
+        assert page.url.endswith("/account/details"), "closing by Back gave nothing back a second time"
         assert errors == []
     finally:
         browser.close()

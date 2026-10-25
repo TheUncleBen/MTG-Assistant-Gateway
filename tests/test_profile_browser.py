@@ -86,13 +86,16 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         # the bell shows Archidekt's count once the page has loaded, at every width (before the
         # list is opened: reading the list is what clears the count)
-        page.goto(f"{server.base}/account", wait_until="networkidle")
-        badge = page.locator(".topbar .bell .n")
-        badge.wait_for(state="visible", timeout=4000)
-        assert (
-            badge.inner_text() == "3"
-            and page.locator(".topbar .bell").get_attribute("aria-label") == "Notifications, 3 new"
+        # (the touch rail has it as its Alerts place instead of beside the picture)
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
+        rail = page.evaluate(
+            "() => getComputedStyle(document.querySelector('.tabbar')).flexDirection === 'column'"
         )
+        bell = page.locator(".tabbar a.bell" if rail else ".topbar .bell")
+        badge = bell.locator(".n")
+        badge.wait_for(state="visible", timeout=4000)
+        name = "Alerts" if rail else "Notifications"
+        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == f"{name}, 3 new"
         for path in ("/account", "/collection", "/", "/notifications"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert page.evaluate(MEASURE) == [], path
@@ -101,10 +104,11 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
                 sizes = _targets(
                     page,
                     ".acc .ui-row .switch, .acc .ui-row .msel-btn, .acc .btn, .acc button:not(.inline), "
-                    ".col-vis .btn, .col-vis button, .topbar .bell, .bell-row, .hq .wdg .go .btn",
+                    ".col-vis .btn, .col-vis button, .topbar .bell, .tabbar a.bell, .bell-row, "
+                    ".hq .wdg .go .btn, .yhub .yrow, .yhub .ysignout button",
                 )
                 assert sizes and min(sizes) >= 43.5, (path, sizes)
-        page.goto(f"{server.base}/account", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
         # the picture box: the words, the file checked here, the preview, the one orange button
         page.locator("[data-box-open='picture']").click()
         box = page.locator("#picture")
@@ -126,7 +130,7 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, TEXT) == []
         use.click()
-        page.wait_for_url("**/account?ok=picture*")
+        page.wait_for_url("**/account/details?ok=picture*")
         assert "Picture saved on Archidekt and read back." in page.locator("#profile").inner_text()
         assert server.ark.account.uploads and server.ark.account.uploads[-1][0] == "alice"
         browser.close()
@@ -141,7 +145,7 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
     me = server.ark.account.profile("alice")
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        page.goto(f"{server.base}/account", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
         page.wait_for_timeout(800)  # the click guard: a press faster than a person reads is refused
         page.locator("label[class='switch']:has(#pr-newsletter)").click()
         page.locator(".toast").wait_for(state="visible", timeout=4000)
@@ -165,7 +169,7 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         # the bio and username save with the panel's notice
         page.fill("#pr-bio", "Commander player in Leeds.")
         page.locator("#pr-f button").click()
-        page.wait_for_url("**/account?ok=profile*")
+        page.wait_for_url("**/account/details?ok=profile*")
         assert "Profile saved on Archidekt: bio. Read back." in page.locator("#profile").inner_text()
         # the bell: the count, then the box with the list; the count clears once the list opened
         badge = page.locator(".topbar .bell .n")
@@ -256,7 +260,7 @@ def test_account_holds_together_on_a_phone_at_200_percent_text(server: Server, z
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
             page.wait_for_timeout(300)
             assert page.evaluate(MEASURE) == [], (path, zoom)
-        page.goto(f"{server.base}/account", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         page.locator("[data-box-open='picture']").click()
         page.locator("#picture").wait_for(state="visible")

@@ -1596,7 +1596,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             body = (
                 "<div class='card'><h2>Link your Archidekt account</h2><p>Your lists appear here once "
                 "Archidekt is "
-                "linked.</p><div class='actions'><a class='btn btn-primary' href='/account'>Link "
+                "linked.</p><div class='actions'>"
+                "<a class='btn btn-primary' href='/account/details#archidekt'>Link "
                 "Archidekt</a></div></div>"
             )
             return respond(ui.page_head(TITLE, SUB_TEXT) + body, sub, sid, status=200)

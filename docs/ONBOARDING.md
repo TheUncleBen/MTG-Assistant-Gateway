@@ -307,8 +307,8 @@ Good to know:
 
 ## 9. Signing out and leaving
 
-**Signing out.** Use **Sign out** in the account menu or on the Account
-page. To sign out everywhere (say you lost a phone), open
+**Signing out.** Use **Sign out** at the foot of the Account page (your
+picture, top right). To sign out everywhere (say you lost a phone), open
 `https://mtg.example.com/logout` and press **Sign out on all my devices**.
 That signs out every browser and the Android app; connected AI apps keep
 working, so disconnect them on the Account page too. For an hour after you sign out, signing back in on that

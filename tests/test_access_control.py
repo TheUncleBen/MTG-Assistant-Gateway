@@ -72,7 +72,7 @@ async def test_cross_user_objects(stack) -> None:
     )
     assert rep.status_code == 201, rep.text
     rid = rep.json()["report_id"]
-    csrf_a = await ba.csrf("/account")
+    csrf_a = await ba.csrf("/account/details")
     sc = await ba.http.post(
         "/scan/api/sessions", json={"name": "alices box", "items": []}, headers={"X-CSRF-Token": csrf_a}
     )
@@ -83,7 +83,7 @@ async def test_cross_user_objects(stack) -> None:
     bb = await browser_for(h, AMY, "amy", "pw-amy")
     tb = await mcp_token(h)
     auth_b = {"Authorization": f"Bearer {tb}"}
-    csrf_b = await bb.csrf("/account")
+    csrf_b = await bb.csrf("/account/details")
 
     # MCP tools
     for name, args in [
@@ -265,7 +265,7 @@ async def test_non_admin_cannot_post_admin_actions(tmp_path: Path, idp: FakeIdP)
     async with running(Harness(settings, idp)) as h:
         b = Browser(h)
         await b.login()
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         r = await b.http.post("/admin/users/user-1", data={"csrf": csrf, "action": "disable"})
         assert r.status_code == 404
         r = await b.http.post(

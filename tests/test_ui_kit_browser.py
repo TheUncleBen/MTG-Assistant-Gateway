@@ -283,11 +283,13 @@ def test_components_fit_touch_and_read_at_every_size(kit: KitServer) -> None:
                         assert abs(h - 22) < 0.5, (where, h)
                         for name, tw, th in targets:
                             assert th >= 44 - 0.5 and tw >= 44 - 0.5, (where, name, tw, th)
-                    # 200% text: nothing in the page runs past the window's edge
+                    # 200% text: nothing in the page runs past the window's edge (the chips' row
+                    # scrolls sideways inside itself)
                     page.evaluate("document.documentElement.style.fontSize = '28px'")
                     past = page.evaluate(
                         "[...document.querySelectorAll('main *')].filter(e => e.getClientRects().length"
-                        " && e.getBoundingClientRect().right > innerWidth + 0.5).map(e => e.className)"
+                        " && e.getBoundingClientRect().right > innerWidth + 0.5 && !e.closest('.ui-chips'))"
+                        ".map(e => e.className)"
                     )
                     assert not past, (where, "200%", past)
                     page.evaluate("document.documentElement.style.fontSize = ''")

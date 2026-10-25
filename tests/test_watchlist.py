@@ -361,12 +361,12 @@ async def _opt_in(b: Browser, **extra: str) -> httpx.Response:
 async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack) -> None:
     b = await _browser(plain)
     try:
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         assert "This gateway has no notification server set up" in page
         # bug 10: no summary schedule without a server to send it through
         assert "id='summary'" not in page and "summary_every" not in page
         r = await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
-        assert r.headers["location"] == "/account?err=summary_off#summary"
+        assert r.headers["location"] == "/account/details?err=summary_off#summary"
         assert notify.prefs(plain.h.db, "user-1")["summary_every"] == "off"
         assert plain.gw.notifier.enabled is False
         assert plain.gw.notifier._count is None  # nothing hooked
@@ -379,29 +379,30 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
     b = await _browser(stack)
     try:
         r = await _opt_in(b)
-        assert r.status_code == 303 and r.headers["location"] == "/account?ok=notify_saved#notifications"
+        assert r.status_code == 303
+        assert r.headers["location"] == "/account/details?ok=notify_saved#notifications"
         topic = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         assert re.fullmatch(r"mtg-[A-Za-z0-9_-]{22}", topic)
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         # in a browser: no topic or server on show (the app is the only way to read them), Send test
         assert topic not in page and "https://ntfy.test" not in page and "Send test" in page
         assert "data-native='startNotifications'" not in page and "/install?for=android" in page
         assert TOKEN not in page
         r = await _post(b, "/account", {"action": "notify_test"})
-        assert r.headers["location"] == "/account?ok=notify_test_sent#notifications"
+        assert r.headers["location"] == "/account/details?ok=notify_test_sent#notifications"
         msg = stack.ntfy.messages[-1]
-        assert msg["topic"] == topic and msg["click"] == "https://mtg.test/account"
+        assert msg["topic"] == topic and msg["click"] == "https://mtg.test/account/details#notifications"
         assert stack.ntfy.auth[-1] == f"Bearer {TOKEN}"
         # one test a minute per member
         sent = len(stack.ntfy.messages)
         r = await _post(b, "/account", {"action": "notify_test"})
-        assert r.headers["location"] == "/account?err=notify_test_wait#notifications"
+        assert r.headers["location"] == "/account/details?err=notify_test_wait#notifications"
         assert len(stack.ntfy.messages) == sent
         stack.gw.notifier._last_test.clear()
         # a refusal from the server is said plainly, and logged with its status alone
         stack.ntfy.status = 403
         r = await _post(b, "/account", {"action": "notify_test"})
-        assert r.headers["location"] == "/account?err=notify_test_failed#notifications"
+        assert r.headers["location"] == "/account/details?err=notify_test_failed#notifications"
         assert "ntfy publish refused: HTTP 403" in caplog.text
         assert TOKEN not in caplog.text
         assert TOKEN not in repr(stack.gw.settings) and TOKEN not in repr(stack.gw.notifier)
@@ -410,13 +411,13 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == topic
         # Disconnect my phones: a new topic
         r = await _post(b, "/account", {"action": "notify_new_topic"})
-        assert r.headers["location"] == "/account?ok=notify_topic#notifications"
+        assert r.headers["location"] == "/account/details?ok=notify_topic#notifications"
         assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != topic
         # off keeps the topic; on again keeps it too
         kept = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         r = await _post(b, "/account", {"action": "notify_save"})
-        assert r.headers["location"] == "/account?ok=notify_off#notifications"
-        assert "Send test" not in (await b.http.get("/account")).text
+        assert r.headers["location"] == "/account/details?ok=notify_off#notifications"
+        assert "Send test" not in (await b.http.get("/account/details")).text
         await _opt_in(b)
         assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == kept
     finally:
@@ -523,7 +524,7 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
     try:
         await _opt_in(b)
         r = await _post(b, "/account", {"action": "summary_save", "summary_every": "weekly"})
-        assert r.headers["location"] == "/account?ok=summary_saved#summary"
+        assert r.headers["location"] == "/account/details?ok=summary_saved#summary"
         r = await _post(b, "/account", {"action": "summary_save", "summary_every": "hourly"})
         assert "err=" in r.headers["location"]
         assert (await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")).status_code == 303
@@ -538,7 +539,9 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
         # weekly: only the next Monday sends
         assert out["summaries"] == (1 if clock.day == "2026-10-19" else 0), clock.day
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "Your weekly summary" and msg["click"] == "https://mtg.test/account#summary"
+    assert (
+        msg["title"] == "Your weekly summary" and msg["click"] == "https://mtg.test/account/details#summary"
+    )
     assert "1 watched cards, biggest move Sol Ring +25%" in msg["message"]
     token = await mcp_token(h)
     s = structured(await call(h, token, "get_summary", {"period": "week"}))
@@ -546,7 +549,7 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
     assert "Sol Ring: $1.28 to $1.60 (+25%)" in s["text"] and "no AI" in s["written_by"]
     b = await _browser(stack)
     try:
-        page = (await b.http.get("/account")).text
+        page = (await b.http.get("/account/details")).text
         assert "Sol Ring: $1.28 to $1.60 (+25%)" in page and "selected>Every week" in page
     finally:
         await b.aclose()
@@ -686,7 +689,7 @@ async def test_watchlists_off_hide_the_page_links_tools_and_daily_job(
             assert r.status_code in (404, 405)
             page = (await b.http.get("/decks")).text
             assert "href='/watchlist'" not in page and "data-watchlist" not in page
-            account = (await b.http.get("/account")).text
+            account = (await b.http.get("/account/details")).text
             assert "price alert" not in account and "watched card" not in account
         finally:
             await b.aclose()
@@ -711,13 +714,13 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
         b = await _browser(st)
         try:
             await _opt_in(b)
-            page = (await b.http.get("/account")).text
+            page = (await b.http.get("/account/details")).text
             assert "id='summary'" in page and "summary_every" in page
             assert "watched prices" not in page and "price alert" not in page
             assert "<pre>" not in page  # no summary is built for a member who chose none
             r = await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
-            assert r.headers["location"] == "/account?ok=summary_saved#summary"
-            page = (await b.http.get("/account")).text
+            assert r.headers["location"] == "/account/details?ok=summary_saved#summary"
+            page = (await b.http.get("/account/details")).text
             assert "<pre class='sum-text'>Summary for" in page and "Watched cards" not in page
         finally:
             await b.aclose()

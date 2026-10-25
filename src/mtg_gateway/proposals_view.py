@@ -863,7 +863,7 @@ def list_html(
         f"<span class='ui-sub'>{side if not waiting_view else esc(side)}</span></div>"
     )
     parts = [
-        ui.page_head("Proposals", PAGE_SUB),
+        ui.assistant_head("/proposals", "Proposals", PAGE_SUB),
         notice,
         widgets_html(data, query, csrf, now=now),
         head,

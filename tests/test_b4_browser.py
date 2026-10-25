@@ -82,14 +82,14 @@ def test_setup_columns_account_boxes_and_back(server: Server) -> None:
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
 
         # Account: Disconnect opens its box (no page load); the box's solid red button is a submit.
-        page.goto(f"{server.base}/account", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
         box = page.locator("#disc1")
         expect(box).to_be_hidden()
         page.locator("a[data-box-open='disc1']").click()
         expect(box).to_be_visible()
         expect(box.locator("h2")).to_have_text("Disconnect “Claude”?")
         expect(box.locator("button.danger")).to_have_text("Disconnect")
-        assert page.url.endswith("/account")
+        assert page.url.endswith("/account/details")
         box.locator("[data-cancel]").click()
         expect(box).to_be_hidden()
 
@@ -106,7 +106,7 @@ def test_setup_columns_account_boxes_and_back(server: Server) -> None:
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
 
         # A Back button goes back one page where there is one.
-        page.goto(f"{server.base}/account", wait_until="networkidle")
+        page.goto(f"{server.base}/account/details", wait_until="networkidle")
         page.evaluate(
             "() => { const f = document.createElement('form'); f.method = 'post'; f.action = '/account';"
             " const i = document.createElement('input'); i.name = 'x'; i.value = 'a'.repeat(20000);"
@@ -116,7 +116,7 @@ def test_setup_columns_account_boxes_and_back(server: Server) -> None:
         expect(page.locator("h1")).to_have_text("Too large")
         page.locator("a[data-history-back]").click()
         page.wait_for_load_state("networkidle")
-        assert page.url.endswith("/account") and page.locator("#delete-data").count() == 1
+        assert page.url.endswith("/account/details") and page.locator("#delete-data").count() == 1
         phone.close()
         browser.close()
     assert errors == []

@@ -125,7 +125,7 @@ class Summaries:
             "proposals_waiting": waiting,
             "proposals_applied": applied,
             "watchlists": watched,
-            "account_url": f"{self.public_url}/account#summary",
+            "account_url": f"{self.public_url}/account/details#summary",
             "written_by": "the gateway, from its own data (no AI)",
         }
         out["text"] = text(out)
@@ -143,7 +143,7 @@ class Summaries:
             "summary",
             f"Your {'daily' if summary['period'] == 'day' else 'weekly'} summary",
             short_text(summary),
-            "/account#summary",
+            "/account/details#summary",
         )
 
     async def send_due(self, day: str) -> int:

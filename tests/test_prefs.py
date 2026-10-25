@@ -226,9 +226,9 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         for name, value in (("view.deck", "grid"), ("card.size", "l"), ("stack:42:type", ["Land"])):
             db.set_pref(SUB, name, value)
         db.set_pref(SUB, "track.a.something", True)  # not a view choice: stays
-        page = html.unescape((await b.http.get("/account")).text)
+        page = html.unescape((await b.http.get("/account/details")).text)
         assert "Forget my view choices" in page and "Light or dark mode stays on each device." in page
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices"})
         assert r.status_code == 303 and "err=confirm_forget" in r.headers["location"]
         assert db.get_pref(SUB, "card.size") == "l"
