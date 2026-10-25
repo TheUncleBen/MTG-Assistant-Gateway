@@ -101,7 +101,7 @@ def test_sections_are_flat_and_the_groups_are_inset_lists() -> None:
         ("Played with their effect but never mattered", heads[2][1]),
         ("Shortcuts the model takes", heads[3][1]),
     ]
-    assert model.count("<span class='more'>Details") == 4
+    assert model.count("<span class='disc'>Details") == 4
     assert model.count("<details class='ig-info'>") == 4  # all closed: no wall of text
     assert "<div class='ig-blurb'><p>The solo test found these cards and their exact text" in model
     assert "Many cards need things the solo test does not model" in model
@@ -211,3 +211,22 @@ def test_the_page_marks_reports_in_the_nav_and_is_wide(server: Server) -> None:
     # the live status route draws the same label and section as the page
     live = h.get("/api/v1/reports/rep_nav/forge", headers={"Accept": "application/json"}).json()
     assert "rv-forge" in live["forge_html"] and "ui-lbl" in live["status_html"]
+
+
+def test_long_lists_show_six_rows_then_show_all_and_categories_open_on_tap() -> None:
+    """Ben, 10-25 (less scrolling): a list of more than 8 rows shows its first 6 and a Show all
+    capsule for the rest; the cards that need opponents sit in their categories, each a row that
+    opens; Details and Show all are capsules with a chevron, never bare blue text."""
+    model = _page().split("id='rv-model'")[1].split("id='rv-valid'")[0]
+    unmodeled = model.split("id='rv-g-unmodeled'")[1].split("<section")[0]
+    first = unmodeled.split("<details class='ig-more'>")[0]
+    assert first.count("class='cardlink'") == rp.SHOW_FIRST
+    assert "<summary><span class='disc'>Show all 32 cards<svg" in unmodeled
+    opp = model.split("id='rv-g-opp'")[1].split("<section")[0]
+    cats = re.findall(r"<details class='ig-dis'><summary><span class='nm'>([^<]+)</span>", opp)
+    assert cats and "Removal and other interaction" in cats and "ig-sub" not in opp
+    assert model.count("<span class='disc'>Details<svg") == 4 and "class='more'" not in model
+    short = rp.model_section_html(
+        {"deck_size": 100, "honesty": {"unrecognized": [{"name": f"C{i}"} for i in range(8)]}}
+    )
+    assert "ig-more" not in short  # 8 rows or fewer: all shown
