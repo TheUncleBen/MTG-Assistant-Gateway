@@ -471,6 +471,19 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
+/* Disclosure controls (Ben, 10-25: never bare blue text): a Details drop-down or a Show all is a
+   grey capsule with its words and a chevron that turns when open; .disc.round is the icon-only
+   form for a tight row. The capsule is 32px; its tap area reaches 44px. */
+.disc{position:relative;display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 10px 0 12px;
+  border-radius:999px;background:var(--surface-2);color:var(--text);font-size:.85rem;font-weight:600;
+  line-height:1.1;white-space:nowrap;cursor:pointer;-webkit-user-select:none;user-select:none}
+.disc::after{content:"";position:absolute;inset:-6px 0}
+.disc svg{width:14px;height:14px;flex:none;transition:transform .15s}
+.disc.round{width:32px;padding:0;justify-content:center}
+.disc.round svg{width:16px;height:16px}
+summary:hover .disc{background:var(--surface-3)}
+[open] > summary .disc svg{transform:rotate(180deg)}
+summary:focus-visible .disc{outline:2px solid var(--focus);outline-offset:2px}
 /* Account › Approval mode: a tight list, one row per mode (radio and name) with the same fixed
    padding, its meaning in a fold opened by the chevron at the row's end. The radio, the name and
    the chevron share the first line at any text size; the fold's text lines up with the name. */
@@ -484,12 +497,9 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 .mode-opt.off .mode-pick{color:var(--text-muted);cursor:default}
 details.mode-info > summary{position:absolute;right:2px;top:max(0px,calc(12px + .675em - 22px));
   width:44px;height:44px;display:grid;place-items:center;list-style:none;cursor:pointer;
-  color:var(--text-muted);border-radius:var(--radius)}
+  color:var(--text);border-radius:var(--radius)}
 details.mode-info > summary::-webkit-details-marker{display:none}
-details.mode-info > summary:hover{color:var(--text)}
-details.mode-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:-4px}
-details.mode-info > summary svg{transition:transform .15s}
-details.mode-info[open] > summary svg{transform:rotate(180deg)}
+details.mode-info > summary:focus-visible{outline:0}
 .mode-body{margin:-4px 0 0;padding:0 16px 14px 46px;line-height:1.45;font-size:.95rem;color:var(--text)}
 .mode-body p{margin:0 0 .45rem}
 .mode-body ul{margin:-.2rem 0 .55rem;padding-left:1.1rem}
@@ -1552,8 +1562,14 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 }
 @media (min-width:600px){.wdg .go .btn,.wdg .go button{width:auto}}
 /* a fold-out under a row or a section (a report's details, a watched card's history) */
-.rv-det > summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem;
-  min-height:44px;font-weight:700;color:var(--link)}
+details.rv-det > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+  min-height:36px;margin:4px 0;padding:0 14px;border-radius:999px;background:var(--surface-2);
+  color:var(--text);font-weight:600;font-size:.9rem;line-height:1.2}
+.rv-det > summary::-webkit-details-marker{display:none}
+.rv-det > summary::after{content:"";flex:none;width:6px;height:6px;border:solid currentColor;
+  border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);transition:transform .15s}
+.rv-det[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
+.rv-det > summary:hover{background:var(--surface-3)}
 
 /* the Activity pages (admin Activity, My activity): a search on its own line on narrow screens,
    and each event as a short label then its name as plain text that wraps. Each page sets its own

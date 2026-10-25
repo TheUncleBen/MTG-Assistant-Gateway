@@ -1588,7 +1588,8 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
             f"{'' if allowed else ' disabled'}><span>{label}"
             f"{'' if allowed else NOT_ALLOWED}</span></label>"
-            f"<details class='mode-info'><summary title='What this mode does'>{icon('chev')}"
+            f"<details class='mode-info'><summary title='What this mode does'>"
+            f"<span class='disc round'>{icon('chev')}</span>"
             f"<span class='sr-only'>What this mode does: {label}</span></summary>"
             f"<div class='mode-body'>{body}</div></details></div>"
         )

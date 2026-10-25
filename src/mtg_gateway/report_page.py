@@ -930,6 +930,12 @@ def solo_section_html(
 # -- what the quick solo test leaves out: an inset grouped list (the account settings look) -------
 def _rows(cards: list[dict[str, Any]]) -> str:
     """Card rows: the name opens the shared card menu (static/menus.js), its draw rate trails."""
+    items = _row_items(cards)
+    # an odd last row keeps its partner cell on the two-column desktop grid
+    return "".join(items) + ("<li class='fill' aria-hidden='true'></li>" if len(items) % 2 else "")
+
+
+def _row_items(cards: list[dict[str, Any]]) -> list[str]:
     items = []
     for c in cards:
         copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
@@ -940,10 +946,27 @@ def _rows(cards: list[dict[str, Any]]) -> str:
             f"<li><span class='nm'><button type='button' class='cardlink' data-card='{_esc(name)}'>"
             f"{copies}{_esc(name)}</button></span>{drawn}</li>"
         )
-    # an odd last row keeps its partner cell on the two-column desktop grid
-    if len(items) % 2:
-        items.append("<li class='fill' aria-hidden='true'></li>")
-    return "".join(items)
+    return items
+
+
+# A long list shows its first rows and a "Show all" row for the rest (Ben, 10-25: less scrolling).
+SHOW_FIRST = 6
+
+
+def _card(rows: list[str], kind: str, noun: str) -> str:
+    """One inset card of ready rows; past SHOW_FIRST + 2 rows, the rest wait behind Show all."""
+
+    def ul(items: list[str]) -> str:
+        pad = "<li class='fill' aria-hidden='true'></li>" if kind == "ig-cards" and len(items) % 2 else ""
+        return f"<ul class='ig-list {kind}'>{''.join(items)}{pad}</ul>"
+
+    if len(rows) <= SHOW_FIRST + 2:
+        return f"<div class='ig'>{ul(rows)}</div>"
+    return (
+        f"<div class='ig'>{ul(rows[:SHOW_FIRST])}<details class='ig-more'>"
+        f"<summary><span class='disc'>Show all {len(rows)} {noun}{icon('chev')}</span></summary>"
+        f"{ul(rows[SHOW_FIRST:])}</details></div>"
+    )
 
 
 def _group(gid: str, heading: str, count: str, info: str, body: str) -> str:
@@ -952,7 +975,7 @@ def _group(gid: str, heading: str, count: str, info: str, body: str) -> str:
     return (
         f"<section class='ig-sec' id='{gid}' aria-labelledby='{gid}-h'>"
         f"<details class='ig-info'><summary><h3 id='{gid}-h'>{_esc(heading)}</h3>"
-        f"<span class='n'>{_esc(count)}</span><span class='more'>Details{icon('chev')}</span></summary>"
+        f"<span class='n'>{_esc(count)}</span><span class='disc'>Details{icon('chev')}</span></summary>"
         f"<div class='ig-blurb'>{info}</div></details>{body}</section>"
     )
 
@@ -1007,16 +1030,18 @@ def model_section_html(
                 UNMODELED_HEADING,
                 _share(_copies(unrec), size),
                 info + "</p>",
-                f"<ul class='ig ig-list ig-cards'>{_rows(unrec)}</ul>{actions}",
+                _card(_row_items(unrec), "ig-cards", "cards") + actions,
             )
         )
     if oos:
         total = _copies([c for grp in oos for c in grp["cards"]])
         lists = "".join(
-            f"<h4 class='ig-sub'>{_esc(grp['label'])} <span>{_copies(grp['cards'])}</span></h4>"
-            f"<ul class='ig ig-list ig-cards'>{_rows(grp['cards'])}</ul>"
+            f"<details class='ig-dis'><summary><span class='nm'>{_esc(grp['label'])}</span>"
+            f"<span class='v'>{_copies(grp['cards'])}</span>{icon('chev')}</summary>"
+            f"<ul class='ig-list ig-cards'>{_rows(grp['cards'])}</ul></details>"
             for grp in oos
         )
+        lists = f"<div class='ig'>{lists}</div>"
         parts.append(
             _group(
                 "rv-g-opp", OUT_OF_SCOPE_HEADING, _share(total, size), f"<p>{OUT_OF_SCOPE_TEXT}</p>", lists
@@ -1029,22 +1054,22 @@ def model_section_html(
                 LOW_IMPACT_HEADING,
                 _share(len(low), size),
                 f"<p>{LOW_IMPACT_TEXT}</p>",
-                f"<ul class='ig ig-list ig-cards'>{_rows([{'name': n} for n in low])}</ul>",
+                _card(_row_items([{"name": n} for n in low]), "ig-cards", "cards"),
             )
         )
     if approx:
-        rows = "".join(
+        rows = [
             f"<li><span class='nm'>{_esc(a['label'])}</span>"
             f"<span class='cards'>{_esc(a['cards'])}</span></li>"
             for a in approx
-        )
+        ]
         parts.append(
             _group(
                 "rv-g-approx",
                 APPROX_HEADING,
                 f"{len(approx)} shortcut{'s' if len(approx) != 1 else ''}",
                 f"<p>{APPROX_TEXT}</p>",
-                f"<ul class='ig ig-list ig-approx'>{rows}</ul>",
+                _card(rows, "ig-approx", "shortcuts"),
             )
         )
     return _sec(
@@ -1300,9 +1325,6 @@ REPORT_PAGE_CSS = (
 .rv-page .ig-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
 .rv-page .ig-info h3{margin:0;font-size:1.05rem;font-weight:700;flex-basis:100%}
 .rv-page .ig-info .n{color:var(--text-muted);font-size:.9rem}
-.rv-page .ig-info .more{display:inline-flex;align-items:center;gap:2px;color:var(--link);font-size:.9rem}
-.rv-page .ig-info .more svg{width:14px;height:14px;transition:transform .15s}
-.rv-page .ig-info[open] .more svg{transform:rotate(180deg)}
 .rv-page .ig-blurb{margin:.25rem 0 .5rem;padding:10px 14px;border:1px solid var(--border);border-radius:12px;
   font-size:.92rem;line-height:1.45}
 .rv-page .ig-blurb p{margin:0}
@@ -1310,6 +1332,23 @@ REPORT_PAGE_CSS = (
   text-transform:uppercase;color:var(--text-muted)}
 .rv-page .ig-sub span{font-weight:400}
 .rv-page .ig-info + .ig-sub{margin-top:.35rem}
+.rv-page .ig-more > summary,.rv-page .ig-dis > summary{list-style:none;cursor:pointer;display:flex;
+  align-items:center;gap:.75rem;min-height:44px;padding:0 16px;border-top:1px solid var(--border-soft)}
+.rv-page .ig-more > summary::-webkit-details-marker,
+.rv-page .ig-dis > summary::-webkit-details-marker{display:none}
+.rv-page .ig-more > summary{justify-content:center;min-height:52px}
+.rv-page .ig-more[open] > summary{display:none}
+.rv-page .ig-more > ul{border-top:1px solid var(--border-soft)}
+.rv-page .ig-dis:first-child > summary{border-top:0}
+.rv-page .ig-dis > summary .nm{flex:1;min-width:0;font-weight:600}
+.rv-page .ig-dis > ul li{padding-left:28px}
+.rv-page .ig-dis > summary .v{color:var(--text-muted);font-size:.9rem}
+.rv-page .ig-dis svg{width:16px;height:16px;color:var(--text-muted);transform:rotate(-90deg);
+  transition:transform .15s}
+.rv-page .ig-dis[open] > summary svg{transform:none}
+.rv-page .ig-dis > ul{border-top:1px solid var(--border-soft);background:var(--bg)}
+.rv-page .ig-more > summary:focus-visible,.rv-page .ig-dis > summary:focus-visible{
+  outline:2px solid var(--focus);outline-offset:-2px}
 .rv-page .ig-approx li{flex-direction:column;align-items:stretch;gap:.15rem;padding:10px 16px}
 .rv-page .ig-approx .cards{color:var(--text-muted);font-size:.9rem;line-height:1.4}
 .rv-page .ig-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:.75rem auto 0;
