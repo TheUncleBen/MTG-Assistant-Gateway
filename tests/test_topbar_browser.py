@@ -918,3 +918,29 @@ def test_the_bars_room_is_measured_before_it_is_written(chromium, server: Server
         page.evaluate(SETTLE)
         assert page.evaluate(SCRIPTS_RAN)
         assert page.evaluate("() => window.__forced") == 0
+
+
+def test_the_search_box_starts_from_20rem_whatever_the_fonts(chromium, server: Server) -> None:
+    """The box grows from 20rem, not from the input's own width, which follows the browser's
+    fonts: on CI's fonts (25 Oct 2026) the long name kept its whole word at 1100 px while the box
+    sat at 16rem. A smaller input font stands in for those fonts here."""
+    sid = _admin(server)
+    settings = server.app.state.gateway.settings
+    short_name = settings.server_name
+    seen = []
+    with _session(chromium) as browser:
+        ctx = browser.new_context(viewport={"width": 1100, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        try:
+            object.__setattr__(settings, "server_name", LONG_NAME)
+            for css in ("", ".topbar .topsearch input{font-size:11px}"):
+                _open(page, f"{server.base}/history")
+                if css:
+                    page.add_style_tag(content=css)
+                _settle(page)
+                seen.append((css, page.evaluate(BRAND_AND_SEARCH)))
+        finally:
+            object.__setattr__(settings, "server_name", short_name)
+    # at 1100 px the brand's word has the room to give: the box keeps its 20rem
+    assert all(b["search"] >= 20 - 0.05 and b["cut"] for _css, b in seen), seen
