@@ -126,6 +126,14 @@ Account page behind your picture, and a tidier deck page.
   effect. "Left out on purpose" is now "Needs opponents", here, in the downloaded report and in the
   request for your assistant. The two solo tests are named "Quick solo test" and "Full-rules solo
   test by Forge".
+- **Shorter lists** in what the quick solo test leaves out: a list of more than eight shows its
+  first six and **Show all**, and the cards that need opponents sit in their categories
+  (Counterspells, Removal and other interaction, Board wipes and so on), each opening on a tap.
+- **Every Details and Show more fold** is a grey capsule with a chevron that turns when it opens,
+  instead of blue or grey text: on the report page, the Account page (Approval mode, What your
+  sign-in shares, the Archidekt link details), the collection's CSV help, card search's More
+  filters, the new deck and compare pages, a contest's entries, the History page's numbers, a
+  proposal's technical details and diff, a watched card's price table and the admin update steps.
 - **A commander** among the cards the quick solo test lists says "commander" instead of "drawn 0%":
   it starts in the command zone, so it is never drawn.
 - **Android install and update steps** say that on a Samsung Galaxy phone Auto Blocker must be off

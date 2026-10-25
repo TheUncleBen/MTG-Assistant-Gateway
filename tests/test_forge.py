@@ -676,7 +676,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     page = forge_html(newer)
     assert "turn 11" in page and "from turn 8 to 30" in page and "1\u00a0min 35\u00a0s" in page
     assert "<td data-label='How it lost'>commander damage 1, life total 1</td>" in page
-    assert "<summary>Each game (1)</summary>" in page
+    assert "<summary class='fold-btn'>Each game (1)</summary>" in page
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": newer})
     assert (
         "Lost by: commander damage 1, life total 1." in md
