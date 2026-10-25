@@ -623,12 +623,18 @@ def _android(ctx: Context) -> Section:
                     ),
                     Step(f"Check that it is the real app. {verify}"),
                     Step(
+                        "On a Samsung Galaxy phone, turn **Auto Blocker** off (Settings > Security and "
+                        "privacy > Auto Blocker). While it is on, the phone won't install apps that don't "
+                        "come from an app store, so neither this app nor its updates."
+                    ),
+                    Step(
                         "Open the downloaded file. Android asks once to allow installs from your browser: "
                         "allow it."
                     ),
                     Step(
                         "Play Protect may warn that the developer is unknown. That is "
                         "expected: the app is signed by whoever runs this gateway, not by an app store. "
+                        "It may also offer to scan the app first: scanning it or not are both fine. "
                         "Only continue if the signing certificate matched in step 2. If Play Protect says "
                         "the app is harmful, or you are unsure, do not install it and ask the owner of "
                         "this gateway."
@@ -642,7 +648,9 @@ def _android(ctx: Context) -> Section:
                     f"computer run `apksigner verify --print-certs {APK_NAME}` and compare its certificate "
                     "SHA-256 digest with the published one.",
                     "Updates: the app asks this gateway for the version it offers here and offers it "
-                    "itself; Update installs it over the app you have. Android only accepts an update "
+                    "itself; Update installs it over the app you have (with Auto Blocker still off on a "
+                    "Samsung phone; scanning it with Play Protect or not are both fine). Android only "
+                    "accepts an update "
                     "signed with the same key as the installed app, so your settings and sign-in are "
                     "kept, and a file signed by anyone else is refused. An app from before 0.7.12 was "
                     "signed with a test key: uninstall it once and install this file.",

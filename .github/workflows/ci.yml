@@ -488,6 +488,8 @@ jobs:
                 [ -f "$f" ] || continue
                 printf -- '- `%s` SHA-256: `%s`\n' "$(basename "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
               done
+              # What a phone needs to install the app or its updates (docs/ANDROID.md, Getting the app).
+              printf -- '- Installing or updating the Android app: on a Samsung Galaxy phone, turn Auto Blocker off first (Settings > Security and privacy > Auto Blocker). If Play Protect offers to scan the app, scanning it or not are both fine.\n'
             fi
           } > "$notes"
           files=()
