@@ -57,13 +57,15 @@
   // The first measure waits for the first frame: read right away, while the other deferred
   // scripts are still changing the page, it would force a layout of the whole page that the
   // frame then does again (a 100-card deck page paid twice). The room is only scroll padding,
-  // so a frame's wait shows nothing.
-  if (window.requestAnimationFrame) requestAnimationFrame(fit); else fit();
+  // so a frame's wait shows nothing. Where there is a ResizeObserver its first call is that
+  // measure: it comes after the frame's own layout, so it reads what is there; a measure of its
+  // own at the start of the frame laid out the page once more (the deck editor's first frame
+  // paid about 70 ms of its 290 at 4x for it).
   if (window.ResizeObserver) {
     var watch = new ResizeObserver(fit);
     watch.observe(bar);
     for (var i = 0; i < feet.length; i++) watch.observe(feet[i]);
-  }
+  } else if (window.requestAnimationFrame) requestAnimationFrame(fit); else fit();
   window.addEventListener("resize", fit);
   // On the rail, More's menu opens beside its tab (the stylesheet alone puts it at the rail's foot,
   // where it is without this script): its top on the tab's, moved up as far as it must to fit.
