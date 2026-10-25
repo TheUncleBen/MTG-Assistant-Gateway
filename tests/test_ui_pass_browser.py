@@ -92,11 +92,11 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
 
 
 def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> None:  # noqa: F811
-    """A plain fold-out (a details element with no class of its own, such as the Account page's
-    "What your sign-in shares") lost its triangle on touch screens: the rule that makes every summary
-    40 px tall laid it out as a flex box, which drops the native marker. It is a 40 px list item now,
-    on every such fold-out. (The admin's "Details and actions" fold, the first case, is a row menu
-    now.)"""
+    """A plain fold-out (such as the Account page's "What your sign-in shares") lost its triangle on
+    touch screens: the rule that makes every summary 40 px tall laid it out as a flex box, which
+    drops the native marker. Every such fold-out shows a marker: the native one on a list item, or
+    the shared disclosure capsule's own chevron (Ben, 10-25: never bare text). (The admin's
+    "Details and actions" fold, the first case, is a row menu now.)"""
     from playwright.sync_api import sync_playwright
 
     exe, (sid, _pending) = _exe(), _seed(server)
@@ -113,13 +113,14 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
                 "() => [...document.querySelectorAll("
                 "'details:not(.dd):not(.mode-info):not(.yrow) > summary')]"
                 ".filter(s => s.innerText.trim() && !getComputedStyle(s, '::before').content.includes('▸'))"
-                ".map(s => [s.innerText.trim().slice(0, 24), getComputedStyle(s).display,"
+                ".map(s => [s.innerText.trim().slice(0, 24), getComputedStyle(s).display == 'list-item'"
+                " || getComputedStyle(s, '::after').borderBottomWidth != '0px' ? 'marker' : 'none',"
                 " Math.round(s.getBoundingClientRect().height)])"
             )
         browser.close()
     assert any(t.startswith("What your sign-in shares") for t, _, _ in rows), rows
     for text, display, height in rows:
-        assert display == "list-item", (text, display)
+        assert display == "marker", (text, display)
         assert height >= 40, (text, height)
 
 
