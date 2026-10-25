@@ -802,25 +802,42 @@ def coverage_text(g: dict[str, Any]) -> str:
         return ""
     # both figures, as scripts/measure_recognition.py prints them (measured now on precons and test
     # decks, on real decks at deploy)
-    size = c["deck_size"]
     return (
-        f"Of {size} cards, {c['modeled']} played with their effect ({c['pct']}% of the deck), "
-        f"{c['known'] - c['modeled']} need opponents, and {size - c['known']} are not in the quick "
-        "model yet. Each group is listed below."
+        f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
+        f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
+        "cards played with their effect and those that need opponents. The rest are listed below."
     )
 
 
 # The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
-UNMODELED_HEADING = "Not in the quick model yet"
+UNMODELED_HEADING = "Played without their effect"
 # An assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
 # text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
 UNMODELED_TEXT = (
-    "The quick solo test has no model yet for what these cards do, so it cast them for their mana "
-    "cost and body only, and whatever they would add is missing from its numbers. Your assistant may "
-    "be able to describe some of them from their exact text, in a form the quick test can play."
+    "The solo test found these cards and their exact text, but has no description yet of what they "
+    "do, so it drew and cast them without their effect. Whatever they would do in a real game is "
+    "missing from the numbers above. Your assistant may be able to describe some of them from their "
+    "exact text, in a form the solo test can play. Many cards need things the solo test does not "
+    "model, such as opponents to interact with."
 )
 # Said only when the report has a finished Forge solo test (Forge plays nearly every card).
 UNMODELED_FORGE_TEXT = "Forge's full-rules solo test above played them with their real rules."
+# The other groups' explanations, shared by the signed-in page and the export.
+OUT_OF_SCOPE_TEXT = (
+    "The simulator plays against opponents who do nothing, so removal, board wipes, counterspells and "
+    "protection have nothing to act on. Spells that only do that stayed in hand. Creatures and other "
+    "permanents among them were still cast, and played the parts of their text the simulator can read."
+)
+LOW_IMPACT_HEADING = "Played with their effect but never mattered"
+LOW_IMPACT_TEXT = (
+    "These cards were understood, drawn and played, and nothing they do changed a solo test game. A "
+    "solo test game has no opponent and no interaction, so this says nothing about how the card does at "
+    "a real table."
+)
+APPROX_HEADING = "Shortcuts the model takes"
+APPROX_TEXT = (
+    "Simplifications applied to these cards; they play a little better or worse than in a real game."
+)
 UNMODELED_SAVED_TEXT = (
     "The gateway can keep up to 200 of these descriptions for you once they pass its check, and your "
     "later solo tests then play those cards with them. Your saved descriptions play only in your own "
@@ -1100,10 +1117,7 @@ def honesty_groups(
                 "",
                 OUT_OF_SCOPE_HEADING,
                 _share(total, size),
-                "<p>The simulator plays against opponents who do nothing, so removal, board wipes, "
-                "counterspells and protection have nothing to act on. Spells that only do that stayed in "
-                "hand. Creatures and other permanents among them were still cast, and played the parts of "
-                "their text the simulator can read.</p>" + groups,
+                f"<p>{OUT_OF_SCOPE_TEXT}</p>" + groups,
             )
         )
     low = h.get("low_impact") or []
@@ -1111,11 +1125,9 @@ def honesty_groups(
         out.append(
             (
                 "",
-                "Played with their effect but never mattered",
+                LOW_IMPACT_HEADING,
                 _share(len(low), size),
-                "<p>These cards were understood, drawn and played, and nothing they do changed a solo test "
-                "game. A solo test game has no opponent and no interaction, so this says nothing about how "
-                "the card does at a real table.</p>" + _names([{"name": n} for n in low], menu=menu),
+                f"<p>{LOW_IMPACT_TEXT}</p>" + _names([{"name": n} for n in low], menu=menu),
             )
         )
     approx = [a for a in h.get("approximations") or [] if a.get("cards")]
@@ -1124,10 +1136,9 @@ def honesty_groups(
         out.append(
             (
                 "approx",
-                "Shortcuts the model takes",
+                APPROX_HEADING,
                 str(len(approx)),
-                "<p>Simplifications applied to these cards; they play a little better or worse than in a "
-                f"real game.</p><dl class='meta approx'>{rows}</dl>",
+                f"<p>{APPROX_TEXT}</p><dl class='meta approx'>{rows}</dl>",
             )
         )
     return out
