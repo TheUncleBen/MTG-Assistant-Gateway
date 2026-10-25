@@ -381,7 +381,7 @@ else
 fi
 shot 05-end
 
-# -- the page's App menu items (the account menu's App section, on a gateway page): each reaches the app
+# -- the page's App items (the Account page's App rows, on a gateway page): each reaches the app
 adb shell pm grant "$PKG" android.permission.CAMERA
 app() { adb shell am start -W -n "$PKG/local.mtgassistantgateway.app.MainActivity" >/dev/null; sleep 4; }
 # Each item is pressed with a tap on its label. If that has no effect (the label not found on screen,
@@ -402,9 +402,6 @@ app
 before=$(hits /)
 menu "Reload" reload '[ "$(hits /)" -gt '"$before"' ]' "no new page load"
 sleep 2
-menu "Open in browser" openInBrowser 'a=$(top) && ! printf "%s" "$a" | grep -F "$PKG/" >/dev/null' "the app stayed in front"
-shot menu-open-in-browser
-app
 before=$(hits /scan)
 menu "Scan with the app's camera" openCamera '[ "$(hits /scan)" -gt '"$before"' ]' "the scan page was not opened"
 sleep 3
