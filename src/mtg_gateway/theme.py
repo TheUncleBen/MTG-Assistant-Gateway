@@ -82,6 +82,7 @@ _card_size: ContextVar[str] = ContextVar("mtg_card_size", default="m")
 # "system" and under [data-theme=light] for an explicit choice.
 _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
+    --group-bg:#ffffff; /* an inset grouped list's card (iOS style), white on the page */
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
     --text:#383838; --link:#1d55b3; /* 5.2:1 on --surface-2 (the menu); Archidekt's #4183c4 is 3.8:1 */
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
@@ -160,7 +161,7 @@ CSS = (
     """
 :root{
   /* Archidekt dark-mode set (body.dark-mode) */
-  --bg:#181818; --surface:#232323; --surface-2:#383838; --surface-3:#4b4b4b;
+  --bg:#181818; --surface:#232323; --surface-2:#383838; --surface-3:#4b4b4b; --group-bg:#232323;
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
   --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
   --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */

@@ -847,7 +847,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
 
 def _coverage_bar(modeled: int, aside: int, blanks: int, size: int, *, cls: str = "") -> str:
     total = max(1, size)
-    parts = (("m", modeled), ("o", aside), ("u", blanks))
+    parts = (("m", modeled), ("u", blanks), ("o", aside))
     bars = "".join(f"<i class='{k}' style='width:{100 * n / total:.0f}%'></i>" for k, n in parts if n)
     return f"<span class='bar-split rv-cov-bar{(' ' + cls) if cls else ''}' aria-hidden='true'>{bars}</span>"
 
@@ -941,6 +941,9 @@ def _rows(cards: list[dict[str, Any]]) -> str:
             f"<li><span class='nm'>{copies}<button type='button' class='cardlink' data-card='{_esc(name)}'>"
             f"{_esc(name)}</button></span>{drawn}</li>"
         )
+    # an odd last row keeps its partner cell on the two-column desktop grid
+    if len(items) % 2:
+        items.append("<li class='fill' aria-hidden='true'></li>")
     return "".join(items)
 
 
@@ -981,15 +984,15 @@ def model_section_html(
             inner = f"<i class='dot {dot}'></i><span class='nm'>{label}</span>{val}"
             if href and n:
                 return f"<li><a href='{href}'>{inner}{icon('chev')}</a></li>"
-            return f"<li>{inner}</li>"
+            return f"<li>{inner}<span class='sp'></span></li>"
 
         parts.append(
             "<div class='ig ig-sum'>"
             + _coverage_bar(cov["modeled"], aside, blanks, size_n, cls="big")
             + "<ul class='ig-list'>"
             + row("m", "Played with their effect", cov["modeled"])
-            + row("o", "Needs opponents", aside, "#rv-g-opp")
             + row("u", UNMODELED_HEADING, blanks, "#rv-g-unmodeled")
+            + row("o", "Needs opponents", aside, "#rv-g-opp")
             + f"</ul></div><p class='ig-foot'>{_esc(KNOWN_TEXT.format(**cov))}</p>"
         )
     if unrec:
@@ -1222,7 +1225,7 @@ REPORT_PAGE_CSS = (
 .rv-page .ci-w i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--orange)}
 .rv-page .wdg .det .bar-split{width:100%}
 .rv-page .bar-split .m,.rv-page .dot.m{background:var(--green)}
-.rv-page .bar-split .o,.rv-page .dot.o{background:var(--surface-3)}
+.rv-page .bar-split .o,.rv-page .dot.o{background:var(--control-border)}
 .rv-page .bar-split .u,.rv-page .dot.u{background:var(--orange)}
 .rv-page .bar-split.big{height:14px}
 .rv-page .rv-jump{position:sticky;top:0;z-index:5;background:var(--bg);padding:.5rem 0;margin:0 0 .75rem;
@@ -1270,7 +1273,7 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-notes li{margin:.2rem 0;overflow-wrap:anywhere}
 .rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
 /* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */
-.rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--surface);
+.rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--group-bg);
   border:1px solid var(--border-soft);border-radius:12px;overflow:hidden}
 .rv-page .ig-list{list-style:none;margin:0;padding:0}
 .rv-page .ig.ig-list{margin:.5rem 0 0}
@@ -1291,7 +1294,7 @@ REPORT_PAGE_CSS = (
 .rv-page .ig-foot{margin:.4rem 16px 0;font-size:.85rem;line-height:1.4;color:var(--text-muted)}
 .rv-page .ig-sec{margin:1.75rem 0 0}
 .rv-page .ig-info > summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:baseline;
-  gap:.1rem .6rem;padding:.35rem 4px;min-height:44px;align-content:center;box-sizing:border-box}
+  gap:.1rem .6rem;padding:.35rem 16px;min-height:44px;align-content:center;box-sizing:border-box}
 .rv-page .ig-info > summary::-webkit-details-marker{display:none}
 .rv-page .ig-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
 .rv-page .ig-info h3{margin:0;font-size:1.05rem;font-weight:700;flex-basis:100%}
@@ -1317,11 +1320,19 @@ REPORT_PAGE_CSS = (
   gap:.4rem;width:100%;min-height:48px;margin:0;padding:6px 10px;white-space:normal;text-align:center;
   line-height:1.25;box-sizing:border-box}
 .rv-page .ig-actions svg{flex:none}
+@media (max-width:480px){.rv-page .ig-actions.two{grid-template-columns:minmax(0,1fr)}}
+.rv-page .ig-cards li.fill{display:none}
+.rv-page .ig-list .sp{width:16px;flex:none}
 @media (min-width:600px){.rv-page .ig-info h3{flex-basis:auto}}
 @media (min-width:900px){
   .rv-page .ig-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .rv-page .ig-cards li:nth-child(2){border-top:0}
   .rv-page .ig-cards li:nth-child(even){border-left:1px solid var(--border-soft)}
+  .rv-page .ig-cards li.fill{display:flex}
+  .rv-page .ig-sum .ig-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .rv-page .ig-sum .ig-list li{border-top:0}
+  .rv-page .ig-sum .ig-list li + li{border-left:1px solid var(--border-soft)}
+  .rv-page .ig-sum .ig-list .sp{display:none}
   .rv-page .ig-approx li{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:1rem;
     align-items:center}
 }
