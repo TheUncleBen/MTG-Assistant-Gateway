@@ -568,7 +568,8 @@ def test_the_brand_is_whole_at_1280_px_with_every_link(server: Server, path: str
         page.goto(f"{server.base}{path}", wait_until="networkidle")
         got = page.evaluate(BRAND)
         assert got["text"] == "MTG Assistant Gateway" and not got["cut"], got
-        assert got["links"] == 9, got  # Home to Watchlist, none dropped
+        # the four places, none dropped (navigation round 2: the rest under More)
+        assert got["links"] == 4, got
         assert errors == [], errors
         browser.close()
 

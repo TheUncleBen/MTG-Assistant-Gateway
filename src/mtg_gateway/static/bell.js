@@ -4,19 +4,23 @@
    bell is a link to the /notifications page. Needs static/box.js (window.MtgBox). */
 (function () {
   "use strict";
-  var bell = document.querySelector("[data-bell]");
-  if (!bell || !window.fetch) return;
-  var badge = bell.querySelector(".n");
+  // the top bar's bell, and Alerts on the rail (only one of them shows at a time)
+  var bells = Array.prototype.slice.call(document.querySelectorAll("[data-bell]"));
+  if (!bells.length || !window.fetch) return;
   var count = null;
 
   function setCount(n) {
     count = n;
-    if (badge) {
-      badge.textContent = n > 99 ? "99+" : String(n);
-      badge.hidden = !(n > 0);
-    }
-    bell.setAttribute("aria-label", n > 0 ? "Notifications, " + n + " new" : "Notifications");
-    bell.title = bell.getAttribute("aria-label");
+    bells.forEach(function (bell) {
+      var badge = bell.querySelector(".n");
+      if (badge) {
+        badge.textContent = n > 99 ? "99+" : String(n);
+        badge.hidden = !(n > 0);
+      }
+      var name = bell.getAttribute("data-bell-label") || "Notifications"; // the rail's says Alerts
+      bell.setAttribute("aria-label", n > 0 ? name + ", " + n + " new" : name);
+      bell.title = bell.getAttribute("aria-label");
+    });
     var big = document.querySelector("[data-bell-big]"), det = document.querySelector("[data-bell-det]");
     if (big) big.textContent = String(n);
     if (det) det.textContent = n > 0 ? (n === 1 ? "new notification" : "new notifications") : "nothing new";
@@ -49,7 +53,7 @@
     var body = el("div");
     body.appendChild(el("p", "muted", "Reading Archidekt's notifications…"));
     var settings = el("a", "btn btn-plain");
-    settings.href = "/account#email";
+    settings.href = "/account/details#email";
     var gear = window.MtgCardMenu && window.MtgCardMenu.icon ? window.MtgCardMenu.icon("settings") : null;
     if (gear) { settings.appendChild(gear); settings.appendChild(document.createTextNode(" ")); }
     settings.appendChild(document.createTextNode("Settings"));

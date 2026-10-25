@@ -45,6 +45,12 @@
         button.replaceChild(label, node);
         break;
       }
+      // a button with an icon carries its words in a span of their own (Sign out)
+      if (node.nodeType === 1 && node.tagName === "SPAN" && node.textContent.trim()) {
+        label = node;
+        label.classList.add("busy-label");
+        break;
+      }
     }
     if (!label) return;
     button.dataset.busyRestore = label.textContent;

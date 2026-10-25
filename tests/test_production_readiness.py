@@ -307,7 +307,7 @@ async def test_every_page_loads_the_feedback_script_and_offline_worker(gw: Harne
     b = Browser(gw)
     try:
         await b.login()
-        page = await b.http.get("/account", headers=NAVIGATE)
+        page = await b.http.get("/account/details", headers=NAVIGATE)
         csp = page.headers["content-security-policy"]
         script_src = csp.split("script-src")[1].split(";")[0]
         assert script_src.strip() == "'self'"
@@ -359,15 +359,16 @@ async def test_member_can_delete_their_data_from_the_account_page(gw: Harness) -
     b = Browser(gw)
     try:
         await b.login()
-        page = await b.http.get("/account", headers=NAVIGATE)
+        page = await b.http.get("/account/details", headers=NAVIGATE)
         assert "Delete my data" in page.text and "action' value='delete_data'" in page.text
         _snap(gw.db, "s1", owner="user-1")
         gw.db.metrics_increment("2026-10-06", "user-1", "tool", "whoami")
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         # Without the confirmation box nothing happens.
         r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data"})
         # the box comes back open, with the notice (the red outline opens it; the tick is inside it)
-        assert r.status_code == 303 and r.headers["location"] == "/account?delete=1&err=confirm_delete"
+        assert r.status_code == 303
+        assert r.headers["location"] == "/account/details?delete=1&err=confirm_delete"
         assert gw.db.get_user("user-1") is not None
         r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data", "confirm": "yes"})
         assert r.status_code == 303 and r.headers["location"] == "/data-deleted"
@@ -375,7 +376,7 @@ async def test_member_can_delete_their_data_from_the_account_page(gw: Harness) -
         assert gw.db.metrics_totals(3650) == []
         assert any(e["event"] == "member_data_deleted" for e in gw.db.audit_recent(5))
         # Signed out: the session is gone with the data.
-        again = await b.http.get("/account", headers=NAVIGATE)
+        again = await b.http.get("/account/details", headers=NAVIGATE)
         assert again.status_code == 302 and again.headers["location"].startswith("/login")
         done = await b.http.get("/data-deleted", headers=NAVIGATE)
         assert done.status_code == 200 and "Your data was deleted" in done.text

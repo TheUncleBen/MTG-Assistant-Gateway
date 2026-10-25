@@ -494,7 +494,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
               return {
                 scrollWidth: document.documentElement.scrollWidth,
                 innerWidth: window.innerWidth,
+                // the filter chips are one row that scrolls sideways (as iOS draws them): the row
+                // fits, the chips past its end are scrolled to
                 right: Math.max(...Array.from(box.querySelectorAll('*'))
+                  .filter(e => !e.closest('.ui-chips') || e.matches('.ui-chips'))
                   .map(e => e.getBoundingClientRect().right)),
                 low,
                 checked: texts.length,

@@ -85,7 +85,7 @@ def _box(page, sel: str):
 
 def _account(page, base: str) -> None:
     """The Account page with its Archidekt cards (a slow first read draws the page without them)."""
-    page.goto(f"{base}/account", wait_until="networkidle")
+    page.goto(f"{base}/account/details", wait_until="networkidle")
     for _ in range(3):
         if page.locator("#pr-group_by-btn").count():
             break
@@ -248,8 +248,9 @@ def test_a_big_removal_asks_in_a_box_and_a_question_left_open_is_rejected(
         assert server.db.count_pending_proposals("user-1") == 1
         _reload_with_the_list_script_late(page, server)
         # the leaving request is lost under the service worker (as on the site), so the next page
-        # rejects it (static/cardmenu.js) and the strip it was drawn in goes (static/proposals.js)
-        page.wait_for_function("() => !document.querySelector('#waiting')", timeout=8000)
+        # rejects it (static/cardmenu.js), and its row leaves the deck's Proposals box and the
+        # pill's count goes (static/proposals.js)
+        page.wait_for_function("() => !document.querySelector('.banner .soc.prop .nb')", timeout=8000)
         assert server.db.count_pending_proposals("user-1") == 0
         # the note was the member's own (security review 0.7.44 S-03), and it is settled now
         owed = page.evaluate(
@@ -258,7 +259,7 @@ def test_a_big_removal_asks_in_a_box_and_a_question_left_open_is_rejected(
         )
         assert all(k.startswith("mtg_reject_owed:") and v == "[]" for k, v in owed), owed
         page.reload(wait_until="networkidle")
-        assert copies() == 20 and page.locator("#waiting").count() == 0
+        assert copies() == 20 and page.locator(".banner .soc.prop .nb").count() == 0
         # saying no rejects it too, and the card is back where it was
         ask(page)
         page.locator(".mtgbox .acts button", has_text="Keep them").click()

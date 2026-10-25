@@ -14,7 +14,9 @@ the Settings page only, a new Settings row for the Archidekt backup folder, the 
 Claude's connection, an assistant reading the same Forge seed the report page shows, Forge's
 load problems leaving out Java's own warnings, a solo test shorter than five turns no longer talking
 about turn 5, the research service having the current rules from the moment it starts, signing in
-to the Android app coming back to the app by itself, and faster pages and deck deletes.
+to the Android app coming back to the app by itself, and faster pages and deck deletes. The
+navigation is simpler too: four places (Home, Decks, Binder, Assistant) and More, a settings-style
+Account page behind your picture, and a tidier deck page.
 
 ### Upgrade notes
 - **Start from the new stack file and example variables file**, as in
@@ -66,9 +68,36 @@ to the Android app coming back to the app by itself, and faster pages and deck d
   app's package ID and signing certificate from the app it ships.
 - The Android app's automatic sign-in return needs this version of the app as well as of the
   gateway: the app offers the update itself (or download it from the gateway's Android app page).
+- **Account details moved one step in.** Your picture now opens the Account page; the cards that
+  were on it (approval mode, Archidekt, notifications, connected apps, your data) are under
+  **Account details** (`/account/details`). Old `/account` links with a setting or a `#` section
+  still open Account details, so bookmarks and notification links keep working.
 
 ### Changed
-- **Shorter deployment files.** The example variables files and stack files list only what a
+- **Simpler navigation.** The top bar, the phone's tabs and the Fold's rail show the same four
+  places, Home, Decks, Binder (your collection) and Assistant, plus More with Search, Precons, Scan,
+  Watchlist and My lists in two groups. The rail no longer scrolls. Assistant shows how many
+  proposals are waiting, and a switch at its top moves between Proposals, History and Reports. The
+  search box fills the top bar's free space, and on the rail the bell is an Alerts tab.
+- **A new Account page** behind your picture, laid out like a phone's settings: Your account
+  (Account details, My activity, Forum), Look (Theme and Layout, chosen in place), Assistants and
+  apps (Guide, Assistant skill, the Android app, Admin for admins) and, in the Android app, This
+  app (Scan with the app's camera, Reload, Open a copied link, Change gateway, Check for app updates
+  with the installed version). Sign out is one button at its foot.
+- **Decks page:** a My Decks and Packages switch at the top replaces the Show filter (My Decks lists
+  your decks, Packages your packages), with New
+  deck, New folder and New package beside it; the sort, view and size controls fit one row on an
+  unfolded Fold.
+- **Deck page:** Edit deck, Clone deck, Test and play (Goldfish, the full test and solo test, and
+  playing on Archidekt or EDHPlay) and More. More is grouped (This deck, Look into it, Share and
+  print, Community) and adds Deck reports. **Share** replaces Copy link: in the Android app it opens
+  the phone's share sheet (with Open on Archidekt, Copy gateway link and Copy deck list on Android
+  14 and later); in a browser it offers the gateway link, the Archidekt link and the deck list. The
+  deck's waiting proposals are a **Proposals** button beside Like, Bookmark and Comments, with a
+  count, instead of a strip on the page.
+- **The Android app** no longer has Open in browser, and "Open in a new tab" shows on the website
+  only.
+ The example variables files and stack files list only what a
   deployment needs: about 90 lines instead of 350 for the variables, 290 instead of 460 for the
   stack.
 - **ChatGPT's name** is the gateway name, cut at a word to 80 characters (ChatGPT refuses a longer

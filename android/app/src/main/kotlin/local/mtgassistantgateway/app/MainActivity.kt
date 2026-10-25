@@ -74,7 +74,8 @@ import java.io.ByteArrayInputStream
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
- * /login redirected to) during a sign-in, stay in the app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
+ * /login redirected to) during a sign-in, stay in the app. Links anywhere else open in the phone's
+ * browser; a `target=_blank` link stays in the app when it is a gateway page. Other schemes
  * open another app only when tapped in the main frame, and only an activity that accepts links
  * from a browser.
  *
@@ -355,7 +356,6 @@ class MainActivity : ComponentActivity() {
             when (item.itemId) {
                 R.id.menu_scan -> startScan()
                 R.id.menu_reload -> web.reload()
-                R.id.menu_browser -> openExternal(Uri.parse(web.url ?: origin))
                 R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
                 R.id.menu_update -> checkForUpdates()
@@ -504,7 +504,7 @@ class MainActivity : ComponentActivity() {
     /**
      * The floating menu button shows only over pages that are not the gateway's (the sign-in page
      * of the identity provider, say). The gateway's own pages carry the same actions in their
-     * account menu through [NativeBridge], so the button never covers their bottom tab bar.
+     * Account page through [NativeBridge], so the button never covers their bottom tab bar.
      */
     private fun syncFab() {
         fab.visibility = if (camera == null && !gatewayPage) View.VISIBLE else View.GONE
@@ -1219,12 +1219,14 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""
 
-        /** The page's account menu: the actions the floating button offers elsewhere. */
+        /** The Account page's This app list: the actions the floating button offers elsewhere. */
         @JavascriptInterface
         fun reload() = onGatewayPage { web.reload() }
 
+        /** The deck page's Share: the phone's share sheet ([DeckShare]). */
         @JavascriptInterface
-        fun openInBrowser() = onGatewayPage { openExternal(Uri.parse(web.url ?: origin)) }
+        fun share(title: String?, archidektUrl: String?, gatewayUrl: String?, deckList: String?) =
+            onGatewayPage { DeckShare.open(this@MainActivity, title, archidektUrl, gatewayUrl, deckList) }
 
         @JavascriptInterface
         fun checkForUpdates() = onGatewayPage { this@MainActivity.checkForUpdates() }

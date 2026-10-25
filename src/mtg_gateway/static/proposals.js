@@ -1,19 +1,16 @@
-// The waiting-changes lists: the Proposals page (proposals_view.py) and the deck page's strip
-// (waiting_strip.py). The checked count goes on the bar's buttons ("Apply 3 changes" on the
-// Proposals page, "Apply 3" on the strip); the bar's buttons wait until a row is checked; a deck's
-// "all" box checks its rows (the header's box every row); a checked row is tinted; the deck strip
-// opens by itself on a wide screen (one line on a phone). A deck deletion on its review page asks
-// once more, with the solid red button. Without this script every form still works.
+// The waiting-changes lists: the Proposals page (proposals_view.py) and the deck page's Proposals
+// box (waiting_strip.py). The checked count goes on the bar's buttons ("Apply 3 changes" on the
+// Proposals page, "Apply 3" in the box); the bar's buttons wait until a row is checked; a deck's
+// "all" box checks its rows (the header's box every row); a checked row is tinted. A deck deletion
+// on its review page asks once more, with the solid red button. Without this script every form
+// still works.
 (function () {
   "use strict";
   var forms = document.querySelectorAll("form.wform");
   for (var f = 0; f < forms.length; f++) wire(forms[f]);
 
-  var strip = document.querySelector("details.wstrip[data-open-wide]");
-  if (strip && window.matchMedia && window.matchMedia("(min-width: 701px)").matches) strip.open = true;
-
   // A question's proposal rejected late (static/cardmenu.js settles one the deck page owed): its
-  // row goes, the strip's count follows, and an emptied strip goes altogether.
+  // row goes, and the deck's Proposals pill counts one fewer (no count once none wait).
   document.addEventListener("mtg:rejected", function (e) {
     var pid = e.detail && e.detail.proposal_id;
     if (!pid) return;
@@ -21,12 +18,14 @@
     var pick = document.querySelector(sel);
     var row = pick ? pick.closest("li.wrow") : null;
     if (!row) return;
-    var form = pick.form, own = pick.closest("details.wstrip");
+    var form = pick.form;
     row.parentNode.removeChild(row);
     var left = form ? form.querySelectorAll("li.wrow").length : 0;
-    if (own && !left) { own.parentNode.removeChild(own); return; }
-    var b = own ? own.querySelector("summary b") : null;
-    if (b) b.textContent = left + " waiting change" + (left === 1 ? "" : "s");
+    var nb = form && form.classList.contains("ybox") ? document.querySelector(".banner .soc.prop .nb") : null;
+    if (nb) {
+      if (left) nb.textContent = String(left);
+      else { var said = nb.nextElementSibling; nb.remove(); if (said) said.remove(); }
+    }
     if (form) form.dispatchEvent(new Event("change", { bubbles: true }));
   });
 

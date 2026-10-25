@@ -113,8 +113,8 @@
   // the tabs); rejecting one rejected already is harmless. A settled one is announced
   // (mtg:rejected) so a waiting-changes list on the page can drop its row (static/proposals.js).
   // The note is the member's (security review 0.7.44 S-03): it is kept under a short hash of the
-  // name the account menu's "Signed in as" line carries, so the next member on a shared browser
-  // neither sends nor drops it, and signing out clears it. A page that names no member keeps and
+  // top bar's data-who (itself a hash of the member's id, theme.py), so the next member on a
+  // shared browser neither sends nor drops it, and signing out clears it. A page that names no member keeps and
   // sends nothing. It is dropped only when the reject went through or the server says the
   // proposal is no longer pending or not there (S-04); a refusal for now (403, 429, 5xx) or no
   // connection keeps it for the next page, which tries once more (one try a page load).
@@ -123,8 +123,8 @@
   function owedKey() {
     var name = "";
     try {
-      var who = document.querySelector("header.topbar .who[title]");
-      name = (who && who.getAttribute("title")) || "";
+      var who = document.querySelector("header.topbar [data-who]");
+      name = (who && who.getAttribute("data-who")) || "";
     } catch (e) { name = ""; }
     if (!name) return "";
     var h = 5381;

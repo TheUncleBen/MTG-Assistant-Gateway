@@ -85,7 +85,7 @@ async def set_mode(env: Env, user: str, mode: str) -> None:
         await gateway_browser_sign_in(page, env, user, "/account")
         await page.check(f"input[name=mode][value={mode}]")
         await page.click("text=Save approval mode")
-        await page.wait_for_url(f"{PUBLIC_URL}/account?ok=mode_{mode}", timeout=30_000)
+        await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=mode_{mode}", timeout=30_000)
 
 
 async def ensure_unlinked(env: Env, user: str) -> None:
@@ -94,7 +94,7 @@ async def ensure_unlinked(env: Env, user: str) -> None:
         await gateway_browser_sign_in(page, env, user, "/account")
         if "Unlink and delete stored session" in await page.inner_text("body"):
             await page.click("text=Unlink and delete stored session")
-            await page.wait_for_url(f"{PUBLIC_URL}/account?ok=unlinked", timeout=30_000)
+            await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=unlinked", timeout=30_000)
         assert "Link your Archidekt account" in await page.inner_text("body")
 
 
@@ -207,7 +207,7 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
             await page.fill("input[name=archidekt_password]", f"pw-{archidekt_user}")
             await page.check("input[name=accept_risk]")
             await page.click("text=Link account")
-            await page.wait_for_url(f"{PUBLIC_URL}/account?ok=linked", timeout=30_000)
+            await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=linked", timeout=30_000)
             text = await page.inner_text("body")
             assert f"Linked to {archidekt_user}" in text, text
         c = clients[user]

@@ -339,7 +339,7 @@ def picture_box(csrf_in: str, username: str, *, open: bool, error: str = "") -> 
             ),
         ],
         open=open,
-        close_href="/account#profile",
+        close_href="/account/details#profile",
         cls="pr-box",
     )
 
@@ -401,7 +401,9 @@ def account_cards(
         "<div class='ctl'><div class='pr-me'><span class='big' aria-hidden='true'>"
         f"{esc(_initial(me['username']))}"
         "</span><div class='ui-actions'>"
-        + ui.box_opener("Upload a picture…", "/account?picture=1#profile", "picture", icon_name="image")
+        + ui.box_opener(
+            "Upload a picture…", "/account/details?picture=1#profile", "picture", icon_name="image"
+        )
         + "</div></div></div></div>"
         f"<form method='post' action='/account/profile' id='pr-f'>{csrf_in}"
         "<input type='hidden' name='action' value='profile'>"
@@ -555,7 +557,7 @@ def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
     its target where Archidekt names one (the gateway's deck page for a deck)."""
     if not linked:
         return (
-            "<p class='muted'>Link your Archidekt account on the Account page to see its notifications "
+            "<p class='muted'>Link your Archidekt account under Account details to see its notifications "
             "here.</p>"
         )
     rows = got.get("notifications") or []
@@ -672,7 +674,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         action = data.get("action") or ""
         on = data.get("on") == "1"
         shown = data.get("shown")
-        back = "/collection" if data.get("next") == "/collection" else "/account"
+        back = "/collection" if data.get("next") == "/collection" else "/account/details"
         card = {"profile": "profile", "email": "email", "preference": "defaults"}.get(action, "")
         try:
             if action == "profile":
@@ -690,7 +692,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     saved.append("username")
                     unconfirmed = unconfirmed or verified(out) is False
                 code = "ok=unconfirmed" if unconfirmed else f"ok=profile&saved={','.join(saved)}"
-                return RedirectResponse(f"/account?{code}#profile", status_code=303)
+                return RedirectResponse(f"/account/details?{code}#profile", status_code=303)
             if action == "email":
                 out = await press(sub, shown, field="email", switch=data.get("switch") or "", on=on)
             elif action == "preference":
@@ -721,7 +723,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if wants_json(request):
             return JSONResponse({"ok": True, "notice": text, "verified": verified(out)})
         code = "ok=unconfirmed" if verified(out) is False else f"ok={card}"
-        return RedirectResponse(f"/account?{code}#{card}", status_code=303)
+        return RedirectResponse(f"/account/details?{code}#{card}", status_code=303)
 
     @server.custom_route("/account/picture", methods=["POST"], include_in_schema=False)
     async def picture_post(request: Request) -> Response:
@@ -760,7 +762,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         forget(sub)
         if wants_json(request):
             return JSONResponse({"ok": True, "notice": PICTURE_SAVED, "verified": out.get("verified")})
-        return RedirectResponse("/account?ok=picture#profile", status_code=303)
+        return RedirectResponse("/account/details?ok=picture#profile", status_code=303)
 
     # -- the bell ---------------------------------------------------------------------------------
 
@@ -815,7 +817,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             f"<div class='bell-page'><div class='ui-head'><h1>Notifications{badge}</h1></div>"
             "<p class='ui-sub'>Your notifications from Archidekt.</p>"
             f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
-            "<div class='ui-actions'><a class='btn btn-plain' href='/account#email'>"
+            "<div class='ui-actions'><a class='btn btn-plain' href='/account/details#email'>"
             f"{icon('settings')} Settings</a>"
             "</div></div></div>",
             sub=sub,

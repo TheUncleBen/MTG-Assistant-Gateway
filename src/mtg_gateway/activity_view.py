@@ -1334,7 +1334,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             len(apps_now),
             unit="connected",
             detail_html=app_line,
-            actions=[ui.button_link("Connected apps", "/account#apps")],
+            actions=[ui.button_link("Connected apps", "/account/details#apps")],
         ),
     ]
     filters = [

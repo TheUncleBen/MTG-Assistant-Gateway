@@ -360,9 +360,9 @@ async def test_disabled_user_token_is_refused_at_load_and_audited_once(gw: Harne
     b = Browser(gw)
     try:
         await b.login("/account")
-        assert (await b.http.get("/account", headers=NAVIGATE)).status_code == 200
+        assert (await b.http.get("/account/details", headers=NAVIGATE)).status_code == 200
         gw.db.set_user_disabled("user-2", True)
-        r = await b.http.get("/account", headers=NAVIGATE)
+        r = await b.http.get("/account/details", headers=NAVIGATE)
         assert r.status_code == 302 and r.headers["location"].startswith("/login")
     finally:
         await b.aclose()
@@ -381,7 +381,7 @@ async def test_revoke_drops_sessions_and_tokens(gw: Harness) -> None:
     await member.login("/account")  # before the IdP is switched to the admin account
     admin = await admin_browser(gw)
     try:
-        assert (await member.http.get("/account", headers=NAVIGATE)).status_code == 200
+        assert (await member.http.get("/account/details", headers=NAVIGATE)).status_code == 200
         csrf = await admin.csrf("/admin/users")
         r = await admin.http.post(
             "/api/v1/admin/users/user-2", json={"action": "revoke"}, headers={"X-CSRF-Token": csrf}
@@ -395,7 +395,7 @@ async def test_revoke_drops_sessions_and_tokens(gw: Harness) -> None:
             "sessions": 1,
             "codes": 0,
         }
-        r = await member.http.get("/account", headers=NAVIGATE)
+        r = await member.http.get("/account/details", headers=NAVIGATE)
         assert r.status_code == 302 and r.headers["location"].startswith("/login")
         assert (await whoami(gw, tokens["access_token"])).status_code == 401
         assert gw.db.get_user("user-2")["disabled_at"] is None  # revoke is not disable
@@ -605,7 +605,7 @@ async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
         ):
             page = await b.http.get(path, headers={"Accept": "text/html"})
             assert page.status_code == 200 and f"<title>{title} · " in page.text, path
-            assert "Signed in as <b>" in page.text
+            assert "class='icon-btn acct' href='/account'" in page.text
     finally:
         await b.aclose()
 

@@ -79,7 +79,8 @@ def read_filters(qp: Any) -> dict[str, str]:
         "colors": colors,
         "colour_mode": qp.get("cm") if qp.get("cm") in dict(DECK_COLOUR_MODES) else "incl",
         "fmt": (qp.get("format") or "").strip()[:40],
-        "show": qp.get("show") if qp.get("show") in ("decks", "packages") else "",
+        # the switch at the top of My decks: "" your decks, "packages" your card packages
+        "show": "packages" if qp.get("show") == "packages" else "",
     }
 
 

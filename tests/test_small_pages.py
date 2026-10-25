@@ -270,9 +270,9 @@ async def test_form_expired_pages_say_what_was_not_done_and_offer_reload_and_bac
             (
                 {"action": "unlink"},
                 "/account",
-                "Reload Account",
-                "/account",
-                "/account",
+                "Reload Account details",
+                "/account/details",
+                "/account/details",
                 "Nothing was changed.",
             ),
         ):
