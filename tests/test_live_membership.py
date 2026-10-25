@@ -5,6 +5,7 @@ so the gateway asks its userinfo endpoint before serving any request with a sess
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from .conftest import FakeIdP, Harness, make_settings, running
@@ -412,3 +413,81 @@ async def test_a_dropped_connection_to_userinfo_is_tried_once_more(tmp_path: Pat
         assert page.status_code == 503 and not drops
         assert h.db.get_idp_grant(SUB) is not None
         await b.aclose()
+
+
+def _refreshes(idp: FakeIdP) -> int:
+    return len([c for c in idp.token_calls if c.get("grant_type") == "refresh_token"])
+
+
+async def test_the_provider_token_is_renewed_before_it_runs_out_not_during_a_request(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    """Speed (Ben, 25 Oct): a request that finds the provider access token run out waits for a
+    refresh and then userinfo, two round trips to the identity provider. The gateway renews it in
+    the background shortly before it runs out instead, so the request waits for userinfo only. The
+    membership check itself is unchanged: still asked before the request, every time."""
+    from mtg_gateway import membership
+
+    monkeypatch.setattr(membership, "RENEW_LEAD", 2)
+    # the token is past its renewal margin 4 s after it was issued: renewed in the background
+    # about 2 s in (RENEW_LEAD before that)
+    idp.access_ttl = membership.EXPIRY_MARGIN + 4
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        before = _refreshes(idp)
+        await asyncio.sleep(2.5)
+        assert _refreshes(idp) == before + 1  # renewed with no request waiting on it
+        during = _refreshes(idp)
+        calls = idp.userinfo_calls
+        assert (await whoami(h, token)).status_code == 200
+        assert _refreshes(idp) == during and idp.userinfo_calls == calls + 1  # userinfo only
+        # still asked every time: a removal takes effect on the next request as before
+        idp.set_groups(SUB, [])
+        assert (await whoami(h, token)).status_code == 401
+
+
+async def test_a_refused_background_renewal_revokes_nothing_by_itself(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    from mtg_gateway import membership
+
+    monkeypatch.setattr(membership, "RENEW_LEAD", 2)
+    idp.access_ttl = membership.EXPIRY_MARGIN + 4
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        idp.refresh_error = "invalid_grant"
+        before = _refreshes(idp)
+        await asyncio.sleep(2.5)
+        assert _refreshes(idp) == before + 1
+        # the background renewal decides nothing: the next request's own check does, as before
+        assert h.db.audit_recent(5)[0]["event"] != "membership_unverifiable"
+        idp.refresh_error = None
+        idp.access_ttl = 300
+
+
+async def test_a_background_renewal_never_brings_back_a_removed_grant(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    """Security review (25 Oct): a renewal that was waiting on the provider while the member's
+    tokens were revoked (or their data deleted) stores nothing."""
+    from mtg_gateway import membership
+
+    monkeypatch.setattr(membership, "RENEW_LEAD", 2)
+    idp.access_ttl = membership.EXPIRY_MARGIN + 4
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        checker = h.app.state.gateway.membership
+        real = checker.oidc.refresh
+
+        async def slow(refresh_token: str):
+            h.db.revoke_all_for_user(SUB)  # the admin's revoke lands while Authentik answers
+            return await real(refresh_token)
+
+        monkeypatch.setattr(checker.oidc, "refresh", slow)
+        before = _refreshes(idp)
+        await asyncio.sleep(2.5)
+        assert _refreshes(idp) == before + 1
+        assert h.db.get_idp_grant(SUB) is None

@@ -198,6 +198,10 @@ BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and descripti
 # making another when the deck is unchanged since that copy, or the copy is under this many
 # seconds old. Every edit still takes its own snapshot.
 BACKUP_SHARE_SECONDS = 15 * 60
+# A delete pressed this soon after its box opened uses the deck and backup folder the box read
+# (Decks.prepare_delete): the backup copy itself is Archidekt's own copy of the deck as it is then.
+DELETE_PREP_SECONDS = 60
+DELETE_PREP_REMEMBERED = 256
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # Kept in a member's own proposal's result while it waits: its save asked for no backup copy.
 NO_BACKUP_KEY = "no_backup_copy"
@@ -2752,6 +2756,9 @@ class DeckService:
         # backup copy id -> the name, description and folder id it was made with, until its
         # unused delete is queued; only the newest BACKUPS_REMEMBERED are kept
         self._backups_made: dict[str, dict[str, str]] = {}
+        # delete boxes open now (prepare_delete): (member, deck id) -> what the box read
+        self._delete_prep: dict[tuple[str, str], dict[str, Any]] = {}
+        self._prep_tasks: set[asyncio.Task[None]] = set()
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
         self.archidekt_slot_wait = ARCHIDEKT_SLOT_WAIT
         # sub -> waiters for one of its slots: (0 for a page, else 1; arrival; future)
@@ -2815,6 +2822,7 @@ class DeckService:
         remembers for that member about what the write changes is stale from now on."""
         # Deck pages of every member: a collaborator's change shows on the owner's next view too.
         self._forget_page_decks()
+        self._delete_prep.clear()  # a delete box's read may be of the deck this changes
         sub = _acting_sub.get()
         if not sub:
             return
@@ -2829,6 +2837,8 @@ class DeckService:
         self.deck_lists.forget(sub)
         self.folder_trees.forget(sub)
         self._forget_page_decks()
+        for key in [k for k in self._delete_prep if k[0] == sub]:
+            del self._delete_prep[key]
         # the Account page's profile, the bell and My lists' counts are the old account's too
         # (security review 0.7.43)
         from . import account_lists, custom_pictures, packages, profile_page
@@ -5050,6 +5060,9 @@ class DeckService:
         which records each as failed ("interrupted", with what it had sent) before the database
         closes."""
         await self.deck_lists.aclose()
+        for task in list(self._prep_tasks):
+            task.cancel()
+        await asyncio.gather(*self._prep_tasks, return_exceptions=True)
         await self.batches.aclose()  # no further change of a selection starts
         running = list(self._running.values())
         if not running:
@@ -6058,9 +6071,12 @@ class DeckService:
                 return counted > keep
         return False
 
-    async def _backup_copy(self, sub: str, deck: Deck, snapshot_id: str, *, reason: str) -> dict[str, Any]:
+    async def _backup_copy(
+        self, sub: str, deck: Deck, snapshot_id: str, *, reason: str, folder: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         """Copy ``deck`` into the backup folder and record the copy on the snapshot. Raises the
-        Archidekt error as a DeckError; callers decide what that means for their write."""
+        Archidekt error as a DeckError; callers decide what that means for their write. ``folder``:
+        the backup folder a delete box found moments ago (prepare_delete), else it is looked up."""
         name = backup_name(deck.name, time.time())[:200]
         description = (
             f"Automatic backup made by the MTG Assistant Gateway {reason}. Gateway snapshot "
@@ -6069,10 +6085,11 @@ class DeckService:
         )
         folder_name = self.backup_folder
         with backup_writes():  # the backup copy is not a change to the deck
-            folder = await self._call(
-                sub,
-                lambda token, *_: self.client.ensure_folder(token, name=folder_name),
-            )
+            if folder is None:
+                folder = await self._call(
+                    sub,
+                    lambda token, *_: self.client.ensure_folder(token, name=folder_name),
+                )
             self.db.record_backup_folder(sub, folder["id"])
             # How long the gateway's own writes to the copy took (the copy POST and its
             # description PATCH, which come back together): Archidekt's createdAt and every
@@ -7713,6 +7730,54 @@ class DeckService:
         if not self.settings.writes_enabled:
             raise DeckError("writes_disabled", refusals.WRITES_OFF)
 
+    async def prepare_delete(self, sub: str, deck_id: str) -> Deck:
+        """The delete box opening: read the deck (its name and card count for the box) and, while
+        the member types the name, find the backup folder. A delete_deck within
+        DELETE_PREP_SECONDS uses both, so pressing Delete waits for four Archidekt calls instead of
+        six. Only a look-up: the folder is still made by the delete when it is missing."""
+        deck = await self.get_own_deck(sub, deck_id)
+        key = (sub, str(deck.id))
+        entry: dict[str, Any] = {
+            "at": time.monotonic(),
+            "deck": deck,
+            "folder": None,
+            "link": self._link_id(sub),
+        }
+        self._delete_prep[key] = entry
+        while len(self._delete_prep) > DELETE_PREP_REMEMBERED:
+            self._delete_prep.pop(next(iter(self._delete_prep)))
+        if self.live.get("archidekt_backups"):
+            name = self.backup_folder
+
+            async def find() -> None:
+                try:
+                    entry["folder"] = await self._call(
+                        sub, lambda token, *_: self.client.find_folder(token, name=name)
+                    )
+                    entry["folder_name"] = name
+                except DeckError:
+                    pass  # the delete looks it up again
+
+            task = asyncio.create_task(find(), context=contextvars.Context())
+            self._prep_tasks.add(task)
+            task.add_done_callback(self._prep_tasks.discard)
+        return deck
+
+    def _prepared(self, sub: str, deck_id: str) -> dict[str, Any] | None:
+        """The delete box's read, used once: while it is under DELETE_PREP_SECONDS old, nothing the
+        gateway sent to Archidekt since could have changed the deck (_on_archidekt_write forgets
+        every box's read) and the member is still linked to the Archidekt account it was read with."""
+        entry = self._delete_prep.pop((sub, str(deck_id)), None)
+        if entry is None or time.monotonic() - entry["at"] > DELETE_PREP_SECONDS:
+            return None
+        if entry.get("link") != self._link_id(sub):
+            return None
+        return entry
+
+    def _link_id(self, sub: str) -> str:
+        link = self.db.get_link(sub) or {}
+        return str(link.get("archidekt_user_id") or "")
+
     async def delete_deck(
         self,
         sub: str,
@@ -7730,7 +7795,13 @@ class DeckService:
         copy or queues its delete instead of leaving it unrecorded. ``proposal_id``: that action's
         proposal, which the snapshot names so the snapshot list says what it was taken for."""
         self._writes_switch()
-        deck = await self.get_own_deck(sub, deck_id)
+        # the member's own press right after their delete box (never an assistant's proposal,
+        # which has no box): the deck and the backup folder the box read moments ago
+        prepared = self._prepared(sub, _clean_deck_id(deck_id)) if progress is None else None
+        deck = prepared["deck"] if prepared else await self.get_own_deck(sub, deck_id)
+        folder = None
+        if prepared and prepared.get("folder") and prepared.get("folder_name") == self.backup_folder:
+            folder = prepared["folder"]
         # a deck with no name shows as "Unnamed deck", so that is what the member types
         expected = clean_text(deck.name) or "Unnamed deck"
         if clean_text(typed_name).casefold() != expected.casefold():
@@ -7743,7 +7814,9 @@ class DeckService:
         backup: dict[str, Any] = {}
         if self.live.get("archidekt_backups"):
             try:
-                backup = await self._backup_copy(sub, deck, snapshot_id, reason="before it was deleted")
+                backup = await self._backup_copy(
+                    sub, deck, snapshot_id, reason="before it was deleted", folder=folder
+                )
                 if progress is not None:
                     progress.update(backup)
             except DeckError as exc:

@@ -74,6 +74,7 @@ from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .collection import add_collection
 from .companion import add_companion_routes
+from .compress import PageGzip
 from .config import LiveSettings, Settings, with_stored
 from .db import Database
 from .decks import (
@@ -760,6 +761,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             if state.folder_jobs is not None:
                 await state.folder_jobs.aclose()
             await state.decks.aclose()  # an apply still running is given a moment, then recorded
+            if state.membership is not None:
+                await state.membership.aclose()
             await state.oidc.aclose()
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
@@ -1067,6 +1070,7 @@ def create_app(
     )
     app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
+    app.add_middleware(PageGzip)
     # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
     # nosniff and HSTS too.
     app.add_middleware(NoSniffMiddleware, hsts=settings.public_url.startswith("https://"))

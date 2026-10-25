@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify, prefs, proposals_view, smallpage, ui
+from . import app_signin, link_disclosure, masked, modes, notify, prefs, proposals_view, smallpage, ui
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -1049,23 +1049,28 @@ async def apply_own_press(state: Any, sub: str, pid: str, shown: str | None) -> 
     return await state.decks.apply(sub, pid, via=REVIEW_PAGE)
 
 
+def _csrf_key(s: Any, sid: str) -> bytes:
+    return hmac.new(s.session_secret.encode(), f"csrf:{sid}".encode(), hashlib.sha256).digest()
+
+
 def _csrf(s: Any, sid: str | None) -> str | None:
-    if not sid:
-        return None
-    return hmac.new(s.session_secret.encode(), f"csrf:{sid}".encode(), hashlib.sha256).hexdigest()
+    """This browser session's form token, different on every load (masked.py), so compressed
+    pages (compress.py) can't be used to guess it from their sizes (BREACH)."""
+    return masked.mask(_csrf_key(s, sid)) if sid else None
+
+
+def _csrf_matches(s: Any, sid: str | None, given: str) -> bool:
+    return bool(sid) and masked.matches(_csrf_key(s, sid or ""), given)
 
 
 def csrf_form_ok(s: Any, sid: str | None, data: dict[str, str]) -> bool:
     """Whether a posted form's ``csrf`` field is this browser session's token."""
-    expected = _csrf(s, sid)
-    return bool(expected) and hmac.compare_digest(data.get("csrf", "").encode(), expected.encode())
+    return _csrf_matches(s, sid, data.get("csrf", ""))
 
 
 def csrf_header_ok(s: Any, sid: str | None, request: Request) -> bool:
     """Whether a script's ``X-CSRF-Token`` header is this browser session's token."""
-    expected = _csrf(s, sid)
-    given = request.headers.get("x-csrf-token", "")
-    return bool(expected) and hmac.compare_digest(given.encode(), expected.encode())
+    return _csrf_matches(s, sid, request.headers.get("x-csrf-token", ""))
 
 
 def browser_session(state: Any, request: Request) -> tuple[str | None, str | None]:
