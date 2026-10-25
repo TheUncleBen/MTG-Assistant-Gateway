@@ -75,9 +75,24 @@ def front_face(name: Any) -> str:
 UNDERPERFORMS = re.compile(r"\s*\(only this group supports 'the sim agrees this card underperforms'\)")
 
 
+# The research service's validation says its cards were "verified" on Scryfall; the gateway's
+# wording never says "verified" (mf_proxy rewrites new answers, plain_words stored ones).
+VERIFIED_WORDS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(cards?) verified on Scryfall\b"), r"\1 found on Scryfall"),
+    (re.compile(r"\b(\d+ cards?) verified\."), r"\1 found on Scryfall."),
+)
+
+
+def found_not_verified(text: str) -> str:
+    for pattern, replacement in VERIFIED_WORDS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def plain_words(text: str) -> str:
     """The simulator's text without the assistant tool names it mentions (``goldfish_report``,
     ``goldfish_annotate``): the page speaks to a person, not to an assistant."""
+    text = found_not_verified(text)
     text = re.sub(r'Full report: goldfish_report\("([^"]*)"\)', r"Run id: \1", text)
     text = re.sub(r"\s*\(candidates for annotation; see goldfish_annotate\)", " (could be annotated)", text)
     text = re.sub(r"goldfish_report\((\"?)([^)\"]*)\1\)", r"run \2", text)
@@ -1498,6 +1513,8 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
             parts.append(
                 f"<p class='notice{' warn' if state not in ('queued', 'running') else ''}'>{_esc(msg)}</p>"
             )
+    elif stopped:  # done, with games Forge gave no result for
+        parts.append(f"<p class='notice warn'>{_esc(stopped)}</p>")
     parts.append(forge_results_html(f))
     lines = forge_lines(f, results=False)
     if lines:
@@ -1620,8 +1637,21 @@ def forge_solo_lines(f: dict[str, Any]) -> list[str]:
 
 
 def forge_stopped_text(f: dict[str, Any]) -> str:
-    """The sentence for a run that ended without "done" after playing some games, else ""."""
+    """The sentence for a run that ended without "done" after playing some games, or that ended
+    "done" with games Forge gave no result for, else ""."""
     stop = _forge_stop(f)
+    missing = f.get("no_result_games")
+    if stop is None and f.get("state") == "done" and isinstance(missing, list) and missing:
+        total = f.get("games_requested")
+        played = (f.get("result") or {}).get("games") if isinstance(f.get("result"), dict) else None
+        named = ", ".join(str(g) for g in missing[:-1]) + (" and " if len(missing) > 1 else "")
+        named += str(missing[-1])
+        which = f"game {named}" if len(missing) == 1 else f"games {named}"
+        did = "the one game that did" if played == 1 else f"the {played} games that did"
+        return (
+            f"Forge finished, but {which} of the {total} gave no result, so the results below count "
+            f"only {did}."
+        )
     if stop is None:
         return ""
     played, total = stop
@@ -1953,6 +1983,8 @@ def report_markdown(r: dict[str, Any]) -> str:
                 forge_stopped_text(forge) or forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")
             )
             lines += [str(text), ""]
+        elif forge_stopped_text(forge):
+            lines += [forge_stopped_text(forge), ""]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))

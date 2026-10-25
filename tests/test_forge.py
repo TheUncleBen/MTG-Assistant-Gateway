@@ -30,7 +30,13 @@ from mtg_gateway.forge import (
     summarise_solo,
     wilson,
 )
-from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines, forge_solo_lines, report_markdown
+from mtg_gateway.report_view import (
+    FORGE_DRIFT_NOTE,
+    forge_lines,
+    forge_solo_lines,
+    forge_stopped_text,
+    report_markdown,
+)
 from mtg_gateway.reports import (
     SOLO_BUSY,
     SOLO_NOT_STARTED,
@@ -253,6 +259,38 @@ async def test_java_warnings_are_not_load_problems() -> None:
     assert done["load_problems"] == [real]
     fake.jobs[section["job_id"]]["load_problems"] = ["[1.0s][warning][cds] Skipping x: Unsupported location"]
     assert "load_problems" not in await refresh(client, section)
+
+
+async def test_a_game_without_a_result_is_named() -> None:
+    """On the live 0.7.44 gateway (a Pi 4) a Forge run ended "done" with 4 of 5 games: Forge
+    printed no result for game 3 and nothing said so. The section names the game, keeps the end
+    of Forge's log, and the report says the results count only the games that came back."""
+    fake = FakeForge()
+    client = fake.client()
+    section = await start_run(client, DECK_TEXT, "Liesa", games=5)
+    fake.jobs[section["job_id"]].update(
+        state="done",
+        games_requested=5,
+        results=[{"game": g, "draw": True, "stopped_slow": True, "ms": 600_000} for g in (1, 2, 4, 5)],
+        log_tail=["[2] Exception in game thread", "[2] at forge.game.Game.run"],
+    )
+    done = await refresh(client, section)
+    assert done["no_result_games"] == [3] and done["log_tail"][-1] == "[2] at forge.game.Game.run", done
+    text = forge_stopped_text(done)
+    assert text == (
+        "Forge finished, but game 3 of the 5 gave no result, so the results below count only the "
+        "4 games that did."
+    ), text
+    assert text in report_markdown({"deck_name": "L", "deck_id": "4", "stats": {}, "forge": done})
+    from mtg_gateway.report_page import forge_section_html
+    from mtg_gateway.report_view import forge_html
+
+    assert "game 3 of the 5 gave no result" in forge_html(done)
+    assert "game 3 of the 5 gave no result" in forge_section_html(done)
+    # every game back: nothing extra
+    fake.jobs[section["job_id"]]["results"] = [{"game": g, "winner": 1} for g in range(1, 6)]
+    whole = await refresh(client, section)
+    assert "no_result_games" not in whole and "log_tail" not in whole and forge_stopped_text(whole) == ""
 
 
 async def test_start_solo_run_plays_a_deck_without_commander_against_one() -> None:

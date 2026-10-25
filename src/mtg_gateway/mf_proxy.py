@@ -25,6 +25,7 @@ from mcp.server.context import CallNext, ServerRequestContext
 from . import deck_stats
 from .decklist import front_faces
 from .decks import DeckError
+from .report_view import found_not_verified
 from .schemas import compact_schema, flatten_params
 
 logger = logging.getLogger(__name__)
@@ -145,10 +146,11 @@ def paper_search_query(query: str) -> str:
 
 
 def rewrite_text(text: str) -> str:
-    """``text`` with every hidden Mystic Forge tool replaced by the gateway tool that owns its job."""
+    """``text`` with every hidden Mystic Forge tool replaced by the gateway tool that owns its job,
+    and its validation's "verified" in the gateway's words."""
     for pattern, replacement in TEXT_REWRITES:
         text = pattern.sub(replacement, text)
-    return text
+    return found_not_verified(text)
 
 
 # Added to a listed tool's description: what its own description leaves out.

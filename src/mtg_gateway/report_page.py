@@ -359,6 +359,8 @@ def forge_section_html(
             msg += " This section updates by itself when the games finish." if live else ""
         if msg:
             parts.append(f"<p class='notice{'' if pending else ' warn'}'>{_esc(msg)}</p>")
+    elif forge_stopped_text(f):  # done, with games Forge gave no result for
+        parts.append(f"<p class='notice warn'>{_esc(forge_stopped_text(f))}</p>")
     res = f.get("result") if isinstance(f.get("result"), dict) else {}
     seats = [s for s in res.get("seats") or [] if isinstance(s, dict)]
     games = _int(res.get("games")) or 0

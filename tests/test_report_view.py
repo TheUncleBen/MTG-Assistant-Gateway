@@ -85,7 +85,9 @@ def test_validation_verdicts() -> None:
     assert v["lines"] == ["2 card(s) not found on Scryfall:", "Enduring Angel", "Elbrus, the Binding Blade"]
     assert "Enduring Angel // Angelic Enforcer" in v["raw"]
     ok = rv.parse_validation({"ok": True, "text": VALIDATION_PASSED})
-    assert ok["verdict"] == "passed" and ok["lines"][0] == "All 72 unique cards verified on Scryfall."
+    # the research service's "verified" reads "found", the gateway's word for it (stored reports too)
+    assert ok["verdict"] == "passed" and ok["lines"][0] == "All 72 unique cards found on Scryfall."
+    assert "verified" not in ok["raw"]
     assert rv.parse_validation({"ok": False, "text": "service unavailable"})["verdict"] == "failed"
     assert rv.parse_validation({"ok": True, "text": "Validated 100 lines"})["verdict"] is None
     assert rv.parse_validation(None) is None
