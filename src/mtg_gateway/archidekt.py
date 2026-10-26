@@ -393,7 +393,7 @@ class ArchidektError(Exception):
         self.retry_after = retry_after
 
 
-BACKUP_FOLDER_NAME = "MTG Gateway backups"
+BACKUP_FOLDER_NAME = "MTG Gateway Backups"
 DECK_ID_RE = re.compile(r"[0-9]{1,12}")
 
 
@@ -1677,11 +1677,12 @@ class ArchidektClient(AccountRequests):
         return Deck(id=str(new_id), name=name, owner="", updated_at="", cards=[], categories=[], raw=body)
 
     # -- backups ------------------------------------------------------------
-    async def ensure_folder(self, token: str, name: str = BACKUP_FOLDER_NAME) -> dict[str, str]:
-        """``{id, name}`` of the private folder ``name`` directly under the account's root folder, created
-        there if missing. Routes per Archidekt's own site code: GET /decks/folderTree/ (root
-        with ``children``) and POST /decks/folders/ {name, private, parentFolder} (verified
-        live 2026-10-05)."""
+    async def find_folder(self, token: str, name: str = BACKUP_FOLDER_NAME) -> dict[str, str] | None:
+        """``{id, name}`` of the folder ensure_folder would use, or None when it would make one:
+        one GET, nothing created."""
+        return (await self._find_folder(token, name))[1]
+
+    async def _find_folder(self, token: str, name: str) -> tuple[dict[str, Any], dict[str, str] | None]:
         tree = await self._request("GET", "/decks/folderTree/", token=token)
         if not isinstance(tree, dict) or not isinstance(tree.get("id"), int):
             raise ArchidektError("contract", "unexpected folder tree shape")
@@ -1695,9 +1696,19 @@ class ArchidektClient(AccountRequests):
             and c["name"].casefold() == name.casefold()
             and isinstance(c.get("id"), int)
         ]
-        if found:
-            child = next((c for c in found if c["name"] == name), found[0])
-            return {"id": str(child["id"]), "name": child["name"]}
+        if not found:
+            return tree, None
+        child = next((c for c in found if c["name"] == name), found[0])
+        return tree, {"id": str(child["id"]), "name": child["name"]}
+
+    async def ensure_folder(self, token: str, name: str = BACKUP_FOLDER_NAME) -> dict[str, str]:
+        """``{id, name}`` of the private folder ``name`` directly under the account's root folder, created
+        there if missing. Routes per Archidekt's own site code: GET /decks/folderTree/ (root
+        with ``children``) and POST /decks/folders/ {name, private, parentFolder} (verified
+        live 2026-10-05)."""
+        tree, child = await self._find_folder(token, name)
+        if child is not None:
+            return child
         made = await self._request(
             "POST",
             "/decks/folders/",

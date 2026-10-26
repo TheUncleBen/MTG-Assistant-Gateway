@@ -11,7 +11,7 @@ What each person types or clicks:
 | App | Setup | Then |
 | --- | --- | --- |
 | Claude Code | Paste `https://mtg.example.com/install` and say "install this plugin", or run the two commands below | `/mcp` → Authenticate (signs in through the browser), then `/mtg-gateway:setup-mtg-gateway` |
-| Claude web, desktop, iPhone, Android | Download the plugin from `/install` (`/plugin/mtg-gateway.zip`, or `/plugin/<your-name>.zip` with `MTG_SERVER_NAME` set) and go to Customize → Plugins → Add → Upload plugin; or press **Connect to Claude** on `/install` | Connect the connector, pick **Use Claude's published identity** (Register automatically works too), approve the gateway's consent page if it names Claude and returns to `claude.ai` (Deny otherwise), sign in |
+| Claude web, desktop, iPhone, Android | Download the plugin from `/install` (`/plugin/mtg-gateway.zip`, or `/plugin/<your-name>.zip` when the Settings page's **Gateway name** is your own) and go to Customize → Plugins → Add → Upload plugin; or press **Connect to Claude** on `/install` | Connect the connector, pick **Use Claude's published identity** (Register automatically works too), approve the gateway's consent page if it names Claude and returns to `claude.ai` (Deny otherwise), sign in |
 | ChatGPT (web only) | Developer mode, add an app with the connector URL | Connect, sign in, paste the project instructions from `/skill` |
 | Codex CLI | `codex mcp add` with the connector URL | `codex mcp login mtg-gateway` |
 
@@ -29,8 +29,8 @@ page we could read says.
 | `/install` | yes, in a browser | Asks which app you use, then (`?for=claude`, `claude-code`, `chatgpt` or `codex`) shows only the steps that work there, with the Connect to Claude button and the plugin download; `?for=skill` and `?for=android` are the skill and Android app sections. Page and Markdown come from one step list (`setup_hub.py`) |
 | `/install.md` | no | The same thing as Markdown, for an AI agent handed the link (an agent fetching `/install` itself gets this too, since only browser page loads are sent to sign in): every app unless `?for=` narrows it, plus rules not to retry a step or tool the platform doesn't support, and the browser fallbacks for blocked write tools |
 | `/plugin/marketplace.json` | no | A Claude Code marketplace with one plugin, source type `archive`, pinned by SHA-256 |
-| `/plugin/mtg-gateway.zip` (`/plugin/<slug of MTG_SERVER_NAME>.zip` when that is set) | no | The plugin from `plugin/mtg-gateway/`, with the gateway's own `/mcp` URL written into `.mcp.json` and `mcp.json` |
-| `/plugin/mtg-gateway-chatgpt.zip` (`/plugin/<slug>-chatgpt.zip` when `MTG_SERVER_NAME` is set) | no | The ChatGPT plugin (`chatgpt_plugin.py`): its own `plugin.json` and `mcp.json` at the root with the gateway's `/mcp` URL, the MTG skill and `assets/` with the gateway's icon. No setup skill, since its steps are Claude Code commands |
+| `/plugin/mtg-gateway.zip` (`/plugin/<short form of the gateway name>.zip` under a name of your own) | no | The plugin from `plugin/mtg-gateway/`, with the gateway's own `/mcp` URL written into `.mcp.json` and `mcp.json` |
+| `/plugin/mtg-gateway-chatgpt.zip` (`/plugin/<short form>-chatgpt.zip` under a name of your own) | no | The ChatGPT plugin (`chatgpt_plugin.py`): its own `plugin.json` and `mcp.json` at the root with the gateway's `/mcp` URL, the MTG skill and `assets/` with the gateway's icon. No setup skill, since its steps are Claude Code commands |
 | `/skill` | yes | Leads to `/install?for=skill`: the skill ZIP on its own (`/skill/mtg-gateway.zip`), and the ChatGPT project instructions |
 
 The archive is built once per process from the files in the image and comes
@@ -68,7 +68,7 @@ claude plugin install mtg-gateway@mtg-gateway
 ```
 
 The plugin's skills show up as `/mtg-gateway:mtg-gateway` (the MTG skill)
-and `/mtg-gateway:setup-mtg-gateway`. With your own `MTG_SERVER_NAME`, the
+and `/mtg-gateway:setup-mtg-gateway`. With your own **Gateway name** (on the Settings page), the
 plugin's folders and text take its short name (`Deck Helper` becomes
 `deck-helper`), so the commands are `/deck-helper:deck-helper` and
 `/deck-helper:setup-mtg-gateway`: the setup skill keeps its own name. The setup skill checks the connector, has the
@@ -172,6 +172,7 @@ claude plugin install mtg-gateway-operator@mtg-gateway
 `plugin/mtg-gateway/skills/mtg-gateway/` is the only copy of the MTG skill,
 and `plugin/mtg-gateway/chatgpt-instructions.md` the only copy of the
 ChatGPT text. The `/skill` page, the plugin archive and the repository
-marketplace all read them from there (`MTG_PLUGIN_DIR` in the image). So the
+marketplace all read them from there (the image's copy is in
+`/usr/share/mtg-gateway/plugin`). So the
 ChatGPT text, like the skill, is in the public plugin archive on purpose:
 it's prompt text, with nothing per-user or secret in it.

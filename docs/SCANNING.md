@@ -30,11 +30,12 @@ Scryfall and tells the assistant how sure it is:
 | `deferred` | not looked up yet because Scryfall asked the gateway to wait; `retry_in` says how many seconds, and `complete` is false |
 | `conflict` | the set and number are a different card from the name; `card` is what the name matched, `requested` the printing asked for. Left out of the decklist and the changes until you say which card you mean, and `complete` is false |
 
-With no set given, a card gets its newest printing that is already out
-(released today or earlier, UTC) and sold on paper, in foil when foil was
-asked for. Scryfall's own default is its newest printing, which can be a
-preview that isn't out yet; any newer printings passed over are listed in
-`newer_printings`. When foil was asked for and the printing has no foil,
+With no set given, a card keeps Scryfall's own default printing when that
+one is already out (released today or earlier, UTC) and sold on paper, in
+foil when foil was asked for. Scryfall's default is not always its newest
+printing. When the default isn't out yet (a preview) or isn't sold on paper,
+the card gets its newest printing that is, and the newer printings passed
+over are listed in `newer_printings`. When foil was asked for and the printing has no foil,
 the card comes back non-foil with `finish_unavailable` and a note naming
 the finishes it does come in, and it is listed in `needs_review`.
 
@@ -137,8 +138,8 @@ its own lookups and retries a busy answer by itself.
 find its current limits published in a form we could check. A live run on
 2026-10-04 got HTTP 429 with `Retry-After: 60` at about 5 single-card
 lookups a second. So the gateway spaces single-card lookups (`named`,
-`autocomplete`, printings) `MTG_SCRYFALL_LOOKUP_INTERVAL` seconds apart
-(default 0.5; the batched collection call stays at 0.1). If Scryfall still
+`autocomplete`, printings) 0.5 seconds apart by default (**Time between
+Scryfall lookups** on the Settings page; the batched collection call stays at 0.1). If Scryfall still
 says 429, the gateway keeps the cards it already resolved and returns the
 rest as `deferred` instead of failing the whole call. Each call also has a
 time budget of about 40 seconds, so a long list of unreadable names gets an
@@ -192,7 +193,7 @@ bigger than 2400 px on its long side, and the straightening only samples the
 card's own box (at most 2048 px), so a 50 MP photo is never copied whole.
 Titles are read with Tesseract.js (WebAssembly). In continuous mode only
 frames with a card outline are read, a title read below
-`MTG_SCAN_MIN_OCR_CONFIDENCE` goes straight to the unidentified list without
+**Lowest reading confidence looked up** goes straight to the unidentified list without
 a lookup, and a frame that reads the same as the last one reuses its answer,
 which keeps server traffic down. Three frames in a row without an outline
 count as the card having left. For anyone building on the page, its hooks
@@ -230,8 +231,8 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   about 3 MB to the gateway's memory in our test, well inside the 256 MB
   cap. Pillow adds about 6 MB (compressed) to the image.
 - Learned galleries don't grow forever. The most recently scanned
-  `MTG_SCAN_ART_MAX_GALLERIES` cards are kept, and a card not scanned for
-  `MTG_SCAN_ART_GALLERY_IDLE_DAYS` is forgotten (it's just learned again
+  500 cards are kept (**Cards whose printings are kept**), and a card not
+  scanned for 180 days (**Forget a card's printings after**) is forgotten (it's just learned again
   next time). Each learned printing takes roughly 2 KB (768 bytes of hashes
   plus the stored card fields; estimated, not measured on a live gallery),
   so 500 cards with a handful of printings each is around 10 MB, and the
@@ -239,32 +240,31 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   at startup and after every gallery build. At most 8 cards are learned at
   once; others get picked up on their next scan.
 
-These settings are also on the gateway's Settings page. Both stack files pass
-them to the gateway, and both example env files list them commented out with
-their default. Set one in your variables (Portainer's, `mtg.env` or `.env`)
-to lock it; the Settings page then shows it greyed out. A change applies
-after the gateway restarts.
+These settings are on the gateway's Settings page, in the folded **Card
+scanning (advanced)** section. A change applies after the gateway restarts.
+Only the artwork check's on/off switch can also be set in your stack:
+`MTG_SCAN_ART_ENABLED=false` turns it off and locks the row.
 
-| Variable | Default | What it does |
+| Settings page row | Default | What it does |
 | --- | --- | --- |
-| `MTG_SCAN_FUZZY_MIN_SIMILARITY` | `0.65` | Lowest similarity at which a corrected name is accepted at all. Range 0.3 to 1 |
-| `MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY` | `0.8` | Similarity accepted without a second lookup; also what "confidently" means above. Range 0.3 to 1 |
-| `MTG_SCAN_AMBIGUITY_MARGIN` | `0.05` | How close two candidates can be before the answer is `ambiguous`. Range 0 to 0.5 |
-| `MTG_SCAN_AUTO_ADD_CONFIDENCE` | `80` | Reading confidence a continuous-scan card needs to be added without a tap. Range 0 to 100 |
-| `MTG_SCAN_FOIL_STAR_INK_RATIO` | `0.09` | Threshold for spotting the foil star on the collector line. Range 0.01 to 0.9 |
-| `MTG_SCAN_GLARE_RATIO` | `0.08` | Share of blown-out pixels in the title that triggers the glare hint. Range 0.005 to 0.9 |
-| `MTG_SCAN_MIN_OCR_CONFIDENCE` | `50` | Continuous scan only: below this a title goes to the unidentified list without a lookup. Range 0 to 100 |
-| `MTG_SCAN_ART_ENABLED` | `true` | Turns the artwork check on or off |
-| `MTG_SCAN_ART_MAX_DISTANCE` | `380` | Largest difference (of 1024 bits) that still counts as an artwork match. Range 0 to 1024 |
-| `MTG_SCAN_ART_MIN_MARGIN` | `40` | Bits the best match must beat the next different artwork by. Raise to 60 for fewer wrong picks, at the cost of a few more "unsure" results. Range 0 to 1024 |
-| `MTG_SCAN_ART_MAX_PRINTINGS` | `250` | How many of a card's newest printings are learned (basic lands have hundreds). Range 1 to 2000 |
-| `MTG_SCAN_ART_IMAGE_INTERVAL` | `0.1` | Seconds between image fetches from `cards.scryfall.io`. Range 0.05 to 5 (the Settings page: 0.1 to 5) |
-| `MTG_SCAN_ART_IMAGES_PER_HOUR` | `1500` | Cap on image fetches per hour (about a deck's worth of new cards). One person can use at most a quarter of it, and start learning at most `MTG_SCAN_ART_MAX_GALLERIES`/20 new cards an hour; past that their cards answer busy while other people's carry on. Past the whole cap, learning pauses until the hour rolls over and the affected cards say so. Range 1 to 36000 (the Settings page: 1 to 1500) |
-| `MTG_SCAN_ART_MAX_GALLERIES` | `500` | Cards whose learned printings are kept. Range 1 to 100000 |
-| `MTG_SCAN_ART_GALLERY_IDLE_DAYS` | `180` | Days without a scan before a card's learned printings are dropped. Range 1 to 3650 |
+| Lowest name similarity accepted | `0.65` | Lowest similarity at which a corrected name is accepted at all. Range 0.3 to 1 |
+| Name similarity accepted at once | `0.8` | Similarity accepted without a second lookup; also what "confidently" means above. Range 0.3 to 1 |
+| Closest two names may be | `0.05` | How close two candidates can be before the answer is `ambiguous`. Range 0 to 0.5 |
+| Reading confidence to add without a tap | `80` | Reading confidence a continuous-scan card needs to be added without a tap. Range 0 to 100 |
+| Foil star threshold | `0.09` | Threshold for spotting the foil star on the collector line. Range 0.01 to 0.9 |
+| Glare threshold | `0.08` | Share of blown-out pixels in the title that triggers the glare hint. Range 0.005 to 0.9 |
+| Lowest reading confidence looked up | `50` | Continuous scan only: below this a title goes to the unidentified list without a lookup. Range 0 to 100 |
+| Artwork check | on | Turns the artwork check on or off (`MTG_SCAN_ART_ENABLED` in the stack) |
+| Largest artwork difference | `380` | Largest difference (of 1024 bits) that still counts as an artwork match. Range 0 to 1024 |
+| Artwork lead over the next match | `40` | Bits the best match must beat the next different artwork by. Raise to 60 for fewer wrong picks, at the cost of a few more "unsure" results. Range 0 to 1024 |
+| Printings learned per card | `250` | How many of a card's newest printings are learned (basic lands have hundreds). Range 1 to 2000 |
+| Time between image downloads | `0.1` | Seconds between image fetches from `cards.scryfall.io`. Range 0.1 to 5 |
+| Image downloads per hour | `1500` | Cap on image fetches per hour (about a deck's worth of new cards). One person can use at most a quarter of it, and start learning at most a twentieth of **Cards whose printings are kept** as new cards an hour; past that their cards answer busy while other people's carry on. Past the whole cap, learning pauses until the hour rolls over and the affected cards say so. Range 1 to 1500 |
+| Cards whose printings are kept | `500` | Cards whose learned printings are kept. Range 1 to 100000 |
+| Forget a card's printings after | `180` | Days without a scan before a card's learned printings are dropped. Range 1 to 3650 |
 
-`MTG_SCRYFALL_LOOKUP_INTERVAL` (default `0.5`) is in the example stack file
-already; see [DEPLOY.md](DEPLOY.md#environment-reference).
+**Time between Scryfall lookups** (default `0.5` seconds) is in the
+Settings page's **Archidekt and Scryfall pacing** section.
 
 ## Known limits (as of 2026-10-04)
 

@@ -2,8 +2,8 @@
 
 Crumbs, a header (the deck as the title, the status as a label, the meta line, the export
 buttons), six key-number widgets, a sticky row of section links, then the sections as flat blocks
-with one heading each: Forge games, Solo test, What the solo test could not model (its groups
-folded, the first open), Validation, Deck statistics and the raw output (folded). One orange
+with one heading each: Forge games, Quick solo test, What the quick solo test leaves out (inset
+lists, each group with Details), Validation, Deck statistics and the raw output (folded). One orange
 button: Play more games.
 
 Every number and sentence comes from report_view, which also draws the Markdown and the
@@ -16,14 +16,25 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from . import card_models_view, ui
+from . import card_models, card_models_view, ui
 from .report_view import (
+    APPROX_HEADING,
+    APPROX_TEXT,
     CONSTRUCTED_VALIDATION,
     ENDED_TEXT,
     FORGE_HEADING,
     FORGE_STATE_TEXT,
+    LOW_IMPACT_HEADING,
+    LOW_IMPACT_TEXT,
+    MODEL_HEADING,
     MORE_DID_NOT_START,
+    OUT_OF_SCOPE_HEADING,
+    OUT_OF_SCOPE_TEXT,
     PREFLIGHT_ONLY,
+    UNMODELED_FORGE_TEXT,
+    UNMODELED_HEADING,
+    UNMODELED_SAVED_TEXT,
+    UNMODELED_TEXT,
     _copies,
     _esc,
     _float,
@@ -33,16 +44,16 @@ from .report_view import (
     _losses_text,
     _pct,
     _seconds_text,
+    _share,
     _tile,
     _turn,
     ask_html,
     coverage,
-    coverage_text,
     forge_lines,
+    forge_solo_done,
     forge_stopped_early,
     forge_stopped_text,
     front_face,
-    honesty_groups,
     kept_models,
     kept_models_html,
     model_box_id,
@@ -71,6 +82,12 @@ FORGE_SUB = (
     "Forge, an open-source rules engine, plays the deck against the opponent decks below, with combat, "
     "the stack and every player's interaction, all piloted by Forge's AI. Treat the result as a test of "
     "the deck against these opponents, not a prediction for your table."
+)
+# The summary card's footer: the known share (the cards played with their effect and those
+# that need opponents), as coverage_text says it on the export.
+KNOWN_TEXT = (
+    "Known: {known} of {deck_size} cards ({known_pct}% of the deck), counting the cards played with "
+    "their effect and those that need opponents."
 )
 MODEL_SUB = (
     "Read the numbers above with this in mind: the more of the deck sits here, the less the solo test "
@@ -290,7 +307,7 @@ def _games_html(res: dict[str, Any], seats: list[dict[str, Any]]) -> str:
         cls="rv-games",
     )
     return (
-        f"<details class='rv-det games'><summary>Each game ({len(listed)})</summary>"
+        f"<details class='rv-det games'><summary class='fold-btn'>Each game ({len(listed)})</summary>"
         f"{table}{head}{rows}</div></details>"
     )
 
@@ -359,6 +376,8 @@ def forge_section_html(
             msg += " This section updates by itself when the games finish." if live else ""
         if msg:
             parts.append(f"<p class='notice{'' if pending else ' warn'}'>{_esc(msg)}</p>")
+    elif forge_stopped_text(f):  # done, with games Forge gave no result for
+        parts.append(f"<p class='notice warn'>{_esc(forge_stopped_text(f))}</p>")
     res = f.get("result") if isinstance(f.get("result"), dict) else {}
     seats = [s for s in res.get("seats") or [] if isinstance(s, dict)]
     games = _int(res.get("games")) or 0
@@ -430,7 +449,7 @@ def more_html(f: Any, csrf: str, report_id: str) -> str:
 
 
 # -- the solo test played by Forge (the report's ``forge_solo`` block; None when Forge is off) ----
-SOLO_FORGE_NAME = "Solo test, played by Forge"
+SOLO_FORGE_NAME = "Full-rules solo test by Forge"
 SOLO_FORGE_SUB = (
     "Against opponents that do nothing, up to turn {turns}: how fast the deck works on its own, not how "
     "it fares against interaction."
@@ -760,8 +779,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                 f"{cov['pct']}%",
                 unit=f"{cov['modeled']} of {size} cards",
                 detail_html=_coverage_bar(cov["modeled"], aside, blanks, size)
-                + f"<span class='tx'>{blanks} played without their effect · {aside} left out on "
-                "purpose</span>",
+                + f"<span class='tx'>{blanks} played without their effect · {aside} need opponents</span>",
                 actions=[_go("See the cards", "#rv-model")],
                 tone="accent" if cov["pct"] < COVERAGE_WARN else "",
             )
@@ -829,7 +847,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
 
 def _coverage_bar(modeled: int, aside: int, blanks: int, size: int, *, cls: str = "") -> str:
     total = max(1, size)
-    parts = (("m", modeled), ("o", aside), ("u", blanks))
+    parts = (("m", modeled), ("u", blanks), ("o", aside))
     bars = "".join(f"<i class='{k}' style='width:{100 * n / total:.0f}%'></i>" for k, n in parts if n)
     return f"<span class='bar-split rv-cov-bar{(' ' + cls) if cls else ''}' aria-hidden='true'>{bars}</span>"
 
@@ -843,7 +861,7 @@ def solo_section_html(
     csrf: str,
     models_opener: str = "",
 ) -> tuple[str, str]:
-    """The solo test section and the "what it could not model" section ('' when none).
+    """The solo test section and the "what the quick solo test leaves out" section ('' when none).
     ``models_opener``: the My card models button, placed where saved descriptions are mentioned
     (under the ones this run played, and beside the request for cards played without effect)."""
     g, v = s["goldfish"], s["validation"]
@@ -874,7 +892,8 @@ def solo_section_html(
     summary = ""
     if g.get("summary"):
         summary = (
-            "<details class='rv-det'><summary>The simulator's own summary</summary><ul class='rv-notes'>"
+            "<details class='rv-det'><summary class='fold-btn'>The simulator's own summary</summary>"
+            "<ul class='rv-notes'>"
             + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
             + "</ul></details>"
         )
@@ -905,44 +924,158 @@ def solo_section_html(
         cls="btn-plain",
         button=f"{icon('copy')}<span class='label'>{_esc('Copy a request for your assistant')}</span>",
     )
-    if ask and models_opener:
-        ask += f"<div class='rv-models'>{models_opener}</div>"
-    groups = honesty_groups(g, ask, menu=True)
-    if not groups:
-        return solo, ""
-    h = g.get("honesty") or {}
-    head = ""
-    cov = coverage(g)
-    if cov and (h.get("unrecognized") or h.get("out_of_scope")):
-        aside = _copies([c for grp in h.get("out_of_scope") or [] for c in grp["cards"]])
-        blanks = _copies(h.get("unrecognized") or [])
-        legend = (
-            "<ul class='legend rv-legend'>"
-            f"<li><i class='m'></i>Played with their effect <b>{cov['modeled']}</b></li>"
-            f"<li><i class='o'></i>Left out on purpose <b>{aside}</b></li>"
-            f"<li><i class='u'></i>Played without their effect <b>{blanks}</b></li></ul>"
-        )
-        head = (
-            "<div class='rv-cov'>"
-            + _coverage_bar(cov["modeled"], aside, blanks, cov["deck_size"], cls="big")
-            + legend
-            + f"<p class='b coverage'>{_esc(coverage_text(g))}</p></div>"
-        )
-    elif coverage_text(g) and (h.get("unrecognized") or h.get("out_of_scope")):
-        head = f"<p class='b coverage'>{_esc(coverage_text(g))}</p>"
-    folds = "".join(
-        f"<details class='rv-grp{' unmodeled' if key == 'unmodeled' else ''}'{' open' if i == 0 else ''}>"
-        f"<summary><span>{_esc(heading)}</span>"
-        + (f"<span class='n'>{_esc(count)}</span>" if count else "")
-        + f"</summary>{body}</details>"
-        for i, (key, heading, count, body) in enumerate(groups)
-    )
-    model = _sec(
-        "rv-model",
-        "What the solo test could not model",
-        f"<p class='ui-sub'>{_esc(MODEL_SUB)}</p>{head}{folds}",
-    )
+    model = model_section_html(g, ask, models_opener, forge_full=forge_solo_done(r))
     return solo, model
+
+
+# -- what the quick solo test leaves out: an inset grouped list (the account settings look) -------
+def _rows(cards: list[dict[str, Any]]) -> str:
+    """Card rows: the name opens the shared card menu (static/menus.js), its draw rate trails."""
+    items = _row_items(cards)
+    # an odd last row keeps its partner cell on the two-column desktop grid
+    return "".join(items) + ("<li class='fill' aria-hidden='true'></li>" if len(items) % 2 else "")
+
+
+def _row_items(cards: list[dict[str, Any]]) -> list[str]:
+    items = []
+    for c in cards:
+        copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
+        name = front_face(c["name"])
+        drawn = f"<span class='v'>drawn {_pct(c['drawn'])}</span>" if c.get("drawn") is not None else ""
+        drawn = "<span class='v'>commander</span>" if c.get("commander") else drawn
+        items.append(
+            f"<li><span class='nm'><button type='button' class='cardlink' data-card='{_esc(name)}'>"
+            f"{copies}{_esc(name)}</button></span>{drawn}</li>"
+        )
+    return items
+
+
+# A long list shows its first rows and a "Show all" row for the rest (Ben, 10-25: less scrolling).
+SHOW_FIRST = 6
+
+
+def _card(rows: list[str], kind: str, noun: str) -> str:
+    """One inset card of ready rows; past SHOW_FIRST + 2 rows, the rest wait behind Show all."""
+
+    def ul(items: list[str]) -> str:
+        pad = "<li class='fill' aria-hidden='true'></li>" if kind == "ig-cards" and len(items) % 2 else ""
+        return f"<ul class='ig-list {kind}'>{''.join(items)}{pad}</ul>"
+
+    if len(rows) <= SHOW_FIRST + 2:
+        return f"<div class='ig'>{ul(rows)}</div>"
+    return (
+        f"<div class='ig'>{ul(rows[:SHOW_FIRST])}<details class='ig-more'>"
+        f"<summary><span class='disc'>Show all {len(rows)} {noun}</span></summary>"
+        f"{ul(rows[SHOW_FIRST:])}</details></div>"
+    )
+
+
+def _group(gid: str, heading: str, count: str, info: str, body: str) -> str:
+    """One group: its heading and count, with Details opening the group's explanation in an
+    outlined box (the whole heading is the toggle), then its list."""
+    return (
+        f"<section class='ig-sec' id='{gid}' aria-labelledby='{gid}-h'>"
+        f"<details class='ig-info'><summary><h3 id='{gid}-h'>{_esc(heading)}</h3>"
+        f"<span class='n'>{_esc(count)}</span><span class='disc'>Details</span></summary>"
+        f"<div class='ig-blurb'>{info}</div></details>{body}</section>"
+    )
+
+
+def model_section_html(
+    g: dict[str, Any], ask: str = "", models_opener: str = "", *, forge_full: bool = False
+) -> str:
+    """The quick solo test's "leaves out" section: a summary card (the bar and the three counts),
+    then one group per kind of card, each a heading with Details and a list of rows; the request
+    and My card models as two even buttons under the cards played without their effect."""
+    h = g.get("honesty") or {}
+    size = g.get("deck_size")
+    unrec = h.get("unrecognized") or []
+    oos = h.get("out_of_scope") or []
+    low = h.get("low_impact") or []
+    approx = [a for a in h.get("approximations") or [] if a.get("cards")]
+    if not (unrec or oos or low or approx):
+        return ""
+    parts: list[str] = []
+    cov = coverage(g)
+    if cov and (unrec or oos):
+        aside = _copies([c for grp in oos for c in grp["cards"]])
+        blanks = _copies(unrec)
+        size_n = cov["deck_size"]
+
+        def row(dot: str, label: str, n: int, href: str = "") -> str:
+            val = f"<span class='v'><b>{n}</b> · {round(100 * n / size_n)}%</span>"
+            inner = f"<i class='dot {dot}'></i><span class='nm'>{label}</span>{val}"
+            if href and n:
+                return f"<li><a href='{href}'>{inner}{icon('chev')}</a></li>"
+            return f"<li>{inner}<span class='sp'></span></li>"
+
+        parts.append(
+            "<div class='ig ig-sum'>"
+            + _coverage_bar(cov["modeled"], aside, blanks, size_n, cls="big")
+            + "<ul class='ig-list'>"
+            + row("m", "Played with their effect", cov["modeled"])
+            + row("u", UNMODELED_HEADING, blanks, "#rv-g-unmodeled")
+            + row("o", OUT_OF_SCOPE_HEADING, aside, "#rv-g-opp")
+            + f"</ul></div><p class='ig-foot'>{_esc(KNOWN_TEXT.format(**cov))}</p>"
+        )
+    if unrec:
+        info = f"<p>{UNMODELED_TEXT}"
+        info += f" {UNMODELED_FORGE_TEXT}" if forge_full else ""
+        info += f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else ""
+        actions = ""
+        if ask:
+            actions = f"<div class='ig-actions{' two' if models_opener else ''}'>{ask}{models_opener}</div>"
+        parts.append(
+            _group(
+                "rv-g-unmodeled",
+                UNMODELED_HEADING,
+                _share(_copies(unrec), size),
+                info + "</p>",
+                _card(_row_items(unrec), "ig-cards", "cards") + actions,
+            )
+        )
+    if oos:
+        total = _copies([c for grp in oos for c in grp["cards"]])
+        lists = "".join(
+            f"<details class='ig-dis'><summary><span class='nm'>{_esc(grp['label'])}</span>"
+            f"<span class='v'>{_copies(grp['cards'])}</span>{icon('chev')}</summary>"
+            f"<ul class='ig-list ig-cards'>{_rows(grp['cards'])}</ul></details>"
+            for grp in oos
+        )
+        lists = f"<div class='ig'>{lists}</div>"
+        parts.append(
+            _group(
+                "rv-g-opp", OUT_OF_SCOPE_HEADING, _share(total, size), f"<p>{OUT_OF_SCOPE_TEXT}</p>", lists
+            )
+        )
+    if low:
+        parts.append(
+            _group(
+                "rv-g-low",
+                LOW_IMPACT_HEADING,
+                _share(len(low), size),
+                f"<p>{LOW_IMPACT_TEXT}</p>",
+                _card(_row_items([{"name": n} for n in low]), "ig-cards", "cards"),
+            )
+        )
+    if approx:
+        rows = [
+            f"<li><span class='nm'>{_esc(a['label'])}</span>"
+            f"<span class='cards'>{_esc(a['cards'])}</span></li>"
+            for a in approx
+        ]
+        parts.append(
+            _group(
+                "rv-g-approx",
+                APPROX_HEADING,
+                f"{len(approx)} shortcut{'s' if len(approx) != 1 else ''}",
+                f"<p>{APPROX_TEXT}</p>",
+                _card(rows, "ig-approx", "shortcuts"),
+            )
+        )
+    return _sec(
+        "rv-model", MODEL_HEADING, f"<p class='ui-sub'>{_esc(MODEL_SUB)}</p>{''.join(parts)}", flat=True
+    )
 
 
 def validation_section_html(s: dict[str, Any]) -> str:
@@ -973,13 +1106,13 @@ def _jump_html(
     forge = isinstance(f, dict) and f.get("state") != "skipped"
     items = []
     if isinstance(r.get("forge_solo"), dict) and r.get("forge_solo"):
-        items.append(ui.Chip("Solo test by Forge", None, "#rv-solo-forge"))
+        items.append(ui.Chip("Full-rules solo test", None, "#rv-solo-forge"))
     # a report without Forge games starts with its preflight-only section: no link to it
     if forge:
         items.append(ui.Chip("Forge games", None, "#rv-forge"))
-    items.append(ui.Chip("Solo test", None, "#rv-solo"))
+    items.append(ui.Chip("Quick solo test", None, "#rv-solo"))
     if model:
-        items.append(ui.Chip("What it could not model", n or None, "#rv-model"))
+        items.append(ui.Chip("What the quick test leaves out", n or None, "#rv-model"))
     if valid:
         items.append(ui.Chip("Validation", None, "#rv-valid"))
     if stats:
@@ -1070,8 +1203,8 @@ def report_page_html(
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:
         raw = (
-            "<details class='ui-card rv-det rv-raw raw' id='rv-raw'><summary>Raw output from the research "
-            f"service</summary>{raw}</details>"
+            "<details class='ui-card rv-det rv-raw raw' id='rv-raw'><summary class='fold-btn'>"
+            f"Raw output from the research service</summary>{raw}</details>"
         )
     jump = _jump_html(r, s, model=bool(model), valid=bool(valid), stats=bool(stats), raw=bool(raw))
     return (
@@ -1116,11 +1249,10 @@ REPORT_PAGE_CSS = (
   background:var(--surface-2)}
 .rv-page .ci-w i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--orange)}
 .rv-page .wdg .det .bar-split{width:100%}
-.rv-page .bar-split .m,.rv-page .rv-legend .m{background:var(--green)}
-.rv-page .bar-split .o,.rv-page .rv-legend .o{background:var(--surface-3)}
-.rv-page .bar-split .u,.rv-page .rv-legend .u{background:var(--orange)}
+.rv-page .bar-split .m,.rv-page .dot.m{background:var(--green)}
+.rv-page .bar-split .o,.rv-page .dot.o{background:var(--control-border)}
+.rv-page .bar-split .u,.rv-page .dot.u{background:var(--orange)}
 .rv-page .bar-split.big{height:14px}
-.rv-page .rv-legend i{width:12px;height:12px;border-radius:2px}
 .rv-page .rv-jump{position:sticky;top:0;z-index:5;background:var(--bg);padding:.5rem 0;margin:0 0 .75rem;
   border-bottom:1px solid var(--border-soft)}
 .rv-page .rv-jump .ui-chips{margin:0}
@@ -1164,12 +1296,87 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-ended b{font-variant-numeric:tabular-nums;white-space:nowrap}
 .rv-page .rv-notes{margin:.25rem 0 .5rem;padding-left:1.1rem}
 .rv-page .rv-notes li{margin:.2rem 0;overflow-wrap:anywhere}
-.rv-page .rv-det,.rv-page .rv-grp{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
-.rv-page .rv-grp > summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .75rem;
-  min-height:44px;font-weight:700;font-size:1.02rem}
-.rv-page .rv-grp > summary .n{color:var(--text-muted);font-weight:400;font-size:.9rem}
-.rv-page .rv-grp h4{margin:.6rem 0 0;font-size:.95rem}
-.rv-page .rv-grp h4 small{color:var(--text-muted);font-weight:400}
+.rv-page .rv-det{border-top:1px solid var(--border-soft);margin:.5rem 0 0;padding:.25rem 0 0}
+/* what the quick solo test leaves out: inset grouped lists, as on the account settings pages */
+.rv-page .ig{list-style:none;margin:.5rem 0 0;padding:0;background:var(--group-bg);
+  border:1px solid var(--border-soft);border-radius:12px;overflow:hidden}
+.rv-page .ig-list{list-style:none;margin:0;padding:0}
+.rv-page .ig.ig-list{margin:.5rem 0 0}
+.rv-page .ig-list li{display:flex;align-items:center;gap:.75rem;min-height:44px;padding:0 16px;
+  border-top:1px solid var(--border-soft)}
+.rv-page .ig-list li:first-child{border-top:0}
+.rv-page .ig-list .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.rv-page .ig-list .v{color:var(--text-muted);font-size:.9rem;font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+.rv-page .ig-list .v b{color:var(--text)}
+.rv-page .ig-list a{display:flex;align-items:center;gap:.75rem;flex:1;align-self:stretch;color:inherit;
+  text-decoration:none}
+.rv-page .ig-list a svg{transform:rotate(-90deg);color:var(--text-muted);width:16px;height:16px;flex:none}
+.rv-page .ig-list a:hover .nm{text-decoration:underline}
+.rv-page .ig-list .dot{width:12px;height:12px;border-radius:50%;flex:none}
+.rv-page .ig-cards .cardlink{display:block;width:100%;min-height:44px;text-align:left}
+.rv-page .ig .cardlink:focus-visible,.rv-page .ig-list a:focus-visible{outline:2px solid var(--focus);
+  outline-offset:-2px}
+.rv-page .ig-sum .bar-split{margin:16px 16px 8px}
+.rv-page .ig-foot{margin:.4rem 16px 0;font-size:.85rem;line-height:1.4;color:var(--text-muted)}
+.rv-page .ig-sec{margin:1.75rem 0 0}
+.rv-page .ig-info > summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:baseline;
+  gap:.1rem .6rem;padding:.35rem 16px;min-height:44px;align-content:center;box-sizing:border-box}
+.rv-page .ig-info > summary::-webkit-details-marker{display:none}
+.rv-page .ig-info > summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:6px}
+.rv-page .ig-info h3{margin:0;font-size:1.05rem;font-weight:700;flex-basis:100%}
+.rv-page .ig-info .n{color:var(--text-muted);font-size:.9rem}
+.rv-page .ig-blurb{margin:.25rem 0 .5rem;padding:10px 14px;border:1px solid var(--border);border-radius:12px;
+  font-size:.92rem;line-height:1.45}
+.rv-page .ig-blurb p{margin:0}
+.rv-page .ig-sub{margin:1rem 16px .35rem;font-size:.78rem;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--text-muted)}
+.rv-page .ig-sub span{font-weight:400}
+.rv-page .ig-info + .ig-sub{margin-top:.35rem}
+.rv-page .ig-more > summary,.rv-page .ig-dis > summary{list-style:none;cursor:pointer;display:flex;
+  align-items:center;gap:.75rem;min-height:44px;padding:0 16px;border-top:1px solid var(--border-soft)}
+.rv-page .ig-more > summary::-webkit-details-marker,
+.rv-page .ig-dis > summary::-webkit-details-marker{display:none}
+.rv-page .ig-more > summary{justify-content:center;min-height:52px}
+.rv-page .ig-more[open] > summary{display:none}
+.rv-page .ig-more > ul{border-top:1px solid var(--border-soft)}
+.rv-page .ig-dis:first-child > summary{border-top:0}
+.rv-page .ig-dis > summary .nm{flex:1;min-width:0;font-weight:600}
+.rv-page .ig-dis > ul li{padding-left:28px}
+.rv-page .ig-dis > summary .v{color:var(--text-muted);font-size:.9rem}
+.rv-page .ig-dis svg{width:16px;height:16px;color:var(--text-muted);transform:rotate(-90deg);
+  transition:transform .15s}
+.rv-page .ig-dis[open] > summary svg{transform:none}
+.rv-page .ig-dis > ul{border-top:1px solid var(--border-soft);background:var(--bg)}
+.rv-page .ig-more > summary:focus-visible,.rv-page .ig-dis > summary:focus-visible{
+  outline:2px solid var(--focus);outline-offset:-2px}
+.rv-page .ig-approx li{flex-direction:column;align-items:stretch;gap:.15rem;padding:10px 16px}
+.rv-page .ig-approx .cards{color:var(--text-muted);font-size:.9rem;line-height:1.4}
+.rv-page .ig-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:.75rem auto 0;
+  max-width:46rem}
+.rv-page .ig-actions.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.rv-page .ig-actions .ask{position:relative;display:flex;margin:0}
+.rv-page .ig-actions .ask [role=status]{position:absolute;top:100%;left:0;right:0;text-align:center}
+.rv-page .ig-actions button,.rv-page .ig-actions .btn{display:flex;align-items:center;justify-content:center;
+  gap:.4rem;width:100%;min-height:48px;margin:0;padding:6px 10px;white-space:normal;text-align:center;
+  line-height:1.25;box-sizing:border-box}
+.rv-page .ig-actions svg{flex:none}
+@media (max-width:480px){.rv-page .ig-actions.two{grid-template-columns:minmax(0,1fr)}}
+.rv-page .ig-cards li.fill{display:none}
+.rv-page .ig-list .sp{width:16px;flex:none}
+@media (min-width:600px){.rv-page .ig-info h3{flex-basis:auto}}
+@media (min-width:900px){
+  .rv-page .ig-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rv-page .ig-cards li:nth-child(2){border-top:0}
+  .rv-page .ig-cards li:nth-child(even){border-left:1px solid var(--border-soft)}
+  .rv-page .ig-cards li.fill{display:flex}
+  .rv-page .ig-sum .ig-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .rv-page .ig-sum .ig-list li{border-top:0}
+  .rv-page .ig-sum .ig-list li + li{border-left:1px solid var(--border-soft)}
+  .rv-page .ig-sum .ig-list .sp{display:none}
+  .rv-page .ig-approx li{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:1rem;
+    align-items:center}
+}
 .rv-page .rv-games .tr{grid-template-columns:var(--cols)!important}
 @media (max-width:599.98px){.rv-page .rv-games .tr{grid-template-columns:var(--cols-sm)!important}
   .rv-page .rv-games .th{display:grid!important}}
@@ -1199,8 +1406,6 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-chart .ui-hint{margin:0 0 .35rem}
 .rv-page .rv-chart svg{max-height:15rem}
 @media (max-width:599.98px){.rv-page .rv-chart svg{font-size:18px;padding-left:1.25rem}}
-.rv-page .rv-cov{margin:.5rem 0 .75rem}
-.rv-page .rv-cov .b{margin:.5rem 0 0}
 .rv-page .ask{margin:.5rem 0 .75rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .rv-page .ask button{display:inline-flex;align-items:center;gap:.4rem;margin:0}
 .rv-page .kept .names button{min-height:44px;margin:0}

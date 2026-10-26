@@ -5,6 +5,7 @@ so the gateway asks its userinfo endpoint before serving any request with a sess
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from .conftest import FakeIdP, Harness, make_settings, running
@@ -30,14 +31,14 @@ async def test_group_removal_cuts_off_mcp_api_pages_and_refresh_at_once(tmp_path
         client = await h.register()
         tokens = await h.tokens_for(client)
         assert (await whoami(h, tokens["access_token"])).status_code == 200
-        assert (await b.http.get("/account")).status_code == 200
+        assert (await b.http.get("/account/details")).status_code == 200
 
         idp.set_groups(SUB, ["someone-else"])  # removed at the provider; nothing else happens
 
         assert (await whoami(h, tokens["access_token"])).status_code == 401
         api = await h.http.get("/api/v1/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
         assert api.status_code == 401
-        page = await b.http.get("/account")
+        page = await b.http.get("/account/details")
         assert page.status_code == 302 and page.headers["location"].startswith("/login")
         r = await h.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
         assert r.status_code == 400 and r.json()["error"] == "invalid_grant"
@@ -64,7 +65,7 @@ async def test_admin_demotion_closes_the_admin_pages_on_the_next_request(
         assert (await b.http.get("/admin/users")).status_code == 200
         idp.set_groups(SUB, ["mtg-users"])  # still a member, no longer an admin
         assert (await b.http.get("/admin/users")).status_code == 404
-        assert (await b.http.get("/account")).status_code == 200  # the member pages still work
+        assert (await b.http.get("/account/details")).status_code == 200  # the member pages still work
         await b.aclose()
 
 
@@ -101,14 +102,14 @@ async def test_provider_down_refuses_the_request_without_revoking(tmp_path: Path
         idp.down = True
         r = await whoami(h, tokens["access_token"])
         assert r.status_code == 503 and r.json()["error"] == "idp_unavailable"
-        page = await b.http.get("/account", headers={"Accept": "text/html"})
+        page = await b.http.get("/account/details", headers={"Accept": "text/html"})
         assert page.status_code == 503
         # A refresh during the outage fails, but the refresh token is not burned.
         r = await h.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
         assert r.status_code == 400 and r.json()["error"] == "invalid_request"
         idp.down = False
         assert (await whoami(h, tokens["access_token"])).status_code == 200
-        assert (await b.http.get("/account")).status_code == 200
+        assert (await b.http.get("/account/details")).status_code == 200
         r = await h.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
         assert r.status_code == 200, r.text
         await b.aclose()
@@ -125,10 +126,10 @@ async def test_sessions_from_before_the_check_must_sign_in_again(tmp_path: Path,
         with h.db.tx() as c:
             c.execute("DELETE FROM idp_grants")
         assert (await whoami(h, token)).status_code == 401
-        assert (await b.http.get("/account")).status_code == 302
+        assert (await b.http.get("/account/details")).status_code == 302
         assert h.db.get_link(SUB) is not None
         await b.login()
-        assert (await b.http.get("/account")).status_code == 200
+        assert (await b.http.get("/account/details")).status_code == 200
         await b.aclose()
 
 
@@ -196,7 +197,7 @@ async def test_signing_out_makes_the_provider_ask_for_credentials_again(tmp_path
         csrf = await b.csrf("/logout")
         r = await b.http.post("/logout", data={"csrf": csrf, "everywhere": "1"})
         assert r.status_code == 303
-        assert (await other.http.get("/account")).status_code == 302  # the other device too
+        assert (await other.http.get("/account/details")).status_code == 302  # the other device too
         r = await b.http.get("/login")
         assert "prompt=login" in r.headers["location"]
         r = await b.http.get("/login")
@@ -232,7 +233,7 @@ async def test_a_removed_member_cannot_ride_on_someone_elses_token(tmp_path: Pat
         r = await b.http.get("/admin/users", headers={"Authorization": f"Bearer {other}"})
         assert r.status_code == 404
         idp.set_groups(SUB, [])  # user-1 removed
-        r = await b.http.get("/account", headers={"Authorization": f"Bearer {other}"})
+        r = await b.http.get("/account/details", headers={"Authorization": f"Bearer {other}"})
         assert r.status_code == 302
         await b.aclose()
 
@@ -344,10 +345,10 @@ async def test_huge_access_token_is_checked_in_a_post_body(tmp_path: Path, idp: 
     async with running(Harness(live(tmp_path), idp)) as h:
         b = Browser(h)
         await b.login()
-        assert (await b.http.get("/account")).status_code == 200
+        assert (await b.http.get("/account/details")).status_code == 200
         assert idp.userinfo_methods and set(idp.userinfo_methods) == {"POST"}
         idp.set_groups(SUB, ["someone-else"])
-        page = await b.http.get("/account")
+        page = await b.http.get("/account/details")
         assert page.status_code == 302 and page.headers["location"].startswith("/login")
         await b.aclose()
 
@@ -356,7 +357,7 @@ async def test_small_access_token_still_uses_the_header(tmp_path: Path, idp: Fak
     async with running(Harness(live(tmp_path), idp)) as h:
         b = Browser(h)
         await b.login()
-        assert (await b.http.get("/account")).status_code == 200
+        assert (await b.http.get("/account/details")).status_code == 200
         assert idp.userinfo_methods and set(idp.userinfo_methods) == {"GET"}
         await b.aclose()
 
@@ -369,13 +370,13 @@ async def test_admin_group_alone_grants_access_and_leaving_it_cuts_off(tmp_path:
         b = Browser(h)
         await b.login("/admin")
         assert (await b.http.get("/admin/users")).status_code == 200
-        assert (await b.http.get("/account")).status_code == 200
+        assert (await b.http.get("/account/details")).status_code == 200
         client = await h.register()
         tokens = await h.tokens_for(client)
         assert (await whoami(h, tokens["access_token"])).status_code == 200
         idp.set_groups(SUB, ["someone-else"])
         assert (await whoami(h, tokens["access_token"])).status_code == 401
-        page = await b.http.get("/account")
+        page = await b.http.get("/account/details")
         assert page.status_code == 302 and page.headers["location"].startswith("/login")
         await b.aclose()
 
@@ -406,9 +407,87 @@ async def test_a_dropped_connection_to_userinfo_is_tried_once_more(tmp_path: Pat
 
         h.oidc._http.get = flaky  # type: ignore[method-assign]
         drops[:] = [1]  # one drop: the retry answers, the member never notices
-        assert (await b.http.get("/account")).status_code == 200 and not drops
+        assert (await b.http.get("/account/details")).status_code == 200 and not drops
         drops[:] = [1, 1]  # still down on the retry: refused, nothing revoked
-        page = await b.http.get("/account")
+        page = await b.http.get("/account/details")
         assert page.status_code == 503 and not drops
         assert h.db.get_idp_grant(SUB) is not None
         await b.aclose()
+
+
+def _refreshes(idp: FakeIdP) -> int:
+    return len([c for c in idp.token_calls if c.get("grant_type") == "refresh_token"])
+
+
+async def test_the_provider_token_is_renewed_before_it_runs_out_not_during_a_request(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    """Speed (Ben, 25 Oct): a request that finds the provider access token run out waits for a
+    refresh and then userinfo, two round trips to the identity provider. The gateway renews it in
+    the background shortly before it runs out instead, so the request waits for userinfo only. The
+    membership check itself is unchanged: still asked before the request, every time."""
+    from mtg_gateway import membership
+
+    monkeypatch.setattr(membership, "RENEW_LEAD", 2)
+    # the token is past its renewal margin 4 s after it was issued: renewed in the background
+    # about 2 s in (RENEW_LEAD before that)
+    idp.access_ttl = membership.EXPIRY_MARGIN + 4
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        before = _refreshes(idp)
+        await asyncio.sleep(2.5)
+        assert _refreshes(idp) == before + 1  # renewed with no request waiting on it
+        during = _refreshes(idp)
+        calls = idp.userinfo_calls
+        assert (await whoami(h, token)).status_code == 200
+        assert _refreshes(idp) == during and idp.userinfo_calls == calls + 1  # userinfo only
+        # still asked every time: a removal takes effect on the next request as before
+        idp.set_groups(SUB, [])
+        assert (await whoami(h, token)).status_code == 401
+
+
+async def test_a_refused_background_renewal_revokes_nothing_by_itself(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    from mtg_gateway import membership
+
+    monkeypatch.setattr(membership, "RENEW_LEAD", 2)
+    idp.access_ttl = membership.EXPIRY_MARGIN + 4
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        idp.refresh_error = "invalid_grant"
+        before = _refreshes(idp)
+        await asyncio.sleep(2.5)
+        assert _refreshes(idp) == before + 1
+        # the background renewal decides nothing: the next request's own check does, as before
+        assert h.db.audit_recent(5)[0]["event"] != "membership_unverifiable"
+        idp.refresh_error = None
+        idp.access_ttl = 300
+
+
+async def test_a_background_renewal_never_brings_back_a_removed_grant(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    """Security review (25 Oct): a renewal that was waiting on the provider while the member's
+    tokens were revoked (or their data deleted) stores nothing."""
+    from mtg_gateway import membership
+
+    monkeypatch.setattr(membership, "RENEW_LEAD", 2)
+    idp.access_ttl = membership.EXPIRY_MARGIN + 4
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        checker = h.app.state.gateway.membership
+        real = checker.oidc.refresh
+
+        async def slow(refresh_token: str):
+            h.db.revoke_all_for_user(SUB)  # the admin's revoke lands while Authentik answers
+            return await real(refresh_token)
+
+        monkeypatch.setattr(checker.oidc, "refresh", slow)
+        before = _refreshes(idp)
+        await asyncio.sleep(2.5)
+        assert _refreshes(idp) == before + 1
+        assert h.db.get_idp_grant(SUB) is None

@@ -14,6 +14,7 @@ import asyncio
 import ipaddress
 import logging
 import math
+import re
 import secrets
 import socket
 import statistics
@@ -28,6 +29,16 @@ from .decklist import DecklistError, parse_decklist
 logger = logging.getLogger(__name__)
 
 DEFAULT_OPPONENTS = 3
+# The seeds the gateway picks itself stay below 2**53: a JSON number above that loses its last
+# digits in a JavaScript app (Claude and ChatGPT among them), so the assistant would read a seed
+# Forge never used. A seed asked for is sent as it is.
+GATEWAY_SEEDS = 2**53
+
+# A line of the Java runtime's own log ("[457.852s][warning][cds] Skipping jdk/proxy1/$Proxy0:
+# Unsupported location"), which the Forge image reads as a load problem because of its words. It
+# says nothing about the decks, so it is left out of load_problems.
+JAVA_LOG = re.compile(r"\[[\d.]+s\]\[\w+")
+
 FINAL_STATES = frozenset({"done", "failed", "timeout", "cancelled", "lost", "skipped"})
 # A run still unfinished this long after it started is given up (the engine was unreachable).
 GIVE_UP_SECONDS = 4 * 3600
@@ -613,7 +624,7 @@ async def start_run(
     # Without one, Forge would pick its own and never say which (its seed option is optional).
     source = "request" if seed is not None else "gateway"
     if seed is None:
-        seed = secrets.randbelow(2**63)
+        seed = secrets.randbelow(GATEWAY_SEEDS)
     forge_seed = seed % 2**63
     job = await client.start(
         [deck, *({"precon": p} for p in chosen)], games, seed=forge_seed, parallel=max(1, parallel)
@@ -692,10 +703,20 @@ async def refresh(
         "played": played,
     }
     out.pop("unanswered_since", None)
-    if job.get("load_problems"):
-        out["load_problems"] = job["load_problems"]
+    problems = [p for p in job.get("load_problems") or [] if not JAVA_LOG.match(str(p))]
+    if problems:
+        out["load_problems"] = problems
     if job["state"] in ("failed", "timeout"):
         out["log_tail"] = (job.get("log_tail") or [])[-15:]
+    elif job["state"] == "done" and isinstance(own := section.get("games_requested"), int):
+        # Forge can end a game without printing its result (seen on a Pi 4): name the games that
+        # never came back, and keep the end of Forge's log, which may say why. The count is the
+        # gateway's own record of what it asked for, never the number the service sends back.
+        back = {r["game"] for r in played if isinstance(r.get("game"), int)}
+        missing = [g for g in range(1, own + 1) if g not in back]
+        if missing and len(back) < own:
+            out["no_result_games"] = missing
+            out["log_tail"] = (job.get("log_tail") or [])[-15:]
     return out
 
 
@@ -808,7 +829,7 @@ async def start_solo_run(
         solo["game_seconds"] = game_seconds
     source = "request" if seed is not None else "gateway"
     if seed is None:
-        seed = secrets.randbelow(2**63)
+        seed = secrets.randbelow(GATEWAY_SEEDS)
     forge_seed = seed % 2**63
     try:
         job = await client.start([deck], games, fmt, seed=forge_seed, parallel=max(1, parallel), solo=solo)

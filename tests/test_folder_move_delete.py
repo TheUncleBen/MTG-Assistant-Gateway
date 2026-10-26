@@ -724,3 +724,104 @@ async def test_a_renamed_backup_folder_with_no_copy_left_is_still_the_backup_fol
         await decks.folder_contents(SUB, ids["archive"])
     assert exc.value.kind == "backup_inside"
     assert stack.ark.folder_deletes == []
+
+
+def _spy(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    from mtg_gateway import archidekt
+
+    calls: list[tuple[str, str]] = []
+    orig = archidekt.ArchidektClient._request
+
+    async def spy(self, method, path, *a, **k):  # noqa: ANN001
+        calls.append((method, path))
+        return await orig(self, method, path, *a, **k)
+
+    monkeypatch.setattr(archidekt.ArchidektClient, "_request", spy)
+    return calls
+
+
+async def test_a_delete_after_its_box_sends_four_archidekt_calls_not_six(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Speed (Ben, 25 Oct): the delete box reads the deck, and finds the backup folder while the
+    member types the name, so pressing Delete waits for four Archidekt calls (the copy, its
+    description, the delete and the read-back), each at least a second apart, instead of six.
+    The backup copy is still made from the deck as it is on Archidekt (the site's own copy)."""
+    await linked_user(stack)
+    ids = _setup(stack)
+    b, csrf = await _browser(stack)
+    calls = _spy(stack, monkeypatch)
+    try:
+        info = (await b.http.get("/decks/api/decks/201/delete-info")).json()
+        assert info["name"] == "Precon deck"
+        for _ in range(50):  # the folder look-up runs after the box's answer
+            if ("GET", "/decks/folderTree/") in calls:
+                break
+            await asyncio.sleep(0.01)
+        opened = len(calls)
+        r = await b.http.post(
+            "/decks/api/decks/201/delete", json={"typed_name": "Precon deck"}, headers={"X-CSRF-Token": csrf}
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        await b.aclose()
+    pressed = [c for c in calls[opened:]]
+    assert [m for m, _p in pressed] == ["POST", "PATCH", "DELETE", "GET"], pressed
+    assert 201 not in stack.ark.decks
+    copy = max(d for d in stack.ark.decks if d not in (42, 202))
+    assert stack.ark.deck_folder.get(copy) == ids["backup"]
+
+
+async def test_the_box_creates_nothing_and_an_old_box_reads_again(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opening the box never makes the backup folder (only a delete does), and a box open longer
+    than the reuse window reads the deck and the folders again when Delete is pressed."""
+    from mtg_gateway import decks as decks_mod
+
+    await linked_user(stack)
+    _setup(stack)
+    stack.ark.folders["alice"] = [f for f in stack.ark.folders["alice"] if f["id"] != 505]
+    b, csrf = await _browser(stack)
+    calls = _spy(stack, monkeypatch)
+    try:
+        await b.http.get("/decks/api/decks/201/delete-info")
+        await asyncio.sleep(0.2)
+        assert not [c for c in calls if c[0] == "POST"]  # no folder made by opening the box
+        monkeypatch.setattr(decks_mod, "DELETE_PREP_SECONDS", 0)
+        opened = len(calls)
+        r = await b.http.post(
+            "/decks/api/decks/201/delete", json={"typed_name": "Precon deck"}, headers={"X-CSRF-Token": csrf}
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        await b.aclose()
+    pressed = calls[opened:]
+    assert pressed[0] == ("GET", "/decks/201/") and ("GET", "/decks/folderTree/") in pressed
+    assert ("POST", "/decks/folders/") in pressed  # the folder is made at the delete, as before
+
+
+async def test_a_gateway_write_or_another_link_makes_the_delete_read_again(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The box's read is used only while nothing the gateway sent could have changed the deck,
+    and only for the Archidekt account it was read with (security review, 25 Oct)."""
+    await linked_user(stack)
+    _setup(stack)
+    decks = stack.h.app.state.gateway.decks
+    b, csrf = await _browser(stack)
+    calls = _spy(stack, monkeypatch)
+    try:
+        await b.http.get("/decks/api/decks/201/delete-info")
+        decks._on_archidekt_write("/decks/202/update/")  # any write the gateway sends
+        assert decks._prepared(SUB, "201") is None
+        await b.http.get("/decks/api/decks/201/delete-info")
+        entry = decks._delete_prep[(SUB, "201")]
+        entry["link"] = "someone else"
+        assert decks._prepared(SUB, "201") is None
+        await b.http.get("/decks/api/decks/201/delete-info")
+        decks.forget_member(SUB)
+        assert (SUB, "201") not in decks._delete_prep
+    finally:
+        await b.aclose()
+    assert not [c for c in calls if c[0] != "GET"]

@@ -39,7 +39,7 @@ def _link(server: Server) -> str:
 
     sid = server.sign_in()
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
-    csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/account").text).group(1)
+    csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/account/details").text).group(1)
     r = h.post(
         "/account",
         data={

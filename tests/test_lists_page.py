@@ -449,22 +449,22 @@ async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Brows
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # next to Proposals and History (Watchlist sits between when watchlists are on)
-    assert labels == ["Proposals", "History", "Reports", "My lists", "Forum", "Guide", "Account"]
+    # More's Your cards group, after Watchlist (watchlists are on by default)
+    assert labels[-3:] == ["Scan", "Watchlist", "My lists"]
     assert "<a href='/lists'>" in menu
     # the phone's More sheet and the rail list the same pages
     assert page.count("href='/lists'") >= 2
 
     # the Account page's panel, with the counts of the tabs read so far
     account_lists.forget_counts("user-1")  # as before any tab was opened
-    acc = (await member.http.get("/account")).text
+    acc = (await member.http.get("/account/details")).text
     assert "<h2>Your Archidekt lists</h2>" in acc
     assert "Lists that follow you into every deck, kept on Archidekt:" in acc
     assert "<a href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
     assert "<a class='btn' href='/lists'>" in acc and "Open My lists</a>" in acc
     for slug in ("templates", "defaults", "tags", "pins", "custom"):
         await member.http.get(f"/lists/{slug}")
-    acc = (await member.http.get("/account")).text
+    acc = (await member.http.get("/account/details")).text
     assert "<a href='/lists/templates'>2 category templates</a>" in acc
     assert "<a href='/lists/defaults'>1 card with default categories</a>" in acc
     assert "<a href='/lists/tags'>1 color tag</a>" in acc

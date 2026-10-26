@@ -92,9 +92,11 @@
     if (window.MtgMenu && window.MtgMenu.icon) return window.MtgMenu.icon("package");
     return el("span", null, "P");
   }
+  // My Decks (decks only) or Packages (packages only), the switch at the top of the page (Ben,
+  // 2026-10-25; its value rides in the form)
   function showMode() {
-    var s = form.querySelector("select[name=show]");
-    return s ? s.value : "";
+    var s = form.querySelector("input[name=show]");
+    return s && s.value === "packages" ? "packages" : "decks";
   }
   function pkgNote() {
     var n = document.getElementById("pk-note");
@@ -209,12 +211,20 @@
       });
     }
     var total = $("#decks-total"), head = list.querySelector("#fv-decks");
+    var empty = $("#pk-empty");
+    if (mode === "packages" && !shownPk && !empty) {
+      empty = el("p", "muted", "No packages here yet. New package makes one.");
+      empty.id = "pk-empty";
+      empty.setAttribute("role", "status");
+      list.parentNode.insertBefore(empty, list);
+    }
+    if (empty) empty.hidden = mode !== "packages" || shownPk > 0;
     if (mode === "packages") {
       if (total) total.textContent = plural(shownPk, "package");
-      if (head) { head.textContent = "Packages "; head.appendChild(el("span", "n", String(shownPk))); }
+      if (head) head.textContent = "Packages";  // the results bar carries the count
     } else if (mode === "decks") {
       if (total) total.textContent = plural(shownDk, "deck");
-      if (head) { head.textContent = "Decks "; head.appendChild(el("span", "n", String(shownDk))); }
+      if (head) head.textContent = "Decks";
     }
     list.dispatchEvent(new CustomEvent("decks:marked", { bubbles: true }));
   }
@@ -262,7 +272,6 @@
     var t = e.target;
     if (!t || t.closest(".sortcw")) return; // the phone's combined sort sets the real boxes, which change
     if (t.type === "search") return;
-    if (t.name === "show") { mark(); setAddress(); return; } // applied here, nothing asked again
     if (t.type === "checkbox" || t.type === "radio" || t.tagName === "SELECT") { clearTimeout(timer); refresh(); }
   });
 })();

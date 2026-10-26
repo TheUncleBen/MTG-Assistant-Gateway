@@ -1,13 +1,12 @@
 """Waiting changes as rows with checkboxes: the Proposals page's deck groups and the deck page's
-"Waiting changes" strip.
+Proposals box.
 Owned by the approvals work.
 
-The deck route (companion_decks.py) asks ``waiting_changes`` for the strip's data and hands it to
-``deckpage.deck_page_html`` as ``waiting``, which draws it with ``strip_html`` at the top of the
-page, under the banner: folded to one line on a phone ("3 waiting changes · oldest 2 h ·
-Review"), open on a computer. Every list posts to /proposals/select (pages.py): Apply opens a
-confirm that lists the order, Reject rejects the checked rows at once (nothing changes on
-Archidekt).
+The deck route (companion_decks.py) asks ``waiting_changes`` for the box's data and hands it to
+``deckpage.deck_page_html`` as ``waiting``, which draws it with ``deck_box_html``, opened by the
+banner's Proposals pill (its count is how many wait). Every list posts to /proposals/select
+(pages.py): Apply opens a confirm that lists the order, Reject rejects the checked rows at once
+(nothing changes on Archidekt).
 """
 
 from __future__ import annotations
@@ -141,33 +140,32 @@ def action_bar(*, inline: bool = False) -> str:
     )
 
 
-def strip_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -> str:
-    """The deck page's strip, at the top under the banner. Empty without waiting
-    changes, and without a session (nothing to approve with)."""
-    if not lines or not csrf:
+def deck_box_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -> str:
+    """The deck page's Proposals box, opened by the banner's Proposals pill (Ben, 2026-10-25: out
+    of the way until asked for, as a settings list): the member's waiting proposals for the deck
+    in one grouped list, Apply or Reject the checked ones, and the deck's whole Proposals list."""
+    if not csrf:
         return ""
-    now = time.time()
-    n = len(lines)
-    oldest = _age(now - min(int(x.get("created_at") or now) for x in lines))
-    head = (
-        f"<summary><b>{n} waiting change{'s' if n != 1 else ''}</b>"
-        f"<span class='sep'>·</span><span>oldest {oldest}</span>"
-        "<span class='open'><span class='sep'>·</span><span class='go'>Review</span></span></summary>"
+    did = html.escape(deck_id)
+    every = (
+        f"<a class='yall' href='/proposals?deck_id={did}'>All proposals for this deck{ui.icon('chev')}</a>"
     )
-    rows = "".join(row_html(x, now=now, group=deck_id) for x in lines)
-    return (
-        "<details class='wstrip' id='waiting' data-open-wide>"
-        + head
-        + "<form method='post' action='/proposals/select' class='wform'>"
-        f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
-        f"<input type='hidden' name='back' value='/decks/{html.escape(deck_id)}'>"
-        f"<label class='pick all'><input type='checkbox' class='all' data-all='{html.escape(deck_id)}'>"
-        "<span>All waiting changes to this deck</span></label>"
-        f"<ul class='wlist'>{rows}</ul>" + action_bar(inline=True) + "<p class='small more'>"
-        f"<a href='/proposals#deck-{html.escape(deck_id)}'>All waiting changes</a></p>"
-        "</form></details>"
-        f"<script src='{LIST_SCRIPT}' defer></script>"
-    )
+    if not lines:
+        body = f"<p class='muted'>Nothing is waiting for this deck.</p>{every}"
+    else:
+        now = time.time()
+        rows = "".join(row_html(x, now=now, group=deck_id) for x in lines)
+        body = (
+            "<form method='post' action='/proposals/select' class='wform ybox'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+            f"<input type='hidden' name='back' value='/decks/{did}'>"
+            "<div class='ylist'>"
+            f"<label class='pick all'><input type='checkbox' class='all' data-all='{did}'>"
+            f"<span>All {len(lines)} waiting</span></label>"
+            f"<ul class='wlist'>{rows}</ul></div>" + action_bar(inline=True) + every + "</form>"
+            f"<script src='{LIST_SCRIPT}' defer></script>"
+        )
+    return ui.box("proposals", "Proposals for this deck", body, close_href=f"/decks/{did}", cls="propbox")
 
 
 # Shared by the Proposals page, the strip and the confirm and result pages. Colours are the theme's
@@ -215,19 +213,23 @@ form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
 .dgroup h2{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;font-size:1.1rem;margin:0 0 .25rem}
 .dgroup h2 .pick{flex:0 1 auto;padding:.3rem 0;min-height:44px;align-items:center}
 .dgroup h2 .meta2{color:var(--text-muted);font-size:.86rem;font-weight:400}
-.wstrip{margin:0 0 1rem;border:1px solid var(--border);border-left:4px solid var(--orange);
-  border-radius:var(--radius-panel);background:var(--surface)}
-.wstrip > summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;min-height:44px;
-  padding:.35rem .75rem;list-style:none}
-.wstrip > summary::-webkit-details-marker{display:none}
-.wstrip > summary .open{display:inline-flex;gap:.4rem}
-.wstrip > summary .open .go{color:var(--link);text-decoration:underline}
-.wstrip[open] > summary .open{display:none}
-.wstrip .sep{color:var(--text-muted)}
-.wstrip .wform{padding:0 .75rem .6rem}
-.wstrip .more{margin:.5rem 0 0}
 /* links a thumb taps on their own are 44 px tall */
-.wstrip .more a,.dgroup h2 > a,.results li > a{display:inline-flex;align-items:center;min-height:44px}
+.dgroup h2 > a,.results li > a{display:inline-flex;align-items:center;min-height:44px}
+/* the deck page's Proposals box: the rows as one grouped list, as a phone's settings draw one */
+.ybox .ylist{background:var(--surface);border:1px solid var(--border-soft);border-radius:14px;
+  padding:0 .75rem;margin:0 0 .5rem}
+.ybox .wrow .review::after{content:'›';margin-left:.3rem;font-size:1.2em;line-height:1}
+.ybox .wbar{margin:.5rem 0}
+/* the box's own list and label styles would indent the rows and shrink All to its words */
+.ybox .ylist .wlist{margin:0;padding:0}
+.ybox .ylist .pick.all{display:flex}
+/* the box is narrow everywhere: the count on its own row, Apply and Reject side by side under it */
+.ybox .wbar .wtop{flex-basis:100%}
+.ybox .wbar button[name=action]{flex:1 1 0;min-width:0}
+.propbox .yall{display:flex;align-items:center;justify-content:space-between;min-height:44px;margin:.5rem 0 0;
+  padding:0 .75rem;border-radius:14px;border:1px solid var(--border-soft);background:var(--surface);
+  color:var(--text);text-decoration:none;font-weight:700}
+.propbox .yall svg.i{transform:rotate(-90deg);width:16px;height:16px;color:var(--text-muted)}
 .order{margin:0 0 1rem;padding-left:1.4rem}
 .order li{margin:.3rem 0;overflow-wrap:break-word}
 .order .held{display:block;font-size:.9rem;margin-top:.2rem}

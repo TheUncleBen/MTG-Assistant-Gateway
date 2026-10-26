@@ -7,7 +7,7 @@ import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -51,6 +51,7 @@ from .theme import (
     esc as _esc,
 )
 from .theme import (
+    hub_switch,
     icon,
 )
 from .waiting_strip import waiting_changes
@@ -80,7 +81,7 @@ def new_deck_error_html(exc: DeckError) -> str:
     if exc.kind == "not_linked":
         return (
             "<b>Link your Archidekt account first.</b> The deck is made in your Archidekt account. "
-            "<a href='/account'>Open Account</a>"
+            "<a href='/account/details#archidekt'>Link it under Account details</a>"
         )
     if exc.kind == "rate_limited" and "pending proposals" in str(exc):
         return (
@@ -190,7 +191,7 @@ def new_deck_box_html(
         f"<option value='csv'{' selected' if kind == 'csv' else ''}>Archidekt CSV export</option>"
         f"<option value='json'{' selected' if kind == 'json' else ''}>Gateway .json export</option>"
         "</select></span></div>"
-        f"<details class='nd-help'><summary>{icon('guide')} What can I paste?</summary>"
+        f"<details class='nd-help'><summary class='fold-btn'>{icon('guide')} What can I paste?</summary>"
         f"<p class='small'>{NEW_DECK_HELP}</p></details></div>"
         "</div></div></div>"
         "<aside class='nd-prev' aria-label='How it will look in My decks'>"
@@ -267,9 +268,6 @@ NEW_DECK_CSS = """
 .nd-as{display:flex;align-items:center;gap:.5rem}
 .nd-as label{margin:0}
 .nd-help{min-width:0}
-.nd-help summary{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;cursor:pointer;
-  color:var(--link);font-size:.92rem;font-weight:700}
-.nd-help summary svg.i{width:16px;height:16px}
 .nd-help p{margin:.2rem 0 0;max-width:30rem}
 /* the tile at the top of its column, level with the fields (0.7.43: it floated mid-column) */
 .nd-prev{display:flex;flex-direction:column;justify-content:flex-start;padding-left:1.1rem;
@@ -363,13 +361,30 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # the heading with its three actions: + New folder (a box, static/menus.js), New package (a
         # plain button; parity release 2) and New deck (the one orange button): the boxes' links
         # are the old addresses, which open this page with the box open
+        # The switch names the page (My Decks or Packages), so the heading is for screen readers only;
+        # the three actions share its row (Ben, 2026-10-25).
+        packages = filters["show"] == "packages"
+        # the switch keeps the folder open, as the Show filter it replaced did
+        in_folder = f"folder={quote(folder, safe='')}" if folder else ""
         head = (
-            "<div class='ui-head phead'><h1>My decks</h1><span class='acts'>"
+            "<div class='ui-head phead hubhead'>"
+            f"<h1 class='sr-only'>{'Packages' if packages else 'My Decks'}</h1>"
+            + hub_switch(
+                "Decks",
+                [
+                    ("/decks" + (f"?{in_folder}" if in_folder else ""), "My Decks", ""),
+                    ("/decks?show=packages" + (f"&{in_folder}" if in_folder else ""), "Packages", "packages"),
+                ],
+                filters["show"],
+            )
+            # New deck first, the one orange button, then New folder and New package (Ben,
+            # 2026-10-25: "New deck / New folder / New package")
+            + "<span class='acts'>"
+            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
+            f"{icon('plus')} New deck</a>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
             f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
             f"{icon('package')} New package</a>"
-            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
-            f"{icon('plus')} New deck</a>"
             "</span></div>"
         )
         notice = ""
@@ -454,7 +469,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             )
         )
         resp = page(
-            "My decks"
+            ("Packages" if filters["show"] == "packages" else "My Decks")
             if new_deck is None and new_package is None
             else "New deck"
             if new_deck

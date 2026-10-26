@@ -12,7 +12,8 @@ async def test_the_uploaded_picture_is_shown(env: Env):
     expected = (GEN / "avatar.png").read_bytes()
     async with browser_page() as page:
         await gateway_browser_sign_in(page, env, "alice-test", "/account")
-        assert await page.locator("img.av").count() == 1
+        # the top bar's Account button and the Account page's own header both show it
+        assert await page.locator("img.av[src='/account/avatar']").count() == 2
         body = b""
         for _ in range(20):  # fetched in the background after sign-in
             r = await page.request.get(f"{PUBLIC_URL}/account/avatar")

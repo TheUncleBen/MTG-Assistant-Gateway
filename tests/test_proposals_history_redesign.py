@@ -360,7 +360,7 @@ async def test_one_proposal_is_a_side_panel_or_a_page(stack: Stack) -> None:
         closed = (await b.http.get("/proposals/p00", headers=NAV)).text.split("<main")[1]
         assert "href='/proposals?show=all'>← Back to Proposals" in closed
         assert "<dt>Expires</dt>" not in closed
-        assert "<summary>Technical details</summary>" in closed
+        assert "<summary class='fold-btn'>Technical details</summary>" in closed
     finally:
         await b.aclose()
 
@@ -429,11 +429,14 @@ async def test_an_empty_waiting_widget_says_nothing_is_waiting(stack: Stack) -> 
         await b.aclose()
 
 
-async def test_deck_menu_links_its_proposals(stack: Stack) -> None:
+async def test_the_deck_page_links_its_proposals(stack: Stack) -> None:
+    """The banner's Proposals pill (beside Like, Bookmark and Comments) opens the deck's Proposals
+    box; without scripts it is a link to the deck's proposals, and the box links there too."""
     b = await linked_browser(stack)
     try:
         page = (await b.http.get("/decks/42", headers=NAV)).text
-        assert "<a href='/proposals?deck_id=42'>" in page and "Proposals for this deck</a>" in page
+        assert "<a class='soc prop' href='/proposals?deck_id=42' data-box-open='proposals'>" in page
+        assert "<a class='yall' href='/proposals?deck_id=42'>All proposals for this deck" in page
     finally:
         await b.aclose()
 

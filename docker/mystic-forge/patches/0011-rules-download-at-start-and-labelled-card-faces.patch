@@ -1,0 +1,159 @@
+Subject: Rules download at start-up; a card's second face is labelled
+
+Right after a restart the rules tools answered from the bundled
+Comprehensive Rules copy until the first rules call started the download
+of the current one, so answers a minute apart named two effective dates.
+The download now starts when the server starts (MYSTIC_FORGE_NO_CR_WARMUP
+switches it off; the tests set it).
+
+A two-face card in a search result was printed with a bare "---" between
+its faces, the marker the numbered list puts between results, so a reader
+took the second face for another card. The second face is now headed
+"Other face of <card name>:".
+
+diff --git a/conftest.py b/conftest.py
+index 0e988c1..e3eeaf0 100644
+--- a/conftest.py
++++ b/conftest.py
+@@ -5,6 +5,7 @@ import sys
+ sys.path.insert(0, os.path.dirname(__file__))
+ 
+ os.environ["MYSTIC_FORGE_NO_INGEST"] = "1"  # never start the ingest loop in tests
++os.environ["MYSTIC_FORGE_NO_CR_WARMUP"] = "1"  # no rules download at startup in tests
+ 
+ import pytest
+ 
+diff --git a/server.py b/server.py
+index 0d3547e..3a5cfa5 100644
+--- a/server.py
++++ b/server.py
+@@ -185,10 +185,18 @@ class PassphraseMiddleware:
+         self.app = app
+         self._ingest_task = None
+         self._sidecar_task = None
++        self._rules_task = None
+ 
+     async def __call__(self, scope, receive, send):
+         if scope["type"] == "lifespan":
+             async def send_hooked(msg):
++                # The rules: load the local copy and start the download of the
++                # current one now, not on the first rules call, so answers
++                # right after a restart don't come from the bundled copy.
++                if (msg["type"] == "lifespan.startup.complete"
++                        and not os.environ.get("MYSTIC_FORGE_NO_CR_WARMUP")
++                        and self._rules_task is None):
++                    self._rules_task = asyncio.create_task(_get_rules_index())
+                 if (msg["type"] == "lifespan.startup.complete"
+                         and not os.environ.get("MYSTIC_FORGE_NO_INGEST")):
+                     # `is None`, not truthiness: a second startup event must
+@@ -205,6 +213,8 @@ class PassphraseMiddleware:
+                         self._ingest_task.cancel()
+                     if self._sidecar_task:
+                         self._sidecar_task.cancel()
++                    if self._rules_task:
++                        self._rules_task.cancel()
+                 await send(msg)
+             await self.app(scope, receive, send_hooked)
+             return
+@@ -456,7 +466,8 @@ def _format_card(card: dict, verbose: bool = False) -> str:
+         # Double-faced card: format each face
+         lines.extend(_format_face(faces[0]))
+         for face in faces[1:]:
+-            lines.append("---")
++            # Not "---": the numbered list marks each result with "--- N ---".
++            lines.append(f"Other face of {card.get('name') or faces[0].get('name', '?')}:")
+             lines.extend(_format_face(face))
+     else:
+         # Single-faced card
+diff --git a/tests/test_rules_warmup_and_faces.py b/tests/test_rules_warmup_and_faces.py
+new file mode 100644
+index 0000000..b892092
+--- /dev/null
++++ b/tests/test_rules_warmup_and_faces.py
+@@ -0,0 +1,86 @@
++"""Two fixes from the ChatGPT connector test of 2026-10-25.
++
++1. Right after a restart the rules tools answered from the bundled
++   Comprehensive Rules copy (effective August 7, 2026) until the first call
++   started the download of the current one, so one answer could say August 7
++   and the next September 25. The download now starts when the server starts.
++2. A card with two faces in a search result was printed as its first face,
++   a bare "---" and its second face, the same marker the numbered list uses
++   between results ("--- 34 ---"), so a reader took the second face for a
++   card the search had returned. The second face is now labelled.
++"""
++import asyncio
++
++import server
++from tests.test_http_surface import run_lifespan
++
++
++def test_startup_starts_the_rules_download(monkeypatch):
++    monkeypatch.setenv("MYSTIC_FORGE_NO_INGEST", "1")   # as the gateway's stack runs it
++    monkeypatch.delenv("MYSTIC_FORGE_NO_CR_WARMUP", raising=False)
++    calls = []
++
++    async def fake_index():
++        calls.append("rules")
++
++    monkeypatch.setattr(server, "_get_rules_index", fake_index)
++    run_lifespan("lifespan.startup.complete")
++    assert calls == ["rules"]
++
++
++def test_a_second_startup_event_does_not_start_it_twice(monkeypatch):
++    monkeypatch.delenv("MYSTIC_FORGE_NO_CR_WARMUP", raising=False)
++    calls = []
++
++    async def fake_index():
++        calls.append("rules")
++
++    monkeypatch.setattr(server, "_get_rules_index", fake_index)
++    run_lifespan("lifespan.startup.complete", "lifespan.startup.complete")
++    assert calls == ["rules"]
++
++
++def test_the_warmup_can_be_switched_off(monkeypatch):
++    monkeypatch.setenv("MYSTIC_FORGE_NO_CR_WARMUP", "1")
++    calls = []
++
++    async def fake_index():
++        calls.append("rules")
++
++    monkeypatch.setattr(server, "_get_rules_index", fake_index)
++    run_lifespan("lifespan.startup.complete")
++    assert calls == []
++
++
++_PREPARE = {
++    "name": "Emeritus of Truce // Swords to Plowshares",
++    "layout": "prepare",
++    "color_identity": ["W"],
++    "card_faces": [
++        {"name": "Emeritus of Truce", "mana_cost": "{1}{W}{W}",
++         "type_line": "Creature — Cat Cleric", "oracle_text": "When this creature enters, ...",
++         "power": "3", "toughness": "3"},
++        {"name": "Swords to Plowshares", "mana_cost": "{W}", "type_line": "Instant",
++         "oracle_text": "Exile target creature. Its controller gains life equal to its power."},
++    ],
++}
++
++
++def test_a_second_face_is_labelled_as_part_of_the_same_card():
++    text = server._format_card(_PREPARE)
++    lines = text.splitlines()
++    assert "---" not in lines
++    assert "Other face of Emeritus of Truce // Swords to Plowshares:" in lines
++    assert lines.index("Other face of Emeritus of Truce // Swords to Plowshares:") < next(
++        i for i, l in enumerate(lines) if "Swords to Plowshares**" in l)
++
++
++def test_a_search_list_numbers_only_cards():
++    text = server._format_card_list([_PREPARE], total=1, has_more=False)
++    assert [l for l in text.splitlines() if l.startswith("---")] == ["--- 1 ---"]
++
++
++def test_a_one_face_card_is_unchanged():
++    card = {"name": "Sol Ring", "mana_cost": "{1}", "type_line": "Artifact",
++            "oracle_text": "{T}: Add {C}{C}.", "color_identity": []}
++    assert "Other face" not in server._format_card(card)

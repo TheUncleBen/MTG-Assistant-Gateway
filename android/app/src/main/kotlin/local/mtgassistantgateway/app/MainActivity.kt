@@ -45,6 +45,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.browser.auth.AuthTabIntent
+import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.util.Consumer
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter
@@ -72,7 +74,8 @@ import java.io.ByteArrayInputStream
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
- * /login redirected to) during a sign-in, stay in the app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
+ * /login redirected to) during a sign-in, stay in the app. Links anywhere else open in the phone's
+ * browser; a `target=_blank` link stays in the app when it is a gateway page. Other schemes
  * open another app only when tapped in the main frame, and only an activity that accepts links
  * from a browser.
  *
@@ -353,7 +356,6 @@ class MainActivity : ComponentActivity() {
             when (item.itemId) {
                 R.id.menu_scan -> startScan()
                 R.id.menu_reload -> web.reload()
-                R.id.menu_browser -> openExternal(Uri.parse(web.url ?: origin))
                 R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
                 R.id.menu_update -> checkForUpdates()
@@ -502,7 +504,7 @@ class MainActivity : ComponentActivity() {
     /**
      * The floating menu button shows only over pages that are not the gateway's (the sign-in page
      * of the identity provider, say). The gateway's own pages carry the same actions in their
-     * account menu through [NativeBridge], so the button never covers their bottom tab bar.
+     * Account page through [NativeBridge], so the button never covers their bottom tab bar.
      */
     private fun syncFab() {
         fab.visibility = if (camera == null && !gatewayPage) View.VISIBLE else View.GONE
@@ -539,14 +541,50 @@ class MainActivity : ComponentActivity() {
 
     // -- sign-in through the phone's browser ([BrowserSignIn]) --------------------
 
-    private fun startBrowserSignIn(next: String?, fresh: Boolean) {
+    /** The Auth Tab's answer: registered before the activity starts, as Android requires. */
+    private val authTab = AuthTabIntent.registerActivityResultLauncher(this) { onAuthTabResult(it) }
+    /** The sign-in the Auth Tab is running, to start again in a Custom Tab if the gateway can't vouch for this app. */
+    private var authTabSignIn: Pair<String?, Boolean>? = null
+
+    private fun startBrowserSignIn(next: String?, fresh: Boolean, authTabAllowed: Boolean = true) {
         val verifier = BrowserSignIn.newVerifier()
         prefs.setPendingSignIn(origin, verifier, System.currentTimeMillis())
-        val url = BrowserSignIn.startUrl(origin, next, BrowserSignIn.challengeOf(verifier), fresh)
+        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, BrowserSignIn.challengeOf(verifier), fresh))
+        val host = BrowserSignIn.authTabHost(origin)
+        val browser = CustomTabsClient.getPackageName(this, emptyList())
+        if (authTabAllowed && host != null && browser != null && CustomTabsClient.isAuthTabSupported(this, browser)) {
+            try {
+                // Returns, and closes itself, once the gateway sends it to its own RETURN_PATH.
+                val tab = AuthTabIntent.Builder().build()
+                tab.intent.setPackage(browser)
+                tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
+                authTabSignIn = next to fresh
+                return
+            } catch (e: ActivityNotFoundException) {
+                // the Custom Tab below
+            }
+        }
         try {
-            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, Uri.parse(url))
+            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, getString(R.string.sign_in_no_browser), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun onAuthTabResult(result: AuthTabIntent.AuthResult) {
+        val started = authTabSignIn
+        authTabSignIn = null
+        when (result.resultCode) {
+            AuthTabIntent.RESULT_OK -> {
+                val code = BrowserSignIn.codeOfReturn(origin, result.resultUri?.toString())
+                if (code != null) finishBrowserSignIn(code)
+                else Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+            }
+            // The browser could not confirm the gateway vouches for this app (a build signed with
+            // another key, say): the same sign-in in a Custom Tab, ending on the page with the button.
+            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->
+                started?.let { (next, fresh) -> startBrowserSignIn(next, fresh, authTabAllowed = false) }
+            else -> Unit // closed by the person: nothing to finish
         }
     }
 
@@ -1181,12 +1219,14 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""
 
-        /** The page's account menu: the actions the floating button offers elsewhere. */
+        /** The Account page's This app list: the actions the floating button offers elsewhere. */
         @JavascriptInterface
         fun reload() = onGatewayPage { web.reload() }
 
+        /** The deck page's Share: the phone's share sheet ([DeckShare]). */
         @JavascriptInterface
-        fun openInBrowser() = onGatewayPage { openExternal(Uri.parse(web.url ?: origin)) }
+        fun share(title: String?, archidektUrl: String?, gatewayUrl: String?, deckList: String?) =
+            onGatewayPage { DeckShare.open(this@MainActivity, title, archidektUrl, gatewayUrl, deckList) }
 
         @JavascriptInterface
         fun checkForUpdates() = onGatewayPage { this@MainActivity.checkForUpdates() }

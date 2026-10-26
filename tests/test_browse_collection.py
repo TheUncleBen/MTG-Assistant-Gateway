@@ -44,7 +44,7 @@ async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) ->
         r = await b.http.get("/", headers=NAV)
         assert r.status_code == 200
         nav = r.text[r.text.index("<nav class='site'") : r.text.index("</nav>")]
-        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/history"):
+        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/precons", "/lists"):
             assert f"href='{href}'" in nav, href
         assert "class='tabbar'" in r.text and re.search(r"<body class='[^']*\bhome\b", r.text)
         assert "Sample Commander Deck" in r.text  # the newest decks with their covers
@@ -445,8 +445,9 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
         assert js.status_code == 200 and "guide-q" in js.text
         for banned in ("docker", "Docker", "MTG_", "Portainer", "compose"):
             assert banned not in r.text, banned
-        menu = r.text[r.text.index("<nav class='user'") : r.text.index("</header>")]
-        assert "href='/guide'" in menu  # the Guide is reachable from the account menu
+        # the Guide is a row on the Account page the picture opens
+        hub = (await b.http.get("/account", headers=NAV)).text
+        assert "<a class='yrow' href='/guide'>" in hub
     finally:
         await b.aclose()
 
@@ -462,46 +463,44 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         assert app.status_code == 200
         assert "<footer class='site'>" not in app.text
         assert re.search(r"<body class='[^']*\bapp\b", app.text)
-        for action in ("openCamera", "reload", "openInBrowser", "changeGateway"):
-            assert f"data-native='{action}'" in app.text, action
-        # These two stay in the app's own menu and the Account page's App card only
-        for action in ("openCopiedLink", "checkForUpdates"):
-            assert f"data-native='{action}'" not in app.text, action
-        assert (
-            "href='/install?for=android'"
-            not in app.text[app.text.index("<nav class='user'") : app.text.index("</header>")]
-        )
+        # the app's own actions are the Account page's This app rows, not in every page's bar
+        assert "data-native" not in app.text
+        hub = await b.http.get("/account", headers={**NAV, **APP_UA})
+        for action in ("openCamera", "reload", "openCopiedLink", "changeGateway", "checkForUpdates"):
+            assert f"data-native='{action}'" in hub.text, action
+        assert "openInBrowser" not in hub.text  # gone from the app (Ben, 2026-10-25)
+        assert "data-native" not in (await b.http.get("/account", headers=NAV)).text
     finally:
         await b.aclose()
 
 
-async def test_account_page_in_the_app_has_an_app_card(stack: Stack) -> None:
-    """Inside the app the Account page shows the installed version and the update
-    check, not "Get the Android app"; in a browser it stays as it was."""
+async def test_account_page_in_the_app_has_a_this_app_group(stack: Stack) -> None:
+    """Inside the app the Account page has This app (with the installed version on Check for app
+    updates), not the Android app row; in a browser the other way round."""
     b = Browser(stack.h)
     try:
         await b.login("/account")
         web = await b.http.get("/account", headers=NAV)
         assert web.status_code == 200
-        assert "Get the Android app" in web.text and "href='/install?for=android'" in web.text
-        assert "<h2>App</h2>" not in web.text and "data-native" not in web.text
+        assert "<a class='yrow' href='/install?for=android'>" in web.text
+        assert "<h2>This app</h2>" not in web.text and "data-native" not in web.text
 
         app = await b.http.get("/account", headers={**NAV, **APP_UA})
         assert app.status_code == 200
         main = app.text[app.text.index("</header>") :]
-        assert "Get the Android app" not in main and "href='/install?for=android'" not in main
-        card = main[main.index("<div class='card' id='app'>") :]
-        card = card[: card.index("</div></div>") + 12]
-        assert "<h2>App</h2>" in card
-        assert "<dt>Installed version</dt><dd>0.6.4</dd>" in card
-        assert "data-native='checkForUpdates'" in card and "data-native='openCopiedLink'" in card
+        assert "href='/install?for=android'" not in main and "<h2>This app</h2>" in main
+        row = main[main.index("data-native='checkForUpdates'") :]
+        assert "<span class='val'>0.6.4</span>" in row[: row.index("</button>")]
+        # the details page no longer has an App card of its own
+        details = await b.http.get("/account/details", headers={**NAV, **APP_UA})
+        assert "<div class='card' id='app'>" not in details.text
 
-        # A user agent with the mark but no readable version still gets the card, marked unknown,
-        # and nothing from the user agent reaches the page.
+        # a user agent with the mark but no readable version: no version, and nothing from the
+        # user agent reaches the page
         odd = {"User-Agent": "Mozilla/5.0 MTGAssistant/<b>x</b>"}
         r = await b.http.get("/account", headers={**NAV, **odd})
-        assert "<dt>Installed version</dt><dd>unknown</dd>" in r.text and "<b>x</b>" not in r.text
-        r = await b.http.get("/account", headers={**NAV, "User-Agent": "MTGAssistant/0.7.22.9"})
-        assert "<dd>unknown</dd>" in r.text
+        assert "<b>x</b>" not in r.text and "data-native='checkForUpdates'" in r.text
+        update_row = r.text.split("data-native='checkForUpdates'")[1].split("</button>")[0]
+        assert "<span class='val'>" not in update_row
     finally:
         await b.aclose()

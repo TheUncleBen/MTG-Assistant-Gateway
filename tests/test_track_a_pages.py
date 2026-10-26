@@ -232,20 +232,24 @@ async def test_the_review_page_sends_the_version_it_showed(stack: Stack) -> None
         await b.aclose()
 
 
-async def test_the_deck_page_shows_the_strip_and_home_counts_the_decks(stack: Stack) -> None:
+async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stack: Stack) -> None:
+    """The banner's Proposals pill carries the count of the deck's waiting changes and opens the
+    Proposals box (Ben, 2026-10-25: not in your face), which lists them to apply or reject."""
     h = stack.h
     token, b = await _signed_in(stack)
     try:
         page = (await b.http.get("/decks/42")).text
-        assert "class='wstrip'" not in page  # nothing waiting: no strip
+        pill = page.split("<a class='soc prop'")[1].split("</a>")[0]
+        assert "class='nb'" not in pill  # nothing waiting: no count
+        assert "Nothing is waiting for this deck." in page
         await _propose(h, token, _add("Opt"))
         await _propose(h, token, _add("Delver of Secrets"))
         page = (await b.http.get("/decks/42")).text
-        assert "<details class='wstrip' id='waiting' data-open-wide>" in page
-        assert "<b>2 waiting changes</b>" in page and "oldest 1 min" in page
-        # at the top, under the banner
-        assert page.index("class='banner") < page.index("class='wstrip'") < page.index("id='cards'")
-        assert "name='back' value='/decks/42'" in page
+        pill = page.split("<a class='soc prop'")[1].split("</a>")[0]
+        assert "<b class='nb'>2</b>" in pill and "<span class='sr-only'> waiting</span>" in pill
+        assert "class='wstrip'" not in page  # no strip on the page any more
+        box = page.split("id='proposals'")[1]
+        assert "<span>All 2 waiting</span>" in box and "name='back' value='/decks/42'" in box
         home = (await b.http.get("/")).text
         assert "2<small>waiting</small>" in home and "2 on 1 deck · oldest 1 min · next expires in" in home
     finally:

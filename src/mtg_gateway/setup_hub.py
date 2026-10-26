@@ -28,17 +28,15 @@ from . import ui
 from .app_page import APK_NAME, RELEASES_URL, android_facts
 from .pages import _csrf, browser_session, login_redirect
 from .plugin_page import (
-    CHATGPT_NAME_MAX,
     CONNECTOR_ICON_PATH,
     SERVER_DESCRIPTION,
     SETUP_SKILL,
     chatgpt_label,
-    chatgpt_name_too_long,
     chatgpt_zip_name,
     claude_connect_link,
     plugin_slug,
 )
-from .theme import display_name, icon, render
+from .theme import icon, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -132,7 +130,6 @@ class Context:
     public_url: str
     site: str
     gpt_text: str | None = None  # the ChatGPT project instructions (skill_page.chatgpt_text)
-    gpt_name: str | None = None  # the owner's MTG_CHATGPT_NAME: the name ChatGPT shows, when set
     app: dict[str, Any] | None = None  # app_page.android_facts, or None when no APK is shipped
     page: bool = True  # False for the public Markdown
 
@@ -368,17 +365,7 @@ def section(key: str, ctx: Context) -> Section:
             ),
         )
     if key == "chatgpt":
-        # The name to type: the owner's MTG_CHATGPT_NAME (filtered as the plugin file writes it)
-        # when set, else the site's name as it is.
-        gpt_name = chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site
-        long = chatgpt_name_too_long(site, ctx.gpt_name)
-        plugin_warn = (
-            f"This gateway's ChatGPT connector name, “{long[0]}”, is {long[1]} characters, and ChatGPT "
-            f"refuses a plugin file whose name is over {CHATGPT_NAME_MAX} characters. Add the connector by "
-            "hand with the steps above instead, or ask the gateway's owner to shorten the name."
-            if long
-            else None
-        )
+        gpt_name = chatgpt_label(site)  # the name the plugin file carries too
         return Section(
             key,
             CLIENTS[key],
@@ -480,7 +467,6 @@ def section(key: str, ctx: Context) -> Section:
                         primary=False,
                         icon="download",
                     ),
-                    warn=plugin_warn,
                 ),
                 Block(
                     "If ChatGPT blocks write tools",
@@ -566,10 +552,7 @@ def section(key: str, ctx: Context) -> Section:
                             if gpt or not ctx.page
                             else None,
                         ),
-                        Step(
-                            f"Chat inside that project with the "
-                            f"{chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site} connector on."
-                        ),
+                        Step(f"Chat inside that project with the {chatgpt_label(site)} connector on."),
                     ),
                     notes=(
                         "ChatGPT supports custom connectors on the web only, not in its phone apps.",
@@ -640,12 +623,18 @@ def _android(ctx: Context) -> Section:
                     ),
                     Step(f"Check that it is the real app. {verify}"),
                     Step(
+                        "On a Samsung Galaxy phone, turn **Auto Blocker** off (Settings > Security and "
+                        "privacy > Auto Blocker). While it is on, the phone won't install apps that don't "
+                        "come from an app store, so neither this app nor its updates."
+                    ),
+                    Step(
                         "Open the downloaded file. Android asks once to allow installs from your browser: "
                         "allow it."
                     ),
                     Step(
                         "Play Protect may warn that the developer is unknown. That is "
                         "expected: the app is signed by whoever runs this gateway, not by an app store. "
+                        "It may also offer to scan the app first: scanning it or not are both fine. "
                         "Only continue if the signing certificate matched in step 2. If Play Protect says "
                         "the app is harmful, or you are unsure, do not install it and ask the owner of "
                         "this gateway."
@@ -659,7 +648,9 @@ def _android(ctx: Context) -> Section:
                     f"computer run `apksigner verify --print-certs {APK_NAME}` and compare its certificate "
                     "SHA-256 digest with the published one.",
                     "Updates: the app asks this gateway for the version it offers here and offers it "
-                    "itself; Update installs it over the app you have. Android only accepts an update "
+                    "itself; Update installs it over the app you have (with Auto Blocker still off on a "
+                    "Samsung phone; scanning it with Play Protect or not are both fine). Android only "
+                    "accepts an update "
                     "signed with the same key as the installed app, so your settings and sign-in are "
                     "kept, and a file signed by anyone else is refused. An app from before 0.7.12 was "
                     "signed with a test key: uninstall it once and install this file.",
@@ -847,9 +838,7 @@ def _context(state: AppState, *, page: bool) -> Context:
 
         base = skill_dir()
         gpt = chatgpt_text(base) if base is not None else None
-    return Context(
-        s.public_url, s.server_name, gpt_text=gpt, gpt_name=s.chatgpt_name, app=android_facts(), page=page
-    )
+    return Context(s.public_url, s.server_name, gpt_text=gpt, app=android_facts(), page=page)
 
 
 def add_setup_routes(server: MCPServer, state: AppState) -> None:
@@ -922,7 +911,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             current="/install",
             heading=False,
             main_class="ui-wide",

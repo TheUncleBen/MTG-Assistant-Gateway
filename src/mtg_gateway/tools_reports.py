@@ -98,7 +98,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             stats = deck_stats.compute_from_text(cards)
             out: dict[str, object] = {
                 "ok": True,
-                "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+                "deck": {"id": None, "name": "Unnamed deck", "card_count": stats["card_count"]},
                 "stats": stats,
                 "note": "A pasted list has names and counts only; for card-level checks use "
                 "validate_decklist, or read an Archidekt deck.",
@@ -301,7 +301,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "with position and "
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games; the "
             "second report of a compare_with pair starts beside the first when Forge has places for two "
-            "runs (FORGE_MAX_PARALLEL 2 or more, Forge's CPU and memory limits raised to fit two, or "
+            "runs (Forge's CPU and memory limits raised to fit two, or "
             "a second Forge copy), otherwise, as with the default one place, it is queued behind the "
             "first; when "
             "the engine itself is busy the run waits too, engine_busy with retry_after seconds), "

@@ -412,10 +412,12 @@
   // existing cards, by category. The category panels come at once with their headings and
   // counts; the rows are built in slices of ROW_SLICE, the first one now and the rest a frame at
   // a time, so a 100-card deck never holds the page in one long task (a tap during the load
-  // would otherwise wait on it). render() skips a row not built yet and the slice builds it from
+  // would otherwise wait on it). The second slice waits a frame more: the first frame already
+  // styles and lays out the whole page with the first slice, and a slice on top of it made that
+  // frame the longest task on any page (up to about 350 ms at 4x with slices of 12). render() skips a row not built yet and the slice builds it from
   // the state as it is then; MtgReveal (a #card-… deep link) runs once every row is there.
   var existing = root.querySelector(".existing");
-  var ROW_SLICE = 12, rowWork = [];
+  var ROW_SLICE = 6, rowWork = [];
   cfg.groups.forEach(function (g) {
     var det = el("details", { class: "panel cat", open: "", id: "cat-" + g.name }, [
       el("summary", {}, [el("span", { class: "cname", text: g.name, title: g.name }), el("b", { text: String(g.total) })])
@@ -493,6 +495,7 @@
       ul.appendChild(li);
     }
   }
+  var first = true;
   function buildSlice() {
     var n = 0;
     while (rowWork.length && n < ROW_SLICE) {
@@ -501,7 +504,10 @@
       n += 1;
     }
     if (rowWork.length) {
-      if (window.requestAnimationFrame) requestAnimationFrame(buildSlice); else buildSlice();
+      if (!window.requestAnimationFrame) buildSlice();
+      else if (first) requestAnimationFrame(function () { requestAnimationFrame(buildSlice); });
+      else requestAnimationFrame(buildSlice);
+      first = false;
       return;
     }
     render();  // a change made while the rows were still coming marks every row

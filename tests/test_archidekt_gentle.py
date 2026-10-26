@@ -14,7 +14,7 @@ import pytest
 
 from mtg_gateway import archidekt as ark_mod
 from mtg_gateway.archidekt import ArchidektClient, ArchidektError, Pacer
-from mtg_gateway.config import ConfigError, Settings, load_settings
+from mtg_gateway.config import Settings, load_settings
 from tests.fake_archidekt import FakeArchidekt
 from tests.test_backup_and_config import _write_secrets
 
@@ -649,29 +649,28 @@ async def test_requests_carry_the_gateways_own_user_agent() -> None:
 
 # -- settings, stack files, admin page ----------------------------------------------------------------
 GENTLE = {
-    "MTG_ARCHIDEKT_MIN_INTERVAL": ("archidekt_min_interval", 1.0),
-    "MTG_ARCHIDEKT_MAX_PER_MINUTE": ("archidekt_max_per_minute", 30),
-    "MTG_ARCHIDEKT_RETRIES": ("archidekt_retries", 2),
-    "MTG_ARCHIDEKT_BACKOFF_BASE": ("archidekt_backoff_base", 1.0),
-    "MTG_ARCHIDEKT_CACHE_SECONDS": ("archidekt_cache_seconds", 60),
-    "MTG_ARCHIDEKT_CARD_CACHE_SECONDS": ("archidekt_card_cache_seconds", 3600),
+    "archidekt_min_interval": 1.0,
+    "archidekt_max_per_minute": 30,
+    "archidekt_retries": 2,
+    "archidekt_backoff_base": 1.0,
+    "archidekt_cache_seconds": 60,
+    "archidekt_card_cache_seconds": 3600,
 }
 
 
 def test_settings_defaults_and_bounds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    for name in GENTLE:
-        monkeypatch.delenv(name, raising=False)
+    """The pacing lives on the Settings page, gentle by default, within bounds that stay kind to
+    Archidekt."""
+    from mtg_gateway.config import MANAGED_SETTINGS, SettingError
+
     _write_secrets(tmp_path, monkeypatch)
     s = load_settings()
-    for _env, (attr, default) in GENTLE.items():
-        assert getattr(s, attr) == default, attr
-    monkeypatch.setenv("MTG_ARCHIDEKT_MAX_PER_MINUTE", "500")
-    with pytest.raises(ConfigError):
-        load_settings()
-    monkeypatch.setenv("MTG_ARCHIDEKT_MAX_PER_MINUTE", "20")
-    monkeypatch.setenv("MTG_ARCHIDEKT_MIN_INTERVAL", "0.1")
-    with pytest.raises(ConfigError):
-        load_settings()
+    for attr, default in GENTLE.items():
+        assert getattr(s, attr) == default == MANAGED_SETTINGS[attr].default, attr
+    with pytest.raises(SettingError):
+        MANAGED_SETTINGS["archidekt_max_per_minute"].parse(500)
+    with pytest.raises(SettingError):
+        MANAGED_SETTINGS["archidekt_min_interval"].parse(0.1)
 
 
 def test_a_dev_null_copy_folder_means_no_copies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -685,26 +684,15 @@ def test_a_dev_null_copy_folder_means_no_copies(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.mark.parametrize("path", ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"])
-def test_stack_files_pass_every_limit_and_the_optional_copy_mount(path: str) -> None:
+def test_stack_files_mount_the_optional_copy_folder(path: str) -> None:
     text = (ROOT / path).read_text()
-    for name in GENTLE:  # empty unless the env sets it: the Settings page manages them (0.7.29)
-        assert f"{name}: ${{{name}:-}}\n" in text, name
     assert "MTG_BACKUP_COPY_DIR: /backup-copy" in text
     assert "source: ${MTG_BACKUP_COPY_DIR:-/dev/null}\n        target: /backup-copy" in text
 
 
 @pytest.mark.parametrize("path", ["deploy/stack.env.example", "deploy/compose/.env.example"])
-def test_example_env_files_list_the_limits(path: str) -> None:
-    text = (ROOT / path).read_text()
-    for name, (_attr, default) in GENTLE.items():
-        assert f"\n# {name}={default}\n" in text, name
-    assert "#MTG_BACKUP_COPY_DIR=" in text
-
-
-def test_deploy_doc_documents_every_limit() -> None:
-    text = (ROOT / "docs/DEPLOY.md").read_text()
-    for name, (_attr, default) in GENTLE.items():
-        assert f"| `{name}` | no, *stack* | `{default}` |" in text, name
+def test_example_env_files_leave_the_copy_folder_empty(path: str) -> None:
+    assert "\nMTG_BACKUP_COPY_DIR=\n" in (ROOT / path).read_text()
 
 
 def test_entrypoint_chowns_only_a_real_copy_folder() -> None:

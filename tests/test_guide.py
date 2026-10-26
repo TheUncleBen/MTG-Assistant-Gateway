@@ -161,7 +161,7 @@ class _Live:
 def test_the_backup_texts_follow_the_backup_settings() -> None:
     """The save bar box, the approve step and Delete deck say what this gateway does: the box
     ticked or unticked by default, and no backup copy at all with backups off."""
-    folder = "MTG Gateway backups"
+    folder = "MTG Gateway Backups"
     copy_step = (
         f"saves a snapshot and puts a backup copy of the deck in a “{folder}” folder on your "
         "Archidekt account"
@@ -213,7 +213,7 @@ def test_the_advanced_fold_is_last_closed_and_lists_each_ask_beside_its_tool_nam
     fold = re.search(r"<details class='gadv' id='adv-tools'>(.*?)</details>", page, re.S)
     assert fold, "no fold"
     assert " open" not in fold.group(0)[: fold.group(0).index(">")]  # closed by default
-    assert "<summary class='btn'>" in fold.group(0) and "Advanced: tool names</summary>" in fold.group(0)
+    assert "<summary class='fold-btn'>" in fold.group(0) and "Advanced: tool names</summary>" in fold.group(0)
     assert (
         "<p>Your assistant picks these for you. They are listed here in case you need the exact name.</p>"
         in fold.group(0)

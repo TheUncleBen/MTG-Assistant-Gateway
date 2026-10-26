@@ -22,13 +22,13 @@ REPO_PLUGIN = REPO / "plugin"
 
 @pytest.fixture
 async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     app_dir = tmp_path / "app-dist"
     app_dir.mkdir()
     (app_dir / "mtg-assistant-gateway.apk").write_bytes(b"PK\x03\x04" + b"\0" * 100)
     meta = '{"version_name": "0.7.24", "cert_sha256": "' + "ab" * 32 + '"}'
     (app_dir / "mtg-assistant-gateway.json").write_text(meta)
-    monkeypatch.setenv("MTG_APP_DIR", str(app_dir))
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", app_dir)
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
 
@@ -221,6 +221,15 @@ async def test_the_approved_wording_changes(harness: Harness, monkeypatch: pytes
         assert "whoami" not in claude.split("<h2>After connecting</h2>", 1)[1]
         android = (await b.http.get("/install?for=android")).text
         assert "Play Protect may warn that the developer is unknown. That is expected" in android
+        # Ben (25 Oct): a Samsung phone installs nothing while Auto Blocker is on, updates included,
+        # and Play Protect's offer to scan the app may be taken or not
+        blocker = (
+            "turn <strong>Auto Blocker</strong> off (Settings &gt; Security and privacy &gt; Auto Blocker)"
+        )
+        assert blocker in android
+        assert "neither this app nor its updates" in android
+        assert "It may also offer to scan the app first: scanning it or not are both fine." in android
+        assert "with Auto Blocker still off on a Samsung phone" in android
         assert "unverified" not in android
         # the Markdown keeps its lead and the same intro
         md = (await harness.http.get("/install.md")).text
@@ -233,8 +242,8 @@ async def test_the_approved_wording_changes(harness: Harness, monkeypatch: pytes
 async def test_without_an_app_file_the_page_speaks_to_members(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
-    monkeypatch.setenv("MTG_APP_DIR", str(tmp_path / "no-such-dir"))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
+    monkeypatch.setattr("mtg_gateway.app_page.IMAGE_APP_DIR", tmp_path / "no-such-dir")
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         b = Browser(h)
         try:

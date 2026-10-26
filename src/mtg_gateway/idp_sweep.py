@@ -6,7 +6,7 @@ it expires. This sweep closes that gap: every hour it asks Authentik who is in M
 (and MTG_ADMIN_GROUP) right now and deletes the stored session of every linked member who is in
 neither, or whose Authentik user is deactivated or gone.
 
-It is optional. It needs an Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE, a Docker secret)
+It is optional. It needs an Authentik API token (the mtg_authentik_api_token Docker secret)
 whose user may only view the gateway's groups and its own tokens (``authentik_core.view_group``
 granted on those groups alone, not globally); docs/IDP-AUTHENTIK.md has the steps.
 Without one it stays off; an unreadable token file gives a single warning at start, and
@@ -119,8 +119,8 @@ SETUP = "docs/IDP-AUTHENTIK.md section 12"
 NEXT_STEPS = (
     (
         "Authentik could not be reached",
-        "Check that the gateway can reach Authentik's address "
-        "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
+        "Check that the gateway can reach Authentik at the issuer's address "
+        "(MTG_OIDC_ISSUER). It tries again by itself.",
     ),
     (
         "Authentik answered HTTP 401",
@@ -135,7 +135,7 @@ NEXT_STEPS = (
     (
         "Authentik answered HTTP",
         "Authentik had a problem or sent the request elsewhere. It tries again "
-        "by itself; if this stays, check MTG_AUTHENTIK_API_URL.",
+        "by itself; if this stays, check that MTG_OIDC_ISSUER is Authentik's own address.",
     ),
     (
         " found ",
@@ -158,7 +158,7 @@ NEXT_STEPS = (
         "Users page; otherwise check the provider's Subject mode and the group names.",
     ),
 )
-NEXT_STEP_OTHER = "Check that MTG_AUTHENTIK_API_URL points at Authentik itself, then see the gateway's log."
+NEXT_STEP_OTHER = "Check that MTG_OIDC_ISSUER is Authentik's own address, then see the gateway's log."
 
 
 def next_step(error: str) -> str:
@@ -206,8 +206,8 @@ class AuthentikSweep:
         and SweepRefused's safe-to-log text: never the token."""
         if not self.enabled:
             reason = self.why_off() or (
-                "removed-member clean-up is off: no Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE); "
-                "it is optional (docs/IDP-AUTHENTIK.md)"
+                "removed-member clean-up is off: no Authentik API token "
+                "(the mtg_authentik_api_token secret); it is optional (docs/IDP-AUTHENTIK.md)"
             )
             if self.settings.authentik_api_token_problem:
                 cause = "token-unreadable"

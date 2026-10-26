@@ -198,7 +198,7 @@ async def test_revoke_ends_only_that_token_family(gw: Harness):
     cb = await gw.idp_leg(r)
     p = urlparse(cb)
     assert (await b.get(f"{p.path}?{p.query}")).status_code == 302
-    assert (await b.get("/account")).status_code == 200
+    assert (await b.get("/account/details")).status_code == 200
     r = await gw.http.post(
         "/revoke",
         data={
@@ -208,7 +208,7 @@ async def test_revoke_ends_only_that_token_family(gw: Harness):
         },
     )
     assert r.status_code == 200
-    assert (await b.get("/account")).status_code == 200  # the browser session survives
+    assert (await b.get("/account/details")).status_code == 200  # the browser session survives
     r = await gw.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
     assert r.status_code == 400  # but the grant's whole family is gone
     await b.aclose()

@@ -270,9 +270,9 @@ async def test_form_expired_pages_say_what_was_not_done_and_offer_reload_and_bac
             (
                 {"action": "unlink"},
                 "/account",
-                "Reload Account",
-                "/account",
-                "/account",
+                "Reload Account details",
+                "/account/details",
+                "/account/details",
                 "Nothing was changed.",
             ),
         ):
@@ -334,7 +334,9 @@ async def test_the_app_only_finish_and_the_in_app_pages(gw: Harness) -> None:
     verifier = "v" * 50
     start = await gw.http.get("/login", params={"next": "/decks", "app_challenge": challenge_of(verifier)})
     cb = await gw.idp_leg(start)
-    back = await gw.http.get(cb[len(GATEWAY) :], headers=NAV)
+    handed = await gw.http.get(cb[len(GATEWAY) :], headers=NAV)
+    assert handed.status_code == 303  # to the gateway's own return address (app_signin.RETURN_PATH)
+    back = await gw.http.get(handed.headers["location"], headers=NAV)
     assert back.status_code == 200
     body = panel(back.text, "Signed in")
     assert "<p>You're signed in. Go back to the MTG Assistant Gateway app to finish.</p>" in body

@@ -92,7 +92,7 @@ class Server:
         )
         self.db.create_browser_session(sid, "user-1", 3600)
         h = httpx.Client(base_url=self.base, cookies={"mtg_session": sid})
-        csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/account").text).group(1)
+        csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", h.get("/account/details").text).group(1)
         r = h.post(
             "/account",
             data={

@@ -7,14 +7,13 @@ source repository to connect (the steps are the setup hub's, setup_hub.py):
   whose source is the ZIP archive below, pinned by SHA-256.
 - ``/plugin/<name>.zip`` is the plugin from the repository's ``plugin/``
   folder with this gateway's own address written into its connector files.
-  ``<name>`` is ``mtg-gateway`` unless the owner set ``MTG_SERVER_NAME``: then the
+  ``<name>`` is ``mtg-gateway`` unless the owner renamed the gateway: then the
   plugin, its connector and skills take a name made from it, and the archive drops
   the project's name and homepage, so the public files don't point at the project.
 
 None of this is secret: the plugin holds the public MCP URL and the end-user
 skill text, so these routes need no sign-in. They never read the database and
-are built once from files shipped in the image (``/usr/share/mtg-gateway/plugin``,
-or ``MTG_PLUGIN_DIR``).
+are built once from files shipped in the image (``/usr/share/mtg-gateway/plugin``).
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import os
 import re
 import zipfile
 from collections.abc import Iterable, Iterator
@@ -44,7 +42,7 @@ PLUGIN_NAME = "mtg-gateway"
 MARKETPLACE_NAME = "mtg-gateway"
 # The setup skill's name, so its command is /<plugin>:setup-mtg-gateway whatever the plugin is called.
 SETUP_SKILL = "setup-mtg-gateway"
-# The product name the plugin's files carry; an owner's MTG_SERVER_NAME replaces it.
+# The product name the plugin's files carry; an owner's own gateway name replaces it.
 DEFAULT_SITE = "MTG Assistant Gateway"
 SLUG_MAX = 40
 # ChatGPT refuses a plugin file whose displayName is over 80 characters (OpenAI's plugin docs,
@@ -55,13 +53,14 @@ CHATGPT_NAME_MAX = 80
 DEVELOPER_NAME_MAX = 120
 IMAGE_PLUGIN_DIR = Path("/usr/share/mtg-gateway/plugin")
 REPO_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugin"
+PLUGIN_DIRS = (IMAGE_PLUGIN_DIR, REPO_PLUGIN_DIR)  # the image's copy, else a checkout's
 MAX_FILE_BYTES = 512 * 1024
 ZIP_DATE = (2026, 1, 1, 0, 0, 0)
 # The connector files whose ``url`` the gateway fills in with its own address.
 CONNECTOR_FILES = (".mcp.json", "mcp.json")
 # What an app shows about the connector: MCP ``serverInfo.description`` (app.py), and the text the
 # install page offers to copy into ChatGPT's description box. It names no project, so it suits an
-# owner's own MTG_SERVER_NAME.
+# owner's own gateway name.
 SERVER_DESCRIPTION = (
     "Magic: The Gathering deck research, goldfish testing and safe Archidekt deck edits, "
     "from a self-hosted gateway."
@@ -78,9 +77,7 @@ CONNECTOR_ICON_MAX_BYTES = 10 * 1024
 
 def plugin_dir() -> Path | None:
     """The folder holding ``mtg-gateway/.claude-plugin/plugin.json``."""
-    override = os.environ.get("MTG_PLUGIN_DIR", "").strip()
-    candidates = [Path(override)] if override else [IMAGE_PLUGIN_DIR, REPO_PLUGIN_DIR]
-    for d in candidates:
+    for d in PLUGIN_DIRS:
         if (d / PLUGIN_NAME / ".claude-plugin" / "plugin.json").is_file():
             return d
     return None
@@ -107,53 +104,22 @@ def plugin_label(site: str) -> str:
     return label or plugin_slug(site)
 
 
-def chatgpt_name_from_setting(chatgpt_name: str | None) -> str:
-    """The owner's MTG_CHATGPT_NAME through plugin_label's filter; empty when unset or when the
-    filter leaves nothing (MTG_SERVER_NAME is used then)."""
-    return " ".join(re.sub(r"[^A-Za-z0-9 ._'-]+", " ", chatgpt_name or "").split())
-
-
-def chatgpt_label(site: str, chatgpt_name: str | None = None) -> str:
-    """The name ChatGPT shows for this gateway: the owner's MTG_CHATGPT_NAME when set, else their
-    MTG_SERVER_NAME, through plugin_label's filter either way."""
-    return chatgpt_name_from_setting(chatgpt_name) or plugin_label(site)
-
-
-def chatgpt_name_too_long(site: str, chatgpt_name: str | None = None) -> tuple[str, int] | None:
-    """The name ChatGPT shows and its length when that is over CHATGPT_NAME_MAX, else None."""
-    label = chatgpt_label(site, chatgpt_name)
-    return (label, len(label)) if len(label) > CHATGPT_NAME_MAX else None
+def chatgpt_label(site: str) -> str:
+    """The name ChatGPT shows for this gateway: the owner's server name through plugin_label's
+    filter, cut at a word to CHATGPT_NAME_MAX (ChatGPT refuses a longer plugin name)."""
+    return cut_at_word(plugin_label(site), CHATGPT_NAME_MAX)
 
 
 def cut_at_word(text: str, limit: int) -> str:
-    """``text`` cut to ``limit`` characters at the last space before it; when the first ``limit``
-    characters hold no space, at ``limit`` itself, inside the word. Trailing spaces and . - _ '
-    go too."""
+    """``text`` cut to ``limit`` characters at the last space before it (or right at ``limit`` when
+    a word ends there); when the first ``limit`` characters hold no space, at ``limit`` itself,
+    inside the word. Trailing spaces and . - _ ' go too."""
     if len(text) <= limit:
         return text
     head = text[:limit]
+    if text[limit] == " ":
+        return head.rstrip(" .-_'") or head
     return (head.rsplit(" ", 1)[0] if " " in head else head).rstrip(" .-_'") or head
-
-
-def developer_name_cut(site: str) -> tuple[int, str] | None:
-    """When the owner's MTG_SERVER_NAME, filtered as the plugin file writes it (plugin_label), is
-    over DEVELOPER_NAME_MAX: its length and the shortened name the ChatGPT plugin file uses as
-    its developer and author name; else None."""
-    label = plugin_label(site)
-    return (len(label), cut_at_word(label, DEVELOPER_NAME_MAX)) if len(label) > DEVELOPER_NAME_MAX else None
-
-
-def developer_name_warning(site: str) -> str | None:
-    """The owner's notice (admin page, log at start) when the plugin file shortens their name."""
-    cut = developer_name_cut(site)
-    if not cut:
-        return None
-    return (
-        f"MTG_SERVER_NAME is {cut[0]} characters. OpenAI's plugin check refuses a plugin file whose "
-        f"developer name is over {DEVELOPER_NAME_MAX} characters, so the ChatGPT plugin file uses a "
-        f"shortened name, “{cut[1]}”, as its developer and author name. To choose the name yourself, "
-        f"set MTG_SERVER_NAME to {DEVELOPER_NAME_MAX} characters or fewer."
-    )
 
 
 def _renamed(data: bytes, rel: str, site: str, name: str) -> bytes:

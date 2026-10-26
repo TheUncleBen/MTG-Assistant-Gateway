@@ -14,12 +14,7 @@ from .track_a_helpers import apply_any
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
 
-COMPANION = AUTO_PROXY.but(
-    settings={
-        **AUTO_PROXY.settings,
-        "android_assetlinks": '[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
-    }
-)
+COMPANION = AUTO_PROXY
 stack_options = stack_with(COMPANION)
 
 
@@ -53,7 +48,7 @@ async def test_cookie_writes_need_the_csrf_header(stack: Stack) -> None:
         assert me.status_code == 200 and me.json()["via"] == "browser"
         r = await b.http.post("/api/v1/proposals", json={"deck_id": "42", "changes": []})
         assert r.status_code == 403 and r.json()["error"] == "csrf"
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         r = await b.http.post(
             "/api/v1/proposals",
             json={"deck_id": "42", "changes": [{"action": "add", "card_name": "Sol Ring"}]},
@@ -186,7 +181,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert page.status_code == 200 and "<span class='ui-lbl blue'>" in page.text
         assert "Open report</a>" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
-        assert detail.status_code == 200 and "Solo test (" in detail.text
+        assert detail.status_code == 200 and "Quick solo test (" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert gone.status_code == 200
         assert (await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)).status_code == 404
@@ -213,7 +208,7 @@ async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> Non
         assert r.status_code == 201, r.text
         assert r.json()["engine_label"] == "Preflight only (no rules engine)" and r.json()["status"]
         await h.http.post("/api/v1/reports", json={"deck_id": "42"}, headers=auth)
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
         assert ran.status_code == 303
         await b.http.post("/decks/42/report", data={"csrf": csrf})
@@ -342,7 +337,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
     db = h.app.state.gateway.db._conn
     stack.ark.private.discard(43)
     try:
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
         sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
         db.execute("DELETE FROM reports")
@@ -411,7 +406,7 @@ async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack)
 
     reports.pair_deck = slow_pair
     try:
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
         sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
         db.execute("DELETE FROM reports")
@@ -676,7 +671,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         empty = await b.http.get("/reports", headers=NAV)
         assert empty.status_code == 200 and "No reports yet" in empty.text and "Run full test" in empty.text
         assert "Nothing plays or waits now." in empty.text
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
         listed = await b.http.get("/reports", headers=NAV)
         assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
@@ -789,11 +784,11 @@ async def test_deck_pages(stack: Stack) -> None:
         assert txt.status_code == 200 and txt.headers["content-disposition"].startswith("attachment")
         js = await b.http.get("/decks/42/export.json")
         assert js.status_code == 200 and js.json()["id"] == "42"
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
-        assert shown.status_code == 200 and "Solo test (" in shown.text and "## Metrics" in shown.text
+        assert shown.status_code == 200 and "Quick solo test (" in shown.text and "## Metrics" in shown.text
         # the page speaks to a person: no assistant tool names, exports in one row of buttons
         assert "goldfish_" not in shown.text and "run_deck_report" not in shown.text
         assert (
@@ -829,7 +824,7 @@ async def test_app_shell_routes(stack: Stack) -> None:
     assert "script-src 'self'; connect-src 'self';" in sw.text
     links = await h.http.get("/.well-known/assetlinks.json")
     assert links.status_code == 200
-    assert links.json()[0]["relation"] == ["delegate_permission/common.handle_all_urls"]
+    assert links.json() == []  # no app shipped here (test_app_signin covers the statement)
     assert (await h.http.get("/static/../app.py")).status_code == 404
     assert (await h.http.get("/static/nope.js")).status_code == 404
 
@@ -1022,7 +1017,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
             got = shape(copy)
             assert got == want, (label, sorted(want - got), sorted(got - want))
         # The New deck page takes the same JSON (pasted, or read from a file by the page's script).
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         r = await b.http.post(
             "/decks/new",
             data={
@@ -1058,7 +1053,7 @@ async def test_new_deck_page_says_which_card_was_not_found(stack: Stack) -> None
     instead of "No such proposal for your account" (the proposal does exist)."""
     b = await linked_browser(stack)
     try:
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         r = await b.http.post(
             "/decks/new",
             data={
@@ -1127,7 +1122,7 @@ async def test_another_persons_public_deck_can_be_cloned_but_not_edited(stack: S
         stack.ark.private.discard(43)  # Amy's deck, public for this test
         page = await b.http.get("/decks/43", headers=NAV)
         assert page.status_code == 200 and "Clone deck" in page.text and "Edit deck" not in page.text
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         before = set(stack.ark.decks)
         r = await b.http.post("/decks/43/clone", data={"csrf": csrf})
         assert r.status_code == 303 and "ok=created" in r.headers["location"], r.headers
@@ -1360,7 +1355,7 @@ async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> No
     b = await linked_browser(stack)
     try:
         assert (await b.http.post("/goldfish/guide", json={"hidden": True})).status_code == 403
-        csrf = await b.csrf("/account")
+        csrf = await b.csrf("/account/details")
         bad = await b.http.post("/goldfish/guide", json={"hidden": "yes"}, headers={"X-CSRF-Token": csrf})
         assert bad.status_code == 400
         ok = await b.http.post("/goldfish/guide", json={"hidden": True}, headers={"X-CSRF-Token": csrf})

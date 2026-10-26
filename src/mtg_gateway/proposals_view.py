@@ -863,7 +863,7 @@ def list_html(
         f"<span class='ui-sub'>{side if not waiting_view else esc(side)}</span></div>"
     )
     parts = [
-        ui.page_head("Proposals", PAGE_SUB),
+        ui.assistant_head("/proposals", "Proposals", PAGE_SUB),
         notice,
         widgets_html(data, query, csrf, now=now),
         head,
@@ -950,10 +950,10 @@ PROPOSALS_CSS = """
 .pr-table .th .pr-sort{color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:.2rem}
 .pr-table .th .pr-sort svg.i{width:14px;height:14px}
 .ui-drawer .apply{background:none;border:0;padding:0;margin-top:1rem}
-.ui-drawer details>summary{align-items:center;gap:.4rem}
-.ui-drawer details>summary::before{content:"";border:5px solid transparent;border-left:7px solid currentColor;
-  border-right:0;flex:none}
-.ui-drawer details[open]>summary::before{transform:rotate(90deg)}
+.ui-drawer details>summary:not(.fold-btn){align-items:center;gap:.4rem}
+.ui-drawer details>summary:not(.fold-btn)::before{content:"";border:5px solid transparent;
+  border-left:7px solid currentColor;border-right:0;flex:none}
+.ui-drawer details[open]>summary:not(.fold-btn)::before{transform:rotate(90deg)}
 .ui-drawer form.reject{margin:.75rem 0 .25rem}
 .pr-undo{display:inline;margin:0}
 .pr-undo .linkbtn{background:none;border:0;padding:0;margin:0;color:var(--link);text-decoration:underline;
@@ -984,7 +984,7 @@ PROPOSALS_CSS = """
 .ui-drawer .apply .choice{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 .25rem}
 .ui-drawer .apply .choice button,.ui-drawer .apply .choice .btn{margin:0}
 .ui-drawer .pr-tech pre{max-height:22rem;overflow:auto;font-size:.82rem}
-.ui-drawer details > summary{min-height:44px;display:flex;align-items:center;cursor:pointer}
+.ui-drawer details > summary:not(.fold-btn){min-height:44px;display:flex;align-items:center;cursor:pointer}
 .ui-drawer .page-only{margin:0 0 .5rem}
 .ui-drawer .page-only a{display:inline-flex;align-items:center;min-height:44px}
 /* "Open as a full page": the panel alone, in the page's own column */

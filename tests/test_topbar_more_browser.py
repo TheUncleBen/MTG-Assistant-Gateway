@@ -1,7 +1,7 @@
-"""The top bar on a computer: from 1200 px (85.7em of the bar's 14 px text)
-it lists Reports and Watchlist after History; narrower, Proposals and the links after it fold into
-"More ▾", which lists the phone's More sheet (Proposals, History, Reports, Watchlist, My lists, Guide,
-Account). Large text folds them too. Phones and the touch rail have no More ▾ in the bar."""
+"""The top bar on a computer (navigation round 2, Ben 2026-10-25): the four places (Home, Decks,
+Binder, Assistant) at every width and text size, then "More ▾" with its two groups (Find: Search
+and Precons; Your cards: Scan, Watchlist and My lists). History and Reports mark Assistant; a page
+under More marks More. Phones and the touch rail have no More ▾ in the bar."""
 
 from __future__ import annotations
 
@@ -30,44 +30,41 @@ def server(tmp_path: Path):
         s.stop()
 
 
-def test_the_bar_marks_a_folded_page_on_more(server: Server) -> None:
+def test_the_bar_marks_the_place_and_a_page_under_more(server: Server) -> None:
     sid = server.sign_in()
-    page = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}).get("/reports").text
-    nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
-    assert "<a href='/reports' aria-current='page' class=fold>Reports</a>" in nav
-    assert "<a href='/watchlist' class=fold>Watchlist</a>" in nav
-    assert "<details class='dd navmore'><summary class='on'>More<span aria-hidden='true'>▾</span>" in nav
+    h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
+    nav = h.get("/reports").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
+    assert "<a href='/proposals' aria-current='page'>Assistant</a>" in nav
+    assert "<details class='dd navmore'><summary>More<span aria-hidden='true'>▾</span>" in nav
     menu = nav.split("<div class='menu'>")[1]
+    assert [x.split("</div>")[0] for x in menu.split("<div class='head'>")[1:]] == ["Find", "Your cards"]
     assert [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]] == [
-        "Proposals",
-        "History",
-        "Reports",
+        "Search decks and cards",
+        "Precons",
+        "Scan",
         "Watchlist",
         "My lists",
-        "Forum",
-        "Guide",
-        "Account",
     ]
+    nav = h.get("/watchlist").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
+    assert "<summary class='on'>More" in nav and "<a href='/watchlist' aria-current=page>" in nav
 
 
-def test_more_folds_below_1200_px_and_with_large_text(server: Server) -> None:
+def test_the_four_places_and_more_at_every_width_and_large_text(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid = server.sign_in()
-    full = ["Home", "Decks", "Search", "Collection", "Scan", "Proposals", "History", "Reports", "Watchlist"]
-    folded = ["Home", "Decks", "Search", "Collection", "Scan", "More▾"]
+    bar = ["Home", "Decks", "Binder", "Assistant", "More▾"]
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         for width, zoom, touch, want in [
-            (1280, False, False, full),
-            (1200, False, False, full),
-            (1199, False, False, folded),
-            (1000, False, False, folded),
-            (700, False, False, folded),
-            (1280, True, False, folded),
+            (1440, False, False, bar),
+            (1280, False, False, bar),
+            (1000, False, False, bar),
+            (700, False, False, bar),
+            (1280, True, False, bar),
             (390, False, True, []),
             (673, False, True, []),
         ]:
@@ -80,12 +77,12 @@ def test_more_folds_below_1200_px_and_with_large_text(server: Server) -> None:
                 page.evaluate(ROOT_200)
             assert page.evaluate(SHOWN) == want, (width, zoom, touch)
             assert page.evaluate("document.documentElement.scrollWidth") <= width, (width, zoom)
-            if want == folded:
+            if want:
                 page.locator(".navmore > summary").click()
                 menu = page.locator(".navmore .menu")
                 box = menu.bounding_box()
                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= width
-                menu.locator("a", has_text="Reports").click()
-                page.wait_for_url("**/reports")
+                menu.locator("a", has_text="Watchlist").click()
+                page.wait_for_url("**/watchlist")
             ctx.close()
         browser.close()

@@ -42,9 +42,9 @@ More CPU cores and memory for Forge is what helps. Forge plays one game per 2 co
 
 - `FORGE_CPUS` and `FORGE_MEMORY_LIMIT` give Forge more of the machine (defaults 2 and 1536M).
   Forge works out how many games it can play at once from these.
-- `MTG_FORGE_GAMES` sets how many games a report plays (default 4). Fewer games finish sooner;
-  more games give steadier numbers.
-- `FORGE_GAME_SECONDS` stops a game that runs too long and counts it as a draw (default 240).
+- **Forge games per report** on the admin Settings page sets how many games a report plays
+  (default 4). Fewer games finish sooner; more games give steadier numbers.
+- A game that runs longer than four minutes is stopped and counted as a draw.
 
 Every variable is in [DEPLOY.md](DEPLOY.md#environment-reference). Start from the defaults and
 raise them while the machine keeps up.

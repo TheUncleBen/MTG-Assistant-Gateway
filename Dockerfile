@@ -35,7 +35,7 @@ FROM mirror.gcr.io/library/python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec
 LABEL org.opencontainers.image.source="https://github.com/TheUncleBen/MTG-Assistant-Gateway" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
-    MTG_DATA_DIR=/data MTG_BACKUP_DIR=/backups MTG_LISTEN_PORT=8080
+    MTG_DATA_DIR=/data MTG_BACKUP_DIR=/backups
 # util-linux provides setpriv, used by the entrypoint to drop to PUID:PGID.
 RUN apt-get update && apt-get install -y --no-install-recommends util-linux ca-certificates \
  && rm -rf /var/lib/apt/lists/* \

@@ -3,7 +3,7 @@
 Each gateway can hand out the MTG Assistant Gateway Android app itself, so people get it from the
 deployment they use and never need an app store. The image ships the APK that the
 release build produced under ``/usr/share/mtg-gateway/app`` (``docker/app-dist`` at
-build time); ``MTG_APP_DIR`` overrides the location. Next to the APK the build writes
+build time). Next to the APK the build writes
 ``mtg-assistant-gateway.json`` with the version, size, the file's SHA-256 and the SHA-256 of the
 signing certificate, which the page shows. Both come from the same place as the APK,
 so they prove nothing on their own: the file checksum only shows the download is
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import html
 import json
-import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,13 +46,8 @@ LATEST_PATH = "/app/latest.json"
 
 def app_dir() -> Path | None:
     """The folder holding ``mtg-assistant-gateway.apk``, or None when this gateway ships no app."""
-    override = os.environ.get("MTG_APP_DIR", "").strip()
-    candidates = [Path(override)] if override else [IMAGE_APP_DIR]
-    for d in candidates:
-        apk = d / APK_NAME
-        if apk.is_file() and not apk.is_symlink():
-            return d
-    return None
+    apk = IMAGE_APP_DIR / APK_NAME
+    return IMAGE_APP_DIR if apk.is_file() and not apk.is_symlink() else None
 
 
 def app_meta(base: Path) -> dict[str, Any]:
@@ -104,6 +99,43 @@ def android_facts() -> dict[str, Any] | None:
         if value
     )
     return {"cert_sha256": cert, "facts_html": f"<ul>{facts}</ul>"}
+
+
+DEFAULT_PACKAGE = "local.mtgassistantgateway.app"  # android/app/application-id.txt
+_PACKAGE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+")
+
+
+def app_package() -> str:
+    """The Android app's package ID: the one the build recorded next to the APK this gateway ships
+    (android/scripts/build.sh), else the project's own. The browser sign-in hands back to it
+    (app_signin.py), and assetlinks.json names it."""
+    base = app_dir()
+    raw = app_meta(base).get("package_name") if base is not None else None
+    if isinstance(raw, str) and len(raw) <= 200 and _PACKAGE_ID.fullmatch(raw):
+        return raw
+    return DEFAULT_PACKAGE
+
+
+def assetlinks() -> list[dict[str, Any]]:
+    """The ``/.well-known/assetlinks.json`` statement vouching for the app this gateway ships: its
+    package ID and the signing certificate its build recorded next to the APK. Android's Auth Tab
+    hands the sign-in back only to an app named here (app_signin.py), and an App Links build
+    (docs/ANDROID.md) opens the gateway's links. An empty list when no app or certificate is
+    shipped, so no app is vouched for."""
+    base = app_dir()
+    cert = _fingerprint(app_meta(base).get("cert_sha256")) if base is not None else None
+    if cert is None:
+        return []
+    return [
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": app_package(),
+                "sha256_cert_fingerprints": [":".join(cert[i : i + 2] for i in range(0, 64, 2)).upper()],
+            },
+        }
+    ]
 
 
 def add_app_routes(server: MCPServer, state: AppState) -> None:

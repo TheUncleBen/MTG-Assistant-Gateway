@@ -65,7 +65,8 @@
         var href = row.getAttribute("href"), id = row.getAttribute("data-id");
         var items = [
           Menu.link("Open thread", "comment", href),
-          Menu.link("Open in a new tab", "external", href, { ext: true }),
+          // the app has no tabs: a website-only item
+          window.MtgNative ? null : Menu.link("Open in a new tab", "external", href, { ext: true }),
           Menu.item("Copy link", "link", function () {
             Menu.copyAndSay(location.origin + href, "Copied the thread's link.");
           }),

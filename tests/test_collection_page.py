@@ -45,8 +45,8 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         assert r.status_code == 200
         page = r.text
         # the head: the purpose line, Export CSV plain, + Add cards the one orange button (opens the box)
-        assert "<h1>My collection</h1>" in page
-        assert "<p class='ui-sub'>The cards you own, kept on Archidekt.</p>" in page
+        assert "<h1>Binder</h1>" in page
+        assert "<p class='ui-sub'>The cards you own: your collection on Archidekt.</p>" in page
         assert page.count("btn-primary") == 1
         assert re.search(
             r"<a class='btn btn-primary' href='/collection\?add=1' data-box-open='col-add'>", page

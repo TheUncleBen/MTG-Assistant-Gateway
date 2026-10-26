@@ -79,7 +79,8 @@ def read_filters(qp: Any) -> dict[str, str]:
         "colors": colors,
         "colour_mode": qp.get("cm") if qp.get("cm") in dict(DECK_COLOUR_MODES) else "incl",
         "fmt": (qp.get("format") or "").strip()[:40],
-        "show": qp.get("show") if qp.get("show") in ("decks", "packages") else "",
+        # the switch at the top of My decks: "" your decks, "packages" your card packages
+        "show": "packages" if qp.get("show") == "packages" else "",
     }
 
 
@@ -335,9 +336,11 @@ def level_html(
             "new deck.</p>"
         )
     heading = f"Decks matching “{esc(q)}”" if q else "Matching decks" if level.searching else "Decks"
+    # no count beside it: the results bar above already says "4 decks" (the folders' count stays,
+    # since that bar counts decks only)
     out += (
         "<section class='fv-area' aria-labelledby='fv-decks'>"
-        f"<h2 id='fv-decks'>{heading} <span class='n'>{len(level.decks)}</span></h2>{listing}</section>"
+        f"<h2 id='fv-decks'>{heading}</h2>{listing}</section>"
     )
     return out
 

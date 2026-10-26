@@ -65,13 +65,15 @@ def test_export_help_fits_and_reads_at_every_width(server: Server, width: int, t
         assert page.evaluate(FITS) == []
         texts = "details.csvhelp summary, details.csvhelp p, details.csvhelp th, details.csvhelp td"
         assert page.evaluate(CONTRAST, texts) == []
-        # the summary's text stays inside the fold (the side text is dropped on a phone)
+        # the summary's text stays inside the fold
         assert fold.evaluate(
             "d => { const b = d.getBoundingClientRect();"
             " return [...d.querySelectorAll('summary > span')].filter(s => s.offsetParent)"
             ".every(s => s.getBoundingClientRect().right <= b.right - 1); }"
         )
-        assert fold.locator("summary .chev").is_visible() == (width > 600)
+        # the shared disclosure capsule (Ben, 10-25): its words say what the fold holds at every width
+        assert "column types" in fold.locator("summary").inner_text()
+        assert "fold-btn" in (fold.locator("summary").get_attribute("class") or "")
         if SHOTS:
             fold.scroll_into_view_if_needed()
             box = fold.bounding_box()

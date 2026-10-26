@@ -37,7 +37,10 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         csrf = await b.csrf()
         page = await b.http.get("/decks", headers=NAV)
         assert "<html lang='en' data-card-size=m>" in page.text
-        assert "class='tabbar'" in page.text and "Site theme" in page.text
+        assert "class='tabbar'" in page.text and "class='icon-btn acct' href='/account'" in page.text
+        # Theme lives on the Account page (Look), as a form posting to /theme
+        hub = await b.http.get("/account", headers=NAV)
+        assert "<form method='post' action='/theme'>" in hub.text
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "light", "next": "/decks"})
         assert r.status_code == 303 and r.headers["location"] == "/decks"
         assert "mtg_theme=light" in r.headers["set-cookie"]
@@ -53,7 +56,8 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         # "Desktop layout" is a cookie too; it asks the device for a wide viewport (as a
         # browser's Desktop site switch would) so the width queries pick the top bar, and the app's
         # forced rail is dropped. "Fit the screen" clears it.
-        assert "Site layout" in page.text and "action='/layout'" in page.text
+        hub = await b.http.get("/account", headers=NAV)
+        assert "Layout" in hub.text and "action='/layout'" in hub.text
         r = await b.http.post("/layout", data={"csrf": csrf, "layout": "desktop", "next": "/decks"})
         assert r.status_code == 303 and "mtg_layout=desktop" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)

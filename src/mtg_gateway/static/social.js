@@ -47,7 +47,7 @@
   function socialProblem(d) {
     if (d && (d.error === "not_linked" || d.error === "auth")) {
       var a = el("a", "", "Link your Archidekt account");
-      a.href = "/account";
+      a.href = "/account/details#archidekt";
       var frag = document.createDocumentFragment();
       frag.appendChild(a);
       frag.appendChild(document.createTextNode(" to like, bookmark, follow or comment."));
@@ -441,7 +441,7 @@
     // voted on and replied to, not only the first).
     var showMore = function (pg) {
       var wrap = el("p", "more-comments");
-      var btn = el("button", "btn", "Show more comments");
+      var btn = el("button", "disc", "Show more comments");
       btn.type = "button";
       wrap.appendChild(btn);
       thread.appendChild(wrap);

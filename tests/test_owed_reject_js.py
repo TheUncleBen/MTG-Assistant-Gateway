@@ -16,7 +16,8 @@ import pytest
 CARDMENU = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "static" / "cardmenu.js"
 
 # Runs the owed-reject block of cardmenu.js (from ``var OWED`` to ``var norm``) with stub storage,
-# a stub post() answering with the case's status, and a page whose account menu names ``who``.
+# a stub post() answering with the case's status, and a page whose top bar names ``who`` (the
+# account link's data-who).
 HARNESS = r"""
 const fs = require("fs");
 const [path, raw] = process.argv.slice(2);
@@ -35,7 +36,7 @@ const post = p => {
   return c.offline ? Promise.reject(new Error("offline")) : Promise.resolve(c.answer);
 };
 const tick = () => new Promise(r => setTimeout(r, 0));
-const who = c.who ? { getAttribute: n => (n === "title" ? c.who : null) } : null;
+const who = c.who ? { getAttribute: n => (n === "data-who" ? c.who : null) } : null;
 const document = {
   querySelector: s => (s.indexOf("who") >= 0 ? who : null),
   dispatchEvent: e => events.push(e.detail.proposal_id),

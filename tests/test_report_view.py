@@ -85,7 +85,9 @@ def test_validation_verdicts() -> None:
     assert v["lines"] == ["2 card(s) not found on Scryfall:", "Enduring Angel", "Elbrus, the Binding Blade"]
     assert "Enduring Angel // Angelic Enforcer" in v["raw"]
     ok = rv.parse_validation({"ok": True, "text": VALIDATION_PASSED})
-    assert ok["verdict"] == "passed" and ok["lines"][0] == "All 72 unique cards verified on Scryfall."
+    # the research service's "verified" reads "found", the gateway's word for it (stored reports too)
+    assert ok["verdict"] == "passed" and ok["lines"][0] == "All 72 unique cards found on Scryfall."
+    assert "verified" not in ok["raw"]
     assert rv.parse_validation({"ok": False, "text": "service unavailable"})["verdict"] == "failed"
     assert rv.parse_validation({"ok": True, "text": "Validated 100 lines"})["verdict"] is None
     assert rv.parse_validation(None) is None
@@ -170,15 +172,15 @@ def test_a_short_run_claims_no_turn_it_did_not_play() -> None:
 def test_page_speaks_plainly_and_shows_every_panel() -> None:
     html = rv.report_body_html(report(), stats_html="<div class='tiles'>stats</div>", reused=True)
     for text in (
-        "Solo test (300 games, no opponents)",
+        "Quick solo test (300 games, no opponents)",
         "class='tiles wide rv-stats'",
         "class='ci'",
         "class='charts rv-charts'",
         "<svg",
-        "What the solo test could not model",
+        "What the quick solo test leaves out",
         "Played without their effect",
         "32 of 98 cards (33% of the deck)",
-        "Left out on purpose",
+        "Needs opponents",
         "Removal and other interaction",
         "Issues found</span>",
         "Deck statistics",
@@ -216,7 +218,7 @@ def test_markdown_and_html_exports() -> None:
     assert md.startswith("# Deck report: Immortal Reckoning\n")
     assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
     assert (
-        "## Solo test (300 games, no opponents)" in md
+        "## Quick solo test (300 games, no opponents)" in md
         and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
     )
     assert (
@@ -294,9 +296,11 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
     assert "underperforms" not in html and "says nothing about how the card does" in html
     assert (
         "Played with their effect: 49 of 98 cards (50% of the deck). Known: 66 of 98 cards (67% of the "
-        "deck), counting the cards played with their effect and those left out on purpose. The rest are "
-        "listed below." in html
+        "deck), counting the cards played with their effect and those that need opponents. The rest "
+        "are listed below." in rv.report_body_html(report(), standalone=True)
     )
+    # the signed-in page says the same as the summary card's rows and footer
+    assert "Known: 66 of 98 cards (67% of the deck), counting the cards played with their effect" in html
     md = rv.report_markdown(report())
     assert "underperforms" not in md and "Played with their effect: 49 of 98 cards (50% of the deck)" in md
     g = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
@@ -370,14 +374,14 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
 
 def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
     """Ben, 0.7.31 test round: the request for the assistant covers not only the cards played
-    without their effect but also those left out on purpose, those that never mattered and the
+    without their effect but also those that need opponents, those that never mattered and the
     shortcuts, so the assistant can say where any of them matters."""
     r = report(deck_url="https://archidekt.com/decks/42")
     g = rv.parse_goldfish(r["goldfish"], deck_size=100)
     h = g["honesty"]
     assert h.get("out_of_scope") and h.get("low_impact") and h.get("approximations")
     text = rv.report_body_html(r).split("id='ask-model'")[1].split("</textarea>")[0]
-    assert "left out on purpose" in text
+    assert "These cards need opponents, which the solo test does not have" in text
     assert rv.front_face(h["out_of_scope"][0]["cards"][0]["name"]) in text
     assert "never mattered: " + rv.front_face(h["low_impact"][0]) in text
     assert h["approximations"][0]["label"] in text
@@ -388,7 +392,7 @@ def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
 
 
 def test_left_out_groups_count_copies_as_their_heading_does() -> None:
-    """A group under "Left out on purpose" counts copies, like the heading."""
+    """A group under "Needs opponents" counts copies, like the heading."""
     g = {
         "deck_size": 60,
         "honesty": {
@@ -431,3 +435,15 @@ def test_the_export_draws_labels_with_icons_like_the_live_report() -> None:
     assert "<span class='ui-lbl red'>" in failed and ">Not run</span>" in failed
     # the export stays scriptless: no card menus on its names
     assert "cardlink" not in doc and "<script" not in doc
+
+
+def test_markdown_explains_each_group_and_lists_the_shortcuts() -> None:
+    """The Markdown export says what the page's Details say, group by group, and lists the
+    shortcuts as the page does."""
+    md = rv.report_markdown(report())
+    part = md.split(f"## {rv.MODEL_HEADING}")[1].split("## Validation")[0]
+    for text in (rv.UNMODELED_TEXT, rv.OUT_OF_SCOPE_TEXT, rv.LOW_IMPACT_TEXT, rv.APPROX_TEXT):
+        assert text in part, text
+    assert f"{rv.APPROX_HEADING}: " in part and "\n- " in part.split(rv.APPROX_HEADING)[1]
+    text = rv.report_body_html(report()).split("id='ask-model'")[1].split("</textarea>")[0]
+    assert "These cards need opponents, which the solo test does not have: " in text

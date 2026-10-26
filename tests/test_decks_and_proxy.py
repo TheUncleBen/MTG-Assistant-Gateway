@@ -85,7 +85,7 @@ class Browser:
         assert r2.headers["location"] == next_path
         return r2
 
-    async def csrf(self, path: str = "/account") -> str:
+    async def csrf(self, path: str = "/account/details") -> str:
         r = await self.http.get(path)
         assert r.status_code == 200, r.text
         m = re.search(r"name='csrf' value='([0-9a-f]+)'", r.text)
@@ -162,7 +162,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     h = stack.h
     b = Browser(h)
     await b.login()
-    page = await b.http.get("/account")
+    page = await b.http.get("/account/details")
     assert "Link your Archidekt account" in page.text
     assert "default-src 'none'" in page.headers["content-security-policy"]
 
@@ -171,12 +171,12 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     assert not h.db.get_link("user-1")
 
     ok = await b.link("alice", "pw-alice")
-    assert ok.status_code == 303 and ok.headers["location"] == "/account?ok=linked"
+    assert ok.status_code == 303 and ok.headers["location"] == "/account/details?ok=linked"
     row = h.db.get_link("user-1")
     assert row and row["archidekt_username"] == "alice"
     # encrypted, no password
     assert "pw-alice" not in row["secret_enc"] and "tok-alice" not in row["secret_enc"]
-    page = await b.http.get("/account?ok=linked")
+    page = await b.http.get("/account/details?ok=linked")
     assert "Linked to <strong>alice</strong>" in page.text
 
     token = await mcp_token(h)
@@ -207,14 +207,14 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     assert out_resp.headers["location"] == "/signed-out"
     signed_out = await b.http.get("/signed-out")
     assert signed_out.status_code == 200 and "Sign out" not in signed_out.text
-    assert (await b.http.get("/account")).status_code == 302  # back to sign-in
+    assert (await b.http.get("/account/details")).status_code == 302  # back to sign-in
     await b.aclose()
 
 
 async def test_account_form_requires_csrf_and_session(stack: Stack) -> None:
     h = stack.h
     anon = Browser(h)
-    r = await anon.http.get("/account")
+    r = await anon.http.get("/account/details")
     assert r.status_code == 302 and r.headers["location"].startswith("/login?next=")
     r = await anon.http.post(
         "/account", data={"action": "link", "archidekt_login": "alice", "archidekt_password": "x"}
@@ -976,7 +976,7 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
     tokens = await h.tokens_for(client)
     b = Browser(h)
     await b.login()
-    assert (await b.http.get("/account")).status_code == 200
+    assert (await b.http.get("/account/details")).status_code == 200
     r = await h.http.post(
         "/revoke",
         data={
@@ -986,7 +986,7 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
         },
     )
     assert r.status_code == 200, r.text
-    r = await b.http.get("/account")
+    r = await b.http.get("/account/details")
     assert r.status_code == 200
     await b.aclose()
 
@@ -1277,7 +1277,7 @@ async def test_apply_keeps_a_backup_copy_on_archidekt_first(stack: Stack) -> Non
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] and a["state"] == "applied", a
     folders = ark.folders["alice"]
-    assert [f["name"] for f in folders] == ["MTG Gateway backups"] and folders[0]["private"] is True
+    assert [f["name"] for f in folders] == ["MTG Gateway Backups"] and folders[0]["private"] is True
     copy_id = int(a["result"]["backup_deck_id"])
     assert a["result"]["backup_url"] == f"https://archidekt.com/decks/{copy_id}"
     copy = ark.decks[copy_id]
@@ -1312,7 +1312,7 @@ async def test_apply_keeps_a_backup_copy_on_archidekt_first(stack: Stack) -> Non
     assert p2["ok"], p2
     a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
     assert a2["ok"], a2
-    assert [f["name"] for f in ark.folders["alice"]] == ["MTG Gateway backups", "Brews"]
+    assert [f["name"] for f in ark.folders["alice"]] == ["MTG Gateway Backups", "Brews"]
     # within 15 minutes of the first copy, the second edit shares it (its own snapshot
     # still holds the exact deck before it); tests/test_backup_limits.py covers the rest.
     assert a2["result"]["backup_deck_id"] == a["result"]["backup_deck_id"]
@@ -1825,6 +1825,8 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     text = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
     assert rep["ok"] and rep["stored"] is False and rep["deck"]["id"] is None, rep
+    # A pasted list has no name: it reads "Unnamed deck", like any deck without one.
+    assert rep["deck"]["name"] == "Unnamed deck", rep["deck"]
     assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
     assert rep["validation"]["ok"] is True, rep["validation"]
     assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
@@ -1855,7 +1857,7 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
             {"deck_ref": "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Main\n2 Opt\n97 Island\n"},
         )
     )
-    assert stats["ok"] and stats["deck"]["id"] is None, stats
+    assert stats["ok"] and stats["deck"]["id"] is None and stats["deck"]["name"] == "Unnamed deck", stats
     checks = stats["stats"]["checks"]
     assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}] and checks["ok"] is False
     bad = structured(await call(h, token, "deck_stats", {"deck_ref": "not a list at all"}))

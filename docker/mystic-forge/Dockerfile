@@ -13,7 +13,7 @@ ARG MF_REPO=https://github.com/Kautiontape/mystic-forge.git
 ARG MF_COMMIT=dd82cd1449645862a2e309ae70df2fb7c3a2a839
 ARG MF_VERSION=1.3.2
 # Bump when the patch set changes. The image is tagged <MF_VERSION>-<MF_LOCAL>.
-ARG MF_LOCAL=mag5
+ARG MF_LOCAL=mag6
 
 FROM mirror.gcr.io/library/python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS source
 ARG MF_REPO

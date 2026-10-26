@@ -74,6 +74,7 @@ from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .collection import add_collection
 from .companion import add_companion_routes
+from .compress import PageGzip
 from .config import LiveSettings, Settings, with_stored
 from .db import Database
 from .decks import (
@@ -107,7 +108,7 @@ from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .summary import Summaries, add_summary_tool
 from .sync import DeckSync
-from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
+from .theme import NoSniffMiddleware, ThemeMiddleware, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .upgrade_backup import folder_for
@@ -480,7 +481,7 @@ _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
 
 # What an app shows about the connector itself (MCP ``serverInfo``: description, website, icons).
 # Only signed-in clients see it (``initialize`` needs a token), so naming the project here doesn't
-# undo the anonymity of the public pages under an owner's own MTG_SERVER_NAME. The icons are this
+# undo the anonymity of the public pages under an owner's own gateway name. The icons are this
 # gateway's own files on its own origin, as the MCP spec asks clients to require. The description is
 # SERVER_DESCRIPTION (plugin_page.py), which the install page also offers to copy into ChatGPT.
 ICON_SIZES = (512, 192, 128, 64)
@@ -760,6 +761,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             if state.folder_jobs is not None:
                 await state.folder_jobs.aclose()
             await state.decks.aclose()  # an apply still running is given a moment, then recorded
+            if state.membership is not None:
+                await state.membership.aclose()
             await state.oidc.aclose()
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
@@ -993,6 +996,7 @@ def create_app(
     ui.use_client_info(db.get_client)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
+    theme.WAITING_COUNT = db.count_pending_proposals  # the Assistant place's count
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,
         settings.oidc_client_id,
@@ -1067,6 +1071,7 @@ def create_app(
     )
     app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
+    app.add_middleware(PageGzip)
     # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
     # nosniff and HSTS too.
     app.add_middleware(NoSniffMiddleware, hsts=settings.public_url.startswith("https://"))
@@ -1099,7 +1104,7 @@ def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
         user = state.db.get_user(sub) or {}
         admin = bool(state.settings.admin_group and state.settings.admin_group in (user.get("groups") or []))
         csrf = _csrf(state.settings, sid)
-        return {"signed_in": True, "csrf": csrf, "admin": admin, "user": display_name(user)}
+        return {"signed_in": True, "csrf": csrf, "admin": admin, "sub": sub}
     except Exception:
         return {}
 
