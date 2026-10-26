@@ -57,8 +57,8 @@ from .pages import (
 from .profile_page import COLLECTION_CSS as VISIBILITY_CSS
 from .profile_page import collection_visibility, profile_or_none
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
+from .theme import icon, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -936,9 +936,9 @@ def export_help_html() -> str:
         f"<tr><th scope='row'>{_esc(col)}</th><td>{_esc(kind)}</td></tr>" for col, kind in EXPORT_COLUMN_TYPES
     )
     return (
-        f"<details class='csvhelp'><summary>{icon('download')} "
-        "<span class='t'>Importing the CSV on archidekt.com</span>"
-        "<span class='chev'>column types</span></summary><section class='panel'>"
+        f"<details class='csvhelp'><summary class='fold-btn'>{icon('download')} "
+        "<span class='t'>Importing the CSV on archidekt.com: column types</span></summary>"
+        "<section class='panel'>"
         "<p>Archidekt does not read the column names. When you import the file on archidekt.com, pick "
         "each column's type as below and leave <strong>Skip first line</strong> on.</p>"
         "<div class='tbl'><table><thead><tr><th scope='col'>Column in this file</th>"
@@ -1018,7 +1018,7 @@ CONDITION_LABELS = {
     "DMG": "Damaged (DMG)",
 }
 DIRECTION_WORDS = {"desc": "newest set first", "asc": "oldest set first"}
-PURPOSE = "The cards you own, kept on Archidekt."
+PURPOSE = "The cards you own: your collection on Archidekt."
 TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 8.5rem var(--ctl)"
 TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
 TABLE_SM = "minmax(0,1fr) var(--ctl)"
@@ -1589,15 +1589,7 @@ ul.colllist .th .qc{justify-self:start}
 @media (max-width:420px){ .mtgbox .body .fl{grid-template-columns:1fr} }
 /* how to import the Export CSV on archidekt.com: a fold under the list with a two-column table */
 .collection details.csvhelp{margin:0 0 1rem}
-.collection details.csvhelp > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
-  align-items:center;gap:.5rem;list-style:none;flex-wrap:wrap;padding-right:.35rem}
-.collection details.csvhelp > summary::-webkit-details-marker{display:none}
-.collection details.csvhelp > summary::before{content:'\\25B8';color:var(--orange)}
-.collection details.csvhelp[open] > summary::before{content:'\\25BE'}
 .collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
-.collection details.csvhelp > summary .chev{margin-left:auto;color:var(--text-muted);font-weight:400;
-  font-size:.86rem}
-@media (max-width:600px){ .collection details.csvhelp > summary .chev{display:none} }
 .csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
 .csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
 .csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
@@ -1638,7 +1630,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             wide=True,
             heading=heading,
             body_class="collection",
@@ -1763,7 +1755,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         return strip(msgs[code], "ok" if code in ("added", "removed", "updated", "imported") else "error")
 
     def head(actions_html: str = "") -> str:
-        return ui.page_head("My collection", PURPOSE, actions_html=actions_html)
+        return ui.page_head("Binder", PURPOSE, actions_html=actions_html)
 
     def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):
@@ -1771,7 +1763,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
                 "<p>Link your Archidekt account to see it here. Nothing about your cards is stored on this "
                 "gateway.</p><div class='actions'>"
-                + ui.button_link("Link Archidekt", "/account", kind="primary", icon_name="account")
+                + ui.button_link(
+                    "Link Archidekt", "/account/details#archidekt", kind="primary", icon_name="account"
+                )
                 + "</div></section>"
             )
         return (
@@ -1878,7 +1872,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
             notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
             return page(
-                "My collection",
+                "Binder",
                 head() + notes_html + problem(exc),
                 sub=sub,
                 sid=sid,
@@ -1952,7 +1946,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 + add_box
                 + details_box
             )
-        resp = page("My collection", body, sub=sub, sid=sid, scripts=True, heading=False)
+        resp = page("Binder", body, sub=sub, sid=sid, scripts=True, heading=False)
         if remember:
             prefs.remember_view(
                 state.db, sub, resp, "collection", view, secure=s.public_url.startswith("https://")

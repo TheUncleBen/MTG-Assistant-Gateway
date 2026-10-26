@@ -338,7 +338,7 @@ class ReportService:
                 _keep_quantities(goldfish, sim_text)
         return {
             "stored": False,
-            "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+            "deck": {"id": None, "name": "Unnamed deck", "card_count": stats["card_count"]},
             "stats": stats,
             "goldfish": goldfish,
             "validation": validation,
@@ -1168,8 +1168,8 @@ class ReportService:
                 section = {"state": "failed", "error": "Forge gave an unexpected answer."}
         if section.get("error") == SOLO_TOO_OLD:
             logger.warning(
-                "Forge solo test skipped: the Forge image is older than it needs; update "
-                "FORGE_TAG to the version the stack file names"
+                "Forge solo test skipped: the Forge image is older than it needs; redeploy "
+                "with this version's stack file"
             )
         # only over the mark read above: a report deleted, or a mark given up, while it started
         # keeps that, and the new job is stopped
@@ -2146,7 +2146,7 @@ def report_status(goldfish: Any, validation: Any, forge: Any, solo: Any = None) 
     """One word for where a report stands: "queued" or "running" while its Forge games or its
     Forge solo test wait or play, else "complete" when every part asked for came back, "partial"
     when some did not (a failed simulation or validation, Forge games that failed or found no
-    place), "failed" when none did. Forge left out on purpose (not asked for, or a 60-card deck)
+    place), "failed" when none did. Forge not run on purpose (not asked for, or a 60-card deck)
     is not a failure, nor is a Forge solo test skipped (Forge busy or too old)."""
     going = [
         x.get("state") for x in (forge, solo) if isinstance(x, dict) and x.get("state") not in FINAL_STATES

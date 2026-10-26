@@ -1,9 +1,9 @@
 """Deck tools end to end: ingest, proposals, the write switches, the browser review page, isolation.
 
 Archidekt is the local mock from stacks/edge-stack.yml (tests/fake_archidekt.py over HTTP), so
-nothing here touches archidekt.com. The gateway starts with the stack file defaults, writes off;
-the write tests switch MTG_WRITES_ENABLED and MTG_APPROVAL_MODE_DEFAULT with ``docker service update``
-and switch them back at the end of the module.
+nothing here touches archidekt.com. The run deploys with writes off (run.sh); the write tests switch
+MTG_WRITES_ENABLED with ``docker service update``, set alice's approval mode on her own account page,
+and switch both back at the end of the module.
 """
 
 from __future__ import annotations
@@ -37,10 +37,11 @@ def clients(env: Env) -> dict[str, McpClient]:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def fresh_mock_and_default_switches():
+def fresh_mock_and_default_switches(env: Env):
     mock("/__e2e/reset", method="POST")
     yield
-    set_switches(writes="false", mode="manual")
+    set_writes("false")
+    run(set_mode(env, "alice-test", "manual"))
 
 
 def mock(path: str, method: str = "GET") -> str:
@@ -54,15 +55,9 @@ def mock(path: str, method: str = "GET") -> str:
     return sh("docker", "exec", container_of(GATEWAY), "python", "-c", code)
 
 
-def set_switches(*, writes: str, mode: str) -> None:
-    """Flip the write switch and the default approval mode the way the owner would in Portainer,
-    then wait for the restart."""
-    sh(
-        "docker", "service", "update", "--quiet",
-        "--env-add", f"MTG_WRITES_ENABLED={writes}",
-        "--env-add", f"MTG_APPROVAL_MODE_DEFAULT={mode}",
-        GATEWAY,
-    )  # fmt: skip
+def set_writes(writes: str) -> None:
+    """Flip the write switch the way the owner would in Portainer, then wait for the restart."""
+    sh("docker", "service", "update", "--quiet", "--env-add", f"MTG_WRITES_ENABLED={writes}", GATEWAY)
     ctx = httpx.Client(verify=str(GEN / "ca.crt"), trust_env=False, timeout=5)
     deadline = time.time() + 240
     while time.time() < deadline:
@@ -84,13 +79,22 @@ def set_switches(*, writes: str, mode: str) -> None:
     raise AssertionError("gateway did not come back after the service update")
 
 
+async def set_mode(env: Env, user: str, mode: str) -> None:
+    """Pick ``user``'s approval mode on their own Account details page, the only place a mode is set."""
+    async with browser_page() as page:
+        await gateway_browser_sign_in(page, env, user, "/account/details")
+        await page.check(f"input[name=mode][value={mode}]")
+        await page.click("text=Save approval mode")
+        await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=mode_{mode}", timeout=30_000)
+
+
 async def ensure_unlinked(env: Env, user: str) -> None:
     """Start from 'no Archidekt account linked' even when the suite ran before on this stack."""
     async with browser_page() as page:
-        await gateway_browser_sign_in(page, env, user, "/account")
+        await gateway_browser_sign_in(page, env, user, "/account/details")
         if "Unlink and delete stored session" in await page.inner_text("body"):
             await page.click("text=Unlink and delete stored session")
-            await page.wait_for_url(f"{PUBLIC_URL}/account?ok=unlinked", timeout=30_000)
+            await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=unlinked", timeout=30_000)
         assert "Link your Archidekt account" in await page.inner_text("body")
 
 
@@ -188,7 +192,7 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
     async def go():
         await ensure_unlinked(env, user)
         async with browser_page() as page:
-            await gateway_browser_sign_in(page, env, user, "/account")
+            await gateway_browser_sign_in(page, env, user, "/account/details")
             # a wrong password is refused by Archidekt (the mock) and shown on the page
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", "wrong")
@@ -203,7 +207,7 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
             await page.fill("input[name=archidekt_password]", f"pw-{archidekt_user}")
             await page.check("input[name=accept_risk]")
             await page.click("text=Link account")
-            await page.wait_for_url(f"{PUBLIC_URL}/account?ok=linked", timeout=30_000)
+            await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=linked", timeout=30_000)
             text = await page.inner_text("body")
             assert f"Linked to {archidekt_user}" in text, text
         c = clients[user]
@@ -305,7 +309,7 @@ def test_users_cannot_see_or_touch_each_others_decks_and_proposals(clients, env:
 
 
 def test_writes_on_apply_is_browser_only_and_the_review_page_applies(clients, env: Env):
-    set_switches(writes="true", mode="manual")
+    set_writes("true")
     pid = STATE["edit"]
 
     async def go():
@@ -372,7 +376,7 @@ def test_stale_deck_is_refused_on_the_review_page(clients, env: Env):
 
 
 def test_apply_over_mcp_only_in_auto_mode(clients, env: Env):
-    set_switches(writes="true", mode="auto")
+    run(set_mode(env, "alice-test", "auto"))  # writes are still on from the test above
 
     async def go():
         c = clients["alice-test"]
@@ -418,7 +422,8 @@ def test_apply_over_mcp_only_in_auto_mode(clients, env: Env):
             assert create["result"]["verified"] is True and create["result"]["sent_entries"] == 72, create
 
     run(go())
-    set_switches(writes="false", mode="manual")
+    set_writes("false")
+    run(set_mode(env, "alice-test", "manual"))
 
     # The audit log records both routes, and no Archidekt password or session token is in the database.
     c = container_of(GATEWAY)

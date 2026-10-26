@@ -386,7 +386,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         if refused:
             return refused
         try:
-            deck = await decks.get_own_deck(sub, request.path_params["deck_id"])
+            deck = await decks.prepare_delete(sub, request.path_params["deck_id"])
         except DeckError as exc:
             return _from(exc)
         cards = sum(c.quantity for c in deck.cards if deck.in_deck(c))

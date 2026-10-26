@@ -20,7 +20,7 @@ FEEDBACK_JS = (Path(notify.__file__).parent / "static" / "feedback.js").read_tex
 BRIDGE = """
 window.calls = [];
 window.MtgNative = {};
-["openCamera", "reload", "openInBrowser", "changeGateway", "startNotifications"].forEach(function (name) {
+["openCamera", "reload", "changeGateway", "startNotifications"].forEach(function (name) {
   window.MtgNative[name] = function (arg) {
     if (this !== window.MtgNative) throw new Error("not called on the bridge");
     window.calls.push(arg === undefined ? name : name + ":" + arg);
@@ -35,7 +35,6 @@ window.MtgNative.notificationsState = function () {
 MENU = (
     "<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
     "<button type='button' data-native='reload'>Reload</button>"
-    "<button type='button' data-native='openInBrowser'>Open in browser</button>"
     "<button type='button' data-native='changeGateway'>Change gateway</button>"
 )
 
@@ -60,9 +59,9 @@ def test_each_app_button_reaches_the_app() -> None:
     with sync_playwright() as p:
         browser, page = _page(p, exe, MENU, "off")
         try:
-            for label in ("Scan with the app's camera", "Reload", "Open in browser", "Change gateway"):
+            for label in ("Scan with the app's camera", "Reload", "Change gateway"):
                 page.get_by_role("button", name=label).click()
-            assert page.evaluate("window.calls") == ["openCamera", "reload", "openInBrowser", "changeGateway"]
+            assert page.evaluate("window.calls") == ["openCamera", "reload", "changeGateway"]
         finally:
             browser.close()
 

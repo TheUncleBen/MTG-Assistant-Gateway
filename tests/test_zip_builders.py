@@ -166,7 +166,7 @@ def test_skill_zip_is_unchanged(awkward: Path) -> None:
 
 async def test_download_rules_are_unchanged(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
     """The two plugins download without a sign-in; the skill asks for one first."""
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         for path in ("/plugin/mtg-gateway.zip", "/plugin/mtg-gateway-chatgpt.zip"):
             r = await h.http.get(path)

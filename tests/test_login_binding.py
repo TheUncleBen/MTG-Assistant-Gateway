@@ -86,7 +86,7 @@ async def test_login_next_does_not_plant_the_login_cookie(gw: Harness):
     assert (await victim.get(await _victim_idp_callback(gw, start.headers["location"]))).status_code == 302
     victim.cookies.delete("__Host-mtg_login")  # a key from an earlier sign-in would not help anyway
     _client_id, login_id, _csrf, idp_url = await _attacker_login(gw, atk)
-    r = await victim.get("/login", params={"next": f"/account?state={login_id}"})
+    r = await victim.get("/login", params={"next": f"/account/details?state={login_id}"})
     assert r.status_code == 302 and "mtg_login" not in _set_cookies(r)
     done = await victim.get(await _victim_idp_callback(gw, idp_url))
     assert done.status_code == 403

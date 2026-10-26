@@ -184,7 +184,7 @@ PURGE_BATCH = 500
 METRICS_RETENTION_SECONDS = 400 * 86400
 DECK_COVER_RETENTION_SECONDS = 180 * 86400
 # Daily price points and watched decks' values are kept this many days (Database.price_days, set
-# from MTG_PRICE_HISTORY_DAYS by create_app).
+# from the price_history_days setting by create_app).
 PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
@@ -886,7 +886,7 @@ class Database:
         the database file."""
         self.path = Path(path)
         self.upgrade_dir = upgrade_dir
-        # Days the before-upgrade copies are kept (the app wires in MTG_BACKUP_KEEP_DAYS); None
+        # Days the before-upgrade copies are kept (the app wires in backup_keep_days); None
         # keeps them until newer ones push them out.
         self.upgrade_keep_days: int | None = None
         if str(self.path) != ":memory:":
@@ -1940,6 +1940,19 @@ class Database:
                      updated_at=excluded.updated_at""",
                 (sub, refresh_enc, access_enc, access_expires_at, int(time.time())),
             )
+
+    def replace_idp_grant(
+        self, sub: str, *, old_refresh_enc: str, refresh_enc: str, access_enc: str, access_expires_at: int
+    ) -> bool:
+        """save_idp_grant for a renewal ahead of time (membership.py): only over the grant it
+        renewed, never bringing back one revoked or deleted meanwhile. False: nothing written."""
+        with self.tx() as c:
+            cur = c.execute(
+                """UPDATE idp_grants SET refresh_enc=?, access_enc=?, access_expires_at=?, updated_at=?
+                   WHERE sub = ? AND refresh_enc = ?""",
+                (refresh_enc, access_enc, access_expires_at, int(time.time()), sub, old_refresh_enc),
+            )
+            return cur.rowcount == 1
 
     def get_idp_grant(self, sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM idp_grants WHERE sub = ?", (sub,))

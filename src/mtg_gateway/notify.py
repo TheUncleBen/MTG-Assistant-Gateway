@@ -1073,7 +1073,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             "test",
             "Test from your MTG gateway",
             "Notifications work. This is the only test message.",
-            "/account",
+            "/account/details#notifications",
         )
         return "ok=notify_test_sent" if ok else "err=notify_test_failed"
     if action == "summary_send":

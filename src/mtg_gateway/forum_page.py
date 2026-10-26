@@ -141,10 +141,6 @@ CSS = """
 /* the contest strip (deck_extras' strip) and the entries fold */
 .fm .dx-strip .t .muted a{color:inherit}
 .fm details.entries{margin:0 0 .75rem}
-.fm details.entries summary{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;cursor:pointer;
-  font-weight:700}
-.fm details.entries summary svg.i{width:16px;height:16px;transition:transform .15s}
-.fm details.entries[open] summary svg.i{transform:rotate(180deg)}
 .fm .entries-list{list-style:none;margin:0;padding:0}
 .fm .entries-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .75rem;min-height:44px;
   border-top:1px solid var(--border-soft)}
@@ -522,7 +518,7 @@ def contest_html(
             f"{you}{mark}</li>"
         )
     fold = (
-        f"<details class='entries' open><summary>{icon('chev')}Entries ({len(rows)})</summary>"
+        f"<details class='entries' open><summary class='fold-btn'>Entries ({len(rows)})</summary>"
         f"<ul class='entries-list'>{''.join(items)}</ul></details>"
     )
     return strip + fold

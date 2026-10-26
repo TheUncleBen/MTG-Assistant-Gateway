@@ -1,0 +1,308 @@
+Subject: Goldfish: set aside cards that need opponents, read more wording
+
+The solo test listed cards as "played without their effect" that only do
+something to opponents or their creatures (votes, mass bounce, "bite"
+spells, Auras that shut a creature down, regeneration), next to cards it
+simply had no template for. A member read that list as the simulator
+failing. Measured on Scryfall's oracle cards (2026-10-25): 16.0% of the
+32,116 Commander-legal cards modeled, 10.9% set aside; Forge's 85
+Commander precons 2023-2026: 51.6% of each deck's cards played with their
+effect, 59.7% accounted for (played or set aside).
+
+This patch, in mystic_forge/goldfish/rules_text.py:
+
+- sets aside, as interaction with nothing to act on: a line that holds a
+  vote (political), "return all ... to their owners' hands" (wipe), a
+  creature dealing damage equal to its power to a target creature and the
+  excess-damage rider (removal), regeneration (protection), and an Aura
+  whose enchanted creature loses all abilities, can't attack or block,
+  doesn't untap or gets a fixed base power and toughness (removal);
+  permanents among them are still cast, as before;
+- reads as free: "Enchant creature (you control)" (the Aura's other
+  sentences decide), "can't be blocked by ...", "Choose a creature type /
+  color", "Exile this spell"; and, with a note: a graveyard shuffled into
+  the library, an activation discount (the full cost is paid);
+- reads "put a land card from your hand onto the battlefield" as ramp_land
+  (noted: the land comes from the library, tapped);
+- notes, and never uses, miracle, overload, convoke, delve, improvise,
+  undaunted, affinity and every landcycling/typecycling keyword, and reads
+  "Equip <type> {N}";
+- fixes a sentence with an interaction pattern and a rider (", then ..."
+  or a second sentence) that was returned as unknown without being listed,
+  so its card counted as fully modeled while that sentence never played (26
+  Commander-legal cards, for example Displacer Kitten); an ability in quotes
+  granted to the target is no longer taken for a rider.
+
+tests/goldfish/test_known_answers.py: 16 new cases from real cards' text.
+
+Measured with the same oracle file: 16.4% modeled, 11.9% set aside (the
+rider fix moves 26 cards back to needing a model); precons 51.9% played
+with their effect, 60.4% accounted for.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has no such reader. Needs
+patches 0001-0011 applied first.
+
+diff --git a/mystic_forge/goldfish/rules_text.py b/mystic_forge/goldfish/rules_text.py
+index 430d2f8..e7834a3 100644
+--- a/mystic_forge/goldfish/rules_text.py
++++ b/mystic_forge/goldfish/rules_text.py
+@@ -57,6 +57,13 @@ NOTED_KEYWORDS = {
+     "evoke": "unused-option: evoke is never used; the card is cast",
+     "ninjutsu": "unused-option: ninjutsu is never used; the card is cast",
+     "madness": "unused-option: madness is never used",
++    "miracle": "unused-option: miracle is never used; the card is cast for its mana cost",
++    "overload": "unused-option: overload is never used",
++    "convoke": "unused-option: convoke is never used; the full cost is paid in mana",
++    "delve": "unused-option: delve is never used; the full cost is paid in mana",
++    "improvise": "unused-option: improvise is never used; the full cost is paid in mana",
++    "undaunted": "unused-option: undaunted's discount is not counted; the full cost is paid",
++    "affinity": "unused-option: affinity's discount is not counted; the full cost is paid",
+ }
+ SCRY_NOTE = "library-order: scry and surveil do not change the library order"
+ DIES_NOTE = "no-deaths: nothing dies in a goldfish game, so this never happens"
+@@ -77,10 +84,25 @@ ASIDE_PATTERNS = (
+     (r"\btap (up to \w+ )?target\b", "interaction_removal"),
+     (r"\btarget creature( an opponent controls)? can't block\b", "interaction_removal"),
+     (r"\bfights?\b", "interaction_removal"),
++    # "bite": one of your creatures deals damage to a creature you don't control
++    (r"\bdeals? damage equal to [^.]* to (up to one |another )?target creature\b",
++     "interaction_removal"),
++    (r"\bexcess damage\b", "interaction_removal"),
++    (r"\breturn all [^.]*to (their|its) owners?'? hands?\b", "interaction_wipe"),
++    (r"\bregenerate\b", "protection"),
++    # Auras that shut an opponent's creature down
++    (r"^enchanted creature [^.]*(loses all abilities|can't attack|can't block|"
++     r"doesn't untap|base power and toughness \d+/\d+)", "interaction_removal"),
+ )
++# A line that holds a vote needs opponents to vote: the whole line is set aside.
++VOTE_LINE = re.compile(r"\bvot(e|es|ed|ing)\b", re.IGNORECASE)
+ FREE_SENTENCES = tuple(re.compile(p, re.IGNORECASE) for p in (
+     r"CARDNAME can't block",
+     r"CARDNAME can't be (blocked|countered)( except by [^.]*)?",
++    r"CARDNAME can't be blocked by [^.]+",
++    r"enchant creature( you control)?",
++    r"exile CARDNAME",
++    r"(as CARDNAME enters, )?choose a (creature type|color)",
+     r"this spell can't be countered",
+     r"activate only (as a sorcery|during your turn)",
+     r"you have no maximum hand size",
+@@ -89,6 +111,17 @@ FREE_SENTENCES = tuple(re.compile(p, re.IGNORECASE) for p in (
+     r"creatures you control have (flying|trample|vigilance|menace|reach|deathtouch|"
+     r"first strike|hexproof|indestructible|lifelink|ward \{\d+\})",
+ ))
++# Free, but the report says what is left out.
++NOTED_SENTENCES = tuple((re.compile(p, re.IGNORECASE), note) for p, note in (
++    (r"(target|each) player shuffles their graveyard into their library",
++     "graveyard-shuffle: shuffling a graveyard back into the library is skipped"),
++    (r"this ability costs \{\d+\} less to activate [^.]+",
++     "discount-ignored: the activation discount is not counted; the full cost is paid"),
++))
++LAND_FROM_HAND = re.compile(r"(you may )?put a land card from your hand onto the battlefield",
++                            re.IGNORECASE)
++LAND_FROM_HAND_NOTE = ("land-from-hand: the land comes from the library, tapped, instead of "
++                       "from your hand")
+ # Your own life total is not tracked: opponents never attack in a goldfish game.
+ OWN_LIFE = re.compile(r"^you lose \w+ life$|^CARDNAME deals \w+ damage to you$",
+                       re.IGNORECASE)
+@@ -99,7 +132,9 @@ MONARCH_NOTE = ("monarch: nobody takes it from you at a goldfish table, so it is
+                 "one more card each turn, drawn at your upkeep instead of your end step")
+ KEYWORD_COSTED = re.compile(
+     r"^(?:(ward|equip|cycling|flashback|kicker|multikicker|buyback|entwine|evoke|"
+-    r"ninjutsu|madness)(?: ?(?:\{[^}]+\})+| ?\u2014[^,;]+)"
++    r"ninjutsu|madness|miracle|overload)(?: ?(?:\{[^}]+\})+| ?\u2014[^,;]+)"
++    r"|((?:basic )?[a-z]*cycling) ?(?:\{[^}]+\})+|(equip) [a-z ]+? ?(?:\{[^}]+\})+"
++    r"|(affinity) for [a-z ]+"
+     r"|(crew) \d+|(protection from) [a-z ]+|([a-z]+walk)|(partner with) [^,;]+)$",
+     re.IGNORECASE)
+ 
+@@ -266,6 +301,11 @@ def _tutor(m):
+     return [{"do": "tutor", "filter": (m.group(2) or "any").lower()}]
+ 
+ 
++@_effect(r"(you may )?put a land card from your hand onto the battlefield")
++def _land_from_hand(m):
++    return [{"do": "ramp_land", "count": 1}]       # LAND_FROM_HAND_NOTE
++
++
+ @_effect(r"add ((?:\{[WUBRGC]\})+)")
+ def _ritual(m):
+     return [{"do": "add_mana", "pips": m.group(1)}]
+@@ -392,7 +432,9 @@ def _keyword_sentence(s: str, out: Reading) -> bool:
+         head = KEYWORD_COSTED.match(low)
+         if head:
+             word = next(g for g in head.groups() if g)
+-            if word in NOTED_KEYWORDS:
++            if word.endswith("cycling"):
++                notes.append(NOTED_KEYWORDS["cycling"])
++            elif word in NOTED_KEYWORDS:
+                 notes.append(NOTED_KEYWORDS[word])
+             elif word in ("crew", "equip", "partner with") or word.endswith("walk") \
+                     or word in ("ward", "protection from"):
+@@ -418,6 +460,10 @@ def read_sentence(s: str, out: Reading, *, permanent: bool) -> str:
+         return "model"
+     if any(p.fullmatch(s) for p in FREE_SENTENCES):
+         return "free"
++    for pat, note in NOTED_SENTENCES:
++        if pat.fullmatch(s):
++            out.notes.append(note)
++            return "free"
+     if OWN_LIFE.match(s):
+         out.notes.append(OWN_LIFE_NOTE)
+         return "free"
+@@ -506,6 +552,8 @@ def read_sentence(s: str, out: Reading, *, permanent: bool) -> str:
+         if verbs is not None:
+             for v in verbs:
+                 out.triggers.append({"on": "cast", **v})
++            if LAND_FROM_HAND.search(s):
++                out.notes.append(LAND_FROM_HAND_NOTE)
+             if re.match(r"^(scry|surveil)", s, re.IGNORECASE):
+                 out.notes.append(SCRY_NOTE)
+             return "model"
+@@ -518,8 +566,10 @@ def _aside_or_unknown(s: str, out: Reading) -> str:
+         if re.search(pat, low):
+             # Only when the whole sentence is the interaction: a rider
+             # ("..., then draw a card") would be lost otherwise.
+-            rest = re.split(r", then |\. ", low, maxsplit=1)
++            # (an ability in quotes, granted to the target, is not a rider).
++            rest = re.split(r", then |\. ", re.sub(r"[\"“][^\"”]*[\"”]", "", low), maxsplit=1)
+             if len(rest) > 1:
++                out.unknown.append(s)      # never a sentence dropped unread
+                 return "unknown"
+             out.aside = out.aside or cls
+             return "aside"
+@@ -536,6 +586,9 @@ def read_card(oracle: str, name: str, *, permanent: bool) -> Reading:
+                     re.IGNORECASE):
+             out.unknown.append(line)       # modal spells: not modeled
+             continue
++        if VOTE_LINE.search(line):
++            out.aside = out.aside or "political"
++            continue
+         for s in _sentences(line):
+             read_sentence(s, out, permanent=permanent)
+     out.notes = list(dict.fromkeys(out.notes))
+diff --git a/tests/goldfish/test_known_answers.py b/tests/goldfish/test_known_answers.py
+index 5c1697b..3ea9137 100644
+--- a/tests/goldfish/test_known_answers.py
++++ b/tests/goldfish/test_known_answers.py
+@@ -305,3 +305,121 @@ def test_long_and_chains_read_quickly():
+     assert rules_text.read_effect("x, then y and " * 40 + "z") is None
+     assert rules_text.read_effect(" and ".join(["x"] * 2000)) is None
+     assert time.monotonic() - t < 1.0
++
++
++# -- Patch 0012: more wording read, and cards that need opponents set aside -------------------
++# Oracle text copied from Scryfall 2026-10-25.
++
++MORE_READ = [
++    (_card("Lórien Revealed", "Sorcery", "{3}{U}{U}",
++           "Draw three cards.\nIslandcycling {1} ({1}, Discard this card: Search your library "
++           "for an Island card, reveal it, put it into your hand, then shuffle.)",
++           keywords=["Islandcycling", "Landcycling", "Typecycling"]),
++     [("cast", "draw", 3, None, None, None, None, "eot")], "unused-option: cycling"),
++    (_card("Learn from the Past", "Instant", "{3}{U}",
++           "Target player shuffles their graveyard into their library.\nDraw a card."),
++     [("cast", "draw", 1, None, None, None, None, "eot")], "graveyard-shuffle:"),
++    (_card("Growth Spiral", "Instant", "{G}{U}",
++           "Draw a card. You may put a land card from your hand onto the battlefield."),
++     [("cast", "draw", 1, None, None, None, None, "eot"),
++      ("cast", "ramp_land", 1, None, None, None, None, "eot")], "land-from-hand:"),
++    (_card("Devastation Tide Miracle", "Sorcery", "{3}{U}",
++           "Draw two cards.\nMiracle {1}{U} (You may cast this card for its miracle cost "
++           "when you draw it if it's the first card you drew this turn.)",
++           keywords=["Miracle"]),
++     [("cast", "draw", 2, None, None, None, None, "eot")], "unused-option: miracle"),
++    (_card("Seeds Undaunted", "Sorcery", "{6}{G}",
++           "Undaunted (This spell costs {1} less to cast for each opponent.)\nDraw two "
++           "cards. Exile this spell.", keywords=["Undaunted"]),
++     [("cast", "draw", 2, None, None, None, None, "eot")], "unused-option: undaunted"),
++]
++
++
++@pytest.mark.parametrize("card,triggers,note", MORE_READ, ids=[c[0]["name"] for c in MORE_READ])
++def test_more_wording_is_read(card, triggers, note):
++    d = _derived(card)
++    assert d.auto_annotated and not d.needs_annotation, d.unread
++    assert d.card.scope_class is None and d.aside_class is None
++    assert _ann(d) == (triggers, [])
++    assert any(n.startswith(note) for n in d.approx_notes), d.approx_notes
++
++
++def test_an_activation_discount_is_ignored_not_limiting():
++    d = _derived(_card("Mirror of Galadriel", "Legendary Artifact", "{2}",
++                       "{5}, {T}: Scry 1, then draw a card. This ability costs {1} less to "
++                       "activate for each legendary creature you control."))
++    assert d.auto_annotated and not d.needs_annotation, d.unread
++    assert [(a.do, a.count) for a in d.card.ann.activated] == [("draw", 1)]
++    assert any(n.startswith("discount-ignored:") for n in d.approx_notes)
++
++
++NEEDS_OPPONENTS = [
++    # (card, scope_class: not cast, aside_class: cast and counted aside)
++    (_card("Devastation Tide", "Sorcery", "{3}{U}{U}",
++           "Return all nonland permanents to their owners' hands.\nMiracle {1}{U} (You may "
++           "cast this card for its miracle cost when you draw it if it's the first card you "
++           "drew this turn.)", keywords=["Miracle"]),
++     "interaction_wipe", None),
++    (_card("Raise the Palisade", "Sorcery", "{4}{U}",
++           "Choose a creature type. Return all creatures that aren't of the chosen type to "
++           "their owners' hands."),
++     "interaction_wipe", None),
++    (_card("Windswift Slice", "Instant", "{2}{G}",
++           "Target creature you control deals damage equal to its power to target creature "
++           "you don't control. Create a number of 1/1 green Elf Warrior creature tokens equal "
++           "to the amount of excess damage dealt this way."),
++     "interaction_removal", None),
++    (_card("Lignify", "Kindred Enchantment — Treefolk Aura", "{1}{G}",
++           "Enchant creature\nEnchanted creature is a Treefolk with base power and toughness "
++           "0/4 and loses all abilities."),
++     None, "interaction_removal"),
++    (_card("Asceticism", "Enchantment", "{3}{G}{G}",
++           "Creatures you control have hexproof.\n{1}{G}: Regenerate target creature. (The "
++           "next time it would be destroyed this turn, instead tap it, remove it from "
++           "combat, and heal all damage on it.)"),
++     None, "protection"),
++    (_card("Lothlórien Blade", "Artifact — Equipment", "{3}",
++           "Whenever equipped creature attacks, it deals damage equal to its power to target "
++           "creature defending player controls.\nEquip Elf {2}\nEquip {5}"),
++     None, "interaction_removal"),
++    (_card("Galadriel, Elven-Queen", "Legendary Creature — Elf Noble", "{2}{G}{U}",
++           "Will of the council — At the beginning of combat on your turn, if another Elf "
++           "entered the battlefield under your control this turn, starting with you, each "
++           "player votes for dominion or guidance. If dominion gets more votes, the Ring "
++           "tempts you, then you put a +1/+1 counter on your Ring-bearer. If guidance gets "
++           "more votes or the vote is tied, draw a card.", "3", "3"),
++     None, "political"),
++    (_card("Erestor of the Council", "Legendary Creature — Elf Noble", "{1}{G}{U}",
++           "Whenever players finish voting, each opponent who voted for a choice you voted "
++           "for creates a Treasure token. You scry X, where X is the number of opponents who "
++           "voted for a choice you didn't vote for. Draw a card.", "2", "4"),
++     None, "political"),
++]
++
++
++@pytest.mark.parametrize("card,scope,aside", NEEDS_OPPONENTS,
++                         ids=[c[0]["name"] for c in NEEDS_OPPONENTS])
++def test_cards_that_need_opponents_are_set_aside(card, scope, aside):
++    d = _derived(card)
++    assert not d.needs_annotation, d.unread
++    assert d.card.scope_class == scope
++    assert d.aside_class == aside
++    if aside:                       # a permanent: still cast
++        assert d.card.inert_reason is None
++
++
++def test_a_buff_aura_still_asks():
++    # "Enchant creature" is read as free; the aura's own effect still decides.
++    d = _derived(_card("Rancor", "Enchantment — Aura", "{G}",
++                       "Enchant creature\nEnchanted creature gets +2/+0 and has trample.\nWhen "
++                       "Rancor is put into a graveyard from the battlefield, return Rancor to "
++                       "its owner's hand."))
++    assert d.needs_annotation and d.unread
++
++
++def test_an_interaction_sentence_with_a_rider_is_never_dropped_unread():
++    # Before 0012 the sentence was neither read nor listed, so the card counted as modeled.
++    d = _derived(_card("Flicker Card", "Creature — Cat", "{2}{W}",
++                       "When this creature enters, exile target creature, then return it to "
++                       "the battlefield under its owner's control.", "2", "2"))
++    assert d.needs_annotation and d.unread

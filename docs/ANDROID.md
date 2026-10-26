@@ -56,23 +56,28 @@ download button. Then:
    SHA-256 only shows the download arrived intact, not who made it. For a
    stronger check, run `apksigner verify --print-certs mtg-assistant-gateway.apk` on a computer
    and compare the `certificate SHA-256 digest` line with the published value.
-2. Open the downloaded `mtg-assistant-gateway.apk`. Android asks you to allow installs from
+2. On a Samsung Galaxy phone, turn **Auto Blocker** off first (Settings >
+   Security and privacy > Auto Blocker). While it is on, the phone won't
+   install apps that don't come from an app store, so neither the app nor its
+   updates ([Updates](#updates) below). Other phones have no such switch.
+3. Open the downloaded `mtg-assistant-gateway.apk`. Android asks you to allow installs from
    that browser once. Allow it and tap **Install**.
-3. Play Protect may warn that the developer is unknown or unverified, because
+4. Play Protect may warn that the developer is unknown or unverified, because
    the app is signed by whoever runs your gateway, not by an app store; the
-   exact wording varies by phone and Android version. Only continue if you got
+   exact wording varies by phone and Android version. It may also offer to
+   scan the app first: scanning it or not are both fine. Only continue if you got
    the file from your gateway's setup page and the certificate fingerprint
    matched in step 1. If Play Protect says the app is harmful, or you are
    unsure, don't install it and ask the gateway's owner.
-4. On first launch the app asks for your **gateway address**: type the hostname
+5. On first launch the app asks for your **gateway address**: type the hostname
    the owner gave you, for example `mtg.example.com`. The app checks that the
    address answers as a gateway, saves it, and opens the site. Sign-in then
    opens in your phone's browser ([Sign-in](#2-using-it) below).
 
 **Updates** come to the app by themselves ([Updates](#updates) below): when a
 newer version is out, a bar at the top offers it and **Update** installs it over
-the one you have, keeping your settings and sign-in. **Change gateway** in the
-account menu (the person icon, top right) brings the address screen back; over
+the one you have, keeping your settings and sign-in. **Change gateway** on the
+Account page (your picture, top right), under This app, brings the address screen back; over
 a page that isn't the gateway's (the sign-in page, say) it is in the round
 button's menu at the bottom right.
 
@@ -96,7 +101,10 @@ the app is available**:
    certificate as the app you have. If any of that fails, nothing is installed
    and the app says why.
 2. The first time, Android asks you to allow installs from MTG Assistant
-   Gateway ("Install unknown apps"). Allow it, go back, and confirm.
+   Gateway ("Install unknown apps"). Allow it, go back, and confirm. On a
+   Samsung Galaxy phone, Auto Blocker must be off for this, as for the first
+   install. If Play Protect offers to scan the update, scanning it or not are
+   both fine.
 3. Android installs the update over the app and closes it. Open the app again
    from its icon. Your gateway address and sign-in are kept.
 
@@ -152,18 +160,17 @@ For operators whose image has no app, or who build their own:
    sudo chown -R 1000:1000 /srv/mtg-gateway/app
    ```
 
-3. Mount the folder into the gateway service read-only and point
-   `MTG_APP_DIR` at it. In the stack file, under the gateway's `volumes:`:
+3. Mount the folder into the gateway service read-only, over the image's own
+   copy. In the stack file (or `docker-compose.yml`), under the gateway's `volumes:`:
 
    ```yaml
          - type: bind
            source: /srv/mtg-gateway/app
-           target: /app-dist
+           target: /usr/share/mtg-gateway/app
            read_only: true
    ```
 
-   and set `MTG_APP_DIR=/app-dist` in your variables (Portainer's variables, `mtg.env`, or `.env`
-   with Docker Compose). Redeploy.
+   Redeploy.
 4. Open `/app` signed in: it now shows the version, checksums and the
    download button. If you built the app yourself, give your users your
    signing certificate SHA-256 some way other than the gateway (step 1 of
@@ -214,11 +221,15 @@ only; a release build never does. A 24 hour battery test needs a real phone.
 The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
-- **The App section of the account menu** (the person icon, top right):
-  *Scan with the app's camera*, *Reload*, *Open in browser*, *Change gateway*.
-  *Open a copied link* and *Check for app updates* are on the Account page's
-  **App** card and in the round button's menu (the round button shows only
-  over pages that aren't the gateway's).
+- **This app, on the Account page** (your picture, top right):
+  *Scan with the app's camera*, *Reload*, *Open a copied link*, *Change gateway*
+  and *Check for app updates* (with the installed version). They are in the
+  app's own menu too, and in the round button's menu (the round button shows
+  only over pages that aren't the gateway's).
+- **Share** on a deck's More menu opens the phone's own share sheet with the
+  deck's Archidekt link; from Android 14 the sheet also offers *Open on
+  Archidekt*, *Copy gateway link* and *Copy deck list*, and on older Androids
+  the gateway link is added to the shared text.
   The same actions sit on a round button at the bottom right while a
   page that is not the gateway's is showing (the sign-in service, say); on
   the gateway's own pages the button stays out of the way of the bottom tab
@@ -228,7 +239,8 @@ else your gateway serves. A few things are native:
   website footer. Navigation follows Android's window size classes: under
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
-  down the left edge with every page on it (Home first) and no More menu. The rules track the live
+  down the left edge with the same places (Home, Decks, Binder, Assistant),
+  Alerts and More, which opens beside the rail. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
 - **Back** goes back a page; on the first page it leaves the app.
@@ -255,9 +267,11 @@ else your gateway serves. A few things are native:
 - **Sign-in** happens in your phone's browser, shown over the app (a Custom
   Tab), not in the app's own web view: that is where passkeys, your password
   manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
-  work, exactly as they do on the website. When you are done there, tap **Open
-  the MTG Assistant Gateway app** on the last page and you are back in the
-  app, signed in. The browser itself stays signed out of the gateway.
+  work, exactly as they do on the website. When you are done there, the
+  browser closes and you are back in the app, signed in (where the browser
+  offers an Auth Tab, as Chrome does; otherwise tap **Open the MTG Assistant
+  Gateway app** on the last page). The browser itself stays signed out of the
+  gateway.
   Whether a passkey or autofill works is up to your browser and password
   manager: if it works on the website in that browser, it works here. If you
   would rather sign in inside the app, the sign-in page has a link for that;
@@ -284,7 +298,7 @@ else your gateway serves. A few things are native:
   phone's Light / Dark setting. A switch while the app is open re-themes the
   app's own screens at the next page you open, so the page in use (an editor
   with unsaved edits, an open camera panel) is never reloaded under you. The pages follow the setting too unless you pick Light
-  or Dark in the account menu on the page, which wins inside the app as well.
+  or Dark under Look on the Account page, which wins inside the app as well.
   The camera screen is always dark, over the black viewfinder.
 - **Launcher.** The icon's label is "MTG Gateway" (the full name does not fit
   most launchers). Long-press the icon for shortcuts to **My decks**, **Scan
@@ -365,10 +379,10 @@ The app talks only to pages and endpoints the gateway already serves:
 | Used for | Endpoint |
 |---|---|
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
-| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `POST /login/app` with the one-time code ([section 13](#13-privacy-and-security-notes)) |
+| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
-| App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
+| Sign-in return and App Links | `GET /.well-known/assetlinks.json`: the gateway vouches for the app it ships (its package ID and signing certificate), with no setting |
 | Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
 | Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
 | Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
@@ -394,8 +408,8 @@ Nothing here costs money or needs an account with anyone:
   produced and serves it at `/app/mtg-assistant-gateway.apk` behind the normal sign-in, with the
   setup page's Android section (`/install?for=android`; `/app` leads there) showing the version,
   the file checksum and the signing certificate fingerprint. Self-hosters therefore give out
-  the app from their own deployment. `MTG_APP_DIR` points the gateway at a
-  different folder if you build your own ([DEPLOY.md](DEPLOY.md#environment-reference)).
+  the app from their own deployment. If you build your own, mount it over the image's copy
+  ([Adding the app to a gateway](#adding-the-app-to-a-gateway)).
 - **From the GitHub release.** The release workflow attaches
   `mtg-assistant-gateway-release.apk`, `mtg-assistant-gateway-release.aab` and `mtg-assistant-gateway.json` to the version's
   GitHub release when the release signing secrets are set
@@ -621,9 +635,8 @@ The usual convention is a domain you control, reversed, plus a name. This app is
 sideloaded, not published in a store, so it doesn't need one:
 `local.mtgassistantgateway.app` is a neutral name that belongs to no domain or person.
 It lives in one file, `android/app/application-id.txt`; the Gradle build reads it from
-there. Change it and rebuild, and set `MTG_ANDROID_PACKAGE` on your gateway to the same
-ID so the browser sign-in hands back to your build
-([DEPLOY.md](DEPLOY.md#environment-reference)). The launcher shortcuts in
+there. Change it and rebuild: the build records the ID next to the APK, and a gateway that
+ships your build ([section 1](#1-getting-the-app)) hands the browser sign-in back to that ID by itself. The launcher shortcuts in
 `android/app/src/main/res/xml/shortcuts.xml` name the ID too (Android reads them without the
 app's resources, so it is written out there): change it there as well; the app's unit tests
 fail until both match. The Kotlin package name
@@ -644,18 +657,10 @@ matching statement on the gateway:
 1. Build with `APP_LINKS_HOST=mtg.example.com` (or set the
    `ANDROID_APP_LINKS_HOST` repository variable for the CI build). The
    resulting APK claims `https://mtg.example.com/...`.
-2. Put the signing certificate's SHA-256 fingerprint
-   ([section 8](#8-signing-your-release-key)) in `MTG_ANDROID_ASSETLINKS`
-   ([DEPLOY.md](DEPLOY.md#environment-reference)), which the gateway serves at
-   `/.well-known/assetlinks.json`:
-
-   ```json
-   [{"relation": ["delegate_permission/common.handle_all_urls"],
-     "target": {"namespace": "android_app",
-                "package_name": "local.mtgassistantgateway.app",
-                "sha256_cert_fingerprints": ["D4:F7:32:...:97:1E"]}}]
-   ```
-
+2. Ship that APK from the gateway ([section 1](#1-getting-the-app)).
+   The gateway serves `/.well-known/assetlinks.json` itself, naming the
+   package ID and the signing certificate the build
+   recorded in `mtg-assistant-gateway.json` next to the APK; nothing to set.
    The package name must match `android/app/application-id.txt`.
 3. Install the app. Android checks the statement at install time; after that a
    tap on a gateway link opens the page in the app. If verification fails
@@ -702,20 +707,27 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
   each sign-in, keeps it on the phone, and sends only its SHA-256 with the
   browser's `/login`. After the sign-in service, the gateway sets no cookie in
-  the browser; it keeps a one-time code for two minutes and shows a page whose
-  button opens the app through an `intent:` link naming the app's package ID
-  (`MTG_ANDROID_PACKAGE`, [DEPLOY.md](DEPLOY.md#environment-reference)), so
-  Android hands it only to the installed app with that ID; that relies on the
-  browser honouring the package in `intent:` links, which Chrome does (other
-  browsers not checked), so the button waits for your tap and names the app.
+  the browser; it keeps a one-time code for two minutes and sends the browser
+  to `/login/app-return?code=...` on the gateway's own address. Where the
+  browser has an Auth Tab, the app opened the sign-in in one, and the Auth Tab
+  hands that address back to the app and closes, but only to an app the
+  gateway vouches for at `/.well-known/assetlinks.json`: the package ID and
+  the signing certificate of the app the gateway ships, as its build recorded
+  them next to the APK. Any other browser shows a page whose button opens the
+  app through an `intent:` link naming the app's package ID, so Android hands
+  it only to the installed app with that ID; that relies on the browser
+  honouring the package in `intent:` links, which Chrome does (other browsers
+  not checked), so the button waits for your tap and names the app. The
+  one-time code is in that address, so a reverse proxy that logs full
+  addresses (many do by default) may keep it in its access log;
+  the gateway's own log never records it, and it is useless there: it works
+  only with the app's secret, once, within two minutes.
   The app then posts the code with its secret to `/login/app`, and only then
   is the session created, in the app. The code is worthless without the
   secret, works once, and one wrong try burns it. `/login/app` accepts posts
   only from the app (its user agent, never from another site's page), so
   nobody can sign your browser in to their account with a code of theirs.
-  A verified App Link ([section 12](#12-app-links-opening-gateway-links-in-the-app))
-  would not depend on the browser for the hand-back; it is not used for this
-  yet because it needs per-gateway setup. The browser's own sign-in at the
+  The browser's own sign-in at the
   sign-in service stays signed in, as on the website; the app's **Sign out**
   makes the next sign-in ask for your credentials again.
 - JavaScript runs only for pages the WebView loads, and the native bridge the

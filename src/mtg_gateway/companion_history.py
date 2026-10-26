@@ -170,7 +170,7 @@ def add_history_routes(
         unfiltered = want == "all" and not search and not query["when"] and not query["offset"]
         copies_panel = (
             backup_copies_html(
-                copies, folder=s.archidekt_backup_folder, deck_id=deck_id, names={**seen, **current}, now=now
+                copies, folder=decks.backup_folder, deck_id=deck_id, names={**seen, **current}, now=now
             )
             if unfiltered
             else ""
@@ -230,8 +230,11 @@ def add_history_routes(
             f"<span class='ui-sub'>Newest first</span></div>"
         )
         list_html = (
-            ui.page_head("History" if not deck_id else "Deck history")
-            + f"<p class='ui-sub'>{_esc(PAGE_SUB_TEXT)} <a href='/proposals'>Proposals</a>.</p>"
+            ui.assistant_head(
+                "/history",
+                "History" if not deck_id else "Deck history",
+                sub_html=f"{_esc(PAGE_SUB_TEXT)} <a href='/proposals'>Proposals</a>.",
+            )
             + back
             + _history_widgets(sub, deck_id, copies, now=now)
             + trend
@@ -313,7 +316,7 @@ def add_history_routes(
             "clone",
             n_copies,
             unit="on Archidekt",
-            detail=f'In the folder "{s.archidekt_backup_folder}"',
+            detail=f'In the folder "{decks.backup_folder}"',
             # to the table, which is on the unfiltered page
             actions=[
                 ui.button_link("See them", "/history" + query_string({"deck_id": deck_id or ""}) + "#backups")
@@ -385,7 +388,7 @@ def add_history_routes(
     @server.custom_route("/history/reports/{rid}", methods=["GET"], include_in_schema=False)
     async def report_page(request: Request) -> Response:
         """One stored report as a page a person reads: the deck, the headline numbers of the goldfish
-        simulation with their confidence intervals, charts, what the simulation could not model,
+        simulation with their confidence intervals, charts, what the quick solo test leaves out,
         the validation verdict and the deck statistics; the service's raw text folded away."""
         sub, sid = browser_session(state, request)
         if not sub:

@@ -176,8 +176,8 @@ The assistant never changes a deck directly:
 4. Every step lands in the audit log. Any snapshot can be restored the same
    way.
 
-`MTG_WRITES_ENABLED=false` turns the last step off for everyone: proposals
-still work, nothing is ever applied.
+`MTG_WRITES_ENABLED=false` in the stack turns the last step off for everyone
+(it is `true` by default): proposals still work, nothing is ever applied.
 
 ## What works with it
 
@@ -273,7 +273,7 @@ For the exact devices and plans tested, see
   an **approval mode** (`src/mtg_gateway/modes.py`), set only on their own
   Account page in the browser, never over MCP or the API: `manual` (the
   default: ask every time), `semi` (the assistant may apply a low-risk edit
-  itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
+  itself: at most **Rows a small edit may have** (a Settings page row, 5 by default) review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
   value changes of at most four copies each, never a change to which cards
   are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a
@@ -287,8 +287,8 @@ For the exact devices and plans tested, see
   for the modes comes from `modes.py`.
   The mode is read by the member's id when an apply is attempted, so one
   member's choice never reaches another's proposals, decks or apps; the
-  operator can cap it with `MTG_APPROVAL_MODE_MAX` and set the mode of
-  members who have not chosen with `MTG_APPROVAL_MODE_DEFAULT`. Every apply
+  operator can cap it and set the mode of members who have not chosen on the
+  admin Settings page. Every apply
   still snapshots the deck first.
   The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
   `static/cards/proposal-card.html`): every `propose_*` tool and `get_proposal`
@@ -339,8 +339,8 @@ For the exact devices and plans tested, see
   proposal records and shows the app that made it; disconnecting an app
   rejects its pending proposals, and a member may hold at most 100 pending
   proposals.
-- **Archidekt load** is capped per member: `MTG_ARCHIDEKT_CALLS_PER_10_MIN`
-  calls (120 by default) and three at a time, so a looping assistant can't
+- **Archidekt load** is capped per member: 120 calls per 10 minutes by
+  default (a Settings page row) and three at a time, so a looping assistant can't
   hammer Archidekt or starve other members. Across everyone, requests go one
   at a time, at least a second apart and at most 30 a minute; 429s pause
   every request (an apply waits them out, up to 6 waits and 5 minutes in all,

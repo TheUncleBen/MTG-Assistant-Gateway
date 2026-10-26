@@ -21,7 +21,6 @@
 
     <string name="menu_scan">Scan with the app\'s camera</string>
     <string name="menu_reload">Reload</string>
-    <string name="menu_browser">Open in browser</string>
     <string name="menu_gateway">Change gateway</string>
     <string name="menu_update">Check for app updates</string>
     <string name="menu_paste">Open a copied link</string>
@@ -80,8 +79,8 @@
     <!-- A share or a copied link the app does not open. %1$s is the link's host (link_other_gateway, clip_other). -->
     <string name="link_other_gateway">Not opened: %1$s. Only gateway links and archidekt.com deck links open here.</string>
     <string name="link_discord_message">Discord shared the message, not the deck. Share the archidekt.com link itself.</string>
-    <string name="link_none_shared">No https link was shared. Use Open a copied link on the Account page\'s App card.</string>
-    <string name="link_file_shared">A file arrived, not a link. Use Open a copied link on the Account page\'s App card.</string>
+    <string name="link_none_shared">No https link was shared. Use Open a copied link on the Account page.</string>
+    <string name="link_file_shared">A file arrived, not a link. Use Open a copied link on the Account page.</string>
     <string name="clip_other">Not opened: %1$s. Only gateway links and archidekt.com deck links open here.</string>
     <string name="clip_none">No link on the clipboard. Copy an archidekt.com deck link or a gateway link first.</string>
 
@@ -124,4 +123,10 @@
         <item quantity="one">%d card</item>
         <item quantity="other">%d cards</item>
     </plurals>
+    <!-- The deck page's Share (DeckShare.kt): the sheet's title is the deck's name. -->
+    <string name="share_open_archidekt">Open on Archidekt</string>
+    <string name="share_copy_gateway">Copy gateway link</string>
+    <string name="share_copy_list">Copy deck list</string>
+    <string name="share_copied_gateway">Gateway link copied.</string>
+    <string name="share_copied_list">Deck list copied. EDHPlay and most sites take it as it is.</string>
 </resources>

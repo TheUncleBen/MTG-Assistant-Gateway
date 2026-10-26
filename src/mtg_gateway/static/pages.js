@@ -5,6 +5,10 @@
 //   ticked (the Delete my data box). Without scripts the tick box's `required` stops the form.
 (function () {
   "use strict";
+  // A link to a part of the account's cards from before they moved one row in (a summary email,
+  // an older app's notification: /account#summary) opens that part of Account details.
+  if (location.pathname === "/account" && location.hash.length > 1 && document.querySelector(".yhub"))
+    location.replace("/account/details" + location.hash);
   document.addEventListener("click", function (e) {
     var a = e.target && e.target.closest ? e.target.closest("[data-history-back]") : null;
     if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button) return;

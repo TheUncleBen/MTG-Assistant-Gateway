@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import prices
 from .decks import DeckError
 from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
-from .theme import display_name, render
+from .theme import render
 from .watchlist_page import WATCH_PAGE_CSS, Query, watchlist_page_html
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             main_class="ui-wide",
             head_extra=f"<style>{WATCH_PAGE_CSS}</style><script src='/static/cardview.js' defer></script>"
             "<script src='/static/watchlist.js' defer></script>",
-            user=display_name(user),
+            sub=sub,
         )
 
     @server.custom_route("/watchlist", methods=["GET"], include_in_schema=False)

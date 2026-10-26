@@ -33,14 +33,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 KEY = os.environ.get("PUSH_TEST_KEY", "")
 KEEPALIVE = float(os.environ.get("PUSH_TEST_KEEPALIVE", "5"))
 STATIC = os.environ.get("PUSH_TEST_STATIC", "")
-# The App section of the gateway's account menu (theme.py), as the app's buttons
+# The App rows of the gateway's Account page (account_hub.py), as the app's buttons
 PAGE = (
     "<!doctype html><meta name='viewport' content='width=device-width'><title>Test gateway</title>"
     "<style>button{display:block;font-size:20px;margin:16px;padding:12px}[hidden]{display:none}</style>"
     "<p>Test gateway.</p>"
     "<button type='button' data-native='openCamera'>Scan with the app's camera</button>"
     "<button type='button' data-native='reload'>Reload</button>"
-    "<button type='button' data-native='openInBrowser'>Open in browser</button>"
     "<button type='button' data-native='changeGateway'>Change gateway</button>"
     "<script src='/static/feedback.js'></script>"
     # Reports what it shows, and clicks a button when the test asks (POST /control/press)

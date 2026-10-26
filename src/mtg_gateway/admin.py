@@ -35,7 +35,6 @@ from .pages import (
     login_redirect,
     read_limited,
 )
-from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long, developer_name_warning
 from .theme import display_name, icon, plural, render
 
 if TYPE_CHECKING:
@@ -112,7 +111,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=True,
-            user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
+            sub=sid_sub,
             head_extra=ADMIN_HEAD + head_extra,
             heading=False,
             main_class="ui-wide",
@@ -673,8 +672,8 @@ ADMIN_CSS = """
 .ao .ui-row .lab .muted{font-weight:400;margin-left:.35rem}
 .ao .ui-card .notice{margin:.75rem 0 0}
 .ao .ui-card details{margin:.5rem 0 0}
-.ao .ui-card details > summary{display:flex;align-items:center;gap:.4rem;min-height:44px;cursor:pointer;
-  font-weight:700;list-style:none}
+.ao .ui-card details > summary:not(.fold-btn){display:flex;align-items:center;gap:.4rem;min-height:44px;
+  cursor:pointer;font-weight:700;list-style:none}
 .ao .ui-card details > summary::-webkit-details-marker{display:none}
 .ao .ui-card details > summary svg.i{width:18px;height:18px;flex:none}
 .ao .ui-card details[open] > summary svg.i{transform:rotate(180deg)}
@@ -976,7 +975,6 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         )
         + _cleanup_warning(sysd["member_cleanup"])
         + _went_back_notice(sysd.get("before_upgrade"))
-        + _chatgpt_name_warning(state.settings)
         + "</section>"
     )
     rows = []
@@ -1056,36 +1054,6 @@ def _cleanup_warning(c: dict[str, Any]) -> str:
     return ui.notice(text, "warn")
 
 
-def _chatgpt_name_warning(settings: Any) -> str:
-    """A notice when the ChatGPT connector name (MTG_CHATGPT_NAME, else MTG_SERVER_NAME) is over
-    the limit ChatGPT puts on a plugin file's name."""
-    out = ""
-    long = chatgpt_name_too_long(settings.server_name, getattr(settings, "chatgpt_name", None))
-    if long:
-        text = (
-            f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
-            f"file whose name is over {CHATGPT_NAME_MAX} characters. "
-        )
-        if "chatgpt_name" in getattr(settings, "env_set", ()):
-            # set in the stack: the Settings page row is locked, so the fix is in the stack
-            text += (
-                f"Change MTG_CHATGPT_NAME in your stack to a name of {CHATGPT_NAME_MAX} characters or "
-                "fewer, then redeploy."
-            )
-            out += ui.notice(text, "warn")
-        else:
-            text += f"Set a name of {CHATGPT_NAME_MAX} characters or fewer under “Name in ChatGPT” on the "
-            out += ui.notice(
-                f"{html.escape(text)}<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.",
-                "warn",
-                html=True,
-            )
-    # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened
-    if cut := developer_name_warning(settings.server_name):
-        out += ui.notice(cut, "warn")
-    return out
-
-
 def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
@@ -1113,7 +1081,7 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     )
     tag = html.escape(found["version"]) if found else "&lt;new version&gt;"
     steps = (
-        f"<details id='how-to-update'><summary>{icon('chev')}How to update</summary>"
+        f"<details id='how-to-update'><summary class='fold-btn'>How to update</summary>"
         "<p>The gateway never updates itself. An update is a fresh install on top of your data "
         "(docs/UPGRADING.md has every step): take the newest stack file and the newest example "
         "variables file, copy your own values into the example, and deploy. Your data, backups and "
@@ -1181,13 +1149,11 @@ def _cleanup_text(c: dict[str, Any], *, now: float | None = None) -> str:
                 return (
                     f"Off: {why}. The likely cause: the mtg_authentik_api_token secret isn't attached "
                     "to the gateway, as with a stack file from before 0.7.37. Use the current stack "
-                    "file, check that MTG_AUTHENTIK_API_TOKEN_FILE is "
-                    f"/run/secrets/mtg_authentik_api_token or not set, then redeploy ({setup}, steps 6 "
-                    "and 7)."
+                    f"file, then redeploy ({setup}, steps 6 and 7)."
                 )
             return (
-                f"Off: {why}. Check the mtg_authentik_api_token Docker secret and "
-                f"MTG_AUTHENTIK_API_TOKEN_FILE, then redeploy ({setup}, steps 6 and 7)."
+                f"Off: {why}. Check the mtg_authentik_api_token Docker secret, then redeploy "
+                f"({setup}, steps 6 and 7)."
             )
         if cause == "no-group":
             return "Off: it needs MTG_REQUIRED_GROUP. Set it in the stack and redeploy."

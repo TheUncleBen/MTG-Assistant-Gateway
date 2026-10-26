@@ -1,0 +1,11 @@
+# Test-only additions to deploy/portainer-stack.yml (run.sh deploys both files together):
+# the locally built images, and the gateway talking to the Archidekt mock, never archidekt.com.
+version: "3.8"
+
+services:
+  mtg-assistant-gateway:
+    image: ${MTG_IMAGE}:${MTG_TAG}
+    environment:
+      MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE}
+  mtg-assistant-mysticforge:
+    image: ${MF_IMAGE}:${MF_TAG}

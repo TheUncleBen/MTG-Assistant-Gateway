@@ -68,8 +68,8 @@ curl -fsSL "$base/.env.example" -o .env
 ```
 
 **Now edit `.env`** and copy your values in from `.env.old`, as in Portainer step 1 (in
-particular `MTG_DATA_DIR`, `MTG_BACKUP_DIR` and `MTG_SECRETS_DIR` if you changed them, so the
-gateway finds your data and secrets). Then:
+particular `MTG_DATA_DIR` and `MTG_BACKUP_DIR` if you changed them, so the gateway finds your
+data). The secret files are always in `./secrets/` next to `docker-compose.yml`. Then:
 
 ```bash
 ./make-secrets.sh          # adds only a secret file that is missing
@@ -91,7 +91,8 @@ upgrading. When it does, the gateway:
    or is cut off leaves the database exactly as it was;
 4. keeps the newest 3 copies and deletes older ones. A start that keeps failing saves its copy
    once, not on every try. Every copy is also deleted once it is older than
-   `MTG_BACKUP_KEEP_DAYS` (14 days unless you changed it), as the nightly backups are.
+   "Days of nightly backups kept" on the Settings page (14 unless you changed it), as the
+   nightly backups are.
 
 If it can't save the copy (for example the disk is full or the folder can't be written), it
 doesn't upgrade, changes nothing and doesn't start. Its log says why, with a line starting
@@ -127,7 +128,8 @@ the older one finds its copy in `before-upgrade` and puts it back by itself when
 
 - First it saves the newer database in the same folder as a set-aside copy,
   `mtg-gateway-set-aside-...sqlite`, so nothing is lost. The newest 3 set-aside copies are kept,
-  each for at most `MTG_BACKUP_KEEP_DAYS`, like the before-upgrade copies.
+  each for at most the Settings page's "Days of nightly backups kept", like the before-upgrade
+  copies.
 - Members disabled, Archidekt sessions deleted and members' **Delete my data** since the upgrade
   stay so, and each member keeps the Archidekt link and phone connection they have now (going
   back to 0.7.39 or newer). Every other change made since the upgrade (proposals, snapshots,
@@ -136,10 +138,10 @@ the older one finds its copy in `before-upgrade` and puts it back by itself when
 - It ends every sign-in, so everyone signs in once more, and the admin page says what happened.
 
 If there is no copy for it, it doesn't start, and its log says so: run the newer version again.
-That is also the case once the copy was older than `MTG_BACKUP_KEEP_DAYS` and has been deleted,
-so going back this way works only within that many days of the upgrade (the nightly backups from
-before the upgrade are gone by then too). To keep the way back open longer, raise
-`MTG_BACKUP_KEEP_DAYS` before you update.
+That is also the case once the copy was older than "Days of nightly backups kept" (Settings page)
+and has been deleted, so going back this way works only within that many days of the upgrade (the
+nightly backups from before the upgrade are gone by then too). To keep the way back open longer,
+raise it before you update.
 
 **To 0.7.36 or older:** these versions don't go back by themselves. A version that didn't change
 the database needs nothing more than the `MTG_TAG` change. If the newer version upgraded the
@@ -180,9 +182,6 @@ upgrade, stop the gateway as above, and with the same `sudo -u '#1000' sh -c '..
 The update steps above bring every stack, variable and secret change up to now. A few changes
 reach past the stack, so if your old version is older than the one named, also:
 
-- **0.7.29 or older:** settings you keep in your variables lock them on the gateway's Settings
-  page (greyed out with that value). Leave out of `mtg.env` (or `.env`) any setting you'd rather
-  change on the page.
 - **0.7.29 or older:** members' notifications come in the gateway's Android app, not the ntfy
   app. Each member who wants them ticks **Send me notifications** on their Account page in the
   app and presses **Save notifications**. Members on an app older than 0.7.12 install the new app
@@ -194,13 +193,15 @@ reach past the stack, so if your old version is older than the one named, also:
   `mtg_authentik_api_token` secret, so you no longer remove the `# ` from its lines. The secrets
   step above (Portainer step 2) creates it with the word `off` if you don't have it; with Compose,
   `./make-secrets.sh` does.
-- **0.7.39 or older:** Forge is on in the example variables files. If you take the new example
-  file and want Forge off, set both `FORGE_REPLICAS=0` and an empty `MTG_FORGE_URL=` (Compose: put
-  a `#` in front of `COMPOSE_PROFILES=forge` and set an empty `MTG_FORGE_URL=`). Turning Forge off
-  without emptying `MTG_FORGE_URL` leaves the gateway asking a Forge that isn't there; emptying it
-  alone leaves Forge running unused. A variables file made from an earlier example already has
-  both lines and keeps Forge as it was; one with no `MTG_FORGE_URL` line at all now asks for Forge.
-  Everyone on a stack: `FORGE_NODE` now needs a node name, even with Forge off.
+- **0.7.39 or older:** on a stack, `FORGE_NODE` needs a node name, even with Forge off.
+- **0.7.44 or older:** most tuning settings are now only on the Settings page, and a variable
+  left in your file for one of them does nothing. Before you update, note any you set (for
+  example `MTG_FORGE_GAMES` or `MTG_LOG_LEVEL`) and set them again on the page afterwards; the
+  [0.7.45 notes](../CHANGELOG.md) list them. Every feature is on unless your file turns it off:
+  deck edits reach Archidekt unless `MTG_WRITES_ENABLED=false`, and watchlists are on unless
+  `MTG_WATCHLISTS_ENABLED=false`. Forge follows `FORGE_REPLICAS` alone (`0` = off), with Compose
+  too: if you had turned Forge off with `COMPOSE_PROFILES`, set `FORGE_REPLICAS=0`, or it comes
+  back on.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.

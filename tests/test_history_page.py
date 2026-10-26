@@ -437,7 +437,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             "class='charts rv-charts'",
             "<polyline class='s1'",
             "<rect class='col'",
-            "What the solo test could not model",
+            "What the quick solo test leaves out",
             "32 of 98 cards (33% of the deck)",
             "Validation</h2><span class='ui-lbl orange'>",
             "class='wdg alert'",

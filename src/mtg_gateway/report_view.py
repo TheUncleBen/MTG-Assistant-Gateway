@@ -6,7 +6,7 @@ PASSED" or "ISSUES FOUND" with the problems under it. This module reads those te
 data (never raising on odd or partial input: a report of a failed run is still a page) and
 draws the page from that data: summary tiles with their confidence intervals, small inline-SVG
 charts coloured by the theme (no script), a plain-language account of what the simulation
-could not model, the validation verdict, and the raw output folded away. The same data makes
+leaves out, the validation verdict, and the raw output folded away. The same data makes
 the Markdown and the self-contained HTML exports.
 """
 
@@ -44,7 +44,10 @@ APPROXIMATIONS = {
     "conditional-tapland": "Lands that sometimes enter tapped enter untapped",
     "dfc-back-face": "Two-faced cards are played as their front face only",
     "lifelink": "Life from lifelink is not counted",
-    "unused-option": "Optional costs and other ways to cast (kicker, cycling, flashback) are not used",
+    "unused-option": "Optional costs and other ways to cast (kicker, cycling, miracle, convoke) are not used",
+    "graveyard-shuffle": "A graveyard shuffled back into the library is skipped",
+    "discount-ignored": "Discounts on an ability are not counted",
+    "land-from-hand": "A land put from your hand comes from the library, tapped",
     "library-order": "Scry and surveil do not change the order of the library",
     "no-deaths": "Nothing dies in a solo test, so death triggers never happen",
     "attack-trigger": "Attack triggers happen whenever you attack",
@@ -75,9 +78,24 @@ def front_face(name: Any) -> str:
 UNDERPERFORMS = re.compile(r"\s*\(only this group supports 'the sim agrees this card underperforms'\)")
 
 
+# The research service's validation says its cards were "verified" on Scryfall; the gateway's
+# wording never says "verified" (mf_proxy rewrites new answers, plain_words stored ones).
+VERIFIED_WORDS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(cards?) verified on Scryfall\b"), r"\1 found on Scryfall"),
+    (re.compile(r"\b(\d+ cards?) verified\."), r"\1 found on Scryfall."),
+)
+
+
+def found_not_verified(text: str) -> str:
+    for pattern, replacement in VERIFIED_WORDS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def plain_words(text: str) -> str:
     """The simulator's text without the assistant tool names it mentions (``goldfish_report``,
     ``goldfish_annotate``): the page speaks to a person, not to an assistant."""
+    text = found_not_verified(text)
     text = re.sub(r'Full report: goldfish_report\("([^"]*)"\)', r"Run id: \1", text)
     text = re.sub(r"\s*\(candidates for annotation; see goldfish_annotate\)", " (could be annotated)", text)
     text = re.sub(r"goldfish_report\((\"?)([^)\"]*)\1\)", r"run \2", text)
@@ -733,6 +751,7 @@ def _names(cards: list[dict[str, Any]], *, menu: bool = False) -> str:
     for c in cards:
         copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
         drawn = f" <i>drawn {_pct(c['drawn'])}</i>" if c.get("drawn") is not None else ""
+        drawn = " <i>commander</i>" if c.get("commander") else drawn
         name = front_face(c["name"])
         shown = (
             f"<button type='button' class='cardlink' data-card='{_esc(name)}'>{_esc(name)}</button>"
@@ -787,7 +806,7 @@ def coverage_text(g: dict[str, Any]) -> str:
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
         f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
-        "cards played with their effect and those left out on purpose. The rest are listed below."
+        "cards played with their effect and those that need opponents. The rest are listed below."
     )
 
 
@@ -802,11 +821,34 @@ UNMODELED_TEXT = (
     "exact text, in a form the solo test can play. Many cards need things the solo test does not "
     "model, such as opponents to interact with."
 )
+# Said only when the report has a finished Forge solo test (Forge plays nearly every card).
+UNMODELED_FORGE_TEXT = (
+    "Forge's full-rules solo test above played them with their real rules, except any it lists under "
+    "“Cards Forge left out”."
+)
+# The other groups' explanations, shared by the signed-in page and the export.
+OUT_OF_SCOPE_TEXT = (
+    "The simulator plays against opponents who do nothing, so removal, board wipes, counterspells and "
+    "protection have nothing to act on. Spells that only do that stayed in hand. Creatures and other "
+    "permanents among them were still cast, and played the parts of their text the simulator can read."
+)
+LOW_IMPACT_HEADING = "Played with their effect but never mattered"
+LOW_IMPACT_TEXT = (
+    "These cards were understood, drawn and played, and nothing they do changed a solo test game. A "
+    "solo test game has no opponent and no interaction, so this says nothing about how the card does at "
+    "a real table."
+)
+APPROX_HEADING = "Shortcuts the model takes"
+APPROX_TEXT = (
+    "Simplifications applied to these cards; they play a little better or worse than in a real game."
+)
 UNMODELED_SAVED_TEXT = (
     "The gateway can keep up to 200 of these descriptions for you once they pass its check, and your "
     "later solo tests then play those cards with them. Your saved descriptions play only in your own "
     "solo tests."
 )
+OUT_OF_SCOPE_HEADING = "Needs opponents"
+MODEL_HEADING = "What the quick solo test leaves out"
 KEPT_HEADING = "Played with saved card descriptions"
 KEPT_TEXT = (
     "Your assistant described each of these cards in a form the solo test can play, and the gateway "
@@ -937,16 +979,13 @@ ASK_LABEL = "Copy a request for your assistant"
 
 
 def _ask_context(honesty: dict[str, Any] | None) -> str:
-    """The request's closing context: the solo test's other groups (left out on purpose, played
+    """The request's closing context: the solo test's other groups (need opponents, played
     but never mattered, shortcuts), so the assistant can say where any of those cards matters."""
     h = honesty if isinstance(honesty, dict) else {}
     parts: list[str] = []
     left = [front_face(c["name"]) for grp in h.get("out_of_scope") or [] for c in grp.get("cards") or []]
     if left:
-        parts.append(
-            "These cards were left out on purpose, because the solo test has no opponent for them to act "
-            f"on: {', '.join(left)}."
-        )
+        parts.append(f"These cards need opponents, which the solo test does not have: {', '.join(left)}.")
     low = [front_face(n) for n in h.get("low_impact") or []]
     if low:
         parts.append(f"These were played with their effect but never mattered: {', '.join(low)}.")
@@ -1025,7 +1064,7 @@ def ask_html(
 
 # The 300 automatic games are the "solo test"; "Goldfish" is the page where the member
 # plays a hand. Forge's games always seat bundled precons (forge.start_run).
-SOLO_NAME = "Solo test"
+SOLO_NAME = "Quick solo test"
 FORGE_HEADING = "Forge games (against precons)"
 
 
@@ -1038,13 +1077,15 @@ def solo_heading(g: dict[str, Any] | None) -> str:
 
 
 def honesty_groups(
-    g: dict[str, Any], ask: str = "", *, menu: bool = False
+    g: dict[str, Any], ask: str = "", *, menu: bool = False, forge_full: bool = False
 ) -> list[tuple[str, str, str, str]]:
-    """The groups of the "what the simulation could not model" panel, in order, as (key, heading,
+    """The groups of the "what the quick solo test leaves out" panel, in order, as (key, heading,
     count words, body): the cards played without their effect (with ``ask`` under their names),
-    those left out on purpose, those played but never mattered, and the model's shortcuts. The
-    export draws them as headed blocks (honesty_html), the signed-in page as folds, with the card
-    menu on every name (``menu``)."""
+    those that need opponents, those played but never mattered, and the model's shortcuts. The
+    export draws them as headed blocks (honesty_html); the signed-in page has its own inset lists
+    (report_page.model_section_html), with the card
+    menu on every name (``menu``). ``forge_full``: the report has a finished Forge solo test,
+    which plays the cards the quick test has no model for."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
     out: list[tuple[str, str, str, str]] = []
@@ -1058,6 +1099,7 @@ def honesty_groups(
                 UNMODELED_HEADING,
                 _share(_copies(unrec), size),
                 f"<p>{UNMODELED_TEXT}"
+                + (f" {UNMODELED_FORGE_TEXT}" if forge_full else "")
                 + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else "")
                 + "</p>"
                 + _names(unrec, menu=menu)
@@ -1075,12 +1117,9 @@ def honesty_groups(
         out.append(
             (
                 "",
-                "Left out on purpose",
+                OUT_OF_SCOPE_HEADING,
                 _share(total, size),
-                "<p>The simulator plays against opponents who do nothing, so removal, board wipes, "
-                "counterspells and protection have nothing to act on. Spells that only do that stayed in "
-                "hand. Creatures and other permanents among them were still cast, and played the parts of "
-                "their text the simulator can read.</p>" + groups,
+                f"<p>{OUT_OF_SCOPE_TEXT}</p>" + groups,
             )
         )
     low = h.get("low_impact") or []
@@ -1088,11 +1127,9 @@ def honesty_groups(
         out.append(
             (
                 "",
-                "Played with their effect but never mattered",
+                LOW_IMPACT_HEADING,
                 _share(len(low), size),
-                "<p>These cards were understood, drawn and played, and nothing they do changed a solo test "
-                "game. A solo test game has no opponent and no interaction, so this says nothing about how "
-                "the card does at a real table.</p>" + _names([{"name": n} for n in low], menu=menu),
+                f"<p>{LOW_IMPACT_TEXT}</p>" + _names([{"name": n} for n in low], menu=menu),
             )
         )
     approx = [a for a in h.get("approximations") or [] if a.get("cards")]
@@ -1101,24 +1138,29 @@ def honesty_groups(
         out.append(
             (
                 "approx",
-                "Shortcuts the model takes",
+                APPROX_HEADING,
                 str(len(approx)),
-                "<p>Simplifications applied to these cards; they play a little better or worse than in a "
-                f"real game.</p><dl class='meta approx'>{rows}</dl>",
+                f"<p>{APPROX_TEXT}</p><dl class='meta approx'>{rows}</dl>",
             )
         )
     return out
 
 
-def honesty_html(g: dict[str, Any], ask: str = "") -> str:
-    """The "what the simulation could not model" panel body, or '' when there is nothing to say.
+def forge_solo_done(r: dict[str, Any]) -> bool:
+    """The report has a finished Forge solo test, which plays the cards the quick test cannot."""
+    fs = r.get("forge_solo")
+    return isinstance(fs, dict) and fs.get("state") == "done"
+
+
+def honesty_html(g: dict[str, Any], ask: str = "", *, forge_full: bool = False) -> str:
+    """The "what the quick solo test leaves out" panel body, or '' when there is nothing to say.
     ``ask`` is the copy-a-request block (ask_html) the signed-in page puts under the cards played
     without their effect."""
     h = g.get("honesty") or {}
     parts: list[str] = []
     if (h.get("unrecognized") or h.get("out_of_scope")) and coverage_text(g):
         parts.append(f"<p class='b coverage'>{_esc(coverage_text(g))}</p>")
-    for key, heading, count, body in honesty_groups(g, ask):
+    for key, heading, count, body in honesty_groups(g, ask, forge_full=forge_full):
         cls = "group unmodeled" if key == "unmodeled" else "group"
         # the shortcuts' count is the page's fold summary only
         small = f" <small>{_esc(count)}</small>" if count and key != "approx" else ""
@@ -1345,7 +1387,8 @@ def forge_results_html(f: dict[str, Any]) -> str:
             for g in listed
         )
         games_html = (
-            f"<details class='games'><summary>Each game ({len(listed)})</summary><div class='scroll'>"
+            f"<details class='games'><summary class='fold-btn'>Each game ({len(listed)})</summary>"
+            "<div class='scroll'>"
             "<table class='qty stack'><thead><tr><th scope='col' class='num'>Game</th>"
             "<th scope='col'>Winner</th>"
             "<th scope='col' class='num'>Turn</th><th scope='col' class='num'>Time</th>"
@@ -1498,6 +1541,8 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
             parts.append(
                 f"<p class='notice{' warn' if state not in ('queued', 'running') else ''}'>{_esc(msg)}</p>"
             )
+    elif stopped:  # done, with games Forge gave no result for
+        parts.append(f"<p class='notice warn'>{_esc(stopped)}</p>")
     parts.append(forge_results_html(f))
     lines = forge_lines(f, results=False)
     if lines:
@@ -1620,8 +1665,21 @@ def forge_solo_lines(f: dict[str, Any]) -> list[str]:
 
 
 def forge_stopped_text(f: dict[str, Any]) -> str:
-    """The sentence for a run that ended without "done" after playing some games, else ""."""
+    """The sentence for a run that ended without "done" after playing some games, or that ended
+    "done" with games Forge gave no result for, else ""."""
     stop = _forge_stop(f)
+    missing = f.get("no_result_games")
+    if stop is None and f.get("state") == "done" and isinstance(missing, list) and missing:
+        total = f.get("games_requested")
+        played = (f.get("result") or {}).get("games") if isinstance(f.get("result"), dict) else None
+        named = ", ".join(str(g) for g in missing[:-1]) + (" and " if len(missing) > 1 else "")
+        named += str(missing[-1])
+        which = f"game {named}" if len(missing) == 1 else f"games {named}"
+        did = "the one game that did" if played == 1 else f"the {played} games that did"
+        return (
+            f"Forge finished, but {which} of the {total} gave no result, so the results below count "
+            f"only {did}."
+        )
     if stop is None:
         return ""
     played, total = stop
@@ -1746,6 +1804,18 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _mark_commanders(g: dict[str, Any], names: list[Any]) -> None:
+    """Mark the commanders among the honesty groups' cards: a commander starts in the command zone,
+    so it is never drawn, and its row says "commander" instead of "drawn 0%"."""
+    cmd = {front_face(n).casefold() for n in names if isinstance(n, str) and n}
+    h = g.get("honesty") or {}
+    aside = [c for grp in h.get("out_of_scope") or [] for c in grp["cards"]]
+    cards = list(h.get("unrecognized") or []) + aside
+    for c in cards:
+        if isinstance(c, dict) and front_face(c.get("name")).casefold() in cmd:
+            c["commander"] = True
+
+
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     """Everything the page, the Markdown and the HTML export share, computed once."""
     stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
@@ -1756,6 +1826,8 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     # deck is not sent to it, and one an older report sent is not shown.
     v = None if constructed else parse_validation(r.get("validation"))
     commander = (g or {}).get("commander") or ((stats.get("commanders") or [None])[0] if stats else None)
+    if g:
+        _mark_commanders(g, [commander, *(stats.get("commanders") or [])])
     return {
         "goldfish": g,
         "validation": v,
@@ -1763,7 +1835,7 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
         "commander": commander,
         "tiles": tiles_for(g) if g else [],
         "charts": charts_for(g) if g else [],
-        "honesty": honesty_html(g) if g else "",
+        "honesty": honesty_html(g, forge_full=forge_solo_done(r)) if g else "",
         "unmodeled": ((g or {}).get("honesty") or {}).get("unrecognized") or [],
         "triggers": _triggers_html(g) if g else "",
     }
@@ -1855,7 +1927,7 @@ def report_body_html(
         summary = ""
         if g.get("summary"):
             summary = (
-                "<details class='disclosure'><summary>The simulator's own summary</summary>"
+                "<details class='disclosure'><summary class='fold-btn'>The simulator's own summary</summary>"
                 "<ul class='sumlines'>"
                 + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
                 + "</ul></details>"
@@ -1876,10 +1948,10 @@ def report_body_html(
             + "</div>"
         )
         ask = "" if standalone else ask_html(r, s["unmodeled"], (g or {}).get("honesty"))
-        honesty = s["honesty"] if standalone else honesty_html(g, ask)
+        honesty = s["honesty"] if standalone else honesty_html(g, ask, forge_full=forge_solo_done(r))
         if honesty:
             body += (
-                "<div class='card honesty'><h2>What the solo test could not model</h2>"
+                f"<div class='card honesty'><h2>{MODEL_HEADING}</h2>"
                 "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
                 "here, the less the solo test says about it.</p>" + honesty + "</div>"
             )
@@ -1898,9 +1970,8 @@ def report_body_html(
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:
         body += (
-            "<details class='card raw disclosure'><summary>Raw output from the research service</summary>"
-            + raw
-            + "</details>"
+            "<details class='card raw disclosure'><summary class='fold-btn'>Raw output from the research "
+            "service</summary>" + raw + "</details>"
         )
     return f"<div class='report'>{body}</div>"
 
@@ -1953,6 +2024,8 @@ def report_markdown(r: dict[str, Any]) -> str:
                 forge_stopped_text(forge) or forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")
             )
             lines += [str(text), ""]
+        elif forge_stopped_text(forge):
+            lines += [forge_stopped_text(forge), ""]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
@@ -1965,25 +2038,32 @@ def report_markdown(r: dict[str, Any]) -> str:
     if g:
         h = g["honesty"]
         size = g.get("deck_size")
-        if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
-            lines += ["## What the solo test could not model", ""]
+        approx = [a for a in h.get("approximations") or [] if a.get("cards")]
+        if h["unrecognized"] or h["out_of_scope"] or h["low_impact"] or approx:
+            lines += [f"## {MODEL_HEADING}", ""]
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         if h["unrecognized"]:
             lines.append(f"{UNMODELED_HEADING}: {_share(_copies(h['unrecognized']), size)}.")
+            lines.append(UNMODELED_TEXT)
             lines.append(", ".join(_md_name(c) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
-            lines.append(f"Left out on purpose: {_share(total, size)}.")
+            lines.append(f"{OUT_OF_SCOPE_HEADING}: {_share(total, size)}.")
+            lines.append(OUT_OF_SCOPE_TEXT)
             for grp in h["out_of_scope"]:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(
-                f"Played with their effect but never mattered: {_share(len(h['low_impact']), size)}."
-            )
+            lines.append(f"{LOW_IMPACT_HEADING}: {_share(len(h['low_impact']), size)}.")
+            lines.append(LOW_IMPACT_TEXT)
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
+            lines.append("")
+        if approx:
+            lines.append(f"{APPROX_HEADING}: {len(approx)}.")
+            lines.append(APPROX_TEXT)
+            lines += [f"- {a['label']}: {a['cards']}" for a in approx]
             lines.append("")
     if s["constructed"]:
         lines += ["## Validation", "", CONSTRUCTED_VALIDATION, ""]
@@ -2132,7 +2212,7 @@ REPORT_CSS = """
 .report .forge-results .ended li:first-child{border-top:0}
 .report .forge-results .ended b{font-variant-numeric:tabular-nums}
 .report .forge-results details.games{margin-top:.75rem}
-.report .forge-results details.games > summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+
 /* phones: each row of a results table becomes a small block, every value with its column's name */
 @media (max-width:600px){
   .report .forge-results table.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;

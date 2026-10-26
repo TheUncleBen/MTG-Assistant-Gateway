@@ -7,6 +7,181 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.45] - 2026-10-26
+
+Shorter stack and example variables files with every feature on by default, the tuning settings on
+the Settings page only, a new Settings row for the Archidekt backup folder, the Claude logo beside
+Claude's connection, an assistant reading the same Forge seed the report page shows, Forge's
+load problems leaving out Java's own warnings, a solo test shorter than five turns no longer talking
+about turn 5, the research service having the current rules from the moment it starts, signing in
+to the Android app coming back to the app by itself, and faster pages and deck deletes. The
+navigation is simpler too: four places (Home, Decks, Binder, Assistant) and More, a settings-style
+Account page behind your picture, and a tidier deck page.
+
+### Upgrade notes
+- **Start from the new stack file and example variables file**, as in
+  [docs/UPGRADING.md](docs/UPGRADING.md), and copy your values in: the address and sign-in lines,
+  the nodes, folders, `PUID`, `PGID`, the network, `MTG_TAG`, and any security or
+  identity-provider line you changed. The new files name the exact research service, Forge and
+  ntfy images and their limits, so there is nothing to change for those.
+- **These are now only on the Settings page** (`/admin/settings`). A line left in your variables
+  for one of them does nothing, so set any you had changed again on the page after the update:
+  `MTG_SERVER_NAME`, `MTG_LOG_LEVEL`, `MTG_APPROVAL_MODE_DEFAULT`, `MTG_APPROVAL_MODE_MAX`,
+  `MTG_AUTO_APPLY_MAX_ROWS`, `MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`,
+  `MTG_ARCHIDEKT_CALLS_PER_10_MIN`, `MTG_ARCHIDEKT_MIN_INTERVAL`, `MTG_ARCHIDEKT_MAX_PER_MINUTE`,
+  `MTG_ARCHIDEKT_RETRIES`, `MTG_ARCHIDEKT_BACKOFF_BASE`, `MTG_ARCHIDEKT_CACHE_SECONDS`,
+  `MTG_ARCHIDEKT_CARD_CACHE_SECONDS`, `MTG_ARCHIDEKT_BACKUP_COPIES`,
+  `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_ARCHIDEKT_BACKUP_FOLDER`, `MTG_SNAPSHOTS_PER_DECK`,
+  `MTG_BACKUP_HOUR_UTC`, `MTG_BACKUP_KEEP_DAYS`, `MTG_FORGE_GAMES`, `MTG_FORGE_PARALLEL_GAMES`,
+  `MTG_WATCH_MAX_CARDS`, `MTG_WATCH_MAX_DECKS`, `MTG_PRICE_HISTORY_DAYS`, `MTG_PRICE_HOUR_UTC`,
+  `MTG_SCRYFALL_LOOKUP_INTERVAL` and every `MTG_SCAN_*` setting except `MTG_SCAN_ART_ENABLED`.
+- **Removed:** `MTG_CHATGPT_NAME` (ChatGPT now shows the gateway name), `MTG_AUTHENTIK_API_URL`
+  (the clean-up uses the issuer's address), `MTG_ALLOWED_HOSTS` (worked out from the public URL),
+  `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT`, `MTG_PLUGIN_DIR`, `MTG_APP_DIR`,
+  `MTG_ANDROID_ASSETLINKS`, `MTG_ANDROID_PACKAGE`, `MTG_IMAGE`, `MF_IMAGE`, `MF_TAG`, `MF_NODE`
+  (the research service may run on any node), `MF_MEMORY_LIMIT`, `FORGE_IMAGE`, `FORGE_TAG`,
+  `FORGE_XMX`, `FORGE_MAX_METASPACE`, `FORGE_OOM_SCORE_ADJ`, `FORGE_GAME_SECONDS`,
+  `FORGE_MAX_GAMES`, `FORGE_MAX_PARALLEL` (Forge works out games at once from its memory and CPU
+  limits), `NTFY_IMAGE`, `NTFY_MEMORY_LIMIT`, `COMPOSE_PROFILES`,
+  `COMPOSE_PROJECT_NAME`, `CADDYFILE` and `MTG_SECRETS_DIR`. With Compose, the Caddyfile stays at
+  `deploy/proxy/caddy/Caddyfile` and the secret files in `./secrets/`. `MTG_FORGE_URL` is now a
+  fixed line in the stack files.
+- **Every feature is on unless you turn it off.** Deck edits now reach Archidekt unless
+  `MTG_WRITES_ENABLED=false`, and watchlists are on unless `MTG_WATCHLISTS_ENABLED=false`.
+  `MTG_ARCHIDEKT_BACKUPS`, `MTG_APPLY_IN_CHAT`, `MTG_SCAN_ART_ENABLED`, `MTG_UPDATE_CHECK` and
+  `MTG_DECK_SYNC_MINUTES` work the same way: empty means on and changeable on the Settings page,
+  and `false` (or `0` for the deck check) turns it off and locks its row.
+- **Forge follows `FORGE_REPLICAS` alone** (`1` on, `0` off), with Compose too. If you had turned
+  Forge off with `COMPOSE_PROFILES`, set `FORGE_REPLICAS=0`, or Forge comes back on.
+- **Approval rules set in your variables.** If you capped what members may choose with
+  `MTG_APPROVAL_MODE_MAX`, or changed `MTG_APPROVAL_MODE_DEFAULT`, `MTG_AUTO_APPLY_MAX_ROWS` or
+  `MTG_AUTO_BIG_EDIT_ROWS`, set the same values on the Settings page right after the update and
+  before members use their assistants: until then the defaults apply (members may choose any mode),
+  and deck edits now reach Archidekt by default.
+- **Backup folder.** The default name is now "MTG Gateway Backups". A member who already has an
+  "MTG Gateway backups" folder on Archidekt keeps using it (the name is matched whatever its
+  capitals); new members get "MTG Gateway Backups". The new Settings row "Backup folder on
+  Archidekt" changes the name.
+- No database change, so this update saves no before-upgrade copy. Going back to 0.7.44 needs its
+  stack file and example variables file, with your values copied back in.
+- No new secrets. The two `MTG_ANDROID_*` lines are gone because the gateway now takes the Android
+  app's package ID and signing certificate from the app it ships.
+- The Android app's automatic sign-in return needs this version of the app as well as of the
+  gateway: the app offers the update itself (or download it from the gateway's Android app page).
+- **Account details moved one step in.** Your picture now opens the Account page; the cards that
+  were on it (approval mode, Archidekt, notifications, connected apps, your data) are under
+  **Account details** (`/account/details`). Old `/account` links with a setting or a `#` section
+  still open Account details, so bookmarks and notification links keep working.
+
+### Changed
+- **Simpler navigation.** The top bar, the phone's tabs and the Fold's rail show the same four
+  places, Home, Decks, Binder (your collection) and Assistant, plus More with Search, Precons, Scan,
+  Watchlist and My lists in two groups. The rail no longer scrolls. Assistant shows how many
+  proposals are waiting, and a switch at its top moves between Proposals, History and Reports. The
+  search box fills the top bar's free space, and on the rail the bell is an Alerts tab.
+- **A new Account page** behind your picture, laid out like a phone's settings: Your account
+  (Account details, My activity, Forum), Look (Theme and Layout, chosen in place), Assistants and
+  apps (Guide, Assistant skill, the Android app, Admin for admins) and, in the Android app, This
+  app (Scan with the app's camera, Reload, Open a copied link, Change gateway, Check for app updates
+  with the installed version). Sign out is one button at its foot.
+- **Decks page:** a My Decks and Packages switch at the top replaces the Show filter (My Decks lists
+  your decks, Packages your packages), with New
+  deck, New folder and New package beside it; the sort, view and size controls fit one row on an
+  unfolded Fold.
+- **Deck page:** Edit deck, Clone deck, Test and play (Goldfish, the full test and solo test, and
+  playing on Archidekt or EDHPlay) and More. More is grouped (This deck, Look into it, Share and
+  print, Community) and adds Deck reports. **Share** replaces Copy link: in the Android app it opens
+  the phone's share sheet (with Open on Archidekt, Copy gateway link and Copy deck list on Android
+  14 and later); in a browser it offers the gateway link, the Archidekt link and the deck list. The
+  deck's waiting proposals are a **Proposals** button beside Like, Bookmark and Comments, with a
+  count, instead of a strip on the page.
+- **The Android app** no longer has Open in browser, and "Open in a new tab" shows on the website
+  only.
+ The example variables files and stack files list only what a
+  deployment needs: about 90 lines instead of 350 for the variables, 290 instead of 460 for the
+  stack.
+- **ChatGPT's name** is the gateway name, cut at a word to 80 characters (ChatGPT refuses a longer
+  one), in the plugin file and the setup steps alike. The "Name in ChatGPT" setting and its warnings
+  are gone.
+- **"Backup folder on Archidekt"** is a new row on the Settings page; a new name applies to the next
+  backup copy.
+- **Faster pages.** Pages go out compressed, so a long deck page is about a sixth of the size
+  over the network. The gateway renews its Authentik token in the background before it runs out,
+  so a page no longer waits for that renewal. It still asks Authentik whether you are allowed in
+  before each page, exactly as before. Deleting a deck from its Delete box now waits for four
+  Archidekt calls instead of six: the box reads the deck and finds the backup folder while you
+  type the name. The backup copy is still Archidekt's own copy of the deck as it is when you press
+  Delete.
+- **Android sign-in returns to the app by itself.** After signing in, the browser no longer stops
+  on a "Signed in" page waiting for you to tap **Open the MTG Assistant Gateway app**. Where your
+  browser supports it (Chrome's Auth Tab), it closes and you are back in the app, signed in. The
+  browser hands the sign-in back only to the app the gateway ships, checked against the app's
+  signing certificate, which the gateway now publishes at `/.well-known/assetlinks.json` with no
+  setting. Other browsers, or an app the gateway didn't ship, still get the page with the button.
+- **What the quick solo test leaves out**, on a report's page, is laid out like the account
+  settings lists. A summary card shows the bar and the three counts; the two left-out counts lead
+  to their groups. Each group's explanation is folded under **Details** after its count. The cards
+  are rows, in two columns on a wide screen, and the shortcuts are a list. **Copy a request for
+  your assistant** and **My card models** are two even buttons under the cards played without their
+  effect. "Left out on purpose" is now "Needs opponents", here, in the downloaded report and in the
+  request for your assistant. The two solo tests are named "Quick solo test" and "Full-rules solo
+  test by Forge".
+- **Shorter lists** in what the quick solo test leaves out: a list of more than eight shows its
+  first six and **Show all**, and the cards that need opponents sit in their categories
+  (Counterspells, Removal and other interaction, Board wipes and so on), each opening on a tap.
+- **Every Details and Show more fold** is a grey capsule with a chevron that turns when it opens,
+  instead of blue or grey text: on the report page, the Account page (Approval mode, What your
+  sign-in shares, the Archidekt link details), the collection's CSV help, card search's More
+  filters, the new deck and compare pages, a contest's entries, the History page's numbers, a
+  proposal's technical details and diff, a watched card's price table and the admin update steps.
+  The Show all and Show more buttons (a precon set's decks, the goldfish game's steps, a deck's
+  comments and a proposal card's changes) are the same capsule.
+- **A commander** among the cards the quick solo test lists says "commander" instead of "drawn 0%":
+  it starts in the command zone, so it is never drawn.
+- **Android install and update steps** say that on a Samsung Galaxy phone Auto Blocker must be off
+  to install the app or its updates, and that letting Play Protect scan the app or not are both
+  fine. The release notes say the same beside the app's files.
+- **Fewer obvious lines.** The Archidekt profile switches and default settings no longer say that
+  each one saves when you change it.
+
+### Fixed
+- **The Claude logo** beside a Claude connection: Claude registers sign-in addresses on both
+  claude.ai and claude.com, and only claude.ai was recognised, so it got the plain icon.
+- **Forge seeds in Claude and ChatGPT.** The seed the gateway picks for a report's Forge games and
+  its Forge solo test could be too large for the apps to show exactly, so an assistant read a
+  rounded number that Forge never used. The gateway now picks seeds every app shows in full. Seeds
+  you give yourself are used as they are.
+- **Forge's load problems** no longer list the Java runtime's own start-up warnings ("Skipping
+  jdk/proxy1/…: Unsupported location"), which an assistant could read as cards Forge could not load.
+- **Short solo tests.** A solo test played to turn 3 said "made every land drop through T5" and
+  gave the commander's cast "by T4, T5, T6". The text and the research service's own report now
+  name the last turn the run played.
+- **Rules right after a restart.** For a short while after the research service started, the rules
+  tools answered from the older copy of the Comprehensive Rules built into its image, so two answers
+  a minute apart could name different dates. It now starts fetching the current rules as soon as it starts.
+- **Two-face cards in card search.** A card's second face (for example Swords to Plowshares on
+  Emeritus of Truce) read like a separate search result; it is now headed "Other face of …".
+- **Which printing a card gets** when no set is given is now described as it works, in the
+  assistant's tool description and [docs/SCANNING.md](docs/SCANNING.md): Scryfall's own default
+  printing when it is out on paper, which is not always the newest one, else the newest that is.
+- **A pasted list's name.** A test run or deck check of a pasted list named it "pasted list", which
+  an assistant could show as the deck's name; it now reads "Unnamed deck", like any deck without a name.
+- **A Forge game with no result.** When Forge ended a game without printing its result, the
+  report said "Games played: 4 of 5" and nothing about the missing game. It now names the game,
+  says the results count only the games that came back, and keeps the end of Forge's log.
+- **Cards the solo test lists.** Cards that only act on opponents or their creatures (votes,
+  returning every creature to its owner's hand, a creature dealing damage equal to its power to
+  another, Auras that shut a creature down, regeneration) are now listed under "Needs
+  opponents", not with the cards it played without their effect. A creature whose ability exiled a
+  creature and then did more (for example Displacer Kitten) counted as played with its effect
+  while that ability never played; it is now listed as played without its effect.
+- **More card text in the solo test.** It now reads landcycling and the other options it never
+  uses (miracle, convoke, undaunted and similar: the full cost is paid), a graveyard shuffled back
+  into the library, a land put onto the battlefield from your hand, and an equip cost for one
+  creature type. Each shortcut is named in the report.
+- **Validation wording.** The deck check said "All 82 unique cards verified on Scryfall"; it now
+  says "found on Scryfall" in new answers, and on the pages of reports saved before.
+
 ## [0.7.44] - 2026-10-24
 
 A review of the screens 0.7.42 and 0.7.43 added, brought to the same standard as the rest of the

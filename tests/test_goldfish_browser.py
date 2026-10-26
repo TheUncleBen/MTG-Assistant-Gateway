@@ -106,7 +106,9 @@ def test_commander_goldfish_by_mouse(server: Server, width: int, scheme: str) ->
         requests: list[str] = []
         page.on("request", lambda r: requests.append(r.url))
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        page.locator(".banner a", has_text="Goldfish").click()
+        # the banner's Test and play opens its menu (navigation round 2)
+        page.locator(".banner .decktestbtn").click()
+        page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Goldfish").click()
         page.wait_for_url(re.compile(r"/decks/42/goldfish$"))
         page.wait_for_load_state("networkidle")
         requests.clear()

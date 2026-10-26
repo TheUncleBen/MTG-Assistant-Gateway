@@ -39,7 +39,6 @@ from .pages import (
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
-    display_name,
     icon,
     render,
     stylesheet_link,
@@ -298,7 +297,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
-            user=display_name(user),
+            sub=sub,
             wide=two_pane,
             current=current,
             heading=heading,
@@ -403,7 +402,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return (
             "<div class='card'><h2>Link your Archidekt account</h2><p>Your decks appear here once Archidekt "
             "is linked. Public decks can still be opened by their Archidekt link.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/account'>Link Archidekt</a></div></div>"
+            "<div class='actions'><a class='btn btn-primary' href='/account/details#archidekt'>"
+            "Link Archidekt</a></div></div>"
         )
 
     # The route modules import this module's helpers, so they are imported here, not at the top.

@@ -48,7 +48,7 @@ def _card(page: str, card_id: str) -> str:
 
 
 async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack: Stack) -> None:
-    page = (await member.http.get("/account")).text
+    page = (await member.http.get("/account/details")).text
     prof = _card(page, "profile")
     assert "A JPEG or PNG up to 1 MB." in prof and "Only you can change it" not in prof
     mail = _card(page, "email")
@@ -77,7 +77,7 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
 
 
 async def test_the_account_switches_and_the_price_sources_row(member: Browser) -> None:
-    page = (await member.http.get("/account")).text
+    page = (await member.http.get("/account/details")).text
     mail = _card(page, "email")
     # each switch names itself for a reader only: the row's bold label is the one shown
     assert "<span class='sr-only'>Other members can contact me</span>" in mail

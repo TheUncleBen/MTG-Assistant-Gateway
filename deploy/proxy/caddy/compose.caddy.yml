@@ -3,9 +3,8 @@
 #
 #   docker compose -f docker-compose.yml -f ../proxy/caddy/compose.caddy.yml up -d
 #
-# Edit the Caddyfile first: put your domain where mtg.example.com is. If you
-# downloaded files instead of cloning, set CADDYFILE in .env to its path
-# (default ../proxy/caddy/Caddyfile, relative to docker-compose.yml).
+# Edit the Caddyfile first: put your domain where mtg.example.com is. It must sit
+# at ../proxy/caddy/Caddyfile, next to this file, as in the repository.
 # Ports 80 and 443 on this machine must be free and reachable from the internet
 # (Let's Encrypt checks them), and your domain's DNS must point here.
 services:
@@ -17,7 +16,7 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ${CADDYFILE:-../proxy/caddy/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ../proxy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

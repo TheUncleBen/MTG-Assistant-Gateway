@@ -219,7 +219,7 @@ class NotifyService : Service() {
     private fun ongoing(): Notification {
         val open = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
-            data = Uri.parse(prefs.gatewayOrigin + "/account#notifications")
+            data = Uri.parse(prefs.gatewayOrigin + "/account/details#notifications")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val tap = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

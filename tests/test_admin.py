@@ -14,7 +14,7 @@ from starlette.routing import Route
 from mtg_gateway import db as dbmod
 from mtg_gateway import ui
 from mtg_gateway.admin import add_admin_routes
-from mtg_gateway.config import ConfigError, load_settings
+from mtg_gateway.config import load_settings
 from mtg_gateway.db import Database
 
 from .conftest import FakeIdP, Harness, make_settings, running
@@ -216,7 +216,7 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
                 "(file is empty); it is optional (docs/IDP-AUTHENTIK.md)",
             },
             "Off: the Authentik API token can't be read (file is empty). Check the "
-            "mtg_authentik_api_token Docker secret and MTG_AUTHENTIK_API_TOKEN_FILE, then redeploy "
+            "mtg_authentik_api_token Docker secret, then redeploy "
             "(docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
         ),
         (
@@ -232,9 +232,7 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             "MTG_AUTHENTIK_API_TOKEN_FILE: [Errno 2] No such file or directory: "
             "'/run/secrets/mtg_authentik_api_token'). The likely cause: the mtg_authentik_api_token "
             "secret isn't attached to the gateway, as with a stack file from before 0.7.37. Use the "
-            "current stack file, check that MTG_AUTHENTIK_API_TOKEN_FILE is "
-            "/run/secrets/mtg_authentik_api_token or not set, then redeploy (docs/IDP-AUTHENTIK.md "
-            "section 12, steps 6 and 7).",
+            "current stack file, then redeploy (docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
         ),
         (
             {"state": "off", "cause": "no-group", "reason": "x"},
@@ -260,8 +258,8 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
                 "error": "Authentik could not be reached (ConnectError)",
             },
             f"Not working. The last check {_AT} failed and deleted nothing: Authentik could not be "
-            "reached (ConnectError). To fix: Check that the gateway can reach Authentik's address "
-            "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
+            "reached (ConnectError). To fix: Check that the gateway can reach Authentik at the "
+            "issuer's address (MTG_OIDC_ISSUER). It tries again by itself.",
         ),
         ({"state": "not started"}, "Not started yet. Reload this page to see its first result."),
     ],
@@ -362,9 +360,9 @@ async def test_disabled_user_token_is_refused_at_load_and_audited_once(gw: Harne
     b = Browser(gw)
     try:
         await b.login("/account")
-        assert (await b.http.get("/account", headers=NAVIGATE)).status_code == 200
+        assert (await b.http.get("/account/details", headers=NAVIGATE)).status_code == 200
         gw.db.set_user_disabled("user-2", True)
-        r = await b.http.get("/account", headers=NAVIGATE)
+        r = await b.http.get("/account/details", headers=NAVIGATE)
         assert r.status_code == 302 and r.headers["location"].startswith("/login")
     finally:
         await b.aclose()
@@ -383,7 +381,7 @@ async def test_revoke_drops_sessions_and_tokens(gw: Harness) -> None:
     await member.login("/account")  # before the IdP is switched to the admin account
     admin = await admin_browser(gw)
     try:
-        assert (await member.http.get("/account", headers=NAVIGATE)).status_code == 200
+        assert (await member.http.get("/account/details", headers=NAVIGATE)).status_code == 200
         csrf = await admin.csrf("/admin/users")
         r = await admin.http.post(
             "/api/v1/admin/users/user-2", json={"action": "revoke"}, headers={"X-CSRF-Token": csrf}
@@ -397,7 +395,7 @@ async def test_revoke_drops_sessions_and_tokens(gw: Harness) -> None:
             "sessions": 1,
             "codes": 0,
         }
-        r = await member.http.get("/account", headers=NAVIGATE)
+        r = await member.http.get("/account/details", headers=NAVIGATE)
         assert r.status_code == 302 and r.headers["location"].startswith("/login")
         assert (await whoami(gw, tokens["access_token"])).status_code == 401
         assert gw.db.get_user("user-2")["disabled_at"] is None  # revoke is not disable
@@ -580,26 +578,20 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MTG_REQUIRED_GROUP", "mtg-users")
 
 
-def test_admin_group_and_assetlinks_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_admin_group_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _env(tmp_path, monkeypatch)
     s = load_settings()
-    assert s.admin_group is None and s.android_assetlinks is None
-    assert s.cimd_enabled is True and s.writes_enabled is False and s.archidekt_backups is True
+    assert s.admin_group is None
+    assert s.cimd_enabled is True and s.writes_enabled is True and s.archidekt_backups is True
     monkeypatch.setenv("MTG_ADMIN_GROUP", "mtg-admins")
-    monkeypatch.setenv(
-        "MTG_ANDROID_ASSETLINKS", '[{"relation": ["delegate_permission/common.handle_all_urls"]}]'
-    )
+    # gone in 0.7.45 (the gateway vouches for its own app): a value left set is ignored
+    monkeypatch.setenv("MTG_ANDROID_ASSETLINKS", "not json")
     monkeypatch.setenv("MTG_WRITES_ENABLED", "YES")
     monkeypatch.setenv("MTG_CIMD_ENABLED", "0")
     monkeypatch.setenv("MTG_ARCHIDEKT_BACKUPS", "")
     s = load_settings()
-    assert s.admin_group == "mtg-admins"
-    assert s.android_assetlinks == '[{"relation":["delegate_permission/common.handle_all_urls"]}]'
+    assert s.admin_group == "mtg-admins" and not hasattr(s, "android_assetlinks")
     assert s.writes_enabled is True and s.cimd_enabled is False and s.archidekt_backups is True
-    for bad in ("not json", '{"a": 1}', "42"):
-        monkeypatch.setenv("MTG_ANDROID_ASSETLINKS", bad)
-        with pytest.raises(ConfigError, match="MTG_ANDROID_ASSETLINKS must be a JSON list"):
-            load_settings()
 
 
 async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
@@ -613,7 +605,7 @@ async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
         ):
             page = await b.http.get(path, headers={"Accept": "text/html"})
             assert page.status_code == 200 and f"<title>{title} · " in page.text, path
-            assert "Signed in as <b>" in page.text
+            assert "class='icon-btn acct' href='/account'" in page.text
     finally:
         await b.aclose()
 

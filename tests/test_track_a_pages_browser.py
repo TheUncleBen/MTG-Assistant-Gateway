@@ -142,15 +142,12 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
                 if shots:
                     page.screenshot(path=f"{shots}/a-proposals-ticked-{where}.png")
 
-                # the deck page's strip
+                # the deck page's Proposals pill and its box (navigation round 2)
                 page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-                strip = page.locator("details.wstrip")
-                assert strip.count() == 1, where
-                if not strip.evaluate("e => e.open"):
-                    strip.locator("summary").click()
-                # open, the heading has no separator left over from the hidden "Review"
-                assert not strip.locator("summary").inner_text().strip().endswith("·"), where
-                _readable(page, "details.wstrip summary, details.wstrip a, details.wstrip label", where)
+                page.locator(".banner .soc.prop").click()
+                strip = page.locator("#proposals form.ybox")
+                strip.wait_for(timeout=5000)
+                _readable(page, "#proposals form.ybox a, #proposals form.ybox label", where)
                 _no_sideways(page, vw, where)
                 if shots:
                     strip.scroll_into_view_if_needed()
@@ -323,7 +320,7 @@ def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
 
 
 def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> None:
-    """Reject on the Proposals page and the deck strip asks in the bar first
+    """Reject on the Proposals page and the deck's Proposals box asks in the bar first
     ("Reject 2 changes?"); Cancel rejects nothing and gives the focus back; the confirm's Reject
     rejects only the checked ones. Phone, Fold and desktop, light and dark: readable, a ring on
     the focused button, no sideways scroll."""
@@ -363,13 +360,14 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
                 assert all(db.get_proposal(i, "user-1")["state"] == "pending" for i in ids), where
                 assert errors == [], (where, errors)
                 ctx.close()
-            # the confirm's Reject rejects the checked ones, on the deck strip too
+            # the confirm's Reject rejects the checked ones, in the deck's Proposals box too
             ctx = _context(browser, server, sid, 390, 844, True, "light")
             page = ctx.new_page()
             page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-            strip = page.locator("details.wstrip")
-            if not strip.evaluate("e => e.open"):
-                strip.locator("summary").click()
+            # navigation round 2: the banner's Proposals pill opens the deck's box
+            page.locator(".banner .soc.prop").click()
+            strip = page.locator("#proposals form.ybox")
+            strip.wait_for(timeout=5000)
             strip.locator(f"input[name=pick][value='{ids[2]}']").check()
             strip.locator("button[name=action][value=reject]").click()
             ask = strip.locator(".rejectask")
@@ -386,9 +384,9 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
 
 
 def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) -> None:
-    """The banner's full-test texts on the deck page: "Run full test" and More's "Solo test only"
-    with their tooltips, at 344, 360 and 390 px, on the Fold and on desktop, light and dark, 100%
-    and 200% text. No sideways scroll, words whole, labels readable (contrast at least
+    """The banner's full-test texts on the deck page: Test and play's "Run full test" and "Solo test
+    only", with their buttons' tooltips, at 344, 360 and 390 px, on the Fold and on desktop, light
+    and dark, 100% and 200% text. No sideways scroll, words whole, labels readable (contrast at least
     4.5:1), and the tooltips word for word."""
     from playwright.sync_api import sync_playwright
 
@@ -420,10 +418,10 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                             )
                             page = ctx.new_page()
                             page.goto(f"{s.base}/decks/42", wait_until="networkidle")
-                            run = page.locator(
-                                "form[action='/decks/42/report'] button", has_text="Run full test"
-                            )
-                            assert run.is_visible(), where
+                            # navigation round 2: the banner's Test and play opens the shared
+                            # menu; its Run full test and Solo test only submit the banner's hidden
+                            # forms, whose buttons keep the busy label and the title
+                            run = page.locator("#fullf button")
                             assert run.get_attribute("data-busy-label") == "Testing…", where
                             assert run.get_attribute("title") == (
                                 "The solo test (300 games, no opponents), a legality check and the deck "
@@ -431,30 +429,28 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                                 "has a commander; saved under History. The solo test takes up to a minute; "
                                 "the result page opens when the solo test is done."
                             ), where
-                            # More is the shared deck menu; its Solo test only item submits the
-                            # banner's hidden solo form, whose button keeps the busy label and title
-                            page.locator(".banner button.deckmenu", has_text="More").click()
-                            solo = page.locator(
-                                ".ctxmenu[role=menu] [role=menuitem]", has_text="Solo test only"
-                            )
-                            assert solo.is_visible(), where
                             form_btn = page.locator("#solof button")
                             assert form_btn.get_attribute("data-busy-label") == "Testing…", where
                             assert form_btn.get_attribute("title") == (
                                 "The same run without Forge games: the solo test, the legality check and "
                                 "the statistics"
                             ), where
-                            for b in (run, solo):
+                            page.locator(".banner .decktestbtn").click()
+                            menu = ".ctxmenu[role=menu] [role=menuitem]"
+                            full = page.locator(menu, has_text="Run full test")
+                            solo = page.locator(menu, has_text="Solo test only")
+                            for b in (page.locator(".banner .decktestbtn"), full, solo):
+                                assert b.is_visible(), where
                                 box = b.bounding_box()
                                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= vw, (where, box)
                                 assert b.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), where
-                            page.keyboard.press("Escape")
-                            sel = "form[action='/decks/42/report'] button"
+                            sel = ".ctxmenu[role=menu] [role=menuitem], .banner .decktestbtn"
                             assert page.evaluate(WORDS_BROKEN, sel) == [], (
                                 where,
                                 page.evaluate(WORDS_BROKEN, sel),
                             )
                             _readable(page, sel, where)
+                            page.keyboard.press("Escape")
                             # the banner itself never runs wider than the screen (the whole page:
                             # test_the_deck_page_never_scrolls_sideways)
                             _no_sideways(page, vw, where)
@@ -640,7 +636,7 @@ def test_the_deck_menus_run_full_test_submits_the_full_test(tmp_path: Path) -> N
                 errors: list[str] = []
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.goto(f"{s.base}/decks/42", wait_until="networkidle")
-                page.locator(".banner button.deckmenu", has_text="More").click()
+                page.locator(".banner .decktestbtn").click()
                 page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Run full test").click()
                 page.wait_for_url(re.compile(r"/(history/reports|decks/42/report)"), timeout=60000)
                 assert errors == [], errors

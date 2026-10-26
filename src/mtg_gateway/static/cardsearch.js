@@ -508,7 +508,7 @@
       add.type = "button";
       add.appendChild(icon("plus"));
       add.appendChild(document.createTextNode(" Add to deck"));
-      if (!linked) { add.disabled = true; add.title = "Link your Archidekt account on the Account page to add cards to a deck."; }
+      if (!linked) { add.disabled = true; add.title = "Link your Archidekt account under Account details to add cards to a deck."; }
       add.addEventListener("click", function () {
         window.MtgCardView.close();
         var own = node.closest("li") && node.closest("li").querySelector("button[data-add]");

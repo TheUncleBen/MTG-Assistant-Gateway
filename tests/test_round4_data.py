@@ -75,7 +75,7 @@ async def test_delete_data_during_apply_leaves_no_snapshot(stack: Stack) -> None
     gw.archidekt.resolve_card = slow_resolve
     b = Browser(h)
     await b.login()
-    csrf = await b.csrf("/account")
+    csrf = await b.csrf("/account/details")
     task = asyncio.create_task(call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     await entered.wait()
     r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data", "confirm": "yes"})
@@ -103,7 +103,7 @@ async def test_delete_data_during_report_stores_no_report(stack: Stack) -> None:
     gw.decks.get_any_deck = slow_read
     b = Browser(h)
     await b.login()
-    csrf = await b.csrf("/account")
+    csrf = await b.csrf("/account/details")
     task = asyncio.create_task(call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
     await entered.wait()
     await b.http.post("/account", data={"csrf": csrf, "action": "delete_data", "confirm": "yes"})
@@ -270,7 +270,7 @@ async def test_delete_data_removes_deck_covers_and_mentions_backups(stack: Stack
     await b.login()
     h.db.save_deck_cover("42", "uid-1", "Sol Ring", owner_sub="user-1")
     h.db.save_deck_cover("99", "uid-9", "Island", owner_sub="someone-else")
-    csrf = await b.csrf("/account")
+    csrf = await b.csrf("/account/details")
     r = await b.http.post("/account", data={"csrf": csrf, "action": "delete_data", "confirm": "yes"})
     assert r.headers["location"] == "/data-deleted"
     assert h.db.deck_covers(["42"]) == {}
@@ -438,9 +438,9 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     assert "Helper Bot" in page and client_id[:12] not in page
     listing = (await b.http.get("/proposals")).text
     assert "Helper Bot" in listing
-    account = (await b.http.get("/account")).text
+    account = (await b.http.get("/account/details")).text
     assert client_id[:12] in account
-    csrf = await b.csrf("/account")
+    csrf = await b.csrf("/account/details")
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "rejected"
@@ -573,7 +573,7 @@ async def test_apps_delete_only_their_own_reports(stack: Stack) -> None:
     rep = structured(await call(h, other, "run_deck_report", {"deck_ref": "42", "simulate": False}))
     b = Browser(h)
     await b.login()
-    csrf = await b.csrf("/account")
+    csrf = await b.csrf("/account/details")
     r = await b.http.delete(f"/api/v1/reports/{rep['report_id']}", headers={"X-CSRF-Token": csrf})
     assert r.status_code == 200, r.text
     await b.aclose()

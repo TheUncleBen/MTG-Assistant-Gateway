@@ -104,3 +104,13 @@ def test_goldfish_report_is_never_named_in_a_result() -> None:
     # goldfish_report is a hidden Mystic Forge tool; its text used to send the assistant to it.
     out = rewrite_text('Full report: goldfish_report("wjyxinfngo4dg")\nValidation')
     assert "goldfish_report" not in out and out == "This is the full report.\nValidation"
+
+
+def test_validation_says_found_not_verified() -> None:
+    """The research service's validation said "All 82 unique cards verified on Scryfall." (and
+    validate_archidekt_deck "All 82 cards verified."), seen on the live 0.7.44 gateway; the
+    gateway's wording never says "verified"."""
+    out = rewrite_text("All 82 unique cards verified on Scryfall.")
+    assert out == "All 82 unique cards found on Scryfall.", out
+    out = rewrite_text("All 82 cards verified. Deck size: 100. Categories valid.")
+    assert out == "All 82 cards found on Scryfall. Deck size: 100. Categories valid.", out

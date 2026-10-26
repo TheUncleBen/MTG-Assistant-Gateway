@@ -14,7 +14,7 @@ same one its Codex loader reads. The archive holds, at its root:
 - ``assets/``: the gateway's own icon.
 
 ``/plugin/<name>-chatgpt.zip`` serves it. Like the Claude plugin it is public: it holds
-only the public MCP URL and the skill text. Under an owner's own ``MTG_SERVER_NAME`` the
+only the public MCP URL and the skill text. Under an owner's own gateway name the
 name, text and skill folder follow it, and the project's homepage and author are dropped.
 """
 
@@ -66,10 +66,10 @@ DEFAULT_PROMPTS = [
 ]
 
 
-def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = None) -> dict:
+def manifest(base: Path, site: str, public_url: str) -> dict:
     """``plugin.json``: the repository's portable manifest, renamed under an owner's name, with
-    the schema, this version and ChatGPT's display fields added. ``displayName`` is the owner's
-    MTG_CHATGPT_NAME when set, else their site name (ChatGPT refuses one over 80 characters)."""
+    the schema, this version and ChatGPT's display fields added. ``displayName`` is the site name,
+    cut at a word to 80 characters (ChatGPT refuses a longer one)."""
     name = plugin_slug(site)
     raw = (base / PLUGIN_NAME / "plugin.json").read_bytes()
     if site != DEFAULT_SITE:
@@ -77,8 +77,7 @@ def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = 
     doc = json.loads(raw)
     # OpenAI's package validation refuses an author.name or interface.developerName over 120
     # characters (plugin_author_name_too_long, plugin_developer_name_too_long; its plugin docs,
-    # read 2026-10-16): a long MTG_SERVER_NAME is cut there, at a word, so the file still uploads,
-    # and the owner is told so (developer_name_warning: admin page and log)
+    # read 2026-10-16): a longer one is cut there, at a word, so the file still uploads
     if isinstance(doc.get("author"), dict) and isinstance(doc["author"].get("name"), str):
         doc["author"]["name"] = cut_at_word(doc["author"]["name"], DEVELOPER_NAME_MAX)
     developer = cut_at_word((doc.get("author") or {}).get("name") or plugin_label(site), DEVELOPER_NAME_MAX)
@@ -91,7 +90,7 @@ def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = 
         "extensions": {
             "com.openai": {
                 "interface": {
-                    "displayName": chatgpt_label(site, chatgpt_name),
+                    "displayName": chatgpt_label(site),
                     "shortDescription": "MTG decks and research",  # max 240; 30 in OpenAI's directory
                     "longDescription": SERVER_DESCRIPTION
                     + " Every deck change is shown to you first and applied only after you approve.",
@@ -115,13 +114,11 @@ def mcp_config(site: str, mcp_url: str) -> dict:
     }
 
 
-def build_zip(
-    base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SITE, chatgpt_name: str | None = None
-) -> bytes:
+def build_zip(base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SITE) -> bytes:
     """The ChatGPT plugin archive, with ``plugin.json`` at its root (not inside a folder)."""
     name = plugin_slug(site)
     files: dict[str, bytes] = {
-        "plugin.json": (json.dumps(manifest(base, site, public_url, chatgpt_name), indent=2) + "\n").encode(),
+        "plugin.json": (json.dumps(manifest(base, site, public_url), indent=2) + "\n").encode(),
         "mcp.json": (json.dumps(mcp_config(site, mcp_url), indent=2) + "\n").encode(),
     }
     skill = base / PLUGIN_NAME / "skills" / PLUGIN_NAME
@@ -146,10 +143,10 @@ def add_chatgpt_plugin_route(server: MCPServer, state: AppState) -> None:
         base = plugin_dir()
         if base is None:
             return PlainTextResponse("plugin not installed on this gateway", status_code=503)
-        key = f"{base}|{s.mcp_url}|{s.server_name}|{s.chatgpt_name}"
+        key = f"{base}|{s.mcp_url}|{s.server_name}"
         hit = cache.get(key)
         if hit is None:
-            data = build_zip(base, s.mcp_url, s.public_url, s.server_name, s.chatgpt_name)
+            data = build_zip(base, s.mcp_url, s.public_url, s.server_name)
             hit = cache[key] = (data, hashlib.sha256(data).hexdigest())
         return Response(
             hit[0],

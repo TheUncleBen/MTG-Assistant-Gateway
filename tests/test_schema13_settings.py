@@ -479,14 +479,14 @@ def test_every_registered_setting_is_a_deployment_setting_with_sane_bounds() -> 
     fields = {f.name: f for f in dataclasses.fields(config.Settings)}
     for key, spec in MANAGED_SETTINGS.items():
         assert key in fields, key
-        assert spec.env.startswith("MTG_"), key
-        if fields[key].default is not dataclasses.MISSING and key != "chatgpt_name":
-            assert fields[key].default == spec.default, key
-        assert spec.parse(spec.default) == spec.default or key == "chatgpt_name", key
+        assert spec.env == "" or spec.env.startswith("MTG_"), key
+        # the code default is the page's default, so a value the page never stored reads the same
+        assert fields[key].default == spec.default, key
+        assert spec.parse(spec.default) == spec.default, key
         if spec.lo is not None:
             assert spec.lo <= spec.default <= spec.hi, key
     # What stays in the deployment only
-    for key in ("membership_check_ttl", "archidekt_backup_folder", "writes_enabled", "public_url"):
+    for key in ("membership_check_ttl", "writes_enabled", "public_url"):
         assert key not in MANAGED_SETTINGS
 
 
@@ -536,7 +536,7 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
 def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> None:
     db = Database(tmp_path / "x.sqlite")
     try:
-        settings = make_settings(tmp_path, forge_games=12, env_set=frozenset({"forge_games"}))
+        settings = make_settings(tmp_path, deck_sync_minutes=60, env_set=frozenset({"deck_sync_minutes"}))
         live = LiveSettings(settings, db)
         heard: list[str] = []
         live.on_change.append(heard.append)
@@ -551,16 +551,18 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
                 live.set("forge_parallel_games", bad, by="admin-1")
         assert live.get("forge_parallel_games") == 3
         # a deployment value wins and locks the setting
-        assert live.get("forge_games") == 12 and live.locked("forge_games")
-        assert live.source("forge_games") == "deployment"
+        assert live.get("deck_sync_minutes") == 60 and live.locked("deck_sync_minutes")
+        assert live.source("deck_sync_minutes") == "deployment"
         with pytest.raises(
             SettingError,
-            match=r"^forge_games is set in your stack \(MTG_FORGE_GAMES\), so it can't be changed here\. "
-            r"Change or remove it in your stack, then redeploy\.$",
+            match=r"^deck_sync_minutes is set in your stack \(MTG_DECK_SYNC_MINUTES\), so it can't be "
+            r"changed here\. Change or remove it in your stack, then redeploy\.$",
         ):
-            live.set("forge_games", 20, by="admin-1")
+            live.set("deck_sync_minutes", 90, by="admin-1")
         with pytest.raises(SettingError):
-            live.reset("forge_games", by="admin-1")
+            live.reset("deck_sync_minutes", by="admin-1")
+        # a setting with no env variable is never locked
+        assert not live.locked("forge_games")
         # another instance (a restart) reads what was stored
         again = LiveSettings(settings, db)
         assert again.get("forge_parallel_games") == 3
@@ -582,13 +584,15 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         assert live.set("approval_mode_default", "semi", by=None) == "semi"
         with pytest.raises(SettingError):
             live.set("approval_mode_default", "yolo", by=None)
-        assert live.set("chatgpt_name", "", by=None) == ""
-        assert live.set("chatgpt_name", None, by=None) == ""  # not the word "None"
         assert live.set("server_name", "  My   gateway ", by=None) == "My gateway"
+        assert live.set("archidekt_backup_folder", " Old  decks ", by=None) == "Old decks"
+        with pytest.raises(SettingError):
+            live.set("archidekt_backup_folder", "x" * 101, by=None)
         with pytest.raises(SettingError):
             live.set("server_name", "", by=None)
         described = {d["key"]: d for d in live.describe()}
-        assert described["forge_games"]["source"] == "deployment" and described["forge_games"]["value"] == 12
+        assert described["deck_sync_minutes"]["source"] == "deployment"
+        assert described["deck_sync_minutes"]["value"] == 60
         assert described["approval_mode_default"]["changed"]["updated_by"] is None
         assert set(described) == set(MANAGED_SETTINGS)
     finally:
@@ -631,18 +635,12 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_forge_games_at_once_go_up_to_16(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """0.7.33 raised the top of MTG_FORGE_PARALLEL_GAMES from 4 to 16, in the stack and on the page."""
+    """The Settings page's Forge games at once go up to 16."""
     spec = MANAGED_SETTINGS["forge_parallel_games"]
     assert (spec.lo, spec.hi, spec.default) == (1, 16, 4)
     assert spec.parse("16") == 16 and spec.parse(5) == 5
     with pytest.raises(SettingError, match="^forge_parallel_games must be between 1 and 16$"):
         spec.parse(17)
-    _env(tmp_path, monkeypatch)
-    monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "16")
-    assert load_settings().forge_parallel_games == 16
-    monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "17")
-    with pytest.raises(ConfigError, match="MTG_FORGE_PARALLEL_GAMES must be between 1 and 16"):
-        load_settings()
 
 
 def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -655,18 +653,17 @@ def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.Mo
         25,
         False,
     )
-    monkeypatch.setenv("MTG_PROPOSAL_EXPIRY_DAYS", "3")
-    monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "2")
-    monkeypatch.setenv("MTG_ARCHIDEKT_CALLS_PER_10_MIN", "600")  # the deployment may go past the page
-    monkeypatch.setenv("MTG_SERVER_NAME", "")  # blank: left to the page
-    monkeypatch.setenv("MTG_CHATGPT_NAME", "   ")  # only spaces: blank too
+    monkeypatch.setenv("MTG_WATCHLISTS_ENABLED", "false")
+    monkeypatch.setenv("MTG_DECK_SYNC_MINUTES", "0")
+    monkeypatch.setenv("MTG_UPDATE_CHECK", "")  # blank: left to the page
+    monkeypatch.setenv("MTG_APPLY_IN_CHAT", "   ")  # only spaces: blank too
     s = load_settings()
-    assert s.env_set == {"proposal_expiry_days", "forge_parallel_games", "archidekt_calls_per_10_min"}
+    assert s.env_set == {"watchlists_enabled", "deck_sync_minutes"}
     db = Database(tmp_path / "x.sqlite")
     try:
         live = LiveSettings(s, db)
-        assert live.get("proposal_expiry_days") == 3 and live.get("archidekt_calls_per_10_min") == 600
-        assert not live.locked("server_name")
+        assert live.get("watchlists_enabled") is False and live.get("deck_sync_minutes") == 0
+        assert not live.locked("update_check") and not live.locked("apply_in_chat")
     finally:
         db.close()
 
@@ -680,20 +677,17 @@ def test_a_setting_of_only_spaces_is_unset_at_start_up_too(
     _env(tmp_path, monkeypatch)
     defaults = load_settings()
     for spec in MANAGED_SETTINGS.values():
-        monkeypatch.setenv(spec.env, "   ")
+        if spec.env:
+            monkeypatch.setenv(spec.env, "   ")
     s = load_settings()
     assert s.env_set == frozenset()
     for key in MANAGED_SETTINGS:
         assert getattr(s, key) == getattr(defaults, key), key
-    assert s.archidekt_backups is True and s.apply_in_chat is True and s.log_level == "INFO"
-    for env, value in (
-        ("MTG_DECK_SYNC_MINUTES", " 60 "),
-        ("MTG_LOG_LEVEL", " debug "),
-        ("MTG_APPLY_IN_CHAT", " false "),
-    ):
+    assert s.archidekt_backups is True and s.apply_in_chat is True
+    for env, value in (("MTG_DECK_SYNC_MINUTES", " 60 "), ("MTG_APPLY_IN_CHAT", " false ")):
         monkeypatch.setenv(env, value)
     s = load_settings()
-    assert (s.deck_sync_minutes, s.log_level, s.apply_in_chat) == (60, "DEBUG", False)
+    assert (s.deck_sync_minutes, s.apply_in_chat) == (60, False)
 
 
 async def test_the_gateway_shares_one_live_settings(stack: Stack) -> None:
@@ -937,3 +931,16 @@ def test_settings_refusals_read_as_the_pages_do() -> None:
         'must be one of "Ask me every time", "Apply low-risk changes without asking" or '
         '"Apply changes without asking"'
     )
+
+
+def test_the_stack_keeps_the_deck_checks_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """MTG_DECK_SYNC_MINUTES takes what the page takes: 0 (off), or 30 to 1440, so the stack can't
+    make the background check ask Archidekt more often than the page allows."""
+    _env(tmp_path, monkeypatch)
+    for ok in ("0", "30", "1440"):
+        monkeypatch.setenv("MTG_DECK_SYNC_MINUTES", ok)
+        assert load_settings().deck_sync_minutes == int(ok)
+    for bad in ("1", "29", "1441"):
+        monkeypatch.setenv("MTG_DECK_SYNC_MINUTES", bad)
+        with pytest.raises(ConfigError, match=r"MTG_DECK_SYNC_MINUTES must be 0 \(off\), or between 30"):
+            load_settings()

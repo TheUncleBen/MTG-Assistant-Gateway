@@ -9,7 +9,7 @@ The copy is the database exactly as it was, members' Archidekt links and identit
 included (still encrypted with the Fernet key, which is never in the file), so going back needs
 nobody to relink. That is why it stays in its own owner-only folder and is never copied to
 ``MTG_BACKUP_COPY_DIR``. The newest ``KEEP`` copies are kept, and none longer than the nightly
-backups (``MTG_BACKUP_KEEP_DAYS``, :func:`age_out`). What a member ends on the live database is
+backups (backup_keep_days, :func:`age_out`). What a member ends on the live database is
 ended in every copy too (:func:`scrub_member`): an unlink, a disable, "Delete my data".
 
 Going back: when an older version (this one or newer) starts on a database a newer version
@@ -499,7 +499,7 @@ def went_forward(conn: sqlite3.Connection) -> bool:
 
 def age_out(folder: Path, keep_days: int, now: float | None = None) -> int:
     """Delete the before-upgrade and set-aside copies older than ``keep_days`` (the nightly backups'
-    ``MTG_BACKUP_KEEP_DAYS``), by the time in their names: they hold what members asked to be
+    backup_keep_days), by the time in their names: they hold what members asked to be
     deleted later, so they are kept no longer than the nightly backups. Returns how many went."""
     cutoff = (time.time() if now is None else now) - keep_days * 86400
     removed = 0

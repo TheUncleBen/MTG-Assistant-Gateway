@@ -210,7 +210,7 @@ def table_html(hist: list[dict[str, Any]], currency: str, what: str) -> str:
         for h in reversed(pts)
     )
     return (
-        "<details class='rv-det wx-tbl'><summary>Price history table</summary>"
+        "<details class='rv-det wx-tbl'><summary class='fold-btn'>Price history table</summary>"
         f"<div class='tbl' role='region' aria-label='{esc(what)}, newest first' tabindex='0'>"
         "<table><thead><tr><th scope='col'>Day</th><th scope='col'>Price</th></tr></thead>"
         f"<tbody>{rows}</tbody></table></div></details>"

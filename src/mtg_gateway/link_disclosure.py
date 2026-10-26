@@ -172,7 +172,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "The access token lasts about an hour and is renewed with the refresh token. The "
             "refresh token stops working about 40 days after you link (measured October 2026; "
-            "Archidekt can change this). Then you link again. Your Account page shows your date.",
+            "Archidekt can change this). Then you link again. Account details shows your date.",
             "Unlink, Delete my data, or an admin's Unlink or Disable deletes the gateway's copy at "
             "once, also from the copies saved before database upgrades.",
             "If you're removed from this gateway's group, or your sign-in account is deactivated "
@@ -243,7 +243,7 @@ def form_html(sweep_on: bool | None = None, *, read: bool = False) -> str:
         f"<p><strong>{html.escape(TITLE)}</strong></p>"
         f"{_summary_html()}"
         f"<details class='disclosure-detail' id='{DETAIL_ID}' open{must}>"
-        f"<summary>{html.escape(DETAIL_SUMMARY)}</summary>"
+        f"<summary class='fold-btn'>{html.escape(DETAIL_SUMMARY)}</summary>"
         f"{body_html(sweep_on)}{_terms_html()}</details></div>"
         f"<script src='{SCRIPT}' defer></script>"
     )
@@ -253,7 +253,7 @@ def linked_html(sweep_on: bool | None = None) -> str:
     """On the Account page once linked: the same text, folded, so it stays readable later."""
     return (
         "<details class='disclosure' id='archidekt-disclosure'>"
-        "<summary>What linking gives this gateway and the person who runs it</summary>"
+        "<summary class='fold-btn'>What linking gives this gateway and the person who runs it</summary>"
         f"{_summary_html()}{body_html(sweep_on)}{_terms_html()}</details>"
     )
 

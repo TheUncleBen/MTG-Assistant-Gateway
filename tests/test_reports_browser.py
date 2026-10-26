@@ -88,7 +88,7 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         assert state["charts"] == 4 and 0 < state["svgWidth"] <= state["innerWidth"]
         assert state["lineStroke"] == "rgb(250, 137, 13)", state["lineStroke"]  # the theme's orange
         assert state["copy"] and state["actionsRow"] == "flex"
-        assert "goldfish_" not in state["text"] and "What the solo test could not model" in state["text"]
+        assert "goldfish_" not in state["text"] and "What the quick solo test leaves out" in state["text"]
         assert state["bodyBg"] == ("rgb(24, 24, 24)" if scheme == "dark" else "rgb(249, 250, 251)")
 
         page.goto(f"{server.base}/history?deck_id=42", wait_until="networkidle")
@@ -494,7 +494,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
               return {
                 scrollWidth: document.documentElement.scrollWidth,
                 innerWidth: window.innerWidth,
+                // the filter chips are one row that scrolls sideways (as iOS draws them): the row
+                // fits, the chips past its end are scrolled to
                 right: Math.max(...Array.from(box.querySelectorAll('*'))
+                  .filter(e => !e.closest('.ui-chips') || e.matches('.ui-chips'))
                   .map(e => e.getBoundingClientRect().right)),
                 low,
                 checked: texts.length,
@@ -601,7 +604,7 @@ def test_saved_descriptions_and_remove_fit_and_read(
         kept.scroll_into_view_if_needed()
         if shots:
             kept.screenshot(path=f"{shots}/report-saved-{width}-{scheme}.png")
-            page.locator(".report .coverage").screenshot(path=f"{shots}/report-coverage-{width}-{scheme}.png")
+            page.locator(".report .ig-sum").screenshot(path=f"{shots}/report-coverage-{width}-{scheme}.png")
         state = page.evaluate(
             """(contrast) => {
               const ratio = eval(contrast);
@@ -624,8 +627,10 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert state["right"] <= state["innerWidth"] + 0.5, state
         assert not state["low"], state["low"]
         assert len(state["buttons"]) == 1 and state["buttons"][0] >= 44, state["buttons"]
-        coverage = page.locator(".report .coverage").inner_text()
-        assert "Played with their effect:" in coverage and "Known:" in coverage
+        coverage = (
+            page.locator(".report .ig-sum").inner_text() + page.locator(".report .ig-foot").inner_text()
+        )
+        assert "Played with their effect" in coverage and "Known:" in coverage
         # Remove asks first (2026-10-21, POPUP-INVENTORY): the red outline opens a box whose solid
         # red button removes
         page.get_by_role("button", name="Remove the saved description of Sol Ring").click()

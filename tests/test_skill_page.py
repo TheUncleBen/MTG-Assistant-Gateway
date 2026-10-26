@@ -19,7 +19,7 @@ REPO_SKILL = REPO_PLUGIN / "mtg-gateway"
 
 @pytest.fixture
 async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (REPO_PLUGIN,))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
 
@@ -56,7 +56,7 @@ async def test_signed_in_user_gets_page_and_zip(harness: Harness) -> None:
         assert "mtg-gateway/reference/tools.md" in names
         assert all(n.startswith("mtg-gateway/") for n in names)
 
-        account = await b.http.get("/account")
+        account = await b.http.get("/account/details")
         assert "href='/install?for=skill'" in account.text
     finally:
         await b.aclose()
@@ -90,7 +90,7 @@ def test_zip_is_reproducible_and_skips_links_and_hidden_files(tmp_path: Path) ->
 async def test_missing_skill_files_give_a_clear_503(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("MTG_PLUGIN_DIR", str(tmp_path / "nowhere"))
+    monkeypatch.setattr("mtg_gateway.plugin_page.PLUGIN_DIRS", (tmp_path / "nowhere",))
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         b = Browser(h)
         try:

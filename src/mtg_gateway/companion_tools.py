@@ -261,7 +261,7 @@ def add_deck_tool_routes(
             "<input type='hidden' id='addcat' name='addcat' value=''>"
             "<input type='hidden' id='addzone' name='addzone' value='main'>"
             "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
-            "<details class='pastebox'><summary>Paste a list</summary>"
+            "<details class='pastebox'><summary class='fold-btn'>Paste a list</summary>"
             "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "
             "(“2 Lightning Bolt”)</label>"
             "<textarea id='pastetext' name='text' rows='6' maxlength='20000' "
