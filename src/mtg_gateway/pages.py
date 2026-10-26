@@ -405,6 +405,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             },
         )
 
+    # Account details' forms with no action (Link account, Save approval mode, Forget my choices,
+    # the Notifications card) post to the page's own address: the same handler as /account.
+    @server.custom_route("/account/details", methods=["POST"], include_in_schema=False)
     @server.custom_route("/account", methods=["POST"], include_in_schema=False)
     async def account_post(request: Request) -> Response:
         sub, sid = current(request)

@@ -253,3 +253,26 @@ async def test_the_disconnected_notice_names_only_the_members_own_app(stack: Sta
         assert "<div class='notice ok'>Disconnected “Unnamed app”.</div>" in page
     finally:
         await b.aclose()
+
+
+async def test_the_forms_without_an_action_post_to_account_details(stack: Stack) -> None:
+    """Account details' own forms (Link account, Save approval mode, Forget my choices, the
+    Notifications card) carry no action, so the browser posts them to /account/details itself:
+    that address takes the same posts as /account (a 405 there broke linking and the mode)."""
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/account/details")).text
+        bare = re.findall(r"<form method='post'(?![^>]*action=)[^>]*>", page)
+        assert len(bare) >= 2, bare  # at least Save approval mode and Forget my choices
+        csrf = await b.csrf()
+        r = await b.http.post(
+            "/account/details", data={"csrf": csrf, "action": "approval_mode", "mode": "manual"}
+        )
+        assert r.status_code == 303 and r.headers["location"] == "/account/details?ok=mode_manual", r.text
+        # an expired form is refused the same way on both addresses
+        r = await b.http.post(
+            "/account/details", data={"csrf": "stale", "action": "approval_mode", "mode": "manual"}
+        )
+        assert r.status_code == 403
+    finally:
+        await b.aclose()
