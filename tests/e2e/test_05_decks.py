@@ -80,9 +80,9 @@ def set_writes(writes: str) -> None:
 
 
 async def set_mode(env: Env, user: str, mode: str) -> None:
-    """Pick ``user``'s approval mode on their own account page, the only place a mode is set."""
+    """Pick ``user``'s approval mode on their own Account details page, the only place a mode is set."""
     async with browser_page() as page:
-        await gateway_browser_sign_in(page, env, user, "/account")
+        await gateway_browser_sign_in(page, env, user, "/account/details")
         await page.check(f"input[name=mode][value={mode}]")
         await page.click("text=Save approval mode")
         await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=mode_{mode}", timeout=30_000)
@@ -91,7 +91,7 @@ async def set_mode(env: Env, user: str, mode: str) -> None:
 async def ensure_unlinked(env: Env, user: str) -> None:
     """Start from 'no Archidekt account linked' even when the suite ran before on this stack."""
     async with browser_page() as page:
-        await gateway_browser_sign_in(page, env, user, "/account")
+        await gateway_browser_sign_in(page, env, user, "/account/details")
         if "Unlink and delete stored session" in await page.inner_text("body"):
             await page.click("text=Unlink and delete stored session")
             await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=unlinked", timeout=30_000)
@@ -192,7 +192,7 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
     async def go():
         await ensure_unlinked(env, user)
         async with browser_page() as page:
-            await gateway_browser_sign_in(page, env, user, "/account")
+            await gateway_browser_sign_in(page, env, user, "/account/details")
             # a wrong password is refused by Archidekt (the mock) and shown on the page
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", "wrong")
