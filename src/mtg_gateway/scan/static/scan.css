@@ -262,7 +262,8 @@ body.picker-open{overflow:hidden}
 
 /* match result: the confirm or fix step (the status pill carries the colour) */
 .scan .result{display:flex;gap:.9rem;align-items:flex-start}
-.scan .result img{width:6.5rem;border-radius:var(--radius);background:var(--bg);flex:0 0 auto}
+/* the picture takes a third of the card at most, so the name keeps its room at large text */
+.scan .result img{width:min(6.5rem,32%);border-radius:var(--radius);background:var(--bg);flex:0 0 auto}
 .scan .result .meta{flex:1 1 auto;min-width:0;display:block;margin:0}
 .scan .result h3{margin:0 0 .3rem;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere}
 .scan .result .status{display:inline-block;margin:.15rem 0 .35rem;padding:.15rem .6rem;border-radius:22px;

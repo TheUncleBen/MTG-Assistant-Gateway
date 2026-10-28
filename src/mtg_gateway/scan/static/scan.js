@@ -238,24 +238,41 @@
     const b = $('#scan-tally'); if (!b) return;
     const n = totalCards();
     b.hidden = n === 0;
-    const hook = (window.__scan && window.__scan.listValue) || listValue;
-    let value = null;
-    try { value = hook(state.items); } catch (e) { value = null; }
-    let money = '';
-    if (value && typeof value.amount === 'number' && isFinite(value.amount)) {
-      try { money = new Intl.NumberFormat(undefined, { style: 'currency', currency: value.currency || 'USD' }).format(value.amount); }
-      catch (e) { money = ''; }
-    }
+    const money = valueText();
     b.textContent = plural(n, 'card') + (money ? ' · ' + money : '');
     b.setAttribute('aria-label', plural(n, 'card') + (money ? ', worth ' + money + ',' : '') + ' in this scan. Open the list');
   }
-  /* The scan's value for the running count. Decision C5 hook: the gateway does not price scanned
-     cards yet, so this answers null and only the count shows. When C5's daily prices reach the scan
-     results (a price per printing and finish on each line's card), return {amount, currency} here:
-     the sum of quantity times price over state.items, or null while any matched line has no price
-     (a part-priced total would mislead). The count then shows "12 cards · $34.50". The app's camera
-     panel shows the page's events (ScanGlue.kt), so the value would need adding to those too. */
-  function listValue() { return null; }
+  /* The scan's value in words for the running count and the list's summary: "$34.50", with
+     "(3 without a price)" when some lines have none; '' while nothing has a price. */
+  function valueText() {
+    const hook = (window.__scan && window.__scan.listValue) || listValue;
+    let value = null;
+    try { value = hook(state.items); } catch (e) { value = null; }
+    if (!value || typeof value.amount !== 'number' || !isFinite(value.amount)) return '';
+    let money = '';
+    try { money = new Intl.NumberFormat(undefined, { style: 'currency', currency: value.currency || 'USD' }).format(value.amount); }
+    catch (e) { return ''; }
+    return money + (value.unpriced ? ' (' + value.unpriced + ' without a price)' : '');
+  }
+  /* The scan's value: quantity times price over the lines whose printing has a price in its
+     finish, as Scryfall listed it when the card was looked up (card.prices on the resolve answer:
+     Scryfall's daily prices, read at most a day ago). A line with no card, or whose printing has no
+     price in that finish (a foil with only a non-foil price), is counted in `unpriced` and said so;
+     nothing is guessed for it. Null while no line has a price, so only the count shows. */
+  function linePrice(it) {
+    const prices = it && it.card && it.card.prices;
+    if (!prices) return null;
+    const v = parseFloat(prices[isFoil(it) ? 'usd_foil' : 'usd']);
+    return isFinite(v) && v >= 0 ? v : null;
+  }
+  function listValue(items) {
+    let amount = 0, priced = 0, unpriced = 0;
+    (items || []).forEach((it) => {
+      const n = Math.max(1, it.quantity || 1), v = linePrice(it);
+      if (v == null) unpriced += n; else { priced += n; amount += v * n; }
+    });
+    return priced ? { amount: Math.round(amount * 100) / 100, currency: 'USD', priced, unpriced } : null;
+  }
 
   function showTab(id) {
     if (state.tab === 'camera' && id !== 'camera') { state.continuous = false; stopCamera(); }
@@ -577,6 +594,11 @@
   function cameraProblem(err) {
     return (err && CAMERA_ERRORS[err.name]) || 'the camera could not be started';
   }
+  /* A scan is reading a picture (scanRegion marks the viewfinder busy), or Auto is on. */
+  function scanning() {
+    const cam = $('#camera');
+    return !!state.continuous || !!(cam && cam.classList.contains('busy'));
+  }
   function setStatus(text) {
     const s = $('#cam-status'); if (s) s.textContent = text;
     const glare = /glare on the card/i.test(text || '');
@@ -624,8 +646,10 @@
       });
       await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: OCR_WHITELIST, preserve_interword_spaces: '1' });
       state.ocr = worker; state.ocrState = 'ready'; state.ocrProgress = 1;
-      // In the app the hint under the viewfinder already says to tap the shutter.
-      setStatus(phoneCamera() ? '' : 'Ready. Hold the card flat and tap Scan.');
+      // In the app the hint under the viewfinder already says to tap the shutter. A scan that
+      // waited for the engine (scanRegion, or Auto) goes on with its own words: Ready would
+      // write over them.
+      if (!scanning()) setStatus(phoneCamera() ? '' : 'Ready. Hold the card flat and tap Scan.');
       emit('ocr', { state: 'ready', progress: 1 });
     } catch (err) {
       state.ocrState = 'failed';
@@ -1640,7 +1664,8 @@
       const unresolved = state.items.filter((it) => !it.card).length;
       // The saved scan is named, never numbered, here.
       const saved = state.sessionId ? ' · saved' + (state.sessionName ? ' as ' + state.sessionName : '') + (state.dirty ? ' (unsaved changes)' : '') : ' · not saved yet';
-      summary.textContent = state.items.length ? totalCards() + ' cards, ' + state.items.length + ' distinct' + (unresolved ? ', ' + unresolved + ' unresolved' : '') + saved : 'Nothing scanned yet.';
+      const worth = valueText();
+      summary.textContent = state.items.length ? totalCards() + ' cards, ' + state.items.length + ' distinct' + (unresolved ? ', ' + unresolved + ' unresolved' : '') + (worth ? ' · ' + worth : '') + saved : 'Nothing scanned yet.';
     };
     draw();
     const save = h('button', { id: 'save-btn', class: 'primary', onclick: async () => {

@@ -192,9 +192,15 @@ async def test_scryfall_cache_keeps_slim_cards() -> None:
     sf = ScryfallClient("https://scryfall.test", min_interval=0.0, http=FakeScryfall().client())
     raw = json.loads((FIXTURES / "live" / "scryfall_named_sol_ring.json").read_text())
     card = await sf.named("Sol Ring")
-    assert summarize(card) == summarize(raw)
+    # the same summary from the slim card as from the raw one (the fake's Sol Ring is another
+    # recording of the same printing, so only its prices differ)
+    assert {k: v for k, v in summarize(card).items() if k != "prices"} == {
+        k: v for k, v in summarize(raw).items() if k != "prices"
+    }
     cached = next(iter(sf.cards._items.values()))[1]
-    assert "oracle_text" not in cached and "prices" not in cached
+    assert "oracle_text" not in cached
+    # the prices stay (the Scan page's running value): the ones Scryfall has, six short strings at most
+    assert cached["prices"] == {"usd": "1.28", "eur": "1.13", "tix": "0.02"}
     assert len(json.dumps(cached)) < 1500 < len(json.dumps(raw))
 
 
