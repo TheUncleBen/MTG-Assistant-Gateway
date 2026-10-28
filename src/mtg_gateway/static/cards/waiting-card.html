@@ -256,7 +256,7 @@ button.danger:disabled{color:var(--red)}
     return w.charAt(0).toUpperCase() + w.slice(1);
   }
 
-  var polls = 0, nudged = false;
+  var polls = 0, told = false;
   function showResult(sc) {
     var rl = $("res-list"); rl.replaceChildren();
     (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
@@ -273,10 +273,10 @@ button.danger:disabled{color:var(--red)}
       u.onclick = function (e) { e.preventDefault(); B.openLink(sc.result_url, B.setStatus); };
       a.appendChild(u);
     }
-    if (running && !nudged && polls === 0) {
-      // under way: the assistant carries on now, as after a proposal card's Approve of a large change
-      nudged = true;
-      B.tellModel("The user pressed Apply all on the waiting changes card; it is still applying to Archidekt. " + String(sc.summary || "")).then(B.nudge);
+    if (running && !told && polls === 0) {
+      // under way: the assistant is told now, so it knows if the person asks before it ends
+      told = true;
+      B.tellModel("The user pressed Apply all on the waiting changes card; it is still applying to Archidekt. " + String(sc.summary || ""));
     }
     if (running && polls < 150) {
       polls += 1;
@@ -290,13 +290,9 @@ button.danger:disabled{color:var(--red)}
           .catch(function () { showResult(sc); });
       }, 4000);
     } else if (!running) {
-      var told = B.tellModel("The user pressed Apply all on the waiting changes card. " + String(sc.summary || "") +
+      B.tellModel("The user pressed Apply all on the waiting changes card. " + String(sc.summary || "") +
         ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
         ((sc.not_sent || []).length ? " Not sent (still waiting or closed): " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
-      // one nudge for the whole batch, sent when it is under way or done (whichever the card sees
-      // first); a row's own Approve sends none, so approving several rows one by one doesn't start
-      // a turn for each
-      if ((sc.applied || []).length && !nudged) { nudged = true; told.then(B.nudge); }
     }
   }
 

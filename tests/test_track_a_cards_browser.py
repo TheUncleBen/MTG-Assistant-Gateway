@@ -1131,12 +1131,11 @@ def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) 
             browser.close()
 
 
-def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_it_did() -> None:
-    """Ben, 0.7.31 test round: after an approval the assistant sat still. Where the host takes a
-    message from a card, Apply all posts "Approved, go on" once for the whole batch (as soon as it is
-    under way); a row's own
-    Approve posts none, so approving rows one by one doesn't start a turn each. The row's result
-    is the gateway's own words for what it did (a like is not a deck that matches)."""
+def test_apply_all_on_the_waiting_card_posts_nothing_as_the_user_and_a_row_approve_says_what_it_did() -> None:
+    """Owner decision 0.7.46: no card posts "Approved, go on" as the person's message any more,
+    neither after a row's Approve nor after Apply all (done or still applying); the assistant is
+    told the outcome through the model context. The row's result is the gateway's own words for
+    what it did (a like is not a deck that matches)."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()
@@ -1179,18 +1178,13 @@ def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_i
             card.locator("#apply-all:not([disabled])").click()
             card.locator("#go:not([disabled])").click()
             card.locator("#result:not(.hidden)").wait_for()
-            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')")
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/update-model-context')")
             page.wait_for_timeout(300)
             log = page.evaluate("() => window.log")
-            sent = [m for m in log if m.get("method") == "ui/message"]
-            assert [m["params"] for m in sent] == [
-                {"role": "user", "content": [{"type": "text", "text": "Approved, go on"}]}
-            ]
-            told = [i for i, m in enumerate(log) if m.get("method") == "ui/update-model-context"]
-            assert told and told[-1] < log.index(sent[0])
+            assert not [m for m in log if m.get("method") == "ui/message"]
             page.close()
-            # a large batch still applying: the one nudge goes as soon as it is under way, as on the
-            # proposal card, and the end of the batch sends no second one
+            # a large batch still applying: the assistant is told while it runs and when it ends,
+            # and nothing is posted as the user either time
             page = browser.new_page(viewport={"width": 390, "height": 900})
             page.on("pageerror", lambda e: errors.append(str(e)))
             running = {**DONE, "state": "applying", "summary": "Applying 1.", "applied": [], "not_sent": []}
@@ -1203,11 +1197,11 @@ def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_i
             )
             card.locator("#apply-all:not([disabled])").click()
             card.locator("#go:not([disabled])").click()
-            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')")
             card.locator("#status", has_text="Applied 1.").wait_for(timeout=8000)
             page.wait_for_timeout(300)
-            sent = [m for m in page.evaluate("() => window.log") if m.get("method") == "ui/message"]
-            assert len(sent) == 1, sent
+            log = page.evaluate("() => window.log")
+            assert len([m for m in log if m.get("method") == "ui/update-model-context"]) == 2, log
+            assert not [m for m in log if m.get("method") == "ui/message"]
         finally:
             browser.close()
     assert not errors, errors

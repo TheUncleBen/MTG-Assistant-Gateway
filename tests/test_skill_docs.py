@@ -127,20 +127,22 @@ def test_every_guide_says_to_finish_the_review_before_proposing() -> None:
     assert "Finish your review before proposing: one proposal with every change, and amend_proposal" in told
 
 
-def test_every_guide_says_what_approved_go_on_means() -> None:
-    """A card's "Approved, go on" reads like the user saying they applied it, and the guides said to
-    call get_proposal then, which draws the proposal card a second time. Each guide now says to
-    carry on from the outcome the card passed in and to read the proposal only when that is unclear."""
+def test_no_guide_mentions_a_message_posted_as_the_user() -> None:
+    """Owner decision 0.7.46: the cards no longer post "Approved, go on" as the user's message. The
+    guides say the outcome comes with the user's next message, to carry on from it and to read the
+    proposal only when that is unclear; none still mentions the posted message."""
     from mtg_gateway.app import server_instructions
+    from mtg_gateway.guide import add_guide_routes
 
     skill = " ".join((SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").split())
-    assert 'posts "Approved, go on" as the user\'s message: carry on from the outcome you were told' in skill
     block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
-    assert (
-        'On "Approved, go on" or their word, use the outcome given; proposal_status only if unclear.' in block
-    )
     told = server_instructions("https://gateway.example.com")
-    assert "carry on from that outcome, and call proposal_status only when it is unclear" in told
+    guide = Path(add_guide_routes.__code__.co_filename).read_text(encoding="utf-8")
+    for text in (skill, block, told, guide):
+        assert "go on" not in text.replace("goes on", "")
+    assert "Carry on from the outcome you were told" in skill
+    assert "After a card press, use the outcome given; proposal_status only if unclear." in block
+    assert "Carry on from that outcome, and call proposal_status only when it is unclear" in told
 
 
 def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:

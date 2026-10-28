@@ -53,7 +53,7 @@ WRITING
 1. Edit: get_deck, propose_deck_changes(deck_id, changes=[{action: add|remove|set_quantity, name, quantity}]), max 40 (remove with no quantity: all; zone side: maybeboard). Settings, folder, tags, cover: propose_deck_details. Finish your review, then propose once with every change; to change a waiting one, amend_proposal. Each propose/amend makes a card: check_deck_changes first, follow its suggest.
    Create: check_new_deck, then propose_new_deck once (name, deck_format, cards|decklist_text|csv_text|scan_session); change it: amend_proposal new_deck.
 2. Show the diff, review_url and say "Nothing has been changed on Archidekt yet."
-3. assistant_may_apply (the user's approval mode) decides: false: the user approves on card or review page; stop. On "Approved, go on" or their word, use the outcome given; proposal_status only if unclear. true: state the change briefly, call apply_proposal once. browser_required: give review_url; stop.
+3. assistant_may_apply (the user's approval mode) decides: false: the user approves on card or review page; stop. After a card press, use the outcome given; proposal_status only if unclear. true: state the change briefly, call apply_proposal once. browser_required: give review_url; stop.
 4. Only "applied" counts. "applying": still writing; check proposal_status later; don't re-apply. Report whether the check matched, snapshot_id, result.deck_url, undo (list_snapshots, propose_restore_snapshot).
 
 ERRORS (ok:false, error)

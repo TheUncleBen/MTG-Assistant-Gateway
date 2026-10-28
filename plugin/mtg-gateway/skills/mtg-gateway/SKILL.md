@@ -330,9 +330,9 @@ own linked account. Follow every step, in order.
    decides on the card: show the diff and the review link in your words,
    say nothing has changed yet, and stop. The gateway tells you the
    outcome when they press a button (a note that the proposal is applied
-   or rejected). Where the app allows it, the card then posts "Approved, go
-   on" as the user's message: carry on from the outcome you were told, and
-   call `proposal_status` only when that outcome is unclear (for example still
+   or rejected) with their next message; the card never posts in their
+   name. Carry on from the outcome you were told, and call
+   `proposal_status` only when that outcome is unclear (for example still
    `applying`). Never call `apply_proposal` for a proposal the card is
    showing, and never call `confirm_proposal`: it belongs to the card's
    buttons, needs a code you do not have, and refuses and logs any other

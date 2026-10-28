@@ -325,14 +325,10 @@ For the exact devices and plans tested, see
   assistant does not in a host that follows the standard. `MTG_APPLY_IN_CHAT=false`
   removes the card, the code and the tool.
   The waiting-changes card (`static/cards/waiting-card.html`) works the same
-  way: its buttons call `confirm_proposal` and `confirm_waiting`. Once a
-  proposal approved on its card, or a batch sent with Apply all, is applied
-  or under way (a row's own Approve on the waiting-changes card sends
-  nothing), the card posts the
-  fixed text "Approved, go on" as a user message where the host allows it
-  (`ui/message` when the host declares `message`, else ChatGPT's
-  `sendFollowUpMessage`), so the assistant carries on; it carries no data
-  and nothing in it comes from the page.
+  way: its buttons call `confirm_proposal` and `confirm_waiting`. A card
+  tells the assistant what was pressed through `ui/update-model-context`
+  only; since 0.7.46 no card posts a message in the member's name
+  (`ui/message` or ChatGPT's `sendFollowUpMessage`).
   The two pickers (`src/mtg_gateway/cards.py`, HTML in `static/cards/`:
   printings, picker) only show and relay: a tap sends the
   pick to the assistant as text through the host (`ui/update-model-context`),
