@@ -254,3 +254,41 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         assert [e for e in db.audit_recent(20, sub=SUB) if e["event"] == "view_choices_forgotten"]
     finally:
         await b.aclose()
+
+
+async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
+    """Ben, 2026-10-28: one card size for every page meant a change in the printings dialog resized
+    the deck page. Each page keeps its own (card.size.<page>), M until chosen, or the one size
+    chosen before for every page, so nobody's choice is lost."""
+    b = await linked(stack)
+    try:
+        db = stack.h.db
+        assert set(prefs.CARD_SIZE_PAGES) >= {
+            "deck", "printings", "search", "watchlist", "goldfish", "scan", "collection", "editor", "decks"
+        }  # fmt: skip
+        r = await api(
+            b, "POST", "/api/v1/prefs", {"set": {"card.size.deck": "s", "card.size.printings": "l"}}
+        )
+        assert r.json()["saved"] == ["card.size.deck", "card.size.printings"], r.text
+        r = await api(b, "POST", "/api/v1/prefs", {"set": {"card.size.nowhere": "s", "card.size.deck": "xl"}})
+        assert r.json()["refused"] == ["card.size.nowhere", "card.size.deck"]
+        page = (await b.http.get("/decks/42")).text
+        assert "data-card-size=s data-card-size-page=deck data-card-size-printings=l>" in page
+        # a page with no choice of its own: M, or the size chosen once for every page before
+        page = (await b.http.get("/cards", params={"q": "sol"})).text
+        assert (
+            "data-card-size=m data-card-size-page=search data-card-size-unset data-card-size-printings=l>"
+            in page
+        )
+        db.set_pref(SUB, "card.size", "l")
+        page = (await b.http.get("/cards", params={"q": "sol"})).text
+        assert "data-card-size=l data-card-size-page=search data-card-size-printings=l>" in page
+        assert "data-card-size=s data-card-size-page=deck" in (await b.http.get("/decks/42")).text
+        assert "data-card-size-page=editor" in (await b.http.get("/decks/42/edit")).text
+        assert "data-card-size-page=collection" in (await b.http.get("/collection")).text
+        assert "data-card-size-page=decks" in (await b.http.get("/decks")).text
+        # Forget my view choices forgets each page's
+        prefs.forget(db, SUB)
+        assert db.get_pref(SUB, "card.size.deck") is None and db.get_pref(SUB, "card.size.printings") is None
+    finally:
+        await b.aclose()

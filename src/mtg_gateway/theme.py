@@ -75,8 +75,9 @@ APP_UA_MARK = "MTGAssistant/"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
 _app_version: ContextVar[str] = ContextVar("mtg_app_version", default="")
-# The signed-in member's card size (prefs.py), set by pages.browser_session for this request.
-_card_size: ContextVar[str] = ContextVar("mtg_card_size", default="m")
+# The signed-in member's card sizes (prefs.py) by pref name, and the page drawn, set by
+# pages.browser_session for this request.
+_card_size: ContextVar[tuple[str, dict[str, Any]]] = ContextVar("mtg_card_size", default=("deck", {}))
 
 # Archidekt's light set (body custom properties). Emitted twice: under prefers-color-scheme for
 # "system" and under [data-theme=light] for an explicit choice.
@@ -1180,8 +1181,15 @@ CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
 # page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
 # 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
 # follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
-# (no flash) and by static/prefs.js when the S / M / L switch is pressed.
+# (no flash) and by static/prefs.js when the S / M / L switch is pressed. Each page keeps its own
+# (Ben, 2026-10-28): the account's card.size.<page>, else the one size chosen for every page before
+# (card.size), else M. The printings dialog has its own too, on <html data-card-size-printings>
+# and on the dialog itself.
 CARD_SIZES = ("s", "m", "l")
+CARD_SIZE = "card.size"
+CARD_SIZE_PAGES = (
+    "deck", "editor", "goldfish", "decks", "search", "collection", "watchlist", "scan", "printings"
+)  # fmt: skip
 CSS += """
 /* the S / M / L switch, styled as card search's Grid / List switch */
 .sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
@@ -1225,8 +1233,8 @@ html[data-card-size=s] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
 html[data-card-size=l] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(230px,16.2rem)),1fr))}
-html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
-html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
+.printpick[data-card-size=s] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
+.printpick[data-card-size=l] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
 /* list views (R-175): the row pictures follow the same choice through --thumb-scale (S 0.75, L 1.35);
    a page's own list thumbnail multiplies its width and height by it (ui.thumb_size_css). The scale
    is set on the thumbnails themselves, never on <html>: a custom property changed on the root is
@@ -1258,8 +1266,8 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
   html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   html[data-card-size=l] ul.decklist.grid{grid-template-columns:minmax(0,1fr)} }
 @media (max-width:700px){
-  html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
-  html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(186px,1fr))} }
+  .printpick[data-card-size=s] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+  .printpick[data-card-size=l] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(186px,1fr))} }
 @media (max-width:600px){
   html[data-card-size=s] .deckview.grid .cards,
   html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -2286,28 +2294,70 @@ def current_layout() -> str:
     return _layout.get()
 
 
-def set_card_size(size: object) -> None:
-    """The card size this request's page is drawn with (the account's, prefs.py)."""
-    _card_size.set(size if isinstance(size, str) and size in CARD_SIZES else "m")
+def card_size_page(path: str) -> str:
+    """Which page's card size (CARD_SIZE_PAGES) the page at ``path`` uses. A page not named here
+    (Home, the site search, a profile) shows deck tiles: it shares My decks' size."""
+    parts = [p for p in path.split("/") if p]
+    head = parts[0] if parts else ""
+    if head == "decks" and len(parts) >= 2 and parts[1] not in ("new", "new-package", "open"):
+        return {"goldfish": "goldfish", "edit": "editor"}.get(parts[2] if len(parts) > 2 else "", "deck")
+    return {"cards": "search", "collection": "collection", "watchlist": "watchlist", "scan": "scan"}.get(
+        head, "decks"
+    )
 
 
-def current_card_size() -> str:
-    return _card_size.get()
+def set_card_size(sizes: object, page: str | None = None) -> None:
+    """The card sizes this request's page is drawn with: the account's choices by pref name
+    (prefs.py; a plain size is the one for every page), and the page (card_size_page of the
+    request's path when not given)."""
+    if isinstance(sizes, str):
+        sizes = {CARD_SIZE: sizes}
+    _card_size.set((page or card_size_page(current_path()), dict(sizes) if isinstance(sizes, dict) else {}))
+
+
+def _stored_card_size(page: str) -> str | None:
+    sizes = _card_size.get()[1]
+    for name in (f"{CARD_SIZE}.{page}", CARD_SIZE):
+        if sizes.get(name) in CARD_SIZES:
+            return sizes[name]
+    return None
+
+
+def current_card_size(page: str | None = None) -> str:
+    """The card size of ``page`` (this request's page when not given): its own, else the one size
+    chosen before for every page, else M."""
+    return _stored_card_size(page or _card_size.get()[0]) or "m"
+
+
+def card_size_attrs() -> str:
+    """``<html>``'s card size attributes: the page's size and name, ``data-card-size-unset`` when
+    the account has no size for it (static/prefs.js may then use this device's copy), and the
+    printings dialog's size."""
+    page, sizes = _card_size.get()
+    unset = _stored_card_size(page) is None and sizes.get("prefs.forgotten") is not True
+    return (
+        f" data-card-size={current_card_size(page)} data-card-size-page={page}"
+        + (" data-card-size-unset" if unset else "")
+        + f" data-card-size-printings={current_card_size('printings')}"
+    )
 
 
 def card_size_control(*, cls: str = "field cardsize") -> str:
     """The one S / M / L card size switch (R-175): put it in the toolbar of every view that shows card
     pictures, list rows included. static/prefs.js presses it, applies it at once on
-    ``<html data-card-size>`` and keeps the choice on the account (prefs.CARD_SIZE), so one choice
-    follows the member to every view. ``cls`` is the wrapper's class (keep ``cardsize`` in it)."""
-    size = current_card_size()
+    ``<html data-card-size>`` and keeps the choice on the account as this page's own
+    (card.size.<page>, prefs.py), so it follows the member to this page on every device and leaves
+    the other pages as they are. ``cls`` is the wrapper's class (keep ``cardsize`` in it)."""
+    page = _card_size.get()[0]
+    size = current_card_size(page)
     buttons = "".join(
         f"<button type='button' data-card-size-set='{k}' aria-pressed='{'true' if k == size else 'false'}' "
         f"aria-label='{label} cards' title='{label} cards'>{k.upper()}</button>"
         for k, label in (("s", "Small"), ("m", "Medium"), ("l", "Large"))
     )
     return (
-        f"<div class='{esc(cls)}'><span class='lbl' aria-hidden='true'>Card size</span>"
+        f"<div class='{esc(cls)}' data-card-size-page='{page}'>"
+        "<span class='lbl' aria-hidden='true'>Card size</span>"
         f"<span class='sizeseg' role='group' aria-label='Card size'>{buttons}</span></div>"
     )
 
@@ -2594,7 +2644,7 @@ def render(
     description = f"{site}: a private gateway to your Magic: The Gathering decks on Archidekt."
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}"
-        f"{f' data-card-size={current_card_size()}' if signed_in else ''}>"
+        f"{card_size_attrs() if signed_in else ''}>"
         "<head><meta charset='utf-8'>"
         f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
@@ -2711,7 +2761,7 @@ class ThemeMiddleware:
         ptoken = _path.set(path)
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
-        ctoken = _card_size.set("m")
+        ctoken = _card_size.set((card_size_page(path), {}))
         try:
             await self.app(scope, receive, send)
         finally:
