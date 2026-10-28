@@ -48,11 +48,12 @@ from .pages import (
     login_redirect,
 )
 from .theme import (
-    esc as _esc,
-)
-from .theme import (
+    SPINNER,
     hub_switch,
     icon,
+)
+from .theme import (
+    esc as _esc,
 )
 from .waiting_strip import waiting_changes
 
@@ -793,8 +794,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if deck.link_notice:  # the member's link was dropped while reading this deck
             notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
         being_made = decks.being_made(deck.id)  # a new deck whose cards are still going in
-        if being_made:
-            notice = f"<p class='notice'>{_esc(being_made)}</p>" + notice
+        if being_made:  # with the progress ring, until static/deck.js sees it done and reloads
+            notice = (
+                f"<p class='notice making' role='status' data-made-poll='/decks/{_esc(deck.id)}/made'>"
+                f"{SPINNER} {_esc(being_made)} Changes wait until it is done.</p>" + notice
+            )
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
@@ -818,6 +822,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
+            making=bool(being_made),
             waiting=waiting_changes(
                 state.db, sub, deck.id, own=own, risk_of=decks.proposal_risk
             ),  # waiting_strip.py
@@ -892,6 +897,16 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect(f"/decks/{deck_id}")
         return await deck_page_response(request, sub, sid, deck_id)
+
+    @server.custom_route("/decks/{deck_id}/made", methods=["GET"], include_in_schema=False)
+    async def deck_made(request: Request) -> Response:
+        """Whether a new deck's cards are all in (decks.being_made): the deck page asks now and
+        then while its notice says it is still being made, and reloads once it is."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"made": False, "signed_in": False}, status_code=401)
+        made = decks.being_made(request.path_params["deck_id"]) is None
+        return JSONResponse({"made": made}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:

@@ -3825,7 +3825,7 @@ class DeckService:
         sent = int(progress.get("sent_entries") or 0)
         cards = sum(int(e["modifications"]["quantity"]) for e in entries[:sent])
         total = sum(int(e["modifications"]["quantity"]) for e in entries)
-        return f"This deck is still being made: {cards} of {total} cards in."
+        return f"This deck is still being made: {cards} of {total} cards added so far."
 
     def refuse_while_made(self, deck_id: str) -> None:
         """Refuse a change to a deck that is still being made (its apply would race the edit)."""

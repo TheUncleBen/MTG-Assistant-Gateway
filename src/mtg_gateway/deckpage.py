@@ -349,10 +349,12 @@ def banner_html(
     writes_enabled: bool,
     forge_on: bool = False,
     waiting: int = 0,
+    making: bool = False,
 ) -> str:
     """The deck banner: name, facts, the buttons (Edit deck the page's one orange button, Clone
     deck, Test and play, More; the same on every screen, Ben 2026-10-25) and the deck menu.
     ``waiting``: the member's proposals waiting on this deck, the count on the Proposals pill.
+    ``making``: a new deck whose cards are still going in, whose Edit deck is off until it is done.
     The menu is the shared deck menu (static/deck.js builds it with cardmenu.js's layer, from the
     ⋮ More button, a right-click on the banner or a press and hold). Without scripts it is a
     details drop-down of the items that work as links, and its Export…, Compare with… and Delete
@@ -383,7 +385,12 @@ def banner_html(
     did = esc(deck.id)
     title = deck_title(deck)
     primary = ""
-    if own and csrf:
+    if own and csrf and making:
+        primary += (
+            "<button type='button' class='btn btn-primary' disabled "
+            f"title='Changes wait until the deck is made'>{icon('edit')} Edit deck</button>"
+        )
+    elif own and csrf:
         primary += f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} Edit deck</a>"
     if csrf:
         # Any deck the member can read can be cloned into their own account, as on archidekt.com
@@ -932,11 +939,16 @@ def _select(name: str, options: dict[str, str], current: str, label: str, ic: st
     )
 
 
-def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: str) -> str:
+def toolbar_html(
+    deck: Deck, *, own: bool, view: str, group: str, sort: str, q: str, making: bool = False
+) -> str:
     """The toolbar panel. Two separate forms: Quick add (goes to the editor) and the view controls.
     They must never nest: HTML has no nested forms, the parser would end the outer form at the
-    inner one's close tag and the View / Group / Sort selects would submit nothing."""
+    inner one's close tag and the View / Group / Sort selects would submit nothing. ``making``: a
+    new deck whose cards are still going in, whose Quick add and Add a package are off meanwhile."""
     did = esc(deck.id)
+    if own and making:
+        return _toolbar_making(toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q), did)
     add = (
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
@@ -2017,6 +2029,23 @@ def description_html(deck: Deck) -> str:
     return f"<section class='panel description'><h2>Description</h2>{body}</section>"
 
 
+def _toolbar_making(html: str, did: str) -> str:
+    """The toolbar with Quick add and Add a package off (the deck is still being made)."""
+    return (
+        html.replace("autocomplete='off'>", "autocomplete='off' disabled>", 1)
+        .replace(
+            "<button type='submit' aria-label='Card search'>",
+            "<button type='submit' aria-label='Card search' disabled>",
+            1,
+        )
+        .replace(
+            f"<a class='btn addpkg' href='/decks/{did}/package' {ui.box_open_attr('package')}>",
+            "<a class='btn addpkg' aria-disabled='true'>",
+            1,
+        )
+    )
+
+
 def deck_page_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -2034,7 +2063,9 @@ def deck_page_html(
     waiting: list[dict[str, Any]] | None = None,
     boxes: str = "",
     before: str = "",
+    making: bool = False,
 ) -> str:
+    # ``making``: a new deck whose cards are still going in (decks.being_made): its edits are off;
     # ``waiting``: the member's waiting proposals for the deck (waiting_strip.py), behind the
     # banner's Proposals pill; ``boxes``: the page's boxes (deck_boxes_html), hidden until opened; ``before``:
     # a strip above the banner (the deck help listing, deck_extras.py)
@@ -2051,12 +2082,13 @@ def deck_page_html(
             writes_enabled=writes_enabled,
             forge_on=forge_on,
             waiting=len(waiting or []),
+            making=making,
         )
         + boxes
         + waiting_strip.deck_box_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
-        + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
-        + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
+        + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q, making=making)
+        + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own and not making, owned=owned)
         + stats_panel_html(deck, stats)
         + description_html(deck)
         + (comments_html(deck, writes_enabled=writes_enabled) if csrf else "")
