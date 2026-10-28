@@ -228,7 +228,7 @@ def test_markdown_and_html_exports() -> None:
     assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
-    assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme:dark" in doc
+    assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme: light" in doc
     assert "<title>Deck report: Immortal Reckoning</title>" in doc
 
 
@@ -327,7 +327,7 @@ def test_preflight_only_label_and_overall_status() -> None:
     assert "Preflight only" not in running and ">Forge games (against precons)</h2>" in running
     assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge going</span>" in running
     md = rv.report_markdown(report(forge=skipped, status="complete"))
-    assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
+    assert "## Preflight only (no rules engine)" in md and "- Status: Complete" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
     assert "## Forge games (against precons)" in rv.report_markdown(
         report(forge={"state": "running"}, status="running")

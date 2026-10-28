@@ -1450,7 +1450,8 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
             )
             lost = _losses_text(seat.get("losses"))
             out.append(
-                f"{front_face(seat.get('deck'))}: {seat.get('wins', 0)} wins, "
+                f"{front_face(seat.get('deck'))}: {seat.get('wins', 0)} "
+                f"{'win' if seat.get('wins', 0) == 1 else 'wins'}, "
                 f"{_pct(seat.get('win_rate'))}{ci}." + (f" Lost by: {lost}." if lost else "")
             )
         if res.get("draws"):
@@ -1987,10 +1988,16 @@ def report_markdown(r: dict[str, Any]) -> str:
     lines = [f"# Deck report: {r.get('deck_name') or r.get('deck_id')}", ""]
     if s["commander"]:
         lines.append(f"- Commander: {front_face(s['commander'])}")
-    lines.append(f"- Deck: https://archidekt.com/decks/{r.get('deck_id')}")
+    source = r.get("source") if isinstance(r.get("source"), dict) else None
+    if source and source.get("label"):
+        # a pasted list, a proposal or a comparison: named for what it is
+        lines.append(f"- Source: {source['label']}")
+    if str(r.get("deck_id") or "").isdigit():
+        lines.append(f"- Deck: https://archidekt.com/decks/{r.get('deck_id')}")
     lines.append(f"- Run: {time_text(r.get('taken_at'))}")
     if r.get("status") in STATUS_TEXT:
-        lines.append(f"- Status: {STATUS_TEXT[r['status']]}")
+        status = STATUS_TEXT[r["status"]]
+        lines.append(f"- Status: {status[:1].upper()}{status[1:]}")
     if g and g.get("games"):
         extra = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
         lines.append(f"- Games: {g['games']}{extra}")
@@ -2009,7 +2016,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         named = ", ".join(
             front_face(u["name"]) + (f" ({_kept_who(u)})" if _kept_who(u) else "") for u in used
         )
-        lines += [f"{KEPT_HEADING}: {named}", ""]
+        lines += [f"**{KEPT_HEADING}:** {named}", ""]
     forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
     if forge is None or forge.get("state") == "skipped":
         why = (
@@ -2044,26 +2051,26 @@ def report_markdown(r: dict[str, Any]) -> str:
             lines += [f"## {MODEL_HEADING}", ""]
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
+        # each group is its own paragraphs: its count in bold, what it means, then its cards
         if h["unrecognized"]:
-            lines.append(f"{UNMODELED_HEADING}: {_share(_copies(h['unrecognized']), size)}.")
-            lines.append(UNMODELED_TEXT)
+            lines += [f"**{UNMODELED_HEADING}: {_share(_copies(h['unrecognized']), size)}.**", ""]
+            lines += [UNMODELED_TEXT, ""]
             lines.append(", ".join(_md_name(c) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
-            lines.append(f"{OUT_OF_SCOPE_HEADING}: {_share(total, size)}.")
-            lines.append(OUT_OF_SCOPE_TEXT)
+            lines += [f"**{OUT_OF_SCOPE_HEADING}: {_share(total, size)}.**", ""]
+            lines += [OUT_OF_SCOPE_TEXT, ""]
             for grp in h["out_of_scope"]:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(f"{LOW_IMPACT_HEADING}: {_share(len(h['low_impact']), size)}.")
-            lines.append(LOW_IMPACT_TEXT)
+            lines += [f"**{LOW_IMPACT_HEADING}: {_share(len(h['low_impact']), size)}.**", ""]
+            lines += [LOW_IMPACT_TEXT, ""]
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
         if approx:
-            lines.append(f"{APPROX_HEADING}: {len(approx)}.")
-            lines.append(APPROX_TEXT)
+            lines += [f"**{APPROX_HEADING}: {len(approx)}.**", "", APPROX_TEXT, ""]
             lines += [f"- {a['label']}: {a['cards']}" for a in approx]
             lines.append("")
     if s["constructed"]:
@@ -2074,7 +2081,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         )
         lines += ["## Validation" + (f": {verdict}" if verdict else ""), ""]
         if v.get("headline"):
-            lines.append(v["headline"])
+            lines += [v["headline"], ""]
         lines += [f"- {ln}" for ln in v["lines"]]
         lines.append("")
     if stats:
@@ -2091,54 +2098,91 @@ def report_markdown(r: dict[str, Any]) -> str:
         if isinstance(curve, dict) and curve:
             lines.append("- Mana curve: " + ", ".join(f"{k}: {val}" for k, val in curve.items()))
         lines.append("")
+    ab = r.get("comparison") if isinstance(r.get("comparison"), dict) else None
+    if ab and ab.get("text"):
+        lines += ["## Comparison", "", *_md_fenced(str(ab["text"])), ""]
+    # the research service's own output keeps its own headings, so it goes inside a fence
     if g and g.get("raw"):
-        lines += ["## Simulation output", "", g["raw"], ""]
+        lines += ["## Simulation output", "", *_md_fenced(g["raw"]), ""]
     if v and v.get("raw"):
-        lines += ["## Validation output", "", v["raw"], ""]
+        lines += ["## Validation output", "", *_md_fenced(v["raw"]), ""]
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _md_fenced(text: str) -> list[str]:
+    """``text`` as a fenced block, its fence longer than any run of backticks inside it."""
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(4, longest + 1)
+    return [f"{fence}text", text.rstrip("\n"), fence]
+
+
+# The HTML export's own page styles. Its colours are the site's (export_css() puts the theme's
+# light and dark sets in front, following the reader's system setting), and so are its labels.
 EXPORT_CSS = """
-:root{--bg:#f9fafb;--surface:#fafafa;--surface-2:#dedede;--surface-3:#c1c1c1;--border:#bababa;
-  --border-soft:#d4d4d4;--text:#383838;--text-muted:#5e5e5e;--link:#2a66c9;--orange:#fa890d;--blue:#4286f4;
-  --green:#1ebb6c;--purple:#6435c9;--on-orange:#111;--on-green:#111;--danger-fill:#c0182b;--red:#ff555b;
-  --orange-tint:rgba(250,137,13,.16);--orange-text:#a65400;--radius:5px}
-@media (prefers-color-scheme:dark){:root{--bg:#181818;--surface:#232323;--surface-2:#383838;
-  --surface-3:#4b4b4b;--border:#5f5f5f;--border-soft:#323232;--text:#e3e3e3;--text-muted:#a8a8a8;--link:#73a8dc;
-  --orange-tint:rgba(250,137,13,.14);--orange-text:#fa890d}}
-*{box-sizing:border-box} html{font-size:14px;-webkit-text-size-adjust:100%}
-body{margin:0;padding:1rem;background:var(--bg);color:var(--text);line-height:1.35;
+*{box-sizing:border-box}
+html{font-size:14px;-webkit-text-size-adjust:100%;line-height:1.15;
   font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif}
-.report{max-width:52rem;margin:0 auto} a{color:var(--link)}
+body{margin:0;padding:1rem;background:var(--bg);color:var(--text);font-size:1rem;line-height:1.35}
+.report{max-width:52rem;margin:0 auto;overflow-wrap:break-word} a{color:var(--link)}
+a:hover{color:var(--orange-text)} :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
+  stroke-linejoin:round;vertical-align:-.15em;flex:none}
 h1{font-size:2rem;margin:.25rem 0 .75rem;overflow-wrap:anywhere} h2{font-size:1.5rem;margin:0 0 .6rem}
 h3{font-size:1.1rem;margin:.75rem 0 .4rem} h4{font-size:1rem;margin:.6rem 0 .2rem} p{margin:.5rem 0}
 h3 small,h4 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:1rem;margin:0 0 1rem}
+.card{background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  padding:1rem;margin:0 0 1rem;min-width:0}
 .card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
-.meta{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1rem;margin:0 0 1rem;font-size:.93rem}
+.meta{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem 1rem;margin:0 0 1rem;
+  font-size:.93rem}
 .meta dt{color:var(--text-muted);font-weight:700} .meta dd{margin:0;overflow-wrap:anywhere}
-/* labels: a word, a colour and an icon, as the live report page draws them (theme.UI_CSS .ui-lbl) */
-.ui-lbl{display:inline-flex;align-items:center;gap:.3rem;height:24px;padding:0 .55rem 0 .45rem;
-  border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
-  border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
-.ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;fill:none;stroke:currentColor;stroke-linecap:round;
-  stroke-linejoin:round}
-.ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}
-.ui-lbl.green{background:rgba(30,187,108,.18);color:#146b3f}
-.ui-lbl.red{background:rgba(192,24,43,.14);color:#9a1322}
-.ui-lbl.blue{background:rgba(66,134,244,.16);color:#1f4f9e}
-.ui-lbl.grey{background:transparent;color:var(--text-muted);border-color:var(--border)}
-@media (prefers-color-scheme:dark){.ui-lbl.green{color:#5fd59a}.ui-lbl.red{color:#ff8a90}
-  .ui-lbl.blue{color:#8db6f7}}
 h2 .ui-lbl{margin-left:.35rem}
-.notice{border:1px solid var(--border);border-left:4px solid var(--blue);background:var(--surface);
-  border-radius:3px;padding:.7rem .9rem;margin:0 0 1rem;font-weight:700}
+.notice{border:1px solid var(--card-border);border-left:4px solid var(--blue);background:var(--surface);
+  border-radius:var(--radius-panel);padding:.7rem .9rem;margin:0 0 1rem;font-weight:700}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
 pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(--border-soft);
-  border-radius:5px;padding:.75rem .9rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
-details summary{cursor:pointer;font-weight:700}
+  border-radius:var(--radius);padding:.75rem .9rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+/* a fold is the site's grey capsule with its chevron (theme.py .disc, summary.fold-btn) */
+details > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+  max-width:100%;min-height:44px;margin:0 0 0 -4px;padding:6px 14px;border:4px solid transparent;
+  border-radius:22px;background:var(--surface-2) padding-box;color:var(--text);font-weight:600;
+  font-size:.9rem;line-height:1.2}
+details > summary::-webkit-details-marker{display:none}
+details > summary::after{content:"";flex:none;width:6px;height:6px;margin-left:auto;border:solid currentColor;
+  border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg)}
+details[open] > summary::after{transform:translateY(2px) rotate(-135deg)}
+details > summary:hover{background:var(--surface-3) padding-box}
+/* a saved file never updates, so a run that was going when it was saved keeps a still ring */
+.ui-spin{display:inline-block;box-sizing:border-box;width:14px;height:14px;flex:none;border-radius:50%;
+  border:2px solid currentColor;border-right-color:transparent}
 """
+
+# After the page styles shared with the signed-in page (REPORT_CSS): the site's table headings,
+# its capsules for the card names, and room for the tables on a phone.
+EXPORT_THEME_CSS = """
+.report .forge-results thead th,.report table.trig th{text-transform:uppercase;letter-spacing:.03em;
+  font-size:.76rem;font-weight:700;color:var(--text-muted)}
+.report .forge-results tr.mine th,.report .forge-results tr.mine td{background:var(--orange-tint)}
+.report .names li{border-radius:999px;border-color:var(--control-border);background:transparent;
+  padding:.2rem .7rem}
+.report .tiles{min-width:0} .report .chart,.report .chart svg{max-width:100%}
+/* a phone at large text: the head's rows stack, and a stacked results table keeps to the window */
+@media (max-width:480px){ .meta{grid-template-columns:minmax(0,1fr)} .meta dd{margin-bottom:.35rem}
+  .meta .ui-lbl{white-space:normal;height:auto;min-height:24px} }
+@media (max-width:600px){ .report .forge-results table.stack,.report .forge-results table.stack tbody{
+  display:block;width:100%} }
+"""
+
+
+def export_css() -> str:
+    """The theme's colour sets (dark, the light one for a light system setting) and its label
+    rules, then the export's own page styles: the HTML export follows the site's look."""
+    from . import theme
+
+    tokens = theme.CSS[theme.CSS.index(":root{") : theme.CSS.index("*{box-sizing:border-box}")]
+    labels = "\n".join(re.findall(r"(?m)^\.ui-lbl[^{]*\{[^}]*\}", theme.UI_CSS))
+    return tokens + EXPORT_CSS + labels + "\n"
 
 
 def report_export_html(r: dict[str, Any], *, stats_html: str = "", theme_css: str = "") -> str:
@@ -2151,7 +2195,8 @@ def report_export_html(r: dict[str, Any], *, stats_html: str = "", theme_css: st
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta name='color-scheme' content='light dark'>"
         f"<link rel='icon' href='{ICON_DATA_URL}' type='image/svg+xml'>"
-        f"<title>{title}</title><style>{EXPORT_CSS}{theme_css}{REPORT_CSS}</style></head>"
+        f"<title>{title}</title><style>{export_css()}{theme_css}{REPORT_CSS}{EXPORT_THEME_CSS}</style>"
+        "</head>"
         f"<body>{body}</body></html>"
     )
 
