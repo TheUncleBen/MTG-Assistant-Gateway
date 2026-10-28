@@ -23,6 +23,7 @@ from . import deck_stats, modes, prefs
 from .archidekt import page_turn
 from .decks import (
     DeckError,
+    changed_anything,
     current_client,
     edit_mismatches,
     is_outside_category,
@@ -404,13 +405,39 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
         # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
         # would fill the backup folder and slow each save by paced Archidekt writes.
-        result = await decks.apply(
-            who.sub,
-            pid,
-            via="browser",
-            archidekt_backup=False,
-            version=data.get("version") if answer else None,
-        )
+        try:
+            result = await decks.apply(
+                who.sub,
+                pid,
+                via="browser",
+                archidekt_backup=False,
+                version=data.get("version") if answer else None,
+            )
+        except DeckError as exc:
+            # The write may have landed although Archidekt never answered (a timeout): the page
+            # never says "not saved" then. It gets what Archidekt has now and draws that (0.7.46
+            # audit D-04). A failure that changed nothing is answered as it is.
+            stored = (state.db.get_proposal(pid, who.sub) or {}).get("result") or {}
+            if not changed_anything(stored):
+                raise
+            try:
+                deck = await decks.get_own_deck(who.sub, deck_id)
+            except DeckError:
+                raise exc from None
+            asked = parse_changes(p.get("changes"), row_flags=True)
+            touched = {front_face(ch.card_name).casefold() for ch in asked}
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": exc.kind,
+                    "message": str(exc),
+                    **exc.extra,
+                    "may_have_changed": True,
+                    "proposal_id": pid,
+                    **view(deck, touched, stale=False),
+                },
+                STATUS_FOR.get(exc.kind, 400),
+            )
         applied = result.get("state") == "applied"
         out: dict[str, Any] = {
             "applied": applied,

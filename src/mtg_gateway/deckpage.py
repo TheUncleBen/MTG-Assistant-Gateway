@@ -53,7 +53,7 @@ from .deck_stats import (
 from .decks import mana_value_text, split_label
 from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
-from .theme import card_size_control, esc, icon, plural
+from .theme import SPINNER, card_size_control, esc, icon, plural
 from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -2985,6 +2985,17 @@ def deck_check_html(deck_id: str, read_at: float | None, *, reload: bool) -> str
         f"<p class='notice deck-check' role='status' data-check='/decks/{esc(deck_id)}/check'"
         f" data-reload='{'1' if reload else '0'}' data-failed='{esc(failed)}'"
         f"{'' if reload else ' hidden'}>{'Checking Archidekt for changes…' if reload else ''}</p>"
+    )
+
+
+def deck_saving_html(deck_id: str, changes: int) -> str:
+    """The strip while an apply on the deck runs (DeckService.deck_saving), after a reload too:
+    static/deck.js asks /decks/{id}/busy now and then and loads the page again once it ends, so
+    the rows show what Archidekt took (0.7.46 audit D-06)."""
+    what = "1 change" if changes == 1 else f"{changes} changes"
+    return (
+        f"<p class='notice saving' role='status' data-busy='/decks/{esc(deck_id)}/busy'>"
+        f"{SPINNER} Saving {what}…</p>"
     )
 
 
