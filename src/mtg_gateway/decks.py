@@ -4063,6 +4063,14 @@ class DeckService:
         lock = self._deck_locks.get(f"{sub}:{deck_id}")
         return (lock is not None and lock.locked()) or self.db.deck_applying(sub, deck_id)
 
+    def deck_saving(self, sub: str, deck_id: str) -> int:
+        """How many changes the applies running on this deck carry (0 when none runs): the deck
+        page's "Saving N changes…" strip, which also shows after a reload (0.7.46 audit D-06)."""
+        if not self.deck_busy(sub, deck_id):
+            return 0
+        rows = self.db.list_proposals(sub, 100, deck_id=str(deck_id), states=("applying",))
+        return max(1, sum(len(r.get("changes") or []) for r in rows))
+
     async def sync_deck_list(self, sub: str, *, wait: float = 120.0) -> list[dict[str, Any]] | None:
         """The member's deck list for the deck sync: the cached one while it is fresh, else one
         listing request (shared with a page's read already under way). Read-only, outside the
@@ -10800,6 +10808,13 @@ def needs_look_error(reason: str | None) -> DeckError:
     )
     exc.recheck_reason = reason or recheck.REASON_CHANGED  # type: ignore[attr-defined]
     return exc
+
+
+def changed_anything(progress: dict[str, Any]) -> bool:
+    """Whether an apply that stopped may have changed anything on Archidekt, by the proposal's
+    stored result: the deck page's own save (api.py) draws what Archidekt has then, instead of
+    putting the card back as if nothing had happened (0.7.46 audit D-04)."""
+    return _changed_anything(progress)
 
 
 def _changed_anything(progress: dict[str, Any]) -> bool:

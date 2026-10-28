@@ -129,7 +129,10 @@ class FakeArchidekt:
         # this many PATCH modifyCards are saved but answered 200 with a body that is not JSON
         self.garble_card_writes = 0
         # set to an unset threading.Event: PATCH modifyCards waits for it (a slow save, held open)
+        # without holding up the gateway's other requests (_after)
         self.hold_card_writes: Any = None
+        # PATCH modifyCards is saved but never answered: the write landed and the gateway times out
+        self.timeout_card_writes = False
         # the same for a folder delete (deleteItems), waited for without holding up the gateway's
         # other requests (_after)
         self.hold_folder_deletes: Any = None
@@ -1308,8 +1311,9 @@ class FakeArchidekt:
                 deck["updatedAt"] = _now_iso() if deck["id"] in self.timed else "2026-10-03T00:00:00Z"
                 return httpx.Response(200, json={"id": deck["id"], "name": deck["name"]})
             if parts[3:] == ["modifyCards", "v2"] and request.method == "PATCH":
-                if self.hold_card_writes is not None:
-                    self.hold_card_writes.wait(15)
+                held = self.hold_card_writes
+                if held is not None and not held.is_set():
+                    return self._after(held, request)
                 if self.fail_card_writes:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
@@ -1325,6 +1329,8 @@ class FakeArchidekt:
                 if self.garble_card_writes > 0:
                     self.garble_card_writes -= 1
                     return httpx.Response(200, text="<html>Saved</html>")
+                if self.timeout_card_writes:
+                    raise httpx.ReadTimeout("no answer", request=request)
                 return httpx.Response(200, json={"ok": True})
         return httpx.Response(404, json={"detail": "Not found."})
 

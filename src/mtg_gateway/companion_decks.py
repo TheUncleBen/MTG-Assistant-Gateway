@@ -35,6 +35,7 @@ from .deckpage import (
     deck_list_controls_html,
     deck_list_held_html,
     deck_page_html,
+    deck_saving_html,
     deck_title,
     decks_unreadable_html,
     featured,
@@ -809,6 +810,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
         notice = held + notice
+        # an apply still running on the deck (a slow save, this tab's or another's): the strip
+        # says so until it ends, then the page loads again (static/deck.js)
+        saving = decks.deck_saving(sub, deck.id) if own else 0
+        if saving:
+            notice = deck_saving_html(deck.id, saving) + notice
         if deck.link_notice:  # the member's link was dropped while reading this deck
             notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
         being_made = decks.being_made(deck.id)  # a new deck whose cards are still going in
@@ -927,6 +933,17 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         return JSONResponse(
             found or {"changed": False, "failed": False}, headers={"Cache-Control": "no-store"}
         )
+
+    @server.custom_route("/decks/{deck_id}/busy", methods=["GET"], include_in_schema=False)
+    async def deck_busy(request: Request) -> Response:
+        """Whether an apply on the member's deck is still running, and how many changes it
+        carries (decks.deck_saving): the deck page's Saving strip asks now and then and loads the
+        page again once it ends."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"busy": False, "signed_in": False}, status_code=401)
+        changes = decks.deck_saving(sub, request.path_params["deck_id"])
+        return JSONResponse({"busy": changes > 0, "changes": changes}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/{deck_id}/made", methods=["GET"], include_in_schema=False)
     async def deck_made(request: Request) -> Response:

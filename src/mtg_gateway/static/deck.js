@@ -38,6 +38,24 @@
       }, 3000);
     })();
   }
+  // A save still running on the deck when the page was drawn (a slow one, from this tab before
+  // a reload or from another): ask now and then whether it has ended, then load the page again
+  // so the rows show what Archidekt took.
+  var busy = $("p.notice.saving[data-busy]");
+  if (busy) {
+    (function ask() {
+      setTimeout(function () {
+        fetch(busy.getAttribute("data-busy"), { credentials: "same-origin", headers: { Accept: "application/json" } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (d && d.busy === false) { location.reload(); return; }
+            if (d && d.changes) busy.lastChild.textContent = " Saving " + (d.changes === 1 ? "1 change" : d.changes + " changes") + "…";
+            ask();
+          })
+          .catch(ask);
+      }, 2000);
+    })();
+  }
   // While something is dragged: how far to scroll the page this frame when the pointer or finger
   // rests near the window's top or bottom edge (faster the closer it is), so a far stack is reachable;
   // never past the ends of `box` (the cards), where there is nothing left to drop on. Null when the
@@ -296,18 +314,51 @@
         });
       }
       saving = false;
-      if (d.ok && d.status === 202 && d.proposal_id) {
-        var see = el("a", "btn", "Review page");
-        see.href = "/proposals/" + enc(d.proposal_id);
-        toast("Still saving on Archidekt; the review page shows how far it got.", { sticky: true, actions: [see] });
-        return d;
-      }
+      // Archidekt is slow and the save carries on behind: the page stays on the deck, keeps its
+      // Saving note and draws the row once the save ends (0.7.46 audit D-07)
+      if (d.ok && d.status === 202 && d.proposal_id) return awaitApply(d.proposal_id, changes, undoChanges, opts);
       if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
-      throw new Error(d.message || "The change could not be saved.");
+      var failed = new Error(d.message || "The change could not be saved.");
+      // Archidekt never answered, so the write may have landed: the answer carries what the deck
+      // shows now, and the caller draws that instead of putting the card back (D-04)
+      if (d.may_have_changed && d.rows) failed.answer = d;
+      throw failed;
     }).catch(function (err) {
       saving = false;
       if (!err || !err.cancelled) throw err instanceof Error ? err : new Error("No connection; nothing was changed.");
       throw err;
+    });
+  }
+  // A save Archidekt took longer than the gateway waits for: the proposal is asked about now and
+  // then until it ends; then the touched rows are read again and drawn, Saved with Undo as any
+  // other save (or the failure, with what the deck shows now).
+  function awaitApply(pid, changes, undoChanges, opts) {
+    var names = namesOf(changes);
+    return new Promise(function (resolve, reject) {
+      var refresh = function (p) {
+        api(editUrl, { refresh: true, names: names }).then(function (r) {
+          if (p.state === "applied") {
+            r.applied = true; r.proposal_id = pid; r.snapshot_id = p.snapshot_id;
+            applyAnswer(r, changes, undoChanges, opts.replay, opts.note);
+            resolve(r);
+            return;
+          }
+          var failed = new Error((p.result && p.result.detail) || "The change could not be saved.");
+          if (r.ok && r.rows) failed.answer = r;
+          reject(failed);
+        }, function () { reject(new Error("No connection; the deck page shows what was saved.")); });
+      };
+      (function look() {
+        setTimeout(function () {
+          fetch("/api/v1/proposals/" + enc(pid), { credentials: "same-origin", headers: { Accept: "application/json" } })
+            .then(function (r) { return r.json(); })
+            .then(function (p) {
+              if (!p || !p.ok) { reject(new Error("No connection; the deck page shows what was saved.")); return; }
+              if (p.state === "applying" || p.state === "pending") { look(); return; }
+              refresh(p);
+            }, look);
+        }, 2000);
+      })();
     });
   }
   function showError(err) {
@@ -708,11 +759,63 @@
       if (!plan) { dropSavingNote(job.card, job.what); return null; }
       savingNote(plan.saying, true, job.card, job.what);
       return saveEdit(plan.changes, plan.inverse, { note: plan.note }).then(function () { if (job.saved) job.saved(); }, function (err) {
-        var back = job.undo();
-        if (err && err.cancelled) { dismissToast(); return; }
-        var why = ((err && err.message) || "no connection").replace(/\.$/, "");
-        toast(job.what + " not saved: " + why + ". " + back, { error: true });
+        notSaved(plan, job, err, false);
       });
+    }).then(done, done);
+  }
+  /* A save that did not go through. The card goes back as Archidekt last had it, and the red
+     note says why, with Try again, which sends the same change once more (0.7.46 audit D-05).
+     When Archidekt never answered, the write may have landed: nothing is put back; the rows the
+     answer carries (what the deck shows now) are drawn instead (D-04). again: a Try again's own
+     failure, after which there is nothing more to put back. */
+  function notSaved(plan, job, err, again) {
+    var back = again ? "" : job.undo();
+    if (err && err.cancelled) { dismissToast(); return; }
+    if (err && err.answer) {
+      drawRows(err.answer.rows, namesOf(plan.changes));
+      drawStats(err.answer);
+      if (menu && !menuCard.isConnected) closeMenu();
+      // the rows show the change was not taken (a refusal after the request went): the plain
+      // failure, with Try again; otherwise it was, or the page cannot tell, and the rows say it
+      if (landed(plan.changes, err.answer.rows) !== false) {
+        toast("Archidekt didn't answer; this is what the deck shows now.", { warn: true, sticky: true });
+        return;
+      }
+    }
+    var why = ((err && err.message) || "no connection").replace(/\.$/, "");
+    var retry = el("button", "btn", "Try again");
+    retry.type = "button";
+    retry.addEventListener("click", function () { dismissToast(); sendAgain(plan, job); });
+    toast(job.what + " not saved: " + why + "." + (back ? " " + back : ""), { error: true, actions: [retry] });
+  }
+  // Whether the rows Archidekt shows now carry the changes: true, false, or null when the page
+  // cannot tell (a printing, a tag: the row's own fields say nothing sure about them)
+  function landed(changes, rows) {
+    var known = true, took = true;
+    changes.forEach(function (ch) {
+      var zone = ch.zone === "side" ? "side" : "main";
+      var row = (rows || []).filter(function (r) {
+        return frontFace(r.name) === frontFace(ch.card_name) && (ch.relation_id ? String(r.relation_id) === String(ch.relation_id) : r.zone === zone);
+      })[0] || null;
+      if (ch.action === "set_quantity") took = took && !!row && row.qty === ch.quantity;
+      else if (ch.action === "remove") took = took && !row;
+      else if (ch.action === "set_category") took = took && !!row && (row.categories || [])[0] === ch.category;
+      else if (ch.action === "set_finish") took = took && !!row && String(row.finish || "").toLowerCase() === String(ch.finish).toLowerCase();
+      else known = false;
+    });
+    return known ? took : null;
+  }
+  // Try again: the same change, sent once more in its turn; the answer draws the rows as any
+  // save's does (Saved with Undo), and its failure says why, with Try again once more.
+  function sendAgain(plan, job) {
+    bgCount++;
+    bgCards.push(job.card);
+    syncHist();
+    var done = function () { bgCount--; syncHist(); };
+    bgQueue = bgQueue.then(idle).then(function () {
+      bgCards.splice(bgCards.indexOf(job.card), 1);
+      savingNote(plan.saying, true, job.card, job.what);
+      return saveEdit(plan.changes, plan.inverse, { note: plan.note }).then(null, function (err) { notSaved(plan, job, err, true); });
     }).then(done, done);
   }
   // Where a card sits and how it is filed, to put it back there when its save does not go through

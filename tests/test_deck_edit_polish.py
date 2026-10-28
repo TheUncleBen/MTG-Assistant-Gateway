@@ -130,3 +130,89 @@ async def test_save_changes_stays_on_deck_settings_with_a_saved_note(stack: Stac
         assert "value='Renamed deck'" in again
     finally:
         await b.aclose()
+
+
+async def test_a_write_archidekt_never_answered_draws_what_the_deck_shows_now(stack: Stack) -> None:
+    """0.7.46 audit D-04: a write that timed out was reported as not saved and rolled back on the
+    page, though it may have landed. The answer says the write may have changed the deck and
+    carries the rows as Archidekt has them, in plain words (no exception names)."""
+    stack.ark.timeout_card_writes = True
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+        )
+        d = r.json()
+        assert r.status_code != 201 and d["ok"] is False, r.text
+        assert d["may_have_changed"] is True and d["proposal_id"]
+        assert [(x["name"], x["qty"]) for x in d["rows"]] == [("Cultivate", 2)]
+        assert d["stats"]["card_count"] and "checks_html" in d
+        assert "ReadTimeout" not in d["message"] and "HTTP" not in d["message"], d["message"]
+        assert d["message"].startswith("Archidekt didn't answer in time"), d["message"]
+    finally:
+        await b.aclose()
+
+
+async def test_a_write_archidekt_refused_shows_the_rows_as_they_are(stack: Stack) -> None:
+    """Archidekt answered the sent write with a refusal: the gateway treats a sent write as one
+    that may have landed, so the answer carries the rows too, which show the count unchanged (the
+    page then says the change was not saved, with Try again). The words name no status code."""
+    stack.ark.fail_card_writes = True
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+        )
+        d = r.json()
+        assert r.status_code != 201 and d["ok"] is False, r.text
+        assert d["may_have_changed"] is True
+        assert [(x["name"], x["qty"]) for x in d["rows"]] == [("Cultivate", 1)]
+        assert "503" not in d["message"] and "HTTP" not in d["message"], d["message"]
+    finally:
+        await b.aclose()
+
+
+async def test_the_deck_page_says_saving_while_an_apply_runs(stack: Stack) -> None:
+    """0.7.46 audit D-06: a save still running was invisible after a reload. The page carries
+    the Saving strip while the gateway reports the deck busy, and /decks/{id}/busy says when it
+    ends."""
+    import asyncio
+    import threading
+
+    held = threading.Event()
+    stack.ark.hold_card_writes = held
+    b = await linked(stack)
+    try:
+        before = (await b.http.get("/decks/42", headers=NAV)).text
+        assert "class='notice saving'" not in before
+        assert (await b.http.get("/decks/42/busy")).json() == {"busy": False, "changes": 0}
+        task = asyncio.create_task(
+            api(
+                b,
+                "POST",
+                "/api/v1/decks/42/edit",
+                {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+            )
+        )
+        for _ in range(200):
+            await asyncio.sleep(0.05)
+            if ("PATCH", "/api/decks/42/modifyCards/v2/") in stack.ark.calls:
+                break
+        assert (await b.http.get("/decks/42/busy")).json() == {"busy": True, "changes": 1}
+        page = (await b.http.get("/decks/42", headers=NAV)).text
+        assert "data-busy='/decks/42/busy'" in page and "Saving 1 change…" in page
+        held.set()
+        r = await task
+        assert r.status_code == 201, r.text
+        assert (await b.http.get("/decks/42/busy")).json() == {"busy": False, "changes": 0}
+        after = (await b.http.get("/decks/42", headers=NAV)).text
+        assert "class='notice saving'" not in after
+    finally:
+        held.set()
+        await b.aclose()

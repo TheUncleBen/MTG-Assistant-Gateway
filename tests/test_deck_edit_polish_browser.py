@@ -125,3 +125,139 @@ def test_the_packages_tab_shows_one_empty_state_under_its_heading(server: Server
         assert shown.count() == 1 and "No packages here yet" in shown.inner_text()
         assert errors == []
         browser.close()
+
+
+# -- the deck page's saves when Archidekt is slow or fails (0.7.46 audit D-04, D-05, D-06, D-07) --
+from mtg_gateway import decks as decks_mod  # noqa: E402
+
+from .test_deck_views_browser import _error, _held, _menu_page, _open_menu  # noqa: E402
+
+
+def test_a_timed_out_save_shows_what_the_deck_has_now(server: Server) -> None:
+    """D-04: Archidekt took the write but never answered. The page never says "not saved" and
+    never puts the old count back: it draws the count Archidekt has, and says so."""
+    from playwright.sync_api import sync_playwright
+
+    server.ark.timeout_card_writes = True
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, 390, 844, "dark")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        n = server.quantity("Cultivate")
+        menu = _open_menu(page, row)
+        menu.locator(".qtyrow .step").nth(1).click()
+        note = page.locator(".deck-toast.warn .msg")
+        note.wait_for(timeout=15_000)
+        assert note.inner_text() == "Archidekt didn't answer; this is what the deck shows now."
+        assert page.locator(".deck-toast.error").count() == 0
+        assert row.get_attribute("data-qty") == str(n + 1)
+        assert menu.locator(".qtyrow .n").inner_text() == str(n + 1)
+        assert server.quantity("Cultivate") == n + 1
+        assert errors == []
+        browser.close()
+
+
+def test_try_again_sends_a_refused_change_once_more(server: Server) -> None:
+    """D-05: the red note offers Try again, which sends the same change again; saved, the row
+    shows it with Undo. Refused again, the note says so once more, with Try again."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, 1280, 800, "light")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        n = server.quantity("Cultivate")
+        was = f"Cultivate is back to {n} {'copy' if n == 1 else 'copies'}."
+        server.ark.fail_card_writes = True
+        menu = _open_menu(page, row)
+        menu.locator(".qtyrow .step").nth(1).click()
+        text = _error(page)
+        assert text.startswith("Quantity not saved:") and text.endswith(was), text
+        assert "503" not in text and "HTTP" not in text
+        again = page.locator(".deck-toast.error button", has_text="Try again")
+        assert again.count() == 1 and row.get_attribute("data-qty") == str(n)
+        server.ark.fail_card_writes = False
+        again.click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert page.locator(".deck-toast button", has_text="Undo").count() == 1
+        assert row.get_attribute("data-qty") == str(n + 1) and server.quantity("Cultivate") == n + 1
+        # refused twice: the second note has nothing to put back, and Try again once more
+        server.ark.fail_card_writes = True
+        page.keyboard.press("Escape")
+        menu = _open_menu(page, row)
+        menu.locator(".qtyrow .step").nth(1).click()
+        assert _error(page).endswith(f"Cultivate is back to {n + 1} copies.")
+        page.locator(".deck-toast.error button", has_text="Try again").click()
+        text = _error(page)
+        assert text.startswith("Quantity not saved:") and "is back" not in text, text
+        assert page.locator(".deck-toast.error button", has_text="Try again").count() == 1
+        assert row.get_attribute("data-qty") == str(n + 1) and server.quantity("Cultivate") == n + 1
+        assert errors == []
+        browser.close()
+
+
+def test_a_slow_save_ends_on_the_deck_page_with_undo(server: Server, monkeypatch) -> None:
+    """D-07: Archidekt takes longer than the gateway waits. The page keeps its Saving note (no
+    "Review page" link), and once the save ends the row is drawn, Saved with Undo."""
+    from playwright.sync_api import sync_playwright
+
+    monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.5)
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, 390, 844, "dark")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        n = server.quantity("Cultivate")
+        held = _held(server)
+        try:
+            menu = _open_menu(page, row)
+            menu.locator(".qtyrow .step").nth(1).click()
+            saying = page.locator(".deck-toast .msg", has_text=f"Saving Cultivate: {n + 1} copies…")
+            saying.wait_for(timeout=5000)
+            page.wait_for_timeout(2500)
+            assert page.locator(".deck-toast a", has_text="Review page").count() == 0
+            assert "Saving Cultivate" in page.locator(".deck-toast .msg").inner_text()
+            assert row.get_attribute("data-qty") == str(n + 1)
+        finally:
+            held.set()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=10_000)
+        assert row.get_attribute("data-qty") == str(n + 1) and server.quantity("Cultivate") == n + 1
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=10_000)
+        assert row.get_attribute("data-qty") == str(n) and server.quantity("Cultivate") == n
+        assert errors == []
+        browser.close()
+
+
+def test_a_reload_during_a_slow_save_shows_the_strip_then_the_result(server: Server, monkeypatch) -> None:
+    """D-06: a reload while a save still runs shows "Saving 1 change…"; once it ends the page
+    loads again by itself and the row shows the saved count."""
+    from playwright.sync_api import sync_playwright
+
+    monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.5)
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, 390, 844, "dark")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        n = server.quantity("Cultivate")
+        held = _held(server)
+        try:
+            menu = _open_menu(page, row)
+            menu.locator(".qtyrow .step").nth(1).click()
+            page.locator(".deck-toast .msg", has_text="Saving Cultivate").wait_for(timeout=5000)
+            page.wait_for_timeout(1500)
+            page.reload(wait_until="networkidle")
+            strip = page.locator("p.notice.saving[data-busy]")
+            assert strip.is_visible() and "Saving 1 change…" in strip.inner_text()
+            assert strip.get_attribute("role") == "status"
+            fresh = page.locator(".deckview .row[data-card='Cultivate']").first
+            assert fresh.get_attribute("data-qty") == str(n)
+        finally:
+            held.set()
+        page.wait_for_function(
+            "() => !document.querySelector('p.notice.saving') && "
+            f"document.querySelector(\".deckview .row[data-card='Cultivate']\").dataset.qty === '{n + 1}'",
+            timeout=15_000,
+        )
+        assert server.quantity("Cultivate") == n + 1
+        assert errors == []
+        browser.close()
