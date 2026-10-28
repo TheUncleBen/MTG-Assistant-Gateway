@@ -11,12 +11,14 @@ page and the assistant read back.
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
 import json
 import logging
 import re
 import secrets
 import time
+import zlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -39,7 +41,15 @@ from .forge import (
     summarise,
 )
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
-from .report_view import PREFLIGHT_ONLY, RESEARCH_FAILED, goldfish_settings, parse_goldfish, speed_numbers
+from .report_view import (
+    PREFLIGHT_ONLY,
+    RESEARCH_FAILED,
+    compared_numbers,
+    forge_enough,
+    goldfish_settings,
+    parse_goldfish,
+    speed_numbers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +131,11 @@ FORGE_NO_COMMANDER = (
 # the deck also plays alone on Forge, by the full rules, beside the solo test's quick estimate. It
 # is kept apart from the games against precons (forge_solo_json), takes no place in the member's
 # queue of those, starts after them, and each member has one unfinished at a time (two for
-# reports that share opponents). Each round of games gets an equal part of a time budget of play,
-# never less than SOLO_MIN_GAME_SECONDS nor more than the Forge service's own limit; Java's start
-# and a wait in Forge's queue come on top. A report is finished once both Forge parts are.
+# reports that share opponents; a later one waits its turn in the gateway's queue, behind other
+# members' waiting games too, and starts by itself: _start_waiting_solos). Each round of games gets
+# an equal part of a time budget of play, never less than SOLO_MIN_GAME_SECONDS nor more than the
+# Forge service's own limit; Java's start and a wait in Forge's queue come on top. A report is
+# finished once both Forge parts are.
 SOLO_BUDGET_SECONDS = 270
 SOLO_MIN_GAME_SECONDS = 30
 # A solo test whose engine stops answering is given up this long after it started (not after
@@ -133,17 +145,10 @@ SOLO_GIVE_UP_SECONDS = 3600
 # still without a job this long after (a gateway restart while it started) never started.
 SOLO_START_SECONDS = 600
 SOLO_NOT_STARTED = "The Forge solo test did not start. Run the report again."
-SOLO_ONE_AT_A_TIME = (
-    "Another report of yours is still playing its Forge solo test, so this report has none. Run the "
-    "report again once that one has finished."
+SOLO_WAITED_TOO_LONG = (
+    "This Forge solo test waited its turn for four hours and was given up. Run the test again later."
 )
 SOLO_BUSY = "Forge's queue was full, so this report has no Forge solo test. Run the report again later."
-# Other members' games against precons that wait in the gateway's queue go first (first come,
-# first served): a solo test never takes Forge's place ahead of them.
-SOLO_OTHERS_WAITING = (
-    "Other members' Forge games are waiting their turn, so this report has no Forge solo test. Run the "
-    "report again later."
-)
 FORGE_BUSY_GAVE_UP = (
     "Forge stayed busy with other runs for four hours, so this run was given up. Run the report again later."
 )
@@ -245,6 +250,11 @@ class ReportService:
             # stored before them); NULL once they came back.
             if "research_state" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
                 c.execute("ALTER TABLE reports ADD COLUMN research_state TEXT")
+            # The list the report tested (pack_rows), and a proposal's paired solo test against the
+            # deck as it is (``paired_json``, the research service's A/B): owner decision C7.
+            if "tested_list" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
+                c.execute("ALTER TABLE reports ADD COLUMN tested_list TEXT")
+                c.execute("ALTER TABLE reports ADD COLUMN paired_json TEXT")
             # One gateway process: a report still asking at start-up was cut off by a restart.
             stopped = json.dumps(
                 {"tool": "goldfish_run", "ok": False, "error": True, "note": RESEARCH_STOPPED}
@@ -374,10 +384,11 @@ class ReportService:
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
         forge: bool | None = None,
+        on_stored: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """The same validation and simulation for a pasted or hypothetical list, stored as one of
         the member's reports with the source "Pasted list" (filed under no deck, so no deck's trend
-        counts it). Its Forge games come as for a stored deck."""
+        counts it). Its Forge games come as for a stored deck. ``on_stored``: as for ``run``."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         try:
@@ -396,6 +407,7 @@ class ReportService:
             games=games,
             options=options,
             forge=forge,
+            on_stored=on_stored,
         )
         out["decklist_text"] = to_text(cards)
         return out
@@ -412,11 +424,16 @@ class ReportService:
         options: dict[str, Any] | None = None,
         forge: bool | None = None,
         goldfish: dict[str, Any] | None = None,
+        on_stored: Callable[[str], None] | None = None,
+        paired_with: Deck | None = None,
+        ab_with: tuple[str, str, tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         """A report of a deck that is not a stored deck as it is: a pasted list (``list_deck``), a
         waiting proposal's resulting deck (``proposal_deck``) or a comparison's A/B (``goldfish``:
-        the A/B already run, kept as the report's simulation). Stored and kept like any report, with
-        ``source`` (its kind, label and what it relates to) in its settings; never a reused one."""
+        the A/B already run, kept as the report's simulation; ``ab_with``: the two lists and their
+        modes, the A/B run once the report is stored, as the website's). Stored and kept like any
+        report, with ``source`` (its kind, label and what it relates to) in its settings; never a
+        reused one. ``on_stored``: as for ``run``; ``paired_with``: see ``_run``."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         out = await self._run(
@@ -430,6 +447,10 @@ class ReportService:
             stats=stats,
             source=source,
             goldfish=goldfish,
+            on_stored=on_stored,
+            background=on_stored is not None,
+            paired_with=paired_with,
+            ab_with=ab_with,
         )
         out["stored"] = True
         return out
@@ -443,16 +464,19 @@ class ReportService:
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
         forge: bool | None = None,
+        on_stored: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """A report of the deck as it would be once the member's waiting proposal is applied: the
         deck as it is now plus the proposal's changes (a deck edit), or the new deck it makes. Filed
-        under that deck and linked from the proposal's page. Changes nothing on Archidekt."""
+        under that deck and linked from the proposal's page. A deck edit is tested as a pair (owner
+        decision C7): the deck after the change against the deck as it is now, game for game under
+        the same seeds (``paired``). Changes nothing on Archidekt. ``on_stored``: as for ``run``."""
         row = self.db.get_proposal(str(proposal_id or "").strip(), sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
         if row.get("state") != "pending" or (row.get("expires_at") or 0) < time.time():
             raise DeckError("invalid", PROPOSAL_NOT_WAITING)
-        deck, stats = await self.proposal_deck(sub, row)
+        deck, stats, now = await self.proposal_deck(sub, row)
         no = row.get("board_no")
         label = (f"Proposal #{no}" if no else "Proposal") + f" for “{row.get('deck_name') or deck.name}”"
         source = {
@@ -470,18 +494,22 @@ class ReportService:
             games=games,
             options=options,
             forge=forge,
+            on_stored=on_stored,
+            paired_with=now if simulate else None,
         )
 
-    async def proposal_deck(self, sub: str, row: dict[str, Any]) -> tuple[Deck, dict[str, Any] | None]:
-        """The deck a waiting proposal would leave, and its statistics when Archidekt's card data
-        can't give them (None: computed from the deck): a deck edit on the deck as it is now
-        (``deck_after``), or a new deck's list."""
+    async def proposal_deck(
+        self, sub: str, row: dict[str, Any]
+    ) -> tuple[Deck, dict[str, Any] | None, Deck | None]:
+        """The deck a waiting proposal would leave, its statistics when Archidekt's card data can't
+        give them (None: computed from the deck) and the deck as it is now (None for a new deck):
+        a deck edit on the deck as it is now (``deck_after``), or a new deck's list."""
         kind = row.get("kind") or "edit"
         if kind == "edit":
             from .decks import parse_changes
 
             deck = await self.decks.get_any_deck(sub, str(row["deck_id"]))
-            return deck_after(deck, parse_changes(row["changes"], row_flags=True)), None
+            return deck_after(deck, parse_changes(row["changes"], row_flags=True)), None, deck
         if kind == "create_deck":
             changes = row.get("changes") if isinstance(row.get("changes"), dict) else {}
             cards = [
@@ -495,7 +523,7 @@ class ReportService:
                 if isinstance(e, dict) and e.get("name")
             ]
             name = str(changes.get("name") or row.get("deck_name") or "New deck")
-            return list_deck(cards, name), deck_stats.compute_from_text(cards)
+            return list_deck(cards, name), deck_stats.compute_from_text(cards), None
         raise DeckError("invalid", PROPOSAL_NOT_A_LIST)
 
     async def _run(
@@ -517,10 +545,13 @@ class ReportService:
         goldfish: dict[str, Any] | None = None,
         on_stored: Callable[[str], None] | None = None,
         background: bool = False,
+        paired_with: Deck | None = None,
+        ab_with: tuple[str, str, tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         """``on_stored``: called with the report's id once it is stored. ``background``: nobody
         waits for this run's answer (the website's, ``start``), so a refusal by the research
-        service is kept on the report rather than raised."""
+        service is kept on the report rather than raised. ``paired_with``: a proposal's deck as it
+        is now, played against this one game for game (``_paired``)."""
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
         latest = self._latest(sub, deck.id) if source is None else None
@@ -560,8 +591,21 @@ class ReportService:
         # The other deck of a comparison is read now, before anything is stored and outside the
         # Forge start lock: a deck that can't be read stops the run with no report kept.
         other = await self.pair_deck(sub, pair_with) if pair_with is not None else None
+        if source is None and (other is not None or shared is not None):
+            # a Forge pair (head to head) is kept out of the deck's trend (owner decision C7) and
+            # has its own view of both decks side by side (pair_of)
+            with_name = other.name if other is not None else str((shared or {}).get("deck_name") or "")
+            source = {
+                "kind": "pair",
+                "label": f"Head to head with “{with_name}”" if with_name else PAIR_LABEL,
+                "with": with_name,
+                **({"with_report": shared["report_id"]} if shared else {}),
+            }
         validation: dict[str, Any] | None = None
+        paired: dict[str, Any] | None = None
         if goldfish is not None:  # a comparison's A/B, already run: no second simulation
+            simulate = False
+        if ab_with is not None:  # a comparison whose A/B runs once the report is stored
             simulate = False
         researching = self.mf is not None and goldfish is None
         rid = "rep_" + secrets.token_urlsafe(9)
@@ -590,8 +634,8 @@ class ReportService:
             # research service is asked, so the run shows (as running) while it asks.
             stored = c.execute(
                 "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
-                "goldfish_json, validation_json, created_by_client, research_state) "
-                "SELECT ?,?,?,?,?,?,?,?,?,?,? "
+                "goldfish_json, validation_json, created_by_client, research_state, tested_list) "
+                "SELECT ?,?,?,?,?,?,?,?,?,?,?,? "
                 "WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)",
                 (
                     rid,
@@ -605,6 +649,7 @@ class ReportService:
                     None,
                     current_client.get(),
                     "running" if researching else None,
+                    pack_rows(tested_rows(deck)),
                     sub,
                 ),
             ).rowcount
@@ -636,9 +681,28 @@ class ReportService:
             on_stored(rid)
         if researching:
             try:
-                validation, goldfish = await self._research(
-                    sub, deck, stats, mode, simulate, games, options, keep=source is None
-                )
+                if ab_with is not None:
+                    goldfish = await self.ab(
+                        sub,
+                        ab_with[0],
+                        ab_with[1],
+                        games=games,
+                        options=_ab_options(options),
+                        modes=ab_with[2],
+                    )
+                    goldfish = goldfish or {"tool": "goldfish_ab", "ok": False, "text": RESEARCH_FAILED}
+                else:
+                    validation, goldfish, paired = await self._research(
+                        sub,
+                        deck,
+                        stats,
+                        mode,
+                        simulate,
+                        games,
+                        options,
+                        keep=source is None or source.get("kind") == "pair",
+                        paired_with=paired_with,
+                    )
             except BaseException as exc:
                 if not background:
                     # An assistant's run (or a cancelled one) answers with the refusal and keeps
@@ -651,11 +715,16 @@ class ReportService:
                 if not isinstance(exc, DeckError):
                     logger.exception("The research part of report %s failed", rid)
                 note = str(exc) if isinstance(exc, DeckError) else RESEARCH_FAILED
-                failed = {"tool": "goldfish_run" if simulate else "validate_decklist", "ok": False}
-                failed.update({"error": True, "note": note})
-                self._research_done(
-                    sub, rid, failed if simulate else None, None if simulate else failed, None
+                sim = simulate or ab_with is not None
+                tool = (
+                    "goldfish_ab"
+                    if ab_with is not None
+                    else "goldfish_run"
+                    if simulate
+                    else "validate_decklist"
                 )
+                failed = {"tool": tool, "ok": False, "error": True, "note": note}
+                self._research_done(sub, rid, failed if sim else None, None if sim else failed, None)
                 self._created(sub, rid, deck, source)
                 return self.get(sub, rid)
         # the Forge solo test is marked as coming from the start, so the report is not finished
@@ -663,7 +732,7 @@ class ReportService:
         plays_solo = self.forge is not None and forge and simulate and mode in SIM_MODES
         solo_mark = {"state": "queued", "started_at": int(time.time())} if plays_solo else None
         if researching or solo_mark is not None:
-            self._research_done(sub, rid, goldfish, validation, solo_mark)
+            self._research_done(sub, rid, goldfish, validation, solo_mark, paired)
         self._created(sub, rid, deck, source)
         # Shielded: a request cancelled now (its client gone) still saves both Forge parts, so no
         # engine job is left that nobody would cancel. The task is held until it ends.
@@ -688,11 +757,14 @@ class ReportService:
         options: dict[str, Any],
         *,
         keep: bool,
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """The research service's part of a report: its validation and its solo test (each None
-        when not asked for)."""
+        paired_with: Deck | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+        """The research service's part of a report: its validation, its solo test and, with
+        ``paired_with`` (a proposal's deck as it is now), the paired solo test of this deck against
+        that one (each None when not asked for)."""
         validation: dict[str, Any] | None = None
         goldfish: dict[str, Any] | None = None
+        paired: dict[str, Any] | None = None
         # Front faces only: the research service reads names through Scryfall's collection
         # lookup, which knows double-faced cards by their front face only.
         text = front_faces(deck_to_text(deck))
@@ -718,7 +790,28 @@ class ReportService:
             )
             if mana:
                 goldfish["mana_cards"] = mana
-        return validation, goldfish
+            if paired_with is not None:
+                paired = await self._paired(sub, text, paired_with, games, options, mode)
+        return validation, goldfish, paired
+
+    async def _paired(
+        self, sub: str, text: str, now: Deck, games: int, options: dict[str, Any], mode: str
+    ) -> dict[str, Any]:
+        """A proposal's deck (``text``, deck A) against the deck as it is now (``now``, deck B),
+        game for game under the same seeds (the research service's goldfish A/B): its deltas are
+        "after the change minus now". Kept on the proposal's report (``paired``)."""
+        now_text = front_faces(deck_to_text(now))
+        out = await self.ab(
+            sub,
+            text,
+            now_text,
+            games=games,
+            options=_ab_options(options),
+            modes=(mode, sim_mode(deck_stats.compute(now))),
+        )
+        out = out or {"tool": "goldfish_ab", "ok": False, "text": "The research service is not set up."}
+        out["a"], out["b"] = PAIRED_A, PAIRED_B
+        return out
 
     def _research_done(
         self,
@@ -727,19 +820,21 @@ class ReportService:
         goldfish: dict[str, Any] | None,
         validation: dict[str, Any] | None,
         solo_mark: dict[str, Any] | None,
+        paired: dict[str, Any] | None = None,
     ) -> None:
         """Store what the research service answered (and the Forge solo test's mark) on report rid.
         A report deleted while it asked (by the member, or with their data) stays deleted."""
         with self.db.tx() as c:
             found = c.execute(
                 "UPDATE reports SET goldfish_json = COALESCE(?, goldfish_json), validation_json = ?, "
-                "forge_solo_json = ?, forge_solo_state = ?, research_state = NULL "
+                "forge_solo_json = ?, forge_solo_state = ?, paired_json = ?, research_state = NULL "
                 "WHERE id = ? AND owner_sub = ?",
                 (
                     json.dumps(goldfish) if goldfish is not None else None,
                     json.dumps(validation) if validation is not None else None,
                     json.dumps(solo_mark) if solo_mark is not None else None,
                     "queued" if solo_mark is not None else None,
+                    json.dumps(paired) if paired is not None else None,
                     rid,
                     sub,
                 ),
@@ -760,11 +855,20 @@ class ReportService:
             detail={"report_id": rid, "deck_id": deck.id, **({"source": source["kind"]} if source else {})},
         )
 
-    async def start(self, sub: str, deck_ref: str, *, forge: bool | None = None) -> dict[str, Any]:
+    async def start(
+        self,
+        sub: str,
+        deck_ref: str = "",
+        *,
+        forge: bool | None = None,
+        job: Callable[[Callable[[str], None]], Awaitable[dict[str, Any]]] | None = None,
+    ) -> dict[str, Any]:
         """The website's Run full test: ``run`` going on by itself, answered as soon as its report is
         stored (``report_id``, ``running`` True), so the member's page opens while the research
         service and Forge play. When the run ends first (a reused report, a deck that can't be read)
-        its own answer or refusal comes back instead."""
+        its own answer or refusal comes back instead. ``job``: another kind of test the website
+        starts the same way (a pasted list, a proposal, a snapshot, an A/B), called with the
+        callback that marks its report stored."""
         loop = asyncio.get_running_loop()
         stored: asyncio.Future[str] = loop.create_future()
 
@@ -772,7 +876,8 @@ class ReportService:
             if not stored.done():
                 stored.set_result(rid)
 
-        task = loop.create_task(self.run(sub, deck_ref, forge=forge, on_stored=mark))
+        run = job(mark) if job is not None else self.run(sub, deck_ref, forge=forge, on_stored=mark)
+        task = loop.create_task(run)
         self._background.add(task)
         task.add_done_callback(self._ended)
         await asyncio.wait({task, stored}, return_when=asyncio.FIRST_COMPLETED)
@@ -1423,13 +1528,24 @@ class ReportService:
         if row is None:
             return  # the report was deleted meanwhile
         marked = row["forge_solo_json"]
-        if marked is not None and json.loads(marked).get("state") != "queued":
+        was = json.loads(marked) if marked is not None else {}
+        if marked is not None and was.get("state") != "queued":
             return  # given up (SOLO_START_SECONDS) or started already
         section: dict[str, Any]
-        if self._solo_running(sub, rid, partner):
-            section = {"state": "skipped", "error": SOLO_ONE_AT_A_TIME}
-        elif self._others_waiting(sub):
-            section = {"state": "skipped", "error": SOLO_OTHERS_WAITING}
+        if self._solo_running(sub, rid, partner) or self._others_waiting(sub):
+            # Another solo test of the member's plays, or other members' games wait their turn:
+            # this one waits in the gateway's queue (owner decision C7: queued, never dropped) and
+            # starts by itself when its turn comes (_start_waiting_solos).
+            queued_at = was.get("queued_at") if isinstance(was.get("queued_at"), int) else int(time.time())
+            section = {
+                "state": "queued",
+                "waiting": True,
+                "queued_at": queued_at,
+                "started_at": was.get("started_at") or queued_at,
+                "start": {"text": text, "name": name, "seed": seed, "partner": partner},
+            }
+            if marked is not None and _waiting(was) and was.get("start") == section["start"]:
+                return  # still waiting, as stored
         else:
             try:
                 client, engine, how_many = await self.forge.pick()
@@ -1624,6 +1740,57 @@ class ReportService:
                     more=start.get("more") if isinstance(start.get("more"), dict) else None,
                     queued_at=section.get("queued_at") if isinstance(section.get("queued_at"), int) else None,
                 )
+
+    async def _start_waiting_solos(self) -> None:
+        """Start each member's oldest waiting Forge solo test once none of theirs plays and no
+        other member's games wait; one waiting longer than forge.GIVE_UP_SECONDS is given up."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, owner_sub, forge_solo_json FROM reports WHERE forge_solo_state = 'queued' "
+                "ORDER BY taken_at, rowid"
+            ).fetchall()
+        firsts: dict[str, tuple[str, str, dict[str, Any]]] = {}
+        for r in rows:
+            try:
+                section = json.loads(r["forge_solo_json"])
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(section, dict) or not _waiting(section):
+                continue
+            if time.time() - _number_or_zero(section.get("queued_at")) > forge_module.GIVE_UP_SECONDS:
+                failed = {"state": "failed", "error": SOLO_WAITED_TOO_LONG}
+                self._save_solo(str(r["id"]), failed, unless_changed_from=r["forge_solo_json"])
+                continue
+            firsts.setdefault(str(r["owner_sub"]), (str(r["id"]), r["forge_solo_json"], section))
+        for sub, (rid, _stored, section) in firsts.items():
+            start = section.get("start") if isinstance(section.get("start"), dict) else {}
+            partner = start.get("partner")
+            if self._solo_running(sub, rid, partner) or self._others_waiting(sub):
+                continue  # still not its turn
+            if not isinstance(start.get("text"), str):
+                self._save_solo(rid, {"state": "failed", "error": SOLO_NOT_STARTED})
+                continue
+            await self._start_solo(
+                sub, rid, start["text"], str(start.get("name") or ""), start.get("seed"), partner
+            )
+
+    def solo_position(self, sub: str, rid: str) -> int | None:
+        """Report rid's place among the member's waiting Forge solo tests (1 is next), or None."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, forge_solo_json FROM reports WHERE owner_sub = ? AND forge_solo_state = 'queued' "
+                "ORDER BY taken_at, rowid",
+                (sub,),
+            ).fetchall()
+        waiting = []
+        for r in rows:
+            try:
+                section = json.loads(r["forge_solo_json"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(section, dict) and _waiting(section):
+                waiting.append(str(r["id"]))
+        return waiting.index(rid) + 1 if rid in waiting else None
 
     def measured_game_seconds(self) -> float | None:
         """The average Forge game time of the latest finished run on this gateway, for estimates."""
@@ -1838,6 +2005,10 @@ class ReportService:
                 await self._start_waiting_runs()
             except Exception:
                 logger.exception("starting a waiting Forge run failed")
+            try:
+                await self._start_waiting_solos()
+            except Exception:
+                logger.exception("starting a waiting Forge solo test failed")
             await asyncio.sleep(self.forge_interval)
 
     async def ab(
@@ -2031,9 +2202,92 @@ class ReportService:
         out["forge_solo"] = (
             {k: v for k, v in solo.items() if k not in NOT_SHOWN} if isinstance(solo, dict) else None
         )
+        if isinstance(solo, dict) and _waiting(solo):  # its place in the member's line of solo tests
+            out["forge_solo"]["position"] = self.solo_position(sub, d["id"])
+        paired = json.loads(d["paired_json"]) if d.get("paired_json") else None
+        # a proposal's paired solo test against the deck as it is (run_proposal)
+        out["paired"] = _compact(paired) if isinstance(paired, dict) else None
+        rows = unpack_rows(d.get("tested_list"))
+        # the list the report tested, as decklist text (None for a report made before 0.7.46)
+        out["tested_list"] = rows_text(rows) if rows else None
         if any(x and x.get("state") not in FINAL_STATES for x in (out["forge"], out["forge_solo"])):
             self._ensure_forge_refresher()
         return out
+
+    def pair_of(self, sub: str, report_id: str) -> tuple[str, str] | None:
+        """The two reports of a Forge pair (head to head) report_id is one of, first deck first:
+        a compare_with report and its partner, or a report that seated another's opponents and
+        that one. None for any other report."""
+        rid = str(report_id)
+        first = self._compare_of(sub, rid)
+        if first is not None and self._own_forge(sub, first) is not None:
+            return first, rid
+        second = self._compare_partner(sub, rid)
+        if second is not None:
+            return rid, second
+        row = self.db._one("SELECT stats_json FROM reports WHERE id = ? AND owner_sub = ?", (rid, sub))
+        stats = json.loads(row["stats_json"]) if row is not None and row["stats_json"] else {}
+        run = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
+        src = run.get("source") if isinstance(run.get("source"), dict) else {}
+        other = src.get("with_report") if src.get("kind") == "pair" else None
+        if isinstance(other, str) and self._own_forge(sub, other) is not None:
+            return other, rid
+        return None
+
+    def tested(self, sub: str, report_id: str) -> list[dict[str, Any]] | None:
+        """The rows report_id tested (tested_rows), None when it kept none; not_found when it is
+        not the member's."""
+        row = self.db._one(
+            "SELECT tested_list FROM reports WHERE id = ? AND owner_sub = ?", (str(report_id), sub)
+        )
+        if row is None:
+            raise DeckError("not_found", "No such report for your account.")
+        return unpack_rows(row["tested_list"])
+
+    def previous(self, sub: str, report_id: str) -> dict[str, Any] | None:
+        """The deck's test before report_id that it can be compared with (the "since your last
+        test" strip): a test of the same deck as it is (no list, proposal, comparison or
+        head-to-head), taken earlier, whose solo test came back, played the same way (game and
+        last simulated turn). None when report_id is no such test or has none before it."""
+        row = self.db._one(
+            "SELECT id, deck_id, taken_at, stats_json, goldfish_json, forge_json FROM reports "
+            "WHERE id = ? AND owner_sub = ?",
+            (str(report_id), sub),
+        )
+        if row is None or not str(row["deck_id"] or ""):
+            return None
+        stats = json.loads(row["stats_json"]) if row["stats_json"] else {}
+        run = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
+        if run.get("source"):
+            return None
+        goldfish = json.loads(row["goldfish_json"]) if row["goldfish_json"] else None
+        mine = run_settings(stats, goldfish, None)
+        if "goldfish" not in mine["engines"]:
+            return None
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, taken_at, stats_json, goldfish_json, forge_json, tested_list FROM reports "
+                f"WHERE owner_sub = ? AND deck_id = ? AND {_OWN_DECK} AND id != ? AND "
+                "(taken_at < ? OR (taken_at = ? AND rowid < (SELECT rowid FROM reports WHERE id = ?))) "
+                "AND goldfish_json IS NOT NULL ORDER BY taken_at DESC, rowid DESC LIMIT 20",
+                (sub, str(row["deck_id"]), row["id"], row["taken_at"], row["taken_at"], row["id"]),
+            ).fetchall()
+        for r in rows:
+            g = json.loads(r["goldfish_json"]) if r["goldfish_json"] else None
+            st = json.loads(r["stats_json"]) if r["stats_json"] else {}
+            theirs = run_settings(st, g, None)
+            if "goldfish" not in theirs["engines"]:
+                continue
+            if (theirs["mode"], theirs["until_turn"]) != (mine["mode"], mine["until_turn"]):
+                return None  # the test before was played another way: nothing to compare with
+            return {
+                "report_id": str(r["id"]),
+                "taken_at": r["taken_at"],
+                "goldfish": g,
+                "forge": json.loads(r["forge_json"]) if r["forge_json"] else None,
+                "tested": unpack_rows(r["tested_list"]),
+            }
+        return None
 
     def newest_forge_solo(self, sub: str, deck_id: str) -> dict[str, Any] | None:
         """The deck's newest finished Forge solo test, for the Goldfish page: its report, when it
@@ -2071,7 +2325,8 @@ class ReportService:
 
     def for_proposal(self, sub: str, proposal_id: str) -> list[dict[str, Any]]:
         """The member's reports of one proposal's resulting deck (run_proposal), newest first: id,
-        when and overall status, for the proposal's page."""
+        when, overall status and the paired test against the deck as it was (``paired``, None when
+        there is none), for the proposal's page."""
         with self.db._lock:
             rows = self.db._conn.execute(
                 "SELECT * FROM reports WHERE owner_sub = ? AND "
@@ -2079,10 +2334,15 @@ class ReportService:
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 20",
                 (sub, str(proposal_id)),
             ).fetchall()
-        return [
-            {k: s[k] for k in ("report_id", "taken_at", "status")}
-            for s in (self._summary(dict(r)) for r in rows)
-        ]
+        out = []
+        for r in rows:
+            s = self._summary(dict(r))
+            try:
+                paired = json.loads(r["paired_json"]) if r["paired_json"] else None
+            except ValueError:
+                paired = None
+            out.append({**{k: s[k] for k in ("report_id", "taken_at", "status")}, "paired": paired})
+        return out
 
     def forge_only(self, sub: str, report_id: str) -> dict[str, Any]:
         """A report's Forge progress alone (get_deck_report view "forge"), for polling."""
@@ -2442,6 +2702,153 @@ def deck_after(deck: Deck, changes: list[Any]) -> Deck:
     return dataclasses.replace(deck, cards=out)
 
 
+# -- the tested list -------------------------------------------------------------------------------
+# Each report keeps the list it tested (owner decision C7): one row per deck row with its count, zone
+# (main or side), categories and printing, packed small (zlib, then base64) in its tested_list column.
+# The report page shows it, says what changed in the deck since, and can put it back through an
+# ordinary proposal (restore_changes); never a direct write.
+def tested_rows(deck: Deck) -> list[dict[str, Any]]:
+    """The deck's rows as a report keeps them: name, count, zone, categories and printing."""
+    out = []
+    for c in deck.cards:
+        if not c.name or c.quantity <= 0:
+            continue
+        row: dict[str, Any] = {"n": c.name, "q": int(c.quantity), "z": "main" if deck.in_deck(c) else "side"}
+        if c.categories:
+            row["c"] = [str(x) for x in c.categories]
+        if deck.is_commander(c):
+            row["cmd"] = True
+        if c.set_code:
+            row["s"] = c.set_code
+        if c.collector_number:
+            row["cn"] = c.collector_number
+        if c.modifier and c.modifier.lower() in ("foil", "etched"):
+            row["f"] = c.modifier.capitalize()
+        out.append(row)
+    return out
+
+
+def pack_rows(rows: list[dict[str, Any]]) -> str:
+    return base64.b64encode(zlib.compress(json.dumps(rows, separators=(",", ":")).encode(), 9)).decode()
+
+
+def unpack_rows(text: Any) -> list[dict[str, Any]] | None:
+    """The tested rows a report kept; None for a report made before reports kept them (or a value
+    that can't be read)."""
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        rows = json.loads(zlib.decompress(base64.b64decode(text)))
+    except (ValueError, zlib.error):
+        return None
+    if not isinstance(rows, list):
+        return None
+    return [
+        r for r in rows if isinstance(r, dict) and isinstance(r.get("n"), str) and isinstance(r.get("q"), int)
+    ]
+
+
+def rows_text(rows: list[dict[str, Any]]) -> str:
+    """The tested rows as decklist text (the commander marked, the side rows under their own
+    heading), as parse_decklist reads it back: for an assistant and the downloads."""
+    cards = [
+        ListCard(
+            quantity=r["q"],
+            name=r["n"],
+            set_code=str(r.get("s") or ""),
+            collector_number=str(r.get("cn") or ""),
+            categories=list(r.get("c") or [])
+            + (["Commander"] if r.get("cmd") and "Commander" not in (r.get("c") or []) else []),
+            foil=bool(r.get("f")),
+            finish=str(r.get("f") or ""),
+            zone=r.get("z") if r.get("z") in ("main", "side") else "main",
+        )
+        for r in rows
+    ]
+    main = to_text(cards, zone="main")
+    side = to_text(cards, zone="side")
+    return main + (f"\nSideboard\n{side}" if side.strip() else "")
+
+
+def _counts(rows: list[dict[str, Any]]) -> dict[tuple[str, str], tuple[str, int]]:
+    """Copies per (zone, name in lower case): (the name as written, the copies)."""
+    out: dict[tuple[str, str], tuple[str, int]] = {}
+    for r in rows:
+        zone = "side" if r.get("z") == "side" else "main"
+        key = (zone, str(r["n"]).casefold())
+        name, have = out.get(key, (str(r["n"]), 0))
+        out[key] = (name, have + int(r["q"]))
+    return out
+
+
+def list_diff(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """What ``after`` has that ``before`` did not (``added``) and the other way round (``removed``),
+    by name and zone, each with its copies; sorted by name. Printings and categories aside."""
+    a, b = _counts(before), _counts(after)
+    added, removed = [], []
+    for key in set(a) | set(b):
+        name = (b.get(key) or a.get(key) or ("", 0))[0]
+        delta = b.get(key, ("", 0))[1] - a.get(key, ("", 0))[1]
+        if delta > 0:
+            added.append({"name": name, "quantity": delta, "zone": key[0]})
+        elif delta < 0:
+            removed.append({"name": name, "quantity": -delta, "zone": key[0]})
+    order = lambda r: (r["zone"] != "main", r["name"].casefold())  # noqa: E731
+    return {"added": sorted(added, key=order), "removed": sorted(removed, key=order)}
+
+
+RESTORE_TOO_MANY = (
+    "This test's list differs from the deck in {n} rows, more than one proposal can hold ({most}). Restore "
+    "one of the deck's snapshots from History instead, or ask your assistant to make the changes in parts."
+)
+RESTORE_SAME = "The deck already matches the list this test played, so there is nothing to put back."
+
+
+def restore_changes(tested: list[dict[str, Any]], deck: Deck) -> list[dict[str, Any]]:
+    """The proposal changes that put ``deck`` back to the tested rows, as count changes by name and
+    zone: an add (with the tested row's categories and printing) for what the deck lost since, a
+    remove for what it gained. Refused (DeckError) when nothing differs or it would pass the most
+    changes one proposal holds."""
+    from .decks import MAX_CHANGES
+
+    diff = list_diff(tested, tested_rows(deck))
+    first: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in tested:
+        first.setdefault(("side" if r.get("z") == "side" else "main", str(r["n"]).casefold()), r)
+    changes: list[dict[str, Any]] = []
+    for gone in diff["removed"]:  # the tested list had more: add them back
+        row = first.get((gone["zone"], gone["name"].casefold()), {})
+        cats = [c for c in row.get("c") or [] if isinstance(c, str) and c]
+        change: dict[str, Any] = {
+            "action": "add",
+            "card_name": gone["name"],
+            "quantity": gone["quantity"],
+            "zone": gone["zone"],
+        }
+        if cats:
+            change["category"] = cats[0]
+            change["categories"] = cats
+        if row.get("s") and row.get("cn"):
+            change.update(set_code=row["s"], collector_number=row["cn"])
+        if row.get("f"):
+            change["finish"] = row["f"]
+        changes.append(change)
+    for extra in diff["added"]:  # the deck has more now: take them out
+        changes.append(
+            {
+                "action": "remove",
+                "card_name": extra["name"],
+                "quantity": extra["quantity"],
+                "zone": extra["zone"],
+            }
+        )
+    if not changes:
+        raise DeckError("invalid", RESTORE_SAME)
+    if len(changes) > MAX_CHANGES:
+        raise DeckError("invalid", RESTORE_TOO_MANY.format(n=len(changes), most=MAX_CHANGES))
+    return changes
+
+
 def source_label(r: dict[str, Any]) -> str:
     """What a report was run on when it is not a stored deck as it is: "Pasted list", "Proposal
     #N for “DECK”" or "Comparison"; "" for a deck's own report."""
@@ -2510,6 +2917,7 @@ NO_FORGE_TO_SHARE = (
     "That report has no Forge games, so there are no opponents to share. Run it again with Forge, then "
     "compare."
 )
+PAIR_LABEL = "Head to head"
 PAIR_UNREAD = "The gateway could not read the other deck, so no report was made."
 PAIR_NO_FORGE = (
     "compare_with needs Forge games, and this report has none (forge is false, Forge isn't set up on "
@@ -2657,6 +3065,8 @@ def headline_numbers(d: dict[str, Any]) -> dict[str, Any]:
             "games": res.get("games"),
             "opponents": len(seats) - 1,
         }
+        # enough games to headline (owner decision C7): report_view.forge_enough's rule
+        win["enough"] = forge_enough(forge)
     g = parse_goldfish(goldfish) if isinstance(goldfish, dict) else None
     kill = None
     if g and g["ok"]:
@@ -2677,6 +3087,7 @@ def headline_numbers(d: dict[str, Any]) -> dict[str, Any]:
         "kill_damage": 20 if constructed else 40,
         "constructed": constructed,
         "commander": _front_face(str(commanders[0])) if commanders and commanders[0] else None,
+        "commander_turn": compared_numbers(goldfish).get("commander_turn") if goldfish else None,
     }
     if forge.get("state") in FINAL_STATES or not forge:  # a run still playing changes its numbers
         if len(_HEADLINES) >= _HEADLINES_MAX:
@@ -3009,6 +3420,15 @@ def forge_bracket(deck: Any, stats: dict[str, Any]) -> tuple[int | None, str | N
     if isinstance(est, int) and not isinstance(est, bool):
         return est, "estimate"
     return None, None
+
+
+def _ab_options(options: dict[str, Any]) -> dict[str, Any]:
+    """The run options a paired A/B takes (AB_OPTIONS)."""
+    return {k: v for k, v in options.items() if k in AB_OPTIONS}
+
+
+PAIRED_A = "After the change"
+PAIRED_B = "The deck now"
 
 
 def _goldfish(options: dict[str, Any]) -> dict[str, Any]:

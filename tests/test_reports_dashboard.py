@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from .test_history_page import store_report
-from .test_reports_browser import FORGE_DONE
+from .test_report_page import forge_enough_games
 from .test_social_browser import Server
 
 
@@ -60,7 +60,7 @@ def _seed(s: Server) -> httpx.Client:
         goldfish=None,
     )
     failed = {"state": "failed", "job_id": "2" * 16, "not_played": [], "error": "Forge could not start."}
-    done = json.loads(json.dumps(FORGE_DONE))
+    done = forge_enough_games()  # enough games to headline (owner decision C7)
     with db.tx() as c:
         c.execute(
             "UPDATE reports SET forge_json = ?, forge_state = 'done' WHERE id = 'r_new'", (json.dumps(done),)

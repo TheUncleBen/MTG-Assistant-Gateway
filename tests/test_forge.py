@@ -40,8 +40,6 @@ from mtg_gateway.report_view import (
 from mtg_gateway.reports import (
     SOLO_BUSY,
     SOLO_NOT_STARTED,
-    SOLO_ONE_AT_A_TIME,
-    SOLO_OTHERS_WAITING,
     ReportService,
     report_status,
     solo_game_seconds,
@@ -1719,9 +1717,12 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
     assert reports.get("alice", out["report_id"])["status"] == "running"
     assert reports.forge_only("alice", out["report_id"])["forge_solo"]["state"] == "running"
     assert finished == []
-    # a second report while this one's solo test plays gets none
+    # a second report while this one's solo test plays waits its turn (owner decision C7: queued,
+    # never dropped): no engine job yet, first in the member's line of solo tests
     again = await reports.run("alice", "42", games=300, options={"seed": 8})
-    assert again["forge_solo"] == {"state": "skipped", "error": SOLO_ONE_AT_A_TIME, "finished_at": ANY_TIME}
+    assert again["forge_solo"]["state"] == "queued" and again["forge_solo"]["waiting"] is True, again
+    assert again["forge_solo"]["position"] == 1 and "job_id" not in again["forge_solo"]
+    assert sum(1 for job in fake.started if "solo" in job) == 1
     fake.jobs[out["forge_solo"]["job_id"]].update(
         state="done", results=[{"game": 1, "winner": 1, "solo": _solo_view(6)}]
     )
@@ -1734,6 +1735,14 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
     assert solo["state"] == "done" and solo["result"]["median_won_turn"] == 6
     assert full["status"] == "complete" and finished == [out["report_id"]]  # notified once, now
     assert "## Forge solo test (full rules, opponents who do nothing)" in report_markdown(full)
+    # once that one is done, the waiting one starts by itself, with its own deck and seed
+    for _ in range(200):
+        if reports.get("alice", again["report_id"])["forge_solo"]["state"] == "running":
+            break
+        await asyncio.sleep(0.02)
+    assert reports.get("alice", again["report_id"])["forge_solo"]["state"] == "running"
+    solo_jobs = [job for job in fake.started if "solo" in job]
+    assert len(solo_jobs) == 2 and solo_jobs[1]["seed"] == 8, solo_jobs
     newest = reports.newest_forge_solo("alice", "42")
     assert newest == {
         "report_id": out["report_id"],
@@ -1742,11 +1751,12 @@ async def test_a_report_plays_the_forge_solo_test_after_its_precon_games(tmp_pat
         "games": 1,
         "median_won_turn": 6,
     }
-    # deleting a report stops its unfinished runs, the solo test's included
-    third = await reports.run("alice", "42", games=300, options={"seed": 9})
-    reports.delete("alice", third["report_id"])
+    # deleting a report stops its unfinished runs, the solo test's included (the one that waited
+    # and now plays)
+    playing = reports.get("alice", again["report_id"])
+    reports.delete("alice", again["report_id"])
     await asyncio.sleep(0.05)
-    assert third["forge_solo"]["job_id"] in fake.cancelled
+    assert playing["forge_solo"]["job_id"] in fake.cancelled
     reports._forge_task.cancel()
 
 
@@ -1896,7 +1906,7 @@ async def test_two_reports_at_once_play_one_solo_test(tmp_path: Path) -> None:
         reports.run("alice", "43", games=300, options={"seed": 2}),
     )
     states = sorted(x["forge_solo"]["state"] for x in (a, b))
-    assert states == ["running", "skipped"]
+    assert states == ["queued", "running"]  # the second waits for the first (never dropped)
     assert sum(1 for job in fake.started if "solo" in job) == 1
     reports._forge_task.cancel()
 
@@ -1911,7 +1921,8 @@ async def test_a_comparisons_second_deck_plays_its_own_solo_test(tmp_path: Path)
     assert first["forge_solo"]["state"] == "running"
     alone = (await reports.run("alice", "42", games=300, options={"seed": 2}, forge=False))["report_id"]
     await reports._start_solo("alice", alone, DECK_TEXT, "Liesa", None)
-    assert reports.get("alice", alone)["forge_solo"]["error"] == SOLO_ONE_AT_A_TIME
+    waits = reports.get("alice", alone)["forge_solo"]
+    assert waits["state"] == "queued" and waits["waiting"] is True and "job_id" not in waits, waits
     paired = (await reports.run("alice", "42", games=300, options={"seed": 3}, forge=False))["report_id"]
     await reports._start_solo("alice", paired, DECK_TEXT, "Liesa", None, first["report_id"])
     assert reports.get("alice", paired)["forge_solo"]["state"] == "running"
@@ -2074,5 +2085,7 @@ async def test_a_solo_test_never_goes_ahead_of_another_members_waiting_games(tmp
     assert waiting["forge"]["state"] == "queued" and not waiting["forge"].get("job_id")
     fake.solo = True
     out = await reports.run("alice", "42", games=300, options={"seed": 3})
-    assert out["forge_solo"]["state"] == "skipped" and out["forge_solo"]["error"] == SOLO_OTHERS_WAITING
+    # it waits behind them in the gateway's queue instead of going ahead (or being dropped)
+    assert out["forge_solo"]["state"] == "queued" and out["forge_solo"]["waiting"] is True, out["forge_solo"]
+    assert not any("solo" in job for job in fake.started)
     reports._forge_task.cancel()

@@ -2036,6 +2036,17 @@ def report_body_html(
         body += f"<div class='card'><h2>Validation</h2>{validation_html(None)}</div>"
     if stats_html:
         body += f"<div class='card'><h2>Deck statistics</h2>{stats_html}</div>"
+    if paired_lines(r.get("paired")):
+        body += (
+            f"<div class='card'><h2>{_esc(PAIRED_HEADING)}</h2><ul class='sumlines'>"
+            + "".join(f"<li>{_esc(ln)}</li>" for ln in paired_lines(r.get("paired")))
+            + "</ul></div>"
+        )
+    if r.get("tested_list"):
+        body += (
+            f"<details class='card disclosure'><summary class='fold-btn'>{TESTED_HEADING}</summary>"
+            f"<pre>{_esc(r['tested_list'])}</pre></details>"
+        )
     raw = ""
     if g and g.get("raw"):
         raw += f"<h3>Simulation output</h3><pre>{_esc(g['raw'])}</pre>"
@@ -2081,6 +2092,25 @@ def export_meta(r: dict[str, Any], s: dict[str, Any], report_url: str = "") -> l
     return rows
 
 
+# -- what the test kept and how it compares (owner decision C7) ---------------------------------------
+# Forge games lead the report only once their 95% interval is at most this wide (30 points): before
+# that a win rate of a few games says little, and the solo test leads.
+FORGE_ENOUGH_WIDTH = 0.30
+TOO_FEW_TEXT = "Too few games to tell yet"
+
+
+def forge_enough(f: Any) -> bool:
+    """Whether a report's Forge games are enough to lead it: some games, and a 95% interval for the
+    member's deck at most FORGE_ENOUGH_WIDTH wide."""
+    res = f.get("result") if isinstance(f, dict) and isinstance(f.get("result"), dict) else {}
+    seats = [x for x in res.get("seats") or [] if isinstance(x, dict)]
+    if not (_int(res.get("games")) and seats):
+        return False
+    low, high = (seats[0].get("win_rate_95") or [None, None])[:2]
+    lo, hi = _float(low), _float(high)
+    return lo is not None and hi is not None and hi - lo <= FORGE_ENOUGH_WIDTH
+
+
 def export_summary(r: dict[str, Any], s: dict[str, Any]) -> list[str]:
     """The Summary: one line for each part of the report that has a result."""
     g, v = s["goldfish"], s["validation"]
@@ -2097,7 +2127,7 @@ def export_summary(r: dict[str, Any], s: dict[str, Any]) -> list[str]:
         wins = mine.get("wins", 0)
         out.append(
             f"Forge games: {front_face(mine.get('deck'))} won {wins} of {games} "
-            f"({_pct(_float(mine.get('win_rate')))})."
+            f"({_pct(_float(mine.get('win_rate')))})." + ("" if forge_enough(forge) else f" {TOO_FEW_TEXT}.")
         )
     solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
     res = (solo or {}).get("result") if isinstance((solo or {}).get("result"), dict) else {}
@@ -2106,6 +2136,9 @@ def export_summary(r: dict[str, Any], s: dict[str, Any]) -> list[str]:
             f"Forge solo test: won by turn {res.get('until_turn')} in {res.get('won', 0)} of "
             f"{res['games']} games ({_pct(_float(res.get('won_rate')))})."
         )
+    paired = ab_verdict(ab_deltas(r.get("paired")))
+    if paired:
+        out.append(f"Against the deck now: {paired}")
     if s["constructed"]:
         out.append("Validation: not checked (a constructed deck).")
     elif v is not None:
@@ -2249,6 +2282,9 @@ def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
     ab = r.get("comparison") if isinstance(r.get("comparison"), dict) else None
     if ab and ab.get("text"):
         lines += ["## Comparison", "", *_md_fenced(plain_words(str(ab["text"]))), ""]
+    lines += _md_paired(r.get("paired"))
+    if r.get("tested_list"):
+        lines += [f"## {TESTED_HEADING}", "", *_md_fenced(str(r["tested_list"])), ""]
     if (g and g.get("raw")) or (v and v.get("raw")):
         where = f": {report_url}" if report_url else " under History."
         lines += [
@@ -2258,6 +2294,36 @@ def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
             "",
         ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+TESTED_HEADING = "Tested list"
+PAIRED_HEADING = "Against the deck now: paired solo test"
+
+
+def paired_lines(block: Any) -> list[str]:
+    """A proposal's paired test as plain lines: the verdict, then one line per number."""
+    rows = ab_deltas(block)
+    if not rows:
+        return []
+    out = [ab_verdict(rows)] if ab_verdict(rows) else []
+    for x in rows:
+        clear = {True: " (clear difference)", False: " (could be chance)"}.get(x["clear"], "")
+        out.append(f"{x['label']}: {x['words']}{clear}")
+    return out
+
+
+def _md_paired(block: Any) -> list[str]:
+    lines = paired_lines(block)
+    if not lines:
+        return []
+    return [
+        f"## {PAIRED_HEADING}",
+        "",
+        "The deck after the change against the deck as it was, game for game under the same seeds.",
+        "",
+        *[f"- {ln}" for ln in lines],
+        "",
+    ]
 
 
 def _md_fenced(text: str) -> list[str]:
@@ -2460,3 +2526,172 @@ __all__ = [
     "svg_lines",
     "tiles_for",
 ]
+
+
+# -- comparing tests (owner decision C7) -----------------------------------------------------------
+# The numbers a test is compared on with the one before it ("since your last test") and the words
+# for their moves: key, label, unit ("turn" or "%") and which way is better (-1: lower).
+COMPARED = (
+    ("commander_turn", "Commander cast", "turn", -1),
+    ("kill_turn", "Lethal damage", "turn", -1),
+    ("kill_pct", "Games dealing lethal damage", "%", 1),
+    ("mulligan_pct", "Games with a mulligan", "%", -1),
+    ("on_curve_pct", "Every land drop through turn 5", "%", 1),
+)
+
+
+def compared_numbers(block: Any) -> dict[str, float | None]:
+    """A stored solo test's numbers that COMPARED follows (None when it has none)."""
+    g = parse_goldfish(block)
+    out: dict[str, float | None] = {k: None for k, *_ in COMPARED}
+    if not g or not g["ok"]:
+        return out
+    m = g.get("metrics") or {}
+
+    def part(key: str) -> dict[str, Any]:
+        return m.get(key) if isinstance(m.get(key), dict) else {}
+
+    out["commander_turn"] = _float(part("commander_cast").get("median_among_reached"))
+    out["kill_turn"] = _float(part("kill").get("median_among_reached"))
+    for key, rate in (
+        ("kill_pct", _rate(part("kill").get("reached_pct"))),
+        ("mulligan_pct", _rate(part("mulligans").get("pct_mulliganed"))),
+        ("on_curve_pct", _rate(part("on_curve").get("pct_all_drops_through_t5"))),
+    ):
+        out[key] = round(100 * rate["value"], 1) if rate else None
+    if isinstance(g.get("until_turn"), int) and g["until_turn"] < 5:
+        out["on_curve_pct"] = None  # a shorter run never reached turn 5 (as the tile says)
+    return out
+
+
+def move_words(unit: str, better: int, change: float) -> tuple[str, str]:
+    """(the move in words, "better", "worse" or "same") for a change of one COMPARED number."""
+    if abs(change) < (0.05 if unit == "turn" else 0.5):
+        return "no change", "same"
+    good = (change > 0) == (better > 0)
+    if unit == "turn":
+        n = abs(change)
+        size = f"{n:.0f}" if n == int(n) else f"{n:.1f}"
+        return f"{size} turn{'' if n == 1 else 's'} {'later' if change > 0 else 'sooner'}", (
+            "better" if good else "worse"
+        )
+    n = abs(change)
+    size = f"{n:.0f}" if n == int(n) else f"{n:.1f}"
+    return f"{size} point{'' if n == 1 else 's'} {'more' if change > 0 else 'fewer'}", (
+        "better" if good else "worse"
+    )
+
+
+def since_rows(now: dict[str, float | None], before: dict[str, float | None]) -> list[dict[str, Any]]:
+    """The COMPARED numbers both tests hold: label, value now, value before, the move in words and
+    whether it is better, worse or the same."""
+    out = []
+    for key, label, unit, better in COMPARED:
+        a, b = now.get(key), before.get(key)
+        if a is None or b is None:
+            continue
+        words, way = move_words(unit, better, a - b)
+        out.append(
+            {"key": key, "label": label, "unit": unit, "now": a, "before": b, "words": words, "way": way}
+        )
+    return out
+
+
+def _payload(block: dict[str, Any]) -> dict[str, Any] | None:
+    """The JSON a research answer carries: its structured data, else its fenced json block."""
+    data = block.get("data")
+    if isinstance(data, dict):
+        return data
+    text = block.get("text") if isinstance(block.get("text"), str) else ""
+    m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(1))
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+# A paired A/B's delta names, read loosely (the research service names them): pattern, label, unit,
+# which way is better (-1: lower; 0: not said).
+_AB_NAMES = (
+    (r"commander", "Commander cast", "turn", -1),
+    (
+        r"(kill|lethal).*(pct|rate|reached|share)|(pct|rate|reached|share).*(kill|lethal)",
+        "Games dealing lethal damage",
+        "%",
+        1,
+    ),
+    (r"kill|lethal", "Lethal damage", "turn", -1),
+    (r"mulligan", "Games with a mulligan", "%", -1),
+    (r"on_curve|curve", "Every land drop through turn 5", "%", 1),
+    (r"damage", "Damage dealt", "", 1),
+)
+
+
+def ab_deltas(block: Any) -> list[dict[str, Any]]:
+    """A paired A/B's deltas (deck A minus deck B, game for game) as rows: label, the change, its
+    95% interval when given, whether the difference is clear (the interval leaves out zero, or the
+    service says it is significant; None when neither is said) and, for a number whose good
+    direction is known, whether deck A did better. [] when the answer holds no deltas."""
+    if not isinstance(block, dict) or not block.get("ok"):
+        return []
+    payload = _payload(block) or {}
+    deltas = payload.get("deltas")
+    if not isinstance(deltas, dict):
+        return []
+    rows = []
+    for key, d in deltas.items():
+        if not isinstance(key, str):
+            continue
+        mean = _float(d.get("mean") if isinstance(d, dict) else d)
+        if mean is None:
+            continue
+        ci = None
+        if isinstance(d, dict):
+            for name in ("ci95", "ci", "ci_95", "interval"):
+                v = d.get(name)
+                if isinstance(v, (list, tuple)) and len(v) == 2 and all(_float(x) is not None for x in v):
+                    ci = (float(v[0]), float(v[1]))
+                    break
+        clear = (
+            d.get("significant") if isinstance(d, dict) and isinstance(d.get("significant"), bool) else None
+        )
+        if clear is None and ci is not None:
+            clear = ci[0] > 0 or ci[1] < 0
+        label, unit, better = key.replace("_", " ").capitalize(), "", 0
+        for pattern, name, u, b in _AB_NAMES:
+            if re.search(pattern, key, re.I):
+                label, unit, better = name, u, b
+                break
+        scale = 100.0 if unit == "%" and abs(mean) <= 1 and (ci is None or max(map(abs, ci)) <= 1) else 1.0
+        change = mean * scale
+        if better and unit:
+            words, way = move_words(unit, better, change)
+        else:
+            n = abs(change)
+            words = "no change" if n < 0.005 else f"{'+' if change > 0 else '−'}{n:.2f}"
+            way = "same" if n < 0.005 else ""
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "change": round(change, 2),
+                "ci": [round(ci[0] * scale, 2), round(ci[1] * scale, 2)] if ci else None,
+                "clear": clear,
+                "words": words,
+                "way": way,
+            }
+        )
+    return rows
+
+
+def ab_verdict(rows: list[dict[str, Any]]) -> str:
+    """One line for a paired test's rows: the clear moves, else that no difference was clear."""
+    clear = [r for r in rows if r.get("clear") and r.get("way") in ("better", "worse")]
+    if clear:
+        return "; ".join(f"{r['label']}: {r['words']}" for r in clear[:3]) + "."
+    if any(r.get("clear") is False for r in rows):
+        return "No clear difference: every change is within what chance alone gives."
+    return ""

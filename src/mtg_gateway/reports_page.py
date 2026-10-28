@@ -244,11 +244,17 @@ def _ci_bar(win: dict[str, Any]) -> str:
     )
 
 
+FEW_GAMES_CELL = "{n} games, too few"
+
+
 def won_cell(r: dict[str, Any]) -> tuple[str, str]:
     """(the Won vs precons cell, the phone line's short value)."""
     win = r.get("win")
-    if win:
+    if win and win.get("enough", True):
         return f"<span class='md-hide wr'><b>{_pct(win['rate'])}</b>{_ci_bar(win)}</span>", _pct(win["rate"])
+    if win:  # a few games say little (owner decision C7): no headline rate
+        games = int(win.get("games") or 0)
+        return f"<span class='md-hide muted'>{FEW_GAMES_CELL.format(n=games)}</span>", "–"
     state = r.get("forge_state")
     if r.get("research") == "running":
         text = "waiting"
@@ -334,10 +340,12 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
     if latest is None:
         return ui.widget("Latest report", "report", "–", detail="No reports yet.")
     win, turn = latest.get("win"), _turn(latest.get("kill_median_turn"))
-    if win:
+    if win and win.get("enough", True):
         big = f"{_pct(win['rate'])}<small>won against precons</small>"
     elif turn:
         big = f"Turn {turn}<small>{esc(str(latest.get('kill_damage') or 40))} damage, median</small>"
+    elif win:
+        big = f"{int(win.get('games') or 0)}<small>Forge games, too few to tell yet</small>"
     else:
         big = "–"
     href = f"/history/reports/{esc(latest['report_id'])}"
@@ -346,7 +354,7 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
         + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a>, "
         f"{ui.when(latest.get('taken_at'), now=now)}</span>"
     )
-    trend = "/history?" + urlencode({"deck_id": str(latest.get("deck_id") or ""), "type": "reports"})
+    trend = "/history?" + urlencode({"deck_id": str(latest.get("deck_id") or ""), "type": "tests"})
     return ui.widget(
         "Latest report",
         "report",
@@ -468,8 +476,10 @@ def reports_page_html(
     trends: list[dict[str, Any]],
     now: float | None = None,
     notice: str = "",
+    csrf: str = "",
 ) -> str:
     """The page. ``notice``: a line under the head in the page's own words (a report just deleted).
+    ``csrf``: the form token for Test a pasted list (none: the box is left out).
     ``index``: every report (ReportService.index); ``rows``: the shown page's
     summaries; ``total``: how many pass the chip, search and filters; ``counts``: each chip's
     count under the search and filters; ``apps``: client id to app name."""
@@ -549,8 +559,31 @@ def reports_page_html(
         + toolbar_html(query, decks, seen)
         + table
         + pager
+        + paste_test_html(csrf)
         + note
         + "</div>"
+    )
+
+
+PASTE_TEST_LINE = (
+    "Plays a list that is not one of your decks, the way an assistant's test does. The report is filed "
+    "under no deck, so no deck's trend counts it."
+)
+
+
+def paste_test_html(csrf: str) -> str:
+    """Test a pasted list (owner decision C7: the website starts every kind of test), folded."""
+    if not csrf:
+        return ""
+    return (
+        "<details class='fold rp-paste'><summary class='fold-btn'>Test a pasted list</summary>"
+        "<form method='post' action='/reports/test' class='rp-paste-f'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<p class='ui-sub'>{PASTE_TEST_LINE}</p>"
+        "<textarea name='decklist' rows='6' aria-label='The decklist to test' "
+        "placeholder='1 Sol Ring&#10;1 Arcane Signet'></textarea>"
+        "<button type='submit' class='btn-plain' data-busy-label='Testing…'>"
+        f"{icon('play')}<span class='label'>Test this list</span></button></form></details>"
     )
 
 
@@ -572,6 +605,12 @@ REPORTS_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
 /* the Reports page */
+.reports-page .rp-paste{margin:1rem 0}
+.reports-page .rp-paste-f{display:flex;flex-direction:column;gap:.5rem;align-items:flex-start;
+  margin-top:.5rem}
+.reports-page .rp-paste-f textarea{width:100%;min-height:8rem;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.reports-page .rp-paste-f button{min-height:44px}
 .reports-page .kd-trend{list-style:none;margin:0;padding:0;font-size:.88rem;width:100%}
 .reports-page .kd-trend li{display:grid;grid-template-columns:minmax(0,1fr) auto 2.4rem;gap:.5rem;
   align-items:baseline;padding:.15rem 0;border-top:1px solid var(--border-soft)}

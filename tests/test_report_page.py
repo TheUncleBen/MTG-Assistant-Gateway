@@ -22,8 +22,17 @@ from .test_reports_browser import FORGE_DONE
 from .test_social_browser import Server
 
 
-def _page(**over) -> str:
-    r = report(forge=json.loads(json.dumps(FORGE_DONE)), status="complete", **over)
+def forge_enough_games() -> dict:
+    """FORGE_DONE with enough games to lead the report: 400 games, the deck's 95% interval 35% to 45%."""
+    f = json.loads(json.dumps(FORGE_DONE))
+    f["result"].update(games=400, games_requested=400)
+    f["result"]["seats"][0].update(wins=160, win_rate_95=[0.35, 0.45])
+    return f
+
+
+def _page(forge: dict | None = None, **over) -> str:
+    forge = forge if forge is not None else forge_enough_games()
+    r = report(forge=forge, status="complete", **over)
     r["stats"] = {**r["stats"], "price_total": 344.0, "game_changers": []}
     return rp.report_page_html(r, stats_html="<div class='tiles'>stats</div>")
 
@@ -49,8 +58,8 @@ def test_six_widgets_from_the_report() -> None:
         "Validation",
         "Deck",
     ], titles
-    assert "40%<small>of 10 games</small>" in widgets and "class='ci-w'" in widgets
-    assert "95% interval 17% to 69% · against 3 precons" in widgets
+    assert "40%<small>of 400 games</small>" in widgets and "class='ci-w'" in widgets
+    assert "95% interval 35% to 45% · against 3 precons" in widgets
     # under 70% of the deck played with its effect: the orange warning edge
     assert "<div class='wdg accent'><span class='lab'>" in widgets and "50%<small>49 of 98 cards" in widgets
     assert "32 played without their effect · 17 need opponents" in widgets
@@ -59,6 +68,19 @@ def test_six_widgets_from_the_report() -> None:
     assert "$344.00<small>100 cards</small>" in widgets and "34 lands · Avg MV 3.2" in widgets
     for href in ("#rv-forge", "#rv-solo", "#rv-model", "#rv-valid", "#rv-stats"):
         assert f"href='{href}'" in widgets and f"id='{href[1:]}'" in html
+
+
+def test_a_few_forge_games_follow_the_solo_test_without_a_headline_rate() -> None:
+    # owner decision C7 (e): 10 games, 17% to 69%, say little; the solo test leads the report
+    html = _page(forge=json.loads(json.dumps(FORGE_DONE)))
+    widgets = html.split("aria-label='Key numbers'>")[1].split("</section>")[0]
+    titles = re.findall(r"</svg>([^<]+)</span><span class='big'>", widgets)
+    assert titles[:3] == ["Commander cast", "40 damage dealt by turn 10", "Forge: your deck won"], titles
+    assert "40%<small>of 10 games" not in widgets
+    assert rp.TOO_FEW_TEXT in widgets and "10 games so far, 95% interval 17% to 69%" in widgets
+    links = html.split("aria-label='Sections of this report'>")[1].split("</nav>")[0]
+    assert links.index("#rv-solo'") < links.index("#rv-forge'")
+    assert html.index("id='rv-solo'") < html.index("id='rv-forge'")
 
 
 def test_a_passed_validation_keeps_its_widget_green() -> None:
@@ -88,7 +110,7 @@ def test_sections_are_flat_and_the_groups_are_inset_lists() -> None:
         ("rv-raw", "Raw output"),
     ]
     assert "<span class='n'>72</span>" in links  # 32 + 17 + 23 cards in the groups (no basic lands)
-    assert ">10 of 10 played</span>" in html  # the Forge state as a label
+    assert ">400 of 400 played</span>" in html  # the Forge state as a label
     assert "<h3>About these Forge games</h3>" in html and "class='ui-table rv-seats'" in html
     assert "<div class='tr mine'>" in html and ">your deck</span>" in html
     model = html.split("id='rv-model'")[1].split("id='rv-valid'")[0]

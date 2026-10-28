@@ -1,4 +1,20 @@
 "use strict";
+(function () {
+  // "Has the deck changed since this test": drawn as a placeholder when Archidekt was slow, filled in
+  // once the deck's read is in (owner decision C7). An empty answer (no deck, or it can't be read)
+  // takes the placeholder away.
+  var wait = document.querySelector("[data-changes-url]");
+  if (wait) {
+    fetch(wait.getAttribute("data-changes-url"), { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
+        var fresh = doc.body.firstChild.firstElementChild;
+        if (fresh) wait.replaceWith(document.importNode(fresh, true)); else wait.remove();
+      })
+      .catch(function () { wait.remove(); });
+  }
+})();
 // Report page: the shared card menu (M9) on the card rows of "Cards Forge left out" (.rv-cards .tr[data-card])
 // and on the card names of the solo test's groups (button.cardlink[data-card], which static/menus.js already
 // serves). A row opens on right-click, press and hold, its ⋮ button, Enter or the ContextMenu key; "Open card"
@@ -60,4 +76,5 @@
     e.preventDefault();
     openCard(row.getAttribute("data-card"), row);
   });
+
 })();
