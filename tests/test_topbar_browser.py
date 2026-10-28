@@ -223,7 +223,7 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     if where.startswith("phone"):  # the bar: the four places and More
         assert got["tabs"] == ["/", "/decks", "/collection", "/proposals"], got
     if where != "desktop":
-        more = ["/search", "/precons", "/scan", "/watchlist", "/lists"]
+        more = ["/search", "/precons", "/scan", "/watchlist", "/lists", "/history/models"]
         assert got["moreShown"] and got["moreItems"] == more, got
 
 
