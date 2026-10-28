@@ -380,14 +380,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 ],
                 filters["show"],
             )
-            # New deck first, the one orange button, then New folder and New package (Ben,
-            # 2026-10-25: "New deck / New folder / New package")
+            # New deck first, then New folder and New package (Ben, 2026-10-25: "New deck / New
+            # folder / New package"); the one orange button is the page's own: New deck on My
+            # Decks, New package on Packages (0.7.46 audit D-25)
             + "<span class='acts'>"
-            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
-            f"{icon('plus')} New deck</a>"
+            f"<a class='btn{'' if packages else ' btn-primary'}' href='/decks/new' "
+            f"{ui.box_open_attr('newdeck')}>{icon('plus')} New deck</a>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
-            f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
-            f"{icon('package')} New package</a>"
+            f"<a class='btn{' btn-primary' if packages else ''}' href='/decks/new-package' "
+            f"{ui.box_open_attr('newpkg')}>{icon('package')} New package</a>"
             "</span></div>"
         )
         notice = ""

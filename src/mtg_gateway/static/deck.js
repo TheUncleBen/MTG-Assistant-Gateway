@@ -2915,7 +2915,9 @@
     name: banner.getAttribute("data-deck-name") || "Unnamed deck",
     own: banner.getAttribute("data-own") === "1",
     can: banner.getAttribute("data-can") === "1",
-    forge: banner.getAttribute("data-forge") === "1"
+    forge: banner.getAttribute("data-forge") === "1",
+    // a new deck whose cards are still going in (decks.being_made): no edits until it is done
+    making: banner.getAttribute("data-making") === "1"
   };
   var more = $("details.deckmore", banner);
   var btn = el("button", "btn deckmenu", "");
@@ -2989,10 +2991,11 @@
   function head(text) { return el("div", "ghead", text); }
   // The deck menu, the same on every screen (Ben, 2026-10-25): what the banner's buttons do (Edit
   // deck, Clone deck, Test and play) is not repeated here, and the deck's proposals are the
-  // banner's Proposals pill. Items that change the deck show on your own decks only.
+  // banner's Proposals pill. Items that change the deck show on your own decks only, and not
+  // while the deck is still being made (its page says so; the gateway would refuse them).
   function items() {
-    var id = enc(d.id), out = [];
-    if (d.own) {
+    var id = enc(d.id), out = [], edits = d.own && !d.making;
+    if (edits) {
       out.push(head("This deck"));
       out.push(item("Rename…", "edit", renameDeck));
       out.push(item("Move to folder…", "folder", moveDeck));
@@ -3020,7 +3023,7 @@
     }
     if (d.can && document.getElementById("report")) community.push(item("Report deck…", "flag", extras("report")));
     if (community.length) { out.push(sep()); out.push(head("Community")); out = out.concat(community); }
-    if (d.own) {
+    if (edits) {
       out.push(sep());
       out.push(item("Delete deck…", "trash", openBox("delete"), { danger: true }));
     }

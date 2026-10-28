@@ -334,7 +334,7 @@ async def test_check_deck_changes_reports_every_problem_with_a_suggestion(stack:
     unknown = next(p for p in out["problems"] if p["error"] == "unknown_cards")
     assert unknown["unknown_cards"] == ["Lightnig Bolt"], unknown
     assert unknown["did_you_mean"] == {"Lightnig Bolt": "Lightning Bolt"}, unknown
-    assert "did you mean 'Lightning Bolt'" in unknown["message"], unknown
+    assert "did you mean “Lightning Bolt”" in unknown["message"], unknown
 
 
 async def test_deck_stats_identity_is_the_commanders(stack: Stack) -> None:

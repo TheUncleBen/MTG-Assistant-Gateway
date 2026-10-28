@@ -1451,7 +1451,7 @@ async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: St
     bad = [{"action": "add", "card_name": "Islend"}, {"action": "add", "card_name": "Swamp"}]
     out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": bad}))
     assert out["ok"] is False and out["error"] == "unknown_cards", out
-    assert out["unknown_cards"] == ["Islend"] and "'Islend'" in out["message"], out
+    assert out["unknown_cards"] == ["Islend"] and "“Islend”" in out["message"], out
     good = [
         {"action": "add", "card_name": "Delver of Secrets"},
         {"action": "add", "card_name": "Sol Ring"},  # in deck 42, though not in this catalog

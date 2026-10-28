@@ -164,16 +164,22 @@ auto_category = deck_stats.auto_category
 
 def cards_by_category(deck: Deck) -> list[tuple[str, list[DeckCard]]]:
     """Cards grouped the way Archidekt shows them: Commander first, then the deck's own category
-    order, then anything else alphabetically; uncategorised cards under their auto category."""
+    order, then anything else alphabetically; uncategorised cards under their auto category. The
+    categories not in the deck (Maybeboard, Sideboard and any other the deck marks "Not in deck")
+    come last, in the deck's order, after every stack that counts (0.7.46 audit D-14)."""
     order = [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)]
+    excluded = deck.excluded_categories()
     groups: dict[str, list[DeckCard]] = {}
     for card in deck.cards:
         cats = card.categories or [auto_category(card)]
         groups.setdefault(cats[0], []).append(card)
     rank = {name: i for i, name in enumerate(order)}
     rank.setdefault("Commander", -1)
+    after = len(order) + 2  # past every deck category, "Other" and the automatic stacks
 
     def key(name: str) -> tuple[int, str]:
+        if name in excluded:
+            return (after + rank.get(name, len(order)), name.lower())
         return (rank.get(name, len(order) + (1 if name == "Other" else 0)), name.lower())
 
     return [(name, sorted(groups[name], key=lambda c: c.name.lower())) for name in sorted(groups, key=key)]

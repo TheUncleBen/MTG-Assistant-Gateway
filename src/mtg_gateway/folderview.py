@@ -381,7 +381,9 @@ ul.folderlist{display:grid;gap:10px;margin:0}
 ul.folderlist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
 ul.folderlist.list{grid-template-columns:minmax(0,1fr);gap:.5rem}
 ul.folderlist .folder,ul.folderlist .folder a,ul.folderlist .text{min-width:0}
-ul.folderlist .folder a{display:flex;align-items:center;gap:.75rem;min-height:64px;padding:.65rem .85rem;
+/* the right padding keeps the tile's ⋮ (menus.py, absolute at the row's end) off the name */
+ul.folderlist .folder a{display:flex;align-items:center;gap:.75rem;min-height:64px;
+  padding:.65rem calc(var(--ctl) + .85rem) .65rem .85rem;
   border:1px solid var(--border);border-radius:5px;background:var(--surface-2);color:var(--text);
   text-decoration:none}
 ul.folderlist.list .folder a{min-height:52px}
