@@ -261,3 +261,101 @@ def test_a_reload_during_a_slow_save_shows_the_strip_then_the_result(server: Ser
         assert server.quantity("Cultivate") == n + 1
         assert errors == []
         browser.close()
+
+
+# -- Deck settings save each change as it is made, with Undo (owner decision C4) -----------------
+from .test_deck_categories import _give_categories  # noqa: E402
+
+# the hidden was_ field of a Main settings field holds its last saved value
+_WAS = "() => document.querySelector('input[name=was_%s]').value === '%s'"
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
+def test_deck_settings_save_each_change_at_once_with_undo(server: Server, width: int, scheme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    _give_categories(server.ark)
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        # no Save buttons: each change saves itself (the foot says so)
+        assert page.locator("#ds-main button:visible", has_text="Save changes").count() == 0
+        assert page.locator("#catform button:visible", has_text="Save categories").count() == 0
+        assert page.locator("#catform button:visible", has_text="Undo changes").count() == 0
+        assert "as you make it" in page.locator("#ds-main .foot").inner_text()
+        # a switch: saved at once, Undo puts it back
+        private = page.locator("#private")
+        private.check(force=True)
+        toast = page.locator(".toast .msg", has_text="Saved to Archidekt")
+        toast.wait_for(timeout=8000)
+        assert server.ark.decks[42]["private"] is True
+        assert page.locator("input[name=was_private]").get_attribute("value") == "1"
+        page.locator(".toast button", has_text="Undo").click()
+        page.wait_for_function(_WAS % ("private", ""), timeout=8000)
+        assert server.ark.decks[42]["private"] is False and not private.is_checked()
+        # the name: saved when the box is left; a refusal puts the saved name back
+        name = page.locator("#name")
+        name.fill("Renamed on the page")
+        name.press("Tab")
+        page.wait_for_function(_WAS % ("name", "Renamed on the page"), timeout=8000)
+        assert server.ark.decks[42]["name"] == "Renamed on the page"
+        server.ark.fail_deck_update = True
+        name.fill("Refused name")
+        name.press("Tab")
+        page.locator(".toast.error").wait_for(timeout=8000)
+        assert name.input_value() == "Renamed on the page"
+        assert server.ark.decks[42]["name"] == "Renamed on the page"
+        server.ark.fail_deck_update = False
+        page.locator(".toast .close").click()
+        # a category switch: saved at once, the list drawn again with it on
+        ramp = page.locator("#catform li[data-name='Ramp']")
+        cid = ramp.get_attribute("data-cat")
+        ramp.locator(f"input[name='not_in_price_{cid}']").check(force=True)
+        page.locator(".toast .msg", has_text="Categories saved").wait_for(timeout=8000)
+        ramp = page.locator("#catform li[data-name='Ramp']")
+        assert ramp.locator(f"input[name='not_in_price_{cid}']").is_checked()
+        assert ramp.locator(f"input[name='was_not_in_price_{cid}']").get_attribute("value") == "1"
+        # one that makes commanders asks first: Cancel puts the switch back, nothing is sent
+        updates = len(server.ark.updates)
+        ramp.locator(f"input[name='premier_{cid}']").check(force=True)
+        box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+        box.wait_for(timeout=5000)
+        assert "Change the commander category?" in box.locator("h2").inner_text()
+        box.locator("button", has_text="Cancel").click()
+        page.wait_for_timeout(300)
+        assert not ramp.locator(f"input[name='premier_{cid}']").is_checked()
+        assert len(server.ark.updates) == updates
+        assert errors == []
+        browser.close()
+
+
+def test_leaving_deck_settings_while_a_save_runs_asks_first(server: Server) -> None:
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
+        asks = (
+            "() => { const e = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(e);"
+            " return e.defaultPrevented; }"
+        )
+        assert page.evaluate(asks) is False
+        held = []
+        page.route("**/decks/42/settings", lambda route: held.append(route))
+        page.locator("#private").check(force=True)
+        page.wait_for_function("() => true")
+        for _ in range(40):
+            if held:
+                break
+            page.wait_for_timeout(50)
+        assert held, "the save never left the page"
+        assert page.evaluate(asks) is True
+        held[0].continue_()
+        page.locator(".toast .msg", has_text="Saved to Archidekt").wait_for(timeout=8000)
+        assert page.evaluate(asks) is False
+        assert errors == []
+        browser.close()

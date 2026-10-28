@@ -417,6 +417,8 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366)
+        # the Maybeboard stack comes last now (0.7.46 audit D-14): a window tall enough for both
+        page.set_viewport_size({"width": 1366, "height": 1400})
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         url = page.url
         source = ".deckview .row[data-card='Sol Ring'][data-zone='side']"
