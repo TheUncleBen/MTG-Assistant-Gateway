@@ -29,9 +29,19 @@
     return fetch(href, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); });
   }
+  // the count is kept in this tab for a minute (sessionStorage), so moving between pages does not
+  // ask again (0.7.46 audit SH-23); sign-out clears it with the site's storage
+  var COUNT_KEY = "mtg-bell", KEEP_MS = 60000;
+  function keep(n) {
+    try { sessionStorage.setItem(COUNT_KEY, JSON.stringify({ at: Date.now(), n: n })); } catch (e) { /* storage off */ }
+  }
   function readCount() {
+    try {
+      var kept = JSON.parse(sessionStorage.getItem(COUNT_KEY) || "null");
+      if (kept && Date.now() - kept.at < KEEP_MS && typeof kept.n === "number") { setCount(kept.n); return; }
+    } catch (e) { /* storage off: ask */ }
     getJSON("/notifications/count").then(function (d) {
-      if (d && d.ok) setCount(d.unseen || 0);
+      if (d && d.ok) { setCount(d.unseen || 0); keep(d.unseen || 0); }
     }, function () { /* no connection: the bell stays quiet */ });
   }
   function later(fn) {
@@ -78,6 +88,7 @@
         }
         // no mark-as-read request was seen in Archidekt's scripts: the count clears once the list was opened
         setCount(0);
+        keep(0);
       }
       var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Email and notifications.");
       wrap.appendChild(note);

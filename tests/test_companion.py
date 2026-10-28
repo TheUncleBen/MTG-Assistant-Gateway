@@ -7,6 +7,9 @@ import html
 import json
 import re
 
+from mtg_gateway.busy import area_of
+from mtg_gateway.decks import PAGE_DECK_STALE
+
 from .conftest import AUTO_PROXY, FakeIdP, Stack, sse_json, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
 from .track_a_helpers import apply_any
@@ -1188,6 +1191,9 @@ BUSY_PAGES = (
     "/search?name=Sample",
     "/precons",
 )
+# the busy pages that draw the deck page itself (its boxes drawn open): with a read of the deck
+# kept, they show it read-only and dated instead (0.7.46 audit D-03)
+HELD_DECK_PAGES = {"/decks/42", "/decks/42/export", "/decks/42/delete"}
 BUSY_DOWNLOADS = (
     "/decks/42/export.txt",
     "/decks/42/export.archidekt.txt",
@@ -1200,7 +1206,13 @@ BUSY_DOWNLOADS = (
 
 def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -> None:
     assert r.status_code == status, (path, r.status_code, r.text[:300])
-    assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    if path.startswith("/collection"):  # the Binder keeps its own frame, the busy words in its list
+        assert "<title>Binder" in r.text and f"<h2 class='busy-title'>{title}</h2>" in r.text, path
+    else:
+        assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    # never Archidekt's raw words: codes, exception names, seconds (0.7.46 audit D-05, C-15)
+    for raw in ("HTTP 5", "HTTP 4", "ReadTimeout", "request failed:", " seconds"):
+        assert raw not in r.text, (path, raw)
     assert f"<a class='btn btn-primary' href='{html.escape(path)}'>Try again</a>" in r.text, path
     assert 1 <= int(r.headers["retry-after"]) <= max_wait, (path, r.headers)
     assert r.headers["cache-control"] == "no-store", path
@@ -1222,14 +1234,26 @@ async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stac
         decks.archidekt_budget = RateBudget(per_window=1, window=600)
         first = await b.http.get("/decks/42", headers=NAV)
         assert first.status_code == 200  # the one call of the window
+        # too old to be shown without a read: the deck page then shows that read, read-only and
+        # dated, instead of the busy page (0.7.46 audit D-03)
+        decks._page_decks = {k: (t - PAGE_DECK_STALE - 1, d) for k, (t, d) in decks._page_decks.items()}
         for path in BUSY_PAGES:
-            # as Reload asks (a deck page just read would be shown again from memory, no call)
             r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
+            if path.split("?")[0] in HELD_DECK_PAGES:
+                assert r.status_code == 200 and "data-card='Sol Ring'" in r.text, path
+                assert "Too many requests right now, so this is the deck as it was read" in r.text, path
+                assert "Changes are off" in r.text and "/decks/42/edit" not in r.text, path
+                continue
             _assert_busy_page(r, path, status=429, title="Too many requests right now", max_wait=600)
             assert "used up its Archidekt allowance for the last 10 minutes" in r.text, path
             assert "once there is room" in r.text, path
-            assert "Your account has used its 1 Archidekt actions" in r.text, path
-            assert "href='/decks'>My decks</a>" in r.text, path
+            # the page's own area: "your collection" on the Binder, "your decks" on the deck pages
+            noun, back, label = area_of(path)
+            assert f"Nothing is wrong with your {noun} or your account" in r.text or (
+                noun is None and "Nothing is wrong with your account" in r.text
+            ), path
+            if back != path.split("?")[0]:
+                assert f"href='{back}'>{label}</a>" in r.text, path
         for path in BUSY_DOWNLOADS:
             r = await b.http.get(path)
             assert r.status_code == 429 and r.text.startswith("Too many requests right now."), (path, r.text)

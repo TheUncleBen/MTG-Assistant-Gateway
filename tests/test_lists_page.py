@@ -608,6 +608,8 @@ async def test_the_tab_counts_never_open_the_shared_breaker(
         ark.calls.clear()
         r = await member.http.get("/lists/templates")
         assert r.status_code == 200  # the page still draws
+        counts = await member.http.get("/lists/api/counts")  # what static/lists.js asks after it
+        assert counts.status_code == 200 and counts.json()["ok"] is True
         failing_by_view.append(
             ["pins" if "pins" in p else "colorTags" for _m, p in ark.calls if "pins" in p or "colorTags" in p]
         )
@@ -621,3 +623,26 @@ async def test_the_tab_counts_never_open_the_shared_breaker(
     counts = account_lists.counts("user-1")
     assert "color_tags" not in counts and "pins" not in counts and "templates" in counts
     account_lists.forget_counts("user-1")
+
+
+async def test_my_lists_draws_with_one_read_and_fills_the_other_counts_after(
+    member: Browser, stack: Stack
+) -> None:
+    """0.7.46 audit SH-03: a first visit to My lists read every list one after another before
+    drawing (40 s at 8 s Archidekt latency). It now reads the open tab only; the tab bar asks for
+    the other counts once the page is there."""
+    account_lists.forget_counts("user-1")
+    stack.ark.calls.clear()
+    page = await member.http.get("/lists/templates")
+    assert page.status_code == 200
+    reads = [p for m, p in stack.ark.calls if m == "GET"]
+    assert len(reads) <= 1, reads
+    assert "data-counts='/lists/api/counts'" in page.text
+    assert "Category templates<span class='n'>2</span>" in page.text
+    assert "Pinned cards<span class='n'>" not in page.text  # not read yet
+    got = (await member.http.get("/lists/api/counts")).json()
+    assert got["ok"] is True and got["counts"]["templates"] == 2 and got["counts"]["pins"] == 1
+    again = await member.http.get("/lists/templates")
+    assert "Pinned cards<span class='n'>1</span>" in again.text and "data-counts" not in again.text
+    js = (await member.http.get("/static/lists.js")).text
+    assert "data-counts" in js

@@ -42,7 +42,7 @@ from .archidekt import (
     language_code,
     page_turn,
 )
-from .busy import busy_response
+from .busy import busy_body, busy_headers, busy_plan, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
 from .decks import DeckError, _writing, archidekt_wait, current_client
@@ -2150,10 +2150,21 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             got = await listing(sub, lq)
             whole = got["out"] if not lq["q"] and lq["sort"] == "added" else await service.page(sub)
         except CollectionError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
+            if (plan := busy_plan(exc)) is not None:
+                # the Binder keeps its title and notes; the busy words sit where the list goes
+                body = head() + notes_html + f"<h2 class='busy-title'>{_esc(plan.title)}</h2>"
+                busy = page(
+                    "Binder",
+                    body + busy_body(plan, same_url(request)),
+                    sub=sub,
+                    sid=sid,
+                    status=plan.status,
+                    heading=False,
+                )
+                busy.headers.update(busy_headers(plan))
                 return busy
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
-            notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
             return page(
                 "Binder",
                 head() + notes_html + problem(exc),

@@ -10528,7 +10528,7 @@ def _changed_anything(progress: dict[str, Any]) -> bool:
 
 def _sentence(exc: Exception) -> str:
     """An error's message as a whole sentence, so the note after it starts a new one
-    ("Archidekt returned HTTP 503. 1 of 3 ...", never "HTTP 503 1 of 3")."""
+    ("Archidekt had a problem answering. 1 of 3 ...", never "answering 1 of 3")."""
     text = str(exc).rstrip()
     return text if not text or text[-1] in ".!?" else text + "."
 

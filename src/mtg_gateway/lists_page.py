@@ -228,14 +228,21 @@ def box_note(error: str) -> str:
     return f"<p class='notice error boxnote' role='alert'>{esc(error)}</p>" if error else ""
 
 
+COUNTS_API = PAGE + "/api/counts"
+
+
 def tabs_html(current: str, counts: dict[str, int]) -> str:
+    """The tab bar. A tab whose list has not been read yet has no number; static/lists.js asks
+    COUNTS_API for them after the page has drawn (data-counts), so the page never waits for them."""
     out = []
     for t in TABS:
         n = counts.get(t.kind)
         cur = " aria-current='page'" if t.slug == current else ""
         num = f"<span class='n'>{n:,}</span>" if n is not None else ""
         out.append(f"<a href='{PAGE}/{t.slug}'{cur}>{esc(t.label)}{num}</a>")
-    return f"<nav class='adm-nav lp-tabs' aria-label='Lists'>{''.join(out)}</nav>"
+    missing = any(counts.get(t.kind) is None for t in TABS)
+    fill = f" data-counts='{COUNTS_API}'" if missing else ""
+    return f"<nav class='adm-nav lp-tabs' aria-label='Lists'{fill}>{''.join(out)}</nav>"
 
 
 def list_head(title: str, count_html: str, actions_html: str = "") -> str:
@@ -1622,6 +1629,22 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return login_redirect(PAGE)
         return RedirectResponse(f"{PAGE}/templates", status_code=302)
 
+    @server.custom_route(COUNTS_API, methods=["GET"], include_in_schema=False)
+    async def lists_counts(request: Request) -> Response:
+        """The tab counts the page drew without (read_counts), asked by static/lists.js once the
+        page is there: the page itself reads only its own tab (0.7.46 audit SH-03)."""
+        sub, _sid = browser_session(state, request)
+        headers = {"Cache-Control": "no-store"}
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        try:
+            await read_counts(sub)
+        except DeckError:
+            pass  # a count that can't be read stays blank
+        counts = account_lists.counts(sub)
+        by_tab = {t.slug: counts[t.kind] for t in TABS if t.kind in counts}  # keyed as the tabs' links
+        return JSONResponse({"ok": True, "counts": by_tab}, headers=headers)
+
     @server.custom_route(PAGE + "/{tab}", methods=["GET"], include_in_schema=False)
     async def lists_tab(request: Request) -> Response:
         tab = BY_SLUG.get(request.path_params["tab"])
@@ -1638,8 +1661,6 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             if wants_json(request):
                 return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
             return problem(request, exc, sub, sid, tab)
-        if not wants_json(request):
-            await read_counts(sub)
         if wants_json(request) and tab.slug in ("defaults", "custom"):
             # Load more with scripts: the next page's rows, appended in place (static/lists.js)
             if tab.slug == "defaults":

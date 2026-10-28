@@ -245,15 +245,34 @@
      every page's card menu then says "On your watchlist" for them instead of offering the watch
      again. A watch or an Undo here keeps the list right. */
   var watchedNames = null, watchedAsked = false;
+  // kept in this tab for a minute (sessionStorage), so moving between pages does not ask again
+  // (0.7.46 audit SH-23); sign-out clears it with the site's storage
+  var WATCHED_KEY = "mtg-watched", KEEP_MS = 60000;
+  function keptWatched() {
+    try {
+      var kept = JSON.parse(sessionStorage.getItem(WATCHED_KEY) || "null");
+      return kept && Date.now() - kept.at < KEEP_MS && kept.names ? kept.names : null;
+    } catch (e) { return null; }
+  }
+  function keepWatched() {
+    try { sessionStorage.setItem(WATCHED_KEY, JSON.stringify({ at: Date.now(), names: Object.keys(watchedNames || {}) })); } catch (e) { /* storage off */ }
+  }
   function loadWatched() {
     if (watchedAsked || !enabled() || !window.fetch) return;
     watchedAsked = true;
+    var kept = keptWatched();
+    if (kept) {
+      watchedNames = watchedNames || Object.create(null);
+      kept.forEach(function (n) { watchedNames[n] = true; });
+      return;
+    }
     fetch("/watchlist/api/names", { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d || !d.ok || !d.names) return;
         watchedNames = watchedNames || Object.create(null);
         d.names.forEach(function (n) { watchedNames[norm(n)] = true; });
+        keepWatched();
       })
       .catch(function () { /* the menus offer Watch; the server keeps one watch a card */ });
   }
@@ -261,6 +280,7 @@
   function markWatched(name, on) {
     watchedNames = watchedNames || Object.create(null);
     if (on) watchedNames[norm(name)] = true; else delete watchedNames[norm(name)];
+    if (keptWatched()) keepWatched();
   }
   function listLink(name) {
     var a = el("a", null, "Open the watchlist");
