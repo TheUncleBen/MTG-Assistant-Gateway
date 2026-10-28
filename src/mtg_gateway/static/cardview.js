@@ -406,7 +406,7 @@
       }
       watches.forEach(function (v) {
         var where = printLabel([(v.set || "").toUpperCase(), v.collector_number || ""].filter(Boolean).join(" ")) || "any printing";
-        box.appendChild(el("p", null, where + " · " + v.finish + ": " + money(v.price, v.currency) + (v.day ? " on " + v.day : "")));
+        box.appendChild(el("p", null, where + " · " + titleCase(v.finish || "nonfoil") + ": " + money(v.price, v.currency) + (v.day ? " on " + v.day : "")));
         var rows = (v.history || []).filter(function (h) { return h.price !== null; }).reverse().slice(0, 30);
         if (!rows.length) { box.appendChild(el("p", "muted", "No price yet; it comes with the next daily check.")); return; }
         var table = el("table");
@@ -425,8 +425,10 @@
         });
         box.appendChild(table);
       });
-      var a = el("a", null, "Open the watchlist");
-      a.href = "/watchlist";
+      // a capsule, like every other way on (no plain blue link); it opens this card's row
+      var a = el("a", "btn small", "Open the watchlist");
+      var wid = watches.length === 1 ? watches[0].watch_id : "";
+      a.href = wid ? "/watchlist?open=" + encodeURIComponent(wid) + "#wr-" + encodeURIComponent(wid) : "/watchlist";
       box.appendChild(a);
     }
     btn.addEventListener("click", function () {
