@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
     from ..cards import CardLinks
 
+# card_printings' note, true whether or not the app shows the printings card
+PRINTINGS_NOTE = (
+    "In an app that shows cards, every printing with its picture is on the card in the chat, where the "
+    "user can tap the one they mean. Otherwise ask which set, then call again with set_code."
+)
+
 CARD_FIELDS = (
     "name",
     "set",
@@ -203,7 +209,8 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "not sold on paper (`paper: false`). Give `oracle_id` from a resolve_cards result, or `name`. "
             "Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that come in it). "
             "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
-            "rows (default 25) and `truncated` means that cap cut the list. `sets` lists the sets the card "
+            "rows (default 25) and `truncated` means that cap cut the list; `has_more` means more printings "
+            "exist than `cards` holds. `sets` lists the sets the card "
             "was printed in, newest first, not narrowed by set_code or finish; `limit` caps it too, "
             "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that "
             "shows cards, the user sees every printing's picture and taps the one they mean; wait for "
@@ -252,17 +259,16 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "cards": rows,
             # this tool's own limit cut the matching rows; nothing to do with Scryfall's pages
             "truncated": len(cards) > shown,
+            # more printings exist than the rows returned, whatever cut them
+            "has_more": len(cards) > shown or bool(out.get("has_more")),
             # Scryfall shows 175 printings a page; past that, filters only see the newest 175
-            "has_more": bool(out.get("has_more")),
+            "scryfall_more_pages": bool(out.get("has_more")),
             "total_cards": out.get("total_cards"),  # every printing of the card, before any filter
             "sets": sets[:shown],
             "sets_total": len(sets),
             "sets_truncated": len(sets) > shown,
             "sets_scope": "the sets the card was printed in, not narrowed by set_code or finish",
-            "note": (
-                "Every printing with its picture is on the card in the chat, where the user can tap the "
-                "one they mean. Without the card, ask which set, then call again with set_code."
-            ),
+            "note": PRINTINGS_NOTE,
         }
         card = None
         if links is not None:
