@@ -331,7 +331,8 @@ button.danger:disabled{color:var(--red)}
     var meta = result._meta || {};
     approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
     var st0 = meta[SET_KEY];
-    applySet = st0 && Array.isArray(st0.ids) && typeof st0.code === "string" ? { ids: st0.ids.map(String), code: st0.code } : null;
+    // what Apply all applies, one line each (card-only: in _meta, never in the assistant's result)
+    applySet = st0 && Array.isArray(st0.ids) && typeof st0.code === "string" ? { ids: st0.ids.map(String), code: st0.code, lines: Array.isArray(st0.lines) ? st0.lines : [] } : null;
     confirming = false;
     // The assistant's apply_proposal of a change the user must approve answers with the
     // proposal itself (error browser_required), so its card shows the change and the buttons.
@@ -595,7 +596,7 @@ button.danger:disabled{color:var(--red)}
   function codesMeta() {
     var meta = {};
     if (approval) meta[APPROVAL_KEY] = approval;
-    if (applySet) meta[SET_KEY] = { ids: applySet.ids, code: applySet.code };
+    if (applySet) meta[SET_KEY] = { ids: applySet.ids, code: applySet.code, lines: applySet.lines };
     return meta;
   }
   function onShown() {
@@ -831,7 +832,7 @@ button.danger:disabled{color:var(--red)}
     var ol = $("also-list"); ol.replaceChildren();
     if (confirming && applySet) {
       var byId = {};
-      (w.set_lines || []).forEach(function (x) { byId[String(x.proposal_id)] = x; });
+      (applySet.lines || []).forEach(function (x) { byId[String(x.proposal_id)] = x; });
       applySet.ids.forEach(function (id) {
         var x = byId[id] || {};
         var li = el("li", "", (x.board_no ? "#" + x.board_no + " " : "") + String(x.summary || id));
@@ -877,7 +878,7 @@ button.danger:disabled{color:var(--red)}
     setStatus("Applying to Archidekt…", "");
     $("status").focus();
     // the status each change showed on the confirm: a change held since is not sent
-    var shown = {}, lines = (proposal.deck_waiting && proposal.deck_waiting.set_lines) || [];
+    var shown = {}, lines = set.lines || [];
     lines.forEach(function (x) {
       var id = String(x.proposal_id);
       if (set.ids.indexOf(id) < 0) return;

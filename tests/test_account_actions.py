@@ -1524,7 +1524,8 @@ async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stac
     res = await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
     info = structured(res)["deck_waiting"]
     ids = res["_meta"][APPROVAL_SET_META_KEY]["ids"]
-    lines = {x["proposal_id"]: x["summary"] for x in info["set_lines"]}
+    lines = {x["proposal_id"]: x["summary"] for x in res["_meta"][APPROVAL_SET_META_KEY]["lines"]}
+    assert "set_lines" not in info
     assert len(ids) == 2 and set(lines) == set(ids), (ids, lines)
     assert any("Like" in s for s in lines.values()) and any("Follow" in s for s in lines.values()), lines
 

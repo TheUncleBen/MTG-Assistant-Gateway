@@ -82,7 +82,7 @@ async def test_a_new_category_reads_as_one_line_and_sends_nothing(stack: Stack) 
         SUB, "42", [{"action": "create", "category": "Removal", "not_in_price": True}]
     )
     assert p["diff"] == "New category “Removal”: Not in price on. " + OPEN_TABS_NOTE
-    assert p["diff"] == category_line(p["rows"][0])
+    assert p["diff"] == category_line(p["rows"][0]) + " " + OPEN_TABS_NOTE  # said once, at the end
     assert stack.ark.category_creates == [] and stack.ark.category_deletes == []
 
 

@@ -90,9 +90,10 @@ async def test_apply_all_from_the_proposal_card_leaves_out_a_change_held_since(s
     h, a, b, theirs, pid, other = await _replacement(stack)
     res = await card_read(h, a, other)
     card = structured(res)
-    lines = card["deck_waiting"]["set_lines"]
-    assert {x["proposal_id"] for x in lines} == {pid, other}
     s = res["_meta"][APPROVAL_SET_META_KEY]
+    lines = s["lines"]  # card-only: in _meta, not in what the assistant reads
+    assert "set_lines" not in card["deck_waiting"]
+    assert {x["proposal_id"] for x in lines} == {pid, other}
     shown = {x["proposal_id"]: {"status": x.get("status") or ""} for x in lines}
     await _apply_theirs(h, b, theirs, pid)
     got = structured(

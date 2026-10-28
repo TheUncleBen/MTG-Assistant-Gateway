@@ -1369,7 +1369,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                         title = modes.category_words("unused_title", name=title_name, n=len(unused_names))
                         notes.append(modes.category_names_line(unused_names))
                     elif not move_field:
-                        notes.append(" ".join(category_line(r).split(" Archidekt tabs")[0] for r in rows))
+                        notes.append(" ".join(category_line(r) for r in rows))
                     note = notes
                 body = confirm_form(
                     f"/decks/{deck.id}/categories#categories",

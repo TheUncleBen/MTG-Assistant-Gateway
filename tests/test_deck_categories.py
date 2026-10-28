@@ -130,7 +130,7 @@ async def test_the_review_line_names_the_change_in_the_settings_pages_words(stac
     )
     assert p["kind"] == "categories" and len(p["rows"]) == 1
     line = "Category “Ramp”: rename to “Mana” (its 2 cards go with it), Not in price on. " + OPEN_TABS_NOTE
-    assert p["diff"] == line == category_line(p["rows"][0])
+    assert p["diff"] == line == category_line(p["rows"][0]) + " " + OPEN_TABS_NOTE
     flags = _svc(stack).describe(SUB, p["proposal_id"])
     assert flags["diff"] == line  # the same line on the review page, the card, Changes and History
     assert stack.ark.category_patches == []  # proposing sends nothing
@@ -142,6 +142,21 @@ async def test_flag_only_lines_carry_the_open_tabs_note_too(stack: Stack) -> Non
     p = await _svc(stack).propose_categories(SUB, "42", [{"category": "Maybeboard", "not_in_price": False}])
     assert p["diff"] == "Category “Maybeboard”: Not in price off. " + OPEN_TABS_NOTE
     assert "old name" not in OPEN_TABS_NOTE and "old categories" in OPEN_TABS_NOTE
+
+
+async def test_the_open_tabs_note_is_said_once_however_many_categories_change(stack: Stack) -> None:
+    """AT-36: the note was on every category line (four times in one result)."""
+    await _ready(stack)
+    p = await _svc(stack).propose_categories(
+        SUB,
+        "42",
+        [
+            {"category": "Ramp", "rename_to": "Mana"},
+            {"category": "Maybeboard", "not_in_price": False},
+        ],
+    )
+    lines = p["diff"].splitlines()
+    assert len(lines) == 2 and p["diff"].count(OPEN_TABS_NOTE) == 1 and lines[-1].endswith(OPEN_TABS_NOTE)
 
 
 @pytest.mark.parametrize(
@@ -394,11 +409,10 @@ async def test_restore_puts_category_names_and_flags_back_by_id(stack: Stack) ->
     ark.category_patches.clear()
     r = await svc.propose_restore(SUB, done["result"]["snapshot_id"])
     lines = r["diff"].splitlines()
-    assert (
-        "Category “Mana”: rename to “Ramp” (its 2 cards go with it), Not in price off. " + OPEN_TABS_NOTE
-        in lines
-    )
-    assert "Category “Maybeboard”: Not in deck on. " + OPEN_TABS_NOTE in lines
+    said = [ln.removesuffix(" " + OPEN_TABS_NOTE) for ln in lines]
+    assert "Category “Mana”: rename to “Ramp” (its 2 cards go with it), Not in price off." in said
+    assert "Category “Maybeboard”: Not in deck on." in said
+    assert r["diff"].count(OPEN_TABS_NOTE) == 1
     assert not [ln for ln in lines if ln.startswith(("+", "-"))]  # no card is removed and added again
     back = await svc.apply(SUB, r["proposal_id"], via="browser")
     assert back["state"] == "applied" and back["result"]["verified"] is True, back

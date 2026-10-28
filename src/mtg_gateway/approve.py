@@ -404,13 +404,14 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
         "what_changed",
     )
     in_set = {pid for pid, _v in items}
-    info["set_lines"] = [
+    # card-only (standard 16): the assistant's result says how many wait, the card lists them
+    lines = [
         {k: x[k] for k in keys if k in x}
         for x in decks.board_lines(sub, str(deck_id))
         if x["proposal_id"] in in_set
     ]
     code = approval_set_code(decks.settings.session_secret, sub=sub, client_id=client, items=items)
-    return info, {"ids": [i for i, _v in items], "code": code}
+    return info, {"ids": [i for i, _v in items], "code": code, "lines": lines}
 
 
 def approval_matches(expected: str, given: Any) -> bool:
