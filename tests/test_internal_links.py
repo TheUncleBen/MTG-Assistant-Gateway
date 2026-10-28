@@ -98,7 +98,9 @@ async def test_no_internal_link_is_dead(stack: Stack) -> None:
 async def test_no_dead_link_signed_out(stack: Stack) -> None:
     b = Browser(stack.h)
     try:
-        seen = await _crawl(b, ("/", "/guide", "/install", "/install?for=skill", "/install?for=android"), depth=2)
+        seen = await _crawl(
+            b, ("/", "/guide", "/install", "/install?for=skill", "/install?for=android"), depth=2
+        )
         dead = {p: origin for p, (status, origin) in seen.items() if status == 404}
         assert dead == {}, dead
     finally:
