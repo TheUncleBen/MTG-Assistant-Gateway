@@ -725,7 +725,9 @@
   async function scanFile(file) {
     const url = URL.createObjectURL(file);
     try {
-      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; })
+        .catch(() => null);
+      if (!img) { setStatus(unreadablePhoto(file)); return; }
       // Phone photos run to 50 MP; a working copy with the long side at most PHOTO_MAX px holds
       // every detail the OCR can use and keeps the tab's memory bounded.
       const k = Math.min(1, PHOTO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
@@ -740,8 +742,17 @@
       await scanRegion(c, { x: c.width * 0.06, y: c.height * 0.035, w: c.width * 0.72, h: c.height * 0.085 },
         infoRegionOf(0, 0, c.width, c.height), null);
     } catch (e) {
-      setStatus('Could not read that photo.');
+      setStatus('Could not read that photo: ' + ((e && e.message) || e) + '.');
     } finally { URL.revokeObjectURL(url); }
+  }
+
+  /* Why a picture would not open. Browsers on Android and most desktops cannot show HEIC/HEIF,
+     the "high efficiency" format some phone cameras save in. */
+  function unreadablePhoto(file) {
+    const heic = /hei[cf]/i.test((file && file.type) || '') || /\.hei[cf]$/i.test((file && file.name) || '');
+    return heic
+      ? 'This photo is in HEIC format, which this browser cannot open. Choose a JPEG or PNG picture, or use the camera.'
+      : 'Could not open that picture. Choose a JPEG or PNG photo, or use the camera.';
   }
 
   /* Read the info line (set code, collector number, language, foil star) if the crop is given.
@@ -795,7 +806,11 @@
       const ocr = await recognize(strip, 'title');
       const text = cleanOcr(ocr.text);
       if (text.length < 3) {
-        setStatus('Could not read a name.' + (glareHint || ' Move closer, avoid glare, and keep the title inside the dashed box.'));
+        // Say which step failed: no card outline at all is a background or framing problem, an
+        // outline with no readable name is focus, light or glare.
+        setStatus(flat
+          ? 'Found the card but could not read its name.' + (glareHint || ' Hold it steady in good light, a little further away if the picture is blurred.')
+          : 'Could not find the card’s edges or read a name.' + (glareHint || ' Lay the card on a plain background that contrasts with its border, name at the top, and keep it inside the frame.'));
         return;
       }
       if (state.continuous) {

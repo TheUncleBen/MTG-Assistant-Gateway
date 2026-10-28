@@ -89,7 +89,10 @@ What's on it:
 - **Printing picker.** Lists every printing of a card, newest first, with
   finishes and art, so you can pick the exact one by hand.
 - **Photo.** Uses your camera app or gallery instead, for browsers that
-  can't stream video. It does the same edge-finding over the whole picture.
+  can't stream video. It does the same edge-finding over the whole picture,
+  so the card doesn't have to fill the photo. HEIC pictures (the "high
+  efficiency" setting of some phone cameras) can't be opened by the browser;
+  the page says so, and JPEG or PNG works.
 - **Type.** Card name with instant suggestions as you type, or paste a whole decklist.
 - **List.** Quantities, cards still unresolved, **Save scan** and
   **Copy decklist**, then **What next?** with the three places the cards
@@ -187,8 +190,14 @@ also carries `sets`, one row per set, and a `note`.
 
 **On the page.** Before reading, the page looks for the card's four edges
 and straightens the card (perspective correction in `geometry.js`, no
-libraries). When it can't find a convincing outline it reads the dashed box
-as is. The Photo button searches the whole picture on a working copy no
+libraries). Around the dashed box first; failing that, over the whole
+picture for a card down to about a quarter of the picture's width (a card
+held further back than the box, a photo where the card fills only part of
+the frame). An edge must be straight to within about half a percent of the
+picture, so wood grain or a busy playmat isn't taken for a card. When it
+can't find a convincing outline it reads the dashed box as is, and a failed
+read says whether the card's edges or its name were the problem. The Photo
+button works on a copy no
 bigger than 2400 px on its long side, and the straightening only samples the
 card's own box (at most 2048 px), so a 50 MP photo is never copied whole.
 Titles are read with Tesseract.js (WebAssembly). In continuous mode only
