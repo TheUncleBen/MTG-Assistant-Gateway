@@ -423,7 +423,7 @@ def forge_section_html(
         name = str(pair.get("deck_name") or "the other deck")
         links.append(
             ui.cap_link(
-                f"Open {name}'s report, which met the same opponents", f"/history/reports/{pair['report_id']}"
+                f"Open {name}’s report, which met the same opponents", f"/history/reports/{pair['report_id']}"
             )
         )
     parts.extend(f"<p class='rv-link'>{a}</p>" for a in links)

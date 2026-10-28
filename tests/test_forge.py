@@ -1254,7 +1254,7 @@ async def test_two_decks_meet_the_same_opponents(tmp_path: Path) -> None:
     assert second["forge"]["state"] == "queued"
     assert second["forge"]["shared_with"] == {"report_id": first["report_id"], "deck_name": "Deck 42"}
     page = report_body_html(second)
-    assert f"href='/history/reports/{first['report_id']}'>Open Deck 42's report" in page
+    assert f"href='/history/reports/{first['report_id']}'>Open Deck 42’s report" in page
     fake.finish(first["forge"]["job_id"], [1])
     for _ in range(200):
         if len(fake.started) == 2:

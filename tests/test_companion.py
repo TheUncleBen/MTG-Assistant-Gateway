@@ -250,7 +250,7 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         first_id = seen[1][3]
         assert r.headers["location"].startswith("/history/reports/rep_") and first_id
         shown = await b.http.get(r.headers["location"], headers=NAV)
-        assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck's report" in shown.text
+        assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck’s report" in shown.text
         assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
         bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "nope"})
         assert bad.status_code == 400 and "Pick the other deck" in bad.text
