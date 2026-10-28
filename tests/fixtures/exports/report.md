@@ -29,6 +29,7 @@
 ## Forge games (against precons)
 
 - Games played: 10 of 10.
+- Only 10 games: that tells you very little, and the win rates could change a lot with more games (see the 95% intervals).
 - Immortal Reckoning: 4 wins, 40% (95% interval 17% to 69%). Lost by: life total 3, commander damage 2.
 - Riders of the Long Name Precon Deck: 3 wins, 30% (95% interval 11% to 60%). Lost by: life total 6.
 - Precon 2: 1 win, 10% (95% interval 2% to 40%). Lost by: life total 8.
