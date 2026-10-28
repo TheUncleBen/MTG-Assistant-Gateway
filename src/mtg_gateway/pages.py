@@ -160,6 +160,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if not app_signin.CHALLENGE.fullmatch(challenge):
                 return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
             params["app_challenge"] = challenge
+            back = q.get("app_return")
+            if back is not None:
+                # The app's Auth Tab returns on the app's own scheme (app_signin.py). The identity
+                # provider is then asked for a sign-in of its own, never a silent pass-through: any
+                # app can start this leg, and only a person signing in may finish it.
+                if back != app_signin.SCHEME_RETURN:
+                    return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
+                params["app_return"] = back
+                fresh = True
         else:
             sub, _sid = current(request)
             if sub:
@@ -991,8 +1000,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The Android app's sign-in: no session in this browser, a one-time code for the app,
             # handed over at the gateway's own address, where the app's Auth Tab closes by itself.
             code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
+            scheme = session["params"].get("app_return") == app_signin.SCHEME_RETURN
             return RedirectResponse(
-                f"{app_signin.RETURN_PATH}?code={code}",
+                # the app's own scheme, which its Auth Tab takes with no Digital Asset Links check;
+                # else the gateway's address (an older app's Auth Tab, or the page with the button)
+                app_signin.scheme_url(code) if scheme else f"{app_signin.RETURN_PATH}?code={code}",
                 status_code=303,
                 headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
             )

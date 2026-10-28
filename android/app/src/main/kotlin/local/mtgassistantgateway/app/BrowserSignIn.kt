@@ -14,12 +14,14 @@ import java.util.Base64
  * 1. The gateway's /login page inside the app calls `MtgNative.signInWithBrowser(next, fresh)`.
  * 2. The app keeps a random verifier and opens [startUrl] (with the verifier's SHA-256) in a
  *    Custom Tab; the person signs in at the identity provider there.
- * 3. The gateway sends the browser to [RETURN_PATH]`?code=...` on its own address. Where the
- *    browser has an Auth Tab, the app opened the sign-in in one: the Auth Tab hands that address
- *    back and closes by itself, but only to an app the gateway vouches for in its
- *    assetlinks.json (this app's package ID and signing certificate). Otherwise the page there
- *    opens `mtgassistant-signin://signin?code=...` through an `intent:` link naming this app's
- *    package, so only this app receives it.
+ * 3. Where a browser on the phone has an Auth Tab ([pickAuthTabBrowser]: the default browser,
+ *    else Chrome, else any other that has one), the app opened the sign-in in one on its own
+ *    scheme ([SCHEME_RETURN]): the gateway ends the browser's part with
+ *    `mtgassistant-signin://signin?code=...`, which the Auth Tab hands back to this app and
+ *    closes, with no tap and no Digital Asset Links check ([codeOfSchemeReturn]). Otherwise, in a
+ *    Custom Tab, the gateway sends the browser to [RETURN_PATH]`?code=...` on its own address,
+ *    whose page opens `mtgassistant-signin://signin?code=...` through an `intent:` link naming
+ *    this app's package, once by itself where the browser allows and else on a tap.
  * 4. The app posts the code with its verifier to [FINISH_PATH] in the WebView, which gets the
  *    session cookie. A code is worthless without the verifier, which never leaves this app.
  *
@@ -29,8 +31,12 @@ object BrowserSignIn {
     const val SCHEME = "mtgassistant-signin"
     const val HOST = "signin"
     const val FINISH_PATH = "/login/app"
-    /** Where the gateway hands the code back (app_signin.RETURN_PATH). */
+    /** Where the gateway hands the code back to a Custom Tab (app_signin.RETURN_PATH). */
     const val RETURN_PATH = "/login/app-return"
+    /** Asks the gateway to end the browser's part on [SCHEME] instead (app_signin.SCHEME_RETURN). */
+    const val SCHEME_RETURN = "scheme"
+    /** Preferred when the default browser has no Auth Tab. */
+    const val CHROME = "com.android.chrome"
     /** How long a started sign-in waits for the browser to come back. */
     const val MAX_AGE_MS = 10 * 60 * 1000L
     private val CODE = Regex("[A-Za-z0-9_-]{43}")
@@ -48,32 +54,27 @@ object BrowserSignIn {
     fun safeNext(next: String?): String =
         if (next != null && next.startsWith("/") && !next.startsWith("//") && '\\' !in next && next.length <= 200) next else "/"
 
-    /** The gateway's /login for the browser leg. */
-    fun startUrl(origin: String, next: String?, challenge: String, fresh: Boolean): String =
+    /** The gateway's /login for the browser leg; [schemeReturn] for an Auth Tab on [SCHEME]. */
+    fun startUrl(origin: String, next: String?, challenge: String, fresh: Boolean, schemeReturn: Boolean = false): String =
         origin + "/login?next=" + URLEncoder.encode(safeNext(next), "UTF-8") +
-            "&app_challenge=" + challenge + (if (fresh) "&fresh=1" else "")
-
-    /** The one-time code from the link the browser opened, or null when it isn't ours or isn't well formed. */
-    fun codeOf(scheme: String?, host: String?, code: String?): String? =
-        if (scheme == SCHEME && host == HOST && code != null && CODE.matches(code)) code else null
+            "&app_challenge=" + challenge + (if (fresh) "&fresh=1" else "") +
+            (if (schemeReturn) "&app_return=$SCHEME_RETURN" else "")
 
     /**
-     * The host an Auth Tab returns on: the gateway's own, when [origin] is plain `https://host`.
-     * Null (sign in with a Custom Tab instead) for anything else, a port included: an Auth Tab
-     * matches a host and a path only.
+     * The browser to open an Auth Tab in: the default one when it has Auth Tabs, else Chrome when
+     * it has them, else the first of [installed] that has them; null when none has (a Custom Tab
+     * then). [installed] lists the browsers that offer Custom Tabs, as the phone lists them.
      */
-    fun authTabHost(origin: String): String? {
-        val uri = try { URI(origin) } catch (e: URISyntaxException) { return null }
-        val host = uri.host ?: return null
-        return if (uri.scheme == "https" && uri.port == -1 && (uri.rawPath ?: "").isEmpty() && uri.rawQuery == null &&
-            uri.rawUserInfo == null) host else null
+    fun pickAuthTabBrowser(default: String?, installed: List<String>, hasAuthTab: (String) -> Boolean): String? {
+        if (default != null && hasAuthTab(default)) return default
+        val others = installed.filter { it != default }.distinct()
+        return others.firstOrNull { it == CHROME && hasAuthTab(it) } ?: others.firstOrNull { it != CHROME && hasAuthTab(it) }
     }
 
-    /** The one-time code from the address an Auth Tab returned, or null when it isn't [RETURN_PATH] on [origin]. */
-    fun codeOfReturn(origin: String, returned: String?): String? {
-        val host = authTabHost(origin) ?: return null
+    /** The one-time code from the address an Auth Tab on [SCHEME] returned, or null when it isn't ours. */
+    fun codeOfSchemeReturn(returned: String?): String? {
         val uri = try { URI(returned ?: return null) } catch (e: URISyntaxException) { return null }
-        if (uri.scheme != "https" || uri.host != host || uri.port != -1 || uri.rawUserInfo != null || uri.rawPath != RETURN_PATH) {
+        if (uri.scheme != SCHEME || uri.rawAuthority != HOST || !(uri.rawPath ?: "").isEmpty() || uri.rawFragment != null) {
             return null
         }
         val params = (uri.rawQuery ?: "").split('&').filter { it.isNotEmpty() }
@@ -81,6 +82,10 @@ object BrowserSignIn {
         val code = params[0].removePrefix("code=")
         return if (CODE.matches(code)) code else null
     }
+
+    /** The one-time code from the link the browser opened, or null when it isn't ours or isn't well formed. */
+    fun codeOf(scheme: String?, host: String?, code: String?): String? =
+        if (scheme == SCHEME && host == HOST && code != null && CODE.matches(code)) code else null
 
     /** The form the WebView posts to [FINISH_PATH]; both values are URL-safe base64, so nothing needs escaping. */
     fun finishBody(code: String, verifier: String): ByteArray {
