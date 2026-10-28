@@ -1216,9 +1216,61 @@ def test_the_picker_finds_the_rows_own_printing_and_waits_out_a_busy_answer(serv
         browser.close()
 
 
+def test_the_picker_spins_while_it_looks_and_says_plainly_when_other_lookups_hold_it(
+    server: Server,
+) -> None:
+    """While printings are looked up (busy answers asked again included) the status line has the
+    theme's progress ring; it goes when the tiles show. Lookups that stay busy say so plainly."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    busy = json.dumps({"ok": False, "error": "busy", "message": "other card lookups are still running"})
+    prints = re.compile(r"/scan/api/prints\?")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        held = {"n": 2}
+
+        def busy_twice(route) -> None:
+            if held["n"]:
+                held["n"] -= 1
+                route.fulfill(status=429, content_type="application/json", body=busy)
+            else:
+                route.continue_()
+
+        page.route(prints, busy_twice)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_menu(page, card)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        status = page.locator(".printpick .ppstatus")
+        status.wait_for(timeout=5000)
+        assert status.locator(".ui-spin[aria-hidden=true]").count() == 1
+        assert "Looking up printings…" in status.inner_text()
+        page.locator(".printpick .pptile").first.wait_for(timeout=10000)
+        assert status.locator(".ui-spin").count() == 0
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        page.unroute(prints)
+        page.route(prints, lambda r: r.fulfill(status=429, content_type="application/json", body=busy))
+        page.reload(wait_until="networkidle")
+        _open_menu(page, card)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        error = page.locator(".printpick .ppstatus.error")
+        error.wait_for(timeout=15000)
+        assert error.locator(".ui-spin").count() == 0
+        assert (
+            "Printings could not be loaded. Your other card lookups are still running. "
+            "Retry when you\u2019re ready." in error.inner_text()
+        )
+        assert errors == []
+        browser.close()
+
+
 @pytest.mark.parametrize("width", [375, 1280])
 def test_the_filter_box_says_it_filters_by_set_and_offers_a_card_search(server: Server, width: int) -> None:
-    """The box over the printings is labelled "Filter these printings by set", with a filter
+    """The box over the printings shows "Filter by set" (its label for screen readers stays
+    "Filter these printings by set"), with a filter
     icon. Text that matches no printing and does not look like a set code (a card's name, say)
     offers "Search all cards for “…”", which opens the card search; a set code does not."""
     from playwright.sync_api import sync_playwright
@@ -1231,7 +1283,7 @@ def test_the_filter_box_says_it_filters_by_set_and_offers_a_card_search(server: 
             page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
             _open_picker(page, page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']"))
             box = page.locator("#pp-q")
-            assert box.get_attribute("placeholder") == "Filter these printings by set"
+            assert box.get_attribute("placeholder") == "Filter by set"
             assert box.get_attribute("aria-label") == "Filter these printings by set"
             assert page.locator(".printpick .ppsearch svg.i").count() == 1
             go = page.locator(".printpick .ppempty a.btn")
