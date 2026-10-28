@@ -889,6 +889,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         )
         if p["state"] == "replaced":
             p["replaced_by"] = _replacement(state, sub, pid)
+        if getattr(state, "reports", None) is not None:  # simulations of its resulting deck
+            p["sim_reports"] = state.reports.for_proposal(sub, pid)
         close = proposals_view.panel_close_href(query)
         full = request.query_params.get("full") == "1"
         no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
@@ -2425,6 +2427,21 @@ def _proposal_body(
         )
     else:
         meta_rows.append(("Version", str(int(p.get("version") or 1))))
+    if p.get("sim_reports"):  # reports of the deck as this proposal would leave it (run_deck_report)
+        meta_rows.append(
+            (
+                "Simulated",
+                "<span class='ui-actions'>"
+                + "".join(
+                    ui.button_link(
+                        f"Report, {ui.when_text(x.get('taken_at'), now=now)}",
+                        f"/history/reports/{x['report_id']}",
+                    )
+                    for x in p["sim_reports"]
+                )
+                + "</span>",
+            )
+        )
     stale = (
         f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
         if pending and p.get("out_of_date")

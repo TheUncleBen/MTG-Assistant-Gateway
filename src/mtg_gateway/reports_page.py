@@ -189,6 +189,14 @@ def _turn(v: Any) -> str:
     return f"{v:.0f}" if v == int(v) else f"{v:.1f}"
 
 
+def source_label_html(r: dict[str, Any]) -> str:
+    """What a report was run on when it is not a stored deck as it is (a pasted list, a waiting
+    proposal's resulting deck, a comparison), as a blue label; "" for a deck's own report."""
+    src = r.get("source")
+    label = src.get("label") if isinstance(src, dict) else r.get("source_label")
+    return f"<span class='ui-lbl blue src'>{esc(str(label))}</span>" if label else ""
+
+
 def deck_line(r: dict[str, Any]) -> str:
     """The row's second line: the commander, then the one thing to know about this report (Forge
     games under way, Forge games that could not run, which checks it holds) or else the bracket."""
@@ -212,7 +220,9 @@ def deck_line(r: dict[str, Any]) -> str:
         what = f"{ESTIMATE_LABEL}: {esc(bracket_name(r['bracket_estimate']))}"
     else:
         what = ""
-    parts = [esc(r["commander"])] if r.get("commander") else []
+    parts = [source_label_html(r)] if source_label_html(r) else []
+    if r.get("commander"):
+        parts.append(esc(r["commander"]))
     if what:
         parts.append(what)
     return " · ".join(parts)
@@ -336,7 +346,13 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
         0,
         big_html=big,
         detail_html=det,
-        actions=[ui.button_link("Open report", href), ui.button_link("Deck trend", trend)],
+        # a pasted list's (or a proposal's, a comparison's) report is in no deck's trend
+        actions=[ui.button_link("Open report", href)]
+        + (
+            [ui.button_link("Deck trend", trend)]
+            if latest.get("deck_id") and not latest.get("source")
+            else []
+        ),
     )
 
 
@@ -369,7 +385,7 @@ def problem_widget(index: list[dict[str, Any]], *, now: float) -> str:
 def decks_widget(index: list[dict[str, Any]], trends: list[dict[str, Any]]) -> str:
     """How many decks were tested, and the newest few with the median turn their newest report
     dealt lethal damage and its change from the report before (faster green, slower red)."""
-    decks = {r["deck_id"] for r in index}
+    decks = {r["deck_id"] for r in index if r.get("deck_id") and not r.get("source_label")}
     rows = []
     for t in trends:
         turn = _turn(t.get("latest"))

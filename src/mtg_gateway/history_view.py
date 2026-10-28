@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 from . import ui
 from .decks import actor_label
+from .reports_page import source_label_html
 from .theme import esc as _esc
 from .theme import icon, time_html
 
@@ -274,7 +275,7 @@ def build_events(
                 "deck_name": r.get("deck_name") or r.get("deck_id"),
                 # the report's overall status (reports.report_status), shown unless complete
                 "state": r["status"] if r.get("status") and r.get("status") != "complete" else "",
-                "line": _esc((", ".join(bits) + f" · {sim}") if bits else sim),
+                "line": source_label_html(r) + _esc((", ".join(bits) + f" · {sim}") if bits else sim),
                 "app": app,
                 "client": client,
                 "who": True,

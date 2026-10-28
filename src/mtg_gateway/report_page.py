@@ -63,7 +63,7 @@ from .report_view import (
     solo_heading,
     validation_html,
 )
-from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, status_label
+from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, source_label_html, status_label
 from .theme import icon
 
 # The "Played with their effect" widget takes the orange edge below this share of the deck.
@@ -1122,6 +1122,28 @@ def _jump_html(
     return f"<div class='rv-jump'>{ui.chips(items, label='Sections of this report')}</div>"
 
 
+def comparison_section_html(r: dict[str, Any]) -> str:
+    """A simulated comparison's paired A/B (compare_decks with simulate): which decks, and the
+    research service's deltas as it wrote them."""
+    ab = r.get("comparison")
+    if not isinstance(ab, dict):
+        return ""
+    src = r.get("source") if isinstance(r.get("source"), dict) else {}
+    who = (
+        f"<p>Deck A: <strong>{_esc(src.get('a') or '')}</strong> · Deck B: "
+        f"<strong>{_esc(src.get('b') or '')}</strong>. Both decks played game for game under the same "
+        "seeds.</p>"
+        if src.get("a") or src.get("b")
+        else ""
+    )
+    body = (
+        f"<pre class='rv-ab'>{_esc(ab.get('text') or '')}</pre>"
+        if ab.get("ok")
+        else f"<p class='notice error'>{_esc(ab.get('text') or 'The comparison did not run.')}</p>"
+    )
+    return _sec("rv-compare", "Comparison: paired solo test", who + body)
+
+
 def status_label_html(status: Any) -> str:
     """The report's overall status as its status label (the same words as the Reports list)."""
     return status_label(status) if isinstance(status, str) and status in STATUS_LABEL else ""
@@ -1147,14 +1169,27 @@ def report_page_html(
     s = report_sections(r)
     g = s["goldfish"]
     deck_id = _esc(r.get("deck_id"))
-    name = _esc(r.get("deck_name") or r.get("deck_id"))
+    name = _esc(r.get("deck_name") or r.get("deck_id") or "Unnamed deck")
+    # a pasted list (or a new deck's proposal) has no deck to go back to
+    on_deck = str(r.get("deck_id") or "").isdigit()
     crumbs = (
         "<nav class='crumbs rv-crumbs' aria-label='Back'>"
-        f"<a href='/decks/{deck_id}'>← Back to the deck</a><span aria-hidden='true'>·</span>"
-        f"<a href='/history?deck_id={deck_id}'>Deck history</a><span aria-hidden='true'>·</span>"
-        "<a href='/reports'>All reports</a></nav>"
+        + (
+            f"<a href='/decks/{deck_id}'>← Back to the deck</a><span aria-hidden='true'>·</span>"
+            f"<a href='/history?deck_id={deck_id}'>Deck history</a><span aria-hidden='true'>·</span>"
+            if on_deck
+            else ""
+        )
+        + "<a href='/reports'>All reports</a></nav>"
     )
     meta = [f"<span id='rep-status'>{status_label_html(r.get('status'))}</span>"]
+    src = r.get("source") if isinstance(r.get("source"), dict) else {}
+    if src.get("kind") == "proposal" and src.get("proposal_id"):
+        meta.append(
+            f"<span><a href='/proposals/{_esc(src['proposal_id'])}'>{source_label_html(r)}</a></span>"
+        )
+    elif src:
+        meta.append(f"<span>{source_label_html(r)}</span>")
     if s["commander"]:
         meta.append(f"<span><span class='k'>Commander</span> {_esc(front_face(s['commander']))}</span>")
     if g and g.get("games"):
@@ -1166,8 +1201,8 @@ def report_page_html(
     meta.append(f"<span><span class='k'>Run</span> {ui.when(r.get('taken_at'))}</span>")
     head = (
         "<header class='rv-head'><div class='rv-title'>"
-        f"<h1><a href='/decks/{deck_id}'>{name}</a></h1>"
-        f"<p class='rv-meta'>{''.join(meta)}</p></div>"
+        + (f"<h1><a href='/decks/{deck_id}'>{name}</a></h1>" if on_deck else f"<h1>{name}</h1>")
+        + f"<p class='rv-meta'>{''.join(meta)}</p></div>"
         f"<div class='rv-acts'>{actions_html}</div></header>"
     )
     if reused:
@@ -1206,6 +1241,7 @@ def report_page_html(
             "<details class='ui-card rv-det rv-raw raw' id='rv-raw'><summary class='fold-btn'>"
             f"Raw output from the research service</summary>{raw}</details>"
         )
+    compare = comparison_section_html(r)
     jump = _jump_html(r, s, model=bool(model), valid=bool(valid), stats=bool(stats), raw=bool(raw))
     return (
         "<div class='report rv-page gb-dash'>"
@@ -1214,6 +1250,7 @@ def report_page_html(
         + notice_html
         + widgets_html(r, s, stats_section=bool(stats))
         + jump
+        + compare
         + solo_forge
         + forge
         + solo
@@ -1423,7 +1460,7 @@ REPORT_PAGE_CSS = (
   .rv-page .rv-dstats .tile:nth-child(-n+2){border-top:0}
   .rv-page .rv-dstats .tile:nth-child(even){border-left:1px solid var(--border-soft)}}
 .rv-page .rv-raw{padding:.25rem 1rem .5rem}
-.rv-page .rv-raw pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
+.rv-page .rv-raw pre,.rv-page .rv-ab{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
 .rv-page .rv-np p{overflow-wrap:anywhere}
 .rv-page .rv-np h3 .n,.rv-page .rv-sec h3 .n{color:var(--text-muted);font-weight:400;font-size:.9rem;
   margin-left:.3rem}
