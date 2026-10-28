@@ -1213,3 +1213,43 @@ def test_the_picker_finds_the_rows_own_printing_and_waits_out_a_busy_answer(serv
         assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width", [375, 1280])
+def test_the_filter_box_says_it_filters_by_set_and_offers_a_card_search(server: Server, width: int) -> None:
+    """The box over the printings is labelled "Filter these printings by set", with a filter
+    icon. Text that matches no printing and does not look like a set code (a card's name, say)
+    offers "Search all cards for “…”", which opens the card search; a set code does not."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        for theme in ("light", "dark"):
+            browser, page, errors = _page(p, server, sid, width, theme=theme, touch=width == 375)
+            page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+            _open_picker(page, page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']"))
+            box = page.locator("#pp-q")
+            assert box.get_attribute("placeholder") == "Filter these printings by set"
+            assert box.get_attribute("aria-label") == "Filter these printings by set"
+            assert page.locator(".printpick .ppsearch svg.i").count() == 1
+            go = page.locator(".printpick .ppempty a.btn")
+            box.fill("zzz")
+            page.wait_for_timeout(100)
+            assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
+            assert go.count() == 0
+            box.fill("Lightning Bolt")
+            page.wait_for_timeout(100)
+            assert go.inner_text() == "Search all cards for \u201cLightning Bolt\u201d"
+            assert go.get_attribute("href") == "/cards?q=Lightning%20Bolt"
+            assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
+            assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppempty p, .printpick .ppempty .btn") == []
+            # as tall as "Clear filters" beside it (44 px on a touch screen)
+            clear = page.locator(".printpick .ppempty button", has_text="Clear filters").bounding_box()
+            assert go.bounding_box()["height"] == clear["height"]
+            if width == 375:
+                assert page.evaluate(SMALL) == []
+            go.click()
+            page.wait_for_url(re.compile(r"/cards\?q=Lightning"), timeout=5000)
+            assert errors == []
+            browser.close()

@@ -3817,6 +3817,11 @@ html.printpick-open{overflow:hidden}
 .printpick .pptools{display:flex;flex-direction:column;gap:.5rem;flex:none;min-width:0}
 .printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
 .printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
+/* the filter box: a filter icon inside it, on the left */
+.printpick .ppq{position:relative;display:flex;flex:1 1 10rem;min-width:0}
+.printpick .ppq svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);width:18px;height:18px;
+  color:var(--text-muted);pointer-events:none}
+.printpick .ppq input{width:100%;padding-left:2.4rem}
 .printpick .ppfiltbtn{display:none;margin:0;flex:none}
 /* the card size switch (0.7.29) keeps its size; on a narrow phone it wraps under the search */
 .printpick .ppsearch{flex-wrap:wrap}
