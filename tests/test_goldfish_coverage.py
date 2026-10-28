@@ -105,3 +105,36 @@ def test_an_ab_says_each_commander_is_cast_from_the_command_zone() -> None:
     assert "Ghostly Prison (drawn 12%)" in a
     # deck B's commander is another card: its line is left as it is
     assert "Galadriel, Light of Valinor (drawn 4%)" in b
+
+
+async def test_the_forge_view_carries_the_forge_result(tmp_path) -> None:
+    import asyncio
+
+    from mtg_gateway.db import Database
+    from mtg_gateway.reports import ReportService
+
+    from .test_forge import FakeForge, _Decks
+
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    assert reports.forge_only("alice", out["report_id"])["forge_result"] is None  # still playing
+    fake.finish(out["forge"]["job_id"], [1, 2, 1, 1])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    view = reports.forge_only("alice", out["report_id"])
+    full = reports.get("alice", out["report_id"])["forge"]
+    assert view["forge_result"]["result"] == full["result"], view
+    assert view["forge_result"]["result"]["seats"][0]["wins"] == 3
+    assert "opponent_choice" in view["forge_result"]
+
+
+def test_a_handful_of_forge_games_is_said_to_tell_little() -> None:
+    from mtg_gateway.report_view import forge_lines
+
+    seat = {"deck": "Mine", "wins": 1, "win_rate": 0.2, "win_rate_95": [0.036, 0.625]}
+    few = forge_lines({"state": "done", "result": {"games": 5, "games_requested": 5, "seats": [seat]}})
+    assert any(line.startswith("Only 5 games: that tells you very little") for line in few), few
+    many = forge_lines({"state": "done", "result": {"games": 40, "games_requested": 40, "seats": [seat]}})
+    assert not any(line.startswith("Only ") for line in many), many

@@ -1475,6 +1475,15 @@ FORGE_DRIFT_NOTE = (
 )
 
 
+# Below this many Forge games the win rates are said to be rough (a 95% interval wider than about
+# 40 points), in words beside the numbers.
+FEW_FORGE_GAMES = 20
+FEW_GAMES_TEXT = (
+    "Only {n} game{s}: that tells you very little, and the win rates could change a lot with more games "
+    "(see the 95% intervals)."
+)
+
+
 def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
     """Forge's result as plain sentences, shared by the page and the Markdown export. The page
     draws the results themselves as a table (forge_results_html) and passes ``results=False``."""
@@ -1497,6 +1506,8 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
     if res.get("games") and results:
         asked = res.get("games_requested") or f.get("games_requested")
         out.append(f"Games played: {res['games']} of {asked}." if asked else f"Games played: {res['games']}.")
+        if res["games"] < FEW_FORGE_GAMES:
+            out.append(FEW_GAMES_TEXT.format(n=res["games"], s="" if res["games"] == 1 else "s"))
         for seat in seats:
             low, high = (seat.get("win_rate_95") or [None, None])[:2]
             ci = (
