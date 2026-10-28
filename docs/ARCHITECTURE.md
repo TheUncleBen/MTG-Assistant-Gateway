@@ -200,9 +200,11 @@ For the exact devices and plans tested, see
 - **Membership is live.** Before any request with a browser session or a
   gateway token is served, and at every code exchange and refresh, the
   gateway asks the identity provider's userinfo endpoint for the person's
-  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. Removing
+  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old; for up to 60
+  seconds after the provider last let the person in, a page is answered at
+  once and the provider is asked in the background. Removing
   someone from `MTG_REQUIRED_GROUP`, or deactivating or deleting them at the
-  provider, takes effect on their next request: every gateway token,
+  provider, takes effect within those 60 seconds: every gateway token,
   browser session and stored provider token is revoked, and a removal from
   the group revokes their Archidekt link too (a deactivated or deleted
   account, which the provider reports only as a refused token, keeps the

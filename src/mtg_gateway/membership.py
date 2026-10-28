@@ -9,7 +9,12 @@ So the gateway keeps the provider's own access and refresh tokens from each sign
 with the Fernet key) and, before serving any request that carries a session cookie or a bearer
 token, asks userinfo for that person's current groups. The answer is cached for
 MTG_MEMBERSHIP_CHECK_TTL seconds (5 by default, 0 = every request) to spare the identity provider
-from page bursts; that is the worst-case delay. Outcomes:
+from page bursts. Past that, and within GRACE seconds (60) of the provider last letting the person
+in, the request is answered at once and the provider is asked in the background, so a page never
+waits for the provider while someone is using the gateway; past GRACE the request waits for the
+answer. A removal therefore takes effect at most GRACE seconds after the provider last let the
+person in (counted from when that check was sent). With MTG_MEMBERSHIP_CHECK_TTL=0 every request
+waits for the provider's answer, as before. Outcomes:
 
 - still allowed: the groups are recorded, so the admin check sees a removal at once too;
 - no longer in the required group: every token, browser session and the Archidekt link are
@@ -24,6 +29,7 @@ from page bursts; that is the worst-case delay. Outcomes:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -47,6 +53,9 @@ EXPIRY_MARGIN = 30
 RENEW_LEAD = 10
 RENEW_WINDOW = 15 * 60
 MAX_CACHED = 10_000
+# How long after the provider last let someone in a request of theirs is answered without waiting
+# for the next check (which then runs in the background). The longest a removed member can go on.
+GRACE = 60.0
 
 
 class Membership(Enum):
@@ -65,6 +74,7 @@ class MembershipChecker:
         self._locks: dict[str, asyncio.Lock] = {}
         self._renewals: dict[str, asyncio.Task[None]] = {}
         self._refreshing: set[str] = set()  # renewals asking the provider right now
+        self._background: dict[str, asyncio.Task[Membership]] = {}  # checks run after a request
         self._warned_no_refresh = False
         # The member's profile picture follows the provider's answer (avatars.py).
         self.avatars = AvatarStore(settings.data_dir / "avatars")
@@ -113,18 +123,47 @@ class MembershipChecker:
     async def _check(self, sub: str) -> Membership:
         ttl = self.settings.membership_check_ttl
         last = self._checked.get(sub)
-        if ttl and last is not None and time.monotonic() - last < ttl:
-            return Membership.ALLOWED
+        if ttl and last is not None:
+            age = time.monotonic() - last
+            if age < ttl:
+                return Membership.ALLOWED
+            if age < GRACE:
+                self._check_in_background(sub)
+                return Membership.ALLOWED
+        return await self._check_now(sub)
+
+    def _check_in_background(self, sub: str) -> None:
+        """Ask the provider about ``sub`` after this request: one such check per member at a time.
+        Its own context, so its time is not counted against the request (timing.py)."""
+        running = self._background.get(sub)
+        if running is not None and not running.done():
+            return
+        if len(self._background) >= MAX_CACHED:
+            return  # never a task per member without bound: the grace runs out and requests wait
+        task = asyncio.get_running_loop().create_task(self._check_now(sub), context=contextvars.Context())
+        self._background[sub] = task
+
+        def done(t: asyncio.Task[Membership]) -> None:
+            if self._background.get(sub) is t:
+                self._background.pop(sub, None)
+            if not t.cancelled() and t.exception() is not None:
+                logger.warning("background membership check failed: %r", t.exception())
+
+        task.add_done_callback(done)
+
+    async def _check_now(self, sub: str) -> Membership:
+        ttl = self.settings.membership_check_ttl
         lock = self._locks.setdefault(sub, asyncio.Lock())
         async with lock:
             last = self._checked.get(sub)  # a concurrent request may have just checked
             if ttl and last is not None and time.monotonic() - last < ttl:
                 return Membership.ALLOWED
+            asked = time.monotonic()  # the answer is as of the moment it was asked for
             outcome = await self._ask(sub)
             if outcome is Membership.ALLOWED:
                 if len(self._checked) >= MAX_CACHED:
                     self._checked.clear()
-                self._checked[sub] = time.monotonic()
+                self._checked[sub] = asked
                 self._plan_renewal(sub)
             else:
                 self._checked.pop(sub, None)
@@ -271,6 +310,10 @@ class MembershipChecker:
     async def aclose(self, grace: float = 5.0) -> None:
         """At shutdown: renewals still waiting are cancelled; one already asking the provider gets
         ``grace`` seconds to finish, so a refresh token the provider just rotated is not lost."""
+        for check in list(self._background.values()):
+            check.cancel()
+        await asyncio.gather(*self._background.values(), return_exceptions=True)
+        self._background.clear()
         tasks = dict(self._renewals)
         self._renewals.clear()
         busy = [t for sub, t in tasks.items() if sub in self._refreshing]
@@ -307,6 +350,11 @@ class MembershipChecker:
         if not removed:
             n = sum(self.db.revoke_all_for_user(sub).values())
             self.db.audit("membership_unverifiable", sub=sub, detail={"reason": reason, "revoked": n})
+            logger.warning(
+                "membership check signed a member out everywhere: the identity provider no longer "
+                "vouches for them (%s); they sign in again",
+                reason,
+            )
             return Membership.REVOKED
         if groups is None:
             # Keep the recorded groups minus the required one, so every stored-groups check

@@ -102,6 +102,10 @@ class FakeIdP:
         self.userinfo_omit: set[str] = set()
         self.refresh_id_token = False
         self.refresh_error: str | None = None
+        # A slow provider: userinfo answers after this many seconds. ``token_status`` makes only the
+        # token endpoint answer with that HTTP status (a 502 from a proxy in front of it, say).
+        self.userinfo_delay = 0.0
+        self.token_status: int | None = None
         self.app = Starlette(
             routes=[
                 Route("/application/o/mtg/.well-known/openid-configuration", self.discovery),
@@ -149,6 +153,8 @@ class FakeIdP:
             form["_auth_method"] = "client_secret_post"
             ok = form.get("client_id") == CLIENT_ID and form.get("client_secret") == CLIENT_SECRET
         self.token_calls.append(form)
+        if self.token_status is not None:
+            return JSONResponse({"error": "temporarily_unavailable"}, status_code=self.token_status)
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         if not ok:
@@ -207,6 +213,8 @@ class FakeIdP:
 
     async def userinfo(self, req: Request) -> Response:
         self.userinfo_calls += 1
+        if self.userinfo_delay:
+            await asyncio.sleep(self.userinfo_delay)
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         token = req.headers.get("authorization", "").removeprefix("Bearer ")

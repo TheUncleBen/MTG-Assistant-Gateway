@@ -363,8 +363,13 @@ secret.
 2. The gateway notices on their next request. Before serving any request
    that carries a browser session or a gateway token, it asks Authentik's
    userinfo endpoint for the person's current groups (the answer is cached
-   for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default, so that's the worst
-   case). Someone taken out of the group loses every gateway token, every
+   for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default). So that pages
+   don't wait for Authentik while someone is using the gateway, a request
+   within 60 seconds of Authentik last letting the person in is answered at
+   once and Authentik is asked in the background; after 60 seconds the
+   request waits for the answer. The worst case is therefore 60 seconds
+   after Authentik last let them in; `MTG_MEMBERSHIP_CHECK_TTL=0` makes
+   every request wait for Authentik's answer instead. Someone taken out of the group loses every gateway token, every
    browser session (web pages and Android app), the Authentik tokens the
    gateway kept, and their stored Archidekt session, all at once on that
    next request (see the note on **Disable** below); the audit log gets

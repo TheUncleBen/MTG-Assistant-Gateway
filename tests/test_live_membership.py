@@ -6,7 +6,10 @@ so the gateway asks its userinfo endpoint before serving any request with a sess
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
+
+import pytest
 
 from .conftest import FakeIdP, Harness, make_settings, running
 from .test_decks_and_proxy import Browser, mcp_token
@@ -491,3 +494,110 @@ async def test_a_background_renewal_never_brings_back_a_removed_grant(
         await asyncio.sleep(2.5)
         assert _refreshes(idp) == before + 1
         assert h.db.get_idp_grant(SUB) is None
+
+
+# -- the check off a page's critical path (0.7.46) -----------------------------------------------
+def _age_last_check(h: Harness, seconds: float) -> None:
+    """Make the last check that let SUB in ``seconds`` older than it is."""
+    checker = h.app.state.gateway.membership
+    checker._checked[SUB] -= seconds
+
+
+async def _background_checks(h: Harness) -> None:
+    checker = h.app.state.gateway.membership
+    await asyncio.gather(*list(checker._background.values()), return_exceptions=True)
+
+
+async def test_a_member_checked_recently_is_not_kept_waiting_for_the_provider(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    """Within GRACE seconds of the provider last letting the member in, a request is answered at
+    once and the provider is asked in the background."""
+    from mtg_gateway.membership import GRACE
+
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        _age_last_check(h, 10)  # past the 5 s cache, well inside the grace
+        idp.userinfo_delay = 1.0
+        calls = idp.userinfo_calls
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        page = await b.http.get("/account/details")
+        assert page.status_code == 200
+        assert loop.time() - t0 < 0.5  # not the provider's second
+        await _background_checks(h)
+        assert idp.userinfo_calls == calls + 1  # asked once, in the background
+        # Past the grace, the request waits for the provider's answer.
+        _age_last_check(h, GRACE + 1)
+        t0 = loop.time()
+        assert (await b.http.get("/account/details")).status_code == 200
+        assert loop.time() - t0 >= 1.0
+        await b.aclose()
+
+
+async def test_a_removal_takes_effect_within_the_grace(tmp_path: Path, idp: FakeIdP) -> None:
+    from mtg_gateway.membership import GRACE
+
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        _age_last_check(h, 10)
+        idp.set_groups(SUB, ["someone-else"])
+        # The request that starts the background check is still served ...
+        assert (await b.http.get("/account/details")).status_code == 200
+        await _background_checks(h)
+        # ... and the check's answer applies to the next one.
+        page = await b.http.get("/account/details")
+        assert page.status_code == 302 and page.headers["location"].startswith("/login")
+        await b.aclose()
+
+        # Past the grace, the very first request is refused: it waited for the provider.
+        b = Browser(h)
+        idp.set_groups(SUB, ["mtg-users"])
+        await b.login()
+        _age_last_check(h, GRACE + 1)
+        idp.set_groups(SUB, ["someone-else"])
+        page = await b.http.get("/account/details")
+        assert page.status_code == 302 and page.headers["location"].startswith("/login")
+        await b.aclose()
+
+
+async def test_no_grace_when_every_request_is_checked(tmp_path: Path, idp: FakeIdP) -> None:
+    """MTG_MEMBERSHIP_CHECK_TTL=0 still asks before every request, as it says."""
+    async with running(Harness(live(tmp_path), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        idp.set_groups(SUB, ["someone-else"])
+        page = await b.http.get("/account/details")
+        assert page.status_code == 302
+        await b.aclose()
+
+
+async def test_a_provider_error_on_renewal_signs_nobody_out(
+    tmp_path: Path, idp: FakeIdP, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The provider's access token ran out and its token endpoint answers 502 (or 503, or 500):
+    the answer is unknown, so the request is refused for now and every session is kept."""
+    async with running(Harness(live(tmp_path), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        idp.access_tokens.clear()  # userinfo refuses the old access token: a renewal is needed
+        for status in (502, 503, 504, 500):
+            idp.token_status = status
+            page = await b.http.get("/account/details", headers={"Accept": "text/html"})
+            assert page.status_code == 503, status
+        with h.db.tx() as c:
+            assert c.execute("SELECT COUNT(*) FROM browser_sessions WHERE sub = ?", (SUB,)).fetchone()[0] == 1
+            events = [r[0] for r in c.execute("SELECT event FROM audit_log").fetchall()]
+        assert not [e for e in events if e.startswith("membership_")], events
+        idp.token_status = None
+        assert (await b.http.get("/account/details")).status_code == 200
+        # A definite refusal (the grant is gone at the provider) does sign the member out, and the
+        # log says why.
+        idp.access_tokens.clear()
+        idp.refresh_tokens.clear()
+        with caplog.at_level(logging.INFO, logger="mtg_gateway.membership"):
+            assert (await b.http.get("/account/details")).status_code == 302
+        assert any("idp_refused_refresh" in r.getMessage() for r in caplog.records), caplog.text
+        await b.aclose()
