@@ -772,12 +772,14 @@
     var back = again ? "" : job.undo();
     if (err && err.cancelled) { dismissToast(); return; }
     if (err && err.answer) {
-      drawRows(err.answer.rows, namesOf(plan.changes));
+      // the card is back as it was; when the rows Archidekt shows now draw it the same, the
+      // change was not taken (a refusal after the request went): the plain failure, with Try
+      // again. Otherwise it was, or the page cannot tell, and the rows say it.
+      var names = namesOf(plan.changes), before = lookOf(names);
+      drawRows(err.answer.rows, names);
       drawStats(err.answer);
       if (menu && !menuCard.isConnected) closeMenu();
-      // the rows show the change was not taken (a refusal after the request went): the plain
-      // failure, with Try again; otherwise it was, or the page cannot tell, and the rows say it
-      if (landed(plan.changes, err.answer.rows) !== false) {
+      if (lookOf(names) !== before) {
         toast("Archidekt didn't answer; this is what the deck shows now.", { warn: true, sticky: true });
         return;
       }
@@ -788,22 +790,11 @@
     retry.addEventListener("click", function () { dismissToast(); sendAgain(plan, job); });
     toast(job.what + " not saved: " + why + "." + (back ? " " + back : ""), { error: true, actions: [retry] });
   }
-  // Whether the rows Archidekt shows now carry the changes: true, false, or null when the page
-  // cannot tell (a printing, a tag: the row's own fields say nothing sure about them)
-  function landed(changes, rows) {
-    var known = true, took = true;
-    changes.forEach(function (ch) {
-      var zone = ch.zone === "side" ? "side" : "main";
-      var row = (rows || []).filter(function (r) {
-        return frontFace(r.name) === frontFace(ch.card_name) && (ch.relation_id ? String(r.relation_id) === String(ch.relation_id) : r.zone === zone);
-      })[0] || null;
-      if (ch.action === "set_quantity") took = took && !!row && row.qty === ch.quantity;
-      else if (ch.action === "remove") took = took && !row;
-      else if (ch.action === "set_category") took = took && !!row && (row.categories || [])[0] === ch.category;
-      else if (ch.action === "set_finish") took = took && !!row && String(row.finish || "").toLowerCase() === String(ch.finish).toLowerCase();
-      else known = false;
-    });
-    return known ? took : null;
+  // How the cards of these names look on the page (their markup and the stack each sits in):
+  // the same before and after a draw means the draw changed nothing about them
+  function lookOf(names) {
+    return $$(".c, .row", cards).filter(function (c) { return names.indexOf(frontFace(c.getAttribute("data-card"))) >= 0; })
+      .map(function (c) { return stackOf(c) + "\n" + c.outerHTML; }).join("\n\n");
   }
   // Try again: the same change, sent once more in its turn; the answer draws the rows as any
   // save's does (Saved with Undo), and its failure says why, with Try again once more.

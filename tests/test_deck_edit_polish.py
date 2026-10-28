@@ -216,3 +216,86 @@ async def test_the_deck_page_says_saving_while_an_apply_runs(stack: Stack) -> No
     finally:
         held.set()
         await b.aclose()
+
+
+# -- Deck settings save each change as it is made (owner decision C4; audit D-26) ----------------
+from mtg_gateway import modes  # noqa: E402
+from mtg_gateway.decks import CATEGORIES_SAVED  # noqa: E402
+
+from .test_deck_categories import _give_categories  # noqa: E402
+from .test_deck_categories_page import _csrf as _settings_page  # noqa: E402
+from .test_deck_categories_page import _form, _ids  # noqa: E402
+
+
+async def test_main_settings_save_one_change_at_once_as_json(stack: Stack) -> None:
+    """The page's own save (static/decksettings.js) posts the form with json=1 and gets the
+    notice's words and the form's new baseline back; nothing changed is said as such."""
+    ark = stack.ark
+    b = await linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        # the Save buttons are for a page without scripts; the scripts take them away
+        assert "<div class='acts ds-save'><button class='btn btn-primary'>" in page
+        assert "<span class='ds-save'><button class='btn' name='action' value='save'>" in page
+        assert "data-instant='Each change is saved to Archidekt as you make it;" in page
+        csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page).group(1)
+        was = dict(re.findall(r"<input type='hidden' name='(was_[a-z_]+)' value='([^']*)'>", page))
+        form = {**was, "csrf": csrf, "json": "1", "name": ark.decks[42]["name"], "description": ""}
+        form["game"] = "any"
+        r = await b.http.post("/decks/42/settings", data={**form, "private": "1"})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["ok"] is True
+        assert d["message"] == "Saved to Archidekt. A snapshot from just before is under History."
+        assert d["was"]["private"] == "1" and d["was"]["name"] == ark.decks[42]["name"]
+        assert ark.decks[42]["private"] is True
+        # the same again, from the new baseline: nothing to save
+        again = {**form, **{f"was_{k}": v for k, v in d["was"].items()}, "private": "1"}
+        r = await b.http.post("/decks/42/settings", data=again)
+        nothing = "Nothing to save: nothing on the form was changed."
+        assert r.status_code == 400 and r.json() == {"ok": False, "message": nothing}
+        # an expired form token: said in words, not a page
+        r = await b.http.post("/decks/42/settings", data={**form, "csrf": "0" * 32, "private": ""})
+        assert r.status_code == 403 and r.json()["ok"] is False and "expired" in r.json()["message"]
+    finally:
+        await b.aclose()
+
+
+async def test_category_switches_save_at_once_and_ask_first_when_they_must(stack: Stack) -> None:
+    """A switch is saved as it is flipped; the answer carries the panel drawn again. A switch that
+    touches the commander answers the box's words first, and goes through with confirmed=1."""
+    _give_categories(stack.ark)
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _settings_page(b)
+        ids = _ids(page)
+        ramp = ids["Ramp"]
+        data = {**_form(page, ids, **{f"not_in_price_{ramp}": "1"}), "csrf": csrf, "json": "1"}
+        r = await b.http.post("/decks/42/categories", data=data)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["ok"] is True and d["message"] == CATEGORIES_SAVED
+        assert f"name='not_in_price_{ramp}' value='1' checked" in d["html"]
+        assert "<ul class='plain ds-list ds-cats'>" in d["html"] and "data-names=" in d["html"]
+        # Premier on Ramp makes its cards commanders: the page asks first, nothing is sent
+        page, csrf = await _settings_page(b)
+        sent = len(stack.ark.category_writes) if hasattr(stack.ark, "category_writes") else None
+        data = {**_form(page, ids, **{f"premier_{ramp}": "1"}), "csrf": csrf, "json": "1"}
+        r = await b.http.post("/decks/42/categories", data=data)
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "ok": False,
+            "needs_confirm": True,
+            "title": "Change the commander category?",
+            "text": modes.CATEGORY_COMMANDER_CONFIRM,
+        }
+        if sent is not None:
+            assert len(stack.ark.category_writes) == sent
+        r = await b.http.post("/decks/42/categories", data={**data, "confirmed": "1"})
+        assert r.status_code == 200 and r.json()["ok"] is True, r.text
+        assert f"name='premier_{ramp}' value='1' checked" in r.json()["html"]
+        # a stale page (the panel no longer matches the deck) is refused in words
+        r = await b.http.post("/decks/42/categories", data={**data, f"was_premier_{ramp}": "0"})
+        assert r.status_code == 400 and r.json()["fresh"] is True and "Not saved" in r.json()["message"]
+    finally:
+        await b.aclose()

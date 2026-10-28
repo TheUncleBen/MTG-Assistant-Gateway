@@ -251,9 +251,10 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
     server: Server, width: int, scheme: str
 ) -> None:
     """Each category: its name in a box and the three switches with their words, all inside the
-    window, 44 px on a phone, text at 4.5:1; Undo changes puts the boxes back; Save categories is
-    plain and saves at once; touching the commander opens the confirm box first (the backend's
-    words), whose Save sends the form with ``confirmed``."""
+    window, 44 px on a phone, text at 4.5:1; no Save or Undo buttons: a plain change saves at once
+    as it is made, with Undo on the note (owner decision C4); touching the commander opens the
+    confirm box first (the backend's words), whose Save sends the change with ``confirmed`` and
+    whose Cancel puts the switch back."""
     from playwright.sync_api import sync_playwright
 
     from .test_card_search_filters_browser import CONTRAST
@@ -276,56 +277,54 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
             assert all(f[1] >= (44 if touch else 36) for f in r["flags"]), r
         assert page.evaluate(CONTRAST, "#categories .nm input, #categories .ds-flag, #categories .foot") == []
         assert page.locator("#categories button.btn-primary").count() == 0
+        assert page.locator("#categories button:visible", has_text="Save categories").count() == 0
+        assert page.locator("#categories button:visible", has_text="Undo changes").count() == 0
         panel = page.locator("#categories")
-        # Undo changes puts a typed name and a switched flag back
+        # a plain change saves at once when the box is left, no confirm box; Undo puts it back
         ramp = panel.locator("li[data-name='Ramp']")
         ramp.locator("input[type=text]").fill("Mana")
-        ramp.locator("label.ds-flag", has_text="Not in price").click()
-        assert ramp.locator("input[name^=not_in_price_]").is_checked()
-        panel.locator("button[type=reset]").click()
-        assert ramp.locator("input[type=text]").input_value() == "Ramp"
-        assert not ramp.locator("input[name^=not_in_price_]").is_checked()
-        # a plain change saves at once, no box
-        ramp.locator("input[type=text]").fill("Mana")
-        panel.locator("button[name=action][value=save]").click()
-        page.wait_for_url(lambda u: "ok=categories" in u, timeout=5000)
-        page.wait_for_load_state("networkidle")
+        ramp.locator("input[type=text]").press("Tab")
+        page.locator(".toast .msg", has_text="Categories saved to Archidekt.").wait_for(timeout=8000)
         assert page.evaluate(OPEN_BOXES) == 0
-        assert "Categories saved to Archidekt." in page.locator("#categories .notice").inner_text()
         assert page.locator("#categories li[data-name='Mana']").count() == 1
         assert [b["name"] for b in server.ark.category_patches] == ["Mana"]
+        page.locator(".toast button", has_text="Undo").click()
+        page.locator("#categories li[data-name='Ramp']").wait_for(timeout=8000)
+        assert [b["name"] for b in server.ark.category_patches] == ["Mana", "Ramp"]
+        page.locator(".toast .close").click()
         # touching the commander asks first, in the box, with the backend's sentence
-        cmd = page.locator("#categories li[data-name='Commander']")
+        panel = page.locator("#categories")
+        cmd = panel.locator("li[data-name='Commander']")
         cmd.locator("label.ds-flag", has_text="Premier").click()
-        panel.locator("button[name=action][value=save]").click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         assert box.locator("h2").inner_text() == "Change the commander category?"
         assert "Cards in a Premier category are the deck's commanders." in box.inner_text()
         assert box.locator(".acts button.primary").inner_text().strip() == "Save categories"
-        assert len(server.ark.category_patches) == 1  # nothing sent yet
+        assert len(server.ark.category_patches) == 2  # nothing sent yet
         box.locator("button", has_text="Cancel").click()
         box.wait_for(state="hidden", timeout=3000)
         assert page.evaluate(OPEN_BOXES) == 0
-        assert len(server.ark.category_patches) == 1
-        panel.locator("button[name=action][value=save]").click()
+        assert cmd.locator("input[name^=premier_]").is_checked()  # the switch is back on
+        assert len(server.ark.category_patches) == 2
+        cmd.locator("label.ds-flag", has_text="Premier").click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         box.locator(".acts button.primary").click()
-        page.wait_for_url(lambda u: "ok=categories" in u and "settings" in u, timeout=5000)
-        page.wait_for_load_state("networkidle")
+        page.locator(".toast .msg", has_text="Categories saved to Archidekt.").wait_for(timeout=8000)
         assert [b["isPremier"] for b in server.ark.category_patches][-1] is False
+        page.locator(".toast .close").click()
         # a Not in deck switch asks too, in the box, with its own title and sentence
         sent = len(server.ark.category_patches)
         panel = page.locator("#categories")
-        panel.locator("li[data-name='Mana'] label.ds-flag:has(input[name^=not_in_deck_])").click()
-        panel.locator("button[name=action][value=save]").click()
+        panel.locator("li[data-name='Ramp'] label.ds-flag:has(input[name^=not_in_deck_])").click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
         box.wait_for(timeout=3000)
         assert box.locator("h2").inner_text() == "Change which cards count in the deck?"
         assert "don't count in the deck" in box.inner_text()
         box.locator("button", has_text="Cancel").click()
         box.wait_for(state="hidden", timeout=3000)
+        assert not panel.locator("li[data-name='Ramp'] input[name^=not_in_deck_]").is_checked()
         assert len(server.ark.category_patches) == sent
         assert not errors, errors
         browser.close()
@@ -443,10 +442,10 @@ def test_the_delete_unused_and_new_category_boxes_say_what_they_do(server: Serve
         page.goto(f"{server.base}/decks/42/settings", wait_until="networkidle")
         panel = page.locator("#categories")
         unused = panel.locator("button[value=unused]")
-        # its own line, right-aligned, under Save categories and Undo changes
-        save = panel.locator("button[name=action][value=save]").bounding_box()
+        # its own line, right-aligned, under the list of categories
+        last = panel.locator("ul.ds-cats > li").last.bounding_box()
         ub = unused.bounding_box()
-        assert ub["y"] >= save["y"] + save["height"] - 1, (save, ub)
+        assert ub["y"] >= last["y"] + last["height"] - 1, (last, ub)
         assert ub["x"] + ub["width"] >= panel.bounding_box()["x"] + panel.bounding_box()["width"] - 40, ub
         unused.click()
         box = page.locator(".mtgbox[role=dialog]:not([hidden])")
