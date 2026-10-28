@@ -276,6 +276,24 @@ async def test_background_calls_keep_one_of_the_two_slots_free_for_pages() -> No
     assert not pacer.busy()
 
 
+async def test_a_background_call_cancelled_while_it_waits_outside_the_turn_leaves_it_held() -> None:
+    """A background call waiting outside the turn for a slot has already let the turn go: when it is
+    cancelled there, it must not release the turn a second time, out from under its next holder."""
+    pacer = Pacer(0.0, 0)
+    await pacer.enter(first=False, page=False)  # the one background slot is out
+    waiter = asyncio.create_task(pacer.enter(first=False, page=False))
+    await asyncio.sleep(0.01)
+    assert pacer._waiting == 1 and not pacer._lock.locked()
+    await pacer._lock.acquire(first=True)  # another call holds the turn now
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert pacer._lock.locked() and pacer._waiting == 0
+    pacer._lock.release()
+    pacer.leave(page=False)
+    assert not pacer.busy()
+
+
 async def test_the_per_minute_cap_keeps_a_share_for_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     """Background work (the deck sync, assistants, applies) may use all but a sixth of the per-minute
     cap; the rest is kept for the member's pages, so a long apply never leaves a page waiting a
