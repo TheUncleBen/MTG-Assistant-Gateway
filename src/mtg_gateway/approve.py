@@ -30,6 +30,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from collections.abc import Callable
@@ -81,7 +82,19 @@ CARD_READ_META: dict[str, Any] = dict(CONFIRM_TOOL_META)
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
 
 
-def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> tuple[str | None, bool]:
+def card_seq_of(row: dict[str, Any], client: str | None) -> int:
+    """The number of the newest card drawn for this proposal in ``client``'s chat (0: none)."""
+    try:
+        seqs = json.loads(row.get("card_seqs") or "{}")
+    except ValueError:
+        return 0
+    n = seqs.get(str(client or "")) if isinstance(seqs, dict) else None
+    return int(n) if isinstance(n, int) and not isinstance(n, bool) else 0
+
+
+def card_approval(
+    data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool, reader_seq: int | None = None
+) -> tuple[str | None, bool]:
     """(code, other_app) for a waiting proposal's card: the one-time approval code when the
     member decides it in this chat, and whether it was made in another app (whose card alone can
     approve it, decks.check_approval; this card then sends the member to the review page). A
@@ -103,6 +116,9 @@ def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) 
     creator = row.get("created_by_client")
     if not creator or creator != current_client.get():
         return None, True
+    # an older card's read gets no code: a newer card for this proposal is in the chat
+    if reader_seq is not None and reader_seq < card_seq_of(row, creator):
+        return None, False
     # the code of the version this result shows, so a card never carries a code for rows it does
     # not show (an amend between the read and here makes it one the gateway refuses, "changed")
     shown = data.get("version")
@@ -117,6 +133,7 @@ def proposal_tool_result(
     in_chat: bool,
     drawn: bool = False,
     rows_limit: int | None = CARD_ROWS,
+    reader_seq: int | None = None,
 ) -> Any:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
@@ -128,7 +145,8 @@ def proposal_tool_result(
     card's own read), so the proposal's card number for this app goes up and the result carries
     it (``card_seq``); older cards that read a higher number step aside. ``rows_limit``: how many
     review rows the result carries (``rows_total`` says how many there are; the card loads the
-    rest when asked); None for all of them."""
+    rest when asked); None for all of them. ``reader_seq``: the number of the card that reads
+    (the card's own read), so an older card gets no code."""
     from mcp_types import CallToolResult, TextContent
 
     if drawn and data.get("proposal_id") and (data.get("ok") or data.get("error") == "browser_required"):
@@ -137,7 +155,7 @@ def proposal_tool_result(
         seq = decks.db.next_card_seq(str(data["proposal_id"]), sub, current_client.get())
         if seq:
             data = {**data, "card_seq": seq}
-    approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat)
+    approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat, reader_seq=reader_seq)
     if other_app:
         data = {**data, "card_other_app": True}
     meta: dict[str, Any] | None = {APPROVAL_META_KEY: approval} if approval else None
@@ -289,14 +307,24 @@ def proposal_text(data: dict[str, Any]) -> str:
 
 
 def approval_code(
-    secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int, version: int = 1
+    secret: str,
+    *,
+    proposal_id: str,
+    sub: str,
+    client_id: str,
+    created_at: int,
+    version: int = 1,
+    card_seq: int = 0,
 ) -> str:
     """The one-time code for one proposal: 192 bits of HMAC-SHA256 over the proposal, its owner,
-    the app that made it, when, and (from its second version on) its version, keyed with
-    the gateway's session secret. A card drawn for an earlier version no longer matches."""
+    the app that made it, when, (from its second version on) its version and (since 0.7.46) the
+    number of the card it was drawn on, keyed with the gateway's session secret. A card drawn for
+    an earlier version, or an older card of the same version, no longer matches."""
     parts = ["mtg-approval", proposal_id, sub, client_id or "", str(int(created_at))]
     if int(version or 1) > 1:
         parts.append(f"v{int(version)}")
+    if int(card_seq or 0) > 0:
+        parts.append(f"c{int(card_seq)}")
     msg = "\x00".join(parts).encode()
     digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")

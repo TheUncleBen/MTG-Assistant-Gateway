@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import Counter, OrderedDict
@@ -86,7 +87,23 @@ def card_html(name: str, public_url: str = "") -> str:
     bridge = (STATIC / "_bridge.js").read_text(encoding="utf-8")
     base = (STATIC / "_base.css").read_text(encoding="utf-8")
     gateway = json.dumps(public_url.rstrip("/")).replace("<", "\\u003c")
-    return html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge).replace('"@GATEWAY@"', gateway)
+    html = html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge).replace('"@GATEWAY@"', gateway)
+    return shipped(html)
+
+
+# a /* ... */ comment that fills its lines (no "*/" before its own end, so it never runs on
+# into the code after a shorter comment)
+_COMMENT_LINES = re.compile(r"^[ \t]*/\*(?:(?!\*/).)*\*/[ \t]*\n", re.MULTILINE | re.DOTALL)
+
+
+def shipped(html: str) -> str:
+    """A card as sent to the chat (a chat loads the whole document for every card it draws): the
+    source's comments that fill their own lines, its indentation and its blank lines left out,
+    about a fifth of its size. Only whole lines go, so no code, style, markup or string changes;
+    the cards hold no string or element whose text runs over a line break."""
+    html = _COMMENT_LINES.sub("", html)
+    kept = (line.strip() for line in html.split("\n"))
+    return "\n".join(line for line in kept if line and not line.startswith("//")) + "\n"
 
 
 def _add_card(

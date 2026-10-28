@@ -149,9 +149,16 @@ async def test_card_approve_applies_and_the_code_is_spent(stack: Stack) -> None:
     res = await _propose(h, token)
     p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
     # The assistant's own apply is refused in the member's manual approval mode...
-    own = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    own_res = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    own = structured(own_res)
     assert own["ok"] is False and own["error"] == "browser_required"
     assert _writes(stack.ark) == 0
+    # ...and answers with the card again (since 0.7.46 only the newest card's code applies)
+    first = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert first["ok"] is False and first["error"] == "not_newest_card", first
+    code = own_res["_meta"][APPROVAL_META_KEY]
     # ...the card's Approve applies at once.
     done = await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     got = structured(done)

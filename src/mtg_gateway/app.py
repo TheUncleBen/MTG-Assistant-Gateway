@@ -903,10 +903,15 @@ def build_mcp_server(state: AppState) -> MCPServer:
         return p
 
     def _proposal(
-        data: dict[str, object], *, read: bool = False, rows_limit: int | None = CARD_ROWS
+        data: dict[str, object],
+        *,
+        read: bool = False,
+        rows_limit: int | None = CARD_ROWS,
+        reader_seq: int | None = None,
     ) -> CallToolResult:
         """A card tool's result. ``read``: the card's own read of its proposal, which draws no
-        new card (every other call of a card tool does, where the app shows cards)."""
+        new card (every other call of a card tool does, where the app shows cards);
+        ``reader_seq``: that card's number, so an older card gets no approval code."""
         in_chat = s.apply_in_chat and token_may_write()
         return proposal_tool_result(
             data,
@@ -915,6 +920,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             in_chat=in_chat,
             drawn=s.apply_in_chat and not read,
             rows_limit=rows_limit,
+            reader_seq=reader_seq,
         )
 
     # The tool and route modules import this module, so they are imported here, not at the top.

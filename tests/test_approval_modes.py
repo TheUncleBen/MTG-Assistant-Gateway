@@ -279,8 +279,10 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     assert p["risk"] == "high" and "6 rows" in p["risk_reason"] and p["assistant_may_apply"] is False
     assert "high risk" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
     code = high["_meta"][APPROVAL_META_KEY]  # the card gets its buttons
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    own = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    out = structured(own)
     assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == "high"
+    code = own["_meta"][APPROVAL_META_KEY]  # the card drawn again (only the newest one applies)
     assert "semi-automatic" in out["message"] and len(ark.patches) == sent
     refused = [x for x in h.db.audit_for_user("user-1", 50) if x["event"] == "apply_needs_user"]
     assert refused and refused[0]["detail"]["mode"] == "semi" and refused[0]["detail"]["risk"] == "high"

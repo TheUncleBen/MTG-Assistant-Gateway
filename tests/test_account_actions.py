@@ -597,7 +597,8 @@ async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_
     row = h.db.get_proposal(p["proposal_id"], SUB)
     before = _archidekt_state(ark)
     # the assistant's own apply and the REST apply with the assistant's bearer token: refused
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    own = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    out = structured(own)
     assert out["ok"] is False and out["error"] == "browser_required", out
     r = await h.http.post(
         f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
@@ -626,6 +627,13 @@ async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_
         return
     assert code, res.get("_meta")
     assert "proposal card in the chat" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
+    # the assistant's apply answered with the card again: since 0.7.46 only the newest card's code
+    # applies (the first card's is refused, "not_newest_card")
+    first = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert first["ok"] is False and first["error"] == "not_newest_card", first
+    code = own["_meta"][APPROVAL_META_KEY]
     # a wrong code does nothing; the card's own code applies it
     bad = structured(
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": "x" * 40})
@@ -1458,9 +1466,10 @@ async def test_follow_and_unfollow_someone_by_username(stack: Stack) -> None:
     assert p["ok"] and p["kind"] == "action" and p["assistant_may_apply"] is False, p
     assert p["rows"][0]["text"] == "Follow amy on Archidekt", p["rows"]
     assert [c for c in ark.calls[before:] if "/decks/v3/" in c[1]], ark.calls[before:]
-    refused = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    again = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    refused = structured(again)
     assert refused["ok"] is False and 78 not in ark.follows.get("alice", set()), refused
-    await _press(h, token, res)
+    await _press(h, token, again)  # the newest card (the refused apply drew it again)
     assert 78 in ark.follows["alice"]
     res = await call(h, token, "propose_deck_social", {"action": "unfollow_user", "username": "amy"})
     assert structured(res)["rows"][0]["text"] == "Stop following amy on Archidekt"
