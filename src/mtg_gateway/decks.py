@@ -1856,10 +1856,13 @@ def _with_card_facts(card: DeckCard, facts: dict[str, Any] | None, words: bool) 
     )
 
 
-def _new_problems(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+def _new_problems(
+    before: dict[str, Any], after: dict[str, Any], *, now: bool = False
+) -> list[dict[str, Any]]:
     """The format rules a change breaks that the deck kept before (deck_stats.deck_checks on the
     deck now and as it would be): ``{"problem", "cards"}`` each, the cards it concerns (none for
-    the deck's size). A rule the deck already broke is not counted again."""
+    the deck's size). A rule the deck already broke is not counted again. ``now``: ``after`` is
+    the deck as it is (``before`` empty), so the deck's size is said as it is."""
     out: list[dict[str, Any]] = []
 
     def names(checks: dict[str, Any], key: str) -> list[str]:
@@ -1869,7 +1872,7 @@ def _new_problems(before: dict[str, Any], after: dict[str, Any]) -> list[dict[st
     if size_b.get("ok", True) and not size_a.get("ok", True):
         want = size_a.get("expected") or size_a.get("minimum")
         how = "" if size_a.get("expected") else "at least "
-        problem = f"the deck would have {size_a.get('actual')} cards, not {how}{want}"
+        problem = f"the deck {'has' if now else 'would have'} {size_a.get('actual')} cards, not {how}{want}"
         out.append({"problem": problem, "cards": []})
     had = set(names(before, "colour_identity_violations"))
     outside = [

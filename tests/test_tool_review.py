@@ -356,3 +356,17 @@ async def test_deck_stats_identity_is_the_commanders(stack: Stack) -> None:
     assert stats["colour_identity"] == ["U", "G"], stats["colour_identity"]
     assert "R" in stats["cards_colour_identity"], stats["cards_colour_identity"]
     assert stats["out_of_identity"]["identity"] == ["U", "G"]
+
+
+async def test_a_registration_sheet_for_an_illegal_deck_is_warned(stack: Stack) -> None:
+    commander_deck(stack)
+    token = await linked_user(stack)
+    legal = structured(await call(stack.h, token, "get_registration_pdf", {"deck_id": "42"}))
+    assert legal["ok"] and "warnings" not in legal, legal
+    stack.ark.decks[42]["cards"][-1]["quantity"] += 3  # 103 cards
+    out = structured(await call(stack.h, token, "get_registration_pdf", {"deck_id": "42"}))
+    assert out["ok"] and out["pdf_url"], out
+    assert out["warnings"] == [
+        "The deck breaks its format's rules: the deck has 103 cards, not 100.",
+        "The deck breaks its format's rules: more than one copy in a singleton format: Yavimaya Elder.",
+    ], out

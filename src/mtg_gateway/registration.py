@@ -148,7 +148,7 @@ async def make(
     form = fields(deck, details, sort)
     url = await decks._call(sub, lambda token, *_: decks.client.registration_pdf(token, form))
     decks._audit("registration_pdf", sub=sub, detail={"deck_id": deck.id})
-    return {
+    out = {
         "deck_id": deck.id,
         "deck_name": form["deckName"],
         "pdf_url": url,
@@ -156,3 +156,20 @@ async def make(
         "sideboard": form["sideboardSize"],
         "sorted_by": SORT_WORDS[sort],
     }
+    broken = format_problems(deck)
+    if broken:
+        # the sheet is made either way; a tournament would not accept the deck as it is
+        out["warnings"] = [f"The deck breaks its format's rules: {p}." for p in broken]
+    return out
+
+
+def format_problems(deck: Any) -> list[str]:
+    """The format rules the deck breaks as it is now (deck_stats.deck_checks), in words; none
+    when the deck has no format."""
+    from . import deck_stats
+    from .decks import _new_problems
+
+    if not deck.format:
+        return []
+    checks = deck_stats.compute(deck).get("checks") or {}
+    return [p["problem"] for p in _new_problems({}, checks, now=True)]
