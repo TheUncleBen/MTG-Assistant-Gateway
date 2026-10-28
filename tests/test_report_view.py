@@ -325,7 +325,7 @@ def test_preflight_only_label_and_overall_status() -> None:
     assert "id='rep-status'><span class='ui-lbl orange'>" in html and ">Partial</span>" in html
     running = rv.report_body_html(report(forge={"state": "running"}, status="running"))
     assert "Preflight only" not in running and ">Forge games (against precons)</h2>" in running
-    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge going</span>" in running
+    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge running</span>" in running
     md = rv.report_markdown(report(forge=skipped, status="complete"))
     assert "## Preflight only (no rules engine)" in md and "- Status: Complete" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())

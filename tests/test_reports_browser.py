@@ -193,7 +193,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
         assert page.locator(".forge[data-forge-live]").count() == 1
         assert "updates by itself" in page.locator(".forge").inner_text()
-        assert page.locator("#rep-status").inner_text().startswith("Forge going")  # the overall status
+        assert page.locator("#rep-status").inner_text().startswith("Forge running")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
         # a poll that brings nothing new leaves the live card's nodes untouched, so
         # screen readers are not told the whole card again every 5 seconds

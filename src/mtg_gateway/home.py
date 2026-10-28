@@ -152,7 +152,7 @@ def reports_widget(
         "report",
         "Reports",
         det,
-        big_html=_n(going, "Forge going", "Forge going") if going else "",
+        big_html=_n(going, "Forge running", "Forge running") if going else "",
         actions=actions,
     )
 
