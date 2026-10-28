@@ -164,6 +164,12 @@
   function zoneOf(card) { return card.getAttribute("data-zone") === "side" ? "side" : "main"; }
   function catOf(card) { return card.getAttribute("data-cat") || ""; }
   // every category of the row, in order (data-allcats when it has more than one)
+  // A side row (Maybeboard, Optional Artwork, any category left out of the deck) leaves that
+  // category, not the deck: its Remove says which.
+  function removeLabel(card) {
+    if (zoneOf(card) !== "side") return "Remove from deck";
+    return "Remove from \u201c" + (catsOf(card)[0] || sideCat) + "\u201d";
+  }
   function catsOf(card) {
     var all = null;
     try { all = JSON.parse(card.getAttribute("data-allcats") || "null"); } catch (e) { all = null; }
@@ -597,7 +603,7 @@
     // Archidekt's card extras for a custom card in your own deck: the color tag and the mana value
     m.appendChild(menuItem("Color tag…", "tag", function () { customTagForm(card, m); }));
     m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
-    m.appendChild(menuItem("Remove from deck", "x", function () { customRemove(card); }, "danger"));
+    m.appendChild(menuItem(removeLabel(card), "x", function () { customRemove(card); }, "danger"));
     // no Lock personal categories: Archidekt keeps no default categories for a custom card
     // (the endpoint says so, CUSTOM_LOCK, should a tool ask)
     if (window.MtgMenu) {
@@ -1657,7 +1663,7 @@
       plus.addEventListener("click", function () { stepQty(card, 1); });
       ctl.appendChild(minus); ctl.appendChild(n); ctl.appendChild(plus);
       acts.push(ctl);
-      var rm = el("button", "btn btn-danger", "Remove from deck");
+      var rm = el("button", "btn btn-danger", removeLabel(card));
       rm.type = "button";
       rm.addEventListener("click", function () { removeCard(card); });
       acts.push(rm);
@@ -1845,7 +1851,7 @@
         back.setAttribute("aria-checked", card.hasAttribute("data-flipped") ? "true" : "false");
         m.appendChild(back);
       }
-      m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
+      m.appendChild(menuItem(removeLabel(card), "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
       // Lock personal categories (deck_extras.py): the card's categories here become its default
       // categories on Archidekt; not for a custom card, which has none there
