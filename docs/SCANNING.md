@@ -69,8 +69,23 @@ What's on it:
   Cards it **couldn't read** go to an unidentified list, with a picture of
   the title, so you can type them in later. The same card isn't added twice
   until it's left the frame, so a card sitting under the camera only counts
-  once. Continuous mode needs to see the card's outline, so use a plain,
-  contrasting background; the page tells you if it's not seeing anything.
+  once. A card is only added on its own when the page has found its
+  outline. When it finds none for four frames in a row (a dark mat, a
+  black-bordered card), it reads the dashed box as the shutter does and
+  offers what it read for your tap, never adding it on its own; it doesn't
+  offer the same card again until the box reads something else. A plain,
+  contrasting background still works best. A card from another set than the
+  collector line or the **Set** box asked for (a set code misread, such as
+  "FERC" for FRC) waits for your tap too, since the printing and the foil
+  star came from that line.
+- **Running count.** While you scan, the viewfinder's top corner shows how
+  many cards the scan holds ("12 cards"); tap it to open the list. Once the
+  gateway prices scanned cards, the scan's value will show next to the
+  count.
+- **In the Android app.** The orange shutter and the viewfinder open the
+  phone's own camera, with its torch brightness, zoom and exposure, and
+  **Auto** opens it scanning on its own (see [ANDROID.md](ANDROID.md#3-scanning-with-the-phone-camera)).
+  The page's own camera isn't started inside the app.
 - **Torch, zoom and brightness.** A Torch button turns the phone's flash
   on, and Zoom and Brightness sliders appear, each only when the camera
   reports it. Chrome on Android usually offers all three; iOS Safari has no
@@ -206,15 +221,18 @@ read says whether the card's edges or its name were the problem. The Photo
 button works on a copy no
 bigger than 2400 px on its long side, and the straightening only samples the
 card's own box (at most 2048 px), so a 50 MP photo is never copied whole.
-Titles are read with Tesseract.js (WebAssembly). In continuous mode only
-frames with a card outline are read, a title read below
+Titles are read with Tesseract.js (WebAssembly). In continuous mode a frame
+with a card outline is read; without one, every fourth frame reads the dashed
+box and can only offer a card for a tap. A title read below
 **Lowest reading confidence looked up** goes straight to the unidentified list without
-a lookup, and a frame that reads the same as the last one reuses its answer,
+a lookup (read from the dashed box without an outline, it is let go: it may be the
+table), and a frame that reads the same as the last one reuses its answer,
 which keeps server traffic down. Three frames in a row without an outline
 count as the card having left. For anyone building on the page, its hooks
 live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
-`undoLastAdd()`, `setTorch(on)`, `state.unidentified`, and the
-`scan:auto-added` event).
+`undoLastAdd()`, `noOutlineFrame(picture, box)`, `scanFile(file)`,
+`setTorch(on)`, `state.unidentified`, and the `scan:auto-added` and
+`scan:unsure` events).
 
 ## Privacy and network
 
@@ -281,6 +299,58 @@ Only the artwork check's on/off switch can also be set in your stack:
 **Time between Scryfall lookups** (default `0.5` seconds) is in the
 Settings page's **Archidekt and Scryfall pacing** section.
 
+## Measuring the scanner
+
+Text recognition of the title (with the collector line) is the scanner's main
+signal; the artwork fingerprint only picks the printing once the name is known.
+Whether the artwork should become the main signal, as some scanner apps do, is
+decided on measurements of real phone photos, not on synthetic ones.
+`scripts/measure_scanner.py` runs both signals on a folder of photos with the
+page's and the gateway's own code and writes a report.
+
+**Taking the photos.** About 50, one card each, taken the way you'd scan:
+
+- With the phone's normal camera app, the card about half the picture's width,
+  held or lying a little at an angle, in the light you'd really scan in (a lamp,
+  a window, the ceiling light).
+- A mix, roughly: 10 plain cards, 10 foils, 10 in sleeves (glossy ones too), 5
+  black-bordered cards on a dark mat, 5 not in English, 5 showcase, borderless
+  or full-art cards, 5 old-frame cards. The report breaks the results down by
+  these groups, so the mix matters more than the exact count.
+- JPEG or PNG. Some phones save in HEIC ("high efficiency"); turn that off in
+  the camera's settings, or share the pictures as JPEG. A HEIC photo is counted
+  as the failure it is in a browser.
+- Copy them into one folder on a computer with a checkout of this project
+  (`pip install -e ".[dev]"`, then `playwright install chromium` and
+  `python scripts/fetch_ocr_assets.py`).
+
+**Labelling them.** Run
+
+    python scripts/measure_scanner.py PHOTOS --template
+
+which writes `PHOTOS/labels.csv` with one row per photo. Fill in each card's
+`name`. Where you can read them, add `set` and `number` (the set code and
+collector number at the card's bottom left, for the printing), `foil` (yes or
+no) and `tags`: words for the groups above, separated by `;` (for example
+`foil; sleeved`). A row without a name is left out.
+
+**Running it.**
+
+    python scripts/measure_scanner.py PHOTOS [--pool-extra NAMES.txt] [--json ROWS.json]
+
+writes `PHOTOS/scanner-report.md`: for each signal, how often it found the right
+card (and printing and foil where labelled), how often Auto would have added a
+card without a tap and how many of those were wrong, the same by tag, and one
+line per photo. The artwork is matched among every printing of the labelled
+cards; `--pool-extra` adds look-alike cards (one name a line) to make that
+harder, since a real scanner would choose among every card printed. The photos
+never leave the computer: the script asks Scryfall for card data and card
+pictures (spaced as the gateway spaces them) and keeps what it learns in
+`PHOTOS/.scanner-measure.sqlite`, so a second run is quick.
+
+The rows that decide the question are **Right card** for each signal and, above
+all, **Of those, wrong**: wrong cards that would go on the list without a tap.
+
 ## Known limits (as of 2026-10-04)
 
 - It reads the printed English title only. Foreign-language cards, heavily
@@ -290,8 +360,8 @@ Settings page's **Archidekt and Scryfall pacing** section.
   already out on paper, unless the set and collector number were read or
   typed, or the artwork check picked one. The artwork check has only been measured on synthetic
   photos (99% right with the card straightened, under 1% wrong automatic
-  picks). Real phone results, especially with foil glare, aren't tested
-  yet.
+  picks). Real phone results, especially with foil glare, aren't measured
+  yet; [Measuring the scanner](#measuring-the-scanner) is how.
 - Browsers without `getUserMedia` (some in-app browsers) fall back to the
   Photo button. In an iOS home-screen web app the camera is reported to work
   on current iOS versions, but the project hasn't tested that yet.

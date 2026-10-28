@@ -334,9 +334,11 @@ The gateway's `/scan` page already reads cards from a photo (see
 [SCANNING.md](SCANNING.md)). The app's camera screen just takes a better photo
 than a browser can, then hands it to that page, which keeps running underneath:
 
-1. Menu, **Scan with the app's camera**, or the **Phone camera** button the scan
-   page shows when it runs inside the app. The app opens `/scan` if you aren't
-   on it.
+1. On the scan page, the orange shutter or the viewfinder (inside the app they
+   open the phone camera, and the page doesn't start a camera of its own), or
+   the menu's **Scan with the app's camera**. The app opens `/scan` if you
+   aren't on it. The page's **Auto** switch opens the phone camera with Auto
+   already on (step 4).
 2. Fill the dashed card outline with the card. Controls, each shown only when
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
@@ -358,7 +360,9 @@ than a browser can, then hands it to that page, which keeps running underneath:
    name begins with is added to the list without a tap and shown over the
    viewfinder with **Undo**; the same card is not added again while it stays in
    view; a shaky read is kept for a tap on the page (*Not sure*); a read with no
-   match goes to the page's unidentified list. Each shot is taken as soon as the
+   match goes to the page's unidentified list. When the page finds no card
+   outline in four shots in a row, it reads the dashed box anyway and keeps
+   what it found for a tap (*Not sure*), never adding it on its own. Each shot is taken as soon as the
    page has finished with the previous one. **Done** closes the camera; the
    list tab shows what was added, or the camera tab shows a read that waits.
 
@@ -394,7 +398,7 @@ The app talks only to pages and endpoints the gateway already serves:
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
 | Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
-| Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
+| Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`, and `noOutlineFrame` where the page has it) and its `scan:*` events; the page calls the app's `openCamera` and, from 0.7.46, `openCameraAuto` |
 | Sign-in return and App Links | `GET /.well-known/assetlinks.json`: the gateway vouches for the app it ships (its package ID and signing certificate), with no setting |
 | Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
 | Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |

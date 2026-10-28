@@ -237,6 +237,18 @@ async def test_first_scan_learns_then_matches(tiny) -> None:
     await client.aclose()
 
 
+async def test_a_whole_gallery_is_learned_on_request_and_kept(tiny) -> None:
+    """``gallery`` (the measurement script's way in) waits for the learning a scan only starts."""
+    sf, db, client, index = tiny
+    rows = await index.gallery(ORACLE)
+    assert sorted(p.id for p in rows) == ["id-a1", "id-a2", "id-b"]
+    assert {p.id: p.illustration_id for p in rows} == {"id-a1": "ill-x", "id-a2": "ill-x", "id-b": "ill-y"}
+    assert len(await index.gallery(ORACLE)) == 3
+    assert len(sf.image_requests) == 3  # learned once
+    await index.aclose()
+    await client.aclose()
+
+
 async def test_gallery_is_capped_and_off_host_images_are_refused(tiny) -> None:
     sf, db, client, index = tiny
     index.s.max_printings = 2
