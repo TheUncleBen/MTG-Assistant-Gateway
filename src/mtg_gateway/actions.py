@@ -614,6 +614,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         from .archidekt import rich_text
 
         thread = contest_thread(params.get("contest"))
+        # the words are checked before Archidekt is asked anything
+        summary = summary_text(params.get("summary")) if action == "contest_enter" else ""
         async with decks.archidekt_slot(sub):
             if action == "contest_enter":
                 await _contest_exists(decks, sub, thread)
@@ -622,7 +624,6 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         if action == "contest_enter":
             if entry is not None:
                 raise DeckError("invalid", "This deck is entered in that contest already.")
-            summary = summary_text(params.get("summary"))
             changes["summary"] = summary
             row["text"] = (
                 f"Enter your deck “{deck.name}” in the contest (thread {thread}) on Archidekt, publicly"
