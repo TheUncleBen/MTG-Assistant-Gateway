@@ -510,7 +510,8 @@ async def test_price_alerts_reach_the_member(stack: Stack, monkeypatch) -> None:
     stack.sf.prices[sol["id"]] = {"usd": "1.60"}  # +23% and above $1.50
     assert (await stack.gw.prices.run_daily())["alerts"] == 1
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "Price alert" and msg["click"] == "https://mtg.test/watchlist"
+    # the alert opens the card's row (test_watchlist_rows)
+    assert msg["title"] == "Price alert" and msg["click"] == f"https://mtg.test/watchlist?open={wid}#wr-{wid}"
     assert msg["message"] == "Sol Ring rose 23.1% and rose above $1.50: $1.30 to $1.60."
 
 

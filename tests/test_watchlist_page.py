@@ -130,7 +130,8 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     assert "7 days <span class='dl down'>" in page and "<span class='kv'>in 7 days</span>" in page
     assert len(re.findall(r"<div class='wx' id='wx-[\w]+' hidden>", page)) == 5  # every panel closed
     assert page.count(">Details</a>") == 5
-    assert "1–4 of 4" in page and "1–1 of 1" in page
+    # a list that fits one screen has no pager and no Load more (test_watchlist_rows)
+    assert "1–4 of 4" not in page and "1–1 of 1" not in page and "data-load-more" not in page
 
 
 def test_the_card_size_switch_and_room_for_the_row_menu_beside_details() -> None:
@@ -190,10 +191,10 @@ def test_an_opened_row_has_its_chart_range_alert_and_remove() -> None:
 def test_details_keeps_the_chip_search_filters_and_page() -> None:
     """Without the script, Details is a link to the page with that row open; it carries the
     list's query state, so the filters and the page survive the open (as on History)."""
-    page = _page(show="alert", q="a", finish="nonfoil", sort="price", offset=0)
+    page = _page(show="alert", q="a", finish="nonfoil", sort="price", upto=0)
     assert "href='/watchlist?show=alert&q=a&finish=nonfoil&sort=price&open=w_b#wr-w_b'" in page
-    paged = _page(offset=25)
-    assert "href='/watchlist?offset=25&open=d42#wr-d42'" in paged
+    longer = _page(upto=50)  # after Load more
+    assert "href='/watchlist?upto=50&open=d42#wr-d42'" in longer
     plain = _page()
     assert "href='/watchlist?open=w_a#wr-w_a'" in plain
 
