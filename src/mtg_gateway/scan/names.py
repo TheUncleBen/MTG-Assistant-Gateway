@@ -10,6 +10,10 @@ Accents are ignored both ways (``lim-dul`` finds ``Lim-Dûl``).
 
 The catalog loads in the background (first use, and refreshed when older than a day); until it has
 loaded, ``suggest`` answers ``None`` and the caller falls back to Scryfall's autocomplete.
+
+The catalog leaves tokens out, so ``TOKEN_NAMES`` (the tokens cards make most often) is added to it:
+Add to binder, Watch a card and Add to deck then suggest "Treasure" or "Soldier" too. A token comes
+after the cards that match (typing "sol" still offers Sol Ring first), unless it is the whole text.
 """
 
 from __future__ import annotations
@@ -32,6 +36,26 @@ MAX_SUGGESTIONS = 20
 # keystroke searches only those instead of all ~35,000 names.
 NARROW_KEEP = 64
 
+
+# Tokens by the name Scryfall gives them: the artifacts every set makes, then the creature tokens
+# seen most. Not every token: a name not here can still be typed in full.
+TOKEN_NAMES = tuple(
+    n.strip()
+    for n in """
+Treasure, Food, Clue, Blood, Map, Powerstone, Gold, Shard, Junk, Incubator, Walker, Lander,
+Mutagen, Gift, Copy, Emblem, The Monarch, The Initiative, City's Blessing, Day // Night,
+Energy Reserve, Poison Counter, Eldrazi Spawn, Eldrazi Scion, Servo, Thopter, Construct, Myr,
+Golem, Germ, Saproling, Soldier, Spirit, Zombie, Zombie Army, Goblin, Beast, Elf Warrior,
+Elf Druid, Insect, Squirrel, Rat, Bird, Cat, Dog, Wolf, Bear, Boar, Elephant, Ox, Rhino,
+Dinosaur, Dragon, Angel, Demon, Devil, Human, Human Soldier, Human Warrior, Human Cleric, Knight,
+Warrior, Cleric, Wizard, Rogue, Pirate, Vampire, Faerie, Faerie Rogue, Elemental, Plant,
+Treefolk, Ooze, Hydra, Wurm, Snake, Fish, Octopus, Kraken, Shark, Horror, Illusion, Shapeshifter,
+Satyr, Centaur, Gnome, Monk, Samurai, Ninja, Rabbit, Bat, Frog, Lizard, Mouse, Otter, Raccoon,
+Hippo, Spider, Scarecrow, Gargoyle, Phyrexian Germ, Phyrexian Mite, Phyrexian Golem, Pest,
+Inkling, Fractal, Spirit Cleric, Wall, Kobold, Dwarf, Orc Army, Citizen, Detective, Mercenary,
+Survivor, Assassin
+""".split(",")
+)
 
 _JOINERS = str.maketrans("-'\u2019,", "    ")
 
@@ -77,6 +101,7 @@ class NameCatalog:
         self._task: asyncio.Task[None] | None = None
         self._hits: OrderedDict[str, list[int]] = OrderedDict()
         self._known: set[str] | None = None
+        self._token: list[bool] = []
 
     @property
     def loaded(self) -> bool:
@@ -92,8 +117,10 @@ class NameCatalog:
 
     def set_names(self, names: list[str]) -> None:
         """Install a catalog (also used by tests and for a fresh download)."""
-        self._names = sorted(set(names), key=_sort_key)
+        cards = set(names)
+        self._names = sorted(cards | set(TOKEN_NAMES), key=_sort_key)
         self._folded = [fold(n) for n in self._names]
+        self._token = [n not in cards for n in self._names]
         self._hits.clear()
         self._known = None
         self._loaded_at = time.monotonic()
@@ -154,14 +181,21 @@ class NameCatalog:
         starts: list[str] = []
         words: list[str] = []
         inside: list[str] = []
+        tokens: list[str] = []
         for i in hits:
+            if self._token[i]:
+                # a token typed in full comes first; otherwise after the cards
+                (starts if self._folded[i] == q else tokens).append(self._names[i])
+                continue
             where = rank(self._folded[i], q)
             if where is None:  # cannot happen: _matching only keeps names containing q
                 continue
             (starts, words, inside)[where].append(self._names[i])
             if len(starts) >= limit:
                 break
-        return (starts + words + inside)[:limit]
+        exact = [n for n in starts if fold(n) == q]
+        rest = [n for n in starts if fold(n) != q]
+        return (exact + rest + words + inside + tokens)[:limit]
 
     def _matching(self, q: str) -> list[int]:
         """Catalog positions of every name containing ``q``, in catalog order. Starts from the
