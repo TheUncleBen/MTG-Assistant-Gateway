@@ -198,7 +198,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     padding-bottom:calc(1.25rem + env(safe-area-inset-bottom))}
   .addsheet .acts button{flex:1 1 auto} }
-/* Watch on each result: a pill on the picture's top right corner, a check and "Watching"
+/* Watch on each result: a pill on the picture's top right corner, a check and "On your watchlist"
    when the card is watched; icon only at card size S and in the list view; 44 px on touch */
 .cs-hint{margin:0 0 .9rem}
 .picwrap{position:relative;display:block}
@@ -569,7 +569,7 @@ HINT_HTML = (
 
 
 def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: bool = False) -> str:
-    """The Watch button on a result: "Watch", or a check and "Watching" when the member
+    """The Watch button on a result: "Watch", or a check and "On your watchlist" when the member
     already watches the card. A printing search watches the shown printing."""
     name = str(card.get("name") or "")
     pin = ""
@@ -582,7 +582,7 @@ def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: boo
         return (
             f"<button type='button' class='wbtn on' data-watch='{_esc(name)}'{pin} aria-pressed='true' "
             f"aria-label='{_esc(name)} is on your watchlist' title='On your watchlist'>"
-            f"{icon('check')}<span>Watching</span></button>"
+            f"{icon('check')}<span>On your watchlist</span></button>"
         )
     return (
         f"<button type='button' class='wbtn' data-watch='{_esc(name)}'{pin} aria-pressed='false' "

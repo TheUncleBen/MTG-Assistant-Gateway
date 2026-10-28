@@ -190,7 +190,7 @@ def add_deck_tool_routes(
         }
         side_name = _esc(deck.side_category())
         # Each suggestion in the add box has the card menu (static/cardmenu.js); with
-        # watchlists on also a Watch button, "Watching" for the names the member watches already
+        # watchlists on also a Watch button, "On your watchlist" for the names the member watches already
         watch_attr = " data-suggest-menu"
         if state.prices is not None:
             watched = watched_name_list(watched_names(state.prices.watched_cards(sub)))[:200]

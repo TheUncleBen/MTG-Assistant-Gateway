@@ -231,7 +231,7 @@
   }
 
   // -- Watch -------------------------------------------------------------------------------------
-  // The Watch button's look for a card: "Watch", or a check and "Watching" when it is watched.
+  // The Watch button's look for a card: "Watch", or a check and "On your watchlist" when it is watched.
   function drawButton(b, name, on) {
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
@@ -239,7 +239,7 @@
     b.title = on ? "On your watchlist" : "Watch " + name;
     b.textContent = "";
     b.appendChild(icon(on ? "check" : "bookmark"));
-    b.appendChild(el("span", null, on ? "Watching" : "Watch"));
+    b.appendChild(el("span", null, on ? "On your watchlist" : "Watch"));
   }
   /* The names the member watches (any printing), read once a page from /watchlist/api/names:
      every page's card menu then says "On your watchlist" for them instead of offering the watch

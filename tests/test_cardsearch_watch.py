@@ -1,4 +1,4 @@
-"""Watch this card from Card search: a Watch button on each result's picture ("Watching"
+"""Watch this card from Card search: a Watch button on each result's picture ("On your watchlist"
 with a check when the card is already watched; an icon in the list view), the page hint, the
 card menu (right-click, press and hold, the Menu key or Shift+F10) with Open card, Watch this card,
 Art variants…, Add to deck… and Open on Scryfall, the toast with Undo, and nothing of it when
@@ -48,7 +48,8 @@ def test_tiles_have_a_watch_button_only_with_watchlists_on() -> None:
         SOL, can_add=True, reason="", watched=cv.watched_names([{"name": "sol  RING"}])
     )
     assert "class='wbtn on'" in watched and "aria-label='Sol Ring is on your watchlist'" in watched
-    assert "title='On your watchlist'" in watched and "<span>Watching</span>" in watched
+    assert "title='On your watchlist'" in watched and "<span>On your watchlist</span>" in watched
+    assert "Watching" not in watched
 
 
 def test_a_printing_search_watches_the_shown_printing_and_the_list_has_an_icon() -> None:

@@ -1679,7 +1679,7 @@ CARD_MENU_CSS = """
     max-width:none;max-height:85vh;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
     padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}
 }
-/* Watch: a pill, a check and "Watching" when the card is watched; .icon is the icon alone */
+/* Watch: a pill, a check and "On your watchlist" when the card is watched; .icon is the icon alone */
 .wbtn{display:inline-flex;align-items:center;gap:.3rem;
   margin:0;height:32px;min-height:32px;padding:0 .55rem;border-radius:999px;border:1px solid
   var(--control-border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:700;

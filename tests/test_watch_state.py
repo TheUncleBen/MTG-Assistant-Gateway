@@ -1,5 +1,5 @@
 """A card on the watchlist says so wherever it can be watched, and a watch is never added twice
-(Ben, 2026-10-28). A printing search's Watch button is "Watching" for the watched printing only;
+(Ben, 2026-10-28). A printing search's Watch button says "On your watchlist" for the watched printing only;
 the pages' menus learn the watched names from ``GET /watchlist/api/names``; a Watch by name of a
 card already watched in any printing (in the same finish) is the watch it has, and so is the same
 printing named in other letter case."""
