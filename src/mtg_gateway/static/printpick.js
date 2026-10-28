@@ -471,7 +471,7 @@
   function why(err) {
     if (!err) return "The gateway did not answer.";
     if (err.status === 401) return "You are signed out. Sign in again, then retry.";
-    if (busy(err)) return "Scryfall is busy with other lookups right now. Wait a moment, then retry.";
+    if (busy(err)) return "Scryfall is busy with other lookups right now. Retry when you’re ready.";
     if (err.kind === "not_found") return (err.message || "Scryfall does not know this card") + ".";
     if (err.kind === "unavailable") return "Scryfall is not answering right now.";
     if (!err.status) return "The gateway did not answer. Check the connection, then retry.";
