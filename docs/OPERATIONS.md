@@ -705,8 +705,15 @@ on what the review page would show, not on what the assistant says:
 | Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
-`assistant_may_apply`, and `next_step` tells the assistant whether to call
-`apply_proposal` or hand the decision to the member. The service re-checks
+`assistant_may_apply`, and `next_step` tells the assistant whether it may
+apply it or hands the decision to the member. When the mode allows it, the
+propose call applies the proposal at once (`apply_if_allowed`, default
+true), so no separate `apply_proposal` call is needed. One app keeps one
+waiting change per deck: a later propose from the same app adds to it.
+An apply that failed before anything reached Archidekt (Archidekt didn't
+answer, or was busy) waits again with **Try again**; one that stopped
+partway offers **Propose the rest**, which the gateway builds from the
+snapshot and the deck as it is now. The service re-checks
 the mode and the risk inside the apply itself, over MCP and over the REST
 API alike, so there is no path around it. An assistant apply the mode does
 not allow is logged as `apply_needs_user`. Every apply that changes the
@@ -739,8 +746,10 @@ Semi-auto or Full auto such a change can land on Archidekt without their press. 
 manual mode a person's own press always sits between anything the assistant
 read and a write to Archidekt.
 
-Tell people to keep `apply_proposal` on "ask every time" (or "needs
-approval") in their AI app rather than "always allow".
+Tell people who want to see each write first to keep the proposal tools
+and `apply_proposal` on "ask every time" (or "needs approval") in their AI
+app rather than "always allow": in Semi-auto and Full auto a propose call
+can apply its change in the same call.
 
 Each proposal records the app that made it (or "browser"), and the review
 page and the proposal list show it. An app may apply or reject only its own

@@ -87,17 +87,18 @@ In plain terms:
   this gateway: it used every tool, creating proposals included (tested).
   Plus is still untested.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
-  tool as read-only except the ones that apply, approve, reject or tidy
-  waiting changes, start Forge games, save a scan, remove a saved card
-  description or change your watchlist: `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
+  tool as read-only except the ones that make, apply, approve, reject or tidy
+  changes, start Forge games, save a scan, remove a saved card
+  description or change your watchlist: every `propose_*` tool,
+  `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
   `amend_proposal`, `withdraw_proposal`, `combine_proposals`,
   `run_deck_report`, `play_more_games`, `save_scan_session` and
   `remove_card_model`, and, unless the operator has turned watchlists off,
-  `watch_card`, `watch_deck` and `unwatch`.
-  Making a proposal only records it, so even if ChatGPT limits you to
-  read-only tools you should still be able to propose changes and then press
-  Approve on the card ChatGPT shows with the proposal, or Apply on the
-  gateway's review page in your browser. On Pro no such limit showed in the
+  `watch_card`, `watch_deck` and `unwatch`. Since 0.7.46 a proposal tool
+  can apply its change in the same call when your approval mode allows it,
+  so it is no longer marked read-only. If ChatGPT limits you to read-only
+  tools, the assistant can't make proposals there: make the change on the
+  gateway's deck page in your browser instead. On Pro no such limit showed in the
   owner's check. Whether a plan with the "read/fetch" limit follows those
   markings, and whether ChatGPT shows the card for a connector added in
   developer mode, hasn't been tested yet.
@@ -277,8 +278,13 @@ numbers, and which modes it allows.
 Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In Semi-auto and Full auto the
-assistant applies what the mode allows with `apply_proposal` and tells you;
-the card then shows the change without buttons. A change to one of your
+assistant's proposal is applied in the same call when the mode allows it
+(or later with `apply_proposal`), and it tells you; the card then shows the
+change without buttons. If Archidekt doesn't answer and nothing reached it,
+the change waits again and its card, review page and the Proposals page
+offer **Try again**. If part of an edit reached Archidekt before it
+stopped, they offer **Propose the rest**, which makes a new proposal of
+what is still missing. A change to one of your
 decks still keeps a snapshot you can restore from the History page; a
 collection change keeps none. Restoring a snapshot does not put back a
 deck's folder, tags, cover or custom cards. The cost: an assistant can be tricked by text
@@ -287,8 +293,12 @@ apply changes without asking, such a change can land on Archidekt without
 your press.
 
 Claude lets you set each tool to always allow, needs approval, or blocked
-(reported). Keep `apply_proposal` on **needs approval**: in Semi-auto and
-Full auto that's the tool that actually changes your deck or collection. Claude's Research mode can
+(reported). In Semi-auto and Full auto the proposal tools
+(`propose_deck_changes` and the other `propose_*` tools, `amend_proposal`,
+`combine_proposals`) and `apply_proposal` can change your deck or
+collection: keep them on **needs approval** if you want to see each one
+first. Every proposal tool says it can change things (`readOnlyHint`
+false), so apps that ask before such tools ask for them too. Claude's Research mode can
 call connector tools without asking (reported). Everything except
 `apply_proposal`, `confirm_proposal` and `confirm_waiting` (the card's own
 buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
@@ -386,12 +396,13 @@ pictures.
 ### If ChatGPT blocks write tools
 
 OpenAI says some plans only get reading tools (reported). Every gateway
-tool is marked read-only except the eleven named in
-[Which apps and devices work](#which-apps-and-devices-work) (fourteen when
-watchlists are on), so all of this keeps working: research (Scryfall,
-EDHREC, rules), goldfish odds, reading and importing decks, card lookups
-for scanning, and making deck and collection proposals. For the write tools:
+tool is marked read-only except the proposal tools and the others named in
+[Which apps and devices work](#which-apps-and-devices-work), so all of this
+keeps working: research (Scryfall, EDHREC, rules), goldfish odds, reading
+and importing decks, and card lookups for scanning. For the write tools:
 
+- the `propose_*` tools: make the change on the gateway's deck page, or
+  in Archidekt, yourself.
 - `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
   one, or open the proposal's review link (or **Proposals** on the
   gateway) and press **Apply** there. Same preview, same checks. If you

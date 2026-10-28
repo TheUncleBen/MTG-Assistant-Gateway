@@ -121,7 +121,7 @@ in the member's own collection answers `404`, and a member without a linked acco
 `not_linked`.
 
 Archidekt's social actions for the browser are under `/social/api` (an assistant proposes the same
-through `propose_deck_social` and `propose_comment`; there is no `/api/v1` counterpart): `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
+through `propose_account_action`; there is no `/api/v1` counterpart): `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
 (a like is an up-vote on the deck's thread; answers the new `vote` and `points`), `POST
 /social/api/decks/{id}/bookmark` `{"on": bool}`, `GET` and `POST /social/api/users/{id}/follow`
 (`{"on": bool}`; the GET answers `following` and `self`), `GET /social/api/decks/{id}/comments?page=`
