@@ -205,6 +205,12 @@ set up for another gateway. A connection that fails is tried again after 5
 seconds, then after longer waits up to 5 minutes, and at once when the
 phone's network comes back.
 
+The same connection brings new Archidekt alerts (comments, replies,
+follows) from 0.7.46, while **A new alert on Archidekt** is ticked on the
+card: the gateway looks for them only for members whose phone is connected
+now or was in the last 12 hours. Nothing in the app changed for this; a
+pressed alert opens its deck, forum thread or profile in the app.
+
 **Push test on an emulator.** The `Android push test` workflow
 (`.github/workflows/android-push-test.yml`) runs `android/scripts/push-test.sh`
 on an Android 15 emulator against a small stand-in gateway

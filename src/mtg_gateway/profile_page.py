@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, quote, unquote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import prefs, profile, ui
+from . import alerts_push, notify, prefs, profile, ui
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -241,6 +241,9 @@ async def notification_list(decks: Any, sub: str) -> dict[str, Any]:
         return hit[1]
     got = await profile.notifications(decks, sub)
     _LIST[sub] = (time.monotonic() + LIST_TTL, got)
+    if notify.prefs(decks.db, sub)["ntfy_on"]:
+        # what the member just saw here is never pushed to their phone later (alerts_push.py)
+        alerts_push.seen_in_bell(decks.db, sub, profile.user_id(decks, sub), got["notifications"])
     # the site zeroes its badge once the list was read (no mark-as-read request was seen in its
     # scripts)
     _COUNT[sub] = (time.monotonic() + COUNT_TTL, 0)

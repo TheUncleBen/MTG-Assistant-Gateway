@@ -732,8 +732,8 @@ have the solo test's estimate and no Forge games.
 Members can get a short message on their phone when an assistant leaves changes waiting for their
 press (one message per deck, such as "2 changes to Atraxa are waiting for you", updated as the count changes
 and removed when nothing waits), a deck report finishes (Forge runs that waited in the queue
-included), a watched card crosses a price alert they set, or their daily or weekly summary is
-ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
+included), a watched card crosses a price alert they set, something new arrives in their
+Archidekt alerts, or their daily or weekly summary is ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
 Google push service, and no separate notification app.
 
 How it works: the stack runs its own [ntfy](https://ntfy.sh/) server (`mtg-assistant-ntfy`, free
@@ -776,6 +776,22 @@ yet picked up.
   stack files, and the gateway's limits, the 25-second keepalive and the 12 hours ntfy keeps
   messages are fixed too. ntfy's subscription limit (250) is set above the gateway's 200
   connections on purpose.
+
+### Archidekt alerts on members' phones
+
+Archidekt has no push or webhooks, so the gateway asks it (from 0.7.46, no setting to add). Every
+15 minutes it reads the alert count of each member whose notifications are on, who left **A new
+alert on Archidekt** ticked (the default) and whose phone is connected now or was in the last 12
+hours (the time ntfy keeps a message). That is one request per member a round, plus one read of the
+alert list in a round where the count went up: at most 4 requests an hour per such member, so 10
+of them add about 40 an hour, around 2 % of the shared pace of 30 a minute. A count a member's own
+page read in the last minute is used instead of asking again. The reads are background ones, like
+the deck sync's: they wait for members' own work, never use the share of the pace kept for pages,
+are sent once without retries, stop while the breaker or a Retry-After pause is on, and spend from
+the member's own Archidekt budget only while a quarter of it is left. What was last seen (the
+count and a short fingerprint per alert, never its words) is kept on the account, so a restart
+never sends an alert twice. Whether Archidekt marks alerts as seen when its list is read is not
+known; the gateway's own Alerts list has always read it the same way.
 
 ## Environment reference
 

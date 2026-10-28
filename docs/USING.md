@@ -437,7 +437,8 @@ The **Notifications** card on your Account page can send you a short message
 in the gateway's Android app when an assistant leaves changes waiting for
 your press (one message per deck, such as "2 changes to Atraxa are waiting
 for you"), a deck report finishes (Forge runs that waited in the queue
-included), or a watched card crosses your price alert. There are no
+included), a watched card crosses your price alert, or something new
+arrives in your Archidekt alerts (a comment, a reply, a new follower). There are no
 notifications on iPhone. Open your Account page in the app, tick **Send me
 notifications**, choose which of these you want, and save, then press
 **Get notifications on this phone**. On Android 13 and later the app asks
@@ -446,6 +447,16 @@ Android then shows a quiet "Always connected" notification while the app
 listens. **Send test** checks it, and
 **Disconnect my phones** stops every phone you connected. Messages say only
 what happened and link to the page here; they never list a deck's cards.
+
+**A new alert on Archidekt** is ticked unless you untick it, and works once
+your Archidekt account is linked. Archidekt can't tell the gateway when
+something new arrives, so while a phone of yours is connected the gateway
+looks at your Archidekt alert count now and then, in the background and
+after everyone's own pages. Each new alert comes once, in Archidekt's own
+words; pressing it opens the deck, forum thread or profile here, or the
+Alerts list for news and contests. Several at once come as one message.
+Alerts that were already there when you turned this on, and ones you have
+read in the gateway's Alerts, are not sent.
 
 The summary is part of the **Notifications** card, so it is there only when
 the gateway has a notification server set up (without one, the card only
