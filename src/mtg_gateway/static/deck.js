@@ -1236,7 +1236,16 @@
     if (zone === "side") ch.zone = "side";
     if (action === "set_quantity") ch.quantity = value;
     if (action === "set_category") ch.category = value;
+    var rel = rowRel(card);
+    if (rel) ch.relation_id = rel;
     return ch;
+  }
+  // A card with another row in the same zone (in the Maybeboard and in "Optional Artwork", say):
+  // a remove, a count, a move or a printing names this row by its relation id, so that row only
+  // changes. A card's one row in a zone is named by the card and the zone, as before.
+  function rowRel(card) {
+    var rel = Number(card.getAttribute("data-rel"));
+    return rel > 0 && rel % 1 === 0 && twinIn(card, zoneOf(card)) ? rel : null;
   }
   // Another row of the same card in a zone: a set_category or set_quantity names the card and
   // the zone, so it would move or count both rows. The menu's own change is fine (the person
@@ -1282,9 +1291,11 @@
       if (was.length > 1) inv.categories = was;
       // after the move the row sits in the zone its new category puts it in
       zone = excluded.indexOf(ch.category) >= 0 ? "side" : "main";
-      if (twinIn(card, zone)) return null;
+      if (!ch.relation_id && twinIn(card, zone)) return null;
     } else return null;
     if (zone === "side") inv.zone = "side";
+    // a count or a move keeps the row's relation id: its Undo names the same row
+    if (ch.relation_id) inv.relation_id = ch.relation_id;
     return inv;
   }
   // Before a card with notes is removed: Archidekt keeps a card's notes on its row, and the
@@ -1352,6 +1363,7 @@
         var ch = changeFor(card, "set_quantity", sent);
         var inv = { action: "set_quantity", card_name: name, quantity: s.saved };
         if (ch.zone) inv.zone = ch.zone;
+        if (ch.relation_id) inv.relation_id = ch.relation_id;
         return { changes: [ch], inverse: [inv], saying: "Saving " + name + ": " + copies(sent) + "…" };
       },
       saved: function () {
@@ -1400,7 +1412,10 @@
         saved: function () { var st = filed.state.spot.stack; keepRemoved(card, st ? st.getAttribute("data-group") : ""); },
         undo: function () {
           putBack(card, filed.state.spot);
-          return name + " is back in " + (zoneOf(card) === "side" ? "the " + sideCat : "the deck") + ".";
+          // the row's own category ("Optional Artwork"), not just the page's side category
+          var own = catsOf(card)[0] || sideCat;
+          var where = zoneOf(card) !== "side" ? "the deck" : /^(maybeboard|sideboard)$/i.test(own) ? "the " + own : "“" + own + "”";
+          return name + " is back in " + where + ".";
         },
         done: function () { releaseConfirmed(filed); }
       });
@@ -1543,7 +1558,7 @@
       onWatch: function (p, finish) { return watchCard(card, p, finish); }
     };
     // on the member's own deck the same picker can also put the printing in the deck
-    if (own && deckId && zoneOf(card) === "main") opts.onPick = function (p, info) { if (card.isConnected) savePrinting(card, p, info); };
+    if (own && deckId) opts.onPick = function (p, info) { if (card.isConnected) savePrinting(card, p, info); };
     Pick.open(opts);
   }
   var FINISH_WORDS = { normal: "non-foil", foil: "foil", etched: "etched" };
@@ -1557,13 +1572,19 @@
     var said = printLabel(label);
     var ch = { action: "set_printing", card_name: name, set_code: String(p.set).toLowerCase(), collector_number: String(p.collector_number) };
     if (info.changed) ch.finish = info.finish;
-    // Undo: the old printing (and finish, when this pick changed it). Another row of the card in
-    // the deck in another printing or finish would be swapped by it too: no Undo then.
+    var zone = zoneOf(card), rel = rowRel(card);
+    if (zone === "side") ch.zone = "side";
+    if (rel) ch.relation_id = rel;
+    // Undo: the old printing (and finish, when this pick changed it), for the card in the row's
+    // zone (the new printing is a new row). Another row of the card there in another printing or
+    // finish would be swapped by it too, and a maybeboard or sideboard change takes one row: no
+    // Undo then.
     var inv = wasPr.length === 2 && wasPr[0] ? { action: "set_printing", card_name: name, set_code: wasPr[0].toLowerCase(), collector_number: wasPr[1] } : null;
     if (inv && info.changed) inv.finish = was.finish.toLowerCase();
+    if (inv && zone === "side") inv.zone = "side";
     if (inv && $$(".c, .row", cards).some(function (c) {
-      return c !== card && zoneOf(c) === "main" && frontFace(c.getAttribute("data-card")) === frontFace(name) &&
-        (c.getAttribute("data-set") !== was.set || c.getAttribute("data-finish") !== was.finish);
+      return c !== card && zoneOf(c) === zone && frontFace(c.getAttribute("data-card")) === frontFace(name) &&
+        (zone === "side" || c.getAttribute("data-set") !== was.set || c.getAttribute("data-finish") !== was.finish);
     })) inv = null;
     var fin = info.finish.charAt(0).toUpperCase() + info.finish.slice(1);
     var now = { set: label, img: p.image_normal || p.image_small || "", price: window.MtgPrintPick.priceOf(p, info.finish), finish: fin };
@@ -1796,8 +1817,8 @@
       sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
       m.appendChild(moveBtn);
       m.appendChild(sub);
-      // the deck proper only: Archidekt's printing change is for the deck's own rows
-      if (window.MtgPrintPick && zoneOf(card) === "main") m.appendChild(menuItem("Change printing…", "image", function () { closeMenu(); changePrinting(card); }));
+      // every row: a row of a card that has other rows (a maybeboard row, say) changes on its own
+      if (window.MtgPrintPick) m.appendChild(menuItem("Change printing…", "image", function () { closeMenu(); changePrinting(card); }));
       if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
       // Archidekt's card menu switches: on shows a check, as the Move to list's current category
@@ -2134,6 +2155,8 @@
       });
     }
     function byNameZone(c) { return frontFace(c.getAttribute("data-card")) + "|" + zoneOf(c); }
+    // a remove or a move of a row a card shares its zone with names that row (rowRel): one each
+    function byRow(c) { return byNameZone(c) + "|" + (rowRel(c) || ""); }
     function showTagForm(open) {
       tagForm.hidden = !open;
       tagBtn.setAttribute("aria-expanded", open ? "true" : "false");
@@ -2208,13 +2231,13 @@
       showTagForm(true);
     };
     rm.addEventListener("click", function () {
-      var list = unique(picked(), byNameZone);
+      var list = unique(picked(), byRow);
       var changes = [], inverses = [];
       list.forEach(function (c) {
         var ch = changeFor(c, "remove");
         changes.push(ch);
-        // a remove takes every row of the card in that zone; with two rows (two printings or
-        // categories) an Undo could not put both back as they were, so none is offered
+        // with two rows of the card in that zone (two printings or categories) an Undo could
+        // not put them back as they were, so none is offered
         if (twinIn(c, zoneOf(c))) inverses = null;
         if (inverses) { var inv = inverseFor(c, ch); inverses = inv ? inverses.concat(inv) : null; }
       });
@@ -2227,7 +2250,7 @@
       moveSel.value = "";
       syncSelects();
       if (!to) return;
-      var list = unique(picked().filter(function (c) { return (byCategory ? stackOf(c) : catOf(c)) !== to; }), byNameZone);
+      var list = unique(picked().filter(function (c) { return (byCategory ? stackOf(c) : catOf(c)) !== to; }), byRow);
       if (!list.length) { status.className = "status"; status.textContent = "Those cards are already in " + to + "."; return; }
       var changes = [], inverses = [];
       list.forEach(function (c) {

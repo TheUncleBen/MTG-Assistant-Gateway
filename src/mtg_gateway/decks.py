@@ -124,6 +124,10 @@ CATEGORY_ACTIONS = ("set_category", "set_commander")
 PRINTING_ACTIONS = ("set_finish", "set_printing", "set_label", "set_mana_value", *SWITCH_ACTIONS)
 # Row-by-row changes that also work on the maybeboard and sideboard rows (zone "side").
 ROW_TAG_ACTIONS = ("set_label", "set_mana_value", *SWITCH_ACTIONS)
+# Changes that may name one row of the card by its relation id (the deck page sends it): that
+# row only is removed, counted, moved or given another printing or finish, in whichever zone it
+# is, never the card's other rows (a card in the deck and in "Optional Artwork", say).
+ROW_TARGET_ACTIONS = ("remove", "set_quantity", "set_category", "set_printing", "set_finish")
 MAX_MANA_VALUE = 15  # the range of archidekt.com's own Mana value menu
 LABEL_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
 MAX_LABEL = 40
@@ -904,6 +908,8 @@ class Change:
     # sends them, so a companion or a card set to show its back comes back as it was.
     companion: bool = False
     flipped_default: bool = False
+    # ROW_TARGET_ACTIONS: the one row this changes (``target_rows`` sets the card and zone from it)
+    relation_id: int | None = None
 
     @property
     def pinned(self) -> bool:
@@ -947,6 +953,8 @@ class Change:
             d[SWITCHES[self.action][0]] = bool(self.on)
         if self.zone == "side":
             d["zone"] = "side"
+        if self.relation_id is not None:
+            d["relation_id"] = self.relation_id
         return d
 
 
@@ -984,6 +992,7 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
     if len(raw) > MAX_CHANGES:
         raise DeckError("invalid", f"at most {MAX_CHANGES} changes per proposal")
     out: list[Change] = []
+    rels: list[int | None] = []  # each change's row (relation_id), in order
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             raise DeckError("invalid", f"change {i} must be an object")
@@ -996,6 +1005,19 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
         zone = str(item.get("zone") or "main").strip().lower()
         if zone not in ZONES:
             raise DeckError("invalid", f"change {i}: zone must be main or side")
+        rel = item.get("relation_id")
+        if rel is not None:
+            if action not in ROW_TARGET_ACTIONS:
+                raise DeckError(
+                    "invalid", f"change {i}: relation_id goes with {', '.join(ROW_TARGET_ACTIONS)} only"
+                )
+            if isinstance(rel, str) and rel.isdigit():
+                rel = int(rel)
+            if isinstance(rel, bool) or not isinstance(rel, int) or rel <= 0:
+                raise DeckError(
+                    "invalid", f"change {i}: relation_id must be the number of one of the card's rows"
+                )
+        rels.append(rel)
         if action in CATEGORY_ACTIONS:
             ch = _parse_category_change(i, action, name, item)
             if zone == "side" and action == "set_commander":
@@ -1005,8 +1027,8 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             out.append(dataclasses.replace(ch, zone=zone))
             continue
         if action in PRINTING_ACTIONS:
-            if zone == "side" and action not in ROW_TAG_ACTIONS:
-                raise DeckError("invalid", f"change {i}: {action} works on the deck proper, not zone side")
+            # a printing or finish change in zone side names its row, or the card has one row
+            # there (printing_plan_rows refuses it otherwise)
             if action == "set_label":
                 out.append(dataclasses.replace(_parse_label_change(i, name, item), zone=zone))
                 continue
@@ -1016,7 +1038,7 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             if action in SWITCHES:
                 out.append(dataclasses.replace(_parse_switch_change(i, action, name, item), zone=zone))
                 continue
-            out.append(_parse_printing_change(i, action, name, item))
+            out.append(dataclasses.replace(_parse_printing_change(i, action, name, item), zone=zone))
             continue
         qty = item.get("quantity")
         if action == "remove":
@@ -1082,6 +1104,7 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
                 **flags,
             )
         )
+    out = [dataclasses.replace(ch, relation_id=rel) if rel else ch for ch, rel in zip(out, rels, strict=True)]
     # Per zone: the deck proper and the maybeboard or sideboard each take one pinned printing of a card.
     pinned = [(ch.zone, ch.card_name.lower()) for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
@@ -1110,7 +1133,9 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
     # Names compare by front face, as the plans match them, so "Fire" and "Fire // Ice" clash.
     # The zone is part of the key: a maybeboard row and a deck row of the same card are two rows.
     def key(ch: Change) -> str:
-        return front_face(ch.card_name).lower() + ("" if ch.zone == "main" else " (side)")
+        # a change that names its row is about that row only
+        row = f" #{ch.relation_id}" if ch.relation_id else ""
+        return front_face(ch.card_name).lower() + ("" if ch.zone == "main" else " (side)") + row
 
     categorised = [key(ch) for ch in out if ch.action in CATEGORY_ACTIONS]
     if len(categorised) != len(set(categorised)):
@@ -1283,6 +1308,48 @@ def _parse_printing_change(i: int, action: str, name: str, item: dict[str, Any])
     return Change(action, name, set_code=set_code, collector_number=number, finish=finish)
 
 
+def target_rows(deck: Deck, changes: list[Change]) -> list[Change]:
+    """The changes, each one that names a row (its relation id) set to that row's card and zone:
+    the row says where it is, whatever zone the change was sent with. A row that is no longer in
+    the deck (or holds another card) is refused."""
+    if not any(ch.relation_id for ch in changes):
+        return changes
+    rows = {c.relation_id: c for c in deck.cards if c.relation_id is not None}
+    out = []
+    for ch in changes:
+        if ch.relation_id:
+            row = rows.get(ch.relation_id)
+            if row is None or front_face(row.name).casefold() != front_face(ch.card_name).casefold():
+                raise DeckError(
+                    "invalid",
+                    f"That row of '{ch.card_name}' is no longer in the deck. Reload the deck and try again.",
+                )
+            ch = dataclasses.replace(ch, card_name=row.name, zone="main" if deck.in_deck(row) else "side")
+        out.append(ch)
+    return out
+
+
+def row_counts(deck: Deck, changes: list[Change]) -> dict[int, int]:
+    """The count each row named by a remove or set_quantity (``target_rows`` first) ends at:
+    ``{relation id: copies}``, 0 for a row that goes."""
+    rows = {c.relation_id: c for c in deck.cards if c.relation_id is not None}
+    out: dict[int, int] = {}
+    for ch in changes:
+        if ch.action not in ("remove", "set_quantity") or not ch.relation_id:
+            continue
+        cur = out.get(ch.relation_id, rows[ch.relation_id].quantity)
+        if ch.action == "remove":
+            out[ch.relation_id] = max(0, cur - ch.quantity) if ch.quantity else 0
+        else:
+            out[ch.relation_id] = ch.quantity or 0
+    return out
+
+
+def _primary(row: Any) -> str | None:
+    """A row's own category (its first), as a review row names it."""
+    return clean_text((row.categories or [""])[0] or "") or None
+
+
 def printing_plan_rows(
     deck: Deck, changes: list[Change]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1290,6 +1357,7 @@ def printing_plan_rows(
     ``{name, relation_ids, quantity, categories, finish?, set_code?, collector_number?}`` plus
     their review rows. A card that is not in the deck is an error; a change that leaves the row
     as it is produces nothing."""
+    changes = target_rows(deck, changes)
     specs: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
     by_name: dict[str, list[Any]] = {}
@@ -1305,6 +1373,8 @@ def printing_plan_rows(
             continue
         pool = side_by_name if ch.zone == "side" else by_name
         cards = list({c.relation_id: c for c in pool.get(ch.card_name.lower(), [])}.values())
+        if ch.relation_id:  # that row only
+            cards = [c for c in cards if c.relation_id == ch.relation_id]
         if not cards:
             raise DeckError(
                 "invalid",
@@ -1319,6 +1389,14 @@ def printing_plan_rows(
                     if ch.action in SWITCHES
                     else ", so its printing cannot be changed"
                 ),
+            )
+        if ch.zone == "side" and ch.action not in ROW_TAG_ACTIONS and len(cards) > 1:
+            # the maybeboard, the sideboard and any other category left out of the deck are one
+            # zone: a printing or finish for all of them at once is never what was meant
+            raise DeckError(
+                "invalid",
+                f"'{ch.card_name}' has more than one maybeboard or sideboard row; "
+                "name the row to change (relation_id)",
             )
         if any(c.relation_id is None or c.card_id is None for c in cards):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
@@ -1403,7 +1481,17 @@ def printing_plan_rows(
             if before == [ch.finish]:
                 continue
             spec["finish"] = ch.finish
-            rows.append(_row("finish", name=first.name, before=" / ".join(before), after=ch.finish))
+            spec["zone"] = ch.zone
+            rows.append(
+                _row(
+                    "finish",
+                    name=first.name,
+                    before=" / ".join(before),
+                    after=ch.finish,
+                    category=_primary(first) if ch.relation_id or ch.zone == "side" else None,
+                    zone="side" if ch.zone == "side" else None,
+                )
+            )
         else:
             before = sorted({f"{c.set_code.upper()} {c.collector_number}" for c in cards})
             after = f"{(ch.set_code or '').upper()} {ch.collector_number}"
@@ -1416,9 +1504,23 @@ def printing_plan_rows(
             if same_printing and same_finish:
                 continue
             spec.update(
-                {"set_code": ch.set_code, "collector_number": ch.collector_number, "finish": ch.finish}
+                {
+                    "set_code": ch.set_code,
+                    "collector_number": ch.collector_number,
+                    "finish": ch.finish,
+                    "zone": ch.zone,
+                }
             )
-            rows.append(_row("printing", name=first.name, before=" / ".join(before), after=after))
+            rows.append(
+                _row(
+                    "printing",
+                    name=first.name,
+                    before=" / ".join(before),
+                    after=after,
+                    category=_primary(first) if ch.relation_id or ch.zone == "side" else None,
+                    zone="side" if ch.zone == "side" else None,
+                )
+            )
         specs.append(spec)
     return specs, rows
 
@@ -1485,6 +1587,7 @@ def category_plan_rows(
     proposal's set_commander changes (two for partners). Rows that already have the
     wanted categories are left alone; a card that is not in the deck is an error.
     """
+    changes = target_rows(deck, changes)
     cat_changes = [ch for ch in changes if ch.action in CATEGORY_ACTIONS]
     if not cat_changes:
         return {}, []
@@ -1505,6 +1608,8 @@ def category_plan_rows(
             where = "the deck" if ch.zone == "main" else "the maybeboard or sideboard"
             raise DeckError("invalid", f"'{ch.card_name}' is not in {where}, so its category cannot be set")
         rows = list({r.relation_id: r for r in rows}.values())
+        if ch.relation_id:  # that row only
+            rows = [r for r in rows if r.relation_id == ch.relation_id]
         if any(r.relation_id is None for r in rows):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
         new = list(ch.categories) or [ch.category or COMMANDER]
@@ -1732,6 +1837,7 @@ def plan_zones(
     count changes of zone main, the review rows of every change, and the same counts for the
     maybeboard and sideboard rows (zone side). Category moves between the zones are not in the
     counts (``leaving_deck`` and ``entering_deck`` have them); the rows say what they do."""
+    changes = target_rows(deck, changes)
     before = deck.counts_by_name()
     before_side = deck.side_counts_by_name()
     lookups: dict[str, dict[str, str]] = {}
@@ -1760,12 +1866,38 @@ def plan_zones(
     cat_lines += [_row("add", name=name, qty=qty) for name, qty in entering.items()]
     _specs, print_lines = printing_plan_rows(deck, changes)
     cat_lines = cat_lines + print_lines
+    # A remove or set_quantity that names its row changes that row's count only: the zone's total
+    # moves by as much, and the review has a row of its own for it, under the row's category.
+    by_rel = {c.relation_id: c for c in deck.cards if c.relation_id is not None}
+    counted = row_counts(deck, changes)
+    row_lines: list[dict[str, Any]] = []
+    by_row: set[tuple[str, str]] = set()
+    for rid, n in counted.items():
+        r = by_rel[rid]
+        zone = "main" if deck.in_deck(r) else "side"
+        key = lookups[zone].get(r.name.lower(), r.name)
+        target = after_side if zone == "side" else after
+        target[key] = target.get(key, 0) - r.quantity + n
+        by_row.add((zone, key.lower()))
+        side = "side" if zone == "side" else None
+        if n == 0:
+            row_lines.append(_row("remove", name=r.name, qty=r.quantity, category=_primary(r), zone=side))
+        elif n != r.quantity:
+            row_lines.append(
+                _row("change", name=r.name, before=r.quantity, after=n, category=_primary(r), zone=side)
+            )
     for ch in changes:
-        if ch.action in CATEGORY_ACTIONS or ch.action in PRINTING_ACTIONS:
+        if ch.action in CATEGORY_ACTIONS or ch.action in PRINTING_ACTIONS or ch.relation_id:
             continue
         target = after_side if ch.zone == "side" else after
         lookup = lookups[ch.zone]
         key = lookup.get(ch.card_name.lower(), ch.card_name)
+        if (ch.zone, key.lower()) in by_row:
+            raise DeckError(
+                "invalid",
+                f"'{ch.card_name}' has a change for one of its rows and another for the card as a whole; "
+                "propose them separately",
+            )
         cur = target.get(key, 0)
         if ch.action == "add":
             target[key] = cur + (ch.quantity or 1)
@@ -1794,10 +1926,17 @@ def plan_zones(
         # the colour tag an add puts on its new row is part of what is reviewed (security review F-05)
         tags = {n: next((c.label for c in chs if c.label), "") for n, chs in adds_by_name.items()}
         side = "side" if zone == "side" else None
+        # a maybeboard or sideboard card's own category, when all its rows there share one
+        # ("Optional Artwork"), names where a removal or a count change happens
+        own: dict[str, set[str]] = {}
+        for c in deck.side_cards if side else []:
+            own.setdefault(c.name.lower(), set()).add(_primary(c) or "")
         for name in sorted(set(b_counts) | set(a_counts), key=str.lower):
             b, a = b_counts.get(name, 0), a_counts.get(name, 0)
-            if a == b:
+            if a == b or (zone, name.lower()) in by_row:
                 continue
+            where = own.get(name.lower(), set())
+            where_cat = next(iter(where)) if len(where) == 1 else None
             printing = labels.get(name.lower()) or None
             cat = cats.get(name.lower())
             if not (cat and (b == 0 or name.lower() in pinned_names)):  # a new row is made in that category
@@ -1808,9 +1947,20 @@ def plan_zones(
                     row["tag"] = label_text(tags[name.lower()])
                 lines.append(row)
             elif a == 0:
-                lines.append(_row("remove", name=name, qty=b, zone=side))
+                lines.append(_row("remove", name=name, qty=b, category=where_cat, zone=side))
             else:
-                lines.append(_row("change", name=name, before=b, after=a, printing=printing, zone=side))
+                lines.append(
+                    _row(
+                        "change",
+                        name=name,
+                        before=b,
+                        after=a,
+                        printing=printing,
+                        category=where_cat if not cat else None,
+                        zone=side,
+                    )
+                )
+    lines.extend(row_lines)
     lines.extend(cat_lines)
     if not lines:
         raise DeckError("invalid", "these changes would leave the deck exactly as it is")
@@ -2111,8 +2261,12 @@ def build_payload(
     side_modifiers: dict[str, str] | None = None,
     labels: dict[str, str] | None = None,
     side_labels: dict[str, str] | None = None,
+    rows_to: dict[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
+
+    ``rows_to`` (from ``row_counts``): the count each row named by its relation id ends at; that
+    row is written, the card's other rows are left as they are.
 
     ``labels`` and ``side_labels`` (from ``add_labels``) give a new row its colour tag, as the
     site's add sends one (``label`` in its modifications); a row that is already there and only
@@ -2151,9 +2305,26 @@ def build_payload(
     for c in deck.main_cards:  # never touch maybeboard or sideboard rows
         by_name.setdefault(c.name.lower(), []).append(c)
     payload: list[dict[str, Any]] = []
+
+    def by_row(existing: list[Any], qty: int) -> bool:
+        """Write the rows named by relation id (True: the card's count is all theirs)."""
+        hit = [c for c in existing if c.relation_id in (rows_to or {})]
+        if not hit:
+            return False
+        for c in hit:
+            n = (rows_to or {})[c.relation_id]
+            if n != c.quantity:
+                payload.append(_entry("modify" if n > 0 else "remove", c, n))
+        rest = sum(c.quantity for c in existing if c not in hit)
+        if qty - sum((rows_to or {})[c.relation_id] for c in hit) != rest:
+            raise DeckError("invalid", "a row's count does not match the planned count; nothing was sent")
+        return True
+
     for name, qty in after.items():
         existing = by_name.get(name.lower(), [])
         current = sum(c.quantity for c in existing)
+        if by_row(existing, qty):
+            continue
         if qty == current:
             continue
         pin = (pinned or {}).get(name)
@@ -2183,6 +2354,8 @@ def build_payload(
         side_by_name.setdefault(c.name.lower(), []).append(c)
     for name, qty in (after_side or {}).items():
         existing = side_by_name.get(name.lower(), [])
+        if by_row(existing, qty):
+            continue
         if qty == sum(c.quantity for c in existing):
             continue
         pin = (side_pinned or {}).get(name)
@@ -5603,6 +5776,7 @@ class DeckService:
             side_modifiers,
             add_labels(changes, after, "main"),
             add_labels(changes, after_side, "side"),
+            row_counts(deck, target_rows(deck, changes)),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
@@ -9994,7 +10168,8 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
     """Names whose rows on the re-read deck do not carry the finish or printing a spec asked for."""
     out: list[str] = []
     for spec in specs:
-        rows = [c for c in verified.main_cards if c.name.lower() == spec["name"].lower()]
+        pool = verified.side_cards if spec.get("zone") == "side" else verified.main_cards
+        rows = [c for c in pool if c.name.lower() == spec["name"].lower()]
         switch = next((k for _f, k, _a, _w in SWITCHES.values() if k in spec), None)
         if switch is not None:
             pool = verified.side_cards if spec.get("zone") == "side" else verified.main_cards
@@ -10029,7 +10204,9 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
                 and (not spec.get("rows") or want_cats == got_cats)
             )
         else:
-            ok = bool(rows) and all((c.modifier or "Normal") == spec["modifier"] for c in rows)
+            # a finish changes its rows in place: those rows (a change on one row leaves the rest)
+            mine = [c for c in rows if c.relation_id in spec.get("relation_ids", [])] or rows
+            ok = bool(mine) and all((c.modifier or "Normal") == spec["modifier"] for c in mine)
         if not ok:
             out.append(spec["name"])
     return out
@@ -10394,12 +10571,25 @@ def printing_not_shown(changes: list[Change], now: Deck) -> list[str]:
     specs. A finish a printing change moved on its own is not compared."""
     out: list[str] = []
     for ch in changes:
-        if ch.action not in ("set_printing", "set_finish") or ch.zone == "side":
+        if ch.action not in ("set_printing", "set_finish"):
             continue
         face = front_face(ch.card_name).casefold()
-        rows = [c for c in now.main_cards if front_face(c.name).casefold() == face]
+        rows = [c for c in now.cards_in(ch.zone) if front_face(c.name).casefold() == face]
         if not rows:
             out.append(ch.card_name)
+            continue
+        if ch.relation_id:
+            # one row: a finish stays on that row; a printing makes a new row, so any row shows it
+            same = [c for c in rows if c.relation_id == ch.relation_id]
+            if ch.action == "set_finish":
+                if not same or (same[0].modifier or "Normal") != ch.finish:
+                    out.append(ch.card_name)
+            elif not any(
+                str(c.set_code or "").lower() == str(ch.set_code or "").lower()
+                and str(c.collector_number or "") == str(ch.collector_number or "")
+                for c in rows
+            ):
+                out.append(ch.card_name)
             continue
         for c in rows:
             if ch.action == "set_printing" and (
