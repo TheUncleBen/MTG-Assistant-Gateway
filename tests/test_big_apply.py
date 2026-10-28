@@ -6,6 +6,7 @@ still being made an edit to it is refused with how far the apply got, instead of
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import html
 import re
 from collections import Counter
@@ -212,3 +213,23 @@ async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
     finally:
         release.set()
         await b.aclose()
+
+
+async def test_a_new_deck_that_does_not_match_names_its_deck_id(stack: Stack, big_list) -> None:
+    """A new deck saved with a card short says which deck was made, as "deck ID N"."""
+    h = stack.h
+    token = await linked_user(stack)
+    svc = h.app.state.gateway.decks
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Short", "cards": big_list[:3]}))
+    read = svc.get_deck
+
+    async def one_short(*a, **k):  # noqa: ANN002, ANN003, ANN202
+        deck = await read(*a, **k)
+        return dataclasses.replace(deck, cards=deck.cards[:-1])
+
+    svc.get_deck = one_short
+    out = await press_approve(h, token, p["proposal_id"])
+    row = h.db.get_proposal(p["proposal_id"], "user-1")
+    message = str(out.get("message") or out.get("detail") or row["result"])
+    assert row["state"] == "failed", (row["state"], out)
+    assert f"The deck was created (deck ID {row['deck_id']}) but these cards" in message, message

@@ -7066,9 +7066,8 @@ class DeckService:
                 "verify_mismatch",
                 f"Made, but {differently}"
                 if not mismatches
-                else f"The deck was created (id {created.id}) but these cards do not match the proposal: "
-                + ", ".join(mismatches)
-                + (f". {differently}" if saved_otherwise else ""),
+                else f"The deck was created (deck ID {created.id}) but these cards do not match the "
+                "proposal: " + ", ".join(mismatches) + (f". {differently}" if saved_otherwise else ""),
             )
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])

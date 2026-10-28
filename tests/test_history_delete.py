@@ -143,6 +143,10 @@ def test_the_delete_itself_checks_the_backup_hold_again(tmp_path: Path) -> None:
         "snapbackup", sub="alice", backup_deck_id="900", deck_id="42", proposal_id=None, due=0
     )
     assert db.snapshot_held("snapbackup", "alice") == SNAPSHOT_HELD_BACKUP
+    assert SNAPSHOT_HELD_BACKUP == (
+        "The gateway still needs this snapshot to tidy up its backup copy on Archidekt, "
+        "so it can't be deleted yet."
+    )
     assert db.delete_snapshot("snapbackup", "alice") is False
     assert db.get_snapshot("snapbackup", "alice") is not None
 
