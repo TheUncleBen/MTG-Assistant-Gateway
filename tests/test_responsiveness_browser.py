@@ -562,8 +562,10 @@ def test_the_server_answers_main_pages_fast_and_static_files_are_kept(server: Se
             assert m, (path, r.headers.get("server-timing"))
             best = min(best, float(m.group(1)))
         slow.append((path, best))
-        # kept by the member's own browser only, and always asked again (owner decision, 0.7.46)
-        assert r.headers["cache-control"] == "private, no-cache"
+        # kept by the member's own browser only, and always asked again (owner decision, 0.7.46);
+        # the account and Admin pages are never kept
+        kept = "no-store" if path.startswith(("/account", "/admin")) else "private, no-cache"
+        assert r.headers["cache-control"] == kept, path
     print("server time (ms):", slow)
     over = [s for s in slow if s[1] > SERVER_MS]
     assert not over, f"server time over {SERVER_MS} ms: {over}; all: {slow}"
