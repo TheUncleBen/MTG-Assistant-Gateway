@@ -27,7 +27,16 @@ from . import forge as forge_module
 from .archidekt import Deck, DeckCard
 from .db import Database, _like
 from .decklist import DecklistError, ListCard, front_faces, parse_decklist, to_text
-from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
+from .decks import (
+    ADMIN_CLIENT,
+    BROWSER_CLIENT,
+    DeckError,
+    DeckService,
+    _clean_deck_id,
+    actor_label,
+    current_client,
+    deck_to_text,
+)
 from .forge import (
     FINAL_STATES,
     GIVE_UP_SECONDS,
@@ -2188,14 +2197,24 @@ class ReportService:
         args += [limit, max(0, int(offset))]
         with self.db._lock:
             rows = self.db._conn.execute(sql, args).fetchall()
-        return [self._summary(dict(r)) for r in rows]
+        return self._named([self._summary(dict(r)) for r in rows])
+
+    def _named(self, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Each report's ``created_by``: the app's name (as proposals show it) next to the raw
+        ``created_by_client``, "browser" for the member's own pages."""
+        ids = {s.get("created_by_client") for s in summaries} - {BROWSER_CLIENT, ADMIN_CLIENT, None}
+        names = self.db.client_names(ids) if ids else {}
+        for s in summaries:
+            cid = s.get("created_by_client")
+            s["created_by"] = actor_label(cid, names.get(cid or ""))
+        return summaries
 
     def get(self, sub: str, report_id: str) -> dict[str, Any]:
         row = self.db._one("SELECT * FROM reports WHERE id = ? AND owner_sub = ?", (str(report_id), sub))
         if row is None:
             raise DeckError("not_found", "No such report for your account.")
         d = dict(row)
-        out = self._summary(d)
+        [out] = self._named([self._summary(d)])
         out["stats"] = {k: v for k, v in json.loads(d["stats_json"]).items() if k != RUN_KEY}
         out["goldfish"] = _compact(json.loads(d["goldfish_json"])) if d.get("goldfish_json") else None
         # ahead of the simulation's own text: how much of the deck its numbers stand for

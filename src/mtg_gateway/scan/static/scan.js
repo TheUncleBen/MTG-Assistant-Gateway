@@ -18,6 +18,7 @@
   const G = window.ScanGeometry || null; // card edge detection and flattening (geometry.js)
   const PHOTO_MAX = 2400; // long side of the working copy of an uploaded photo, in pixels
 
+  const ASK_DELETE = new URL(location.href).searchParams.get('delete'); // an assistant's delete link
   const state = {
     items: [],            // {quantity, name, status, note, card, foil}
     setLock: '',          // lowercase set code the user says every card comes from ('' = off)
@@ -25,7 +26,7 @@
     sessionId: null,
     sessionName: '',
     dirty: false,
-    tab: 'camera',
+    tab: ASK_DELETE ? 'sessions' : 'camera',
     stream: null,
     torch: false,         // camera torch (flash LED) on, where the track supports it
     continuous: false,    // keep scanning frames; certain matches are added without a tap
@@ -1777,6 +1778,8 @@
         ul.append(li);
       });
       panel.append(h('div', { class: 'card' }, ul));
+      const asked = ASK_DELETE && byId[ASK_DELETE] && ul.querySelector('li[data-id="' + CSS.escape(ASK_DELETE) + '"] .btn-outline-danger');
+      if (asked && !state.askedDelete) { state.askedDelete = true; del(byId[ASK_DELETE], asked); }
     } catch (err) {
       if (state.tab !== 'sessions') return;
       panel.textContent = ''; panel.append(h('div', { class: 'notice error', text: 'Could not load sessions: ' + why(err) }));

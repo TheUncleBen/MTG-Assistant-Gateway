@@ -90,6 +90,7 @@ TOOLS: dict[str, ToolWords] = {
     "play_more_games": ToolWords("Play more games", "Play more games on that report"),
     "propose_delete_report": ToolWords("Ask to delete a report", "Delete that test report"),
     "propose_delete_snapshot": ToolWords("Ask to delete a snapshot", "Delete that snapshot"),
+    "propose_delete_scan_session": ToolWords("Ask to delete a scan", "Delete that scan"),
     # scan/ (the card scanner's tools)
     "resolve_cards": ToolWords("Find exact printings", "Which printing is this card?"),
     "card_printings": ToolWords("List a card's printings", "Show me this card's printings"),

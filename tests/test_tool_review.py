@@ -426,3 +426,64 @@ async def test_a_backup_copy_is_never_backed_up_itself(stack: Stack) -> None:
     assert set(stack.ark.decks) == before, "a new deck was made on Archidekt"
     assert out["result"].get("archidekt_backup") == "skipped_backup_copy", out["result"]
     assert out["snapshot_id"]
+
+
+# -- a scan session can be removed by the user's own press, from a link the assistant gives ---------
+async def test_an_assistant_can_ask_to_delete_one_scan_session(stack: Stack) -> None:
+    from pathlib import Path
+
+    from mtg_gateway import scan as scan_pkg
+    from mtg_gateway.app import WRITE_TOOLS
+    from mtg_gateway.tool_labels import TOOLS
+
+    from .test_decks_and_proxy import mcp_token
+
+    h = stack.h
+    token = await mcp_token(h)
+    saved = structured(await call(h, token, "save_scan_session", {"name": "Binder", "text": "2 Sol Ring"}))
+    out = structured(await call(h, token, "propose_delete_scan_session", {"session": "binder"}))
+    assert out["ok"] and out["deleted"] is False, out
+    assert out["delete_url"].endswith(f"/scan?delete={saved['id']}"), out
+    assert "press" in out["message"] and "“Binder”" in out["message"]
+    listed = structured(await call(h, token, "list_scan_sessions"))["sessions"]
+    assert [s["id"] for s in listed] == [saved["id"]]  # nothing deleted
+    nope = structured(await call(h, token, "propose_delete_scan_session", {"session": "scan_nope"}))
+    assert nope["ok"] is False and nope["error"] == "not_found", nope
+    assert "propose_delete_scan_session" in WRITE_TOOLS and "propose_delete_scan_session" in TOOLS
+    js = (Path(scan_pkg.__file__).parent / "static" / "scan.js").read_text()
+    assert "searchParams.get('delete')" in js
+
+
+# -- a report names the app that ran it, not only its client id -------------------------------------
+async def test_a_report_names_the_app_that_ran_it(stack: Stack) -> None:
+    from .test_decks_and_proxy import mcp_token
+    from .test_history_page import store_report
+
+    h = stack.h
+    gw = h.app.state.gateway
+    token = await mcp_token(h)
+    sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+    store_report(gw.db, sub, "rep_app")
+    store_report(gw.db, sub, "rep_web", taken_at=1)
+    gw.db.save_client("cid-chat", {"client_id": "cid-chat", "client_name": "ChatGPT"})
+    with gw.db.tx() as c:
+        c.execute("UPDATE reports SET created_by_client = 'cid-chat' WHERE id = 'rep_app'")
+    listed = structured(await call(h, token, "list_deck_reports", {}))["reports"]
+    assert {r["report_id"]: r["created_by"] for r in listed} == {
+        "rep_app": "app: ChatGPT (cid-chat)",
+        "rep_web": "browser",
+    }
+    got = structured(await call(h, token, "get_deck_report", {"report_id": "rep_app"}))
+    assert got["created_by"] == "app: ChatGPT (cid-chat)", got.get("created_by")
+
+
+# -- the assistant keeps working while a proposal waits ---------------------------------------------
+def test_the_instructions_say_reading_and_testing_never_wait_for_approval() -> None:
+    from mtg_gateway.app import server_instructions
+
+    told = server_instructions("https://gateway.example.com")
+    assert (
+        "They and the other reading and test tools (get_deck, deck_stats, compare_decks, "
+        "run_deck_report) never need the user's approval, in any approval mode: keep using them "
+        "while a proposal waits." in told
+    )
