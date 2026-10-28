@@ -566,11 +566,15 @@ class ReportService:
                 raise DeckError(
                     "not_found", "Your gateway data was deleted while the report ran; nothing was kept."
                 )
+            # Past the cap, the oldest report of a pasted list, a proposal or a comparison goes
+            # first, so those never crowd out a deck's own reports (its trend); the one just made
+            # always stays.
             keep = (
-                "owner_sub = ? AND id NOT IN ("
-                "SELECT id FROM reports WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)"
+                "owner_sub = ? AND id NOT IN (SELECT id FROM reports WHERE owner_sub = ? ORDER BY "
+                f"id = ? DESC, json_extract(stats_json, '$.{RUN_KEY}.source') IS NULL DESC, "
+                "taken_at DESC, rowid DESC LIMIT ?)"
             )
-            limit = (sub, sub, MAX_REPORTS_PER_USER)
+            limit = (sub, sub, rid, MAX_REPORTS_PER_USER)
             pruned = c.execute(
                 f"SELECT forge_json, forge_solo_json FROM reports WHERE {keep} AND "
                 "(forge_json IS NOT NULL OR forge_solo_json IS NOT NULL)",
