@@ -52,7 +52,6 @@ from .approve import (
     APPROVAL_META_KEY,
     CARD_ROWS,
     CARD_TOOL_META,
-    apply_when_allowed,
     apps_extension,
     proposal_text,
     proposal_tool_result,
@@ -975,12 +974,6 @@ def build_mcp_server(state: AppState) -> MCPServer:
             reader_seq=reader_seq,
         )
 
-    async def _proposed(data: dict[str, Any], *, apply_if_allowed: bool = True) -> CallToolResult:
-        """``_proposal`` of a propose tool's answer, applied first in the same call when the
-        member's approval mode lets the assistant apply it (approve.apply_when_allowed)."""
-        data = await apply_when_allowed(data, decks=state.decks, sub=_sub(), wanted=apply_if_allowed)
-        return _proposal(data)
-
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes
     from .tools_account import add_account_tools
@@ -995,7 +988,6 @@ def build_mcp_server(state: AppState) -> MCPServer:
     h = SimpleNamespace(
         _closed_at=_closed_at,
         _proposal=_proposal,
-        _proposed=_proposed,
         _sub=_sub,
         card_meta=card_meta,
         login_cookie=login_cookie,
@@ -1069,8 +1061,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # and without the generated titles and null branches, which only cost tokens.
     for tool in server._tool_manager.list_tools():
         tool.parameters = compact_schema(inline_refs(tool.parameters))
-        if tool.name in PROPOSAL_TOOL_HINTS:
-            tool.annotations = _proposal_hints(tool.annotations, PROPOSAL_TOOL_HINTS[tool.name])
+        if tool.name in PROPOSAL_TOOLS:
+            tool.annotations = _proposal_hints(tool.annotations)
 
     add_gateway_routes(state, h)
     add_stream_route(state, server)  # the Android app's notifications (notify.py)
@@ -1078,39 +1070,41 @@ def build_mcp_server(state: AppState) -> MCPServer:
     return server
 
 
-# One hint for every tool that records, changes or closes a proposal (A9, 0.7.46): none is read
-# only, since a propose may apply in the same call when the member's mode allows it
-# (apply_if_allowed) and the rest change what waits, so a host treats them all alike. The value is
-# destructiveHint: whether what it may lead to can remove or overwrite something (a card, a
-# comment, a deck); a tool that only creates something new is not.
-PROPOSAL_TOOL_HINTS: dict[str, bool] = {
-    "propose_new_deck": False,
-    "propose_clone_deck": False,
-    "propose_add_package": False,
-    "propose_deck_changes": True,
-    "propose_restore_snapshot": True,
-    "propose_deck_details": True,
-    "propose_deck_categories": True,
-    "propose_custom_card_changes": True,
-    "propose_list_change": True,
-    "propose_collection_changes": True,
-    "propose_account_action": True,
-    "propose_delete_deck": True,
-    "propose_profile_change": True,
-    "propose_delete_report": True,
-    "propose_delete_snapshot": True,
-    "propose_delete_scan_session": True,
-    "amend_proposal": True,
-    "combine_proposals": True,
-    "withdraw_proposal": False,
-}
+# One hint for every tool that records, changes or closes a proposal (A9): each is read only, as
+# it changes only the gateway's own proposal records and never Archidekt (owner decision 0.7.46: no
+# propose applies in the same call; apply_proposal is the one write), so a host treats them alike.
+PROPOSAL_TOOLS: frozenset[str] = frozenset(
+    {
+        "propose_new_deck",
+        "propose_clone_deck",
+        "propose_add_package",
+        "propose_deck_changes",
+        "propose_restore_snapshot",
+        "propose_deck_details",
+        "propose_deck_categories",
+        "propose_custom_card_changes",
+        "propose_list_change",
+        "propose_collection_changes",
+        "propose_account_action",
+        "propose_delete_deck",
+        "propose_profile_change",
+        "propose_delete_report",
+        "propose_delete_snapshot",
+        "propose_delete_scan_session",
+        "propose_rest",  # the card's own Propose the rest
+        "amend_proposal",
+        "combine_proposals",
+        "withdraw_proposal",
+    }
+)
 
 
-def _proposal_hints(annotations: Any, destructive: bool) -> Any:
-    """A proposal tool's annotations with readOnlyHint false and its destructiveHint."""
+def _proposal_hints(annotations: Any) -> Any:
+    """A proposal tool's annotations: readOnlyHint true, and no destructiveHint (it only applies
+    to a tool that is not read only)."""
     if annotations is None:
-        return types.ToolAnnotations(read_only_hint=False, destructive_hint=destructive)
-    return annotations.model_copy(update={"read_only_hint": False, "destructive_hint": destructive})
+        return types.ToolAnnotations(read_only_hint=True)
+    return annotations.model_copy(update={"read_only_hint": True, "destructive_hint": None})
 
 
 # The admin settings DeckService.waiting_by_deck reads (decks.py mode_of, _assistant_policy).

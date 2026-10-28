@@ -9,7 +9,7 @@ from mcp_types import CallToolResult
 from pydantic import Field
 
 from .app import AppState, _tool_error
-from .approve import APPLY_IF_ALLOWED_TEXT, with_words_note
+from .approve import with_words_note
 from .archidekt import ArchidektError, drops_formatting, words_only_note
 from .archidekt_csv import CsvError, parse_export
 from .decklist import ListCard, to_text
@@ -26,7 +26,6 @@ from .schemas import (
 def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
     """Register the deck details, social and account action tools."""
     _proposal = h._proposal
-    _proposed = h._proposed
     _sub = h._sub
     card_meta = h.card_meta
     server = h.server
@@ -46,8 +45,8 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "and a proposal that would change nothing is refused. Returns the same fields as "
             "propose_deck_changes (kind 'details', "
             "a before/after diff and the review URL); the user confirms it and then it is applied with "
-            "apply_proposal like any other proposal, which keeps a snapshot first. Nothing reaches "
-            "Archidekt unless this call applies it (apply_if_allowed, when assistant_may_apply is true)."
+            "apply_proposal like any other proposal, which keeps a snapshot first. Changes nothing on "
+            "Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -57,7 +56,6 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
         ],
         details: Annotated[DeckDetails, Field(description="Only the settings to change.")],
-        apply_if_allowed: Annotated[bool, Field(description=APPLY_IF_ALLOWED_TEXT)] = True,
     ) -> CallToolResult:
         try:
             raw = dumped(details, unset=True)
@@ -65,9 +63,8 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             # when links, formatting or embeds were lost, so the assistant does not claim them
             lost = drops_formatting(raw.get("description")) if isinstance(raw, dict) else False
             out = await state.decks.propose_deck_details(_sub(), deck_id, raw)
-            return await _proposed(
-                with_words_note({"ok": True, **out}, words_only_note("description") if lost else None),
-                apply_if_allowed=apply_if_allowed,
+            return _proposal(
+                with_words_note({"ok": True, **out}, words_only_note("description") if lost else None)
             )
         except DeckError as exc:
             return _proposal(_tool_error(exc))
@@ -81,8 +78,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "'Copy of - <deck name>'. Returns the proposal (kind 'clone') and the review URL; the user "
             "confirms it and apply_proposal makes the copy, which keeps every card, quantity, category and "
             "finish. A clone is low risk, so in the user's semi-automatic mode you may apply it yourself "
-            "(assistant_may_apply says so). Nothing reaches Archidekt unless this call applies it "
-            "(apply_if_allowed, when assistant_may_apply is true)."
+            "(assistant_may_apply says so). Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -90,11 +86,10 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
     async def propose_clone_deck(
         deck_id: str,
         name: str | None = None,
-        apply_if_allowed: Annotated[bool, Field(description=APPLY_IF_ALLOWED_TEXT)] = True,
     ) -> CallToolResult:
         try:
             made = await state.decks.propose_clone(_sub(), deck_id, name)
-            return await _proposed({"ok": True, **made}, apply_if_allowed=apply_if_allowed)
+            return _proposal({"ok": True, **made})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 

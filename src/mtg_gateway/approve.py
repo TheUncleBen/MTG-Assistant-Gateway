@@ -174,55 +174,6 @@ def proposal_tool_result(
     )
 
 
-# kept from a proposal's answer when the same call applies it: what the proposing found
-KEPT_ON_APPLY = (
-    "warnings",
-    "note",
-    "added_to",
-    "duplicate_of",
-    "replaced",
-    "replaces_when_applied",
-    "legality_after",
-    "unchanged",
-    "unchecked_names",
-)
-# what a propose tool's apply_if_allowed says in its schema
-APPLY_IF_ALLOWED_TEXT = "Apply it in this call when assistant_may_apply allows it (default true)."
-
-
-async def apply_when_allowed(
-    data: dict[str, Any], *, decks: Any, sub: str, wanted: bool = True
-) -> dict[str, Any]:
-    """Propose and apply in one call (owner decision 0.7.46): a waiting proposal the member's
-    approval mode lets the assistant apply (``assistant_may_apply``, the gateway's own rules) is
-    applied at once, exactly as apply_proposal would (via "mcp", which checks the policy again
-    just before anything is sent). Anything else is returned as it was. ``applied_now`` says
-    whether it was applied here; an apply that stopped leaves ``apply_error`` and the proposal as
-    it now stands (waiting again, or failed)."""
-    if not (
-        wanted
-        and data.get("ok") is not False
-        and data.get("state") == "pending"
-        and data.get("assistant_may_apply")
-        and data.get("proposal_id")
-    ):
-        return data
-    from .decks import DeckError
-
-    pid = str(data["proposal_id"])
-    kept = {k: data[k] for k in KEPT_ON_APPLY if k in data}
-    try:
-        done = await decks.apply(sub, pid, via="mcp")
-    except DeckError as exc:
-        try:
-            now = decks.describe(sub, pid)
-        except DeckError:
-            now = dict(data)
-        stop = {"error": exc.kind, "message": str(exc)}
-        return {**now, "ok": True, **kept, "applied_now": False, "apply_error": stop}
-    return {**done, "ok": True, **kept, "applied_now": done.get("state") == "applied"}
-
-
 def rows_summary(rows: list[Any]) -> dict[str, Any]:
     """What a proposal's rows add up to, for a card that shows only the first few: cards added,
     cards taken out, other changes, rows in all, and rows of each kind (``groups``, the card's

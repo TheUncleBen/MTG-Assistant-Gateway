@@ -31,7 +31,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import prefs, refusals, ui
 from . import searchpanel as sp
-from .approve import APPLY_IF_ALLOWED_TEXT, CARD_TOOL_META, apply_when_allowed, proposal_tool_result
+from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import (
     COLLECTION_PAGE_SIZE,
     ArchidektError,
@@ -3094,7 +3094,6 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             str | None, Field(description="Or a scan session's id or name to add.")
         ] = None,
         remove: Annotated[list[CollectionRemove | str] | None, Field(description="Cards to remove.")] = None,
-        apply_if_allowed: Annotated[bool, Field(description=APPLY_IF_ALLOWED_TEXT)] = True,
     ) -> Any:
         sub = _sub()
         items: list[Any] = [card_aliases(dumped(a)) for a in add or []]
@@ -3150,4 +3149,4 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         except DeckError as exc:
             return _result({"ok": False, "error": exc.kind, "message": str(exc), **exc.extra})
         made = {"ok": True, **p, **({"warnings": warnings} if warnings else {})}
-        return _result(await apply_when_allowed(made, decks=service.decks, sub=sub, wanted=apply_if_allowed))
+        return _result(made)

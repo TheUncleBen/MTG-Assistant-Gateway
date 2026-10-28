@@ -219,7 +219,8 @@ def test_overlap_lines_name_both_sides() -> None:
 async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token(stack: Stack) -> None:
     """Review of 0.7.29's own tools: amend, withdraw, combine and the card's Apply all change what
     waits (or Archidekt), so a read-only token (mtg.read) is refused them like every other tool
-    whose readOnlyHint is false."""
+    whose readOnlyHint is false. The proposal tools' hint is true (they never touch Archidekt,
+    owner decision 0.7.46), and a read-only token is still refused them."""
     import json
 
     from mtg_gateway.app import WRITE_TOOLS
@@ -231,7 +232,7 @@ async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token
     r = await h.mcp(token, "tools/list", {}, rid=7)
     tools = sse_json(r)["result"]["tools"]
     writes = {t["name"] for t in tools if (t.get("annotations") or {}).get("readOnlyHint") is False}
-    assert {"amend_proposal", "withdraw_proposal", "combine_proposals"} <= writes
+    assert {"amend_proposal", "withdraw_proposal", "combine_proposals"} <= WRITE_TOOLS - writes
     assert writes <= WRITE_TOOLS, writes - WRITE_TOOLS
     assert "confirm_waiting" in WRITE_TOOLS
     await _mode(h, "manual")

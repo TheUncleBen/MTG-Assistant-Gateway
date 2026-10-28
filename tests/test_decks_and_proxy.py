@@ -56,31 +56,7 @@ async def mcp_token(h: Harness) -> str:
     return (await h.tokens_for(client))["access_token"]
 
 
-# The tools that apply a new proposal in the same call when the member's approval mode lets the
-# assistant apply it (apply_if_allowed, default true). Tests written for the two-step flow (propose,
-# then apply_proposal or the card) keep their proposal waiting by passing false here; a test of the
-# one-call apply passes apply_if_allowed itself (test_assistant_flow.py).
-APPLIES_IN_ONE_CALL = frozenset(
-    {
-        "propose_new_deck",
-        "propose_deck_changes",
-        "amend_proposal",
-        "combine_proposals",
-        "propose_restore_snapshot",
-        "propose_deck_categories",
-        "propose_custom_card_changes",
-        "propose_deck_details",
-        "propose_clone_deck",
-        "propose_list_change",
-        "propose_add_package",
-        "propose_collection_changes",
-    }
-)
-
-
 async def call(h: Harness, token: str, name: str, args: dict | None = None) -> dict:
-    if name in APPLIES_IN_ONE_CALL and isinstance(args, dict):
-        args = {"apply_if_allowed": False, **args}
     return await call_as_sent(h, token, name, args)
 
 

@@ -12,7 +12,6 @@ from pydantic import Field
 
 from . import account_lists
 from .app import AppState, _tool_error
-from .approve import APPLY_IF_ALLOWED_TEXT
 from .decks import DeckError
 
 LIST_FIELD = Field(
@@ -81,8 +80,7 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
             "'lists') and its review URL; it is applied with apply_proposal like any other. A small "
             "change is low risk (assistant_may_apply says when you may apply it yourself); a delete "
             "(a template, a color tag, a custom card, or all pins) always waits for the user's own "
-            "press. Nothing reaches Archidekt unless this call applies it (apply_if_allowed, when "
-            "assistant_may_apply is true)."
+            "press. Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,
@@ -93,10 +91,9 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
             list[dict[str, Any]],
             Field(description="The changes to that list, each with op (see the description)."),
         ],
-        apply_if_allowed: Annotated[bool, Field(description=APPLY_IF_ALLOWED_TEXT)] = True,
     ) -> CallToolResult:
         try:
             out = await state.decks.propose_lists(_sub(), which_list, changes)
-            return await h._proposed({"ok": True, **out}, apply_if_allowed=apply_if_allowed)
+            return h._proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
