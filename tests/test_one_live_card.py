@@ -631,3 +631,28 @@ def test_the_card_sent_to_the_chat_leaves_out_the_sources_comments_and_indentati
     assert "// " in CARD_PATH.read_text(encoding="utf-8")
     for name in ("waiting-card", "deck-card", "stats-card"):
         assert not [x for x in any_card(name).split("\n") if x.strip().startswith("//")], name
+
+
+async def test_a_change_the_assistant_may_apply_still_has_apply_now_on_its_card(stack: Stack) -> None:
+    """Semi and Full auto: a change the assistant may apply itself had no code, so its card had
+    nothing to press, and a change the assistant never applied waited with no way to apply it
+    from the chat. The card now has the code (Apply now, Reject); the assistant can still apply."""
+    from .test_approval_modes import _adds
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    for mode in ("semi", "auto"):
+        await _mode(h, mode)
+        res = await _adds(h, token, 1)
+        p = structured(res)
+        assert p["assistant_may_apply"] is True and p["approval_mode"] == mode, p
+        code = res["_meta"][APPROVAL_META_KEY]
+        before = len(ark.patches)
+        done = structured(
+            await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+        )
+        assert done["ok"] and done["state"] == "applied" and len(ark.patches) > before, done
+        # the assistant's own apply is unchanged
+        own = structured(await _adds(h, token, 1))
+        out = structured(await call(h, token, "apply_proposal", {"proposal_id": own["proposal_id"]}))
+        assert out["ok"] and out["state"] == "applied", out

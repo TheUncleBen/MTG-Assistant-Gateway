@@ -99,7 +99,8 @@ def card_approval(
     member decides it in this chat, and whether it was made in another app (whose card alone can
     approve it, decks.check_approval; this card then sends the member to the review page). A
     deck deletion never has a code (its review page only); since 0.7.29 every other account
-    action has one. A proposal the assistant may apply itself has no buttons to press."""
+    action has one. A proposal the assistant may apply itself (Semi, Full auto) has one too, so its
+    card offers Apply now and Reject should the assistant not apply it (0.7.46)."""
     from .decks import current_client
 
     if not (
@@ -107,7 +108,6 @@ def card_approval(
         and data.get("state") == "pending"
         and data.get("proposal_id")
         and (data.get("ok") or data.get("error") == "browser_required")
-        and not data.get("assistant_may_apply")
     ):
         return None, False
     row = decks.db.get_proposal(str(data["proposal_id"]), sub)

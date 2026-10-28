@@ -296,9 +296,11 @@ button.danger:disabled{color:var(--red)}
     if (loses && !p.assistant_may_apply) return "This removes all the formatting already there, such as bold text, links and pictures. Open it to see what goes, and approve it there.";
     if (keeps && !p.assistant_may_apply) return "This keeps the formatting already there, such as bold text, links or pictures. Open it to see how it will look, and approve it there.";
     if (p.assistant_may_apply) {
-      return p.approval_mode === "auto"
+      // its card has Apply now too (0.7.46): a change the assistant leaves waiting is not stuck
+      var also = approval && p.state === "pending" ? " You can also apply it here with Apply now." : "";
+      return (p.approval_mode === "auto"
         ? "Your approval mode lets your assistant apply this itself, without asking."
-        : "Low-risk change (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
+        : "Low-risk change (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.") + also;
     }
     // one member-only tier, three kinds: each says what it does (a deck deletion: review page only)
     if (p.risk === "destructive" && p.kind === "custom_cards") return "This takes custom cards out of the deck, and restoring a snapshot doesn't put them back. Only you can approve it, every time, in every approval mode.";
@@ -568,7 +570,8 @@ button.danger:disabled{color:var(--red)}
     return Number(sc.version || 1) > Number(p.version || 1);
   }
   function moved(p, sc) {
-    return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
+    // assistant_may_apply, approval_mode: the member's approval mode changed since (Apply now or Approve)
+    return ["status", "status_reason", "press_reason", "replace_note", "assistant_may_apply", "approval_mode"].some(function (k) {
       return String(p[k] || "") !== String(sc[k] || "");
     });
   }
@@ -724,7 +727,8 @@ button.danger:disabled{color:var(--red)}
     // action (a like, a comment, a folder...) has one too; a deck deletion never does, so it
     // takes the "review page" branch below.
     if (p.state === "pending" && p.writes_enabled && approval) {
-      var ok = el("button", "primary", "Approve: apply to Archidekt");
+      // a change the assistant may apply itself: the member may apply it first
+      var ok = el("button", "primary", p.assistant_may_apply ? "Apply now" : "Approve: apply to Archidekt");
       ok.type = "button"; ok.id = "approve";
       var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
       ok.disabled = no.disabled = true; armed = false;
