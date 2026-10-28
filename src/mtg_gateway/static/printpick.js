@@ -318,7 +318,7 @@
     search.id = "pp-q";
     // it narrows this card's printings by set (name or code); a card's name finds nothing here,
     // so the box says what it filters and the empty list offers the card search instead
-    search.placeholder = "Filter these printings by set";
+    search.placeholder = "Filter by set";
     search.setAttribute("aria-label", "Filter these printings by set");
     search.autocomplete = "off";
     search.setAttribute("enterkeyhint", "search");
@@ -415,7 +415,7 @@
     document.documentElement.classList.add("printpick-open");
     if (window.MtgSelect && window.MtgSelect.enhance) window.MtgSelect.enhance(filters);
     closeBtn.focus();
-    status.textContent = "Looking up printings…";
+    looking();
     var seq = ++st.seq;
     var mine = st;
     (opts.oracleId ? Promise.resolve(opts.oracleId) : oracleFor(opts.name, opts.current)).then(function (oid) {
@@ -442,7 +442,7 @@
     st.more.disabled = true;
     st.more.setAttribute("aria-busy", "true");
     st.more.textContent = "Loading…";
-    if (reset) st.status.textContent = "Looking up printings…";
+    if (reset) looking();
     pageFor(st.oid, params, page).then(function (d) {
       if (st !== mine || seq !== st.seq) return;
       st.loading = false;
@@ -467,11 +467,21 @@
       failed(err);
     });
   }
+  // the status line while printings are looked up (busy answers asked again included): the
+  // theme's progress ring until the tiles or an error replace it
+  function looking() {
+    st.status.className = "ppstatus";
+    st.status.textContent = "";
+    var ring = el("span", "ui-spin");
+    ring.setAttribute("aria-hidden", "true");
+    st.status.appendChild(ring);
+    st.status.appendChild(document.createTextNode(" Looking up printings…"));
+  }
   // what went wrong, in plain words
   function why(err) {
     if (!err) return "The gateway did not answer.";
     if (err.status === 401) return "You are signed out. Sign in again, then retry.";
-    if (busy(err)) return "Scryfall is busy with other lookups right now. Retry when you’re ready.";
+    if (busy(err)) return "Your other card lookups are still running. Retry when you’re ready.";
     if (err.kind === "not_found") return (err.message || "Scryfall does not know this card") + ".";
     if (err.kind === "unavailable") return "Scryfall is not answering right now.";
     if (!err.status) return "The gateway did not answer. Check the connection, then retry.";
