@@ -38,7 +38,6 @@ CARD_TOOLS = (
     "propose_restore_snapshot",
     "propose_deck_details",
     "propose_clone_deck",
-    "get_proposal",
 )
 
 
@@ -87,6 +86,9 @@ async def test_proposal_tools_carry_the_card_and_confirm_is_app_only(stack: Stac
     assert confirm["ui"] == {"visibility": ["app"]}
     assert confirm["openai/visibility"] == "private" and confirm["openai/widgetAccessible"] is True
     assert "resourceUri" not in confirm["ui"]
+    # the card's own read: offered to the card only, so a model's status check draws no card
+    read = tools["get_proposal"]["_meta"]
+    assert read["ui"] == {"visibility": ["app"]} and read["openai/visibility"] == "private"
     assert tools["apply_proposal"]["_meta"]["anthropic/requiresUserInteraction"] is True
     assert "confirm_proposal" in WRITE_TOOLS
     # The tools the assistant uses for a reject keep their plain metadata.

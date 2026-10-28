@@ -21,7 +21,7 @@ tool you have not used in this conversation.
    the fact came from ("Scryfall's oracle text says...", "EDHREC lists it in
    41% of decks").
 2. **Never claim a deck was changed or created unless you saw the proposal
-   in `"state": "applied"`** (from `apply_proposal` or `get_proposal`). A
+   in `"state": "applied"`** (from `apply_proposal` or `proposal_status`). A
    proposal is not a change. A review link is not a change. If you did not
    see that state in this conversation, say the change has not been made.
 3. **Never ask for a password, token or one-time code.** Archidekt is linked
@@ -269,9 +269,13 @@ own linked account. Follow every step, in order.
    amend that proposal once with its `amend.changes` and your new
    changes merged into one list, one change per card. The check can't
    see the deck itself, so a card not in it, or a deck changed since
-   you read it, is still found only when you propose. A card already
-   in the chat follows the proposal when it is amended, withdrawn or
-   replaced, so there is no need to show it again.
+   you read it, is still found only when you propose. For a new deck,
+   check it with `check_new_deck` first the same way. A card already in
+   the chat follows the proposal: when it is amended, withdrawn or
+   replaced, older cards shrink to a short line and only the newest card
+   can be approved, so there is no need to show it again. To see where a
+   proposal stands, call `proposal_status` (no card); never propose again
+   to find out.
 3. **Propose** with one of:
    - `propose_deck_changes` to edit an existing deck: `deck_id` and
      `changes` (or `scan_session`, the id or name of a scan session, whose
@@ -291,7 +295,12 @@ own linked account. Follow every step, in order.
      pasted `decklist_text`, an Archidekt `csv_text` export or a
      `scan_session` (id or name). Up to 300 rows and 400 cards. Its
      `warnings` name a deck size the format does not allow and scan cards
-     matched from a misspelt name: tell the user about each.
+     matched from a misspelt name: tell the user about each. One new deck
+     is one proposal: to change a waiting one, call `amend_proposal` with
+     `new_deck` (the fields that change; a card list replaces the whole
+     list). Proposing again with the name of your own waiting new deck
+     updates that proposal in place (`updated_in_place`), and `replaces`
+     names a waiting new deck it takes the place of.
    - `propose_deck_details` for the deck's own settings (`name`,
      `description`, `deck_format`, `edh_bracket`, `private`, `unlisted`) and
      its organisation (`folder`, `add_tags`, `remove_tags`, `cover`). Always
@@ -323,7 +332,7 @@ own linked account. Follow every step, in order.
    outcome when they press a button (a note that the proposal is applied
    or rejected). Where the app allows it, the card then posts "Approved, go
    on" as the user's message: carry on from the outcome you were told, and
-   call `get_proposal` only when that outcome is unclear (for example still
+   call `proposal_status` only when that outcome is unclear (for example still
    `applying`). Never call `apply_proposal` for a proposal the card is
    showing, and never call `confirm_proposal`: it belongs to the card's
    buttons, needs a code you do not have, and refuses and logs any other
@@ -352,22 +361,22 @@ own linked account. Follow every step, in order.
    - If it answers `browser_required`, the user's mode wants their own
      press (the answer carries `approval_mode` and `risk`). Give the user
      the `review_url` or point at the card and stop; when they say they
-     applied it, call `get_proposal`. In Claude Code the gateway may
+     applied it, call `proposal_status`. In Claude Code the gateway may
      instead ask the user to open the review page itself and wait a moment
      for their Apply: then the answer is the proposal's state (`applied`),
      or `browser_pending` if they have not pressed yet; ask them, then call
-     `get_proposal`.
+     `proposal_status`.
    - If it answers `writes_disabled`, applying is switched off; say so and
      stop.
    - If it answers `"state": "applying"`, a large change is still being
      written (it takes a few minutes; `progress` says how far it got). Tell
-     the user it is under way, and call `get_proposal` a minute later. Do
+     the user it is under way, and call `proposal_status` a minute later. Do
      not apply it again or make a new proposal.
    - If the user says no or changes their mind, call `reject_proposal` with
      that `proposal_id`; nothing is sent to Archidekt. Only the user's own
      message can ask for that too.
 6. **Report the result exactly.** Only `"state": "applied"` (in the
-   `apply_proposal` answer or from `get_proposal`) means Archidekt changed.
+   `apply_proposal` answer or from `proposal_status`) means Archidekt changed.
    Then tell the user:
    - that the gateway re-read the deck afterwards and it matched
      (`result.verified` is true);
@@ -436,12 +445,12 @@ flagged as an error too: say the lookup failed. Act on the code:
 
 | `error` | Meaning and what to do |
 | --- | --- |
-| `browser_required` | The user's approval mode wants their own press for this proposal (`approval_mode` and `risk` say why). Nothing was sent. Give the user the `review_url` and ask them to press Apply there (or Approve on the card); afterwards check with `get_proposal`. Do not retry. |
-| `browser_pending` | The user's app opened the review page for them but they have not pressed Apply yet. Nothing was sent. Ask them, then check with `get_proposal`. |
+| `browser_required` | The user's approval mode wants their own press for this proposal (`approval_mode` and `risk` say why). Nothing was sent. Give the user the `review_url` and ask them to press Apply there (or Approve on the card); afterwards check with `proposal_status`. Do not retry. |
+| `browser_pending` | The user's app opened the review page for them but they have not pressed Apply yet. Nothing was sent. Ask them, then check with `proposal_status`. |
 | `invalid_approval` / `in_chat_disabled` | Answers of `confirm_proposal`, the card's own tool. Never call it; the card does. |
 | `writes_disabled` | The owner has switched applying off. The proposal is kept. Give the user the review link and stop; do not retry. |
 | `not_linked` | No Archidekt link, or Archidekt no longer accepts it. Send the user to the account page to link or relink. |
-| `stale` | The deck changed on Archidekt and the proposal would no longer do what was reviewed. Nothing was sent; it is still waiting, marked Needs a look (`status: needs_look`). Load the deck again, explain what changed, then `amend_proposal` it if the user still wants the change, or let them reject it. A waiting proposal can say so before anyone applies it: `out_of_date: true` in `get_proposal` / `list_my_proposals`. Don't apply it; tell the user and amend it from the current deck if they still want it. |
+| `stale` | The deck changed on Archidekt and the proposal would no longer do what was reviewed. Nothing was sent; it is still waiting, marked Needs a look (`status: needs_look`). Load the deck again, explain what changed, then `amend_proposal` it if the user still wants the change, or let them reject it. A waiting proposal can say so before anyone applies it: `out_of_date: true` in `proposal_status` / `list_my_proposals`. Don't apply it; tell the user and amend it from the current deck if they still want it. |
 | `already_applied` | It was applied before. Nothing was sent again. Report that and stop. |
 | `other_client` | Another connected app (or the browser) made this proposal, so it can't be applied or rejected from here. Nothing was sent. Give the user the `review_url` and stop. |
 | `not_pending` | The proposal failed, expired or was rejected by the user earlier. Propose again if wanted. |

@@ -3,11 +3,11 @@ one-time approval code that lets only that card apply or reject a proposal.
 
 How it fits together:
 
-* Every propose_* tool (and get_proposal) is bound to the ``ui://`` card below through the
+* Every propose_* tool (and amend, combine, apply) is bound to the ``ui://`` card below through the
   tool's ``_meta.ui.resourceUri`` (MCP Apps). A host that renders MCP Apps (Claude on web,
-  desktop and phone; ChatGPT on the web) shows the card next to the tool result; a host that
-  does not (Claude Code, older clients) ignores the metadata and shows the text, which still
-  carries the review link.
+  desktop and phone; ChatGPT on the web and in its Android app) shows the card next to the tool
+  result; a host that does not (Claude Code, older clients) ignores the metadata and shows the
+  text, which still carries the review link.
 * The card's buttons call ``confirm_proposal``, a tool whose ``_meta.ui.visibility`` is
   ``["app"]``: hosts offer it to the card, not to the model. It also requires the approval
   code, which travels in the tool result's ``_meta`` (delivered to the card, not part of
@@ -52,6 +52,15 @@ APPROVE_DECISIONS = ("approve", "reject")
 # elicitation sent them there, and how often it looks.
 BROWSER_WAIT_SECONDS = 45.0
 BROWSER_POLL_SECONDS = 2.0
+# A proposal result carries at most this many review rows (the card shows the first few and
+# loads the rest on Show all), and its diff at most TEXT_DIFF_LINES lines, so a 100-card deck
+# keeps the chat and the assistant's context light.
+CARD_ROWS = 8
+TEXT_DIFF_LINES = 40
+MORE_TEXT = (
+    "This result lists only the first changes. proposal_status with full true lists them all "
+    "(no card); the user's card and review page show them all too."
+)
 
 # _meta for the tools whose result the card renders. The flat ``ui/resourceUri`` key is the
 # form older hosts read (the MCP Apps server helper writes both).
@@ -63,6 +72,10 @@ CONFIRM_TOOL_META: dict[str, Any] = {
     "openai/visibility": "private",
     "openai/widgetAccessible": True,
 }
+# _meta for get_proposal, the card's own read of its proposal: the card's alone, like
+# confirm_proposal (the model checks a proposal with proposal_status, which draws no card). Not
+# bound to the card, so no host draws one for it.
+CARD_READ_META: dict[str, Any] = dict(CONFIRM_TOOL_META)
 # apply_proposal (the model's own apply, allowed by the member's approval mode): Claude Code
 # shows its permission prompt on every call and offers no "always allow" for it.
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
@@ -96,14 +109,34 @@ def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) 
     return decks.approval_for(sub, row, version=int(shown) if shown else None), False
 
 
-def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> Any:
+def proposal_tool_result(
+    data: dict[str, Any],
+    *,
+    decks: Any,
+    sub: str,
+    in_chat: bool,
+    drawn: bool = False,
+    rows_limit: int | None = CARD_ROWS,
+) -> Any:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
     out of the text and structured content, so not in the model's context). The code is drawn
     only in the app that made the proposal (the only one whose press check_approval accepts); in
-    another app the card says where to approve it instead (``card_other_app``)."""
+    another app the card says where to approve it instead (``card_other_app``).
+
+    ``drawn``: the result draws a new card in the chat (a model's call of a card tool, not the
+    card's own read), so the proposal's card number for this app goes up and the result carries
+    it (``card_seq``); older cards that read a higher number step aside. ``rows_limit``: how many
+    review rows the result carries (``rows_total`` says how many there are; the card loads the
+    rest when asked); None for all of them."""
     from mcp_types import CallToolResult, TextContent
 
+    if drawn and data.get("proposal_id") and (data.get("ok") or data.get("error") == "browser_required"):
+        from .decks import current_client
+
+        seq = decks.db.next_card_seq(str(data["proposal_id"]), sub, current_client.get())
+        if seq:
+            data = {**data, "card_seq": seq}
     approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat)
     if other_app:
         data = {**data, "card_other_app": True}
@@ -114,12 +147,62 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
             data = {**data, "deck_waiting": info}
         if apply_all and approval:
             meta = {**(meta or {}), APPROVAL_SET_META_KEY: apply_all}
-    data = with_words_note(data)
+    data = bounded(with_words_note(data), rows_limit)
     return CallToolResult(
         content=[TextContent(type="text", text=proposal_text(data))],
         structured_content=data,
         _meta=meta,
     )
+
+
+def rows_summary(rows: list[Any]) -> dict[str, int]:
+    """What a proposal's rows add up to, for a card that shows only the first few: cards added,
+    cards taken out, other changes, and rows in all."""
+    adds = removes = others = 0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        qty = r.get("qty") if isinstance(r.get("qty"), int) else 0
+        if r.get("kind") == "add":
+            adds += qty
+        elif r.get("kind") == "remove":
+            removes += qty
+        else:
+            others += 1
+    return {"adds": adds, "removes": removes, "others": others, "rows": len(rows)}
+
+
+def bounded(data: dict[str, Any], rows_limit: int | None) -> dict[str, Any]:
+    """A proposal result kept small however big the proposal is: at most ``rows_limit`` review
+    rows (with ``rows_total`` and ``rows_summary``), TEXT_DIFF_LINES diff lines (with
+    ``diff_lines_total``) and, for a new deck, as many cards of its stored list as rows
+    (``cards_total``). proposal_status with full true, and the card's Show all, read the rest.
+    None keeps everything (the card's own read of the whole list)."""
+    if rows_limit is None:
+        return data
+    out = dict(data)
+    rows = out.get("rows")
+    if isinstance(rows, list) and len(rows) > rows_limit:
+        out["rows"] = rows[:rows_limit]
+        out["rows_total"] = len(rows)
+        out["rows_summary"] = rows_summary(rows)
+    diff = [ln for ln in str(out.get("diff") or "").splitlines()]
+    if len(diff) > TEXT_DIFF_LINES:
+        out["diff"] = "\n".join(diff[:TEXT_DIFF_LINES])
+        out["diff_lines_total"] = len(diff)
+    changes = out.get("changes")
+    if isinstance(changes, list) and len(changes) > TEXT_DIFF_LINES:
+        out["changes"] = changes[:TEXT_DIFF_LINES]
+        out["changes_total"] = len(changes)
+    elif isinstance(changes, dict) and isinstance(changes.get("cards"), list):
+        cards = changes["cards"]
+        if len(cards) > rows_limit:
+            out["changes"] = {**changes, "cards": cards[:rows_limit], "cards_total": len(cards)}
+    if any(k in out for k in ("rows_total", "diff_lines_total", "changes_total")) or (
+        isinstance(out.get("changes"), dict) and "cards_total" in out["changes"]
+    ):
+        out["more"] = MORE_TEXT
+    return out
 
 
 # The comment actions whose text is written (actions.py).
@@ -156,7 +239,7 @@ def with_words_note(data: dict[str, Any], note: str | None = None) -> dict[str, 
 
 
 # Left out of the text: the review rows and the stored edit, which the diff lines already say.
-_TEXT_SKIP = ("rows", "changes", "diff")
+_TEXT_SKIP = ("rows", "changes", "diff", "card_seq")
 
 
 def proposal_text(data: dict[str, Any]) -> str:
@@ -196,6 +279,9 @@ def proposal_text(data: dict[str, Any]) -> str:
     diff = [ln for ln in str(data.get("diff") or "").splitlines() if ln.strip()]
     if diff:
         lines += ["", "Changes:", *("  " + ln for ln in diff)]
+        total = data.get("diff_lines_total")
+        if isinstance(total, int) and total > len(diff):
+            lines.append(f"  … and {total - len(diff)} more (proposal_status with full true lists them all)")
     rest = [f"{k}: {one_line(v)}" for k, v in data.items() if k not in skip and v not in (None, "", [], {})]
     if rest:
         lines += ["", "Details:", *rest]
@@ -388,7 +474,7 @@ async def apply_on_review_page(
             "ok": False,
             "error": "browser_pending",
             "message": "The review page was opened but the proposal is still pending. Ask the user "
-            "whether they pressed Apply there, then call get_proposal; nothing was sent yet.",
+            "whether they pressed Apply there, then call proposal_status; nothing was sent yet.",
             **p,
         }
     return {"ok": p["state"] == "applied", **p}

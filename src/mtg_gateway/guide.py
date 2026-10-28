@@ -242,6 +242,7 @@ _ON_PROPOSALS = frozenset(
         "withdraw_proposal",
         "combine_proposals",
         "check_deck_changes",
+        "check_new_deck",
     }
 )
 
@@ -407,9 +408,9 @@ def guide_body(
         "<li><span>Ask it something that only reads: “Show me my decks”, “open my Krenko deck and tell me "
         "its mana curve”.</span></li>"
         "<li><span>Ask for a change: “Swap these three cards”. It comes back as a <strong>proposal</strong> "
-        "with a review link and, in Claude on the web, desktop and phones (and ChatGPT, as its maker "
-        "reports), as a card in the chat with Approve and Reject. <a href='#how-approve'>Approve a "
-        "proposal</a> has the details.</span></li></ol>"
+        "with a review link and, in Claude on the web, desktop and phones (and ChatGPT on the web and "
+        "in its Android app), as a card in the chat with Approve and Reject. "
+        "<a href='#how-approve'>Approve a proposal</a> has the details.</span></li></ol>"
         "<p>Things you can ask it:</p><ul>"
         "<li>“Search for Atraxa decks under bracket 3”, “what does this deck run that mine "
         "doesn't?”.</li>"
@@ -1072,8 +1073,9 @@ def guide_body(
         "come from Scryfall directly.</li></ul>"
     )
     exp_assistant = (
-        "<p>In Claude on the web, desktop and phones (and ChatGPT, as its maker reports), the things "
-        "you have to pick or press come as <strong>cards in the chat</strong>: a proposal with Approve "
+        "<p>In Claude on the web, desktop and phones (and ChatGPT on the web and in its Android app), "
+        "the things you have to pick or press come as <strong>cards in the chat</strong>: "
+        "a proposal with Approve "
         "and Reject (Reject can carry a reason), the changes waiting for you with <strong>Apply "
         "all</strong>, the printings of a card as pictures to tap, and the cards read from your photos "
         "to keep or drop. Everything else, such as a deck, its statistics, a comparison, a list of "

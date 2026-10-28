@@ -182,7 +182,8 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             assert _confirms(page) == []  # nothing was confirmed by itself
             reads = _calls(page, "tools/call")  # one read-only look at the proposal's state, at most
             assert len(reads) <= 1 and all(
-                m["params"] == {"name": "get_proposal", "arguments": {"proposal_id": "p-1"}} for m in reads
+                m["params"] == {"name": "get_proposal", "arguments": {"proposal_id": "p-1", "rows_limit": 8}}
+                for m in reads
             )
             assert _calls(page, "ui/notifications/size-changed"), "the card reports its size"
             # Press Approve: one confirm_proposal call with the proposal id, the code and the
@@ -245,7 +246,8 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             assert "12 rows" in card.locator("#summary").inner_text()
             assert card.locator("#risk").inner_text().lower() == "high"  # the risk word
             assert "needs your approval" in card.locator("#note").inner_text()
-            assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 8
+            # COLLAPSE_AT rows since 0.7.46
+            assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 6
             assert card.locator("ul.changes li.group").first.inner_text().lower().startswith("added (9)")
             more = card.locator("#more")
             assert more.inner_text() == "Show all 12 changes"

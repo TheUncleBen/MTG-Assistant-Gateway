@@ -2317,7 +2317,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
     in_chat = bool(getattr(service.decks.settings, "apply_in_chat", False))
 
     def _result(data: dict[str, Any]) -> Any:
-        return proposal_tool_result(data, decks=service.decks, sub=_sub(), in_chat=in_chat)
+        return proposal_tool_result(data, decks=service.decks, sub=_sub(), in_chat=in_chat, drawn=in_chat)
 
     @server.tool(
         name="propose_collection_changes",

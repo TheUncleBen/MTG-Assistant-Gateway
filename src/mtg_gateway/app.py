@@ -49,6 +49,7 @@ from .app_page import PROJECT_URL, add_app_routes
 from .app_signin import AppSignins
 from .approve import (
     APPROVAL_META_KEY,
+    CARD_ROWS,
     CARD_TOOL_META,
     apps_extension,
     proposal_text,
@@ -543,10 +544,12 @@ def server_instructions(public_url: str) -> str:
         "review before proposing: one proposal with every change, and amend_proposal to change one "
         "that is still waiting. Where your app shows cards, each propose, amend or combine call puts "
         "a card in the chat, a refused one too, so check a deck edit with check_deck_changes first and "
-        "follow its suggest. "
+        "follow its suggest, and a new deck with check_new_deck; then propose once. Never propose again "
+        "to change a waiting proposal (amend it; a new deck with amend_proposal's new_deck) or to see "
+        "where it stands (proposal_status, which draws no card). "
         "When the user presses Approve on a proposal card or Apply all, you are "
         'told the outcome, and where the app allows it the card then posts "Approved, go on" as the user\'s '
-        "message: carry on from that outcome, and call get_proposal only when it is unclear (still "
+        "message: carry on from that outcome, and call proposal_status only when it is unclear (still "
         "applying). "
         "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
@@ -899,9 +902,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
             p = {**p, "closed_at": p.get("applied_at"), "applied_at": None}
         return p
 
-    def _proposal(data: dict[str, object]) -> CallToolResult:
+    def _proposal(
+        data: dict[str, object], *, read: bool = False, rows_limit: int | None = CARD_ROWS
+    ) -> CallToolResult:
+        """A card tool's result. ``read``: the card's own read of its proposal, which draws no
+        new card (every other call of a card tool does, where the app shows cards)."""
         in_chat = s.apply_in_chat and token_may_write()
-        return proposal_tool_result(data, decks=state.decks, sub=_sub(), in_chat=in_chat)
+        return proposal_tool_result(
+            data,
+            decks=state.decks,
+            sub=_sub(),
+            in_chat=in_chat,
+            drawn=s.apply_in_chat and not read,
+            rows_limit=rows_limit,
+        )
 
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes

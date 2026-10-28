@@ -273,6 +273,26 @@ class PackageSettings(BaseModel):
     )
 
 
+class NewDeckFields(BaseModel):
+    """amend_proposal's new_deck: what changes in a waiting new deck or card package. A field left
+    out keeps what the proposal has; a card list replaces the whole list."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, description="The new deck's name.")
+    deck_format: DeckFormat | None = Field(default=None, description="The deck's format.")
+    cards: list[NewDeckCard] | None = Field(default=None, description="The whole new card list.")
+    decklist_text: str | None = Field(default=None, description="Or the whole new list, pasted.")
+    csv_text: str | None = Field(default=None, description="Or an Archidekt CSV export.")
+    json_text: str | dict[str, Any] | None = Field(
+        default=None, description="Or a deck as JSON (get_deck's or the Export page's .json)."
+    )
+    private: StrictBool | None = Field(default=None, description="Private deck.")
+    theorycrafted: StrictBool | None = Field(default=None, description="Theorycrafted.")
+    game: Literal["any", "paper", "mtgo", "arena"] | None = Field(default=None, description="Game type.")
+    package: PackageSettings | None = Field(default=None, description="A card package's settings.")
+    folder: str | None = Field(default=None, description="One of the user's folders, by name.")
+
+
 class DeckDetails(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, description="New deck name, 1 to 200 characters.")
@@ -425,6 +445,7 @@ __all__ = [
     "DeckDetails",
     "FINISH_ALIASES",
     "NewDeckCard",
+    "NewDeckFields",
     "RunOptions",
     "card_aliases",
     "change_for_assistant",

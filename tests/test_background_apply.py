@@ -70,7 +70,7 @@ async def test_a_slow_apply_answers_applying_with_progress_then_finishes(stack: 
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] and out["state"] == "applying", out
     assert out["progress"]["sent_entries"] == 1 and out["progress"]["of_entries"] == 3, out
-    assert "get_proposal" in out["next_step"] and "Do not apply it again" in out["next_step"]
+    assert "proposal_status" in out["next_step"] and "Do not apply it again" in out["next_step"]
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "applying" and got["progress"]["sent_entries"] == 1, got
     # pressing apply again while it runs reports it and sends nothing more

@@ -2134,7 +2134,10 @@ def _page_step(p: dict[str, Any]) -> str:
             "api": " through the gateway's API",
             "disconnected": " when you disconnected the app that made it",
         }.get(str(p.get("closed_by") or ""), "")
-        return f"This proposal was rejected{by}. Nothing was changed."
+        why = str(p.get("reject_reason") or "").strip()
+        # the member's own words from the card (escaped where the line is drawn, _step_html)
+        said = f" Your reason: “{why}”" if why else ""
+        return f"This proposal was rejected{by}. Nothing was changed.{said}"
     if state == "replaced" and p.get("replace_note"):
         return str(p["replace_note"])  # "Replaced by #5."
     return "This proposal can no longer be applied."
@@ -2572,7 +2575,7 @@ def _proposal_body(
     # who rejected it (closed_by, said above) is not a result worth a box of its own
     result = p.get("result")
     if isinstance(result, dict):
-        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client")}
+        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client", "reject_reason")}
     url = result.get("deck_url") if isinstance(result, dict) and result else None
     if url:
         actions.append(

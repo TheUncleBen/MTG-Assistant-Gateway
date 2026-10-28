@@ -756,6 +756,15 @@ def _step_15(conn: sqlite3.Connection) -> None:
     _add_column(conn, "proposals", "risk", "TEXT")
 
 
+def _step_16(conn: sqlite3.Connection) -> None:
+    """0.7.46, one live card per proposal: ``card_seqs`` counts, per app (client id), the cards
+    drawn in that app's chat for a proposal, as a JSON object ``{client: n}``. Each card knows
+    its own number, and a card that reads a higher one for its app shows a short line instead of
+    its buttons ("Replaced by a newer version below"), so only the newest card asks for a press.
+    Proposals made before have none: their cards keep working as before."""
+    _add_column(conn, "proposals", "card_seqs", "TEXT")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -773,6 +782,7 @@ MIGRATIONS = [
     _step_13,
     _step_14,
     _step_15,
+    _step_16,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -2600,6 +2610,7 @@ class Database:
         by_client: str | None,
         what_changed: str | None = None,
         baseline_fingerprint: str | None = None,
+        deck_name: str | None = None,
     ) -> int | None:
         """Replace a waiting proposal's content with a new version, keeping its id, date and board
         number. The version being replaced is kept in ``proposal_versions`` with
@@ -2608,7 +2619,8 @@ class Database:
         status is cleared, except a hold that a rejected note it depends on put there: that
         stays until the link is gone, so the new version can't apply by itself. Returns the new
         version, or None when it isn't waiting, has expired or is at another version. Raises
-        ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions."""
+        ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions. ``deck_name``:
+        a new deck's new name (a waiting new deck may be renamed)."""
         now = int(time.time())
         with self.tx() as c:
             row = c.execute(
@@ -2646,7 +2658,8 @@ class Database:
                 "UPDATE proposals SET changes_json = ?, rows_json = ?, diff_text = ?, version = ?, "
                 "amended_at = ?, amended_by_client = ?, version_note = ?, status = ?, "
                 "status_reason = ?, status_at = ?, "
-                "baseline_fingerprint = COALESCE(?, baseline_fingerprint) WHERE id = ?",
+                "baseline_fingerprint = COALESCE(?, baseline_fingerprint), "
+                "deck_name = COALESCE(?, deck_name) WHERE id = ?",
                 (
                     json.dumps(changes),
                     json.dumps(rows) if rows is not None else None,
@@ -2659,10 +2672,33 @@ class Database:
                     row["status_reason"] if held else None,
                     now,
                     baseline_fingerprint,
+                    deck_name,
                     proposal_id,
                 ),
             )
             return old + 1
+
+    def next_card_seq(self, proposal_id: str, owner_sub: str, client: str | None) -> int:
+        """Count one more card drawn for this proposal in ``client``'s chat and return its number
+        (1 for the first). Each app counts its own cards: a card drawn in another app's chat never
+        makes this app's newest card look old."""
+        key = str(client or "")
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT card_seqs FROM proposals WHERE id = ? AND owner_sub = ?", (proposal_id, owner_sub)
+            ).fetchone()
+            if row is None:
+                return 0
+            try:
+                seqs = json.loads(row[0]) if row[0] else {}
+            except ValueError:
+                seqs = {}
+            if not isinstance(seqs, dict):
+                seqs = {}
+            n = int(seqs.get(key) or 0) + 1
+            seqs[key] = n
+            c.execute("UPDATE proposals SET card_seqs = ? WHERE id = ?", (json.dumps(seqs), proposal_id))
+            return n
 
     def proposal_versions(self, proposal_id: str, owner_sub: str) -> list[dict[str, Any]]:
         """The earlier versions of one of the owner's proposals, oldest first (the current one is

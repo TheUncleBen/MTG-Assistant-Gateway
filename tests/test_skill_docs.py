@@ -134,9 +134,11 @@ def test_every_guide_says_what_approved_go_on_means() -> None:
     skill = " ".join((SKILL_DIR / "SKILL.md").read_text(encoding="utf-8").split())
     assert 'posts "Approved, go on" as the user\'s message: carry on from the outcome you were told' in skill
     block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1]
-    assert 'On "Approved, go on" or their word, use the outcome given; get_proposal only if unclear.' in block
+    assert (
+        'On "Approved, go on" or their word, use the outcome given; proposal_status only if unclear.' in block
+    )
     told = server_instructions("https://gateway.example.com")
-    assert "carry on from that outcome, and call get_proposal only when it is unclear" in told
+    assert "carry on from that outcome, and call proposal_status only when it is unclear" in told
 
 
 def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:
