@@ -997,12 +997,30 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
         assert ("Sol Ring", 1, "Etched", False, True) in want and ("Swamp", 2, "Foil", False, True) in want
         assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "Normal", False, False) in want
         exports = {
-            "plain .txt": ("decklist_text", (await b.http.get("/decks/42/export.txt")).text),
             "archidekt .txt": ("decklist_text", (await b.http.get("/decks/42/export.archidekt.txt")).text),
             ".csv": ("csv_text", (await b.http.get("/decks/42/export.csv")).text),
             ".json": ("json_text", (await b.http.get("/decks/42/export.json")).text),
         }
-        assert "[Commander]" in exports["plain .txt"][1] and "*E*" in exports["plain .txt"][1]
+        # The plain .txt is names only (no finish, no Maybeboard: test_export_standard); it still
+        # reads back with its commander, the deck and every copy.
+        plain = (await b.http.get("/decks/42/export.txt")).text
+        assert plain.startswith("Commander\n") and "*E*" not in plain and "Opt" not in plain
+        made = structured(await call(h, token, "propose_new_deck", {"name": "Plain", "decklist_text": plain}))
+        assert made["ok"], made
+        applied = await apply_any(h, token, made["proposal_id"])
+        copy = structured(
+            await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"], "view": "cards"})
+        )
+
+        def copies(deck: dict) -> dict[tuple, int]:
+            out: dict[tuple, int] = {}
+            for c in deck["cards"]:
+                if c["in_deck"]:
+                    key = (c["name"], "Commander" in c["categories"])
+                    out[key] = out.get(key, 0) + c["quantity"]
+            return out
+
+        assert copies(copy) == copies(source)
         assert json.loads(exports[".json"][1])["id"] == "42"  # the gateway's own deck JSON, as is
         for label, (field, text) in exports.items():
             made = structured(

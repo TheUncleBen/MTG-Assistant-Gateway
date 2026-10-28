@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Deck xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <NetDeckID>0</NetDeckID>
+  <PreconstructedDeckID>0</PreconstructedDeckID>
+  <Cards Quantity="1" Sideboard="false" Name="Acidic Slime" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Aesi, Tyrant of Gyre Strait" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Arcane Denial" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Avenger of Zendikar" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Beast Within" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Blighted Woodland" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Coiling Oracle" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Command Tower" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Compulsive Research" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Coral Atoll" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Counterspell" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Cultivate" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Elder Deep-Fiend" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Eternal Witness" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Evolving Wilds" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Explore" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Fact or Fiction" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Fathom Mage" Annotation="0" />
+  <Cards Quantity="15" Sideboard="false" Name="Forest" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Growth Spiral" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Harmonize" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Into the Roil" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Ior Ruin Expedition" Annotation="0" />
+  <Cards Quantity="15" Sideboard="false" Name="Island" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Jungle Basin" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Khalni Heart Expedition" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Kodama's Reach" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Meloku the Clouded Mirror" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Memorial to Genius" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Meteor Golem" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Molimo, Maro-Sorcerer" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Mulldrifter" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Murkfiend Liege" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Nezahal, Primal Tide" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Peel from Reality" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Rampaging Baloths" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Rampant Growth" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Ramunap Excavator" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Reclamation Sage" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Reliquary Tower" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Retreat to Kazandu" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Scourge of Fleets" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Search for Tomorrow" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Seer's Sundial" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Sharktocrab" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Shipbreaker Kraken" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Simic Charm" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Simic Growth Chamber" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Simic Guildgate" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Simic Signet" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Simic Sky Swallower" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Slinn Voda, the Rising Deep" Annotation="0" />
+  <Cards Quantity="2" Sideboard="false" Name="Sol Ring" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Sphinx of Uthuun" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Spitting Image" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Sporemound" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Stormtide Leviathan" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Stumpsquall Hydra" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Swiftfoot Boots" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Terastodon" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Terramorphic Expanse" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Thornwood Falls" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Trench Behemoth" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Tromokratis" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Urban Evolution" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Verdant Sun's Avatar" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Vivid Creek" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Vivid Grove" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Whelming Wave" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Wickerbough Elder" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Woodland Stream" Annotation="0" />
+  <Cards Quantity="1" Sideboard="false" Name="Yavimaya Elder" Annotation="0" />
+  <Cards Quantity="2" Sideboard="true" Name="Opt" Annotation="0" />
+</Deck>

@@ -550,9 +550,10 @@ def export_box_html(deck: Deck, *, open: bool = False) -> str:
     rows outside the deck) and Files, with the seven downloads. Without scripts every pane
     shows, one under the other."""
     from .decks import deck_to_archidekt_text, deck_to_text
+    from .export_formats import to_plain
 
     did = esc(deck.id)
-    main = deck_to_text(deck)
+    main = to_plain(deck)
     side = deck_to_text(deck, zone="side")
     arch = deck_to_archidekt_text(deck)
     tabs = [("exp-arch", "Archidekt text", "Archidekt import text", arch)]
