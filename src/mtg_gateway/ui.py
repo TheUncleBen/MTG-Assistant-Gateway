@@ -658,7 +658,7 @@ def side_panel(
     × and the back link both go to ``close_href`` (the list); put the result in ``split``."""
     return (
         f"<aside class='ui-drawer' aria-label='{esc(label)}'>"
-        f"<p class='page-only'><a href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
+        f"<p class='page-only'><a class='ui-cap' href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
         f"<div class='dh'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
         f" aria-label='Close' title='Close'>{icon('x')}</a></div>{body_html}</aside>"
     )

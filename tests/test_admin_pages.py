@@ -211,7 +211,7 @@ async def test_a_members_panel_holds_the_ids_the_actions_and_the_two_boxes(gw: H
     try:
         text = await _get(b, "/admin/users?open=user-2")
         panel = text.split("<aside class='ui-drawer' aria-label='bob'>", 1)[1]
-        assert "<a href='/admin/users'>← All members</a>" in panel
+        assert "<a class='ui-cap' href='/admin/users'>← All members</a>" in panel
         assert "<code>user-2</code>" in panel and "<code>claude-app</code>" in panel
         assert "<span class='nm'>Claude</span>" in panel and "bob_brews" in panel
         assert "class='btn btn-outline-danger' href='/admin/users?open=user-2&box=disable'" in panel
