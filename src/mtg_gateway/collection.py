@@ -1720,7 +1720,8 @@ ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0}
 ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere}
 ul.colllist .s{display:block;color:var(--text-muted);font-size:.84rem;overflow-wrap:anywhere}
 ul.colllist .smline{display:none}
-ul.colllist .thumbbtn{all:unset;cursor:pointer;display:block;flex:none}
+ul.colllist .thumbbtn{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  flex:none;min-width:44px;min-height:48px}
 ul.colllist .thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 ul.colllist .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:block}
@@ -2233,7 +2234,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
 
     @server.custom_route("/collection/api/rows", methods=["GET"], include_in_schema=False)
     async def api_rows(request: Request) -> Response:
-        """The next screenful for the Load more button: the rows as the page draws them."""
+        """The next screenful for the Load more button, or (``offset`` 0) the first screenful of a
+        name filter as the member types: the rows as the page draws them, the count line and the
+        Load more block to put in place of the page's."""
         who = api_user(request, write=False)
         if isinstance(who, Response):
             return who
@@ -2256,6 +2259,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "total": total,
                 "has_more": got["has_more"],
                 "next": link_to(lq, view, got["shown"]) if got["has_more"] else "",
+                "count_text": f"{total:,} {'entry' if total == 1 else 'entries'}",
+                "more": more_html(lq, view if qp.get("view") in ("grid", "list") else None, got),
                 "done": ""
                 if got["has_more"]
                 else f"All {total:,} {'entry' if total == 1 else 'entries'} shown.",

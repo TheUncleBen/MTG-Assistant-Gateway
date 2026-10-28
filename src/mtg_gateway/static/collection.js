@@ -294,9 +294,13 @@
     }, true);
   }
 
-  /* -- the panel: the name box narrows the list as you type; drop-downs apply on change ----- */
+  /* -- the panel: the name box filters as you type; drop-downs apply on change ------------- */
   var listform = $("#listform");
   var nomatch = $(".col-nomatch");
+  /* the name the rows on the page were read for ("" for the whole binder) */
+  var listQuery = (($("#col-q") || {}).value || "").trim().toLowerCase();
+  /* the rows already on the page, at once; "No cards match" only when they are every row that
+     could match (all loaded, read for a name the new one contains) */
   function narrow(q) {
     if (!list) return;
     q = q.trim().toLowerCase();
@@ -306,11 +310,59 @@
       li.hidden = !ok;
       if (ok) any = true;
     });
-    if (nomatch) nomatch.hidden = any || !$("[data-name]", list);
+    var all = !$(".loadmore [data-load-more]") && q.indexOf(listQuery) !== -1;
+    if (nomatch) nomatch.hidden = any || !all || !$("[data-name]", list);
+  }
+  /* then, once typing stops, the whole binder: Archidekt's own name filter, with the count */
+  var searchSeq = 0, searchTimer = null;
+  function search() {
+    var params = new URLSearchParams(new FormData(listform));
+    params.delete("offset");
+    if (!params.get("q")) params.delete("q");
+    /* the defaults stay out of the address, as the page's own links leave them */
+    if (params.get("sort") !== "edition") { params.delete("sort"); params.delete("dir"); }
+    else if (params.get("dir") === "desc") params.delete("dir");
+    var mine = ++searchSeq;
+    if (list) list.setAttribute("aria-busy", "true");
+    fetch("/collection/api/rows?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (mine !== searchSeq) return;
+        if (list) list.removeAttribute("aria-busy");
+        if (!d.ok) throw new Error(d.message || "");
+        if (list) { list.innerHTML = d.html; list.hidden = !d.total; }
+        var c = $("#col-count");
+        if (c) c.textContent = d.count_text;
+        var more = $(".loadmore");
+        if (more && d.more) {
+          var tmp = document.createElement("div");
+          tmp.innerHTML = d.more;
+          more.parentNode.replaceChild(tmp.firstChild, more);
+        }
+        if (nomatch) nomatch.hidden = d.total > 0;
+        listQuery = (params.get("q") || "").trim().toLowerCase();
+        if (!/[?&]view=/.test(location.search)) params.delete("view");
+        try { history.replaceState(history.state, "", "/collection" + (params.toString() ? "?" + params.toString() : "")); } catch (err) { /* keep the address */ }
+        say(d.count_text + (params.get("q") ? " match “" + params.get("q") + "”." : "."));
+      }).catch(function () {
+        if (mine !== searchSeq) return;
+        if (list) list.removeAttribute("aria-busy");
+        strip(NOT_ANSWERING, "error");
+      });
   }
   if (listform) {
     var qbox = $("#col-q", listform);
-    if (qbox) qbox.addEventListener("input", function () { narrow(qbox.value); });
+    if (qbox) qbox.addEventListener("input", function () {
+      narrow(qbox.value);
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(search, 300);
+    });
+    listform.addEventListener("submit", function (e) {
+      /* Enter in the name box: the same search at once, no page load */
+      if (!qbox || document.activeElement !== qbox) return;
+      e.preventDefault();
+      clearTimeout(searchTimer);
+      search();
+    });
     var sortf = $(".sortf", listform), dirIn = $("input[name=dir]", listform), dirBtn = $(".dirbtn", listform), sortc = $(".sortc", listform);
     function go(sort, dir) {
       if (sortf) sortf.value = sort;
