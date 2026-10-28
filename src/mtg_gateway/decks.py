@@ -249,6 +249,13 @@ _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
 # The member whose Archidekt session the current ``_call_unslotted`` runs with: how a write
 # the client is about to send is tied back to the member whose caches it makes stale.
 _acting_sub: ContextVar[str | None] = ContextVar("_acting_sub", default=None)
+# Set by the deck page's one-click save (api.edit_deck) around its propose and apply (0.7.46 audit
+# D-01): the proposal's own read of the deck is kept here and the apply works on it when it is
+# under ONE_CLICK_REUSE seconds old, instead of reading the deck again (the read right before the
+# write, _rows_unchanged, is still made); the apply's verify read is kept here too, and the page
+# draws from it. A +1 then costs a read, the check before the write, the write and the verify.
+one_click: ContextVar[dict[str, Any] | None] = ContextVar("one_click", default=None)
+ONE_CLICK_REUSE = 2.0
 # A member's deck list is kept in memory for this long after Archidekt answered (fresh), and
 # served for up to DECK_LIST_STALE seconds more while one refresh runs in the background.
 DECK_LIST_FRESH = 90.0
@@ -4219,6 +4226,8 @@ class DeckService:
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
+        if (kept := one_click.get()) is not None:  # for the apply that follows at once (D-01)
+            kept["read"] = (time.monotonic(), deck.id, pickle.dumps(deck))
         self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         await self._refuse_unknown_cards(deck, changes)
@@ -5866,6 +5875,8 @@ class DeckService:
                 )
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
+        if (kept := one_click.get()) is not None:
+            kept["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it (D-01)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
         mismatches += label_mismatches(changes, deck, verified)
@@ -6152,7 +6163,16 @@ class DeckService:
         back to waiting as "needs a look" (``_apply_slotted``)."""
         from . import recheck
 
-        deck = await self.get_own_deck(sub, row["deck_id"])  # ownership re-checked at apply time
+        kept = one_click.get()
+        read = kept.pop("read", None) if kept is not None else None
+        if (
+            read is not None
+            and read[1] == str(row["deck_id"])
+            and time.monotonic() - read[0] < ONE_CLICK_REUSE
+        ):
+            deck = pickle.loads(read[2])  # the one-click save's own read, owned, a moment ago
+        else:
+            deck = await self.get_own_deck(sub, row["deck_id"])  # ownership re-checked at apply time
         status, reason = recheck.check(self, sub, row, deck)
         if status == "needs_look":
             raise needs_look_error(reason)
