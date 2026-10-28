@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from mtg_gateway import api as api_module
+from mtg_gateway import decks as decks_mod
 
 from .conftest import COLLECTION, Stack, stack_with
 from .test_browse_collection import api, linked
@@ -387,10 +388,17 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         assert after["checks"]["legal"] is False and after["checks"]["ok"] is False
         assert after["checks"]["legal_problems"] == ["deck has 101 cards; commander wants 100"]
 
-        # the browser's Reload (max-age=0) never waits those seconds out
+        # the browser's Reload (max-age=0) of a read older than PAGE_DECK_RELOAD shows it at once
+        # and reads it again behind it (owner decision, 0.7.46); the next view shows the change
         _deck_card(stack, "Forest")[0]["quantity"] += 1
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 101" in page.text
+        decks._page_decks = {
+            k: (t - decks_mod.PAGE_DECK_RELOAD - 1, d) for k, (t, d) in decks._page_decks.items()
+        }
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html", "Cache-Control": "max-age=0"})
+        assert "Size: 101" in page.text and "data-reload='1'" in page.text
+        await asyncio.gather(*decks._page_refreshing.values())
         page = await b.http.get("/decks/42", headers={"Accept": "text/html", "Cache-Control": "max-age=0"})
         assert "Size: 102" in page.text
     finally:
@@ -784,8 +792,9 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
     stack: Stack,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When Archidekt's read after the write still shows the old rows, the endpoint waits and reads
-    once more; if it still lags, the answer says ``stale`` so the page can refetch."""
+    """The page is answered from the apply's own verify read (0.7.46 audit D-01), which has seen
+    the change (an apply whose verify read lags fails as verify_mismatch): no read of the
+    endpoint's own, so a later read that lags cannot make the answer stale."""
     monkeypatch.setattr(api_module, "EDIT_REREAD_DELAY", 0.01)
     b = await linked(stack)
     try:
@@ -796,9 +805,9 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         async def lagging(sub: str, deck_id: str):
             deck = await real(sub, deck_id)
             reads.append(deck_id)
-            # the propose and the apply read the deck three times; the endpoint's own re-reads
-            # (the fourth and fifth) see the old count
-            if len(reads) >= 4:
+            # the propose and the check before the write read the deck; any read after them
+            # would see the old count
+            if len(reads) >= 3:
                 for c in deck.cards:
                     if c.name == "Cultivate":
                         c.quantity = 1
@@ -813,8 +822,8 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         )
         assert r.status_code == 201, r.text
         d = r.json()
-        assert d["applied"] is True and d["stale"] is True, d
-        assert d["rows"][0]["qty"] == 1 and len(reads) == 5, reads
+        assert d["applied"] is True and d["stale"] is False, d
+        assert d["rows"][0]["qty"] == 2 and len(reads) == 2, reads
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2  # the write itself landed
     finally:
         await b.aclose()
@@ -863,5 +872,50 @@ async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: 
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
         r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own, "version": 1})
         assert r.status_code == 400 and "applied" in r.json()["message"], r.text
+    finally:
+        await b.aclose()
+
+
+async def test_a_one_click_edit_costs_four_archidekt_calls(stack: Stack) -> None:  # noqa: F811
+    """0.7.46 audit D-01: a "+1" from the deck page cost six Archidekt calls (three reads before
+    the write, the verify, then two reads for the page). Now: the proposal's read (reused by the
+    apply), the check right before the write, the write and the verify, which the page draws from."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")  # the form token, read before the count starts
+        stack.ark.calls.clear()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+            csrf=csrf,
+        )
+        assert r.status_code == 201 and r.json()["applied"] is True, r.text
+        deck_calls = [(m, p) for m, p in stack.ark.calls if p.startswith("/api/decks/42/")]
+        assert [m for m, _p in deck_calls] == ["GET", "GET", "PATCH", "GET"], deck_calls
+        assert len(stack.ark.calls) <= 4, stack.ark.calls
+        # the page is answered from the verify read: it shows the new count
+        assert r.json()["rows"][0]["qty"] == 2 and r.json()["stale"] is False
+    finally:
+        await b.aclose()
+
+
+async def test_a_read_too_old_to_reuse_is_made_again(stack: Stack, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 0.0)
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")  # the form token, read before the count starts
+        stack.ark.calls.clear()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+            csrf=csrf,
+        )
+        assert r.status_code == 201, r.text
+        gets = [m for m, p in stack.ark.calls if p == "/api/decks/42/" and m == "GET"]
+        assert len(gets) == 4  # propose, apply, check before the write, verify
     finally:
         await b.aclose()

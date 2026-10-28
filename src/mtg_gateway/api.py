@@ -26,6 +26,7 @@ from .decks import (
     current_client,
     edit_mismatches,
     is_outside_category,
+    one_click,
     parse_changes,
     printing_not_shown,
     scopes_allow_writes,
@@ -348,6 +349,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
         decks.refuse_while_made(deck_id)  # its new-deck apply is still putting the cards in
+        # the proposal's read and the apply's verify read, shared with the apply (decks.one_click);
+        # set for the rest of this request only (a request runs in a context of its own)
+        kept: dict[str, Any] = {}
+        one_click.set(kept)
         pid = data.get("proposal_id")
         answer = pid is not None
         if answer:
@@ -416,10 +421,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if not applied:  # a large edit still running: the page says so and offers the review page
             return ok(out, 202)
         changes = parse_changes(result.get("changes") or p.get("changes"), row_flags=True)
-        # The apply verified the deck once; this read is the one the page draws from. Archidekt's
-        # reads have been seen to lag a write, so a deck that does not show the change yet is
-        # read once more after a short pause, and the answer says when it still has not caught up.
-        deck = await decks.get_own_deck(who.sub, deck_id)
+        # The apply's verify read is the one the page draws from (0.7.46 audit D-01: no read of its
+        # own). Archidekt's reads have been seen to lag a write, so a deck that does not show the
+        # change yet is read once more after a short pause, and the answer says when it still has
+        # not caught up.
+        deck = kept.get("verified") or await decks.get_own_deck(who.sub, deck_id)
         stale = False
         try:
             before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
