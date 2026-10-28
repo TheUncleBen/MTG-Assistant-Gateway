@@ -380,7 +380,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag6`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag7`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it from
 the base image `main` pins. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -533,9 +533,9 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from eleven patches in
-`docker/mystic-forge/patches/`, which is where the `-mag6` in the image tag
-`1.3.2-mag6` comes from:
+Upstream code is unchanged apart from thirteen patches in
+`docker/mystic-forge/patches/`, which is where the `-mag7` in the image tag
+`1.3.2-mag7` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -600,6 +600,16 @@ Upstream code is unchanged apart from eleven patches in
   (votes, mass bounce, "bite" spells, Auras that shut a creature down) as
   needing opponents, instead of listing them as played without their
   effect, and it reads more card wording.
+- `0013-card-names-front-face-for-every-collection-lookup.patch`: split,
+  adventure and two-faced cards given by their full name ("Fire // Ice") were
+  "not found" in card text, price lists and `format_archidekt`, and
+  `validate_decklist` let such a card outside the commander's colors pass
+  without a word. Every lookup now finds a card by its full name or any face,
+  and `validate_decklist` lists any card it could not check.
+- `0014-research-output-that-misled-an-assistant.patch`: wording and order
+  fixes in EDHREC, Commander Spellbook and precon output: no cut list from a
+  handful of cards, no basic lands or meaningless scores in recommendations,
+  numbered combo steps, combos and top cards by deck count, "sorceries".
 
 What to know about it:
 
@@ -621,7 +631,7 @@ What to know about it:
   Commander Spellbook and Archidekt's public deck API (never logged in to
   Archidekt). The rules tools check Wizards of the Coast for a newer
   Comprehensive Rules at most once a day.
-- **Where and how big.** The stack file fixes its image, `1.3.2-mag6`, and Swarm may run it on
+- **Where and how big.** The stack file fixes its image, `1.3.2-mag7`, and Swarm may run it on
   any node. Memory is capped at 512 MB. After loading
   the rules index it used about 115 MB on an amd64 test machine, and about
   170 MB as an arm64 container under emulation in CI (emulation adds
