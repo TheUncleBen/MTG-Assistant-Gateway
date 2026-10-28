@@ -76,6 +76,19 @@ def fake_mystic_forge() -> MCPServer:
     @mf.tool(name="goldfish_ab", description="paired goldfish A/B")
     async def goldfish_ab(params: _GoldfishAbInput) -> str:
         SIM_CALLS.append(("goldfish_ab", params.model_dump()))
+
+        def library(deck: str) -> int:  # the cards after the commander line (all of a 60-card deck)
+            lines = [ln for ln in deck.strip().splitlines() if ln.strip()]
+            rest = lines if params.constructed else lines[1:]
+            return sum(int(ln.split()[0]) if ln.split()[0].isdigit() else 1 for ln in rest)
+
+        a, b = library(params.deck_a), library(params.deck_b)
+        if a != b:
+            # Mystic Forge's own refusal, word for word (server.py goldfish_ab)
+            return (
+                f"A/B decks must be the same size for position-stable pairing: deck A has {a} cards, "
+                f"deck B has {b} (excluding commanders and any Scryfall-unrecognized names)."
+            )
         return f"# Goldfish A/B\n{params.n} paired games\n\n## Deltas (A − B)\n(none)"
 
     @mf.tool(name="validate_decklist", description="validate a decklist")

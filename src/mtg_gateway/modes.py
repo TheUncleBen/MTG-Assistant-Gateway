@@ -399,6 +399,8 @@ def category_wait(rows: list[dict[str, Any]] | None) -> str | None:
     return None
 
 
+# A deck edit that would make the deck break a format rule it keeps now (decks._judge_rules).
+BREAKS_RULES_REASON = "would make the deck break its format's rules ({rules})"
 COMMANDER_COPIES_REASON = "changes the commander's copies"
 COMPANION_REASON = "changes the deck's companion"
 COMMANDER_ZONE_REASON = "adds or changes a row with a commander-zone category"
@@ -457,6 +459,9 @@ def risk_of(
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", commander_reason(rows)
+    broken = [str(b) for r in rows for b in r.get("breaks") or []]
+    if broken:  # decks.DeckService._judge_rules: a legal deck made illegal is never low risk
+        return "high", BREAKS_RULES_REASON.format(rules="; ".join(dict.fromkeys(broken)))
     if any(r.get("companion_card") for r in rows):
         return "high", COMPANION_REASON
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
