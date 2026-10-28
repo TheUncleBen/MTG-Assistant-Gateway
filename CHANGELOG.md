@@ -57,8 +57,9 @@ card everywhere.
   one it never applies doesn't wait with nothing to press.
 - The reason typed on Reject is kept and shown on the review page and the Proposals list.
 - A sign-in renews as you use the gateway (see the upgrade notes).
-- Pages no longer wait for the identity provider while you use the gateway; someone removed from
-  the group loses access within a minute.
+- Pages no longer wait for the identity provider while you use the gateway. For someone removed
+  from the group, the identity provider is asked again in the background, at most 60 seconds after
+  it last let them in, and they lose access then.
 - A deck page or My decks you saw recently shows at once and updates for the next view.
 - Part of the Archidekt request limit is kept for your pages, and requests in the background no
   longer hold the line while Archidekt answers.
