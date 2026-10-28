@@ -325,7 +325,10 @@ class MainActivity : ComponentActivity() {
         updateText = findViewById(R.id.update_text)
         updateNow = findViewById(R.id.update_now)
         updateLater = findViewById(R.id.update_later)
-        updateLater.setOnClickListener { updateBar.visibility = View.GONE } // asked again at the next check
+        updateLater.setOnClickListener {
+            updateOffer?.let(updater::later) // that version waits three days; Check for app updates still offers it
+            updateBar.visibility = View.GONE
+        }
         updateNow.setOnClickListener { updateOffer?.let(updater::install) }
         updater = Updater(this, object : Updater.Ui {
             override fun showOffer(offer: AppUpdate.Offer) {

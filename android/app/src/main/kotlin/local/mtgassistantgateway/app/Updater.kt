@@ -90,6 +90,10 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                     found == null -> ({ if (manual) toast(activity.getString(R.string.update_none, BuildConfig.VERSION_NAME)) })
                     !AppUpdate.sameSigner(installedCerts(), found.cert) ->
                         ({ if (manual) toast(activity.getString(R.string.update_other_key, found.version)) })
+                    // "Later" keeps that version quiet for a while; a check asked for offers it anyway
+                    !manual && AppUpdate.snoozed(
+                        found.versionCode, prefs.snoozedUpdateCode, prefs.snoozedUpdateAt, System.currentTimeMillis(),
+                    ) -> ({ })
                     else -> ({ ui.showOffer(found) })
                 }
             } catch (e: IOException) {
@@ -101,6 +105,12 @@ class Updater(private val activity: Activity, private val ui: Ui) {
             }
             main.post { busy = false; if (!activity.isDestroyed) result() }
         }.start()
+    }
+
+    /** "Later" on the update bar: the automatic check keeps quiet about [offer]'s version for [AppUpdate.SNOOZE_MS]. */
+    fun later(offer: AppUpdate.Offer) {
+        prefs.snoozedUpdateCode = offer.versionCode
+        prefs.snoozedUpdateAt = System.currentTimeMillis()
     }
 
     /** Downloads, checks and installs [offer]. */

@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /**
  * What the app keeps: which gateway to open, the sign-in origin that gateway advertised, the
  * verifier of a browser sign-in in progress ([BrowserSignIn]), when it last looked for an app
- * update ([Updater]), and the member's notification key with the messages already shown
+ * update and which version "Later" put off ([Updater]), and the member's notification key with the messages already shown
  * ([NotifyService]).
  */
 class Prefs(context: Context) {
@@ -49,6 +49,20 @@ class Prefs(context: Context) {
         get() = p.getLong(KEY_UPDATE_CHECK, 0L)
         set(value) {
             p.edit().putLong(KEY_UPDATE_CHECK, value).apply()
+        }
+
+    /** The app version "Later" on the update bar put off ([AppUpdate.snoozed]), 0 for none. */
+    var snoozedUpdateCode: Int
+        get() = p.getInt(KEY_UPDATE_SNOOZED, 0)
+        set(value) {
+            p.edit().putInt(KEY_UPDATE_SNOOZED, value).apply()
+        }
+
+    /** When "Later" was pressed (epoch ms), 0 for never. */
+    var snoozedUpdateAt: Long
+        get() = p.getLong(KEY_UPDATE_SNOOZED_AT, 0L)
+        set(value) {
+            p.edit().putLong(KEY_UPDATE_SNOOZED_AT, value).apply()
         }
 
     /** The member's notification key (their topic) once they connected this phone, else null. */
@@ -96,6 +110,8 @@ class Prefs(context: Context) {
         private const val KEY_SIGNIN_VERIFIER = "signin_verifier"
         private const val KEY_SIGNIN_AT = "signin_started_at"
         private const val KEY_UPDATE_CHECK = "update_checked_at"
+        private const val KEY_UPDATE_SNOOZED = "update_snoozed_code"
+        private const val KEY_UPDATE_SNOOZED_AT = "update_snoozed_at"
         private const val KEY_PUSH = "push_key"
         private const val KEY_PUSH_LAST = "push_last_id"
         private const val KEY_PUSH_SEEN = "push_seen"
