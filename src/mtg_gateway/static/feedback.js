@@ -71,11 +71,23 @@
     setTimeout(function () { clear(form); }, button && button.dataset && button.dataset.busyLabel ? LONG_RESET_MS : RESET_MS);
   });
 
-  // Coming back with the Back button restores the page from memory: nothing is sending any more.
+  // Coming back with the Back button restores the page from memory, or from the browser's cache
+  // as it was: nothing is sending any more, and the page was drawn with the look of its time.
+  // After Theme changed on Account the theme is put right in place; after Layout changed (the
+  // viewport itself) the page is read again.
   window.addEventListener("pageshow", function (e) {
-    if (!e.persisted) return;
-    var forms = document.querySelectorAll("form[data-sending]");
+    var forms = e.persisted ? document.querySelectorAll("form[data-sending]") : [];
     for (var i = 0; i < forms.length; i++) clear(forms[i]);
+    var cookies = {};
+    document.cookie.split(";").forEach(function (part) {
+      var at = part.indexOf("=");
+      if (at > 0) cookies[part.slice(0, at).trim()] = part.slice(at + 1).trim();
+    });
+    var root = document.documentElement, theme = cookies.mtg_theme || "";
+    if (theme !== (root.getAttribute("data-theme") || "")) {
+      if (theme) root.setAttribute("data-theme", theme); else root.removeAttribute("data-theme");
+    }
+    if ((cookies.mtg_layout === "desktop") !== document.body.classList.contains("desktop")) window.location.reload();
   });
 
   function openMenus() { return document.querySelectorAll("details.dd[open]"); }

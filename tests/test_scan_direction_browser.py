@@ -40,7 +40,9 @@ STAND_IN_OCR = """() => {
   window.__events = [];
   ['auto-added', 'unsure', 'unidentified'].forEach((n) =>
     document.addEventListener('scan:' + n, () => window.__events.push(n)));
-  const s = window.__scan.state; s.items = []; s.unidentified = [];
+  // the stand-in is a loaded engine: without one (the vendored files absent, as on a bare
+  // checkout) the dashed box is never read, which is right for the page, not for this test
+  const s = window.__scan.state; s.items = []; s.unidentified = []; s.ocrState = 'ready';
 }"""
 
 

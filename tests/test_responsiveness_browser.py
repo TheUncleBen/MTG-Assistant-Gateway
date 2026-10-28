@@ -665,8 +665,10 @@ def _loading_looks(d: Driver) -> None:
     if sort_btn.is_visible():
         local("collection sort list", sort_btn.click, d.escape)
     d.goto("/decks/42/settings")
+    # the categories' Save and Undo buttons are hidden by design since each change saves itself
+    # (decksettings.js: Undo is the toast's, which asks the gateway); a visible one is local
     reset = page.locator("#categories button[type=reset]")
-    if reset.count():
+    if reset.count() and reset.first.is_visible():
         local("categories Undo changes", reset.first.click)
     # a control that does ask the gateway shows its loading line while it waits
     d.goto("/decks")

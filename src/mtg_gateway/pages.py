@@ -311,13 +311,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if theme == "system":
             resp.delete_cookie(THEME_COOKIE, path="/")
         else:
+            # readable by the pages' script: a page restored from memory by Back (feedback.js)
+            # checks it against the look it was drawn with
             resp.set_cookie(
                 THEME_COOKIE,
                 theme,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
-                httponly=True,
+                httponly=False,
                 samesite="lax",
             )
         return resp
@@ -344,13 +346,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if layout == "auto":
             resp.delete_cookie(LAYOUT_COOKIE, path="/")
         else:
+            # readable by the pages' script: a page restored from memory by Back (feedback.js)
+            # checks it against the look it was drawn with
             resp.set_cookie(
                 LAYOUT_COOKIE,
                 layout,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
-                httponly=True,
+                httponly=False,
                 samesite="lax",
             )
         return resp
