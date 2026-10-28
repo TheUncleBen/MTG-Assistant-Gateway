@@ -81,8 +81,12 @@ def test_an_older_card_steps_aside_for_the_newest_and_stops_reading() -> None:
             assert len(_reads(page)) == n
             assert card.locator("#approve").count() == 0
             assert _confirms(page) == []
-            # the timed read asks for the first rows only
-            assert _reads(page)[0]["params"]["arguments"] == {"proposal_id": "p-1", "rows_limit": 8}
+            # the timed read asks for the first rows only, and names the card's own number
+            assert _reads(page)[0]["params"]["arguments"] == {
+                "proposal_id": "p-1",
+                "rows_limit": 8,
+                "card_seq": 1,
+            }
             assert not errors, errors
         finally:
             browser.close()
@@ -212,7 +216,10 @@ def test_a_big_proposal_shows_a_few_rows_and_loads_the_rest_on_show_all() -> Non
             card.locator("#more").click()
             card.locator("ul.changes li:not(.group):not(.more-row)").nth(60).wait_for(timeout=5_000)
             whole = [m for m in _reads(page) if "rows_limit" not in m["params"]["arguments"]]
-            assert len(whole) == 1 and whole[0]["params"]["arguments"] == {"proposal_id": "p-1"}
+            assert len(whole) == 1 and whole[0]["params"]["arguments"] == {
+                "proposal_id": "p-1",
+                "card_seq": 1,
+            }
             assert card.locator("ul.changes img.pic").count() <= 6  # the rest as text
             assert card.locator("#approve").count() == 1
         finally:
@@ -246,5 +253,71 @@ def test_reject_sends_the_reason_typed() -> None:
                 "reason": "keep the Islands",
             }
             card.locator("#card.stub").wait_for(timeout=5_000)
+        finally:
+            browser.close()
+
+
+_NODES = "() => document.getElementsByTagName('*').length"
+
+
+def test_a_card_that_steps_aside_keeps_next_to_nothing() -> None:
+    """Ten old cards in a chat should cost next to nothing: a card that steps aside drops its list,
+    pictures, summary, note and footer (the elements left are the card's own frame)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        try:
+            page = browser.new_page()
+            card = _open(
+                page, {"structuredContent": NEW_DECK, "_meta": {APPROVAL_META_KEY: "c1"}}, get_reply=NEW_DECK
+            )
+            card.locator("#more").wait_for()
+            page.evaluate("(r) => { window.getReply = r; }", WHOLE)
+            card.locator("#more").click()
+            card.locator("ul.changes li:not(.group):not(.more-row)").nth(60).wait_for(timeout=5_000)
+            frame = page.frames[1]
+            full = frame.evaluate(_NODES)
+            page.evaluate("(r) => { window.getReply = r; }", {**NEW_DECK, "version": 2, "card_seq": 2})
+            frame.evaluate(
+                "() => { Object.defineProperty(document, 'visibilityState',"
+                " {value: 'visible', configurable: true});"
+                " document.dispatchEvent(new Event('visibilitychange')); }"
+            )
+            card.locator("#card.stub").wait_for(timeout=5_000)
+            stub = frame.evaluate(_NODES)
+            assert card.locator("ul.changes li").count() == 0 and card.locator("img").count() == 0
+            assert card.locator("#summary").inner_text() == "" and card.locator("#note").inner_text() == ""
+            assert stub * 4 < full, (stub, full)
+        finally:
+            browser.close()
+
+
+def test_the_gateway_refusing_an_older_cards_approve_makes_it_step_aside() -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    refused = {
+        "ok": False,
+        "error": "not_newest_card",
+        "message": "A newer card for this change is further down the chat, so nothing was sent to "
+        "Archidekt from this one. Use the newest card for this change.",
+        "state": "pending",
+        "version": 1,
+    }
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        try:
+            page = browser.new_page()
+            card = _open(
+                page, {"structuredContent": NEW_DECK, "_meta": {APPROVAL_META_KEY: "c1"}}, refused, NEW_DECK
+            )
+            card.locator("#approve:enabled").click()
+            card.locator("#card.stub").wait_for(timeout=5_000)
+            assert "Use the newest card" in card.locator("#status").inner_text()
+            assert card.locator("#approve").count() == 0
+            # its reads named its own number
+            assert all(m["params"]["arguments"].get("card_seq") == 1 for m in _reads(page))
         finally:
             browser.close()

@@ -374,7 +374,7 @@ button.danger:disabled{color:var(--red)}
     var drawnWaiting = !sc0.state || sc0.state === "pending";
     var compact = sc.state && sc.state !== "pending" && sc.state !== "applying" && drawnWaiting && !pressedHere;
     $("card").className = "card" + (compact ? " stub" : "");
-    if (compact) list.replaceChildren();
+    if (compact) { list.replaceChildren(); proposal = slim(sc); release(live(sc)); }
     else renderRows(list, rows, total > COLLAPSE_AT ? COLLAPSE_AT : rows.length, total);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
@@ -383,7 +383,7 @@ button.danger:disabled{color:var(--red)}
       var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
       foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
     }
-    $("foot").textContent = foot.join(" · ");
+    $("foot").textContent = compact ? "" : foot.join(" · ");
     renderActions();
     renderAlso();
     if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
@@ -400,10 +400,10 @@ button.danger:disabled{color:var(--red)}
     stopWatching();
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
     askWhy(false);
-    proposal = null; approval = null; applySet = null; confirming = false;
+    proposal = null; confirming = false;
     $("card").className = "card stub";
     $("rows").replaceChildren(); $("actions").replaceChildren();
-    $("also").className = "also hidden"; clearNotSent();
+    $("also").className = "also hidden"; clearNotSent(); release();
     var st = $("state");
     B.label(st, newer(sc0, sc) ? "Replaced" : "Shown below", "replaced", "arrows");
     $("risk").className = "badge risk hidden"; $("nopress").className = "nopress hidden";
@@ -411,6 +411,33 @@ button.danger:disabled{color:var(--red)}
     reportSize();
   }
   var sc0 = {}; // the proposal as this card was first drawn (for its version)
+  // The card's own read names the card's number, so an older card is handed no approval code.
+  function readArgs(pid, rows) {
+    var args = { proposal_id: pid };
+    if (rows) args.rows_limit = rows;
+    if (mySeq) args.card_seq = mySeq;
+    return args;
+  }
+  // A one-line card holds nothing it no longer shows (ten old cards in a chat cost next to
+  // nothing): no list, pictures, summary, note or footer, no codes, only the few fields of
+  // the proposal its line and links use, and nothing left running (a replaced change, which
+  // can come back, is still read now and then: stillReading).
+  function release(stillReading) {
+    if (!stillReading) stopWatching();
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    approval = null; applySet = null; heldCode = null;
+    $("rows").replaceChildren(); $("also-actions").replaceChildren();
+    $("summary").textContent = ""; $("note").textContent = ""; $("foot").textContent = "";
+    sc0 = { version: sc0.version, card_seq: sc0.card_seq, state: sc0.state };
+  }
+  var SLIM_KEYS = ["proposal_id", "state", "kind", "review_url", "deck_id", "deck_name", "version",
+    "card_seq", "closed_at", "closed_by", "closed_by_app", "applied_at", "expires_at", "created_by"];
+  function slim(p) {
+    var keep = {};
+    SLIM_KEYS.forEach(function (k) { if (p[k] !== undefined) keep[k] = p[k]; });
+    if (p.result && p.result.deck_url) keep.result = { deck_url: p.result.deck_url };
+    return keep;
+  }
   var STEPPED_NEWER_TEXT = "Replaced by a newer version below. Use the newest card for this change.";
   var STEPPED_AGAIN_TEXT = "This change is shown again in a newer card below. Use that one.";
   // No more timed reads, retries or on-screen checks: the card has nothing left to follow.
@@ -419,6 +446,7 @@ button.danger:disabled{color:var(--red)}
     if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     if (observer) { observer.disconnect(); observer = null; }
+    document.removeEventListener("visibilitychange", onShown);
   }
 
   // What happened to a proposal that is no longer pending, and who closed it, in one plain line.
@@ -478,7 +506,7 @@ button.danger:disabled{color:var(--red)}
     var p = proposal;
     if (stepped || !live(p) || !p.proposal_id || refreshing || busy) return;
     refreshing = true;
-    request("tools/call", { name: "get_proposal", arguments: { proposal_id: p.proposal_id, rows_limit: ROWS_READ } })
+    request("tools/call", { name: "get_proposal", arguments: readArgs(p.proposal_id, ROWS_READ) })
       .then(function (res) {
         refreshing = false;
         var sc = (res && res.structuredContent) || {};
@@ -550,9 +578,10 @@ button.danger:disabled{color:var(--red)}
     if (applySet) meta[SET_KEY] = { ids: applySet.ids, code: applySet.code };
     return meta;
   }
-  document.addEventListener("visibilitychange", function () {
+  function onShown() {
     if (watching && document.visibilityState === "visible") { refreshes = 0; refresh(); keepFresh(); }
-  });
+  }
+  document.addEventListener("visibilitychange", onShown);
   // Read again now and then while the card is on screen (a host that keeps old cards in the chat
   // shows them current); not while it is scrolled away or the chat is in the background.
   var refreshes = 0, refreshTimer = null, onScreen = true;
@@ -591,7 +620,7 @@ button.danger:disabled{color:var(--red)}
     if (pollTimer || polls >= 120) return;
     pollTimer = setTimeout(function () {
       pollTimer = null; polls += 1;
-      request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+      request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
         .then(function (res) {
           var sc = (res && res.structuredContent) || {};
           if (sc.ok === false || (res && res.isError)) {
@@ -668,7 +697,7 @@ button.danger:disabled{color:var(--red)}
     var p = proposal;
     if (!p || !p.proposal_id) return;
     btn.disabled = true; btn.textContent = "Loading every change…";
-    request("tools/call", { name: "get_proposal", arguments: { proposal_id: p.proposal_id } })
+    request("tools/call", { name: "get_proposal", arguments: readArgs(p.proposal_id) })
       .then(function (res) {
         var sc = (res && res.structuredContent) || {};
         if (proposal !== p) return;
@@ -823,7 +852,7 @@ button.danger:disabled{color:var(--red)}
         }
         applySet = null; pressedHere = true;
         var summary = String(sc.summary || "");
-        request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+        request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
           .then(function (r2) {
             var p2 = (r2 && r2.structuredContent) || {};
             if (p2.state) render({ structuredContent: p2, _meta: (r2 && r2._meta) || {} });
@@ -897,7 +926,7 @@ button.danger:disabled{color:var(--red)}
       // the card was drawn is shown, and applies only on a second press
       var shown = proposal;
       setStatus("Checking this change…", "");
-      request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+      request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
         .then(function (res) {
           var sc = (res && res.structuredContent) || {};
           busy = false;
@@ -934,10 +963,16 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError)) {
           var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
           busy = false;
+          if (sc.error === "not_newest_card") {
+            // the gateway counts a newer card for this change below: this one steps aside
+            stepAside({ version: sc.version || sc0.version });
+            setStatus(String(msg), "err");
+            return;
+          }
           if (sc.error === "changed") {
             // the code is of an older version: read the change as it is now and draw that
             var drawn = proposal;
-            request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+            request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
               .then(function (r2) {
                 var p2 = (r2 && r2.structuredContent) || {};
                 if (proposal !== drawn) return;

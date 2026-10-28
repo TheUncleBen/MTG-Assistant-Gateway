@@ -981,12 +981,16 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         rows_limit: Annotated[
             int | None, Field(description="At most this many review rows (left out: all).", ge=1, le=500)
         ] = None,
+        card_seq: Annotated[
+            int | None, Field(description="The reading card's own number (card_seq it was drawn with).", ge=0)
+        ] = None,
     ) -> CallToolResult:
         try:
             return _proposal(
                 {"ok": True, **_closed_at(state.decks.describe(_sub(), proposal_id))},
                 read=True,
                 rows_limit=rows_limit,
+                reader_seq=card_seq or None,
             )
         except DeckError as exc:
             return _proposal(_tool_error(exc), read=True)

@@ -41,7 +41,7 @@ from urllib.parse import urlparse
 from cryptography.fernet import Fernet, InvalidToken
 
 from . import batch, board, formatting, modes, refusals
-from .approve import approval_code, approval_matches, approval_set_code
+from .approve import approval_code, approval_matches, approval_set_code, card_seq_of
 from .archidekt import (
     FORMAT_IDS,
     GAME_IDS,
@@ -818,6 +818,7 @@ REVIEW_PAGE = "review_page"
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 # The reason the member typed when rejecting on the card, kept with the rejection (at most this long)
 REJECT_REASON_MAX = 500
+OLDER_CARDS = 50  # older cards of a proposal whose code is answered "use the newest card" (not "invalid")
 # What an amend of a waiting new deck may change (DeckService.amend_new_deck), as propose_new_deck
 # takes it (folder_id: the folder, looked up by name in the tool)
 NEW_DECK_FIELDS = (
@@ -4885,9 +4886,12 @@ class DeckService:
         rewritten by another app."""
         return self.card_may_approve(row) and not self.rewritten_by_another_app(sub, row)
 
-    def approval_for(self, sub: str, row: dict[str, Any], *, version: int | None = None) -> str:
+    def approval_for(
+        self, sub: str, row: dict[str, Any], *, version: int | None = None, card_seq: int | None = None
+    ) -> str:
         """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
-        its owner, the app that made it, its creation time and its version. A deck deletion has
+        its owner, the app that made it, its creation time, its version and the number of the
+        newest card drawn for it in that app's chat (``card_seq`` names another). A deck deletion has
         no code (only its review page applies it), so asking for one is refused here, at
         the source."""
         if not self.card_may_approve(row):
@@ -4905,6 +4909,7 @@ class DeckService:
             client_id=row.get("created_by_client") or "",
             created_at=int(row["created_at"]),
             version=int(version if version is not None else row.get("version") or 1),
+            card_seq=card_seq if card_seq is not None else _card_seq(row, row.get("created_by_client")),
         )
 
     def check_approval(self, sub: str, proposal_id: str, approval: Any) -> dict[str, Any]:
@@ -4918,13 +4923,26 @@ class DeckService:
             raise self._review_page_only(sub, row)
         creator = row.get("created_by_client")
         version = int(row.get("version") or 1)
+        mine = bool(creator and creator == current_client.get())
+        stale = mine and not approval_matches(self.approval_for(sub, row), approval)
+        # the cards drawn before the newest (0: one drawn before cards were numbered)
+        seqs = [0, *range(max(1, _card_seq(row, creator) - OLDER_CARDS), _card_seq(row, creator))]
+        if stale and any(approval_matches(self.approval_for(sub, row, card_seq=n), approval) for n in seqs):
+            raise DeckError(
+                "not_newest_card",
+                "A newer card for this change is further down the chat, so nothing was sent to "
+                "Archidekt from this one. Use the newest card for this change.",
+                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
+                state=row["state"],
+                version=version,
+            )
         if (
-            creator
-            and creator == current_client.get()
+            stale
             and version > 1
-            and not approval_matches(self.approval_for(sub, row), approval)
             and any(
-                approval_matches(self.approval_for(sub, row, version=v), approval) for v in range(1, version)
+                approval_matches(self.approval_for(sub, row, version=v, card_seq=n), approval)
+                for v in range(1, version)
+                for n in [*seqs, _card_seq(row, creator)]
             )
         ):
             raise DeckError(
@@ -10767,14 +10785,7 @@ def import_label(raw: Any) -> str:
     return f"{name[:MAX_LABEL]},{colour or DEFAULT_LABEL_COLOUR}"
 
 
-def _card_seq(row: dict[str, Any], client: str | None) -> int:
-    """The number of the newest card drawn for this proposal in ``client``'s chat (0: none)."""
-    try:
-        seqs = json.loads(row.get("card_seqs") or "{}")
-    except ValueError:
-        return 0
-    n = seqs.get(str(client or "")) if isinstance(seqs, dict) else None
-    return int(n) if isinstance(n, int) and not isinstance(n, bool) else 0
+_card_seq = card_seq_of  # the newest card's number for this proposal in an app's chat
 
 
 def normalise_cards(

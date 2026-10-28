@@ -356,6 +356,49 @@ async def test_each_card_drawn_gets_the_next_number_and_the_cards_own_read_does_
     assert structured(await call(h, a, "get_proposal", {"proposal_id": pid}))["card_seq"] == 2
 
 
+async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_version(stack: Stack) -> None:
+    """The same version drawn twice (the assistant's own apply answers with the card again): the
+    first card's code is refused with "Use the newest card", whatever that card shows, and nothing
+    is sent; the newest card's code applies. A read from an older card hands it no code."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    res = await call(
+        h, token, "propose_deck_changes", {"deck_id": "42", "changes": [{"action": "add", "name": "Opt"}]}
+    )
+    p, old_code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    pid = p["proposal_id"]
+    assert p["card_seq"] == 1
+    again = await call(h, token, "apply_proposal", {"proposal_id": pid})
+    redrawn = structured(again)
+    assert redrawn["error"] == "browser_required" and redrawn["card_seq"] == 2 and redrawn["version"] == 1
+    new_code = again["_meta"][APPROVAL_META_KEY]
+    assert new_code != old_code
+    # the older card's read: no code; the newest card's read: its code; a read naming no card
+    # (a card from before card numbers) is answered as before
+    older = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": 1})
+    assert structured(older)["card_seq"] == 2 and APPROVAL_META_KEY not in (older.get("_meta") or {})
+    newest = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": 2})
+    assert newest["_meta"][APPROVAL_META_KEY] == new_code
+    plain = await call(h, token, "get_proposal", {"proposal_id": pid})
+    assert plain["_meta"][APPROVAL_META_KEY] == new_code
+    before = len(ark.patches)
+    stale = structured(
+        await call(
+            h, token, "confirm_proposal", {"proposal_id": pid, "approval": old_code, "decision": "approve"}
+        )
+    )
+    assert stale["ok"] is False and stale["error"] == "not_newest_card", stale
+    assert "Use the newest card" in stale["message"] and stale["state"] == "pending"
+    assert len(ark.patches) == before
+    done = structured(
+        await call(
+            h, token, "confirm_proposal", {"proposal_id": pid, "approval": new_code, "decision": "approve"}
+        )
+    )
+    assert done["ok"] and done["state"] == "applied", done
+
+
 async def test_the_card_numbers_survive_in_the_database(stack: Stack) -> None:
     h = stack.h
     assert db_module.SCHEMA_VERSION == 16
@@ -569,3 +612,22 @@ def test_the_docs_no_longer_say_chatgpts_phone_apps_cant_use_the_gateway() -> No
     for doc in ("CONNECT.md", "ARCHITECTURE.md", "ONBOARDING.md", "PLUGIN.md"):
         text = " ".join((root / "docs" / doc).read_text(encoding="utf-8").split())
         assert "iPhone app" not in text or "tested in the ChatGPT iPhone" not in text, doc
+
+
+def test_the_card_sent_to_the_chat_leaves_out_the_sources_comments_and_indentation() -> None:
+    """Every card is a whole document a chat loads once per card drawn; the source keeps its
+    comments, the copy sent leaves out whole comment lines, indentation and blank lines."""
+    from mtg_gateway.approve import CARD_PATH, card_html
+    from mtg_gateway.cards import card_html as any_card
+
+    html = card_html()
+    assert len(html.encode()) < 68_000, len(html.encode())  # 85,318 bytes before
+    lines = html.split("\n")
+    assert not [x for x in lines if x.strip().startswith(("//", "/*"))]
+    assert not [x for x in lines if x != x.strip() or not x.strip()][:-1]
+    # code and markup are untouched, and the source still explains itself
+    assert "var RETRY_FIRST_MS = 2000, RETRY_LAST_MS = 60000, RETRY_MAX = 6;" in html
+    assert '<textarea id="reason" maxlength="500"' in html and "https://" in html
+    assert "// " in CARD_PATH.read_text(encoding="utf-8")
+    for name in ("waiting-card", "deck-card", "stats-card"):
+        assert not [x for x in any_card(name).split("\n") if x.strip().startswith("//")], name

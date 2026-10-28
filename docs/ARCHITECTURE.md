@@ -298,7 +298,11 @@ For the exact devices and plans tested, see
   `_meta.ui.resourceUri`, a host that renders MCP Apps shows it with the
   result, and each card is numbered among its proposal's cards in that app's
   chat (`card_seqs`, schema 16): a card that reads a higher number steps aside
-  to one line, so only the newest asks for a press. The card follows its
+  to one line, so only the newest asks for a press, and the gateway holds to
+  it: a card's approval code names its number, so an older card's press is
+  refused (`not_newest_card`, "Use the newest card") and its reads carry no
+  code. The card sent is `cards.shipped()`: the source without its comment
+  lines and indentation. The card follows its
   proposal with `get_proposal`, which like `confirm_proposal` is the card's
   own (the model reads a proposal with `proposal_status`, which draws no
   card). Its buttons call `confirm_proposal`, a tool marked
