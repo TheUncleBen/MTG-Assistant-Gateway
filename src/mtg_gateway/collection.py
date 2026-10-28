@@ -70,6 +70,8 @@ if TYPE_CHECKING:
     from .decks import DeckService
     from .scan.service import ScanService
 
+logger = logging.getLogger(__name__)
+
 MAX_ITEMS_PER_CALL = 100  # each card costs one or two Archidekt calls, paced about a second apart
 MAX_QUANTITY = 9_999
 MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
@@ -142,6 +144,37 @@ def _wrap(exc: Exception) -> CollectionError:
 def _finish_of(modifier: Any) -> str:
     m = str(modifier or "Normal").strip().lower()
     return "foil" if m == "foil" else "etched" if m == "etched" else "nonfoil"
+
+
+async def _finish_warnings(adds: list[dict[str, Any]], scan: Any) -> list[str]:
+    """One warning per added card whose exact printing (set and collector number) Scryfall does not
+    list in the finish asked for, e.g. a foil of a printing made in nonfoil only. Nothing when the
+    lookup is not available or fails: the proposal is made either way."""
+    pinned = [a for a in adds if a.get("set") and a.get("collector_number")]
+    if not pinned or scan is None:
+        return []
+    idents = list({(a["set"], a["collector_number"]): None for a in pinned})
+    try:
+        found, _missing = await scan.scryfall.collection(
+            [{"set": s, "collector_number": n} for s, n in idents]
+        )
+    except Exception:
+        logger.warning("finish check of a collection add failed", exc_info=True)
+        return []
+    finishes = {
+        (str(c.get("set") or "").lower(), str(c.get("collector_number") or "")): c.get("finishes") or []
+        for c in found
+    }
+    out = []
+    for a in pinned:
+        made = finishes.get((a["set"], a["collector_number"]))
+        if made and a.get("finish") not in made:
+            out.append(
+                f"{a.get('name') or 'A card'} ({a['set'].upper()} {a['collector_number']}) is not made in "
+                f"{a['finish']}; Scryfall lists {', '.join(made)}. Amend the finish, or the collection "
+                "will hold a printing that does not exist."
+            )
+    return out
 
 
 def normalise_items(items: Any) -> list[dict[str, Any]]:
@@ -2733,6 +2766,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             removals = await _removals(sub, remove)
         except CollectionError as exc:
             return _result(_err(exc))
+        warnings += await _finish_warnings(adds, service.scan)
         try:
             # the source and scan id travel with the proposal so the apply can drop the scan
             p = await service.decks.propose_collection(
