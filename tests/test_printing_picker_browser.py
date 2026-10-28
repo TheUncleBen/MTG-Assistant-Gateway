@@ -1080,6 +1080,9 @@ STALE_SCROLL_THEN_OPEN = """
   const btn = document.querySelector(".printpick .msel-btn[aria-label='Frame']");
   // the box overflowed in CI (its fonts differ); a list that won't shrink stands in for that
   box.querySelector('.ppmain').style.flex = 'none';
+  // the scroll event, once sent (select.js's closer, on the document's capture, has seen it first)
+  window.__boxScrolled = false;
+  box.addEventListener('scroll', () => { window.__boxScrolled = true; }, { once: true });
   box.scrollTop += 6;
   btn.click();
   return box.scrollTop;
@@ -1095,6 +1098,8 @@ SCROLL_THE_BOX = """
   spacer.style.cssText = 'flex:none;height:600px';
   box.appendChild(spacer);
   const before = box.scrollTop;
+  window.__boxScrolled = false;
+  box.addEventListener('scroll', () => { window.__boxScrolled = true; }, { once: true });
   box.scrollTop = before > 0 ? 0 : 40;
   return [before, box.scrollTop];
 }
@@ -1123,7 +1128,8 @@ def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: P
             if not page.locator(".printpick .msel-btn[aria-label='Frame']").is_visible():
                 page.locator(".printpick .ppfiltbtn").click()
             assert page.evaluate(STALE_SCROLL_THEN_OPEN) > 0, "the picker box didn't scroll"
-            page.wait_for_timeout(300)  # several frames: the scroll event has arrived
+            # the scroll event comes a frame or more later (later still on a busy machine)
+            page.wait_for_function("() => window.__boxScrolled")
             assert page.locator(".msel-list").count() == 1, page.evaluate("() => window.__mselLog")
             page.locator(".msel-list [role=option]", has_text="1993 frame").first.click()
             assert page.locator(".msel-list").count() == 0
@@ -1132,7 +1138,7 @@ def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: P
             assert page.locator(".msel-list").count() == 1
             moved = page.evaluate(SCROLL_THE_BOX)
             assert moved[0] != moved[1], moved
-            page.wait_for_timeout(300)
+            page.wait_for_function("() => window.__boxScrolled")
             assert page.locator(".msel-list").count() == 0
             browser.close()
             assert errors == []
