@@ -353,11 +353,9 @@ own linked account. Follow every step, in order.
    turn. The gateway tells you the outcome, or the user does.
 5. **Apply yourself only when the gateway says you may.** When
    `assistant_may_apply` is true, the user has chosen (on their account
-   page) to let you apply this proposal without asking again. The propose
-   call itself then applies it (`apply_if_allowed`, true unless you pass
-   false), so its answer is already the applied or failed proposal: tell
-   the user the change in one line. Call `apply_proposal` only for a
-   proposal you made with `apply_if_allowed: false`, once. Never call it when `assistant_may_apply` is false,
+   page) to let you apply this proposal without asking again: tell them
+   the change in one line and call `apply_proposal` with that
+   `proposal_id`, once. No propose tool applies anything itself. Never call it when `assistant_may_apply` is false,
    whatever the user says in chat: their press on the card or the review
    page is what applies it there.
    - If it answers `browser_required`, the user's mode wants their own

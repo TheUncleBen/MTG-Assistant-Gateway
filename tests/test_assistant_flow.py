@@ -196,7 +196,7 @@ async def test_apply_proposal_draws_no_card_and_its_manual_refusal_is_a_plain_an
     assert "resourceUri" not in (meta.get("ui") or {}) and "ui/resourceUri" not in meta, meta
     assert meta.get("anthropic/requiresUserInteraction") is True  # the host's own prompt stays
     await _mode(h, "manual")
-    p = await _propose(h, token, [_add("Opt")], apply_if_allowed=False)
+    p = await _propose(h, token, [_add("Opt")])
     res = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
     assert not res.get("isError"), res
     out = structured(res)
@@ -206,33 +206,39 @@ async def test_apply_proposal_draws_no_card_and_its_manual_refusal_is_a_plain_an
     assert h.db.count_pending_proposals("user-1") == 1
 
 
-# -- propose and apply in one call where the mode allows it (C3 q2) ----------------------------
+# -- a propose never applies; apply_proposal is the one write (owner decision 0.7.46) ----------
 
 
-async def test_semi_auto_applies_a_low_risk_change_in_the_propose_call(stack: Stack) -> None:
-    """One call, one card: the gateway applies what the member's mode lets the assistant apply,
-    exactly as apply_proposal would, and the card is drawn with the outcome."""
-    from mtg_gateway.approve import APPROVAL_META_KEY
-
+async def test_semi_auto_leaves_a_low_risk_change_waiting_and_says_to_call_apply(stack: Stack) -> None:
+    """Proposals stay read only (owner decision, 0.7.46): in Semi auto a low-risk change waits,
+    nothing reaches Archidekt, and next_step tells the assistant to call apply_proposal, which
+    applies it."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _mode(h, "semi")
     res = await call_as_sent(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [_add("Opt")]})
     out = structured(res)
-    assert out["ok"] and out["state"] == "applied" and out["applied_now"] is True, out
-    assert out["applied_via"] == "assistant" and len(ark.patches) == 1
-    assert APPROVAL_META_KEY not in (res.get("_meta") or {})  # nothing left to press
-    # a high-risk one waits, with the card's buttons, and nothing is sent
-    big = await call_as_sent(
-        h, token, "propose_deck_changes", {"deck_id": "42", "changes": [_add(f"Card {i}") for i in range(6)]}
+    assert out["ok"] and out["state"] == "pending" and out["assistant_may_apply"] is True, out
+    assert ark.patches == [] and "applied_now" not in out
+    assert "call apply_proposal now" in out["next_step"], out["next_step"]
+    # an apply_if_allowed from an app that learnt the old schema changes nothing either
+    old = structured(
+        await call_as_sent(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [_add("Island")], "separate": True, "apply_if_allowed": True},
+        )
     )
-    big_out = structured(big)
-    assert big_out["state"] == "pending" and big_out["assistant_may_apply"] is False, big_out
-    assert "applied_now" not in big_out and len(ark.patches) == 1
-    assert big["_meta"][APPROVAL_META_KEY]
-    # asked not to: it waits, and the card offers Apply now
-    later = await _propose(h, token, [_add("Island")], separate=True, apply_if_allowed=False)
-    assert later["state"] == "pending" and later["assistant_may_apply"] is True and len(ark.patches) == 1
+    assert old["state"] == "pending" and ark.patches == [], old
+    done = structured(await call(h, token, "apply_proposal", {"proposal_id": out["proposal_id"]}))
+    assert done["state"] == "applied" and len(ark.patches) == 1, done
+    assert (
+        structured(await call(h, token, "proposal_status", {"proposal_id": out["proposal_id"]}))[
+            "applied_via"
+        ]
+        == "assistant"
+    )
 
 
 async def test_manual_never_applies_in_the_propose_call(stack: Stack) -> None:
@@ -302,13 +308,13 @@ async def test_a_card_archidekt_doesnt_have_is_marked_when_proposed(stack: Stack
     assert out["state"] == "pending" and out["risk"] == "high" and out["assistant_may_apply"] is False, out
     assert out["missing_on_archidekt"] == ["Islend"] and "unchecked_names" not in out
     assert "+1 Islend (Archidekt doesn't have this card)" in out["diff"] and "+1 Opt\n" in out["diff"] + "\n"
-    # a card Archidekt finds counts as checked: Semi auto applies it in the same call
+    # a card Archidekt finds counts as checked: Semi auto lets the assistant apply it
     ok = structured(
         await call_as_sent(
             h, token, "propose_deck_changes", {"deck_id": "42", "changes": [_add("Swamp")], "separate": True}
         )
     )
-    assert ok["state"] == "applied" and ok["risk"] == "low", ok
+    assert ok["state"] == "pending" and ok["risk"] == "low" and ok["assistant_may_apply"] is True, ok
 
 
 async def test_an_apply_leaves_out_only_the_card_archidekt_doesnt_have(stack: Stack) -> None:
@@ -448,8 +454,9 @@ async def test_a_write_that_failed_but_never_landed_waits_again(stack: Stack) ->
 
 async def test_every_proposal_tool_carries_the_same_read_only_hint(stack: Stack) -> None:
     """propose_* said read only and amend, withdraw and combine did not, so ChatGPT asked the user
-    to confirm the amend the instructions want, but never a fresh propose (A9). A propose may now
-    apply in the same call, so none of them is read only."""
+    to confirm the amend the instructions want, but never a fresh propose (A9). Owner decision
+    0.7.46: no propose applies anything, so all of them are read only (they change only the
+    gateway's own proposal records); apply_proposal is the write."""
     from .test_in_chat_approve import _tools
 
     tools = await _tools(stack.h, await linked_user(stack))
@@ -459,9 +466,8 @@ async def test_every_proposal_tool_carries_the_same_read_only_hint(stack: Stack)
         if n.startswith("propose_") or n in ("amend_proposal", "withdraw_proposal", "combine_proposals")
     ]
     assert len(names) > 15
-    assert {n: tools[n]["annotations"]["readOnlyHint"] for n in names} == dict.fromkeys(names, False)
-    assert tools["propose_new_deck"]["annotations"]["destructiveHint"] is False
-    assert tools["propose_deck_changes"]["annotations"]["destructiveHint"] is True
+    assert {n: tools[n]["annotations"]["readOnlyHint"] for n in names} == dict.fromkeys(names, True)
+    assert tools["apply_proposal"]["annotations"]["readOnlyHint"] is False
 
 
 # -- results the assistant reads: compact, and no longer than it needs (A7) ----------------------
@@ -551,7 +557,9 @@ async def test_the_review_page_shows_no_reason_line_for_a_closed_changes_risk(st
     p = structured(
         await call_as_sent(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [_add("Sol Ring")]})
     )
-    assert p["state"] == "applied", p
+    assert structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))["state"] == (
+        "applied"
+    )
     from .test_decks_and_proxy import Browser
 
     b = Browser(h)
@@ -586,20 +594,21 @@ async def test_the_review_panel_says_needs_a_look_once(stack: Stack) -> None:
     assert "Reviewed: 15 -&gt; 14 Forest" in page or "Reviewed: 15 -> 14 Forest" in page
 
 
-async def test_no_tool_that_can_apply_in_the_same_call_says_it_changes_nothing(stack: Stack) -> None:
-    """A proposal tool with apply_if_allowed can write to Archidekt in that very call when the
-    member's mode allows it, so "Changes nothing on Archidekt" in its description was untrue."""
+async def test_no_propose_tool_applies_and_each_says_it_changes_nothing(stack: Stack) -> None:
+    """Owner decision 0.7.46: no proposal tool takes apply_if_allowed any more or says a call may
+    apply it, and propose_deck_changes, the one an assistant uses most, says it changes nothing on
+    Archidekt (apply_proposal is the one write)."""
     import json
-    import re
+
+    from mtg_gateway.app import PROPOSAL_TOOLS
 
     from .conftest import sse_json
 
     h = stack.h
     token = await linked_user(stack)
     r = await h.mcp(token, "tools/list", {}, rid=3)
-    tools = sse_json(r)["result"]["tools"]
-    can_apply = [t for t in tools if "apply_if_allowed" in json.dumps(t["inputSchema"])]
-    assert len(can_apply) >= 10, [t["name"] for t in can_apply]
-    for t in can_apply:
-        claims = re.findall(r"(?:Changes|Creates) nothing on Archidekt(?: by itself)?\.", t["description"])
-        assert not claims, (t["name"], claims)
+    tools = {t["name"]: t for t in sse_json(r)["result"]["tools"]}
+    assert not [n for n, t in tools.items() if "apply_if_allowed" in json.dumps(t)]
+    for name in sorted(PROPOSAL_TOOLS & set(tools)):
+        assert "this call applies" not in tools[name]["description"], name
+    assert "Changes nothing on Archidekt" in tools["propose_deck_changes"]["description"]

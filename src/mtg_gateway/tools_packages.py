@@ -12,7 +12,6 @@ from pydantic import Field
 
 from . import packages
 from .app import AppState, _tool_error
-from .approve import APPLY_IF_ALLOWED_TEXT
 from .decks import DeckError
 
 
@@ -79,8 +78,8 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
             "by name, or any name with color as #rrggbb). Returns a "
             "proposal like propose_deck_changes (kind 'edit': the adds, each reviewed, under a line "
             "naming the package and what was left out), applied with apply_proposal. When it is "
-            "applied, Archidekt counts one import of the package, as on the site. Nothing reaches "
-            "Archidekt unless this call applies it (apply_if_allowed, when assistant_may_apply is true)."
+            "applied, Archidekt counts one import of the package, as on the site. Changes nothing on "
+            "Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,
@@ -94,7 +93,6 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         singleton: bool | None = None,
         color_tag: str | None = None,
         color: str | None = None,
-        apply_if_allowed: Annotated[bool, Field(description=APPLY_IF_ALLOWED_TEXT)] = True,
     ) -> CallToolResult:
         try:
             out = await state.decks.propose_package(
@@ -108,6 +106,6 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
                 color_tag=color_tag,
                 color=color,
             )
-            return await h._proposed({"ok": True, **out}, apply_if_allowed=apply_if_allowed)
+            return h._proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

@@ -26,7 +26,7 @@ assistant:
 | Mode | Low-risk proposal | High-risk proposal |
 | --- | --- | --- |
 | Manual, shown as "Ask me every time" (default) | the member presses Approve or Apply | the member presses |
-| Semi-auto, shown as "Apply low-risk changes without asking" | the assistant applies it (in the propose call, or `apply_proposal`) | the member presses |
+| Semi-auto, shown as "Apply low-risk changes without asking" | the assistant applies it (`apply_proposal`) | the member presses |
 | Full auto, shown as "Apply changes without asking" | the assistant applies it | the assistant applies it, except a restore, a commander or companion change, a new deck, an edit of more than 20 rows (by default), making a deck public or unlisted, a category change that touches the commander or which cards count in the deck, and any edit of a description that has formatting, such as bold text, links or pictures: the member presses |
 
 Low risk (the owner's Settings page sets the row limit, 5 here): A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row, never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; a private copy of a deck (a clone), which changes nothing that exists; and a change to your Archidekt lists (category templates, default categories, color tags, pins or custom cards) of at most 5 entries, with no deletes.
