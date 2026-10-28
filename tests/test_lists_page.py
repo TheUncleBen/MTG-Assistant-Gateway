@@ -460,16 +460,16 @@ async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Brows
     acc = (await member.http.get("/account/details")).text
     assert "<h2>Your Archidekt lists</h2>" in acc
     assert "Lists that follow you into every deck, kept on Archidekt:" in acc
-    assert "<a href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
+    assert "<a class='ui-cap' href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
     assert "<a class='btn' href='/lists'>" in acc and "Open My lists</a>" in acc
     for slug in ("templates", "defaults", "tags", "pins", "custom"):
         await member.http.get(f"/lists/{slug}")
     acc = (await member.http.get("/account/details")).text
-    assert "<a href='/lists/templates'>2 category templates</a>" in acc
-    assert "<a href='/lists/defaults'>1 card with default categories</a>" in acc
-    assert "<a href='/lists/tags'>1 color tag</a>" in acc
-    assert "<a href='/lists/pins'>1 pinned card</a>" in acc
-    assert "<a href='/lists/custom'>1 custom card</a>" in acc
+    assert "<a class='ui-cap' href='/lists/templates'>2 category templates</a>" in acc
+    assert "<a class='ui-cap' href='/lists/defaults'>1 card with default categories</a>" in acc
+    assert "<a class='ui-cap' href='/lists/tags'>1 color tag</a>" in acc
+    assert "<a class='ui-cap' href='/lists/pins'>1 pinned card</a>" in acc
+    assert "<a class='ui-cap' href='/lists/custom'>1 custom card</a>" in acc
     assert account_lists.counts("user-1")["templates"] == 2
 
 

@@ -1,7 +1,8 @@
 /* The bell in the top bar (theme.py, profile_page.py): Archidekt's unseen count, asked once the
    page has loaded (never during the page's own render, so the bar never slows a page), and the
    list as a box when the bell or Home's "On Archidekt" widget is pressed. Without this file the
-   bell is a link to the /notifications page. Needs static/box.js (window.MtgBox). */
+   bell is a link to the /notifications page. Needs static/box.js (window.MtgBox) and
+   static/fetchjson.js (window.MtgFetch: a session that has ended is "You're signed out"). */
 (function () {
   "use strict";
   // the top bar's bell, and Alerts on the rail (only one of them shows at a time)
@@ -26,6 +27,7 @@
     if (det) det.textContent = n > 0 ? (n === 1 ? "new notification" : "new notifications") : "nothing new";
   }
   function getJSON(href) {
+    if (window.MtgFetch) return window.MtgFetch.json(href);
     return fetch(href, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); });
   }
@@ -42,7 +44,7 @@
     } catch (e) { /* storage off: ask */ }
     getJSON("/notifications/count").then(function (d) {
       if (d && d.ok) { setCount(d.unseen || 0); keep(d.unseen || 0); }
-    }, function () { /* no connection: the bell stays quiet */ });
+    }, function () { /* signed out or no connection: the bell stays quiet */ });
   }
   function later(fn) {
     if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: 2000 });
@@ -94,10 +96,15 @@
       wrap.appendChild(note);
       box.setBody(wrap);
       box.focusFirst();
-    }, function () {
-      var e = el("p", "notice error", "No connection; the list could not be read. Try again.");
-      e.setAttribute("role", "alert");
+    }, function (err) {
+      var e;
+      if (err && err.signedOut && window.MtgFetch) e = window.MtgFetch.signedOut("the list");
+      else {
+        e = el("p", "notice error", "No connection; the list could not be read. Try again.");
+        e.setAttribute("role", "alert");
+      }
       box.setBody(e);
+      box.focusFirst();
     });
   }
   document.addEventListener("click", function (e) {

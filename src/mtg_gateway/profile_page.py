@@ -20,7 +20,7 @@ import re
 import time
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, unquote
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -104,6 +104,9 @@ KIND_WORDS = {
     "Contest": "Contest",
 }
 _DECK_URL = re.compile(r"https://archidekt\.com/decks/(\d+)$")
+_THREAD_URL = re.compile(r"https://archidekt\.com/forum/thread/(\d+)$")
+# Archidekt's profile address names a user; /users/ here takes a username, so a bare number stays there
+_USER_URL = re.compile(r"https://archidekt\.com/user/([^/?#]*[^/?#\d][^/?#]*)$")
 
 CSS = """
 .acc .pr-me{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
@@ -545,16 +548,23 @@ def collection_visibility(
 
 
 def _gateway_url(url: str | None) -> str | None:
-    """A deck's notification opens the gateway's own deck page; everything else stays on Archidekt."""
+    """A notification opens the gateway's own page where it has one: a deck's, a forum thread's
+    (a reply, a sticky, news of a feature) and a follower's profile. News and contests stay on
+    Archidekt."""
     if not url:
         return None
-    m = _DECK_URL.match(url)
-    return f"/decks/{m.group(1)}" if m else url
+    if m := _DECK_URL.match(url):
+        return f"/decks/{m.group(1)}"
+    if m := _THREAD_URL.match(url):
+        return f"/forum/thread/{m.group(1)}"
+    if m := _USER_URL.match(url):
+        return f"/users/{quote(unquote(m.group(1)), safe='')}"
+    return url
 
 
 def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
     """The bell's list: each row the notification's text and kind, tinted while unseen, a link to
-    its target where Archidekt names one (the gateway's deck page for a deck)."""
+    its target where Archidekt names one (the gateway's own page where it has one)."""
     if not linked:
         return (
             "<p class='muted'>Link your Archidekt account under Account details to see its notifications "

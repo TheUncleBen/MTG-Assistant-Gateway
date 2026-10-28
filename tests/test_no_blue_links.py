@@ -96,3 +96,98 @@ def test_the_assistant_pages_have_no_blue_text_links(server: Server, scheme: str
             assert heights and min(heights) >= 44, heights
         finally:
             browser.close()
+
+
+# The rest of the site's pages (0.7.46): the forum's crumbs, Account details' lists, the guide's
+# sentences, a deck's comments, Deck settings and Compare's way back, and the install page. A link
+# inside the guide's or the install page's sentences reads in the text colour, bold, underlined.
+SHELL_PAGES = [
+    "/forum",
+    "/forum/thread/700002",
+    "/account/details",
+    "/guide",
+    "/install?for=chatgpt",
+    "/decks/42",
+    "/decks/42/settings",
+    "/decks/42/compare",
+]
+CRUMBS = """() => {
+  const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);
+  const link = getComputedStyle(probe).color; probe.remove();
+  return Array.from(document.querySelectorAll('.fm nav.crumbs a'))
+    .filter(a => getComputedStyle(a).color === link).map(a => a.innerText.trim());
+}"""
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_shell_pages_have_no_blue_text_links(server: Server, scheme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        try:
+            ctx = browser.new_context(viewport={"width": 1280, "height": 900}, color_scheme=scheme)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            found: dict[str, list[str]] = {}
+            for path in SHELL_PAGES:
+                page.goto(f"{server.base}{path}", wait_until="networkidle")
+                blue = page.evaluate(BLUE) + page.evaluate(CRUMBS)
+                if blue:
+                    found[path] = sorted(set(blue))
+            assert not found, found
+            # the forum's crumbs are capsules, 44 px tall
+            page.goto(f"{server.base}/forum/thread/700002", wait_until="networkidle")
+            heights = page.evaluate(
+                "() => Array.from(document.querySelectorAll('.fm nav.crumbs a'))"
+                ".map(a => a.getBoundingClientRect().height)"
+            )
+            assert heights and min(heights) >= 44, heights
+        finally:
+            browser.close()
+
+
+# The in-chat cards (static/cards/_base.css a.link): Open in the app, Archidekt, Review, Undo and the
+# rest were blue underlined text; they are the cards' grey capsule, 44 px tall.
+CARD_LINKS = """() => {
+  const blue = getComputedStyle(document.documentElement).getPropertyValue('--blue').trim();
+  const probe = document.createElement('span'); probe.style.color = blue; document.body.appendChild(probe);
+  const blueRgb = getComputedStyle(probe).color; probe.remove();
+  return Array.from(document.querySelectorAll('a.link')).filter(a => a.getClientRects().length).map(a => {
+    const c = getComputedStyle(a);
+    return {text: a.innerText.trim(), blue: c.color === blueRgb, line: c.textDecorationLine,
+      h: a.getBoundingClientRect().height};
+  });
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_cards_links_are_capsules(theme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    from .test_cards_browser import MY_DECKS, STATS, _open, _route
+    from .test_consent_browser import _chromium_or_skip, _launch
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for name, result, ready in (
+                ("deck-list-card", MY_DECKS, "#list .row.deck"),
+                ("stats-card", STATS, "#curve .col"),
+            ):
+                page = browser.new_page(viewport={"width": 400, "height": 900})
+                _route(page)
+                card = _open(page, name, {"structuredContent": result}, width=380, theme=theme)
+                card.locator(ready).first.wait_for(timeout=10_000)
+                links = card.locator("body").evaluate(f"(b) => ({CARD_LINKS})()")
+                assert links, name
+                bad = [x for x in links if x["blue"] or x["line"] != "none" or x["h"] < 44]
+                assert not bad, (name, bad)
+                page.close()
+        finally:
+            browser.close()

@@ -451,7 +451,9 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     d = r.json()
     assert d["ok"] and d["unseen"] == 2
     assert "<a class='bell-row new' href='/decks/42'>" in d["html"]  # a deck opens here, on the gateway
-    assert "href='https://archidekt.com/forum/thread/7' target='_blank'" in d["html"]
+    # a forum reply opens the gateway's own thread page, in the same tab
+    assert "<a class='bell-row new' href='/forum/thread/7'>" in d["html"]
+    assert "archidekt.com/forum" not in d["html"]
     assert (
         "<div class='bell-row'><i aria-hidden='true'>A</i><span class='t'>x<span class='s'>Archidekt</span>"
         in d["html"]
@@ -480,6 +482,33 @@ async def test_the_bell_stays_quiet_when_archidekt_cannot_be_asked(member: Brows
     page = (await member.http.get("/account/details")).text
     assert _said(page, "Archidekt did not answer, so your profile and settings can't be shown right now.")
     assert (await member.http.get("/collection")).status_code == 200
+
+
+def test_a_notification_opens_the_gateways_own_page_where_it_has_one() -> None:
+    """A deck, a forum thread and a follower's profile open here; Archidekt's news and contests
+    (no page here) stay on Archidekt, in a new tab. A profile link that is a number, not a
+    username, stays on Archidekt too: /users/ takes a username."""
+    rows = [
+        ("ForumThread", {"selfId": 7}, "/forum/thread/7"),
+        ("Global", {"linkId": 8}, "/forum/thread/8"),
+        ("Sticky", {"linkId": 9}, "/forum/thread/9"),
+        ("Features", {"linkId": 10}, "/forum/thread/10"),
+        ("DeckThread", {"linkId": 42}, "/decks/42"),
+        ("Profile", {"linkId": "dave"}, "/users/dave"),
+        ("Profile", {"linkId": "Amy B."}, "/users/Amy%20B."),
+    ]
+    for kind, extra, want in rows:
+        url = profile.notification_url({"notificationType": kind, **extra})
+        out = profile_page.notifications_html(
+            {"notifications": [{"kind": kind, "text": "t", "seen": True, "url": url}]}
+        )
+        assert f"href='{want}'>" in out and "target=" not in out, (kind, out)
+    for kind, extra in (("News", {"linkId": 55}), ("Contest", {"linkId": 12}), ("Profile", {"linkId": 123})):
+        url = profile.notification_url({"notificationType": kind, **extra})
+        out = profile_page.notifications_html(
+            {"notifications": [{"kind": kind, "text": "t", "seen": True, "url": url}]}
+        )
+        assert "href='https://archidekt.com/" in out and "target='_blank'" in out, (kind, out)
 
 
 def test_the_profile_cards_without_a_profile_say_so() -> None:

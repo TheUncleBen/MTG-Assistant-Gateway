@@ -50,7 +50,7 @@ def test_the_places_are_four_and_more_holds_two_groups(monkeypatch: pytest.Monke
     groups = theme.more_groups()
     assert [g for g, _links in groups] == ["Find", "Your cards"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
-    assert hrefs == ["/search", "/precons", "/scan", "/watchlist", "/lists"]
+    assert hrefs == ["/search", "/precons", "/scan", "/watchlist", "/lists", "/history/models"]
 
 
 def test_watchlist_leaves_more_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:

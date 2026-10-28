@@ -282,10 +282,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         back = _safe_next(data.get("next"))
+        # static/pages.js sends it with fetch and then redraws the page in place, so the choice adds
+        # no step to the browser's history (Back went to the same page)
+        script = "application/json" in (request.headers.get("accept") or "")
         if not (sub and sid and check_csrf(sid, data)):
+            if script:
+                return JSONResponse({"ok": False}, status_code=403)
             return RedirectResponse(back, status_code=303)
         theme = theme_from_cookie(data.get("theme"))
-        resp = RedirectResponse(back, status_code=303)
+        resp: Response = JSONResponse({"ok": True}) if script else RedirectResponse(back, status_code=303)
         if theme == "system":
             resp.delete_cookie(THEME_COOKIE, path="/")
         else:
@@ -310,10 +315,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         back = _safe_next(data.get("next"))
+        # static/pages.js sends it with fetch and then redraws the page in place, so the choice adds
+        # no step to the browser's history (Back went to the same page)
+        script = "application/json" in (request.headers.get("accept") or "")
         if not (sub and sid and check_csrf(sid, data)):
+            if script:
+                return JSONResponse({"ok": False}, status_code=403)
             return RedirectResponse(back, status_code=303)
         layout = layout_from_cookie(data.get("layout"))
-        resp = RedirectResponse(back, status_code=303)
+        resp: Response = JSONResponse({"ok": True}) if script else RedirectResponse(back, status_code=303)
         if layout == "auto":
             resp.delete_cookie(LAYOUT_COOKIE, path="/")
         else:
@@ -1504,10 +1514,11 @@ def _lists_card(sub: str) -> str:
         n = counts.get(t.kind)
         one, many = words[t.kind]
         text = many if n is None else f"{n:,} {one if n == 1 else many}"
-        parts.append(f"<a href='{PAGE}/{t.slug}'>{text}</a>")
+        parts.append(ui.cap_link(text, f"{PAGE}/{t.slug}"))
     return (
         "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
-        f"<p>Lists that follow you into every deck, kept on Archidekt: {', '.join(parts)}.</p>"
+        "<p>Lists that follow you into every deck, kept on Archidekt:</p>"
+        f"<p class='ui-caps'>{''.join(parts)}</p>"
         f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
     )
 

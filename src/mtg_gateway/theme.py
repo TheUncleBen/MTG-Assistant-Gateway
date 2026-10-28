@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, update_check
+from . import __version__, card_models, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -976,6 +976,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home .searchbox .field{flex:1 1 14rem;margin:0}
 .home .searchbox button{margin:0}
 .home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr));gap:.75rem}
+/* two a row down to 320 px (the Fold's cover screen): one a row made each tile a screen's third */
+@media (max-width:419.98px){ .home .recent{grid-template-columns:repeat(2,minmax(0,1fr))} }
 .home .recent a{display:block;position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f) center/cover no-repeat;color:#fff;text-decoration:none;
   font-weight:700}
@@ -1069,6 +1071,10 @@ footer.site .legal{color:#ababab;max-width:60rem}
 """
 )
 
+# The tab bar's and the rail's labels: 11 px at the usual text size, growing with the page's text
+# size (rem) up to 15 px, so a larger default font reads larger without pushing a label out of its tab.
+CSS += ":root{--tab-label:min(.786rem,15px)}\n"
+
 # The compact layout (bottom tab bar), written once and applied under each condition (a media
 # query cannot see a body class, so the rules are emitted per condition). {b} prefixes selectors
 # on <body>.
@@ -1085,7 +1091,7 @@ _MOBILE_RULES = """
     border-top:1px solid var(--border);
     padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 10px rgba(0,0,0,.08)}
   body{b} .tabbar > a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
-    height:56px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:11px;
+    height:56px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:var(--tab-label);
     transition:color .2s ease;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:22px;height:22px;transition:transform .15s ease}
   body{b} .tabbar > a:active svg{transform:scale(.92)}
@@ -1095,7 +1101,7 @@ _MOBILE_RULES = """
     background:var(--orange);border-radius:0 0 3px 3px}
   body{b} .tabbar > a{position:relative}
   body{b} .tabbar details.more summary{display:flex;flex-direction:column;align-items:center;
-    justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
+    justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:var(--tab-label);
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
   /* large text (a phone's font scale): a label wraps inside its tab and the bar grows */
@@ -1127,7 +1133,7 @@ _RAIL_RULES = """
   body{b} .tabbar > a{position:relative;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:.3rem;height:64px;flex:0 1 auto;min-height:52px;color:var(--toolbar-text);
     text-decoration:none;
-    font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
+    font-weight:700;font-size:var(--tab-label);-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     padding:0 2px}
@@ -1140,7 +1146,7 @@ _RAIL_RULES = """
   body{b} .tabbar details.more{display:block}
   body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:.3rem;height:64px;min-height:52px;color:var(--toolbar-text);font-weight:700;
-    font-size:11px;-webkit-tap-highlight-color:transparent}
+    font-size:var(--tab-label);-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
     height:32px;margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
@@ -1164,7 +1170,8 @@ CSS = CSS.replace(
     + "}\n"
     + "body.app footer.site{display:none}\n"
     + "body.app .topbar{padding-top:env(safe-area-inset-top)}\n"
-    + "body.app .topbar .brand .word{display:inline}\n",
+    # the app shows its name beside the mark from 600 px; on a phone only the mark, as the website
+    + "@media (min-width:600px){ body.app .topbar .brand .word{display:inline} }\n",
 )
 # The top bar's second row for large text with a mouse (the container queries above): the brand
 # mark and the account side share the first row, the text links wrap in the row under them.
@@ -1482,6 +1489,8 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-cap:hover{background:var(--surface-3) padding-box;color:var(--text)}
 .ui-cap:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .ui-cap svg.i{width:16px;height:16px;flex:none}
+/* a row of capsules (Your Archidekt lists on Account details): they wrap, with room between */
+.ui-caps{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-left:4px}
 /* a title that opens its row or group, or a deck named in a panel or a widget: the text colour,
    bold, underlined on hover and focus, so the page carries no blue text */
 .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
@@ -1841,9 +1850,10 @@ CSS += BELL_CSS
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 1279 px); under 600 px folded behind the magnifier
 # (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
-# keeps its text links, Search among them, and has no room for the box. The box's rules address
-# the input through .box, not the .suggest wrapper the script puts around it, so the room for the
-# magnifier is there before the script runs and without it (0.7.43: the icon sat on "Search").
+# keeps its text links and has no room for the box: it is folded behind the magnifier there too.
+# The box's rules address the input through .box, not the .suggest wrapper the script puts around
+# it, so the room for the magnifier is there before the script runs and without it (0.7.43: the
+# icon sat on "Search").
 _TOPSEARCH_CSS = """
 .topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
 /* The box's own width, which the bar starts from before it grows or gives way: 20rem, not the
@@ -1854,6 +1864,9 @@ _TOPSEARCH_CSS = """
    rest when the box grows. */
 .topbar .topsearch .box{position:relative;display:grid;grid-template-columns:minmax(9rem,20rem) auto}
 .topbar .topsearch .box > input{grid-column:1 / -1}
+/* the wrapper static/suggest.js puts around the input spans the box too: in the first column only,
+   the input (and under 600 px its suggestion list) stopped 20rem in, short of the box's end */
+.topbar .topsearch .box > .suggest{grid-column:1 / -1}
 .topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
@@ -1888,6 +1901,15 @@ _TOPSEARCH_CSS = """
     background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0}
   body.search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
   body.search-open .topbar .searchbtn{color:var(--orange)} }
+/* A narrow window with a mouse (600 to 899 px) has no room for the box beside its text links: the
+   magnifier shows, and opens the box under the bar as on a phone (it had no search at all) */
+@media (min-width:600px) and (max-width:899.98px) and (hover:hover) and (pointer:fine){
+  body:not(.app) .topbar .searchbtn{display:inline-flex}
+  body:not(.app).search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
+    padding:.5rem 1.25rem .6rem;background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0;
+    max-width:none;margin:0}
+  body:not(.app).search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
+  body:not(.app).search-open .topbar .searchbtn{color:var(--orange)} }
 /* the site search's groups in the suggestion list */
 .suggest-list li.head{padding:.5rem 1rem .2rem;font-size:.78rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.04em;color:var(--menu-head);cursor:default}
@@ -2394,14 +2416,23 @@ MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
     (
         "Your cards",
-        [("/scan", "Scan", "scan"), ("/watchlist", "Watchlist", "stats"), ("/lists", "My lists", "list")],
+        [
+            ("/scan", "Scan", "scan"),
+            ("/watchlist", "Watchlist", "stats"),
+            ("/lists", "My lists", "list"),
+            ("/history/models", "My card models", "box"),
+        ],
     ),
 ]
 
 
 def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
-    """More's groups, without Watchlist while watchlists are off."""
-    return [(head, [x for x in links if WATCHLISTS or x[0] != "/watchlist"]) for head, links in MORE_GROUPS]
+    """More's groups, without Watchlist while watchlists are off and without My card models while
+    descriptions are not kept (card_models.SWITCHED_ON)."""
+    off = {"/watchlist"} if not WATCHLISTS else set()
+    if not card_models.SWITCHED_ON:
+        off.add("/history/models")
+    return [(head, [x for x in links if x[0] not in off]) for head, links in MORE_GROUPS]
 
 
 def hub_switch(label: str, items: list[tuple[str, str, str]], current: str, *, badge: int = 0) -> str:
@@ -2723,6 +2754,7 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
+        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
         + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )

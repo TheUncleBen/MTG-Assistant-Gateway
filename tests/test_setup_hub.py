@@ -165,7 +165,9 @@ async def test_the_app_list_sits_beside_the_steps_and_marks_the_picked_app(harne
         assert "Other sections:" not in hub and "btn-primary' href='/install?for=" not in hub
         assert ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}" in hub
         # the first screen: the intro, the phone note and the Connector URL; its address is a link
-        assert f"<a class='nb' href='{GATEWAY}/install.md'><code>{GATEWAY}/<wbr>install.md</code></a>" in hub
+        assert (
+            f"<a class='mdaddr' href='{GATEWAY}/install.md'><code>{GATEWAY}/<wbr>install.md</code></a>" in hub
+        )
         assert f"<p>{setup_hub.INTRO}</p>" in hub.replace("&#x27;", "'")
         assert "data-copy='mcp-url'" in hub and "On a phone?" in hub
         # a picked app: tinted in the list (aria-current), named in the drop-down, no orange button
@@ -179,7 +181,7 @@ async def test_the_app_list_sits_beside_the_steps_and_marks_the_picked_app(harne
             "<span class='sfk'>Steps for:</span><span class='v'>Claude: web, desktop, iPhone and Android"
             "</span>" in claude
         )
-        assert f"<a class='nb' href='{GATEWAY}/install.md?for=claude'>" in claude
+        assert f"<a class='mdaddr' href='{GATEWAY}/install.md?for=claude'>" in claude
     finally:
         await b.aclose()
 

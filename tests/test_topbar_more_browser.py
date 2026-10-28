@@ -1,7 +1,7 @@
 """The top bar on a computer (navigation round 2, Ben 2026-10-25): the four places (Home, Decks,
 Binder, Assistant) at every width and text size, then "More ▾" with its two groups (Find: Search
-and Precons; Your cards: Scan, Watchlist and My lists). History and Reports mark Assistant; a page
-under More marks More. Phones and the touch rail have no More ▾ in the bar."""
+and Precons; Your cards: Scan, Watchlist, My lists and My card models). History and Reports mark
+Assistant; a page under More marks More. Phones and the touch rail have no More ▾ in the bar."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ def test_the_bar_marks_the_place_and_a_page_under_more(server: Server) -> None:
         "Scan",
         "Watchlist",
         "My lists",
+        "My card models",
     ]
     nav = h.get("/watchlist").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     assert "<summary class='on'>More" in nav and "<a href='/watchlist' aria-current=page>" in nav

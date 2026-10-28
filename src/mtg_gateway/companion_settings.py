@@ -86,7 +86,7 @@ SETTINGS_CSS = """
   text-decoration:none;font-weight:700;font-size:.92rem;margin-left:-2px;border-left:2px solid transparent}
 .ds-nav a:hover,.ds-nav a:focus-visible{color:var(--text);border-left-color:var(--border)}
 .ds-nav a.dz{color:var(--danger-text)}
-.ds .back{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font-weight:700}
+.ds .back{margin-bottom:.25rem}
 .ds .ui-card{margin:0 0 1rem}
 .ds .ui-card h2{display:flex;align-items:center;gap:.5rem}
 .ds .ui-card.danger{border-color:var(--danger-fill)}
@@ -442,7 +442,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         return (
             "<div class='ds-wrap'>"
             + nav
-            + f"<div class='ds'><a class='back' href='/decks/{did}'>← {_esc(title)}</a>"
+            + f"<div class='ds'><a class='back ui-cap' href='/decks/{did}'>← {_esc(title)}</a>"
             + ui.page_head("Deck settings", f"“{title}”" + (" · package" if is_package else ""))
             + f"<form method='post' action='/decks/{did}/settings' class='ui-card settings' id='ds-main'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
@@ -853,7 +853,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + row(
                 "<label for='folder_id'>This deck sits in</label>",
-                "Manage folders on <a href='/decks'>My decks</a>.",
+                "Manage folders on " + ui.cap_link("My decks", "/decks") + ".",
                 f"<div class='ds-inline'><select id='folder_id' name='folder_id'>{opts}</select>"
                 f"<button class='btn'>{icon('folder')} Move</button></div>",
                 "wctl",
@@ -914,7 +914,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         if following is not None and not following:
             hint = (
                 "You don't follow anyone on Archidekt yet. To find people, "
-                "<a href='/search'>search decks</a>, open a deck, then its owner's name, and press Follow."
+                + ui.cap_link("search decks", "/search")
+                + ", open a deck, then its owner's name, and press Follow."
             )
         elif following and not people:
             hint = "Everyone you follow on Archidekt is a collaborator already."

@@ -794,8 +794,13 @@ INSTALL_CSS = (
     ".inst .drop .list{border-top:1px solid var(--border-soft);padding:.25rem 0}"
     ".inst .card>h2{margin-bottom:.4rem}"
     ".inst p,.inst li{overflow-wrap:anywhere}"
-    # the address breaks at its <wbr> first; mid-word only when the address alone is too wide
-    ".inst a.nb code{overflow-wrap:anywhere}"
+    # a link inside the steps' sentences: the text's colour, bold, underlined in orange (the guide's)
+    ".inst :is(p,li) a:not([class]){color:var(--text);font-weight:700;text-decoration:underline;"
+    "text-decoration-color:var(--orange);text-underline-offset:2px}"
+    ".inst :is(p,li) a:not([class]):hover{color:var(--orange-text)}"
+    # the address in the text colour (its class was .nb, the waiting count's orange badge since 0.7.45,
+    # which drew dark text on orange); it breaks at its <wbr> first, mid-word only when too wide
+    ".inst a.mdaddr{color:var(--text)} .inst a.mdaddr code{overflow-wrap:anywhere}"
     ".setup>li{margin:.7rem 0}"
     ".copyfield{margin:.5rem 0}.copyfield label{margin:.2rem 0 .3rem}"
     ".copyline{display:flex;gap:.5rem;align-items:flex-start}"
@@ -883,7 +888,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
         intro = (
             f"<div class='card'><p>{e(INTRO, quote=False)}</p>"
             "<p class='muted small'>Giving an AI agent this page's address and saying \"install this "
-            f"plugin\" is enough: the plain-text version is at <a class='nb' href='{e(md_url)}'>"
+            f"plugin\" is enough: the plain-text version is at <a class='mdaddr' href='{e(md_url)}'>"
             f"<code>{md_shown}</code></a>.</p></div>"
         )
         nav, drop = _picker(client, e)
