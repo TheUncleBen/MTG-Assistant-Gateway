@@ -878,6 +878,10 @@ def _step_18(conn: sqlite3.Connection) -> None:
         _add_column(conn, "watch_cards", column, "TEXT")
 
 
+# A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
+# result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
+RISK_REASON_KEY = "_risk_reason"
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -1045,7 +1049,8 @@ class Database:
         self.session_max_age_source: Callable[[], int] | None = None
         # A closed proposal's risk tier from its stored row (get_proposal's shape), stored when it
         # closes (settle_risks); the app wires in DeckService.stored_risk. None stores nothing.
-        self.risk_source: Callable[[dict[str, Any]], str] | None = None
+        # It may answer (tier, reason): the reason is kept with the tier (RISK_REASON_KEY).
+        self.risk_source: Callable[[dict[str, Any]], str | tuple[str, str]] | None = None
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -2776,19 +2781,31 @@ class Database:
             row = self.get_proposal(pid, owner)
             if row is None:
                 continue
+            reason = ""
             try:
                 risk = self.risk_source(row)
+                if isinstance(risk, tuple):  # (tier, the reason it was judged by)
+                    risk, reason = risk
             except Exception:  # never let one odd row stop a close or the backfill
                 logger.exception("risk of proposal %s could not be worked out", pid)
                 risk = UNJUDGED
             if risk not in ("low", "high", "consent", "destructive"):
-                risk = UNJUDGED
+                risk, reason = UNJUDGED, ""
             with self.tx() as c:
                 stored = c.execute(
                     "UPDATE proposals SET risk = ? WHERE id = ? AND risk IS NULL "
                     "AND state NOT IN ('pending', 'applying')",
                     (risk, pid),
                 ).rowcount
+                if stored and reason:
+                    # the reason beside the tier, kept with it in the stored result (RISK_REASON_KEY)
+                    got = c.execute("SELECT result_json FROM proposals WHERE id = ?", (pid,)).fetchone()
+                    result = json.loads(got["result_json"]) if got and got["result_json"] else None
+                    result = result if isinstance(result, dict) else {}
+                    c.execute(
+                        "UPDATE proposals SET result_json = ? WHERE id = ?",
+                        (json.dumps({**result, RISK_REASON_KEY: str(reason)}), pid),
+                    )
             if risk != UNJUDGED:
                 n += stored
         return n

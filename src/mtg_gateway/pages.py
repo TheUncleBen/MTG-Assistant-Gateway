@@ -2370,12 +2370,9 @@ def _risk_words(p: dict[str, Any]) -> str:
 
 
 def _risk_reason(p: dict[str, Any]) -> str:
-    """The risk's one-line reason; none for a closed change, whose tier was stored when it closed
-    (A18: "judged when it closed" told the member nothing)."""
-    from .decks import STORED_RISK_REASON
-
-    why = str(p.get("risk_reason") or "").strip()
-    return "" if why == STORED_RISK_REASON else why
+    """The risk's one-line reason; a closed change's is the one stored when it closed (none for
+    one closed before 0.7.46)."""
+    return str(p.get("risk_reason") or "").strip()
 
 
 def _future(ts: int | None, now: float) -> str:
