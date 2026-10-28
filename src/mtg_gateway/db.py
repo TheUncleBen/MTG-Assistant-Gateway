@@ -799,6 +799,15 @@ def _like_prefix(prefix: str) -> str:
 
 # job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
 BACKUP_MADE_JOB = "backup_made:"
+# Why a snapshot can't be deleted now (Database.snapshot_held), in the member's words.
+SNAPSHOT_HELD_RESTORE = (
+    "A restore that is waiting puts the deck back to this snapshot, so it can't be deleted. Reject "
+    "or apply that restore first."
+)
+SNAPSHOT_HELD_BACKUP = (
+    "This snapshot holds the gateway's record of a backup copy on Archidekt, which the gateway may "
+    "still delete for you, so it can't be deleted."
+)
 # job_runs rows recording each Archidekt folder the gateway put a member's backup copies in
 # (record_backup_folder), by member and folder id: a renamed backup folder stays known as one
 BACKUP_FOLDER_JOB = "backup_folder:"
@@ -3447,6 +3456,47 @@ class Database:
                 return False
             c.execute("UPDATE proposals SET result_json = ? WHERE id = ?", (json.dumps(new), proposal_id))
             return True
+
+    def snapshot_held(self, snapshot_id: str, owner_sub: str) -> str | None:
+        """Why the member's snapshot can't be deleted now, or None when it can: a waiting (or
+        running) restore puts the deck back to it, or it holds the gateway's record of a backup
+        copy on Archidekt the gateway may still delete (``_prune_snapshots`` keeps both too)."""
+        if self._one(
+            "SELECT 1 FROM proposals WHERE owner_sub = ? AND kind = 'restore' AND state IN ('pending', "
+            "'applying') AND json_extract(changes_json, '$.snapshot_id') = ? LIMIT 1",
+            (owner_sub, snapshot_id),
+        ):
+            return SNAPSHOT_HELD_RESTORE
+        if self._one(
+            "SELECT 1 FROM backup_deletes WHERE snapshot_id = ? LIMIT 1", (snapshot_id,)
+        ) or self._one(
+            "SELECT 1 FROM snapshots s WHERE s.id = ? AND s.owner_sub = ? AND s.backup_deck_id IS NOT NULL "
+            "AND s.id = (SELECT s2.id FROM snapshots s2 WHERE s2.owner_sub = s.owner_sub AND "
+            "s2.deck_id = s.deck_id AND s2.backup_deck_id = s.backup_deck_id ORDER BY s2.taken_at, s2.rowid "
+            "LIMIT 1) AND EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id AND "
+            "coalesce(json_extract(j.detail_json, '$.kept'), 0) != 1)",
+            (snapshot_id, owner_sub, BACKUP_MADE_JOB),
+        ):
+            return SNAPSHOT_HELD_BACKUP
+        return None
+
+    def delete_snapshot(self, snapshot_id: str, owner_sub: str) -> bool:
+        """Delete one of the member's snapshots (the caller checked ``snapshot_held`` first; it is
+        checked again in the same step). False when there is no such snapshot of theirs."""
+        with self.tx() as c:
+            held = c.execute(
+                "SELECT 1 FROM proposals WHERE owner_sub = ? AND kind = 'restore' AND state IN "
+                "('pending', 'applying') AND json_extract(changes_json, '$.snapshot_id') = ? LIMIT 1",
+                (owner_sub, snapshot_id),
+            ).fetchone()
+            if held:
+                return False
+            return (
+                c.execute(
+                    "DELETE FROM snapshots WHERE id = ? AND owner_sub = ?", (snapshot_id, owner_sub)
+                ).rowcount
+                > 0
+            )
 
     def get_snapshot(self, snapshot_id: str, owner_sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM snapshots WHERE id = ? AND owner_sub = ?", (snapshot_id, owner_sub))

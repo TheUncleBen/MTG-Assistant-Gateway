@@ -68,7 +68,7 @@ SIGNIN_EVENTS = (
     "code_reuse_detected",
     "signed_out_everywhere",
 )
-REPORT_EVENTS = ("report_created", "report_more_games")
+REPORT_EVENTS = ("report_created", "report_more_games", "report_deleted", "snapshot_deleted")
 ADMIN_ACTIONS = ("admin_disable", "admin_enable", "admin_revoke", "admin_unlink", "admin_delete_data")
 # admin actions written once (no member copy): the admin page's "Admin actions" counts them too
 ADMIN_ONCE = ("setting_changed", "card_model_removed")
@@ -120,6 +120,8 @@ ICONS = {
     "view_choices_forgotten": "settings",
     "report_created": "report",
     "report_more_games": "report",
+    "report_deleted": "report",
+    "snapshot_deleted": "bookmark",
     "folder_created": "folder",
     "folder_renamed": "folder",
     "folder_moved": "folder",

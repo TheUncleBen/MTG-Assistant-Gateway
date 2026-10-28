@@ -697,7 +697,7 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert _items(page) == ["Review", "Apply", "Reject", "Open the deck"]
             assert page.locator(".ctxmenu a[href='/decks/42']").count() == 1
             page.keyboard.press("Escape")
-            # History: Details, Restore (review first), Open report, Open the deck
+            # History: Details, Restore (review first), Open report, Open the deck, Delete…
             page.goto(f"{server.base}/history", wait_until="networkidle")
             rows = page.locator(".hy-table .tr:not(.th):not(.daygroup):not(.group)")
             found: set[str] = set()
@@ -707,15 +707,21 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
                 found.update(_items(page))
                 page.keyboard.press("Escape")
             assert {"Details", "Open the deck"} <= found, found
-            assert "Restore (review first)" in found, found
-            assert found <= {"Details", "Restore (review first)", "Open report", "Open the deck"}, found
+            assert "Restore (review first)" in found and "Delete…" in found, found
+            assert found <= {
+                "Details",
+                "Restore (review first)",
+                "Open report",
+                "Open the deck",
+                "Delete…",
+            }, found
             # Reports
             page.goto(f"{server.base}/reports", wait_until="networkidle")
             row = page.locator(".rp-t .tr", has_text="Sample Commander Deck").first
             assert row.locator("a button").count() == 0
             row.locator("button.kebab.inline").click()
             _menu(page)
-            assert _items(page) == ["Open", "Play more games", "Copy as Markdown", "Open the deck"]
+            assert _items(page) == ["Open", "Play more games", "Copy as Markdown", "Open the deck", "Delete…"]
             assert page.locator(".ctxmenu a[href='/history/reports/rep_menu#forge-more']").count() == 1
             page.keyboard.press("Escape")
             # the Watchlist: a card row and a deck row

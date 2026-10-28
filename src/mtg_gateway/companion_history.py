@@ -17,8 +17,10 @@ from .companion import (
     _filename,
     stats_strip,
 )
+from .db import SNAPSHOT_HELD_RESTORE
 from .decks import DeckError, current_client, mark_gone
 from .history_view import (
+    DELETED_NOTICES,
     HISTORY_CSS,
     MAX_OFFSET,
     NOTHING_YET,
@@ -28,6 +30,7 @@ from .history_view import (
     backup_copies_html,
     build_events,
     deck_filter_groups,
+    delete_box_html,
     details_panel,
     events_html,
     is_filtered,
@@ -245,7 +248,25 @@ def add_history_routes(
             + copies_panel
         )
         opened = next((e for e in shown if e["key"] == query["open"]), None) if query["open"] else None
-        body = ui.split(list_html, details_panel(opened, query) if opened else "")
+        extra = ""
+        if opened and opened["kind"] in ("report", "snapshot"):
+            # Delete…: the shared confirm box, open when the address asks (a row menu's Delete…)
+            oid = opened["key"][2:]
+            held = state.db.snapshot_held(oid, sub) or "" if opened["kind"] == "snapshot" else ""
+            opener, box = delete_box_html(
+                opened["kind"],
+                f"/history/{opened['kind']}s/{oid}/delete",
+                csrf_in,
+                box_id="hy-del",
+                held=held,
+                open=request.query_params.get("box") == "delete",
+                close_href="/history" + query_string(query, open=opened["key"]),
+            )
+            extra = f"<div class='ui-actions'>{opener}</div>{box}"
+        deleted = DELETED_NOTICES.get(request.query_params.get("deleted") or "", "")
+        if deleted:  # the address names what went; the words are the page's own
+            list_html = f"<p class='notice ok' role='status'>{_esc(deleted)}</p>" + list_html
+        body = ui.split(list_html, details_panel(opened, query, extra_html=extra) if opened else "")
         return page(
             "History" if not deck_id else "Deck history",
             body,
@@ -347,6 +368,68 @@ def add_history_routes(
             return page("History", f"<p class='notice error'>{_esc(exc)}</p>", sub=sub, sid=sid, status=400)
         return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
 
+    def _expired(sub: str, sid: str | None) -> Response:
+        return page(
+            "History",
+            "<p class='notice error'>This form expired. Reload and try again.</p>",
+            sub=sub,
+            sid=sid,
+            status=403,
+        )
+
+    @server.custom_route("/history/reports/{rid}/delete", methods=["POST"], include_in_schema=False)
+    async def report_delete(request: Request) -> Response:
+        """Delete one of the member's reports: the confirm box's solid red button on History or on
+        the report's page. The member's own only (any of theirs, whichever app ran it)."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return _expired(sub, sid)
+        try:
+            reports.delete(sub, request.path_params["rid"])
+        except DeckError:
+            return _not_found(sub, sid)
+        return RedirectResponse("/history?deleted=report", status_code=303)
+
+    @server.custom_route("/history/snapshots/{snap}/delete", methods=["POST"], include_in_schema=False)
+    async def snapshot_delete(request: Request) -> Response:
+        """Delete one of the member's snapshots, unless a waiting restore puts the deck back to it
+        or it holds the record of a backup copy the gateway may still delete (Database.snapshot_held)."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return _expired(sub, sid)
+        snap = request.path_params["snap"]
+        found = state.db.get_snapshot(snap, sub)
+        if found is None:
+            return page(
+                "Snapshot not found",
+                "<div class='card'><p>This snapshot isn't in your history. It may have been deleted.</p>"
+                "<div class='actions'><a class='btn btn-primary' href='/history'>Back to History</a></div>"
+                "</div>",
+                sub=sub,
+                sid=sid,
+                status=404,
+            )
+        held = state.db.snapshot_held(snap, sub)
+        if held or not state.db.delete_snapshot(snap, sub):
+            return page(
+                "History",
+                f"<p class='notice error'>{_esc(held or SNAPSHOT_HELD_RESTORE)}</p>"
+                "<p><a class='btn btn-plain' href='/history'>Back to History</a></p>",
+                sub=sub,
+                sid=sid,
+                status=409,
+            )
+        state.db.audit(
+            "snapshot_deleted", sub=sub, detail={"snapshot_id": snap, "deck_id": found.get("deck_id")}
+        )
+        return RedirectResponse("/history?deleted=snapshot", status_code=303)
+
     def _report_or_404(sub: str, rid: str) -> dict[str, Any] | None:
         try:
             return reports.get(sub, rid)
@@ -408,6 +491,16 @@ def add_history_routes(
             f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
             "</textarea>"
         )
+        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid) or '')}'>"
+        opener, delete_box = delete_box_html(
+            "report",
+            f"/history/reports/{safe}/delete",
+            csrf_in,
+            box_id="rep-del",
+            open=request.query_params.get("box") == "delete",
+            close_href=f"/history/reports/{safe}",
+        )
+        actions += opener
         # the saved descriptions this run played that are still the member's own;
         # imported here so the module's shared import block stays as it is (ownership table)
         from .report_view import MODEL_NOTICES, front_face, kept_models
@@ -451,7 +544,7 @@ def add_history_routes(
             removable=mine,
             csrf=_csrf(s, sid) or "",
             card_types=_card_types(left_out) if left_out else {},
-            my_models=my_models,
+            my_models=my_models + delete_box,
         )
         return page(
             f"Report: {r['deck_name']}",
