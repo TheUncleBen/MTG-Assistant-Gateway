@@ -390,9 +390,9 @@ async def test_the_session_cookie_outlives_its_session_to_be_told_why(tmp_path: 
 
 # -- (d) Guide and Install read signed out ---------------------------------------------------------
 def _main(page: str) -> str:
-    m = re.search(r"<div class='guide' id='top'>.*", page, re.S)
+    m = re.search(r"<main class='[^']*' id='main' tabindex='-1'>.*?</main>", page, re.S)
     assert m, page[:500]
-    return m.group(0).split("</main>")[0]
+    return m.group(0)
 
 
 async def test_the_guide_reads_signed_out_and_holds_nothing_of_a_member(tmp_path: Path, idp: FakeIdP) -> None:
@@ -401,12 +401,21 @@ async def test_the_guide_reads_signed_out_and_holds_nothing_of_a_member(tmp_path
         assert anon.status_code == 200
         assert "class='btn signin' href='/login'" in anon.text  # the way in, in the top bar
         assert "name='csrf'" not in anon.text and "/account/avatar" not in anon.text
+        # the contents page and a page a topic (decision C8), every one of them read signed out
+        topics = sorted(set(re.findall(r"href='(/guide/[a-z0-9-]+)'", _main(anon.text))))
+        assert len(topics) >= 10, topics
         b = Browser(h)
         await b.login()
         member = await b.http.get("/guide", headers=NAV)
         assert member.status_code == 200 and "/account/avatar" in member.text
         # the same guide either way: only the navigation around it differs
         assert _main(anon.text) == _main(member.text)
+        for path in topics:
+            out, inn = await h.http.get(path, headers=NAV), await b.http.get(path, headers=NAV)
+            assert out.status_code == 200 and inn.status_code == 200, path
+            assert "name='csrf'" not in out.text and "/account/avatar" not in out.text, path
+            assert "<div class='guide' id='top'>" in out.text, path  # the topic itself, not a redirect
+            assert _main(out.text) == _main(inn.text), path
         await b.aclose()
 
 
