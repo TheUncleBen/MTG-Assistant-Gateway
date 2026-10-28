@@ -65,15 +65,21 @@ tested end to end with this gateway yet.
 | ChatGPT web, Pro plan | Yes, in Developer mode (tested 2026-10-10) | Yes, every tool, deck proposals included (tested 2026-10-10) |
 | ChatGPT web, Plus plan | OpenAI's pages disagree (reported) | OpenAI's pages disagree (reported) |
 | ChatGPT desktop app | Not tested; OpenAI's pages only mention the web | Not tested |
-| ChatGPT iOS and Android apps | **No, OpenAI doesn't support it** (reported: "No - web only") | **No, OpenAI doesn't support it** (reported) |
+| ChatGPT Android app | Not tried; add it on chatgpt.com in a computer's browser | Yes, once added on chatgpt.com: proposals and their cards included (tested 2026-10-24 and 2026-10-27) |
+| ChatGPT iPhone app | Not tried; add it on chatgpt.com in a computer's browser | Not tested |
 | ChatGPT in a phone's web browser | Not tested | Not tested |
 
 In plain terms:
 
 - **Claude works on every device.** Add the connector once on claude.ai or
   in the desktop app and it works on your phone too.
-- **ChatGPT is web only.** OpenAI says custom connectors are web only, so
-  the ChatGPT phone apps can't use this gateway. Its help center says Pro
+- **ChatGPT: add it on the web, then use it on the web or in the Android
+  app.** Custom connectors are added on chatgpt.com in a computer's web
+  browser. Once added there, the connector works in ChatGPT's apps too: the
+  owner used it in the ChatGPT Android app on 2026-10-24 and 2026-10-27,
+  deck proposals and their cards included (tested). The iPhone app hasn't
+  been tried. OpenAI's help center still answers "Are MCP apps available on
+  mobile?" with "No - web only" (reported). Its help center says Pro
   gets read and fetch tools only, and full support (including tools that
   change things) is for Business, Enterprise and Edu. OpenAI's developer
   guide says Plus and Pro get read and write tools on the web. On
@@ -95,11 +101,10 @@ In plain terms:
   owner's check. Whether a plan with the "read/fetch" limit follows those
   markings, and whether ChatGPT shows the card for a connector added in
   developer mode, hasn't been tested yet.
-- **On ChatGPT Plus and Android? Use Claude for deck edits.** Claude's free
-  plan allows one custom connector (reported), and it works in Claude's
-  Android app once added on the web. ChatGPT might still work for you in a
-  computer's browser; whether Plus can call the gateway's tools is unknown
-  until someone tries it.
+- **On ChatGPT Plus? Claude is the tested path for deck edits.** Claude's
+  free plan allows one custom connector (reported), and it works in Claude's
+  Android app once added on the web. Whether Plus can call the gateway's
+  tools is unknown until someone tries it.
 
 ## Claude
 
@@ -294,8 +299,10 @@ buttons), `reject_proposal`, `amend_proposal`, `withdraw_proposal`,
 ## ChatGPT
 
 Read [Which apps and devices work](#which-apps-and-devices-work) first.
-ChatGPT supports this gateway on the **web only**. On a Pro plan, ChatGPT
-used every tool in a check with this gateway on 2026-10-10 (tested); Plus has
+Add the connector on **chatgpt.com in a computer's web browser**; once it is
+added, it works in the ChatGPT Android app too (tested 2026-10-24 and
+2026-10-27; the iPhone app hasn't been tried). On a Pro plan, ChatGPT used
+every tool in a check with this gateway on 2026-10-10 (tested); Plus has
 not been tried yet.
 
 ### Add the connector (ChatGPT on the web)
@@ -401,12 +408,15 @@ has blocked.
 
 ### ChatGPT desktop and phone apps
 
-- **iOS and Android apps: OpenAI doesn't support them.** Its help center
-  answers "Are MCP apps available on mobile?" with "No - web only"
-  (reported, seen again 2026-10-05). OpenAI's newer Plugins pages say
-  plugins from its directory work on web, iOS and Android, but say nothing
-  about apps you create in Developer mode, so don't count on them on a
-  phone.
+- **Android app: works once the connector is added on the web.** Add it on
+  chatgpt.com in a computer's web browser first; then it shows up in the
+  ChatGPT Android app too. The owner used it there on 2026-10-24 and
+  2026-10-27: tools, deck proposals and the proposal cards all worked
+  (tested). OpenAI's help center still answers "Are MCP apps available on
+  mobile?" with "No - web only" (reported, seen 2026-10-05), so this may
+  change without notice.
+- **iPhone app: not tested.** OpenAI's newer Plugins pages say plugins from
+  its directory work on web, iOS and Android. Tell the owner if you try it.
 - **ChatGPT in your phone's browser** (chatgpt.com, not the app):
   not tested. It's the web version, so it might work. Tell the
   owner if you try it.

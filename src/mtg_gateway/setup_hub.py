@@ -373,19 +373,23 @@ def section(key: str, ctx: Context) -> Section:
                 Block(
                     paras=(
                         "**You need:** a ChatGPT Plus, Pro, Business, Enterprise or Edu plan, and a "
-                        "computer. Set it up on chatgpt.com in the computer's web browser, not in a "
-                        "phone's browser or the ChatGPT desktop app.",
+                        "computer to add the connector. Add it on chatgpt.com in the computer's web "
+                        "browser, not in a phone's browser or the ChatGPT desktop app.",
                         "**Works on:** chatgpt.com in a computer's web browser, with Developer mode on "
                         "(step 3 below). In our testing on Pro every tool worked there, deck proposals "
-                        "included. On some plans, Plus especially, ChatGPT may block the tools that "
-                        "change things: see **If ChatGPT blocks write tools** below.",
-                        "**Does not work on:** the ChatGPT iPhone and Android apps, or the Free plan, "
-                        f"which has no Developer mode. Use [Claude]({pub}/install?for=claude) there "
-                        "instead: its phone apps work.",
+                        "included. Once the connector is added there, it works in ChatGPT's apps too: "
+                        "it was tested in the ChatGPT Android app, deck proposals and their cards "
+                        "included. The iPhone app has not been tried. On some plans, Plus especially, "
+                        "ChatGPT may block the tools that change things: see **If ChatGPT blocks write "
+                        "tools** below.",
+                        "**Does not work on:** the Free plan, which has no Developer mode. Use "
+                        f"[Claude]({pub}/install?for=claude) there instead.",
                     ),
                     agent=(
-                        "If the person is in a ChatGPT phone app or on the Free plan, do not attempt the "
-                        "steps below: say so once and offer Claude or chatgpt.com on a computer.",
+                        "If the person is on the Free plan, do not attempt the steps below: say so once "
+                        "and offer Claude. If they are in a ChatGPT phone app, the connector is added "
+                        "first on chatgpt.com in a computer's web browser; once it is, it works in the "
+                        "app too.",
                     ),
                 ),
                 Block(
@@ -555,7 +559,8 @@ def section(key: str, ctx: Context) -> Section:
                         Step(f"Chat inside that project with the {chatgpt_label(site)} connector on."),
                     ),
                     notes=(
-                        "ChatGPT supports custom connectors on the web only, not in its phone apps.",
+                        "Custom connectors are added on chatgpt.com in a computer's web browser. Once "
+                        "added, the connector works in ChatGPT's apps too (tested in the Android app).",
                         *(
                             ("The ChatGPT instructions are not available on this gateway.",)
                             if ctx.page and not gpt
@@ -886,10 +891,9 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             right = (
                 intro + "<div class='card'>"
                 "<p class='muted small'>On a phone? Claude's iPhone and Android apps work once the "
-                "connector is added on claude.ai or in the desktop app. ChatGPT's phone apps do not "
-                "support custom connectors: set ChatGPT up on chatgpt.com on a computer.</p>"
-                + copy_field("mcp-url", "Connector URL", s.mcp_url)
-                + "</div>"
+                "connector is added on claude.ai or in the desktop app. ChatGPT's apps work once the "
+                "connector is added on chatgpt.com in a computer's web browser (tested in the "
+                "Android app).</p>" + copy_field("mcp-url", "Connector URL", s.mcp_url) + "</div>"
             )
         else:
             right = (

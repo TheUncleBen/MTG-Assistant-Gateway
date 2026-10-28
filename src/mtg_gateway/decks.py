@@ -816,6 +816,23 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
 REVIEW_PAGE = "review_page"
 # Who rejected a proposal (DeckService.reject records it; describe() shows it as closed_by).
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
+# The reason the member typed when rejecting on the card, kept with the rejection (at most this long)
+REJECT_REASON_MAX = 500
+# What an amend of a waiting new deck may change (DeckService.amend_new_deck), as propose_new_deck
+# takes it (folder_id: the folder, looked up by name in the tool)
+NEW_DECK_FIELDS = (
+    "name",
+    "deck_format",
+    "cards",
+    "decklist_text",
+    "csv_text",
+    "json_text",
+    "private",
+    "theorycrafted",
+    "game",
+    "package",
+    "folder_id",
+)
 
 
 def archidekt_wait(exc: BaseException) -> int | None:
@@ -4041,8 +4058,7 @@ class DeckService:
             f"No color tag named “{text}” on this deck or in your color tags. Pick one, or give its color.",
         )
 
-    @_dedupe
-    async def propose_new_deck(
+    async def plan_new_deck(
         self,
         sub: str,
         *,
@@ -4057,7 +4073,15 @@ class DeckService:
         game: str = "any",
         package: dict[str, Any] | None = None,
         folder_id: int | None = None,
+        entries: list[dict[str, Any]] | None = None,
+        parsed_package: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """A new deck (or card package) worked out and checked, saving nothing: ``{"name",
+        "changes", "rows", "cards", "side_cards"}``, where ``changes`` is what the proposal stores
+        and ``rows`` its review lines. Shared by propose_new_deck, an amend of a waiting new deck
+        and check_new_deck. No deck is read (there is none yet); a folder is looked up in the
+        member's folder tree. ``entries`` and ``parsed_package``: the card list and package
+        settings as a waiting proposal already stores them (an amend that keeps them)."""
         name = clean_text(name or "")
         if not name or len(name) > 120:
             raise DeckError("invalid", "name is required (up to 120 characters)")
@@ -4067,18 +4091,18 @@ class DeckService:
         # the New deck form's Theorycrafted and Game type, checked as deck settings checks them
         extra = parse_details({"theorycrafted": theorycrafted, "game": game or "any"})
         # a card package (packages.py): made with the New package form's request, no format
-        pkg = None
+        pkg = parsed_package
         if package is not None:
             from . import packages
 
             pkg = packages.parse(package)
-            if cards is None and not (decklist_text or csv_text or json_text):
+        if entries is None:
+            if pkg is not None and cards is None and not (decklist_text or csv_text or json_text):
                 cards = []  # an empty package, as the New package form makes one
-        entries = normalise_cards(
-            cards=cards, decklist_text=decklist_text, csv_text=csv_text, json_text=json_text
-        )
+            entries = normalise_cards(
+                cards=cards, decklist_text=decklist_text, csv_text=csv_text, json_text=json_text
+            )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
-        self._room_for_proposal(sub)
         # an optional folder of the member's own, checked as propose_clone checks it
         folder = None
         if folder_id is not None:
@@ -4155,35 +4179,211 @@ class DeckService:
             )
             _flag_rows(row, None, f)
             rows.append(row)
-        pid = secrets.token_urlsafe(12)
-        self._save_proposal(
-            {
-                "id": pid,
-                "owner_sub": sub,
-                "kind": "create_deck",
-                "deck_id": "new",
-                "deck_name": name,
-                "baseline_fingerprint": "",
-                # The Archidekt account the deck is made in: shown on the review page, and the
-                # apply is refused if another account is linked by then.
-                "changes": {
-                    "name": name,
-                    "format": fmt,
-                    "private": private,
-                    "cards": entries,
-                    "archidekt_username": link["archidekt_username"],
-                    "archidekt_user_id": link.get("archidekt_user_id"),
-                    **({"category_flags": category_flags} if category_flags else {}),
-                    **({"theorycrafted": True} if extra["theorycrafted"] else {}),
-                    **({"game": extra["game"]} if extra["game"] != "any" else {}),
-                    **({"package": pkg} if pkg else {}),
-                    **({"folder_id": int(folder["id"])} if folder else {}),
-                },
-            },
-            rows,
+        changes = {
+            "name": name,
+            "format": fmt,
+            "private": private,
+            "cards": entries,
+            # The Archidekt account the deck is made in: shown on the review page, and the
+            # apply is refused if another account is linked by then.
+            "archidekt_username": link["archidekt_username"],
+            "archidekt_user_id": link.get("archidekt_user_id"),
+            **({"category_flags": category_flags} if category_flags else {}),
+            **({"theorycrafted": True} if extra["theorycrafted"] else {}),
+            **({"game": extra["game"]} if extra["game"] != "any" else {}),
+            **({"package": pkg} if pkg else {}),
+            **({"folder_id": int(folder["id"])} if folder else {}),
+        }
+        return {"name": name, "changes": changes, "rows": rows, "cards": total, "side_cards": side}
+
+    def waiting_new_deck_named(self, sub: str, name: str, *, package: bool) -> dict[str, Any] | None:
+        """This app's own waiting new deck (or, with ``package``, card package) of this name, the
+        names compared trimmed and in any capitals: the one a second propose_new_deck of the same
+        name updates in place instead of stacking another proposal beside it."""
+        client = current_client.get()
+        if client in (None, BROWSER_CLIENT, ADMIN_CLIENT):
+            return None
+        want = clean_text(name or "").strip().casefold()
+        for line in reversed(self.db.pending_board(sub, "new")):
+            if line.get("kind") != "create_deck" or line.get("created_by_client") != client:
+                continue
+            if str(line.get("deck_name") or "").strip().casefold() != want:
+                continue
+            row = self.db.get_proposal(line["id"], sub)
+            changes = (row or {}).get("changes")
+            if row is not None and isinstance(changes, dict) and bool(changes.get("package")) == package:
+                return row
+        return None
+
+    def _replaceable_new_deck(self, sub: str, proposal_id: Any) -> dict[str, Any]:
+        """The waiting new deck or card package ``replaces`` names: the member's own, still waiting."""
+        row = self.db.get_proposal(str(proposal_id or ""), sub)
+        if row is None or row["state"] != "pending" or row["expires_at"] < int(time.time()):
+            raise DeckError(
+                "invalid",
+                f"{proposal_id} is not a waiting proposal of this user, so nothing was replaced or proposed.",
+            )
+        if row.get("kind") != "create_deck":
+            raise DeckError(
+                "invalid",
+                "replaces names a waiting new deck or card package only. To change a waiting deck "
+                "edit, use amend_proposal; nothing was proposed.",
+            )
+        return row
+
+    def _already_waiting(self, sub: str, proposal_id: str, what: str) -> dict[str, Any]:
+        out = self.describe(sub, proposal_id)
+        no = out.get("board_no")
+        out["duplicate_of"] = proposal_id
+        out["note"] = (
+            f"Already waiting as #{no}" if no else "Already waiting"
+        ) + f": {what} was proposed before and has not been decided, so no second copy was made."
+        return out
+
+    async def _update_new_deck(
+        self, sub: str, row: dict[str, Any], plan: dict[str, Any], *, version: int | None = None
+    ) -> dict[str, Any]:
+        """A waiting new deck changed in place to ``plan`` (its next version): an amend
+        (``version``: the one the assistant last saw), or a second propose_new_deck of the same
+        name. An unchanged plan changes nothing and says so. At the version limit a propose makes
+        a new proposal that replaces it; an amend is refused (versions_full)."""
+        pid = row["id"]
+        if version is None and plan["changes"] == row.get("changes"):
+            return self._already_waiting(sub, pid, "exactly this new deck")
+        rows = plan["rows"]
+        try:
+            new = self.db.amend_proposal(
+                pid,
+                sub,
+                expect_version=int(version if version is not None else row.get("version") or 1),
+                changes=plan["changes"],
+                rows=rows,
+                diff_text="\n".join(row_line(r) for r in rows),
+                by_client=current_client.get(),
+                what_changed=board.what_changed(row.get("rows"), rows),
+                deck_name=plan["name"],
+            )
+        except ProposalVersionsFull:
+            if version is not None:  # an amend asked for this one: the assistant decides
+                raise DeckError(
+                    "versions_full",
+                    f"This proposal already keeps {MAX_PROPOSAL_VERSIONS} earlier versions, so it cannot "
+                    "be amended again. Call propose_new_deck with the whole new deck and pass replaces "
+                    "with this one's id; nothing was changed.",
+                    proposal_id=pid,
+                ) from None
+            made = await self._save_new_deck(sub, plan)
+            if made.get("duplicate_of"):
+                return made
+            done, _later = self.mark_replaced(sub, made["proposal_id"], [pid])
+            return {**self.describe(sub, made["proposal_id"]), **({"replaced": done} if done else {})}
+        if new is None:
+            now = self.db.get_proposal(pid, sub)
+            if now is not None and now["state"] == "pending":
+                raise self._changed(now)
+            raise self._not_pending(sub, pid, "amended")
+        self.db.restart_expiry(pid, sub, int(time.time()) + self.expiry_seconds())
+        self._audit(
+            "proposal_amended", sub=sub, detail={"proposal_id": pid, "deck_id": "new", "version": new}
         )
+        return self.describe(sub, pid)
+
+    async def _save_new_deck(self, sub: str, plan: dict[str, Any]) -> dict[str, Any]:
+        """A new deck proposal stored as ``plan`` says (an exact repeat of this app's waiting one
+        returns that one)."""
+        self._room_for_proposal(sub)
+        pid = secrets.token_urlsafe(12)
+        try:
+            self._save_proposal(
+                {
+                    "id": pid,
+                    "owner_sub": sub,
+                    "kind": "create_deck",
+                    "deck_id": "new",
+                    "deck_name": plan["name"],
+                    "baseline_fingerprint": "",
+                    "changes": plan["changes"],
+                },
+                plan["rows"],
+            )
+        except _Duplicate as dup:
+            return self._already_waiting(sub, dup.proposal_id, "this exact change")
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "create_deck"})
         return self.describe(sub, pid)
+
+    async def propose_new_deck(
+        self,
+        sub: str,
+        *,
+        name: str,
+        deck_format: str,
+        cards: Any = None,
+        decklist_text: str | None = None,
+        csv_text: str | None = None,
+        json_text: str | None = None,
+        private: bool = True,
+        theorycrafted: bool = False,
+        game: str = "any",
+        package: dict[str, Any] | None = None,
+        folder_id: int | None = None,
+        replaces: str | None = None,
+    ) -> dict[str, Any]:
+        """A new deck (or card package) proposal. One proposal per new deck: while this app's own
+        new deck of the same name (any capitals) still waits, it is updated in place to its next
+        version instead (``updated_in_place``); ``replaces`` names a waiting new deck or package of
+        the member's that this one takes the place of, the same way. Cards already drawn for it in
+        the chat then step aside for the newest one."""
+        target = self._replaceable_new_deck(sub, replaces) if replaces else None
+        plan = await self.plan_new_deck(
+            sub,
+            name=name,
+            deck_format=deck_format,
+            cards=cards,
+            decklist_text=decklist_text,
+            csv_text=csv_text,
+            json_text=json_text,
+            private=private,
+            theorycrafted=theorycrafted,
+            game=game,
+            package=package,
+            folder_id=folder_id,
+        )
+        if target is None:
+            target = self.waiting_new_deck_named(
+                sub, plan["name"], package=bool(plan["changes"].get("package"))
+            )
+        if target is None:
+            return await self._save_new_deck(sub, plan)
+        before = int(target.get("version") or 1)
+        out = await self._update_new_deck(sub, target, plan)
+        if out.get("duplicate_of") or out.get("proposal_id") != target["id"]:
+            return out
+        no = out.get("board_no")
+        what = "card package" if plan["changes"].get("package") else "new deck"
+        why = "replaces names it" if replaces else f"one named “{plan['name']}” was already waiting"
+        return {
+            **out,
+            "updated_in_place": True,
+            "replaced_version": before,
+            "note": (
+                f"Updated your waiting {what}{f' #{no}' if no else ''} to version {out['version']} instead "
+                f"of making a second proposal, because {why}. The user approves this one proposal; "
+                "older cards for it in the chat now say a newer version is below."
+            ),
+        }
+
+    async def unknown_new_deck_cards(self, entries: list[dict[str, Any]]) -> list[str]:
+        """The names in a new deck's list that are no Magic card at all (check_new_deck), as
+        check_plan looks them up: a name that can't be judged passes."""
+        names = list(dict.fromkeys(str(c.get("name") or "") for c in entries if c.get("name")))
+        if not names or self.known_cards is None:
+            return []
+        try:
+            found = await self.known_cards(names)
+        except Exception:
+            logger.exception("card-name check failed")
+            return []
+        return [n for n in names if found.get(n) is False]
 
     async def _refuse_unknown_cards(self, deck: Deck, changes: list[Change]) -> None:
         unknown = await unknown_card_names(deck, changes, self.known_cards)
@@ -4270,6 +4470,11 @@ class DeckService:
             and row.get("status") != "needs_look"
         )
         closed_by, closed_by_app = self._closer(row) if state == "rejected" else (None, None)
+        reject_reason = (
+            str((row["result"] or {}).get("reject_reason") or "")
+            if state == "rejected" and isinstance(row["result"], dict)
+            else ""
+        )
         # Checked against the deck as it is now (after an apply, a deck page view, a new
         # proposal or the deck sync), it would no longer do what was reviewed.
         status = row.get("status") if state == "pending" else None
@@ -4324,6 +4529,7 @@ class DeckService:
             **({"closed_at": row["expires_at"]} if state == "expired" else {}),
             **({"closed_by": closed_by} if closed_by else {}),
             **({"closed_by_app": closed_by_app} if closed_by_app else {}),
+            **({"reject_reason": reject_reason} if reject_reason else {}),
             # while an apply runs in the background: how far it got (see APPLY_WAIT_SECONDS)
             **(
                 {"progress": _progress_view(self._progress[row["id"]])}
@@ -4364,6 +4570,9 @@ class DeckService:
                 else {}
             ),
             "board_no": row.get("board_no"),
+            # how many cards this app's chat has drawn for it: a card with a lower number of its
+            # own steps aside for the newest (approve.py)
+            **({"card_seq": seq} if (seq := _card_seq(row, current_client.get())) else {}),
             **status_info,
             "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
             + (
@@ -6622,7 +6831,9 @@ class DeckService:
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
 
-    def reject(self, sub: str, proposal_id: str, *, via: str | None = None) -> dict[str, Any]:
+    def reject(
+        self, sub: str, proposal_id: str, *, via: str | None = None, reason: str | None = None
+    ) -> dict[str, Any]:
         """Close a pending proposal without applying it (owner only). From the member's browser
         (the review page's form, which passes REVIEW_PAGE, or the API with the session cookie) any
         of their proposals; from a connected app (``via`` "mcp", "app" for its card, "api", or any
@@ -6647,6 +6858,11 @@ class DeckService:
         else:
             by = {"app": "card", "mcp": "assistant"}.get(via or "", "api")
         closed = {"rejected_by": by, **({"client": actor} if actor and not from_browser else {})}
+        # the member's own words from the card's "why", kept as plain text and shown where the
+        # rejection is shown (escaped there)
+        why = clean_text(str(reason or ""))[:REJECT_REASON_MAX].strip()
+        if why:
+            closed["reject_reason"] = why
         if not self.db.reject_proposal(proposal_id, sub, closed):
             # Lost a race with an apply, or the proposal has expired: report the state as it is now.
             raise self._not_pending(sub, proposal_id, "rejected")
@@ -6755,19 +6971,22 @@ class DeckService:
     async def amend(self, sub: str, proposal_id: str, raw_changes: Any, *, version: int) -> dict[str, Any]:
         """Replace a waiting note's changes with a new version (any app may,
         labelled). It keeps its number and date; its expiry starts again; the gateway writes
-        what changed. Worked out on the deck as it is now, like a new proposal. Card edits
-        and deck details only; another kind is replaced instead."""
+        what changed. Worked out on the deck as it is now, like a new proposal. Card edits,
+        deck details and new decks (card packages too) only; another kind is withdrawn and
+        proposed again instead."""
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
         if row["state"] != "pending" or row["expires_at"] < int(time.time()):
             raise self._not_pending(sub, proposal_id, "amended")
         kind = row.get("kind") or "edit"
+        if kind == "create_deck":
+            return await self.amend_new_deck(sub, row, raw_changes, version=version)
         if kind not in ("edit", "details"):
             raise DeckError(
                 "invalid",
-                "Only a deck edit or a deck details change can be amended. Make a new proposal and "
-                "pass replaces with this one's id instead.",
+                "Only a deck edit, a deck details change or a new deck can be amended. Withdraw this "
+                "one with withdraw_proposal and make a new proposal instead; nothing was changed.",
             )
         deck = await self.get_own_deck(sub, row["deck_id"])
         self.recheck_waiting(sub, deck)
@@ -6814,8 +7033,13 @@ class DeckService:
             raise DeckError(
                 "versions_full",
                 f"This proposal already keeps {MAX_PROPOSAL_VERSIONS} earlier versions, so it cannot "
-                "be amended again. Make a new proposal with the changes and pass replaces with this "
-                "one's id; nothing was changed.",
+                "be amended again. "
+                + (
+                    "Make a new proposal with propose_deck_changes and pass replaces with this one's id"
+                    if kind == "edit"
+                    else "Withdraw it with withdraw_proposal and make a new one with propose_deck_details"
+                )
+                + "; nothing was changed.",
                 proposal_id=proposal_id,
             ) from None
         if new is None:
@@ -6830,6 +7054,48 @@ class DeckService:
             detail={"proposal_id": proposal_id, "deck_id": row["deck_id"], "version": new},
         )
         return self._board_note(sub, self.describe(sub, proposal_id), row["deck_id"], rows, proposal_id)
+
+    async def amend_new_deck(
+        self, sub: str, row: dict[str, Any], raw: Any, *, version: int
+    ) -> dict[str, Any]:
+        """A waiting new deck (or card package) changed in place: ``raw`` holds the fields to change
+        (NEW_DECK_FIELDS, as propose_new_deck takes them; a card list replaces the whole list),
+        and every field left out keeps what the proposal has. Worked out as propose_new_deck works
+        it out; no deck is read, since none exists yet."""
+        if not isinstance(raw, dict) or not raw:
+            raise DeckError(
+                "invalid",
+                "For a new deck, pass new_deck with the fields to change: name, deck_format, the whole "
+                "new card list (cards, decklist_text, csv_text or json_text), private, theorycrafted, "
+                "game, package or folder. Nothing was changed.",
+            )
+        unknown = sorted(str(k) for k in raw if k not in NEW_DECK_FIELDS)
+        if unknown:
+            raise DeckError(
+                "invalid",
+                f"A new deck has no field {', '.join(unknown)}; use {', '.join(NEW_DECK_FIELDS)}. "
+                "Nothing was changed.",
+            )
+        had = row.get("changes") if isinstance(row.get("changes"), dict) else {}
+        given = {k: v for k, v in raw.items() if v is not None}
+        new_list = any(k in given for k in ("cards", "decklist_text", "csv_text", "json_text"))
+        plan = await self.plan_new_deck(
+            sub,
+            name=given.get("name", had.get("name") or row.get("deck_name") or ""),
+            deck_format=given.get("deck_format", had.get("format") or "commander"),
+            cards=given.get("cards"),
+            decklist_text=given.get("decklist_text"),
+            csv_text=given.get("csv_text"),
+            json_text=given.get("json_text"),
+            private=bool(given.get("private", had.get("private", True))),
+            theorycrafted=bool(given.get("theorycrafted", had.get("theorycrafted", False))),
+            game=str(given.get("game", had.get("game") or "any")),
+            package=given.get("package"),
+            folder_id=given.get("folder_id", had.get("folder_id")),
+            entries=None if new_list else list(had.get("cards") or []),
+            parsed_package=None if "package" in given else had.get("package"),
+        )
+        return await self._update_new_deck(sub, row, plan, version=version)
 
     def withdraw(self, sub: str, proposal_id: str, reason: str) -> dict[str, Any]:
         """Close one of the calling app's own waiting notes because the user's newer request
@@ -10393,7 +10659,7 @@ def _next_step(
         return (
             "Archidekt is still being updated (progress shows how far it got; a large change takes a "
             "few minutes because the gateway paces its requests). Tell the user it is under way and "
-            "check again with get_proposal in a minute. Do not apply it again or make a new proposal."
+            "check again with proposal_status in a minute. Do not apply it again or make a new proposal."
         )
     if state == "applied" and applied:
         return f"Done. {applied}"
@@ -10499,6 +10765,16 @@ def import_label(raw: Any) -> str:
     if not name:
         return ""
     return f"{name[:MAX_LABEL]},{colour or DEFAULT_LABEL_COLOUR}"
+
+
+def _card_seq(row: dict[str, Any], client: str | None) -> int:
+    """The number of the newest card drawn for this proposal in ``client``'s chat (0: none)."""
+    try:
+        seqs = json.loads(row.get("card_seqs") or "{}")
+    except ValueError:
+        return 0
+    n = seqs.get(str(client or "")) if isinstance(seqs, dict) else None
+    return int(n) if isinstance(n, int) and not isinstance(n, bool) else 0
 
 
 def normalise_cards(

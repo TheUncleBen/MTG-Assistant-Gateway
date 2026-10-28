@@ -63,6 +63,8 @@ ARCHIDEKT_REFUSALS = frozenset(
     {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit", "verify_mismatch"}
 )
 NOT_APPLIED = "Could not be applied"
+# a reason typed on the card's Reject, as much of it as the list's line shows
+REASON_SHOWN = 80
 
 PAGE_SUB = (
     "Every change your assistants proposed, waiting and past. Past proposals stay here for 30 days "
@@ -554,8 +556,15 @@ def _closing_html(
         by = (it["result"] or {}).get("rejected_by")
         if by == "assistant":
             return esc(f"Rejected by {it['app'] or 'your assistant'}")
-        # The member's own presses: their pages, the review page or the chat card's Reject.
-        return "Rejected by you" if by in ("review_page", "browser", "card") else ""
+        # The member's own presses: their pages, the review page or the chat card's Reject, with
+        # the reason they typed on the card, shortened to a line (the review page has it whole)
+        said = " ".join(str((it["result"] or {}).get("reject_reason") or "").split())
+        if len(said) > REASON_SHOWN:
+            said = said[: REASON_SHOWN - 1].rstrip() + "…"
+        mine = "Rejected by you" if by in ("review_page", "browser", "card") else ""
+        if said:
+            return esc(f"{mine or 'Rejected'}: “{said}”")
+        return mine
     if st == "expired":
         return esc(f"Expired {ui.when_text(it['expires_at'], now=now)}")
     if st == "replaced":

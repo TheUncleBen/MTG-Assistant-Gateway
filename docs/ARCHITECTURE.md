@@ -184,7 +184,7 @@ The assistant never changes a deck directly:
 | Client | Status |
 | --- | --- |
 | Claude: web, desktop app, iOS, Android | Works. Add the gateway as a custom connector on the web or desktop and it follows you to the phone apps; see [CONNECT.md](CONNECT.md) |
-| ChatGPT | Web only (OpenAI says its phone apps don't support custom MCP connectors). Some plans limit it to read tools, which still covers research and proposals; Apply then happens on the review page. See [CONNECT.md](CONNECT.md#chatgpt) |
+| ChatGPT | Add the connector on chatgpt.com in a computer's browser; it then works there and in the ChatGPT Android app (tested; the iPhone app hasn't been tried). Some plans limit it to read tools, which still covers research and proposals; Apply then happens on the review page. See [CONNECT.md](CONNECT.md#chatgpt) |
 | Claude Code, Codex and other MCP clients | Work with any client that supports remote MCP servers with OAuth; the gateway serves a plugin at `/install`. See [PLUGIN.md](PLUGIN.md) |
 | Android app | Available, built, unit-tested and installed on a phone; camera and fold layouts still await a device report. A small app that opens a gateway's pages full screen and adds a native camera for card scanning. It points at any gateway address, so it works with your own deployment; see [ANDROID.md](ANDROID.md) |
 | Any browser | The account, decks, proposal review, history, scan and admin pages work in any modern browser, on a phone or a desktop |
@@ -293,9 +293,15 @@ For the exact devices and plans tested, see
   admin Settings page. Every apply
   still snapshots the deck first.
   The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
-  `static/cards/proposal-card.html`): every `propose_*` tool and `get_proposal`
-  names it in `_meta.ui.resourceUri`, a host that renders MCP Apps shows it
-  with the result, and its buttons call `confirm_proposal`, a tool marked
+  `static/cards/proposal-card.html`): every `propose_*` tool (and
+  `amend_proposal`, `combine_proposals`, `apply_proposal`) names it in
+  `_meta.ui.resourceUri`, a host that renders MCP Apps shows it with the
+  result, and each card is numbered among its proposal's cards in that app's
+  chat (`card_seqs`, schema 16): a card that reads a higher number steps aside
+  to one line, so only the newest asks for a press. The card follows its
+  proposal with `get_proposal`, which like `confirm_proposal` is the card's
+  own (the model reads a proposal with `proposal_status`, which draws no
+  card). Its buttons call `confirm_proposal`, a tool marked
   `_meta.ui.visibility: ["app"]` (offered to the card, not to the model)
   that also needs a one-time code the tool result carries only in `_meta`
   (handed to the card, kept out of the model's context). The code is an

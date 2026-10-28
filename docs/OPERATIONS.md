@@ -799,7 +799,7 @@ Because of this pacing a large apply takes minutes: about 80 seconds for a
 40 are new to it, and 6 to 7 minutes for a new deck of 100 different cards
 (one lookup and one write per card). An assistant app doesn't wait that long for one tool call,
 so after 20 seconds the apply answers "applying" with how far it got and
-carries on in the background. `get_proposal`, the proposal's review page
+carries on in the background. `proposal_status`, the proposal's review page
 (which refreshes itself) and the in-chat card all show its progress until it
 ends. Restarting the gateway mid-apply gives it 90 seconds to finish, then
 stops it and records the proposal as failed ("interrupted") with what had
@@ -827,7 +827,7 @@ for 6 hours. A waiting proposal on a deck that changed is worked out again on
 the deck as it is now: it is marked **Updated** when it still does what was
 reviewed, or **Needs a look** with the reason when it would now do something
 else, on its review page, in the Proposals list, on the chat cards and in
-`get_proposal` / `list_my_proposals`. The sync never writes to Archidekt and
+`proposal_status` / `list_my_proposals`. The sync never writes to Archidekt and
 never applies, rejects or deletes a proposal or snapshot; it only records a
 waiting proposal's status and moves the baseline of one that still fits
 (Apply still re-reads the deck and decides for itself). Before each request it

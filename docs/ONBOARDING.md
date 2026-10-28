@@ -68,15 +68,16 @@ https://mtg.example.com/mcp
   something, press **Deny**. After that it works in the
   Claude phone apps too. Adding connectors from the phone apps is still a
   beta, so do it on the web or desktop first.
-- **ChatGPT** (web only). Turn on **Developer mode** in Settings, create an
+- **ChatGPT** (add it on the web). Turn on **Developer mode** in Settings, create an
   app with the URL and OAuth sign-in, then connect, press **Approve and sign
   in** on the gateway's page if it returns to `chatgpt.com`, and sign in. Heads up:
-  these steps are only partly tested, OpenAI says custom connectors
-  **don't work in the ChatGPT iOS and Android apps** ("No - web only"), the
-  desktop app is unconfirmed, and OpenAI's pages disagree on which tools each
+  these steps are only partly tested. Once added on chatgpt.com, the
+  connector works in the ChatGPT Android app too (tested; the iPhone app
+  hasn't been tried), the desktop app is unconfirmed, and OpenAI's pages
+  disagree on which tools each
   plan gets. On a Pro plan, ChatGPT used every tool, deck proposals
   included, in a check with this gateway on 2026-10-10. Plus has not been
-  tried yet. If you're mostly on your phone, use Claude.
+  tried yet.
 
 Full step-by-step, error messages and what's been tested are in
 [CONNECT.md](CONNECT.md).
