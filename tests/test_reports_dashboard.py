@@ -89,11 +89,11 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     assert "Krenko Goblin Swarm, 3 days ago: the Forge games could not run" in page
     assert "class='wdg alert'" in page and "/reports?show=problem" in page
     assert "Trends in History" in page and "2<small>decks · 3 reports</small>" in page
-    # the chips count under the filters; the table; the pager says how many
+    # the chips count under the filters; the table; the line under it says every report is shown
     assert "aria-current='true'>All <span class='n'>3</span>" in page
     assert "Partial or failed <span class='n'>1</span>" in page
     assert "With Forge games <span class='n'>1</span>" in page
-    assert _rows(page) == 3 and "1–3 of 3" in page
+    assert _rows(page) == 3 and "All 3 reports shown." in page and "data-load-more" not in page
     # each row: the status label, the win rate with its interval, the lethal turn, who asked
     assert "class='ui-lbl orange'" in page and ">Partial</span>" in page
     assert "95% interval" in page and "turn 10" in page
@@ -155,9 +155,12 @@ def test_reports_dashboard_pages_by_25(server: Server) -> None:
         store_report(server.db, "user-1", f"r{i:02d}", taken_at=now - 1000 - i)
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
     first = h.get("/reports").text
-    assert _rows(first) == 25 and "1–25 of 30" in first and "offset=25" in first
+    # Load more (the standard's button, never a Newer / Older pager): its link is the next page
+    assert _rows(first) == 25 and "<p class='muted'>25 of 30</p>" in first
+    more = "href='/reports?offset=25' rel='next' data-load-more>Load more reports</a>"
+    assert more in first
     second = h.get("/reports?offset=25").text
-    assert _rows(second) == 5 and "26–30 of 30" in second
+    assert _rows(second) == 5 and "All 30 reports shown." in second and "data-load-more" not in second
     assert h.get("/reports?offset=50").text.count("No older reports.") == 1
 
 

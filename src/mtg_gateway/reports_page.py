@@ -542,9 +542,16 @@ def reports_page_html(
         + body
         + "</div>"
     )
-    newer = query.href(offset=max(0, query.offset - PAGE)) if query.offset else None
-    older = query.href(offset=query.offset + PAGE) if query.offset + PAGE < total else None
-    pager = ui.pager(query.offset, total, newer_href=newer, older_href=older)
+    # Load more (the standard's button; reports.js adds the next rows in place), never a pager
+    shown_to = min(query.offset + PAGE, total)
+    if not total:
+        pager = ""
+    elif shown_to < total:
+        pager = ui.load_more(
+            query.href(offset=shown_to), text="Load more reports", shown=shown_to, total=total
+        )
+    else:
+        pager = ui.load_more("", done=f"All {total:,} {'report' if total == 1 else 'reports'} shown.")
     note = (
         f"<p class='ui-note'>{QUEUE_NOTE} To run a report, open one of your decks and press "
         "<strong>Run full test</strong>, or ask your assistant to test a deck.</p>"
