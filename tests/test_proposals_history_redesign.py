@@ -127,10 +127,11 @@ def test_the_closers_settle_only_the_rows_they_closed(tmp_path: Path) -> None:
     assert db.settle_risks() == 1 and asked == ["b", "c", "a"]  # the backfill takes the rest
 
 
-async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(stack: Stack) -> None:
-    """A closed proposal shows the tier stored when it closed, with no reason worked out under
-    today's settings (which may contradict it). One with nothing to judge it by (no review rows)
-    shows a dash, not High, and the Risk filter never counts it as High."""
+async def test_a_stored_tier_keeps_its_own_reason_and_an_unjudged_one_is_a_dash(stack: Stack) -> None:
+    """A closed proposal shows the tier stored when it closed with the reason it was judged by
+    then, never one worked out under today's settings (which may contradict it), nor a generic
+    "judged when it closed" (AT-12). One with nothing to judge it by (no review rows) shows a
+    dash, not High, and the Risk filter never counts it as High."""
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
@@ -154,10 +155,16 @@ async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(
             )
             gw.db.finish_proposal(pid, state="applied", result={})
         assert _risk(gw.db, "lo") == "low" and _risk(gw.db, "nr") == UNJUDGED
+        then = gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))[1]
+        assert then and "judged" not in then
         gw.live.set("auto_apply_max_rows", 1, by="admin-1")  # today it would read High
-        assert gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))[0] == "high"
+        now = gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))
+        assert now[0] == "high" and now[1] != then
         shown = gw.decks.describe(sub, "lo")
-        assert (shown["risk"], shown["risk_reason"]) == ("low", "judged when it closed")
+        assert (shown["risk"], shown["risk_reason"]) == ("low", then)
+        assert "_risk_reason" not in (shown["result"] or {})  # kept for this, not shown as a result
+        review = (await b.http.get("/proposals/lo", headers=NAV)).text
+        assert f"Low: {then}" in review.replace("&#x27;", "'"), then
         unjudged = gw.decks.describe(sub, "nr")
         assert unjudged["risk"] is None and unjudged["risk_reason"] == ""
         body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]

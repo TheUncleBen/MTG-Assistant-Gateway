@@ -84,7 +84,7 @@ from .archidekt import (
 from .archidekt_csv import CsvError, parse_export
 from .busy import BUSY_TEXTS
 from .config import LiveSettings, Settings
-from .db import MAX_PROPOSAL_VERSIONS, Database, ProposalVersionsFull
+from .db import MAX_PROPOSAL_VERSIONS, RISK_REASON_KEY, Database, ProposalVersionsFull
 from .decklist import (
     DecklistError,
     ListCard,
@@ -292,8 +292,6 @@ DECK_LIST_LAST = 24 * 3600.0
 PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
-# The reason beside a closed proposal's stored risk tier (the live one may no longer agree).
-STORED_RISK_REASON = "judged when it closed"
 OUT_OF_DATE_STEP = (
     "Needs a look: the deck changed after this proposal was made and it would now do something "
     "other than what was reviewed, so applying it will be refused and nothing will be sent. Amend "
@@ -4262,13 +4260,14 @@ class DeckService:
         It still waits for the member's own press, as a high-risk one does, but shows no tier."""
         return (row.get("kind") or "edit") in ("edit", "collection") and row.get("rows") is None
 
-    def stored_risk(self, row: dict[str, Any]) -> str:
-        """The risk tier stored on a proposal when it closes (Database.risk_source). A closed edit
-        with no review rows (stored before they existed) has nothing to judge it by: it keeps no
-        tier (``modes.UNJUDGED``) rather than reading High for want of evidence."""
+    def stored_risk(self, row: dict[str, Any]) -> tuple[str, str]:
+        """The risk tier stored on a proposal when it closes, with the reason it was judged by
+        (Database.risk_source). A closed edit with no review rows (stored before they existed) has
+        nothing to judge it by: it keeps no tier (``modes.UNJUDGED``) rather than reading High for
+        want of evidence."""
         if self.unjudged(row):
-            return modes.UNJUDGED
-        return self.proposal_risk(str(row.get("owner_sub") or ""), row)[0]
+            return modes.UNJUDGED, ""
+        return self.proposal_risk(str(row.get("owner_sub") or ""), row)
 
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
         """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval
@@ -5185,9 +5184,10 @@ class DeckService:
         if state not in ("pending", "applying"):
             stored = row.get("risk")
             if stored in ("low", "high", *modes.MEMBER_ONLY):
-                # stored when it closed: the tier it was judged by then, so the reason worked out
-                # under today's settings may contradict it and is not shown
-                risk, why = stored, STORED_RISK_REASON
+                # stored when it closed: the tier and the reason it was judged by then (a reason
+                # worked out under today's settings may contradict it). Closed before 0.7.46: none.
+                kept = (row["result"] or {}).get(RISK_REASON_KEY) if isinstance(row["result"], dict) else None
+                risk, why = stored, str(kept or "")
             elif stored == modes.UNJUDGED:
                 risk, why = None, ""  # nothing to judge it by: no risk label, a dash
         if risk == "high" and why == modes.NO_ROWS_REASON:
@@ -5296,7 +5296,8 @@ class DeckService:
                 else {}
             ),
             "snapshot_id": row["snapshot_id"],
-            "result": {k: v for k, v in row["result"].items() if k != NO_BACKUP_KEY} or None
+            "result": {k: v for k, v in row["result"].items() if k not in (NO_BACKUP_KEY, RISK_REASON_KEY)}
+            or None
             if isinstance(row["result"], dict)
             else row["result"],
             "review_url": f"{self.settings.public_url}/proposals/{row['id']}",

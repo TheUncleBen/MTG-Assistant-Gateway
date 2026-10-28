@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
+from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
@@ -223,7 +224,9 @@ def _gathered(
                 risk, why = UNJUDGED, ""
         elif not risk:  # closed before its tier was stored: as the close would judge it
             full = db.get_proposal(r["id"], sub)
-            risk = decks.stored_risk(full) if full else UNJUDGED
+            risk, why = decks.stored_risk(full) if full else (UNJUDGED, "")
+        elif isinstance(r.get("result"), dict):  # the reason stored with its tier when it closed
+            why = str(r["result"].get(RISK_REASON_KEY) or "")
         app = names.of(r.get("created_by_client"))
         item = {
             "id": r["id"],
