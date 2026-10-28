@@ -64,6 +64,16 @@ def test_a_side_row_of_a_card_with_two_changes_on_its_own(server: Server) -> Non
         maybe = page.locator(".deckview .row[data-card='Sol Ring'][data-cat='Maybeboard']")
         art = page.locator(".deckview .row[data-card='Sol Ring'][data-cat='Optional Artwork']")
         assert maybe.count() == 1 and art.count() == 1
+        # a side row's menu says which category it leaves, not "Remove from deck"
+        for row, words in (
+            (maybe, "Remove from “Maybeboard”"),
+            (art, "Remove from “Optional Artwork”"),
+            (page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']"), "Remove from deck"),
+        ):
+            _open_menu(page, row)
+            items = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
+            assert words in [" ".join(t.split()) for t in items], items
+            page.keyboard.press("Escape")
 
         # a printing for the Maybeboard row: that row only
         _open_picker(page, maybe)
@@ -90,7 +100,7 @@ def test_a_side_row_of_a_card_with_two_changes_on_its_own(server: Server) -> Non
         server.ark.fail_card_writes = True
         _open_menu(page, art)
         with page.expect_request(EDIT_URL) as req:
-            page.locator(".ctxmenu [role=menuitem]", has_text="Remove from deck").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text="Remove from “Optional Artwork”").click()
         rel = _rel(server, "Optional Artwork")
         assert json.loads(req.value.post_data)["changes"] == [
             {"action": "remove", "card_name": "Sol Ring", "zone": "side", "relation_id": rel}
@@ -103,7 +113,7 @@ def test_a_side_row_of_a_card_with_two_changes_on_its_own(server: Server) -> Non
         # and saved: that row goes, the Maybeboard row and the deck's own stay
         art.wait_for(timeout=3000)
         _open_menu(page, art)
-        page.locator(".ctxmenu [role=menuitem]", has_text="Remove from deck").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Remove from “Optional Artwork”").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert _rows(server) == {"": before[""], "Maybeboard": ("sld", "1075")}
         assert errors == [], errors

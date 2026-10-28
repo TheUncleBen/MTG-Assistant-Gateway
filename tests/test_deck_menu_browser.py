@@ -341,7 +341,8 @@ def test_undo_of_a_maybeboard_remove_puts_back_its_printing(server: Server) -> N
         card.scroll_into_view_if_needed()
         card.click()
         page.wait_for_selector(".cardview.open", timeout=3000)
-        page.locator(".cardview .acts button", has_text="Remove from deck").click()
+        # (a side row's viewer says which category it leaves)
+        page.locator(".cardview .acts button", has_text="Remove from “Maybeboard”").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert server.quantity("Sol Ring", side=True) == 0
         sent: list[list[dict]] = []
