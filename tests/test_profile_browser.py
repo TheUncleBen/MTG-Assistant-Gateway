@@ -190,17 +190,18 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert not badge.is_visible()
-        # Home's widget shows the count; on a phone the whole tile leads to the Notifications page,
-        # on a desktop its Open button opens the same box
+        # Home's Needs you row: nothing while the count is zero; with new alerts it shows the
+        # count, and its Open alerts opens the same box
         page.goto(f"{server.base}/", wait_until="networkidle")
         page.wait_for_timeout(800)
-        assert page.locator("[data-bell-big]").inner_text() == "0"
-        page.locator("[data-bell-widget] .lab").click()
-        page.wait_for_url("**/notifications")
-        assert page.locator(".bell-row").count() == 4
+        assert page.locator("[data-bell-row]").is_hidden()
+        # a count of one, as the script keeps it for a minute between pages (the gateway keeps
+        # Archidekt's count for a minute too, so a new note would not show yet)
+        page.evaluate("() => sessionStorage.setItem('mtg-bell', JSON.stringify({at: Date.now(), n: 1}))")
         page.set_viewport_size({"width": 1366, "height": 860})
         page.goto(f"{server.base}/", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        page.locator("[data-bell-row]").wait_for(state="visible", timeout=4000)
+        assert page.locator("[data-bell-row] .what").inner_text() == "1 new alert on Archidekt"
         page.locator("[data-bell-open]").click()
         page.locator(".bell-list").wait_for(state="visible", timeout=4000)
         page.keyboard.press("Escape")

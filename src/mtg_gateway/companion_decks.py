@@ -604,6 +604,28 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure)
         return resp
 
+    @server.custom_route("/api/decks/names", methods=["GET"], include_in_schema=False)
+    async def my_deck_names(request: Request) -> Response:
+        """The member's own decks (id and name) for the site search's "Your decks" rows
+        (static/suggest.js; decision C8): the list as the cache holds it, never a wait for
+        Archidekt (a cold list is read in the background and answers on the next ask), and
+        nothing for a member without a link."""
+        sub, _sid = browser_session(state, request)
+        headers = {"Cache-Control": "no-store"}
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        rows: list[dict[str, Any]] | None = None
+        try:
+            if state.db.get_link(sub):
+                rows = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), 5.0)
+        except (DeckError, TimeoutError):
+            rows = None
+        names = [
+            {"id": str(d["id"]), "name": str(d.get("name") or "Unnamed deck")}
+            for d in sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
+        ]
+        return JSONResponse({"ok": True, "decks": names}, headers=headers)
+
     @server.custom_route("/decks/open", methods=["GET"], include_in_schema=False)
     async def open_deck(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
