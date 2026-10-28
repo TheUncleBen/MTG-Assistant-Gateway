@@ -335,3 +335,24 @@ async def test_check_deck_changes_reports_every_problem_with_a_suggestion(stack:
     assert unknown["unknown_cards"] == ["Lightnig Bolt"], unknown
     assert unknown["did_you_mean"] == {"Lightnig Bolt": "Lightning Bolt"}, unknown
     assert "did you mean 'Lightning Bolt'" in unknown["message"], unknown
+
+
+async def test_deck_stats_identity_is_the_commanders(stack: Stack) -> None:
+    commander_deck(stack)
+    deck = stack.ark.decks[42]
+    bolt = {**deck["cards"][0], "id": 99999, "categories": []}
+    bolt["card"] = {
+        **bolt["card"],
+        "oracleCard": {
+            **bolt["card"]["oracleCard"],
+            "name": "Lightning Bolt",
+            "colorIdentity": ["Red"],
+            "manaCost": "{R}",
+        },
+    }
+    deck["cards"].append(bolt)
+    token = await linked_user(stack)
+    stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
+    assert stats["colour_identity"] == ["U", "G"], stats["colour_identity"]
+    assert "R" in stats["cards_colour_identity"], stats["cards_colour_identity"]
+    assert stats["out_of_identity"]["identity"] == ["U", "G"]

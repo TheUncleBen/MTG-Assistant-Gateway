@@ -44,6 +44,14 @@ _NUMERIC_STATS = (
 )
 
 
+# Where price_total comes from (archidekt._card_price), said beside it: the watchlist's deck value
+# is Scryfall's, so the two can differ.
+PRICE_SOURCE = (
+    "Archidekt's prices: Card Kingdom's for each card (TCGplayer's when Card Kingdom has none), the "
+    "normal finish, in US dollars"
+)
+
+
 def colour_letter(value: str) -> str | None:
     """'Blue' or 'U' -> 'U'; anything else -> None."""
     return COLOR_LETTERS.get(value.strip().casefold())
@@ -335,6 +343,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "keyword_counts": counts_of(cards, "keywords"),
         "price_total": _round(price_total),
         "priced_cards": len(priced),
+        "price_source": PRICE_SOURCE,
         "format": deck.format,
         "legality_problems": card_legality_problems(checks),
         "legality_unknown": int((checks.get("legality") or {}).get("unknown") or 0),
@@ -344,7 +353,10 @@ def compute(deck: Deck) -> dict[str, Any]:
         "mass_land_denial": sum(c.quantity for c in cards if c.mass_land_denial),
         "salt_total": _round(sum(c.salt * c.quantity for c in cards if c.salt is not None)),
         "commanders": [c.name for c in commanders],
-        "colour_identity": colour_identity(cards),
+        # a Commander deck's identity is its commander's; the cards' own colors are said apart, so a
+        # card outside the identity never widens it (out_of_identity lists such cards)
+        "colour_identity": colour_identity(commanders) if commanders else colour_identity(cards),
+        "cards_colour_identity": colour_identity(cards),
         "out_of_identity": out_of_identity(cards, commanders),
         "bracket_estimate": bracket_estimate(cards, deck.format, sideboard_rows(deck)),
         "archidekt_bracket": deck.edh_bracket,
