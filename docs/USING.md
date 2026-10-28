@@ -280,7 +280,9 @@ the gateway.
 1. **Camera.** Hold a card in the frame with its title in the dashed box
    and tap the shutter, or switch on **Auto** and show cards one after
    another: sure matches are added on their own (with Undo), doubtful ones
-   wait for your tap.
+   wait for your tap. A running count of the scan shows in the corner of
+   the viewfinder. In the Android app the shutter and **Auto** use the
+   phone's own camera.
 2. **Check the list.** Fix a wrong match from the suggestions, pick the
    exact printing or foil, adjust quantities. Cards the camera could not
    read are kept with a picture of the title so you can type them.
