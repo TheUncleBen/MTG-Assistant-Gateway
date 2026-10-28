@@ -828,6 +828,56 @@ def _step_17(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS session_ends_at ON session_ends(ended_at)")
 
 
+def _step_18(conn: sqlite3.Connection) -> None:
+    """0.7.46, Binder prices (binder_prices.py, prices.py): what the daily price check prices for a
+    member beyond their watchlist, and the cheapest printing of a watch by name alone.
+
+    - ``binder_records``: the member's Binder as last read whole from Archidekt (once a day while
+      they use the Binder), one row per record: the printing, finish and copies the value and the
+      price sort need, and the row as the page draws it (``row_json``). The gateway's own Binder
+      changes keep it current between reads.
+    - ``binder_reads``: per member, when they last opened the Binder (``seen_at``: only the Binders
+      in use are read and priced), when it was last read whole and how many records that read held.
+    - ``owned_decks``: the printings in each of the member's own decks as last read (any deck
+      page view), so the card viewer has a price history for deck cards too.
+    - ``watch_cards``: the card's Scryfall oracle id, and for a watch by name alone the printing
+      that was cheapest at the last check (its points are kept under ``min:`` and the oracle id).
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS binder_records (
+            sub TEXT NOT NULL,
+            rid INTEGER NOT NULL,
+            scryfall_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
+            finish TEXT NOT NULL DEFAULT 'nonfoil',
+            quantity INTEGER NOT NULL DEFAULT 0,
+            row_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (sub, rid)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS binder_reads (
+            sub TEXT PRIMARY KEY,
+            seen_at INTEGER,
+            read_at INTEGER,
+            records INTEGER NOT NULL DEFAULT 0,
+            complete INTEGER NOT NULL DEFAULT 0
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS owned_decks (
+            sub TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            deck_name TEXT NOT NULL DEFAULT '',
+            cards_json TEXT NOT NULL DEFAULT '[]',
+            read_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, deck_id)
+        )"""
+    )
+    for column in ("oracle_id", "cheapest_id", "cheapest_set", "cheapest_cn"):
+        _add_column(conn, "watch_cards", column, "TEXT")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -847,6 +897,7 @@ MIGRATIONS = [
     _step_15,
     _step_16,
     _step_17,
+    _step_18,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -908,6 +959,9 @@ MEMBER_TABLES = (
     ("watch_cards", "sub"),
     ("watch_decks", "sub"),
     ("deck_values", "sub"),
+    ("binder_records", "sub"),  # their Binder as last read, for its value
+    ("binder_reads", "sub"),
+    ("owned_decks", "sub"),  # the printings of their decks, for the price history
     ("notify_prefs", "sub"),
     ("account_prefs", "sub"),
     ("card_models", "added_by"),  # their simulator card models go too

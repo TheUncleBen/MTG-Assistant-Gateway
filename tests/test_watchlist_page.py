@@ -124,7 +124,7 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     page = _page()
     assert "https://cards.scryfall.io/small/front/0/0/" in page  # Esper Sentinel's picture
     assert "<span class='thumb' aria-hidden='true'><span>Mana Crypt</span></span>" in page  # none: a name box
-    assert "MH2 12 · Normal" in page and "any printing · Foil" in page and "Non-foil" not in page
+    assert "MH2 12 · Normal" in page and "Cheapest printing · Foil" in page and "Non-foil" not in page
     assert "<span class='none'>No alert</span>" in page
     assert "class='ui-lbl blue'" in page and "Above $45.00 · below $30.00</span>" in page
     assert "7 days <span class='dl down'>" in page and "<span class='kv'>in 7 days</span>" in page
@@ -185,7 +185,13 @@ def test_an_opened_row_has_its_chart_range_alert_and_remove() -> None:
     assert "Full history" not in tithe.split("</form>")[0]
     deck = _page(open="d42").split("id='wx-d42'>")[1]
     assert "<h3>Value, last 30 days</h3>" in deck and "Full history (40 days)" in deck
-    assert "data-full='" in deck and ">Open deck</a>" in deck and "btn-outline-danger" in deck
+    # the full history comes from /watchlist/api/deck when asked for (0.7.46), not in the page
+    assert (
+        "data-full='" not in deck
+        and "data-deck='42'" in deck
+        and ">Open deck</a>" in deck
+        and "btn-outline-danger" in deck
+    )
 
 
 def test_details_keeps_the_chip_search_filters_and_page() -> None:

@@ -3221,6 +3221,8 @@ class DeckService:
         self.page_deck_seconds = min(PAGE_DECK_SECONDS, float(settings.archidekt_cache_seconds))
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
+        # called with (sub, deck) after a deck page read a deck (prices.PriceService.note_deck)
+        self.read_hooks: list[Callable[[str, Deck], None]] = []
         from . import packages
 
         self.write_hooks.append(packages.forget)  # My decks' kept package list
@@ -4251,6 +4253,11 @@ class DeckService:
         )
         if sub:
             self.recheck_waiting(sub, deck)  # a deck page view checks its waiting proposals
+            for hook in self.read_hooks:
+                try:
+                    hook(sub, deck)
+                except Exception:  # a hook never stops the page
+                    logger.exception("a deck read hook failed")
         self._keep_page_deck(key, deck, gen, started)
         return deck
 

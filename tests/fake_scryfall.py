@@ -269,10 +269,23 @@ class FakeScryfall:
         ``next_page`` (this same search, ``page`` one higher)."""
         self.print_searches.append(dict(q))
         terms = q.get("q", "").split()
+        # several cards' printings at once: "oracleid:a or oracleid:b" (prices.py, cheapest printing)
+        wanted: set[str] = set()
+        while len(terms) >= 3 and terms[1] == "or" and terms[0].startswith("oracleid:"):
+            wanted.add(terms[0].split(":", 1)[1])
+            terms = terms[2:]
         m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", terms[0] if terms else "")
         if not m2:
             return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
-        found = [c for c in self.cards + self.extra_cards if _oracle(c) == m2.group(1)]
+        wanted.add(m2.group(1))
+        found = [c for c in self.cards + self.extra_cards if _oracle(c) in wanted]
+        if self.prices:  # today's prices a test set, as /cards/collection answers them
+            found = [
+                {**c, "prices": {**(c.get("prices") or {}), **self.prices[c["id"]]}}
+                if c["id"] in self.prices
+                else c
+                for c in found
+            ]
         if q.get("include_extras") != "true":  # Scryfall leaves tokens, emblems and the like out
             found = [c for c in found if c.get("layout") not in EXTRA_LAYOUTS]
         for t in terms[1:]:

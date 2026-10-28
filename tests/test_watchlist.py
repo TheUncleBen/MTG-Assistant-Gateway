@@ -123,7 +123,7 @@ def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkey
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 17
+        assert new.schema_version == db_module.SCHEMA_VERSION == 18
         assert new.get_user("u1") is not None
         tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {
@@ -246,8 +246,11 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
         try:
             r = await _watch(b, name="No Such Card Anywhere")
             assert r.status_code == 404 and "Scryfall knows no card named" in r.text
-            r = await _watch(b, name="Sol Ring", finish="foil")
+            # one printing: its own finishes; by name alone (0.7.46) any printing's
+            r = await _watch(b, name="Sol Ring", set_code="frc", finish="foil")
             assert r.status_code == 400 and "not printed in foil" in r.text
+            r = await _watch(b, name="Sol Ring", finish="etched")
+            assert r.status_code == 400 and "not printed in etched; it comes in foil, nonfoil" in r.text
             r = await _watch(b, name="Sol Ring", collector_number="21")
             assert r.status_code == 400 and "goes with a set code" in r.text
             assert (await _watch(b, name="Sol Ring")).status_code == 303
@@ -313,7 +316,7 @@ async def test_assistant_tools_watch_list_history_and_unwatch(stack: Stack, monk
     await stack.gw.prices.run_daily()
     listed = structured(await call(h, token, "list_watchlist"))
     assert [c["name"] for c in listed["cards"]] == ["Sol Talisman"]
-    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 200, "decks": 10}
+    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 5000, "decks": 100}
     hist = structured(await call(h, token, "card_price_history", {"card": "sol talisman"}))
     assert [p["day"] for p in hist["cards"][0]["history"]] == ["2026-10-12", "2026-10-13"]
     dh = structured(await call(h, token, "card_price_history", {"deck_id": "42"}))
@@ -342,7 +345,8 @@ async def test_old_points_age_out_and_delete_my_data_removes_watches(stack: Stac
         assert (
             db._conn.execute("SELECT COUNT(*) FROM price_points WHERE day = '2000-01-01'").fetchone()[0] == 0
         )
-        assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 1  # today's stays
+        # today's stays (the printing's, and the cheapest printing's of the watch by name, 0.7.46)
+        assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 2
         notify.save_prefs(db, "user-1", ntfy_on=True, ntfy_topic=notify.new_topic(db, "user-1"))
         out = db.delete_member_data("user-1")
         assert out["watch_cards"] == 1 and out["notify_prefs"] == 1
@@ -592,7 +596,12 @@ def test_settings_default_off_and_the_token_comes_from_a_file(monkeypatch, tmp_p
     _env(monkeypatch, tmp_path)
     s = load_settings()
     assert s.ntfy_url is None and s.ntfy_token is None
-    assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (200, 10, 365, 6)
+    assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (
+        5000,
+        100,
+        365,
+        6,
+    )
     (tmp_path / "ntfy").write_text(TOKEN + "\n")
     monkeypatch.setenv("MTG_NTFY_URL", "https://ntfy.example.com/")
     monkeypatch.setenv("MTG_NTFY_TOKEN_FILE", str(tmp_path / "ntfy"))

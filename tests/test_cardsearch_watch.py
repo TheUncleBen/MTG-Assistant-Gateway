@@ -178,6 +178,7 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
             "Add to collection",
             "Watch this card",
             "Art variants…",
+            "Pin card",
             "Copy name",
             "Open on Scryfall",
         ]

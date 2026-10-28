@@ -37,6 +37,9 @@ Every sentence has to stay true of the code; the source of each claim is noted b
 - kept after unlink: ``Database.revoke_link`` blanks only the session; ``delete_member_data``
   removes the row; the audit log is kept for ``AUDIT_RETENTION_SECONDS`` (a year);
 - backups: ``Database.backup_to`` blanks every stored session before the copy is written;
+- the daily reads and copies: ``prices.PriceService.run_daily`` (watched decks, ``_read_binders``
+  with ``collection.CollectionService.read_whole``), ``binder_prices.BinderStore`` (the copies,
+  dropped by ``forget_old`` after ``PRICED_FOR_DAYS``);
 - ending it: unlink, delete my data, admin unlink or disable blank the stored session at once;
   the optional hourly clean-up (``idp_sweep.py``) does for members Authentik no longer lists;
   removal from the required group does so only at the member's next request (``membership.py``),
@@ -83,6 +86,8 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "Only when you, or an assistant you connected, ask for something. A big change you "
             "approved may finish in the background.",
+            "Once a day while watchlists are on: reading the decks you watch and, while you open "
+            "your Binder at least every 60 days, your whole collection, to keep their prices.",
             "Reading your decks (private ones included), folders, tags and collection.",
             "Reading, as you, other people's decks and comment threads you or your assistant look "
             "at and the list of people you follow, and looking up the cards in the changes you make.",
@@ -102,6 +107,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "what you typed to sign in, which may be your email); when you linked and when the "
             "session was last renewed and used; activity-log entries for each link, unlink, "
             "renewal and failed attempt.",
+            "Plain text, while watchlists are on: your collection as last read whole and the card "
+            "lists of your own decks you opened, so they can be priced. Each goes once you have not "
+            "opened it for 60 days.",
             "Never stored: your password.",
             "After an unlink, your Archidekt username and user number stay until you or an admin "
             "delete your data. Activity-log entries, including the Archidekt username noted when "

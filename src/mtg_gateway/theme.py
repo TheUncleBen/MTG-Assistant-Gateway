@@ -2188,6 +2188,7 @@ ICONS = {
     "user": "<circle cx='12' cy='8' r='4'/><path d='M4 21a8 8 0 0 1 16 0'/>",
     "heart": "<path d='M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z'/>",
     "bookmark": "<path d='M6 3h12v18l-6-4-6 4z'/>",
+    "pin": "<path d='M9 3h6l-1 6 4 4H6l4-4z'/><path d='M12 13v8'/>",
     "comment": "<path d='M4 5h16v11H9l-5 4z'/>",
     "follow": "<circle cx='10' cy='8' r='4'/><path d='M2 21a8 8 0 0 1 16 0'/><path d='M19 8v6M16 11h6'/>",
     "thumb": "<path d='M7 11v9H3v-9zM7 11l4-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2l-1.5 7a2 2 0 0 1-2 2H7'/>",

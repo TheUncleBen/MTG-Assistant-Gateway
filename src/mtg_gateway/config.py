@@ -303,8 +303,8 @@ class Settings:
     # decks one member may watch, how many days of daily prices are kept, and the hour (UTC) the
     # daily price check and the members' summaries run. Nothing is fetched while nobody watches.
     watchlists_enabled: bool = True
-    watch_max_cards: int = 200
-    watch_max_decks: int = 10
+    watch_max_cards: int = 5000
+    watch_max_decks: int = 100
     price_history_days: int = 365
     price_hour_utc: int = 6
     # Optional notifications through an ntfy server (notify.py): its address and an access token
@@ -667,8 +667,8 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec(
             "watchlists_enabled", "bool", True, "watchlists", "B", restart=True, env="MTG_WATCHLISTS_ENABLED"
         ),
-        _spec("watch_max_cards", "int", 200, "watchlists", "B", lo=0, hi=200),
-        _spec("watch_max_decks", "int", 10, "watchlists", "B", lo=0, hi=10),
+        _spec("watch_max_cards", "int", 5000, "watchlists", "B", lo=0, hi=5000),
+        _spec("watch_max_decks", "int", 100, "watchlists", "B", lo=0, hi=100),
         _spec(
             "price_history_days",
             "int",

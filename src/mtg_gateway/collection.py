@@ -42,6 +42,7 @@ from .archidekt import (
     language_code,
     page_turn,
 )
+from .binder_prices import BINDER_PAGE_SIZE, BINDER_READ_PAGES, BinderStore
 from .busy import busy_body, busy_headers, busy_plan, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
@@ -94,7 +95,7 @@ CONDITION_NAMES = {
 }
 # Archidekt's own collection orderings the gateway exposes (``collectionOrderBy``; only
 # ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
-SORTS = {"added": "Recently added", "edition": "Set release"}
+SORTS = {"added": "Recently added", "edition": "Set release", "price": "Price"}
 COLLECTION_CSP = (
     "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
@@ -435,16 +436,25 @@ def front_name(name: str) -> str:
     return str(name or "").split(" // ")[0].strip()
 
 
+def record_key(rec: dict[str, Any]) -> tuple[Any, str, str, str]:
+    """What makes two records the same entry (0.7.46): the printing (Archidekt's card id), the
+    finish, the condition ("" when none is set) and the language (English when none is set)."""
+    card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
+    return (
+        card.get("id"),
+        _finish_of(rec.get("modifier")),
+        condition_code(rec.get("condition")) or "",
+        language_code(rec.get("language")) or "EN",
+    )
+
+
 class _Found:
-    """The records an add or a record lookup has read so far, by (printing id, finish)."""
+    """The records an add or a record lookup has read so far, by record_key."""
 
     def __init__(self) -> None:
         self.records: list[dict[str, Any]] = []
         self._ids: set[Any] = set()
-        self.existing: dict[tuple[Any, str], dict[str, Any]] = {}
-        # the language of each record ``existing`` holds, as the gateway's code (a record written
-        # here keeps Archidekt's own shape, so its language is kept apart)
-        self.lang_of: dict[tuple[Any, str], str] = {}
+        self.existing: dict[tuple[Any, str, str, str], dict[str, Any]] = {}
         self.names: set[str] = set()  # front faces already read by the cardName filter
         self.tried_whole = False
         self.whole = False  # one read held the whole binder
@@ -456,11 +466,8 @@ class _Found:
                 continue
             self._ids.add(rec.get("id"))
             self.records.append(rec)
-            card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
-            key = (card.get("id"), _finish_of(rec.get("modifier")))
-            # newest first: the oldest record of a printing and finish is the one copies go to
-            self.existing[key] = rec
-            self.lang_of[key] = language_code(rec.get("language")) or "EN"
+            # newest first: the oldest record of an entry is the one copies go to
+            self.existing[record_key(rec)] = rec
 
 
 class CollectionService:
@@ -478,6 +485,9 @@ class CollectionService:
         self.first_page_ttl = FIRST_PAGE_TTL
         self._writes: dict[str, int] = {}  # collection writes sent per member (_on_write)
         decks.write_hooks.append(self._on_write)
+        # the Binder as last read whole, for its value and the price sort (binder_prices.py): the
+        # gateway's own writes keep it current
+        self.binder = BinderStore(decks.db)
 
     def _on_write(self, sub: str, path: str) -> None:
         if not path or path.startswith("/collection"):
@@ -580,6 +590,24 @@ class CollectionService:
     async def all_rows(self, sub: str, *, max_pages: int = MAX_PAGES_FOR_EXPORT) -> list[dict[str, Any]]:
         return [row_out(r) for r in await self._raw_rows(sub, max_pages=max_pages)]
 
+    async def read_whole(self, sub: str) -> tuple[list[dict[str, Any]], bool]:
+        """The whole Binder for its value and the price sort (the daily price check, as the
+        member): pages of BINDER_PAGE_SIZE, at most BINDER_READ_PAGES of them. Returns the rows
+        and whether that was all of it."""
+        uid = self._user_id(sub)
+        rows: list[dict[str, Any]] = []
+        for page in range(1, BINDER_READ_PAGES + 1):
+            body = await self._run(
+                sub,
+                lambda token, page=page: self.client.collection_page(
+                    token, uid, page=page, page_size=BINDER_PAGE_SIZE
+                ),
+            )
+            rows += [row_out(r) for r in body["results"] if isinstance(r, dict)]
+            if not body.get("next"):
+                return rows, True
+        return rows, False
+
     async def summary(self, sub: str) -> dict[str, Any]:
         """Record count from Archidekt's own listing (one call); copies are summed over the first
         page only when the collection fits in one page, else left out."""
@@ -610,12 +638,11 @@ class CollectionService:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
         ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``), ``condition`` and
-        ``language`` (English when not given; a new record only) are optional. A printing
-        already in the collection in that finish gets its copies added to the existing record
-        (whatever its language, as the site's own add is thought to do, unchecked; ``merged``
-        names each such item whose language differs from the record's, with ``index`` its
-        position in ``items``, ``language`` and ``existing_language``); otherwise a record is
-        created. ``skipped`` items carry ``index`` too. ``progress``: a collection proposal's
+        ``language`` (English when not given) are optional. The copies go into a record only
+        when its printing, finish, condition and language all match (0.7.46: no condition picked
+        is Near Mint, so it also joins a record with none set); otherwise a record is created.
+        Each ``added`` row carries ``index`` (its position in ``items``) and ``went_to``
+        ("existing" or "new"); ``skipped`` items carry ``index`` too. ``progress``: a collection proposal's
         apply, which counts each record written (``_run``). ``result``: the dict the rows go
         into as they are written (an import keeps what was added when it stops part way);
         ``on_item(n)`` is told after each card; ``retry(exc)`` decides, after a refusal of the
@@ -629,7 +656,7 @@ class CollectionService:
         self._user_id(sub)  # fail early when no account is linked
         found = _Found()
         out = result if result is not None else {}
-        out.update(added=[], skipped=[], merged=[])
+        out.update(added=[], skipped=[])
         for index, (spec, opts) in enumerate(wanted):
             while True:
                 if before_item is not None:
@@ -736,19 +763,14 @@ class CollectionService:
         if options and MODIFIERS[finish] not in options and len(options) == 1:
             finish = _finish_of(options[0])  # a printing sold in one finish is that finish
         await self._records_for(sub, str(printing.get("name") or spec["name"]), found)
-        key = (printing["id"], finish)
+        cond, lang = opts["condition"], opts["language"]
+        # no condition picked is written Near Mint, so it joins a Near Mint record, else one with
+        # none set; a condition picked joins only its own
+        keys = [(printing["id"], finish, c, lang) for c in ((cond,) if cond else ("NM", ""))]
+        key = next((k for k in keys if k in found.existing), keys[0])
         have = found.existing.get(key)
         before = int(have.get("quantity") or 0) if have is not None else 0
         if have is not None:
-            if found.lang_of.get(key, "EN") != opts["language"]:
-                out["merged"].append(
-                    {
-                        "input": spec,
-                        "index": index,
-                        "language": opts["language"],
-                        "existing_language": found.lang_of.get(key, "EN"),
-                    }
-                )
             qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
             written = await self._own_write(
                 sub,
@@ -771,17 +793,25 @@ class CollectionService:
                 ),
                 progress,
             )
-            rec = {**written, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, written)}
-            found.lang_of[key] = opts["language"]
-        found.existing[key] = rec
+            rec = {
+                "condition": opts["condition"] or "NM",
+                "language": lang,
+                **written,
+                "modifier": MODIFIERS[finish],
+                "card": self._card_stub(printing, spec, written),
+            }
+        found.existing[record_key(rec)] = rec
         row = row_out(rec)
         # the row's quantity is what the record holds now; these say what this add changed
         row["previous_quantity"] = before
         row["added_quantity"] = int(row["quantity"]) - before
+        row["went_to"] = "existing" if have is not None else "new"
+        row["index"] = index
         if spec["scryfall_id"] and not row.get("scryfall_id"):
             row["scryfall_id"] = spec["scryfall_id"]
             row["image_small"] = image_url(spec["scryfall_id"], "small")
             row["image"] = image_url(spec["scryfall_id"], "normal")
+        self.binder.put(sub, row)
         out["added"].append(row)
 
     @staticmethod
@@ -835,10 +865,13 @@ class CollectionService:
             quantity = min(MAX_QUANTITY, int(rec.get("quantity") or 0) + delta)
         if quantity <= 0:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
+            self.binder.drop(sub, rid)
             self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid})
             return {"row": None, "removed": row_out(rec)}
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, quantity=quantity))
-        return {"row": row_out({**rec, **out, "card": rec.get("card")})}
+        row = row_out({**rec, **out, "card": rec.get("card")})
+        self.binder.put(sub, row)
+        return {"row": row}
 
     async def update(self, sub: str, rid: int, data: dict[str, Any], *, name: str = "") -> dict[str, Any]:
         """Change a record's details: finish, condition, language and price paid (the fields
@@ -859,6 +892,7 @@ class CollectionService:
             raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
         row = row_out({**rec, **out, "card": rec.get("card")})
+        self.binder.put(sub, row)
         read = {  # what Archidekt answered, in the gateway's terms (it keeps numbers for two)
             "purchasePrice": _price(out.get("purchasePrice")),
             "condition": condition_code(out.get("condition")) or None,
@@ -891,6 +925,7 @@ class CollectionService:
         have = int(rec.get("quantity") or 0)
         if quantity is None or quantity >= have:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]), progress=progress)
+            self.binder.drop(sub, rid)
             left = None
         else:
             out = await self._run(
@@ -899,6 +934,7 @@ class CollectionService:
                 progress=progress,
             )
             left = row_out({**rec, **out, "card": rec.get("card")})
+            self.binder.put(sub, left)
         self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
         return {"removed": row_out(rec), "row": left}
 
@@ -1029,8 +1065,8 @@ def _language_name(code: str) -> str:
 def import_result(items: list[dict[str, Any]], out: dict[str, Any]) -> dict[str, Any]:
     """What an import did, for the Collection page's notice: ``items`` as parse_collection_import
     returned them, ``out`` as ``add`` returned it. Plain data (copies added, and the rows kept as
-    English, kept as Near Mint, merged into a record of another language, or not found, each with
-    where it was)."""
+    English, kept as Near Mint, added to an entry already there, or not found, each with where it
+    was)."""
 
     def where(i: int) -> str:
         item = items[i] if 0 <= i < len(items) else {}
@@ -1050,22 +1086,19 @@ def import_result(items: list[dict[str, Any]], out: dict[str, Any]) -> dict[str,
         if item.get("condition_given") and i not in missing:
             given = str(item["condition_given"]).strip()
             near_mint.setdefault(given, []).append({"where": where(i), "name": name(i)})
-    merged = [
-        {
-            "where": where(int(m["index"])),
-            "name": name(int(m["index"])),
-            "language": _language_name(str(m.get("language") or "EN")),
-            "existing": _language_name(str(m.get("existing_language") or "EN")),
-        }
-        for m in out.get("merged") or []
-        if isinstance(m.get("index"), int)
+    # rows whose copies joined an entry already there: same printing, finish, condition and
+    # language (the merge rule of 0.7.46)
+    joined = [
+        {"where": where(int(a["index"])), "name": name(int(a["index"]))}
+        for a in out.get("added") or []
+        if a.get("went_to") == "existing" and isinstance(a.get("index"), int)
     ]
     return {
         "cards": sum(int(it.get("quantity") or 0) for i, it in enumerate(items) if i not in missing),
         "added": bool(out.get("added")),
         "kept": [{"language": k, "rows": v} for k, v in kept.items()],
         "kept_condition": [{"condition": k, "rows": v} for k, v in near_mint.items()],
-        "merged": merged,
+        "joined": joined,
         "missing": [{"where": where(i), "name": name(i)} for i in missing],
     }
 
@@ -1095,18 +1128,11 @@ def import_result_html(result: dict[str, Any]) -> str:
             f"Kept as Near Mint, because “{group['condition']}” is not a condition Archidekt stores for "
             f"collection cards: {rows(group['rows'])}."
         )
-    merged = result.get("merged") or []
-    if merged:
-        langs = {m["existing"] for m in merged}
-        one = len(merged) == 1
-        count_as = (
-            f"{'it counts' if one else 'they count'} as {next(iter(langs))}"
-            if len(langs) == 1
-            else "each counts in that copy's language"
-        )
-        entries = [{**m, "how": f"{m['language']} added to {m['existing']}"} for m in merged]
+    joined = result.get("joined") or []
+    if joined:
         notes.append(
-            f"Added to a copy you already had in another language, so {count_as}: {rows(entries, 'how')}."
+            f"Added to {'an entry' if len(joined) == 1 else 'entries'} you already had, with the same "
+            f"printing, finish, condition and language: {rows(joined)}."
         )
     if result.get("missing"):
         notes.append(f"Not found, so not imported: {rows(result['missing'])}.")
@@ -1221,8 +1247,16 @@ CONDITION_LABELS = {
     "DMG": "Damaged (DMG)",
 }
 DIRECTION_WORDS = {"desc": "newest set first", "asc": "oldest set first"}
+PRICE_WORDS = {"desc": "highest first", "asc": "lowest first"}
+CONDITION_WORDS = {
+    "NM": "Near Mint",
+    "LP": "Lightly Played",
+    "MP": "Moderately Played",
+    "HP": "Heavily Played",
+    "DMG": "Damaged",
+}
 PURPOSE = "The cards you own: your collection on Archidekt."
-TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 8.5rem var(--ctl)"
+TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 7.5rem 8.5rem var(--ctl)"
 TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
 TABLE_SM = "minmax(0,1fr) var(--ctl)"
 ARCHIDEKT_COLLECTION = "https://archidekt.com/collection/v2/"
@@ -1253,7 +1287,76 @@ def _view_attrs(r: dict[str, Any]) -> str:
         + (f" data-loyalty='{_esc(r['loyalty'])}'" if r.get("loyalty") else "")
         + (f" data-faces='{_esc(json.dumps(faces, separators=(',', ':')))}'" if faces else "")
         + (f" data-rarity='{_esc(r['rarity'])}'" if r.get("rarity") else "")
+        + (
+            f" data-price='{r['price']['unit']:.2f}'"
+            if r.get("price") and r["price"].get("currency") == "usd"
+            else ""
+        )
     )
+
+
+def money(value: float | None, currency: str = "usd") -> str:
+    return "" if value is None else (f"${value:,.2f}" if currency == "usd" else f"€{value:,.2f}")
+
+
+def price_text(r: dict[str, Any]) -> str:
+    """A row's price as the Binder shows it: "$1.28", or for more copies the row's value and the
+    unit price ("$2.56 · 2 × $1.28"); "" when Scryfall has no price for its finish."""
+    p = r.get("price")
+    if not p:
+        return ""
+    unit = money(p["unit"], p["currency"])
+    qty = int(r.get("quantity") or 0)
+    return unit if qty <= 1 else f"{money(p['value'], p['currency'])} · {qty} × {unit}"
+
+
+def price_cell(r: dict[str, Any]) -> str:
+    """The list's Price column: the row's value, and under it the copies times the unit price."""
+    p = r.get("price")
+    if not p:
+        return "–"
+    qty = int(r.get("quantity") or 0)
+    unit = money(p["unit"], p["currency"])
+    if qty <= 1:
+        return _esc(unit)
+    return f"{_esc(money(p['value'], p['currency']))}<span class='s'>{qty} × {_esc(unit)}</span>"
+
+
+def where_words(r: dict[str, Any]) -> str:
+    """An entry in words: "CMR 472, Foil, Lightly Played, Japanese" (Normal is not said)."""
+    parts = [
+        _set_line(r),
+        _finish_label(r.get("finish") or ""),
+        CONDITION_WORDS.get((r.get("condition") or "").upper(), ""),
+        _language_name((r.get("lang") or "EN").upper()),
+    ]
+    return ", ".join(p for p in parts if p)
+
+
+def added_text(rows: list[dict[str, Any]]) -> str:
+    """What an add did, in words: which entry each card went to (0.7.46)."""
+    if not rows:
+        return ""
+    if len(rows) == 1:
+        r = rows[0]
+        n = int(r.get("added_quantity") or 0)
+        if r.get("went_to") == "existing":
+            q = int(r.get("quantity") or 0)
+            return (
+                f"Added {n:,} {'copy' if n == 1 else 'copies'} to the “{r['name']}” entry you already had "
+                f"({where_words(r)}): now {q:,} {'copy' if q == 1 else 'copies'}."
+            )
+        return f"Added “{r['name']}” as a new entry ({where_words(r)})" + (
+            f", {n:,} copies." if n > 1 else "."
+        )
+    old = sum(1 for r in rows if r.get("went_to") == "existing")
+    new = len(rows) - old
+    said = []
+    if old:
+        said.append(f"{old} to {'an entry' if old == 1 else 'entries'} you already had")
+    if new:
+        said.append(f"{new} as {'a new entry' if new == 1 else 'new entries'}")
+    return f"Added {len(rows)} cards: " + " and ".join(said) + "."
 
 
 def _set_line(r: dict[str, Any]) -> str:
@@ -1342,13 +1445,15 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             else f"<span class='ph'>{name}</span>"
         )
         sub = set_line + (f" · {_esc(_language_name(lang))}" if lang != "EN" else "")
+        price = price_text(r)
         return (
             f"<li class='cc c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
             f"<button type='button' class='pic thumbbtn' aria-label='Show {name}' title='Show the card'>"
             f"{body}{badges}</button>"
             f"<div class='meta'><span class='nm'><span class='name' title='{name}'>{name}</span>"
-            f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span></div>"
-            f"<div class='act'>{stepper}</div>{shims}</li>"
+            f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span>"
+            + (f"<span class='pr'>{_esc(price)}</span>" if price else "")
+            + f"</div><div class='act'>{stepper}</div>{shims}</li>"
         )
     fin_word = finish or "Normal"
     cond_word = _esc(CONDITION_LABELS.get(cond, cond or "Not set"))
@@ -1359,8 +1464,12 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         if img
         else "<span class='thumb'></span>"
     )
+    price = _esc(price_text(r))
     sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x)
     sub_sm = " · ".join(x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x)
+    if price:  # under 900 px the Price column is hidden: the price goes on the card's own lines
+        sub_md += f"<span class='pr lgh'>{price}</span>"
+        sub_sm += f" · <span class='pr'>{price}</span>"
     return (
         f"<li class='tr row' role='row' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
         f"<span class='cardc' role='cell'><button type='button' class='thumbbtn' aria-label='Show {name}' "
@@ -1373,6 +1482,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         + f"</span><span class='md-hide' role='cell'>{fin_word}</span>"
         f"<span class='md-hide' role='cell'>{cond_word}</span>"
         f"<span class='md-hide' role='cell'>{lang_word}</span>"
+        f"<span class='md-hide prc' role='cell'>{price_cell(r)}</span>"
         f"<span class='qc' role='cell'>{stepper}</span><span class='act' role='cell'>{_kebab(r['name'], rid)}"
         f"</span>{shims}</li>"
     )
@@ -1385,6 +1495,7 @@ def table_head_html() -> str:
         ("Finish", "md-hide"),
         ("Condition", "md-hide"),
         ("Language", "md-hide"),
+        ("Price", "md-hide prc"),
         ("Copies", "qc"),
         ("", "act"),
     )
@@ -1478,10 +1589,17 @@ def details_box_html(r: dict[str, Any] | None, csrf: str, *, open: bool = False)
     )
 
 
-def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
-    """The Add cards box: two tabs, Add a card (name, copies, finish, condition) and Import a list
+def add_box_html(
+    csrf: str, *, tab: str = "add", open: bool = False, defaults: dict[str, Any] | None = None
+) -> str:
+    """The Add cards box: two tabs, Add a card (name, copies, finish, condition, language, and
+    "Use these next time": the member's remembered choices, prefs.BINDER_ADD) and Import a list
     (a file or pasted text). Its forms post to the page as before."""
     imp = tab == "import"
+    d = defaults or {}
+    finish = d.get("finish") if d.get("finish") in FINISHES else "nonfoil"
+    cond = d.get("condition") if d.get("condition") in CONDITIONS[1:] else "NM"
+    lang = d.get("language") if d.get("language") in LANGUAGES else "EN"
     tabs = (
         "<div class='segc coltabs' role='tablist' aria-label='Add cards'>"
         "<button type='button' role='tab' id='col-tab-add' data-coltab='add' "
@@ -1502,9 +1620,15 @@ def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
         "<label class='field'><span>Copies</span><input id='addqty' type='number' name='quantity' value='1' "
         f"min='1' max='{MAX_QUANTITY}'></label>"
         f"<label class='field'><span>Finish</span><select id='addfinish' name='finish'>"
-        f"{_opts(FINISHES, '', MODIFIERS)}</select></label>"
+        f"{_opts(FINISHES, finish, MODIFIERS)}</select></label>"
         f"<label class='field'><span>Condition</span><select id='addcond' name='condition'>"
-        f"{_opts(CONDITIONS[1:], 'NM', CONDITION_LABELS)}</select></label></div>"
+        f"{_opts(CONDITIONS[1:], cond, CONDITION_LABELS)}</select></label>"
+        f"<label class='field'><span>Language</span><select id='addlang' name='language'>"
+        f"{_lang_opts(lang)}</select></label>"
+        "<label class='check span'><input type='checkbox' name='remember' value='1' checked>"
+        "<span>Use this finish, condition and language next time</span></label></div>"
+        "<p class='muted small'>Copies join an entry you already have only when its printing, finish, "
+        "condition and language all match; anything else becomes a new entry.</p>"
         "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
         "<strong>Save to collection</strong>. Everything you add is added to your Collection on "
         "Archidekt.</p>"
@@ -1517,7 +1641,8 @@ def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
         "<input type='hidden' name='action' value='import'>"
         "<p class='muted small'>A collection CSV or a card list, one card per line, "
         f"up to {MAX_IMPORT_ROWS} rows "
-        "at a time. Copies of a printing you already own in that finish are added to it.</p>"
+        "at a time. Copies join an entry you already have only when its printing, finish, condition and "
+        "language all match.</p>"
         "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
         "<input id='importfile' type='file' accept='.csv,.txt,text/csv,text/plain' data-fill='importtext'>"
         "<span class='btn'>Choose a file</span></label>"
@@ -1575,10 +1700,85 @@ def _added_within(row: dict[str, Any], since: float) -> bool:
         return False
 
 
-def widgets_html(whole: dict[str, Any], arch_user: str, *, now: float | None = None) -> str:
-    """The four widgets, from what Archidekt already sends with the first page: Entries, Copies
-    and Foils (both counted only when the whole collection fits one page of 100), Added this week
-    (from the newest 100 entries)."""
+def _day_words(day: str | None, now: float) -> str:
+    """A price day as the Binder says it: "today", "yesterday" or "Oct 12"."""
+    if not day:
+        return ""
+    import datetime as dt
+
+    today = dt.datetime.fromtimestamp(now, dt.UTC).date()
+    try:
+        d = dt.date.fromisoformat(day)
+    except ValueError:
+        return day
+    if d == today:
+        return "today"
+    if d == today - dt.timedelta(days=1):
+        return "yesterday"
+    return d.strftime("%b %d").replace(" 0", " ") + ("" if d.year == today.year else f", {d.year}")
+
+
+def value_widget(
+    value: dict[str, Any] | None, *, reading: bool, now: float, csrf: str = "", failed: bool = False
+) -> str:
+    """The Binder's worth: today's dollars over every entry Scryfall prices in its finish
+    (binder_prices.BinderStore.value), with the copies, the price day and the entries with no
+    price; before the first whole read, what is happening instead, and "Work it out now" (one
+    whole read of the Binder, as the member, then its prices)."""
+    if value is None:
+        if reading:
+            return ui.widget(
+                "Value",
+                "stats",
+                "…",
+                detail="Reading your whole binder to work out its value. Refresh in a minute to see it.",
+                actions=[ui.button_link("Refresh", "/collection", icon_name="refresh")],
+            )
+        now_btn = (
+            "<form method='post' action='/collection' class='inline'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<input type='hidden' name='action' value='value'>"
+            f"<button type='submit' class='btn btn-plain'>{icon('refresh')}Work it out now</button></form>"
+        )
+        return ui.widget(
+            "Value",
+            "stats",
+            "–",
+            detail=(
+                "Archidekt could not be asked for your whole binder just now. Try again later; the "
+                "daily price check tries again too."
+                if failed
+                else "Worked out from your whole binder with the daily price check."
+            ),
+            actions=[now_btn] if csrf else [],
+        )
+    parts = []  # the copies are under Entries
+    if value.get("day"):
+        when = _day_words(value["day"], now)
+        parts.append("Today's prices" if when == "today" else f"Prices of {when}")
+    n = int(value.get("unpriced") or 0)
+    if n:
+        parts.append(f"{n:,} {'entry has' if n == 1 else 'entries have'} no price")
+    if not value.get("complete"):
+        parts.append(f"your first {value['entries']:,} entries")
+    return ui.widget("Value", "stats", money(value["usd"]) or "$0.00", detail=" · ".join(parts))
+
+
+def widgets_html(
+    whole: dict[str, Any],
+    arch_user: str,
+    *,
+    now: float | None = None,
+    value: dict[str, Any] | None = None,
+    reading: bool = False,
+    priced: bool = True,
+    csrf: str = "",
+    failed: bool = False,
+) -> str:
+    """The widgets, from what Archidekt already sends with the first page: Entries (with the copies
+    when known: a collection of 100 entries or fewer, or the Binder as last read whole), Value (with
+    prices on; ``value`` from binder_prices), Added this week (from the newest 100 entries) and
+    Foils (counted only when the whole collection fits one page of 100)."""
     now = time.time() if now is None else now
     rows = whole["rows"]
     total = int(whole["count"])
@@ -1589,30 +1789,20 @@ def widgets_html(whole: dict[str, Any], arch_user: str, *, now: float | None = N
     import datetime as dt
 
     since_day = dt.datetime.fromtimestamp(since, dt.UTC).strftime("%b %d").replace(" 0", " ")
-    items = [ui.widget("Entries", "collection", total, actions=open_link)]
-    if large:
-        items.append(
-            ui.widget(
-                "Copies",
-                "layers",
-                "—",
-                detail=(
-                    "Counted only for a collection of 100 entries or fewer. "
-                    "Open it on Archidekt to see the total."
-                ),
-                actions=open_link,
-            )
+    copies = None if large else sum(int(r.get("quantity") or 0) for r in rows)
+    if copies is None and value is not None and value.get("complete"):
+        copies = int(value["copies"])
+    items = [
+        ui.widget(
+            "Entries",
+            "collection",
+            total,
+            detail=f"{copies:,} {'copy' if copies == 1 else 'copies'}" if copies is not None else "",
+            actions=open_link,
         )
-    else:
-        copies = sum(int(r.get("quantity") or 0) for r in rows)
-        items.append(
-            ui.widget(
-                "Copies",
-                "layers",
-                copies,
-                detail=f"All {total} {'entry' if total == 1 else 'entries'} counted",
-            )
-        )
+    ]
+    if priced:
+        items.append(value_widget(value, reading=reading, now=now, csrf=csrf, failed=failed))
     items.append(
         ui.widget(
             "Added this week",
@@ -1634,16 +1824,18 @@ def widgets_html(whole: dict[str, Any], arch_user: str, *, now: float | None = N
     return ui.widgets(items)
 
 
-def panel_html(*, q: str, sort: str, direction: str, view: str, count: int) -> str:
+def panel_html(*, q: str, sort: str, direction: str, view: str, count: int, priced: bool = True) -> str:
     """The shared search panel: the name box, then the results bar (count, Sort with a direction
-    only for Set release, Grid or List, the card size, Clear filters)."""
+    for Set release and Price, Grid or List, the card size, Clear filters). ``priced``: Price is
+    offered (prices on)."""
+    sorts = {k: v for k, v in SORTS.items() if priced or k != "price"}
     sort_opts = "".join(
-        f"<option value='{k}'{' selected' if k == sort else ''}>{v}</option>" for k, v in SORTS.items()
+        f"<option value='{k}'{' selected' if k == sort else ''}>{v}</option>" for k, v in sorts.items()
     )
     dir_html = ""
-    if sort == "edition":
+    if sort in ("edition", "price"):
         flip = "asc" if direction == "desc" else "desc"
-        words = DIRECTION_WORDS[direction]
+        words = (PRICE_WORDS if sort == "price" else DIRECTION_WORDS)[direction]
         dir_html = (
             f"<input type='hidden' name='dir' value='{direction}'>"
             f"<button type='submit' class='icob dirbtn' name='dir' value='{flip}' "
@@ -1653,8 +1845,14 @@ def panel_html(*, q: str, sort: str, direction: str, view: str, count: int) -> s
         ("added", "Recently added", sort == "added"),
         ("edition:desc", "Set release, newest first", sort == "edition" and direction == "desc"),
         ("edition:asc", "Set release, oldest first", sort == "edition" and direction == "asc"),
+        ("price:desc", "Price, highest first", sort == "price" and direction == "desc"),
+        ("price:asc", "Price, lowest first", sort == "price" and direction == "asc"),
     )
-    sortc = "".join(f"<option value='{v}'{' selected' if on else ''}>{t}</option>" for v, t, on in combined)
+    sortc = "".join(
+        f"<option value='{v}'{' selected' if on else ''}>{t}</option>"
+        for v, t, on in combined
+        if priced or not v.startswith("price")
+    )
     sort_html = (
         "<span class='g sort'><label class='lbl' for='col-sort'>Sort by</label><span class='sortw'>"
         f"<select class='sortf' id='col-sort' name='sort'>{sort_opts}</select></span>{dir_html}"
@@ -1756,6 +1954,17 @@ ul.colllist .smline{display:none}
 ul.colllist .thumbbtn{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;
   flex:none;min-width:44px;min-height:48px}
 ul.colllist .thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* prices (with the watchlists on): a tile's under its set line; the list's own column from 900 px,
+   on the card's lines below that */
+ul.collgrid .meta .pr{display:block;font-size:.86rem;font-weight:700;font-variant-numeric:tabular-nums;
+  color:var(--text);overflow-wrap:anywhere}
+ul.colllist .prc{font-variant-numeric:tabular-nums;font-weight:700;overflow-wrap:anywhere}
+ul.colllist .pr{font-variant-numeric:tabular-nums}
+ul.colllist .sub .lgh{display:block;font-weight:700}
+ul.colllist .prc .s{font-weight:400}
+@media (min-width:900px){ ul.colllist .sub .lgh{display:none} }
+.collection .wdg form.inline{display:inline;margin:0}
+.collection .wdg form.inline .btn{margin:0}
 /* the import's progress strip: the words take the room, Refresh keeps its own width (wraps on phone) */
 .notice.importing{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
 .notice.importing .itext{flex:1 1 14rem;min-width:0}
@@ -1788,6 +1997,8 @@ ul.colllist .th .qc{justify-self:start}
 .mtgbox .body .fl .field > span:first-child{font-weight:700;font-size:.9rem}
 .mtgbox .body .fl .field select,.mtgbox .body .fl .field input{margin:0;width:100%;box-sizing:border-box}
 .mtgbox .body .fl .span,.mtgbox .body .fl .tags{grid-column:1 / -1}
+.mtgbox .body .fl .check{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0;cursor:pointer}
+.mtgbox .body .fl .check input{width:22px;height:22px;margin:0;flex:none}
 .mtgbox .body .tagline{display:flex;flex-wrap:wrap;gap:.3rem}
 .mtgbox .body .dsub{margin:0 0 .6rem}
 .mtgbox .body .importform{display:grid;gap:.6rem}
@@ -1808,6 +2019,13 @@ ul.colllist .th .qc{justify-self:start}
 .csvhelp thead th{background:var(--surface-2)}
 .csvhelp tbody th{font-weight:700}
 """
+
+
+def _price_clock() -> float:
+    """The daily price check's clock (prices.now), which says when a Binder was last opened."""
+    from . import prices
+
+    return prices.now()
 
 
 def add_collection(server: MCPServer, state: AppState) -> CollectionService:
@@ -1931,6 +2149,31 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     # cards it added stay on Archidekt). The page polls /collection/api/import/{id} for its strip.
     imports: dict[str, dict[str, Any]] = {}
     tasks: set[asyncio.Task[Any]] = set()
+    # "Work it out now" on the Value widget: the member's first whole read, in the background
+    # (PriceService.first_read), one per member at a time
+    first_reads: set[str] = set()
+    first_read_failed: set[str] = set()  # the last "Work it out now" could not read the Binder
+
+    def start_first_read(sub: str) -> None:
+        if sub in first_reads or state.prices is None:
+            return
+        first_reads.add(sub)
+        first_read_failed.discard(sub)
+
+        async def run() -> None:
+            ok = False
+            try:
+                ok = await state.prices.first_read(sub)
+            finally:
+                first_reads.discard(sub)
+                if not ok:
+                    if len(first_read_failed) > 10_000:
+                        first_read_failed.clear()
+                    first_read_failed.add(sub)
+
+        task = asyncio.create_task(run())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
     def import_text(job: dict[str, Any]) -> str:
         done, of = job["done"], job["of"]
@@ -2028,6 +2271,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         )
 
     def notice(code: str | None, *, sub: str = "", token: str | None = None) -> str:
+        if code == "added" and token:
+            said = take_result(sub, token)
+            if said is not None and said.get("message"):
+                return strip(str(said["message"]), "ok")
         if code in ("imported", "nothingimported", "toomany", "unreadable") and token:
             result = take_result(sub, token)
             if result is not None:
@@ -2063,8 +2310,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if exc.kind in ("not_linked", "auth"):
             return (
                 "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
-                "<p>Link your Archidekt account to see it here. Nothing about your cards is stored on this "
-                "gateway.</p><div class='actions'>"
+                "<p>Link your Archidekt account to see it here. Your cards stay in your Collection on "
+                "Archidekt.</p><div class='actions'>"
                 + ui.button_link(
                     "Link Archidekt", "/account/details#archidekt", kind="primary", icon_name="account"
                 )
@@ -2109,16 +2356,47 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         base = "/collection/api/rows" if api else "/collection"
         return f"{base}?{urlencode(qs)}" if qs else base
 
+    def priced() -> bool:
+        """Prices are kept (the watchlists are on: state.prices)."""
+        return getattr(state, "prices", None) is not None
+
+    def by_price(sub: str, lq: dict[str, Any]) -> bool:
+        """The address asks for the price sort and the Binder was read whole: the rows come from
+        that read, not from Archidekt."""
+        if lq["sort"] != "price" or not priced():
+            return False
+        info = service.binder.info(sub)
+        return info is not None and info.get("read_at") is not None
+
     async def listing(sub: str, lq: dict[str, Any]) -> dict[str, Any]:
         """The rows the address asks for: a screenful (SHOWN) from the Archidekt page that holds
-        the offset, with what Load more needs (shown, total, has_more)."""
+        the offset, with what Load more needs (shown, total, has_more). Sorted by price: from the
+        Binder as last read whole (binder_prices), with no Archidekt read; before that first read,
+        in the default order. Rows carry their price when prices are kept."""
         offset = lq["offset"]
+        if by_price(sub, lq):
+            got = service.binder.listing(
+                sub, q=lq["q"], offset=offset, limit=SHOWN, descending=lq["dir"] == "desc"
+            )
+            total = got["total"]
+            shown = offset + len(got["rows"])
+            return {
+                "out": None,
+                "rows": got["rows"],
+                "total": total,
+                "shown": shown,
+                "has_more": shown < total,
+            }
+        if lq["sort"] == "price":
+            lq = {**lq, "sort": "added"}
         page_no = offset // PAGE_SIZE + 1
         start = offset % PAGE_SIZE
         out = await service.page(
             sub, page=page_no, q=lq["q"], sort=lq["sort"], descending=lq["dir"] == "desc"
         )
         rows = out["rows"][start : start + SHOWN]
+        if priced():
+            rows = service.binder.with_prices([dict(r) for r in rows])
         total = int(out["count"])
         shown = offset + len(rows)
         has_more = start + SHOWN < len(out["rows"]) or bool(out["has_next"])
@@ -2165,6 +2443,19 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "unreadable",
         )
         notes = notice(result, sub=sub, token=qp.get("r"))
+        # prices kept: opening the Binder puts it in the daily price check (binder_prices)
+        if priced():
+            service.binder.seen(sub, _price_clock())
+            value = service.binder.value(sub)
+            reading = sub in first_reads
+            if lq["sort"] == "price" and value is None:
+                notes += strip(
+                    "Sorting by price needs your binder's value, worked out with the daily price "
+                    "check. Until then, cards are shown in the order you added them.",
+                    "ok",
+                )
+        else:
+            value, reading = None, False
         if qp.get("import"):
             job = imports.get(sub)
             if job is not None and job["id"] == qp.get("import"):
@@ -2181,7 +2472,14 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
         try:
             got = await listing(sub, lq)
-            whole = got["out"] if not lq["q"] and lq["sort"] == "added" else await service.page(sub)
+            whole = (
+                got["out"]
+                if got["out"] is not None
+                and not lq["q"]
+                and lq["sort"] in ("added", "price")
+                and not lq["offset"]
+                else await service.page(sub)
+            )
         except CollectionError as exc:
             notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
             if (plan := busy_plan(exc)) is not None:
@@ -2220,7 +2518,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             except CollectionError:
                 details_row = None
         details_box = details_box_html(details_row, csrf, open=details_row is not None)
-        add_box = add_box_html(csrf, tab=add_tab, open=open_add)
+        add_box = add_box_html(
+            csrf, tab=add_tab, open=open_add, defaults=prefs.choices(state.db, sub, prefs.BINDER_ADD)
+        )
         # the Visibility line by the title (profile_page): the profile as read a short while ago
         vis = collection_visibility(
             await profile_or_none(state.decks, sub),
@@ -2263,8 +2563,23 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 head(acts)
                 + vis
                 + f"<div id='col-notes'>{notes}</div>"
-                + widgets_html(whole, arch_user)
-                + panel_html(q=lq["q"], sort=lq["sort"], direction=lq["dir"], view=view, count=got["total"])
+                + widgets_html(
+                    whole,
+                    arch_user,
+                    value=value,
+                    reading=reading,
+                    priced=priced(),
+                    csrf=csrf,
+                    failed=sub in first_read_failed,
+                )
+                + panel_html(
+                    q=lq["q"],
+                    sort=lq["sort"],
+                    direction=lq["dir"],
+                    view=view,
+                    count=got["total"],
+                    priced=priced(),
+                )
                 + live
                 + cards
                 + f"<p class='muted col-nomatch'{' hidden' if rows else ''}>No cards match that filter.</p>"
@@ -2316,6 +2631,29 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             headers=NO_STORE,
         )
 
+    def remember_add(sub: str, data: dict[str, Any]) -> None:
+        """Keep the Add box's finish, condition and language for next time (prefs.BINDER_ADD)."""
+        choice = {
+            "finish": data.get("finish") if data.get("finish") in FINISHES else "nonfoil",
+            "condition": data.get("condition") if data.get("condition") in CONDITIONS[1:] else "NM",
+            "language": data.get("language") if data.get("language") in LANGUAGES else "EN",
+        }
+        prefs.save(state.db, sub, prefs.BINDER_ADD, choice)
+
+    def with_defaults(sub: str, items: Any) -> Any:
+        """A card menu's or the scan page's add asks no finish, condition or language: each item
+        that names none gets the member's remembered ones (prefs.BINDER_ADD)."""
+        kept = prefs.choices(state.db, sub, prefs.BINDER_ADD)
+        if not kept or not isinstance(items, list):
+            return items
+        out = []
+        for item in items:
+            if isinstance(item, dict):
+                skip = {"finish"} if "foil" in item else set()
+                item = {**{k: v for k, v in kept.items() if k not in skip and not item.get(k)}, **item}
+            out.append(item)
+        return out
+
     @server.custom_route("/collection", methods=["POST"], include_in_schema=False)
     async def collection_post(request: Request) -> Response:
         """The page's own forms (no script needed): add by name, one more, one fewer, remove."""
@@ -2356,11 +2694,21 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                             "quantity": copies,
                             "finish": data.get("finish", "nonfoil"),
                             "condition": data.get("condition", ""),
+                            "language": data.get("language", "EN"),
                         }
                     ],
                     source="manual",
                 )
+                if data.get("remember") == "1":
+                    remember_add(sub, data)
                 code = "ok=added" if out["added"] else "err=nothing"
+                if out["added"]:
+                    code += "&r=" + keep_result(sub, {"message": added_text(out["added"])})
+            elif action == "value":
+                if priced():
+                    service.binder.seen(sub, _price_clock())
+                    start_first_read(sub)
+                code = ""
             elif action == "import":
                 try:
                     items = parse_collection_import(data.get("text", ""))
@@ -2444,7 +2792,11 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return data
         source = data.get("source") if data.get("source") in ("scan", "manual", "assistant") else "manual"
         try:
-            out = await service.add(who[0], data.get("items") or data.get("cards"), source=source)
+            items = data.get("items") or data.get("cards")
+            if source == "manual":
+                items = with_defaults(who[0], items)
+            out = await service.add(who[0], items, source=source)
+            out["message"] = added_text(out.get("added") or [])
             if source == "scan" and service.scan is not None and isinstance(data.get("scan_session"), str):
                 # The scan was the draft for these cards; saved, it has done its job.
                 service.scan.store.delete(data["scan_session"][:60], who[0])
@@ -2552,19 +2904,37 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         description=(
             "The signed-in user's Collection on Archidekt (the account they linked): the cards they "
             "own, one row per printing and finish with a quantity, 100 a page in Archidekt's "
-            "newest-first order. Optional `query` filters by card name; `sort` is added or edition "
-            "(set release); `page` pages. Returns cards, count and total_pages. Read-only."
+            "newest-first order. Optional `query` filters by card name; `sort` is added, edition "
+            "(set release) or price (highest first, from the collection as the daily price check last "
+            "read it, with each card's price; only once the member opened their Binder); `page` pages. "
+            "Returns cards, count and total_pages. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def list_collection(query: str | None = None, sort: str = "added", page: int = 1) -> dict[str, Any]:
         sub = _sub()
+        page_no = max(1, min(int(page or 1), 10_000))
+        info = service.binder.info(sub) if sort == "price" else None
+        if info is not None and info.get("read_at") is not None:
+            got = service.binder.listing(
+                sub, q=_clean(query, 80), offset=(page_no - 1) * PAGE_SIZE, limit=PAGE_SIZE
+            )
+            pages = max(1, -(-got["total"] // PAGE_SIZE))
+            return {
+                "ok": True,
+                "cards": got["rows"],
+                "count": got["total"],
+                "page": page_no,
+                "total_pages": pages,
+                "has_next": page_no < pages,
+                "read_at": info["read_at"],
+            }
         try:
             out = await service.page(
                 sub,
-                page=max(1, min(int(page or 1), 10_000)),
+                page=page_no,
                 q=_clean(query, 80),
-                sort=sort if sort in SORTS else "added",
+                sort=sort if sort in ("added", "edition") else "added",
             )
         except CollectionError as exc:
             return _err(exc)

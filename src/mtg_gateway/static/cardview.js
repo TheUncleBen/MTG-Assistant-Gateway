@@ -361,9 +361,86 @@
     v.appendChild(box);
     return closeBtn;
   }
-  /* Price history: the member's own watches of this card (/watchlist/api/card), the daily prices
-     the gateway stored, newest first; a card not watched yet gets a Watch button. Nothing here
-     asks Scryfall; watching does once (the same as the Watchlist page). */
+  /* Price history: the printing on show when the member owns it (in their Binder or a deck of
+     theirs, which the daily price check prices) as a chart and a table, then the member's own
+     watches of this card (/watchlist/api/card), the daily prices the gateway stored, newest first;
+     a card not watched yet gets a Watch button. Nothing here asks Scryfall; watching does once
+     (the same as the Watchlist page). */
+  var UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
+  function printingId(card) {
+    if (card.sid) return card.sid;
+    var m = UUID.exec(card.img || "");  // Scryfall's picture address carries the printing's id
+    return m ? m[1] : "";
+  }
+  function priceTable(rows, cur, label) {
+    var table = el("table");
+    table.setAttribute("aria-label", label);
+    var head = el("tr");
+    head.appendChild(el("th", null, "Day"));
+    head.appendChild(el("th", null, "Price"));
+    head.childNodes.forEach(function (th) { th.setAttribute("scope", "col"); });
+    table.appendChild(head);
+    rows.forEach(function (h) {
+      var tr = el("tr");
+      var th = el("th", null, h.day);
+      th.setAttribute("scope", "row");
+      tr.appendChild(th);
+      tr.appendChild(el("td", null, money(h.price, cur)));
+      table.appendChild(tr);
+    });
+    return table;
+  }
+  // a line of the daily prices, oldest to newest, its first and last price said in words
+  function priceChart(points, cur, what) {
+    if (points.length < 2) return null;
+    var values = points.map(function (p) { return Number(p.price); });
+    var lo = Math.min.apply(null, values), hi = Math.max.apply(null, values), span = (hi - lo) || 1;
+    var w = 300, h = 80, step = w / (values.length - 1);
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "80");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("style", "display:block;color:var(--orange-text);margin:.25rem 0 .5rem");
+    svg.setAttribute("aria-label", what + ": " + money(values[0], cur) + " on " + points[0].day + ", " +
+      money(values[values.length - 1], cur) + " on " + points[points.length - 1].day + ".");
+    var line = document.createElementNS(NS, "polyline");
+    line.setAttribute("points", values.map(function (v, i) {
+      var y = hi === lo ? h / 2 : h - 4 - (v - lo) / span * (h - 8);
+      return (i * step).toFixed(1) + "," + y.toFixed(1);
+    }).join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", "currentColor");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(line);
+    return svg;
+  }
+  var WHERE = { binder: "your binder", decks: "your decks" };
+  function ownedBlock(o, name) {
+    var wrap = el("div", "pv-owned");
+    var where = (o.where || []).map(function (k) { return WHERE[k] || k; }).join(" and ");
+    var h = el("h3", null, "This printing, in " + where);
+    h.setAttribute("style", "font-size:1rem;margin:0 0 .25rem");
+    wrap.appendChild(h);
+    var pts = (o.history || []).filter(function (h) { return h.price !== null && h.price !== undefined; });
+    if (!pts.length) {
+      wrap.appendChild(el("p", "muted", "No price yet; it comes with the next daily price check."));
+      return wrap;
+    }
+    wrap.appendChild(el("p", null, titleCase(o.finish === "nonfoil" ? "normal" : o.finish) + ": " +
+      money(o.price, o.currency) + (o.day ? " on " + o.day : "")));
+    var chart = priceChart(pts, o.currency, name + ", " + pts.length + " days");
+    wrap.appendChild(chart || el("p", "muted", "The chart shows once there are two days of prices."));
+    var det = el("details");
+    det.setAttribute("style", "margin:.25rem 0 .75rem");
+    det.appendChild(el("summary", "btn small", "Price history table"));
+    det.appendChild(priceTable(pts.slice().reverse(), o.currency, name + ", newest first"));
+    wrap.appendChild(det);
+    return wrap;
+  }
   function money(v, cur) {
     if (v === null || v === undefined) return "no price";
     return (cur === "eur" ? "€" : "$") + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -380,10 +457,13 @@
     var name = card.name || "";
     var fin = (card.finish || "").toLowerCase();
     fin = fin === "foil" || fin === "etched" ? fin : "nonfoil";
-    function show(watches) {
+    var sid = printingId(card);
+    function show(watches, owned) {
       box.textContent = "";
+      if (owned) box.appendChild(ownedBlock(owned, name));
       if (!watches.length) {
-        box.appendChild(el("p", "muted", "This card is not on your watchlist. Watch it to keep its price once a day."));
+        box.appendChild(el("p", "muted", owned ? "This card is not on your watchlist. Watch it for price alerts." :
+          "This card is not on your watchlist. Watch it to keep its price once a day."));
         var csrf = document.querySelector("input[name=csrf]");
         if (!csrf) return;
         var w = el("button", "btn small", "Watch this card");
@@ -395,7 +475,7 @@
             body: JSON.stringify({ name: name, finish: fin }) })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-              if (d && d.ok) { show([d.watch]); return; }
+              if (d && d.ok) { show([d.watch], owned); return; }
               w.disabled = false;
               box.appendChild(el("p", "notice error", (d && d.message) || "The card could not be watched."));
             })
@@ -438,13 +518,15 @@
       if (!opening) return;
       box.textContent = "";
       box.appendChild(el("p", "muted", "Reading the price history…"));
-      getJSON("/watchlist/api/card?name=" + encodeURIComponent(name)).then(function (x) {
+      var url = "/watchlist/api/card?name=" + encodeURIComponent(name) +
+        (sid ? "&sid=" + encodeURIComponent(sid) + "&finish=" + encodeURIComponent(fin) : "");
+      getJSON(url).then(function (x) {
         if (!x.ok || !x.d || !x.d.ok) {
           box.textContent = "";
           box.appendChild(el("p", "notice error", "The price history could not be read. Press Price history again to retry."));
           return;
         }
-        show(x.d.watches || []);
+        show(x.d.watches || [], x.d.owned || null);
       }).catch(function () {
         box.textContent = "";
         box.appendChild(el("p", "notice error", "No connection. Press Price history again to retry."));
@@ -459,6 +541,7 @@
     return {
       name: node.getAttribute("data-card") || "",
       img: node.getAttribute("data-img") || "",
+      sid: node.getAttribute("data-sid") || "",
       // the back face's picture: a two-faced card's (Show back face) or a custom card's, through
       // the gateway
       back_img: node.getAttribute("data-back") || "",

@@ -270,7 +270,9 @@ it into any of your decks with the copies and category you choose. The add
 is saved exactly like an edit made on the deck page (a snapshot first; the
 same confirmation when a change is large; kept for review while writes are
 off), so nothing skips your approval settings. Without a linked Archidekt
-account the button is disabled and says why.
+account the button is disabled and says why. A card's menu (right-click, or
+press and hold) also has **Pin card**, which pins it on Archidekt: it then
+shows under **Pinned** in My lists.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,
@@ -314,17 +316,30 @@ scans are listed under **Sessions**. The details are in
 ## Collection
 
 **Collection** is the list of cards you own. It is your Collection on
-Archidekt, shown and edited here through the account you linked: nothing
-about your cards is stored on the gateway, and what you add here appears on
-archidekt.com at once. Scan a pile and save it, add cards by name, or mark a
+Archidekt, shown and edited here through the account you linked, and what
+you add here appears on archidekt.com at once. With watchlists on, the
+gateway keeps a copy of it as last read whole, to work out its value (below). Scan a pile and save it, add cards by name, or mark a
 card as owned from any deck page. Each card keeps its printing, finish,
 condition and count.
 
-- Filter by name, show it as a grid or a list, sort by newest or by set
-  release, and page through it. Plus and minus change the count; the cross
+- Filter by name, show it as a grid or a list, sort by newest, by set
+  release or by price, and page through it. Plus and minus change the count; the cross
   removes a card; the dots open the card's details: finish, condition,
   language and the price you paid, saved to Archidekt on **Save** (its tags
   are shown as Archidekt holds them).
+- **Add cards** asks the name, copies, finish, condition and language. The
+  copies join an entry you already have only when its printing, finish,
+  condition and language all match; anything else becomes a new entry, and
+  the page says which one they went to. Ticked, **Use this finish, condition
+  and language next time** keeps your choices for the box and for a card
+  menu's **Add to collection**.
+- **Value** (with watchlists on): what the binder is worth at today's
+  Scryfall prices, each entry in its finish, with each row's price. Opening
+  the Binder puts it in the daily price check, which reads it whole once a
+  day while you open it at least every 60 days; **Work it out now** does the
+  first read at once. Entries Scryfall has no dollar price for are counted,
+  not guessed. **Price history** in the card viewer shows the daily prices
+  of a printing you own, in your Binder or a deck of yours you opened.
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
 - **Export CSV** downloads the whole collection. Archidekt's import does not
@@ -340,8 +355,7 @@ condition and count.
   names the lines it could not take as given: a language Archidekt's
   collection doesn't store (such as Phyrexian) is kept as English, a
   condition Archidekt's collection doesn't store (such as EX) is kept as
-  Near Mint, copies of a card you already own in another language are added
-  to that copy, and
+  Near Mint, lines whose copies joined an entry you already had are named, and
   cards Archidekt cannot find are left out. When the text itself cannot be
   read, nothing is imported and the page says which line is wrong.
 - A scan is a draft that stays as long as you like, up to a whole deck:
@@ -434,8 +448,10 @@ The **Watchlist** page (under More)
 keeps the price of cards and decks you choose, once a day:
 
 - **Watch a card** by name, or one printing by its set code and number, in
-  non-foil, foil or etched. A name alone follows the printing Scryfall gives
-  for that name. The card viewer has the same: **Price history** shows the
+  non-foil, foil or etched, and optionally an alert. A name alone follows the
+  card's cheapest printing, checked daily, and says which printing that is.
+  Ticked, **Use this finish and alert next time** keeps them for the form and
+  for the Watch in card menus. The card viewer has the same: **Price history** shows the
   prices kept for that card, and **Watch this card** adds it.
 - **Watch a deck** by its Archidekt link or number (your own or a public
   one). The gateway reads it again once a day, so its value follows the
@@ -449,7 +465,7 @@ keeps the price of cards and decks you choose, once a day:
 
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
 are checked once a day; the operator sets how many cards and decks you may
-watch and how long prices are kept (a year unless they changed it). Your
+watch (up to 5,000 cards and 100 decks) and how long prices are kept (a year unless they changed it). Your
 assistant can do the same: watch a card or a deck, stop watching, list your
 watchlist and read a card's price history. Watching changes nothing on
 Archidekt, so it needs no proposal.
@@ -579,6 +595,7 @@ mentioned at the end.
 *What it uses the session for*
 
 - Only when you, or an assistant you connected, ask for something. A big change you approved may finish in the background.
+- Once a day while watchlists are on: reading the decks you watch and, while you open your Binder at least every 60 days, your whole collection, to keep their prices.
 - Reading your decks (private ones included), folders, tags and collection.
 - Reading, as you, other people's decks and comment threads you or your assistant look at and the list of people you follow, and looking up the cards in the changes you make.
 - Making the deck, folder, tag and collection changes you make yourself, approve, or let your assistant make through your approval mode, including deleting a deck when you ask. It may first save a copy of the deck in a backup folder on your Archidekt account (the person who runs the server can turn that off).
@@ -588,6 +605,7 @@ mentioned at the end.
 
 - Encrypted: the session (an access token and the refresh token that renews it).
 - Plain text: your Archidekt username and user number (if Archidekt sends no username, what you typed to sign in, which may be your email); when you linked and when the session was last renewed and used; activity-log entries for each link, unlink, renewal and failed attempt.
+- Plain text, while watchlists are on: your collection as last read whole and the card lists of your own decks you opened, so they can be priced. Each goes once you have not opened it for 60 days.
 - Never stored: your password.
 - After an unlink, your Archidekt username and user number stay until you or an admin delete your data. Activity-log entries, including the Archidekt username noted when you linked, are kept for a year, even after your data is deleted.
 

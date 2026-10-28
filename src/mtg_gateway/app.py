@@ -1021,6 +1021,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
             lambda: state.scan.scryfall if state.scan is not None else None,
             state.notifier,
         )
+        # the Binder's daily whole read and the member's own decks' printings (binder_prices.py)
+        if state.collection is not None:
+            state.prices.read_binder = state.collection.read_whole
+        state.decks.read_hooks.append(state.prices.note_deck)
     state.summaries = Summaries(state.db, state.prices, state.notifier, s.public_url)
     state.alerts = AlertWatch(state.decks, state.notifier)
     state.db.price_days = s.price_history_days
