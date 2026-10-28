@@ -57,6 +57,7 @@ from .archidekt import (
     ArchidektClient,
     ArchidektError,
     Deck,
+    DeckCard,
     DeckList,
     Pacer,
     Patience,
@@ -719,6 +720,8 @@ def row_label(r: dict[str, Any]) -> str:
         label += f" (name guessed from '{r['guessed_from']}'; check it)"
     if r.get("tag"):  # the colour tag an add puts on its new row
         label += f", color tag {clean_text(str(r['tag']))}"
+    if r.get("breaks"):  # a format rule the change would break (DeckService._judge_rules)
+        label += " (breaks the deck's rules: " + "; ".join(clean_text(str(b)) for b in r["breaks"]) + ")"
     return label
 
 
@@ -1802,6 +1805,136 @@ async def unknown_card_names(
         logger.exception("card-name check failed")
         return []
     return [n for n in names if found.get(n) is False]
+
+
+# Scryfall's colour letters as Archidekt's oracle cards spell them (``colorIdentity``), so an added
+# card is judged against its commander in one spelling.
+_COLOUR_WORDS = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green"}
+_COLOUR_LETTER = {
+    **{w.casefold(): k for k, w in _COLOUR_WORDS.items()},
+    **{k.casefold(): k for k in _COLOUR_WORDS},
+}
+
+
+def _with_card_facts(card: DeckCard, facts: dict[str, Any] | None, words: bool) -> DeckCard:
+    """An added card's row (no Archidekt card data yet) with what its legality turns on, from
+    Scryfall's card: colour identity, types, legalities and rules text. As it is without them."""
+    if not isinstance(facts, dict):
+        return card
+    ident = [str(x) for x in facts.get("color_identity") or [] if isinstance(x, str)]
+    if words:
+        ident = [_COLOUR_WORDS.get(x.upper(), x) for x in ident]
+    type_line = str(facts.get("type_line") or "").split("//", 1)[0]
+    head, _, tail = type_line.partition("—")
+    words_ = head.split()
+    supers = [w for w in words_ if w in ("Basic", "Legendary", "Snow", "World")]
+    legal = facts.get("legalities") if isinstance(facts.get("legalities"), dict) else {}
+    return dataclasses.replace(
+        card,
+        color_identity=ident,
+        types=[w for w in words_ if w not in supers],
+        supertypes=supers,
+        subtypes=tail.split(),
+        legalities={str(k): str(v) for k, v in legal.items() if isinstance(v, str)},
+        oracle_text=str(facts.get("oracle_text") or ""),
+    )
+
+
+def _new_problems(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    """The format rules a change breaks that the deck kept before (deck_stats.deck_checks on the
+    deck now and as it would be): ``{"problem", "cards"}`` each, the cards it concerns (none for
+    the deck's size). A rule the deck already broke is not counted again."""
+    out: list[dict[str, Any]] = []
+
+    def names(checks: dict[str, Any], key: str) -> list[str]:
+        return [str(r["name"]) for r in checks.get(key) or [] if isinstance(r, dict) and r.get("name")]
+
+    size_b, size_a = before.get("deck_size") or {}, after.get("deck_size") or {}
+    if size_b.get("ok", True) and not size_a.get("ok", True):
+        want = size_a.get("expected") or size_a.get("minimum")
+        how = "" if size_a.get("expected") else "at least "
+        problem = f"the deck would have {size_a.get('actual')} cards, not {how}{want}"
+        out.append({"problem": problem, "cards": []})
+    had = set(names(before, "colour_identity_violations"))
+    outside = [
+        r
+        for r in after.get("colour_identity_violations") or []
+        if isinstance(r, dict) and r.get("name") not in had
+    ]
+    if outside:
+        out.append(
+            {
+                "problem": "outside the commander's color identity: "
+                + ", ".join(f"{r['name']} ({', '.join(_letters(r.get('outside')))})" for r in outside),
+                "cards": [str(r["name"]) for r in outside],
+            }
+        )
+    had = set(names(before, "singleton_violations"))
+    extra = [n for n in names(after, "singleton_violations") if n not in had]
+    if extra:
+        problem = "more than one copy in a singleton format: " + ", ".join(extra)
+        out.append({"problem": problem, "cards": extra})
+    for key, words in (("banned", "banned"), ("not_legal", "not legal in this format")):
+        had = set((before.get("legality") or {}).get(key) or [])
+        new = [str(n) for n in (after.get("legality") or {}).get(key) or [] if n not in had]
+        if new:
+            out.append({"problem": f"{words}: " + ", ".join(new), "cards": new})
+    return out
+
+
+def _letters(colours: Any) -> list[str]:
+    """Colours as WUBRG letters ("Red" -> "R"), in that order."""
+    have = {_COLOUR_LETTER.get(str(c).casefold(), str(c)) for c in colours or []}
+    return [c for c in "WUBRG" if c in have] + sorted(have - set("WUBRG"))
+
+
+def mark_breaks(rows: list[dict[str, Any]], problems: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The review rows with ``breaks`` on each row a new problem concerns (a problem of the deck
+    as a whole, its size, on the first row that adds copies), so the review, the diff and the
+    risk all say it."""
+    out = [dict(r) for r in rows]
+
+    def adds(r: dict[str, Any]) -> bool:
+        if r.get("kind") == "add":
+            return True
+        try:
+            return r.get("kind") == "change" and int(r.get("after") or 0) > int(r.get("before") or 0)
+        except (TypeError, ValueError):
+            return False
+
+    for p in problems:
+        wanted = {str(n).casefold() for n in p["cards"]}
+        hit = [
+            r
+            for r in out
+            if wanted
+            and r.get("zone") != "side"
+            and (
+                str(r.get("name") or "").casefold() in wanted
+                or front_face(str(r.get("name") or "")).casefold() in {front_face(n) for n in wanted}
+            )
+        ]
+        if not hit:
+            hit = [r for r in out if adds(r) and r.get("zone") != "side"][:1]
+        for r in hit:
+            r["breaks"] = [*(r.get("breaks") or []), p["problem"]]
+    return out
+
+
+def unchanged_changes(changes: list[Change], rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The finish, printing, tag, mana value and switch changes that would leave their card as it
+    is (printing_plan_rows gives them no row), so the result says so instead of dropping them."""
+    named = {str(r.get("name") or "").casefold() for r in rows} | {
+        front_face(str(r.get("name") or "")).casefold() for r in rows
+    }
+    out: list[dict[str, str]] = []
+    for ch in changes:
+        if ch.action not in PRINTING_ACTIONS:
+            continue
+        if ch.card_name.casefold() in named or front_face(ch.card_name).casefold() in named:
+            continue
+        out.append({"action": ch.action, "name": ch.card_name})
+    return out
 
 
 def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_lookup: dict[str, str]) -> None:
@@ -3004,6 +3137,9 @@ class DeckService:
         # the card-name catalog the gateway keeps in memory (Scryfall asked only for a few names it
         # lacks), so the check costs no Archidekt call
         self.known_cards: Callable[[list[str]], Awaitable[dict[str, bool | None]]] | None = None
+        # identifiers -> (Scryfall cards, not found); set when scanning is on. A proposal's added
+        # cards are looked up once, to judge what the change does to the deck's legality.
+        self.card_collection: Callable[[list[dict[str, str]]], Awaitable[tuple[list, list]]] | None = None
         # Set by collection.py: applies a ``collection`` proposal's stored changes against the
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
@@ -4231,6 +4367,7 @@ class DeckService:
         self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         await self._refuse_unknown_cards(deck, changes)
+        rows, legality = await self._judge_rules(deck, changes, rows)
         if source_row is not None:
             rows = [source_row, *rows]
         pid = secrets.token_urlsafe(12)
@@ -4246,7 +4383,68 @@ class DeckService:
             rows,
         )
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id})
-        return self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
+        out = self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
+        return {**out, **self._rules_note(changes, rows, legality)}
+
+    async def _judge_rules(
+        self, deck: Deck, changes: list[Change], rows: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """The review rows with the format rules the change would break that the deck keeps now
+        marked on them (``breaks``, which makes the proposal high risk), and those rules in words.
+        The deck as it would be is checked with deck_stats.deck_checks; an added card is looked up
+        on Scryfall first (one request) for what its legality turns on. A lookup that fails judges
+        the added cards by name only: their colors and legality are then not checked."""
+        from . import deck_stats
+        from .reports import deck_after
+
+        if not deck.format:
+            return rows, []
+        after = deck_after(deck, changes)
+        new = {c.name for c in after.cards if c.relation_id is None}
+        if new and self.card_collection is not None:
+            try:
+                found, _missing = await self.card_collection([{"name": n} for n in sorted(new)][:75])
+            except Exception:
+                logger.warning("card lookup for a proposal's legality failed", exc_info=True)
+                found = []
+            facts: dict[str, dict[str, Any]] = {}
+            for card in found:
+                full = str(card.get("name") or "")
+                facts.setdefault(full.casefold(), card)
+                facts.setdefault(front_face(full).casefold(), card)
+            words = any(len(x) > 1 for c in deck.cards if deck.is_commander(c) for x in c.color_identity)
+            after = dataclasses.replace(
+                after,
+                cards=[
+                    _with_card_facts(c, facts.get(c.name.casefold()), words) if c.relation_id is None else c
+                    for c in after.cards
+                ],
+            )
+        problems = _new_problems(deck_stats.compute(deck)["checks"], deck_stats.compute(after)["checks"])
+        if not problems:
+            return rows, []
+        return mark_breaks(rows, problems), [p["problem"] for p in problems]
+
+    @staticmethod
+    def _rules_note(changes: list[Change], rows: list[dict[str, Any]], legality: list[str]) -> dict[str, Any]:
+        """What a propose or amend result adds: ``legality_after`` (the rules the change would
+        break, already in the risk) and ``unchanged`` (changes that leave their card as it is), each
+        with a warning to tell the user."""
+        out: dict[str, Any] = {}
+        warnings: list[str] = []
+        if legality:
+            out["legality_after"] = legality
+            warnings += [f"Once applied, the deck would break its format's rules: {p}." for p in legality]
+        same = unchanged_changes(changes, rows)
+        if same:
+            out["unchanged"] = same
+            warnings += [
+                f"“{u['name']}” is already that way, so its {u['action']} changes nothing and is left out."
+                for u in same
+            ]
+        if warnings:
+            out["warnings"] = warnings
+        return out
 
     @_dedupe
     async def propose_package(
@@ -7316,10 +7514,13 @@ class DeckService:
             )
         deck = await self.get_own_deck(sub, row["deck_id"])
         self.recheck_waiting(sub, deck)
+        note: dict[str, Any] = {}
         if kind == "edit":
             changes = parse_changes(raw_changes)
             _before, _after, rows = plan_rows(deck, changes)
             await self._refuse_unknown_cards(deck, changes)
+            rows, legality = await self._judge_rules(deck, changes, rows)
+            note = self._rules_note(changes, rows, legality)
             stored: Any = [c.as_dict() for c in changes]
             # a card package's line stays first while any of its cards is still added: its import
             # is counted at apply, and its risk rule holds (security review 0.7.43)
@@ -7379,7 +7580,8 @@ class DeckService:
             sub=sub,
             detail={"proposal_id": proposal_id, "deck_id": row["deck_id"], "version": new},
         )
-        return self._board_note(sub, self.describe(sub, proposal_id), row["deck_id"], rows, proposal_id)
+        out = self._board_note(sub, self.describe(sub, proposal_id), row["deck_id"], rows, proposal_id)
+        return {**out, **note}
 
     async def amend_new_deck(
         self, sub: str, row: dict[str, Any], raw: Any, *, version: int

@@ -12,8 +12,9 @@ Arena exports:
     1 Aesi, Tyrant of Gyre Strait *CMDR*  (a trailing *CMDR* marks the commander)
     Sol Ring                      (quantity defaults to 1)
     Commander:  /  // Lands  /  Sideboard   (section headers become the category)
+    ## Commander  /  ## Main Deck (99 cards)  (markdown headings, as the research tools print)
     SB: 1 Negate                  (MTGO sideboard prefix)
-    # comments and blank lines are ignored
+    # comments and blank lines are skipped (a comment is listed as not read)
 
 Nothing here contacts any service.
 """
@@ -53,7 +54,18 @@ HEADER_WORDS = {
     "battles",
     "tokens",
     "considering",
+    # the research tools' headings (edhrec_average_deck groups by type, precon_decklist "Main Deck")
+    "main deck",
+    "creature",
+    "instant",
+    "sorcery",
+    "artifact",
+    "enchantment",
+    "planeswalker",
+    "land",
+    "battle",
 }
+MAIN_SECTIONS = ("deck", "main", "mainboard", "maindeck", "main deck")
 SIDE_ZONES = {"sideboard", "maybeboard", "considering"}
 SIDE_CATEGORY = {"sideboard": "Sideboard", "maybeboard": "Maybeboard", "considering": "Maybeboard"}
 FINISH_MARKS = {"F": "Foil", "E": "Etched"}
@@ -63,6 +75,8 @@ NOT_A_CARD = re.compile(
     r"^(?:total|cards?|count|deck size|main ?deck|sideboard|maybeboard)\b[^A-Za-z]*\d", re.I
 )
 LINK = re.compile(r"://|^www\.", re.I)
+# A line in markdown bold ("**Total: 100 cards**", precon_decklist's footer) is read without it.
+BOLD = re.compile(r"^\*\*(.+)\*\*$")
 # A trailing *CMDR* (which the research service's goldfish tools accept) marks the commander.
 CMDR_MARK = re.compile(r"\s+\*CMDR\*(?=\s|$)", re.I)
 # A quantity that is negative, not whole or too big ("-1 Island", "1.5 Island", "1000x Island"):
@@ -94,10 +108,18 @@ class ListCard:
 
 
 def _header(line: str) -> str | None:
-    s = line.strip().strip(":").strip()
-    s = re.sub(r"^(?://|#)\s*", "", s)  # "// Lands" and Archidekt's "# Sideboard" headers
-    s = re.sub(r"\s*\(\d+\)$", "", s)
+    """The section a header line starts, or None. "// Lands", Archidekt's "# Sideboard" and
+    "Commander:" name a known section; a markdown heading of two or more "#" ("## Commander",
+    "## Main Deck (99 cards)", "## Artifact", as the research tools print lists) is always one."""
+    s = line.strip()
+    heading = re.match(r"^(#+)\s*(.*)$", s)
+    level = len(heading.group(1)) if heading else 0
+    s = heading.group(2) if heading else re.sub(r"^//\s*", "", s)
+    s = s.strip().strip("*_").strip().strip(":").strip()
+    s = re.sub(r"\s*\(\d+(?:\s+cards?)?\)$", "", s, flags=re.I)
     if s.lower() in HEADER_WORDS:
+        return s
+    if level >= 2 and s and not s[0].isdigit():
         return s
     if line.strip().endswith(":") and " " not in s and s:
         return s
@@ -129,7 +151,12 @@ def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]
             section = header
             continue
         if line.startswith("#") or line.startswith("//"):
-            continue  # a comment
+            # a comment, or a title such as "# Average Deck for ...": not read, and said so
+            if unread is not None and len(unread) < 50:
+                unread.append(line[:120])
+            continue
+        shown = line
+        line = BOLD.sub(r"\1", line).strip()
         if BAD_QUANTITY.match(line):
             raise DecklistError(f"bad quantity on line (a whole number from 1 to 999): {line[:80]}")
         line, commander_marks = CMDR_MARK.subn("", line)
@@ -137,9 +164,10 @@ def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]
         if not m or not m.group("name").strip():
             raise DecklistError(f"could not read line: {line[:80]}")
         name = m.group("name").strip().rstrip(",")
-        if LINK.search(line) or (not m.group("qty") and NOT_A_CARD.match(line)):
+        # A "|" is in no card name: "Set: FRC | Type: Commander Deck" (precon_decklist's header)
+        if LINK.search(line) or " | " in line or (not m.group("qty") and NOT_A_CARD.match(line)):
             if unread is not None and len(unread) < 50:
-                unread.append(line[:120])
+                unread.append(shown[:120])
             continue
         qty = int(m.group("qty")) if m.group("qty") else 1
         if qty <= 0 or qty > 999:
@@ -165,7 +193,7 @@ def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]
         if m.group("sb") or (section and section.lower() in SIDE_ZONES):
             zone = "side"
             board = SIDE_CATEGORY.get((section or "").lower(), "Sideboard")
-        elif section and section.lower() not in ("deck", "main", "mainboard", "maindeck") and not cats:
+        elif section and section.lower() not in MAIN_SECTIONS and not cats:
             cats = [section]
             if section.lower() in ("commander", "commanders"):
                 cats = ["Commander"]

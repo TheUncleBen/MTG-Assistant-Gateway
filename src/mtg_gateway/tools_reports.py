@@ -126,6 +126,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         reason = str(goldfish.get("message") or goldfish.get("text") or goldfish.get("error") or "it failed")
         return clean_text(reason)[:300].rstrip(". ")
 
+    def _input_code(goldfish: Any) -> dict[str, str]:
+        """INVALID_ARGUMENT for a simulation refused for what the deck is (no commander, too few
+        cards, decks of different sizes: reports marks it ``refused``), so a client tells it from
+        a research service that failed (UPSTREAM_ERROR, the code of simulation_failed)."""
+        refused = isinstance(goldfish, dict) and goldfish.get("refused")
+        return {"error_code": "INVALID_ARGUMENT"} if refused else {}
+
     def _looks_like_list(ref: str) -> bool:
         """A pasted decklist rather than a deck id, URL or snapshot id: more than one line, or a
         count in front of a name."""
@@ -176,7 +183,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
-            "confidence intervals and significance; two Commander decks or two 60-card decks). Does "
+            "confidence intervals and significance; two Commander decks or two 60-card decks of the "
+            "same size, commanders aside, since game for game each deck draws the same positions). Does "
             "not touch Archidekt beyond reading the decks. This is the one tool for deck "
             "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
             "comparison of two decks. A simulated comparison is stored as one of the user's reports "
@@ -286,7 +294,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 # the A/B was asked for and did not run: the result says so at the top
                 message = f"The A/B did not run: {failed}. {_KEPT}"
                 logger.warning("compare_decks: the A/B did not run: %s", failed)
-                out.update(ok=False, error="simulation_failed", message=message)
+                code = _input_code(out["goldfish_ab"])
+                out.update(ok=False, error="simulation_failed", message=message, **code)
         return out
 
     def _side_name(deck: Any) -> str:
@@ -494,6 +503,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     "ok": False,
                     "error": "simulation_failed",
                     "message": f"The simulation did not run: {failed}. {_KEPT}",
+                    **_input_code(report.get("goldfish")),
                 }
             return {"ok": True, **report}
         except DeckError as exc:

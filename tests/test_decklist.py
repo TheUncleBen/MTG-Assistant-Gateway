@@ -141,3 +141,63 @@ def test_signed_or_fractional_quantity_is_refused(line: str) -> None:
     assert [(c.quantity, c.name) for c in parse_decklist("1996 World Champion")] == [
         (1, "1996 World Champion")
     ]
+
+
+# The research tools' own output, as edhrec_average_deck and precon_decklist print it (markdown
+# headings, a bold total, a set line): it must read back with its commander.
+EDHREC_AVERAGE = """# Average Deck for Krenko, Mob Boss
+
+## Commander
+1 Krenko, Mob Boss
+
+## Creature
+1 Goblin Matron
+1 Skirk Prospector
+
+## Artifact
+1 Sol Ring
+
+Total: 4 cards
+"""
+PRECON = """# Multiverse Reforged
+Set: FRC | Type: Commander Deck
+
+## Commander
+1 Krenko, Mob Boss
+
+## Main Deck (2 cards)
+1 Sol Ring
+1 Goblin Matron
+
+## Sideboard (1 cards)
+1 Negate
+
+**Total: 3 cards**
+"""
+
+
+def test_markdown_headings_are_sections() -> None:
+    unread: list[str] = []
+    cards = {c.name: c for c in parse_decklist(EDHREC_AVERAGE, unread)}
+    assert cards["Krenko, Mob Boss"].categories == ["Commander"]
+    assert cards["Goblin Matron"].categories == ["Creature"]
+    assert cards["Sol Ring"].categories == ["Artifact"]
+    # nothing read is dropped without a word: the title and the footer are listed
+    assert unread == ["# Average Deck for Krenko, Mob Boss", "Total: 4 cards"]
+    assert to_text(list(cards.values())).startswith("1 Krenko, Mob Boss [Commander]\n")
+
+
+def test_precon_output_reads_back() -> None:
+    unread: list[str] = []
+    cards = {c.name: c for c in parse_decklist(PRECON, unread)}
+    assert set(cards) == {"Krenko, Mob Boss", "Sol Ring", "Goblin Matron", "Negate"}
+    assert cards["Krenko, Mob Boss"].categories == ["Commander"]
+    assert cards["Sol Ring"].categories == [] and cards["Sol Ring"].zone == "main"
+    assert cards["Negate"].zone == "side"
+    assert unread == ["# Multiverse Reforged", "Set: FRC | Type: Commander Deck", "**Total: 3 cards**"]
+
+
+def test_comment_lines_are_listed_as_unread() -> None:
+    unread: list[str] = []
+    parse_decklist("# my notes\n// made by hand\n1 Sol Ring\n// Lands\n1 Forest\n", unread)
+    assert unread == ["# my notes", "// made by hand"]

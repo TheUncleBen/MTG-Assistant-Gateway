@@ -774,7 +774,8 @@ class ReportService:
         if mode != "constructed":
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
         if simulate and mode not in SIM_MODES:
-            goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
+            # refused for what the deck is, not for a failure: the result's code says so
+            goldfish = {"tool": "goldfish_run", "ok": False, "text": mode, "refused": True}
         elif simulate:
             played = [c for c in deck.cards if deck.in_deck(c)]
             names = [c.name for c in played]
@@ -2035,7 +2036,7 @@ class ReportService:
         if refused is None and modes[0] != modes[1]:
             refused = MIXED_MODES_TEXT
         if refused is not None:
-            return {"tool": "goldfish_ab", "ok": False, "text": refused}
+            return {"tool": "goldfish_ab", "ok": False, "text": refused, "refused": True}
         # both decks play the kept models of their cards, as their own solo tests do
         names = [c.name for t in (text_a, text_b) for c in _cards_or_none(t) if c.zone == "main"]
         opts, used = card_models.merge(sub, self.models, names, opts)
@@ -2043,6 +2044,8 @@ class ReportService:
         if modes[0] == "constructed":
             args["constructed"] = True
         out = await self._mf(sub, "goldfish_ab", args)
+        if not out.get("ok") and str(out.get("text") or "").startswith(AB_SIZE_REFUSAL):
+            out["refused"] = True  # the two decks' sizes, not a failure
         if used:
             out["kept_models"] = used
             out["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
@@ -3364,6 +3367,9 @@ UNMARKED_COMMANDER_TEXT = (
     "Commander deck with its commander unmarked. Put the commander in the deck's Commander "
     '(premier) category, or under a "Commander" heading in a pasted list, and run again.'
 )
+# The opening of the research service's refusal of an A/B of decks of different sizes (its paired
+# games deal both decks the same positions).
+AB_SIZE_REFUSAL = "A/B decks must be the same size"
 MIXED_MODES_TEXT = (
     "No comparison games: one deck has a commander and the other does not. The comparison plays "
     "two Commander decks or two 60-card decks."
