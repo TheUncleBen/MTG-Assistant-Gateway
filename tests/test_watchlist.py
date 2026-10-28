@@ -786,3 +786,18 @@ def test_the_deck_limit_says_how_many_to_remove(watched: list[str], remove: str)
         f"{remove} to add another."
     )
     svc._check_deck_limit("user-1", "1")  # a deck already watched is never refused
+
+
+async def test_a_card_watched_by_name_says_which_printing_is_priced(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28): a card watched by name came back with no set and a price
+    none of the printings the assistant had seen matched."""
+    b = await _browser(stack, link=True)
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    out = structured(await call(stack.h, token, "watch_card", {"name": "Sol Talisman", "finish": "foil"}))
+    watch = out["watch"]
+    assert watch["set"] is None and watch["collector_number"] is None  # it follows the name
+    assert watch["printing_now"]["set"] and watch["printing_now"]["collector_number"], watch
+    assert "Scryfall gives for the name" in watch["follows"], watch
+    listed = structured(await call(stack.h, token, "list_watchlist"))
+    assert "Scryfall gives for the name" in listed["cards"][0]["follows"], listed

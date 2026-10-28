@@ -160,6 +160,13 @@ def _card_keys(card: dict[str, Any]) -> list[tuple[str, ...]]:
     return keys
 
 
+# Beside a card watched by name alone (no set): which printing its price is.
+FOLLOWS_NAME = (
+    "the printing Scryfall gives for the name, which can change; watch a set and collector number "
+    "to price one printing"
+)
+
+
 class PriceService:
     def __init__(
         self,
@@ -228,6 +235,7 @@ class PriceService:
             },
             "history": [{"day": d, "price": v} for d, v in series],
             "priced": bool(w.get("scryfall_id")),
+            **({} if w["set_code"] else {"follows": FOLLOWS_NAME}),
         }
 
     def watched_cards(self, sub: str) -> list[dict[str, Any]]:
@@ -400,6 +408,13 @@ class PriceService:
             if card is not None:
                 self._store_point(c, str(card["id"]), point_of(card), day_of(t))
         out = self.card_view(self._rows("SELECT * FROM watch_cards WHERE id = ?", (wid,))[0])
+        if card is not None:
+            # the printing priced today, also when the watch follows the name
+            out["printing_now"] = {
+                "set": str(card.get("set") or "") or None,
+                "set_name": str(card.get("set_name") or "") or None,
+                "collector_number": str(card.get("collector_number") or "") or None,
+            }
         out["created"] = created
         if note:
             out["note"] = note
