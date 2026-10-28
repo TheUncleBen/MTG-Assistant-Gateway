@@ -23,9 +23,19 @@ def structured(res: dict) -> Any:
     return _structured(res)
 
 
+async def card_read(h, token: str, pid: str, **args) -> dict:
+    """The newest card's own read of its proposal: it names its card number, which the read says
+    (a read naming none is a card from before card numbers, which gets no code once a card has one)."""
+    res = await call(h, token, "get_proposal", {"proposal_id": pid, **args})
+    seq = (res.get("structuredContent") or {}).get("card_seq")
+    if seq and "card_seq" not in args:
+        res = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": seq, **args})
+    return res
+
+
 async def card_code(h, token: str, pid: str) -> str:
     """The approval code the proposal's card gets in the app that made it."""
-    res = await call(h, token, "get_proposal", {"proposal_id": pid})
+    res = await card_read(h, token, pid)
     code = (res.get("_meta") or {}).get(APPROVAL_META_KEY)
     assert code, structured(res)
     return code

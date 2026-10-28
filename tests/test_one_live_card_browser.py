@@ -113,12 +113,18 @@ def test_the_same_version_drawn_again_below_says_so_and_the_newest_keeps_its_but
             )
             card.locator("#approve:enabled").wait_for(timeout=5_000)
             assert "stub" not in (card.locator("#card").get_attribute("class") or "")
-            # a card drawn before card numbers existed (none in its result) is never stepped aside
+            # a card drawn before card numbers existed (none in its result) is number 0: it keeps
+            # its buttons while no card has a number, and steps aside for any numbered card
             old = {k: v for k, v in NEW_DECK.items() if k != "card_seq"}
+            card = _open(page, {"structuredContent": old, "_meta": {APPROVAL_META_KEY: "c0"}}, get_reply=old)
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            assert "card_seq" not in _reads(page)[-1]["params"]["arguments"]  # the gateway reads 0
             card = _open(
                 page, {"structuredContent": old, "_meta": {APPROVAL_META_KEY: "c0"}}, get_reply=again
             )
-            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#card.stub").wait_for(timeout=5_000)
+            assert "shown again in a newer card below" in card.locator("#status").inner_text()
+            assert card.locator("#approve").count() == 0
         finally:
             browser.close()
 

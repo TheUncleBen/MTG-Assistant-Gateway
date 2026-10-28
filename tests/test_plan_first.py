@@ -8,6 +8,7 @@ from .conftest import Stack
 from .test_decks_and_proxy import call, linked_user, mcp_token, structured
 from .test_in_chat_approve import _tools
 from .test_track_a_board import SUB, _change, _mode, _propose
+from .track_a_helpers import card_read
 
 
 async def _check(h, token: str, changes: list, deck: str = "42") -> dict:
@@ -77,7 +78,7 @@ async def test_the_cards_read_after_an_amend_carries_the_new_versions_code(stack
     amend = {"proposal_id": pid, "version": 1, "changes": _change("Ponder")}
     amended = structured(await call(h, token, "amend_proposal", amend))
     assert amended["ok"] and amended["version"] == 2
-    read = await call(h, token, "get_proposal", {"proposal_id": pid})
+    read = await card_read(h, token, pid)
     assert structured(read)["version"] == 2
     new = read["_meta"][APPROVAL_META_KEY]
     assert new != old

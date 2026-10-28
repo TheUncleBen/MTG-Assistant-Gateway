@@ -116,7 +116,8 @@ def card_approval(
     creator = row.get("created_by_client")
     if not creator or creator != current_client.get():
         return None, True
-    # an older card's read gets no code: a newer card for this proposal is in the chat
+    # an older card's read gets no code: a newer card for this proposal is in the chat (a card
+    # from before card numbers reads as 0, so it gets one only while no card has a number)
     if reader_seq is not None and reader_seq < card_seq_of(row, creator):
         return None, False
     # the code of the version this result shows, so a card never carries a code for rows it does
