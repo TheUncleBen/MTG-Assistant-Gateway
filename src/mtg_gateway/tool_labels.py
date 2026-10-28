@@ -52,6 +52,7 @@ TOOLS: dict[str, ToolWords] = {
     ),
     "apply_proposal": ToolWords("Apply a change", "Apply that change"),
     "confirm_proposal": ToolWords("Approve or reject from a chat card", "Approve (a chat card's button)"),
+    "propose_rest": ToolWords("Propose the rest of a change", "Propose the rest (a chat card's button)"),
     "reject_proposal": ToolWords("Reject a change", "Reject that change"),
     "get_snapshot": ToolWords("Read a snapshot", "Show me that snapshot"),
     # tools_account.py
@@ -59,18 +60,15 @@ TOOLS: dict[str, ToolWords] = {
     "propose_clone_deck": ToolWords("Propose a copy of a deck", "Copy this deck into my decks"),
     "get_deck_comments": ToolWords("Read deck comments", "Read the comments on this deck"),
     "get_forum": ToolWords("Read the forum", "Read Archidekt's forum"),
-    "propose_deck_social": ToolWords("Propose a like, bookmark or follow", "Bookmark this deck"),
-    "propose_comment": ToolWords("Propose a comment", "Comment on this deck"),
+    "propose_account_action": ToolWords(
+        "Propose an Archidekt account action", "Bookmark this deck, or comment on it"
+    ),
     "propose_delete_deck": ToolWords("Propose deleting a deck", "Delete my deck"),
-    "propose_create_folder": ToolWords("Propose a new folder", "Make me a folder"),
     "get_deck_collaborators": ToolWords("Read deck collaborators", "Who can edit my deck?"),
     # tools_community.py
-    "propose_deck_help": ToolWords("Propose a deck help request", "Ask for help with this deck"),
-    "propose_report": ToolWords("Propose a report to Archidekt", "Report this deck to Archidekt"),
     "get_my_profile": ToolWords("Read my Archidekt profile", "Show my Archidekt profile"),
     "get_my_notifications": ToolWords("Read my Archidekt notifications", "Any new notifications?"),
     "propose_profile_change": ToolWords("Propose a profile or settings change", "Change my Archidekt bio"),
-    "propose_contest_entry": ToolWords("Propose a contest entry", "Enter this deck in the contest"),
     "get_registration_pdf": ToolWords("Make a deck registration sheet", "Make a registration PDF"),
     # tools_packages.py
     "list_card_packages": ToolWords("List card packages", "List card packages"),
@@ -78,7 +76,6 @@ TOOLS: dict[str, ToolWords] = {
     # tools_lists.py
     "get_my_lists": ToolWords("Read my Archidekt lists", "List my category templates"),
     "propose_list_change": ToolWords("Propose a change to my lists", "Add a color tag called Cut, red"),
-    "propose_collaborator": ToolWords("Propose a collaborator change", "Let someone edit my deck"),
     "parse_deck_export": ToolWords("Read an Archidekt export", "Read this Archidekt export"),
     # tools_reports.py
     "deck_stats": ToolWords("Deck statistics", "Show my deck's statistics"),
@@ -108,6 +105,15 @@ TOOLS: dict[str, ToolWords] = {
     "unwatch": ToolWords("Stop watching", "Stop watching that"),
     "list_watchlist": ToolWords("Read my watchlist", "What is on my watchlist?"),
     "card_price_history": ToolWords("Card price history", "How has this card's price moved?"),
+    # the seven account-action tools merged into propose_account_action in 0.7.46: kept so the
+    # Metrics rows recorded before still read
+    "propose_deck_social": ToolWords("Propose a like, bookmark or follow", "Bookmark this deck"),
+    "propose_comment": ToolWords("Propose a comment", "Comment on this deck"),
+    "propose_create_folder": ToolWords("Propose a new folder", "Make me a folder"),
+    "propose_collaborator": ToolWords("Propose a collaborator change", "Let someone edit my deck"),
+    "propose_deck_help": ToolWords("Propose a deck help request", "Ask for help with this deck"),
+    "propose_report": ToolWords("Propose a report to Archidekt", "Report this deck to Archidekt"),
+    "propose_contest_entry": ToolWords("Propose a contest entry", "Enter this deck in the contest"),
     # Mystic Forge, passed through (mf_proxy.ALLOWED_TOOLS)
     "scryfall_search": ToolWords("Search cards", "Find cards that…"),
     "scryfall_named": ToolWords("Look up a card", "Look up this card"),

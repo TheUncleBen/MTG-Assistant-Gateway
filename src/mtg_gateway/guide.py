@@ -257,15 +257,9 @@ _PROPOSES = frozenset(
 )
 _YOUR_PRESS = frozenset(
     {
-        "propose_deck_social",
-        "propose_comment",
-        "propose_create_folder",
-        "propose_collaborator",
+        "propose_account_action",
         "propose_delete_deck",
-        "propose_deck_help",
-        "propose_report",
         "propose_profile_change",
-        "propose_contest_entry",
     }
 )
 _ON_PROPOSALS = frozenset(
@@ -629,7 +623,9 @@ def build(
         "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or check "
         "several and press <strong>Apply</strong>: the gateway shows the order first, then applies them "
         "one deck at a time. A deck's own page shows its waiting changes at the top, and asking the "
-        "assistant what is waiting shows them as a card with <strong>Apply all</strong>.</span></li>"
+        "assistant what is waiting shows them as a card with <strong>Apply all</strong>. Each app keeps "
+        "one waiting change per deck: when you ask for more, it is added to that change, so the chat "
+        "shows one card for it.</span></li>"
         "<li><span>Before the edit is applied, the gateway checks it still fits the deck, saves a "
         + (
             f"snapshot and puts a backup copy of the deck in a “{folder}” folder on your Archidekt account"
@@ -637,6 +633,10 @@ def build(
             else "snapshot"
         )
         + ", then reads the deck back to confirm.</span></li>"
+        "<li><span>If Archidekt doesn't answer and nothing reached it, the change waits again: press "
+        "<strong>Try again</strong> on its card, its review page or Proposals. If part of an edit reached "
+        "Archidekt before it stopped, <strong>Propose the rest</strong> makes a new proposal of what is "
+        "still missing.</span></li>"
         "<li><span>After an apply, <strong>Undo</strong> puts the deck back as it was just before; it "
         "says first if it would also take back later changes.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "

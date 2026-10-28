@@ -21,7 +21,9 @@ def _add(name: str) -> list[dict]:
 
 async def _propose(h, token: str, changes: list, **more: object) -> dict:
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes, **more})
+        await call(
+            h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes, "separate": True, **more}
+        )
     )
     assert p["ok"], p
     return p

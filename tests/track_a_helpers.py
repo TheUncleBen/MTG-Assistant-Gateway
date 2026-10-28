@@ -79,3 +79,43 @@ async def review_page_apply(h, token: str, pid: str) -> dict:
     finally:
         await b.aclose()
     return structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+
+
+# 0.7.46: the seven account-action tools became one, propose_account_action. The tests written
+# for them keep their own words; this turns a call to an old tool into the new tool's call.
+OLD_ACCOUNT_TOOLS = frozenset(
+    {
+        "propose_deck_social",
+        "propose_comment",
+        "propose_create_folder",
+        "propose_collaborator",
+        "propose_deck_help",
+        "propose_report",
+        "propose_contest_entry",
+    }
+)
+
+
+def account_action_args(tool: str, args: dict) -> dict:
+    """The propose_account_action arguments for a call of one of the old seven tools."""
+    args = dict(args)
+    if tool == "propose_comment":
+        args["action"] = "comment_" + args["action"]
+    elif tool == "propose_create_folder":
+        args["action"] = "create_folder"
+    elif tool == "propose_collaborator":
+        args["action"] = "collaborator_" + args["action"]
+    elif tool == "propose_deck_help":
+        args["action"] = "help_" + args.pop("help_action", "post")
+    elif tool == "propose_report":
+        args["action"] = "report"
+    elif tool == "propose_contest_entry":
+        args["action"] = "contest_" + args.pop("entry_action", "enter")
+    return args
+
+
+async def account_call(h, token: str, tool: str, args: dict | None = None) -> dict:
+    """``call``, with a call of an old account-action tool made as propose_account_action."""
+    if tool in OLD_ACCOUNT_TOOLS:
+        return await call(h, token, "propose_account_action", account_action_args(tool, args or {}))
+    return await call(h, token, tool, args or {})

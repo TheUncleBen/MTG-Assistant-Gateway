@@ -17,6 +17,7 @@ from .conftest import Stack
 from .test_account_actions import _browser_apply, _press
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import account_call
 
 SUB = "user-1"
 
@@ -238,7 +239,9 @@ async def test_a_comment_edit_keeps_its_link(stack: Stack) -> None:
     token = await linked_user(stack)
     await _set_mode(h, "manual")
     await _press(
-        h, token, await call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"})
+        h,
+        token,
+        await account_call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"}),
     )
     mine = ark.comments[300042][-1]
     mine["text"] = _doc(
@@ -246,7 +249,7 @@ async def test_a_comment_edit_keeps_its_link(stack: Stack) -> None:
         {"insert": "this", "attributes": {"link": "https://example.com/t"}},
         {"insert": " first.\n"},
     )
-    res = await call(
+    res = await account_call(
         h,
         token,
         "propose_comment",
@@ -275,12 +278,14 @@ async def test_a_comment_changed_since_its_review_is_not_sent(stack: Stack) -> N
     token = await linked_user(stack)
     await _set_mode(h, "manual")
     await _press(
-        h, token, await call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"})
+        h,
+        token,
+        await account_call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"}),
     )
     mine = ark.comments[300042][-1]
     mine["text"] = _doc({"insert": "Bold", "attributes": {"bold": True}}, {"insert": " words\n"})
     p = structured(
-        await call(
+        await account_call(
             h,
             token,
             "propose_comment",
@@ -302,7 +307,9 @@ async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack
     token = await linked_user(stack)
     await _set_mode(h, "manual")
     await _press(
-        h, token, await call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"})
+        h,
+        token,
+        await account_call(h, token, "propose_comment", {"deck_id": "42", "action": "post", "text": "x"}),
     )
     mine = ark.comments[300042][-1]
     mine["text"] = _doc(
@@ -310,7 +317,7 @@ async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack
         {"insert": "this", "attributes": {"link": "https://example.com/t"}},
         {"insert": " first.\n"},
     )
-    res = await call(
+    res = await account_call(
         h,
         token,
         "propose_comment",
@@ -337,7 +344,7 @@ async def test_a_comment_rewrite_that_keeps_none_of_its_formatting_says_so(stack
     assert rich_text(mine["text"]) == "Totally different." and "example.com" not in mine["text"]
     # a plain comment's rewrite has nothing to lose and says nothing
     plain = structured(
-        await call(
+        await account_call(
             h,
             token,
             "propose_comment",

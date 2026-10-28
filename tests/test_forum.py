@@ -7,6 +7,7 @@ from __future__ import annotations
 from .conftest import Stack
 from .test_account_actions import _browser_apply
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import account_call
 
 GENERAL = {"group": "Archidekt", "section": "General"}
 
@@ -40,7 +41,7 @@ async def test_a_thread_reads_its_first_post_and_replies(stack: Stack) -> None:
 async def test_a_reply_waits_for_the_members_press_and_lands_in_the_thread(stack: Stack) -> None:
     token = await linked_user(stack)
     p = structured(
-        await call(
+        await account_call(
             stack.h,
             token,
             "propose_comment",
@@ -62,7 +63,9 @@ async def test_a_reply_waits_for_the_members_press_and_lands_in_the_thread(stack
 async def test_a_locked_thread_takes_no_reply(stack: Stack) -> None:
     token = await linked_user(stack)
     p = structured(
-        await call(stack.h, token, "propose_comment", {"thread_id": "700003", "action": "post", "text": "Hi"})
+        await account_call(
+            stack.h, token, "propose_comment", {"thread_id": "700003", "action": "post", "text": "Hi"}
+        )
     )
     assert p["ok"] is False and "locked or archived" in p["message"], p
 
@@ -79,7 +82,9 @@ async def test_a_changed_forum_page_is_said_plainly_and_a_thread_still_opens(sta
 async def test_the_review_page_names_the_forum_thread(stack: Stack) -> None:
     token = await linked_user(stack)
     p = structured(
-        await call(stack.h, token, "propose_comment", {"thread_id": "700002", "action": "post", "text": "Hi"})
+        await account_call(
+            stack.h, token, "propose_comment", {"thread_id": "700002", "action": "post", "text": "Hi"}
+        )
     )
     b = Browser(stack.h)
     try:

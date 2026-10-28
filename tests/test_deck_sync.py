@@ -263,7 +263,11 @@ async def test_the_gateways_own_apply_checks_another_waiting_proposal(stack: Sta
             h,
             token,
             "propose_deck_changes",
-            {"deck_id": "42", "changes": [{"action": "set_quantity", "card_name": "Island", "quantity": 2}]},
+            {
+                "deck_id": "42",
+                "changes": [{"action": "set_quantity", "card_name": "Island", "quantity": 2}],
+                "separate": True,
+            },
         )
     )["proposal_id"]
     await sync.check(SUB)

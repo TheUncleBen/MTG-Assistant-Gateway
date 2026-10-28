@@ -14,7 +14,9 @@ SUB = "user-1"
 
 async def _propose(h, token: str, changes: list, deck: str = "42", **more: object) -> str:
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes, **more})
+        await call(
+            h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes, "separate": True, **more}
+        )
     )
     assert p["ok"], p
     return p["proposal_id"]

@@ -52,6 +52,7 @@ from .approve import (
     APPROVAL_META_KEY,
     CARD_ROWS,
     CARD_TOOL_META,
+    apply_when_allowed,
     apps_extension,
     proposal_text,
     proposal_tool_result,
@@ -202,6 +203,9 @@ ERROR_CODES = {
     "interrupted": "INTERNAL",
 }
 RETRYABLE_CODES = frozenset({"BUSY", "RATE_LIMITED", "UNAVAILABLE"})
+# Refusals that are the expected answer, not a failure (A22): the member decides this change
+# themselves. A host shows them as an ordinary result, not a failed tool.
+EXPECTED_REFUSALS = frozenset({"browser_required", "browser_pending"})
 
 
 def error_code(kind: Any) -> str:
@@ -220,7 +224,7 @@ def _card_result(data: dict[str, object], approval: str | None) -> CallToolResul
     the card and keep out of the model's context. Never in the text or structured content."""
     meta = {APPROVAL_META_KEY: approval} if approval else None
     return CallToolResult(
-        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str).decode())],
         structured_content=data,
         _meta=meta,
     )
@@ -240,16 +244,10 @@ WRITE_TOOLS = frozenset(
         "propose_list_change",  # the member's account-wide lists (account_lists.py)
         "propose_add_package",  # a card package's cards into a deck (packages.py)
         # the Archidekt account actions (actions.py): proposals too, even though none of them is
-        # ever applied by an assistant
-        "propose_deck_social",
-        "propose_comment",
+        # ever applied by an assistant (0.7.46: seven tools in one, propose_account_action)
+        "propose_account_action",
         "propose_delete_deck",
-        "propose_create_folder",
-        "propose_collaborator",
-        "propose_deck_help",  # 0.7.43: public, the member's own press only (actions.py)
-        "propose_report",
         "propose_profile_change",
-        "propose_contest_entry",
         # 0.7.46: they delete nothing (the member presses Delete), but a read-only app has no say
         "propose_delete_report",
         "propose_delete_snapshot",
@@ -259,6 +257,7 @@ WRITE_TOOLS = frozenset(
         "get_registration_pdf",
         "apply_proposal",
         "confirm_proposal",
+        "propose_rest",  # the card's "Propose the rest" (0.7.46)
         "reject_proposal",
         # 0.7.29: tidying the waiting changes and "Apply all" on a card
         "amend_proposal",
@@ -330,6 +329,25 @@ def _schema_problems(text: str) -> str | None:
     return "; ".join(problems)[:1500] or None
 
 
+def _compact_text(data: dict[str, Any], structured: dict[str, Any]) -> dict[str, Any] | None:
+    """The result with its text as compact JSON (A7), when the text is the same JSON as the
+    structured content: the library writes a dict result indented, which only adds spaces the
+    model reads. None when the text is anything else (plain text, a proposal's sentences)."""
+    content = list(data.get("content") or [])
+    if not content or not isinstance(content[0], dict) or not isinstance(content[0].get("text"), str):
+        return None
+    text = content[0]["text"]
+    if "\n" not in text or not text.startswith("{"):
+        return None
+    try:
+        if json.loads(text) != structured:
+            return None
+    except ValueError:
+        return None
+    content[0] = {**content[0], "text": pydantic_core.to_json(structured, fallback=str).decode()}
+    return {**data, "content": content}
+
+
 def schema_error_middleware():
     """MCP middleware for tool errors. Arguments the input schema refused get the same answer as
     any other refusal: ok false, error invalid, and a message naming each field and what it takes.
@@ -358,11 +376,16 @@ def schema_error_middleware():
                 except ValueError:
                     same = False
                 if same:  # the text is the same JSON, so clients that read only the text get the code too
-                    text = pydantic_core.to_json(coded, fallback=str, indent=2).decode()
+                    text = pydantic_core.to_json(coded, fallback=str).decode()
                     content[0] = {**content[0], "text": text}
                 elif content[0]["text"] == proposal_text(structured):  # a proposal tool's plain text
                     content[0] = {**content[0], "text": proposal_text(coded)}
-            return {**data, "content": content, "structuredContent": coded, "isError": True}
+            failed = coded.get("error") not in EXPECTED_REFUSALS
+            return {**data, "content": content, "structuredContent": coded, "isError": failed}
+        if isinstance(structured, dict):
+            compact = _compact_text(data, structured)
+            if compact is not None:
+                return compact
         if not data.get("isError") or structured:
             return result
         content = data.get("content") or []
@@ -377,7 +400,7 @@ def schema_error_middleware():
             {"ok": False, "error": "invalid", "message": f"the arguments do not fit the tool: {problems}"}
         )
         return types.CallToolResult(
-            content=[types.TextContent(type="text", text=pydantic_core.to_json(out, indent=2).decode())],
+            content=[types.TextContent(type="text", text=pydantic_core.to_json(out).decode())],
             structuredContent=out,
             isError=True,
         ).model_dump(by_alias=True, exclude_none=True, mode="json")
@@ -952,6 +975,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
             reader_seq=reader_seq,
         )
 
+    async def _proposed(data: dict[str, Any], *, apply_if_allowed: bool = True) -> CallToolResult:
+        """``_proposal`` of a propose tool's answer, applied first in the same call when the
+        member's approval mode lets the assistant apply it (approve.apply_when_allowed)."""
+        data = await apply_when_allowed(data, decks=state.decks, sub=_sub(), wanted=apply_if_allowed)
+        return _proposal(data)
+
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes
     from .tools_account import add_account_tools
@@ -966,6 +995,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     h = SimpleNamespace(
         _closed_at=_closed_at,
         _proposal=_proposal,
+        _proposed=_proposed,
         _sub=_sub,
         card_meta=card_meta,
         login_cookie=login_cookie,
@@ -1039,11 +1069,48 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # and without the generated titles and null branches, which only cost tokens.
     for tool in server._tool_manager.list_tools():
         tool.parameters = compact_schema(inline_refs(tool.parameters))
+        if tool.name in PROPOSAL_TOOL_HINTS:
+            tool.annotations = _proposal_hints(tool.annotations, PROPOSAL_TOOL_HINTS[tool.name])
 
     add_gateway_routes(state, h)
     add_stream_route(state, server)  # the Android app's notifications (notify.py)
 
     return server
+
+
+# One hint for every tool that records, changes or closes a proposal (A9, 0.7.46): none is read
+# only, since a propose may apply in the same call when the member's mode allows it
+# (apply_if_allowed) and the rest change what waits, so a host treats them all alike. The value is
+# destructiveHint: whether what it may lead to can remove or overwrite something (a card, a
+# comment, a deck); a tool that only creates something new is not.
+PROPOSAL_TOOL_HINTS: dict[str, bool] = {
+    "propose_new_deck": False,
+    "propose_clone_deck": False,
+    "propose_add_package": False,
+    "propose_deck_changes": True,
+    "propose_restore_snapshot": True,
+    "propose_deck_details": True,
+    "propose_deck_categories": True,
+    "propose_custom_card_changes": True,
+    "propose_list_change": True,
+    "propose_collection_changes": True,
+    "propose_account_action": True,
+    "propose_delete_deck": True,
+    "propose_profile_change": True,
+    "propose_delete_report": True,
+    "propose_delete_snapshot": True,
+    "propose_delete_scan_session": True,
+    "amend_proposal": True,
+    "combine_proposals": True,
+    "withdraw_proposal": False,
+}
+
+
+def _proposal_hints(annotations: Any, destructive: bool) -> Any:
+    """A proposal tool's annotations with readOnlyHint false and its destructiveHint."""
+    if annotations is None:
+        return types.ToolAnnotations(read_only_hint=False, destructive_hint=destructive)
+    return annotations.model_copy(update={"read_only_hint": False, "destructive_hint": destructive})
 
 
 # The admin settings DeckService.waiting_by_deck reads (decks.py mode_of, _assistant_policy).

@@ -821,7 +821,11 @@ def test_approve_tells_the_assistant_and_never_posts_as_the_user() -> None:
                 card = _open(page, start, end, host_caps=caps, openai=True)
                 _press(page, card, button)
                 page.wait_for_timeout(400)
-                told = [m for m in page.evaluate("() => window.log") if m.get("method") == "ui/update-model-context"]
+                told = [
+                    m
+                    for m in page.evaluate("() => window.log")
+                    if m.get("method") == "ui/update-model-context"
+                ]
                 assert told, button
                 assert _posted_as_user(page) == [], button
                 page.close()

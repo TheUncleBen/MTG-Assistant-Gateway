@@ -8,6 +8,7 @@ from typing import Any
 
 from .conftest import COLLECTION, Stack, stack_with
 from .test_decks_and_proxy import call, linked_user, structured
+from .track_a_helpers import account_call
 
 stack_options = stack_with(COLLECTION)
 
@@ -78,7 +79,8 @@ async def test_a_change_inside_the_rules_stays_low_risk(stack: Stack) -> None:
             {
                 "deck_id": "42",
                 "changes": [
-                    {"action": "add", "name": "Sol Talisman"},
+                    # a card Archidekt has: one it lacks is never low risk (A5/A6)
+                    {"action": "add", "name": "Arcane Signet"},
                     {"action": "remove", "name": "Acidic Slime"},
                 ],
             },
@@ -206,6 +208,7 @@ async def test_an_overlap_comes_before_any_apply(stack: Stack) -> None:
             {
                 "deck_id": "42",
                 "changes": [{"action": "add", "name": "Opt"}, {"action": "add", "name": "Ponder"}],
+                "separate": True,
             },
         )
     )
@@ -287,7 +290,7 @@ async def test_a_collection_add_in_a_finish_its_printing_lacks_is_warned(stack: 
 async def test_a_contest_that_does_not_exist_is_refused_when_proposed(stack: Stack) -> None:
     token = await linked_user(stack)
     out = structured(
-        await call(
+        await account_call(
             stack.h,
             token,
             "propose_contest_entry",
@@ -298,7 +301,7 @@ async def test_a_contest_that_does_not_exist_is_refused_when_proposed(stack: Sta
     assert "no forum thread 999999999" in out["message"], out
     stack.ark.forum_threads[881] = {"title": "Contest", "section": "Contests", "type": 7, "owner": "amy"}
     p = structured(
-        await call(
+        await account_call(
             stack.h,
             token,
             "propose_contest_entry",

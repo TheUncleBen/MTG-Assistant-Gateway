@@ -5,7 +5,7 @@ its server, and the gateway reads the same page data (``ArchidektClient.site_pag
 is not an API, so a site update can change it; when it does, the gateway says so in plain words
 (FORUM_CHANGED) and a thread still opens from its link or number. A thread itself is a comment
 tree, read through the comment API the deck comments use, and a reply is a comment
-(``propose_comment`` with ``thread_id``).
+(``propose_account_action`` comment_post with ``thread_id``).
 
 Shapes, from Archidekt's forum scripts (read 2026-10-22, not yet seen live):
 - /forum: ``forums.results`` = [{title (the group), children: [{title, description, posts}]}].

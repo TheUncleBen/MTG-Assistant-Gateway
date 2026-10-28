@@ -267,7 +267,7 @@ async def test_history_lists_applied_changes_and_tests_open_their_report(stack: 
             h,
             token,
             "propose_deck_changes",
-            {"deck_id": "42", "changes": [{"action": "remove", "card_name": "Forest"}]},
+            {"deck_id": "42", "changes": [{"action": "remove", "card_name": "Forest"}], "separate": True},
         )
     )
     structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))

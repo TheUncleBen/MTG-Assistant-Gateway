@@ -357,7 +357,7 @@ async def test_each_card_drawn_gets_the_next_number_and_the_cards_own_read_does_
 
 
 async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_version(stack: Stack) -> None:
-    """The same version drawn twice (the assistant's own apply answers with the card again): the
+    """The same version drawn twice (the same request made again answers with the card again): the
     first card's code is refused with "Use the newest card", whatever that card shows, and nothing
     is sent; the newest card's code applies. A read from an older card hands it no code."""
     h, ark = stack.h, stack.ark
@@ -369,9 +369,12 @@ async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_ver
     p, old_code = structured(res), res["_meta"][APPROVAL_META_KEY]
     pid = p["proposal_id"]
     assert p["card_seq"] == 1
-    again = await call(h, token, "apply_proposal", {"proposal_id": pid})
+    # the same request again: the waiting proposal answers, and the chat draws its card again
+    again = await call(
+        h, token, "propose_deck_changes", {"deck_id": "42", "changes": [{"action": "add", "name": "Opt"}]}
+    )
     redrawn = structured(again)
-    assert redrawn["error"] == "browser_required" and redrawn["card_seq"] == 2 and redrawn["version"] == 1
+    assert redrawn["proposal_id"] == pid and redrawn["card_seq"] == 2 and redrawn["version"] == 1, redrawn
     new_code = again["_meta"][APPROVAL_META_KEY]
     assert new_code != old_code
     # the older card's read: no code; the newest card's read: its code; a read naming no card

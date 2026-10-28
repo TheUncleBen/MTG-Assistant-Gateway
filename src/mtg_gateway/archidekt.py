@@ -2125,7 +2125,7 @@ class ArchidektClient(AccountRequests):
             loose = await self._card_search(token, name, exact=False, page_size=50)
             hits = [c for c in loose if _card_matches(c, name)]
         if not hits:
-            raise ArchidektError("not_found", f"no Archidekt printing found for '{name}'")
+            raise ArchidektError("not_found", f"Archidekt doesn't have “{name}”.")
         return _printing(_prefer_printing(hits, set_code, collector_number), exact=False)
 
     async def _require_printing(
@@ -2147,7 +2147,9 @@ class ArchidektClient(AccountRequests):
             raise ArchidektError(
                 "not_found", f"{label} is {', '.join(others)}, not '{name}'; nothing was added"
             )
-        raise ArchidektError("not_found", f"Archidekt has no printing {label} of '{name}'; nothing was added")
+        raise ArchidektError(
+            "not_found", f"Archidekt doesn't have “{name}” in that printing ({label}), so nothing was added."
+        )
 
     async def _cards(self, token: str, params: dict[str, Any]) -> list[dict]:
         body = await self._request("GET", "/cards/v2/", token=token, params=params)

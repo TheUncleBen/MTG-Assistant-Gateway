@@ -23,7 +23,9 @@ def _qty(ark, name: str, deck: int = 42) -> int:
 
 async def _propose(h, token: str, changes: list, deck: str = "42", **more: object) -> str:
     p = structured(
-        await call(h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes, **more})
+        await call(
+            h, token, "propose_deck_changes", {"deck_id": deck, "changes": changes, "separate": True, **more}
+        )
     )
     assert p["ok"] and p["state"] == "pending", p
     return p["proposal_id"]

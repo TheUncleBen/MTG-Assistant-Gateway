@@ -38,6 +38,7 @@ NOT_TOOLS = {
     "archidekt_login",
     "archidekt_password",
     "apply_needs_user",
+    "apply_if_allowed",
     "price_total",
     "price_source_1",
     "price_source_2",

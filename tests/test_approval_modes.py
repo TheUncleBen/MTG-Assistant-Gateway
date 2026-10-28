@@ -282,7 +282,7 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     own = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
     out = structured(own)
     assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == "high"
-    code = own["_meta"][APPROVAL_META_KEY]  # the card drawn again (only the newest one applies)
+    assert "_meta" not in own or APPROVAL_META_KEY not in own["_meta"]  # the refusal draws no card (0.7.46)
     assert "semi-automatic" in out["message"] and len(ark.patches) == sent
     refused = [x for x in h.db.audit_for_user("user-1", 50) if x["event"] == "apply_needs_user"]
     assert refused and refused[0]["detail"]["mode"] == "semi" and refused[0]["detail"]["risk"] == "high"
@@ -325,13 +325,16 @@ async def test_every_proposal_kind_has_a_tier(stack: Stack, tool: str, args: dic
 
 
 async def test_semi_mode_note_says_what_it_applies(stack: Stack) -> None:
-    """account_status's note matches the tiers: clones and small deck or collection edits apply
-    without the member's press in semi mode (a clone is low risk by design); a new deck from a list
-    waits."""
+    """The mode's note matches the tiers: clones and small deck or collection edits apply without
+    the member's press in semi mode (a clone is low risk by design); a new deck from a list waits.
+    Since 0.7.46 (A7) account_status gives the assistant the short note and the account page the
+    full one."""
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "semi")
-    note = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    short = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    assert "at most 5 card rows" in short and "a private copy of a deck" in short, short
+    note = modes.mode_help("semi")
     assert "at most 5 card rows" in note and f"{modes.MAX_COPIES_PER_ROW} copies each" in note
     assert "a private copy of a deck (a clone" in note and "collection" in note
     assert "A new deck built from a list" in note and "New decks" not in note
@@ -367,7 +370,7 @@ async def test_auto_mode_applies_everything_with_a_snapshot(stack: Stack) -> Non
     r = structured(await _adds(h, token, 1))
     assert r["assistant_may_apply"] is True
     r = structured(await call(h, token, "reject_proposal", {"proposal_id": r["proposal_id"]}))
-    assert r["state"] == "rejected" and r["assistant_may_apply"] is False and r["risk"] == "low"
+    assert r["state"] == "rejected" and r["assistant_may_apply"] is False
     snaps = structured(await call(h, token, "list_snapshots"))["snapshots"]
     assert [s["snapshot_id"] for s in snaps] == [a["snapshot_id"]]
     # The REST API applies under the same mode (same service path).

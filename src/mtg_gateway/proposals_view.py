@@ -477,10 +477,25 @@ def _waiting_flags(it: dict[str, Any], now: float) -> str:
         )
     if line.get("link_note"):
         out.append(f"<span class='flag'>{esc(line['link_note'])}</span>")
+    if _try_again(it):
+        out.append(f"<span class='flag'>{esc(TRY_AGAIN_FLAG)}</span>")
     v = _version_line(it, now)
     if v:
         out.append(f"<span class='flag'>{esc(v)}</span>")
     return "".join(out)
+
+
+TRY_AGAIN_FLAG = "Archidekt didn't answer, so nothing was changed."
+
+
+def _try_again(it: dict[str, Any]) -> bool:
+    """A waiting change whose last apply Archidekt didn't answer, with nothing changed there
+    (decks.TRY_AGAIN_KINDS): its row offers Try again."""
+    return (
+        it["state"] == "pending"
+        and bool((it.get("result") or {}).get("try_again"))
+        and it["status"] != "needs_look"
+    )
 
 
 def _deck_line(it: dict[str, Any]) -> str:
@@ -526,7 +541,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         f"<label class='md-hide' for='{esc(box)}'>{_chip(it)}</label>"
         f"<label class='md-hide' for='{esc(box)}'>{ui.when(it['created_at'], now=now)}</label>"
         f"<input type='hidden' name='v_{pid}' value='{int(it['version'])}'>"
-        + ui.open_link(f"/proposals/{it['id']}{qs}", "Review")
+        + ui.open_link(f"/proposals/{it['id']}{qs}", "Try\u00a0again" if _try_again(it) else "Review")
         + "</div>"
     )
 

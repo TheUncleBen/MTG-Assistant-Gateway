@@ -207,7 +207,7 @@ def research_refusal(result: types.CallToolResult) -> types.CallToolResult:
         return result
     out = {"ok": False, "error": "invalid", "message": f"the research service refused the arguments: {text}"}
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=json.dumps(out, indent=2))],
+        content=[types.TextContent(type="text", text=json.dumps(out, separators=(",", ":")))],
         structured_content=out,
         isError=True,
     )

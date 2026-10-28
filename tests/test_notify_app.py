@@ -627,7 +627,7 @@ async def test_each_decks_message_follows_its_proposals(stack: Stack) -> None:
                     stack.h,
                     token,
                     "propose_deck_changes",
-                    {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]},
+                    {"deck_id": "42", "changes": [{"action": "add", "card_name": card}], "separate": True},
                 )
             )
             assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode

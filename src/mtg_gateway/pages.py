@@ -658,7 +658,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         data = {k: v[0] for k, v in multi.items()}
         action = data.get("action")
         back = _list_back(data.get("back"))
-        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+        if not check_csrf(sid, data) or action not in ("apply", "reject", "rest"):
             nothing = "Nothing was rejected." if action == "reject" else "Nothing was applied."
             if data.get("box") == "1":
                 return JSONResponse({"ok": False, "message": "This form expired. Reload the page."}, 403)
@@ -1023,7 +1023,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         action = data.get("action")
-        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+        if not check_csrf(sid, data) or action not in ("apply", "reject", "rest"):
             return page(
                 "Proposal",
                 _err("This form expired. Reload the page and try again."),
@@ -1037,6 +1037,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"/proposals/{pid}", status_code=303)
         current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
         try:
+            if action == "rest":
+                # "Propose the rest" of a change that stopped partway: a new proposal to review
+                made = await state.decks.propose_rest(sub, pid)
+                return RedirectResponse(f"/proposals/{made['proposal_id']}", status_code=303)
             if action == "reject":
                 state.decks.reject(sub, pid, via=REVIEW_PAGE)
             else:
@@ -2197,7 +2201,7 @@ def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
     if p.get("state") == "pending":
         result = p.get("result") if isinstance(p.get("result"), dict) else {}
         return (
-            result.get("error") == "rate_limited"
+            (result.get("error") == "rate_limited" or bool(p.get("try_again")))
             and bool(p.get("writes_enabled"))
             and not p.get("out_of_date")
         )
@@ -2220,6 +2224,11 @@ def _page_step(p: dict[str, Any]) -> str:
         return (
             f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
             "so you can apply it again later."
+        )
+    if state == "pending" and p.get("try_again"):
+        # Archidekt didn't answer the last apply, and nothing changed there (decks.TRY_AGAIN_KINDS)
+        return (
+            "Archidekt didn't answer, so nothing was changed. The change is waiting again: press Try again."
         )
     if state == "pending":
         retry = (
@@ -2251,6 +2260,11 @@ def _page_step(p: dict[str, Any]) -> str:
         return (
             f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
             "Check My lists; the entries as they were just before are under Before, below."
+        )
+    if state == "failed" and p.get("rest_offered"):
+        return (
+            "Part of this change reached Archidekt before it stopped. Propose the rest makes a new "
+            "proposal of what is still missing, for you to review."
         )
     if state == "failed" and result.get("sent_entries"):
         where = "your collection" if p.get("kind") == "collection" else "the deck"
@@ -2351,8 +2365,17 @@ def _risk_words(p: dict[str, Any]) -> str:
     """ "Low: 2 card rows, no commander change": the status word and the one-line reason."""
     key = ui.ALIASES.get(str(p.get("risk")), str(p.get("risk")))
     word = ui.LABELS[key].word if key in ui.RISK_KEYS else str(p.get("risk"))
-    why = str(p.get("risk_reason") or "").strip()
+    why = _risk_reason(p)
     return f"{word}: {why}" if why else word
+
+
+def _risk_reason(p: dict[str, Any]) -> str:
+    """The risk's one-line reason; none for a closed change, whose tier was stored when it closed
+    (A18: "judged when it closed" told the member nothing)."""
+    from .decks import STORED_RISK_REASON
+
+    why = str(p.get("risk_reason") or "").strip()
+    return "" if why == STORED_RISK_REASON else why
 
 
 def _future(ts: int | None, now: float) -> str:
@@ -2710,7 +2733,7 @@ def _proposal_body(
     if status == "updated":
         pills.append(ui.status_label("updated", title=str(p.get("status_reason") or "")))
     if p.get("risk") and ui.ALIASES.get(str(p["risk"]), str(p["risk"])) in ui.RISK_KEYS:
-        pills.append(ui.risk_label(str(p["risk"]), title=str(p.get("risk_reason") or "")))
+        pills.append(ui.risk_label(str(p["risk"]), title=_risk_reason(p)))
     elif not p.get("risk"):  # closed with nothing to judge it by
         pills.append(ui.no_risk_label())
     under = []
@@ -2768,11 +2791,16 @@ def _proposal_body(
     tested = _proposal_tests(p, csrf, now=now)
     if tested:
         meta_rows.append(("Tests", tested))
+    # Needs a look: said once, in the orange box with its reason, not again as the next step (A21)
+    why_stale = str(p.get("status_reason") or "").strip()
     stale = (
-        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
+        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}"
+        + (f" Why: {html.escape(why_stale)}" if why_stale else "")
+        + "</p>"
         if pending and p.get("out_of_date")
         else ""
     )
+    step = step and not (stale and _page_step(p).startswith(OUT_OF_DATE_PAGE))
     body = (
         f"<div class='pills'>{''.join(pills)}</div>"
         + "".join(under)
@@ -2852,6 +2880,8 @@ def _proposal_body(
                 "you tap Apply.</p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-primary")
+        if p.get("try_again"):  # Archidekt didn't answer the last apply; nothing changed
+            apply_button = ("apply", "Try again", "primary btn-primary")
         body += (
             ask
             # Apply and Reject stay disabled until the click guard sees the page in use: a
@@ -2903,6 +2933,20 @@ def _proposal_body(
             f"<input type='hidden' name='applied' value='{html.escape(p['proposal_id'])}'>"
             f"<input type='hidden' name='after' value='{int(p.get('applied_at') or 0)}'>"
             "<button class='btn-plain'>Undo this change</button></form>"
+        )
+    if p.get("rest_offered") and csrf:
+        # a deck change that stopped partway: the gateway proposes what is still missing
+        actions.append(
+            "<form method='post' class='rest'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+            f"<input type='hidden' name='shown' value='{html.escape(shown)}'>"
+            "<input type='hidden' name='action' value='rest'>"
+            "<button class='btn'>Propose the rest</button></form>"
+        )
+    elif p.get("rest_proposal_id"):
+        actions.append(
+            f"<a class='btn btn-plain' href='/proposals/{html.escape(str(p['rest_proposal_id']))}'>"
+            "Open the proposal of the rest</a>"
         )
     # who rejected it (closed_by, said above) is not a result worth a box of its own
     result = p.get("result")
