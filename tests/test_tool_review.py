@@ -307,3 +307,31 @@ async def test_a_contest_that_does_not_exist_is_refused_when_proposed(stack: Sta
     )
     assert p["ok"], p
     assert "Enter your deck “" in p["diff"] and " by " not in p["diff"].splitlines()[0], p["diff"]
+
+
+async def test_check_deck_changes_reports_every_problem_with_a_suggestion(stack: Stack) -> None:
+    stack.sf.cards.append(BOLT)
+    stack.sf.fuzzy["lightnig bolt"] = BOLT
+    stack.h.app.state.gateway.scan.names.set_names(["Opt", "Lightning Bolt", "Sol Ring"])
+    token = await linked_user(stack)
+    out = structured(
+        await call(
+            stack.h,
+            token,
+            "check_deck_changes",
+            {
+                "deck_id": "42",
+                "changes": [
+                    {"action": "add", "name": "Opt", "set_code": "m19", "collector_number": "65"},
+                    {"action": "remove", "name": "Opt"},
+                    {"action": "add", "name": "Lightnig Bolt"},
+                ],
+            },
+        )
+    )
+    errors = [p["error"] for p in out["problems"]]
+    assert "unknown_cards" in errors and len(errors) >= 2, out
+    unknown = next(p for p in out["problems"] if p["error"] == "unknown_cards")
+    assert unknown["unknown_cards"] == ["Lightnig Bolt"], unknown
+    assert unknown["did_you_mean"] == {"Lightnig Bolt": "Lightning Bolt"}, unknown
+    assert "did you mean 'Lightning Bolt'" in unknown["message"], unknown
