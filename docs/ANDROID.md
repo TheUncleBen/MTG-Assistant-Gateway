@@ -112,7 +112,9 @@ From Android 12, after that first permission, Android may install later
 updates without asking again, because the app is updating itself
 (`PackageInstaller.SessionParams.setRequireUserAction`). Android still makes
 that call: on some phones and versions it asks every time, and the app shows
-its confirmation when it does. **Later** hides the bar until the next check.
+its confirmation when it does. **Later** hides the bar, and the app does not
+offer that version again on its own for three days; **Check for app updates**
+on the Account page still offers it.
 
 What it sends: one request to your own gateway, with the sign-in the app
 already holds, and the download from the same gateway. Nothing goes to GitHub
