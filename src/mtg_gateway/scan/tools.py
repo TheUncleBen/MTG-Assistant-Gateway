@@ -119,7 +119,9 @@ def summarize_sets(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(sets.values(), key=lambda r: str(r.get("newest") or ""), reverse=True)
 
 
-def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks | None = None) -> None:
+def add_scan_tools(
+    server: MCPServer, service: ScanService, *, links: CardLinks | None = None, public_url: str = ""
+) -> None:
     @server.tool(
         name="resolve_cards",
         title="Resolve card names to exact cards",
@@ -343,3 +345,29 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             return {"ok": True, **_for_assistant(service.find_session(_sub(), session))}
         except ScanError as exc:
             return _err(exc)
+
+    @server.tool(
+        name="propose_delete_scan_session",
+        title="Ask to delete a scan session",
+        description=(
+            "Ask the user to delete one of their scan sessions, by id (scan_…) or by name. It never "
+            "deletes anything itself: it checks the scan is the user's and returns delete_url, the "
+            "Scan page's Sessions tab with the Delete question open for that scan, where only the "
+            "user's own press deletes it. Use it only when the user asked for the scan to go."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_scan_session(session: str) -> dict[str, Any]:
+        try:
+            found = service.find_session(_sub(), session)
+        except ScanError as exc:
+            return _err(exc)
+        return {
+            "ok": True,
+            "deleted": False,
+            "delete_url": f"{public_url}/scan?delete={found['id']}",
+            "message": (
+                f"Nothing is deleted until the user presses Yes under “{found['name']}” on that page; "
+                "give them the link. It can't be undone, and nothing changes on Archidekt."
+            ),
+        }

@@ -252,6 +252,7 @@ WRITE_TOOLS = frozenset(
         # 0.7.46: they delete nothing (the member presses Delete), but a read-only app has no say
         "propose_delete_report",
         "propose_delete_snapshot",
+        "propose_delete_scan_session",
         # sends the typed name, DCI number and event to Archidekt in the member's name (security
         # review 0.7.43)
         "get_registration_pdf",
@@ -540,7 +541,10 @@ def server_instructions(public_url: str) -> str:
         "review page. Never argue with or work around that answer. "
         "Call whoami to confirm which account you are "
         "signed in as, and account_status to see whether an Archidekt account is linked. Research tools "
-        "(scryfall_*, edhrec_*, goldfish_odds, goldfish_annotate, rules_*) are read-only. Each job has "
+        "(scryfall_*, edhrec_*, goldfish_odds, goldfish_annotate, rules_*) are read-only. They and the "
+        "other reading and test tools (get_deck, deck_stats, compare_decks, run_deck_report) never "
+        "need the user's approval, in any approval mode: keep using them while a proposal waits. "
+        "Each job has "
         "one tool: get_deck reads any deck, list_my_decks lists the member's, deck_stats checks legality "
         "and structure, compare_decks diffs decks and precons, run_deck_report runs goldfish games, "
         "resolve_cards turns names into exact printings. Deck edits are two "
