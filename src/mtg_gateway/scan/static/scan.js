@@ -1159,7 +1159,7 @@
       const where = res.card.set ? ' (' + res.card.set.toUpperCase() + ' ' + res.card.collector_number + ')' : '';
       setStatus('Added ' + res.card.name + where + '. Next card, or undo.');
       buzz(30);
-      emit('auto-added', { name: res.card.name, card: res.card, foil: isFoil(res), total: totalCards() });
+      emit('auto-added', { name: res.card.name, card: res.card, foil: isFoil(res), total: totalCards(), worth: valueText() });
       return;
     }
     // An unsure or failed frame leaves the dedupe keys alone: a blurry frame of the card that was
@@ -1204,7 +1204,7 @@
     if (state.lastAutoKey === rec.key) state.lastAutoKey = null;
     state.rejectedKey = rec.key;
     setStatus('Removed ' + rec.name + '. Move it away to add it again.');
-    emit('undo', { name: rec.name, total: totalCards() });
+    emit('undo', { name: rec.name, total: totalCards(), worth: valueText() });
     return rec;
   }
 
