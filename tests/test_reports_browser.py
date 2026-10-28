@@ -111,8 +111,9 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         )
         _shot(page, f"history-{width}-{scheme}")
         assert hist["scrollWidth"] <= hist["innerWidth"], hist
-        # deck 42's 15 snapshots, its restore and the two reports, under day rows
-        assert hist["rows"] == 18 and hist["days"] >= 2, hist
+        # deck 42's 15 snapshots, its 15 applied changes (the restore among them) and the two tests
+        # (owner decision C7: History is the timeline): a page of 25, under day rows
+        assert hist["rows"] == 25 and hist["days"] >= 2, hist
         assert hist["selectArrow"] == "none" and 0 < hist["selectWidth"] <= hist["innerWidth"]
         assert hist["trendBorder"] == "solid", "trend cards are styled"
         # a snapshot's Details: the side panel on a wide screen, its own page on a phone, with

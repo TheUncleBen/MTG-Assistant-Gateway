@@ -2198,34 +2198,48 @@ def compare_page_html(
     error: str = "",
     csrf: str | None = None,
     forge_on: bool = False,
+    mine: list[dict[str, Any]] | None = None,
+    snapshots: list[dict[str, Any]] | None = None,
+    ab_on: bool = False,
 ) -> str:
     """Compare decks: a heading with a back link and one purpose line, a compact form (the other
-    deck and Compare on one row, the pasted list in a fold), then widgets, three tables of card
-    rows with the shared card menu, the statistics' differences, and the Forge panel. One orange
-    button: Compare until results show with the Forge panel, then that panel's button (F5: no
-    card size control here, the rows are text)."""
+    deck and Compare on one row, the pasted list in a fold), the member's own decks and this deck's
+    snapshots to pick from (``mine``, ``snapshots``: owner decision C7), then widgets, three tables
+    of card rows with the shared card menu, the statistics' differences, the paired solo test of
+    both (``ab_on``: the research service is set up) and the Forge panel (not for a snapshot: Forge
+    pairs are two decks). One orange button: Compare until results show, then the Forge panel's
+    (or, without it, the paired test's) (F5: no card size control here, the rows are text)."""
     did = esc(deck.id)
     name = esc(deck_title(deck))
     options = esc(json.dumps(precon_labels(precons), ensure_ascii=False))
+    is_snap = other_ref.startswith("snap_")
+    shown = result is not None and other is not None and not error
     forge_html = (
         compare_forge_html(deck, other, other_name, csrf=csrf, forge_on=forge_on)
-        if result is not None and other is not None and not error
+        if shown and not is_snap
         else ""
     )
-    compare_kind = "" if forge_html else "primary"
+    ab_html = (
+        compare_ab_html(deck, other_ref, other_name, csrf=csrf, primary=not forge_html)
+        if shown and ab_on and isinstance(other, Deck)
+        else ""
+    )
+    compare_kind = "" if forge_html or ab_html else "primary"
     form = (
         f"<a class='cmp-back ui-cap' href='/decks/{did}'>← {name}</a>"
         + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
         + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form'>"
         "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
         f"<input id='cmp-with' type='text' name='with' data-suggest='static' data-options='{options}' "
-        f"value='{esc(other_ref)}' placeholder='Precon name, deck link or deck ID' autocomplete='off'></div>"
+        f"value='{esc('' if is_snap else other_ref)}' placeholder='Precon name, deck link or deck ID' "
+        "autocomplete='off'></div>"
         f"<button type='submit' class='{compare_kind}'>{icon('swap')} Compare</button></div>"
         f"<details class='fold'{' open' if paste else ''}><summary class='fold-btn'>…or paste a decklist"
         "</summary><textarea name='paste' rows='5' aria-label='Paste a decklist' "
         "placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
         f"{esc(paste)}</textarea></details></form>"
     )
+    form += compare_picker_html(deck, mine, snapshots, other_ref=other_ref, folded=shown)
     if error:
         return form + ui.notice(error, "error", html=True, role="alert")
     if result is None or other is None:
@@ -2305,7 +2319,94 @@ def compare_page_html(
             f"<section class='cmp-stats'><h2 class='cmp-h'>Statistics: this deck minus {oname}</h2>"
             f"<div class='cmp-st2'>{cols}</div></section>"
         )
-    return form + widgets + lists + delta_html + forge_html
+    return form + widgets + lists + delta_html + ab_html + forge_html
+
+
+PICK_MOST = 12  # decks shown before "Show N more"
+
+
+def compare_picker_html(
+    deck: Deck,
+    mine: list[dict[str, Any]] | None,
+    snapshots: list[dict[str, Any]] | None,
+    *,
+    other_ref: str,
+    folded: bool,
+) -> str:
+    """The member's other decks and this deck's snapshots, each a chip that compares with it
+    (audit D-31). Folded once a comparison shows. Nothing when there is nothing to pick."""
+    did = esc(deck.id)
+
+    def chip(ref: str, text: str, sub: str = "") -> str:
+        cur = " aria-current='true'" if ref == other_ref else ""
+        small = f" <span class='s'>{esc(sub)}</span>" if sub else ""
+        href = f"/decks/{did}/compare?with={esc(ref)}"
+        return f"<a class='ui-chip cmp-pick' href='{href}'{cur}>{esc(text)}{small}</a>"
+
+    decks_ = [d for d in mine or [] if str(d.get("id")) != str(deck.id) and d.get("id")]
+    decks_.sort(key=lambda d: str(d.get("updated_at") or ""), reverse=True)
+    snaps = [x for x in snapshots or [] if x.get("snapshot_id")]
+    if not decks_ and not snaps:
+        return ""
+    parts = []
+    if snaps:
+        parts.append(
+            "<h3 class='cmp-sub'>Snapshots of this deck</h3><div class='cmp-chips'>"
+            + "".join(
+                chip(
+                    f"snap_{x['snapshot_id']}",
+                    ui.when_text(x.get("taken_at")),
+                    plural(int(x["card_count"]), "card") if x.get("card_count") else "",
+                )
+                for x in snaps
+            )
+            + "</div>"
+        )
+    if decks_:
+
+        def named(d: dict[str, Any]) -> str:
+            return chip(str(d["id"]), str(d.get("name") or f"Deck {d['id']}"))
+
+        first = "".join(named(d) for d in decks_[:PICK_MOST])
+        rest = decks_[PICK_MOST:]
+        more = (
+            f"<details class='fold'><summary class='fold-btn'>Show {len(rest)} more</summary>"
+            "<div class='cmp-chips'>" + "".join(named(d) for d in rest) + "</div></details>"
+            if rest
+            else ""
+        )
+        parts.append(f"<h3 class='cmp-sub'>My decks</h3><div class='cmp-chips'>{first}</div>{more}")
+    inner = "".join(parts)
+    if folded:
+        return (
+            "<details class='fold cmp-mine'><summary class='fold-btn'>Compare with another of yours</summary>"
+            f"{inner}</details>"
+        )
+    return f"<section class='cmp-mine' aria-label='Your decks and snapshots'>{inner}</section>"
+
+
+COMPARE_AB_LINE = (
+    "Plays both decks alone, game for game under the same seeds, and keeps the result as a report. It "
+    "changes nothing on Archidekt."
+)
+
+
+def compare_ab_html(deck: Deck, other_ref: str, other_name: str, *, csrf: str | None, primary: bool) -> str:
+    """The paired solo test of this deck (A) against the other (B), kept as a comparison report
+    (POST /decks/<id>/compare/ab)."""
+    if not csrf or not other_ref:
+        return ""
+    kind = "btn-primary" if primary else "btn-plain"
+    return (
+        "<section class='ui-card cmp-forge cmp-ab'><h2>Solo test both (A/B)</h2>"
+        f"<p class='muted small'>{COMPARE_AB_LINE}</p>"
+        f"<form method='post' action='/decks/{esc(deck.id)}/compare/ab'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<input type='hidden' name='with' value='{esc(other_ref)}'>"
+        f"<button type='submit' class='{kind}' data-busy-label='Starting…'>{icon('swap')} Solo test "
+        f"“{esc(deck_title(deck))}” against “{esc(other_name)}”</button></form>"
+        "</section>"
+    )
 
 
 def _has_commander(deck: Deck) -> bool:
@@ -2365,6 +2466,14 @@ COMPARE_CSS = """
 .cmp-st .v{text-align:right;font-weight:900;font-variant-numeric:tabular-nums}
 .cmp-forge button.btn-primary{white-space:normal;text-align:left;line-height:1.2;margin:0}
 .cmp-forge > p{margin:0 0 .75rem}
+.cmp-forge button{white-space:normal;text-align:left;line-height:1.2;margin:0}
+.cmp-ab{margin:0 0 1rem}
+.cmp-mine{margin:0 0 1rem}
+.cmp-mine .cmp-sub:first-child{margin-top:0}
+.cmp-chips{display:flex;flex-wrap:wrap;gap:.4rem}
+.cmp-pick{min-height:44px;display:inline-flex;align-items:center;gap:.35rem;max-width:100%;overflow-wrap:anywhere}
+.cmp-pick .s{color:var(--text-muted);font-weight:400}
+.cmp-pick[aria-current]{outline:2px solid var(--accent);outline-offset:1px}
 @media (max-width:599.98px){ .cmp-form .row{flex-direction:column;align-items:stretch}
   .cmp-form .row button{width:100%} }
 """

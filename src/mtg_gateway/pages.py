@@ -957,6 +957,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             p["replaced_by"] = _replacement(state, sub, pid)
         if getattr(state, "reports", None) is not None:  # simulations of its resulting deck
             p["sim_reports"] = state.reports.for_proposal(sub, pid)
+            p["can_test"] = getattr(state.reports, "mf", None) is not None
         close = proposals_view.panel_close_href(query)
         full = request.query_params.get("full") == "1"
         no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
@@ -2557,6 +2558,78 @@ def _lists_delete_box(p: dict[str, Any]) -> str:
     return _confirm_box("Delete from your Archidekt lists?", body, "Keep them", final)
 
 
+# Proposals the website can test (owner decision C7): a deck edit (paired against the deck as it is)
+# and a new deck's list.
+TESTABLE_KINDS = frozenset({"edit", "create_deck"})
+TEST_THIS_CHANGE = "Test this change"
+
+
+def _proposal_tests(p: dict[str, Any], csrf: str | None, *, now: float) -> str:
+    """The proposal's test reports, newest first, and a Test this change button while it waits."""
+    links = [
+        ui.button_link(
+            f"Report, {ui.when_text(x.get('taken_at'), now=now)}", f"/history/reports/{x['report_id']}"
+        )
+        for x in p.get("sim_reports") or []
+    ]
+    if p.get("state") == "pending" and p.get("can_test") and (p.get("kind") or "edit") in TESTABLE_KINDS:
+        links.insert(
+            0,
+            f"<form method='post' action='/proposals/{html.escape(str(p['proposal_id']))}/test' "
+            "class='inline'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            "<button type='submit' class='btn btn-plain' data-busy-label='Testing…'>"
+            f"{icon('play')}<span class='label'>{TEST_THIS_CHANGE}</span></button></form>",
+        )
+    return f"<span class='ui-actions'>{''.join(links)}</span>" if links else ""
+
+
+PAIRED_RUNNING = "Testing the change against the deck now. This page shows the result once it is in."
+
+
+def _proposal_paired(p: dict[str, Any]) -> str:
+    """The newest test's paired result (the deck after the change against the deck as it is, game for
+    game): its verdict and one row per number, with a way to the full report."""
+    from .report_view import ab_deltas, ab_verdict
+
+    for x in p.get("sim_reports") or []:
+        block = x.get("paired")
+        if not isinstance(block, dict):
+            if x.get("status") == "running":
+                return f"<p class='ui-sub pr-test' role='status'>{html.escape(PAIRED_RUNNING)}</p>"
+            continue
+        rows = ab_deltas(block)
+        if not block.get("ok") or not rows:
+            continue
+        verdict = ab_verdict(rows)
+        meta = [
+            (
+                str(r["label"]),
+                html.escape(str(r["words"]))
+                # better or worse only when the difference is not within chance
+                + (
+                    {"better": " · Better", "worse": " · Worse"}.get(str(r["way"]), "")
+                    if r["clear"] is not False
+                    else ""
+                )
+                + {True: " · Clear difference", False: " · Could be chance"}.get(r["clear"], ""),
+            )
+            for r in rows
+        ]
+        return (
+            "<section class='pr-test' aria-labelledby='pr-test-h'>"
+            "<h3 class='ui-section' id='pr-test-h'>Against the deck now</h3>"
+            "<p class='ui-sub'>The deck after this change against the deck as it is, game for game under "
+            "the same seeds (solo test).</p>"
+            + (f"<p class='b'>{html.escape(verdict)}</p>" if verdict else "")
+            + ui.meta(meta)
+            + "<p class='ui-actions'>"
+            + ui.button_link("Open the test", f"/history/reports/{x['report_id']}")
+            + "</p></section>"
+        )
+    return ""
+
+
 def _proposal_body(
     p: dict[str, Any],
     csrf: str | None,
@@ -2686,21 +2759,9 @@ def _proposal_body(
         )
     else:
         meta_rows.append(("Version", str(int(p.get("version") or 1))))
-    if p.get("sim_reports"):  # reports of the deck as this proposal would leave it (run_deck_report)
-        meta_rows.append(
-            (
-                "Simulated",
-                "<span class='ui-actions'>"
-                + "".join(
-                    ui.button_link(
-                        f"Report, {ui.when_text(x.get('taken_at'), now=now)}",
-                        f"/history/reports/{x['report_id']}",
-                    )
-                    for x in p["sim_reports"]
-                )
-                + "</span>",
-            )
-        )
+    tested = _proposal_tests(p, csrf, now=now)
+    if tested:
+        meta_rows.append(("Tests", tested))
     stale = (
         f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
         if pending and p.get("out_of_date")
@@ -2712,6 +2773,7 @@ def _proposal_body(
         + (f"<p class='ui-next'>{_step_html(p)}</p>" if step else "")
         + _progress_html(p)
         + ui.meta(meta_rows)
+        + _proposal_paired(p)
         + stale
         + f"<h3 class='ui-section'>{heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"

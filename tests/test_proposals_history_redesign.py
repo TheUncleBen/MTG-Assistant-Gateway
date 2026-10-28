@@ -409,12 +409,15 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         # the Reports widget: the newest report's stored name, never its deck id; "All reports"
         assert "Latest: an unnamed deck, just now" in body and ">All reports</a>" in body
         assert "Deck 99" not in body and "Open Reports" not in body
-        assert "Everything <span class='n'>18</span>" in body  # 15 snapshots, 1 restore, 2 reports
-        assert "Snapshots <span class='n'>15</span>" in body and "Restores <span class='n'>1</span>" in body
-        # no edit proposal is listed; a snapshot links the change it was taken before
+        # the timeline (owner decision C7): 15 snapshots, 15 applied changes (1 a restore), 2 tests
+        assert "Everything <span class='n'>32</span>" in body
+        assert "Snapshots <span class='n'>15</span>" in body and "Changes <span class='n'>15</span>" in body
+        # no waiting, rejected or failed proposal is listed (deck 43's are never applied); a snapshot
+        # links the change it was taken before
         assert "+1 Counterspell" not in body and "Rejected" not in body
-        rows = body.count("action='/history/restore'")
-        assert rows == 15 and body.count("href='/history?open=s-") >= 30  # Details and the phone chevron
+        snaps = (await b.http.get("/history?type=snapshots", headers=NAV)).text.split("<main")[1]
+        rows = snaps.count("action='/history/restore'")
+        assert rows == 15 and snaps.count("href='/history?type=snapshots&amp;open=s-") >= 30
         assert "title='Snapshots do not record who made them'>—" in body
         assert "Snapshots kept</span>" in body and "Backup copies</span>" in body
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]

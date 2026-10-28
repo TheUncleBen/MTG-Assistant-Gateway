@@ -47,20 +47,18 @@ async def test_a_report_is_deleted_from_its_history_details_after_the_confirm_bo
         gw = stack.h.app.state.gateway
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
         store_report(gw.db, sub, "rep_del", taken_at=int(time.time()) - 60)
-        details = (await b.http.get("/history?open=r-rep_del", headers=NAV)).text
-        assert "href='/history?open=r-rep_del&amp;box=delete' data-box-open='hy-del'>Delete…</a>" in details
-        assert "class='btn btn-outline-danger'" in details.split("data-box-open='hy-del'")[0][-200:]
-        assert (
-            "id='hy-del' role='dialog'" in details and "data-open" not in details.split("id='hy-del'")[1][:90]
-        )
-        opened = (await b.http.get("/history?open=r-rep_del&box=delete", headers=NAV)).text
-        box = (
-            opened.split("id='hy-del'", 1)[1].split("</form>", 1)[0]
-            + opened.split("id='hy-del'", 1)[1][:3000]
-        )
-        assert "Delete this report?" in opened and "data-open" in opened.split("id='hy-del'")[1][:120]
+        # a test's one home is its report page (owner decision C7): History's old Details address
+        # opens it, with its confirm box when the address asks for it
+        moved = await b.http.get("/history?open=r-rep_del", headers=NAV, follow_redirects=False)
+        assert moved.status_code == 303 and moved.headers["location"] == "/history/reports/rep_del"
+        asked = await b.http.get("/history?open=r-rep_del&box=delete", headers=NAV, follow_redirects=False)
+        assert asked.headers["location"] == "/history/reports/rep_del?box=delete"
+        listed = (await b.http.get("/history", headers=NAV)).text
+        assert "open=r-rep_del" not in listed and "href='/history/reports/rep_del'" in listed
+        opened = (await b.http.get(asked.headers["location"], headers=NAV)).text
+        box = opened.split("id='rep-del'", 1)[1][:3000]
+        assert "Delete this report?" in opened and "data-open" in box[:120]
         assert "action='/history/reports/rep_del/delete'" in box
-        assert "<button type='submit' class='danger' form='hy-delf'>Delete report</button>" in box
         # no CSRF token: refused, nothing deleted
         r = await b.http.post("/history/reports/rep_del/delete", data={})
         assert r.status_code == 403 and gw.reports.list(sub, None)

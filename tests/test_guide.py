@@ -99,7 +99,7 @@ def test_facts_match_the_current_pages() -> None:
         "90 seconds",  # the deck list cache
         "Markdown",  # the report exports
         "placeholder",  # Home and Decks while the list loads
-        "Everything, Snapshots, Restores or Reports",  # the History chips
+        "Everything, Changes, Snapshots or Tests",  # the History chips (owner decision C7)
         "the search finds a deck by name, and the filters narrow by deck and when",
         "7 card rows",  # the gateway's own low-risk limit
     ):
