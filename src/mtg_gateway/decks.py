@@ -9295,11 +9295,24 @@ def category_state(c: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Every Archidekt deck has these two, not in the deck or the price, even before its answer lists
+# them (a new deck's lists no category at all, Ben 2026-10-28).
+DEFAULT_CATEGORIES = ("Maybeboard", "Sideboard")
+
+
 def category_states(deck: Deck) -> list[dict[str, Any]]:
     """Every category of the deck as ``category_state`` reads it, in id then name order: what a
-    categories change records when it is made and checks again just before it writes."""
+    categories change records when it is made and checks again just before it writes. A default
+    category (DEFAULT_CATEGORIES) the answer leaves out is there without a record, like one
+    Archidekt sends without its id: a change gives it its record."""
     out = [
         category_state(c) for c in deck.categories if isinstance(c, dict) and isinstance(c.get("name"), str)
+    ]
+    have = {s["name"].casefold() for s in out}
+    out += [
+        category_state({"name": name, "includedInDeck": False, "includedInPrice": False})
+        for name in DEFAULT_CATEGORIES
+        if name.casefold() not in have
     ]
     return sorted(out, key=lambda s: (s["id"] or 0, s["name"]))
 
@@ -9507,8 +9520,10 @@ def category_change_rows(
                 (x for x in states if x["id"] is None and x["name"].casefold() == name.casefold()), None
             )
             if record_less is not None and record_less["name"].casefold() not in new_names:
-                # Archidekt's default Sideboard or Maybeboard: creating it is giving it its record
-                w = {**w, "action": "change", "category": record_less["name"]}
+                # Archidekt's default Sideboard or Maybeboard: creating it is giving it its record,
+                # with the switches a new category gets (each off unless asked for)
+                flags = {key: False for key, _label, _field, _inv in CATEGORY_FLAGS}
+                w = {**flags, **w, "action": "change", "category": record_less["name"]}
                 updates.append((w, record_less))
                 new_names.add(name.casefold())
                 continue
