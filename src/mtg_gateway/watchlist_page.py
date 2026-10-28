@@ -9,9 +9,9 @@ chart with "30 days" and "Full history (N days)", the price history table, the a
 card" and a red-outline "Remove".
 
 Everything comes from ``PriceService.overview`` (at most 200 cards and 10 decks): the chips,
-search, filter and sort work on that in the page, with no new query. static/watchlist.js opens the
-rows in place and draws the full history from the existing ``/watchlist/api/card`` (cards) or the
-deck row's own data (decks)."""
+search, filter and sort work on that in the page, with no new query; Load more shows 25 more.
+static/watchlist.js opens the rows in place and draws the full history from the existing
+``/watchlist/api/card`` (cards) or the deck row's own data (decks)."""
 
 from __future__ import annotations
 
@@ -65,13 +65,14 @@ DECK_HINT = (
 
 @dataclass(frozen=True)
 class Query:
-    """What the address asks for: the chip, the search, the finish, the sort, the page and the open row."""
+    """What the address asks for: the chip, the search, the finish, the sort, how many rows are
+    shown (``upto``, which Load more raises) and the open row."""
 
     show: str = ""
     q: str = ""
     finish: str = ""
     sort: str = ""
-    offset: int = 0
+    upto: int = 0  # rows shown; 0 is the first screenful (PAGE)
     open: str = ""
 
     @classmethod
@@ -79,17 +80,21 @@ class Query:
         def get(k: str, n: int) -> str:
             return str(qp.get(k) or "").strip()[:n]
 
-        try:
-            offset = max(0, min(int(qp.get("offset") or 0), 1000))
-        except ValueError:
-            offset = 0
+        def number(k: str) -> int:
+            try:
+                return max(0, min(int(qp.get(k) or 0), 10_000))
+            except ValueError:
+                return 0
+
+        # an old page link (``offset``) still shows the rows it pointed at
+        upto = number("upto") or (number("offset") + PAGE if number("offset") else 0)
         show, finish, sort = get("show", 10), get("finish", 10), get("sort", 10)
         return cls(
             show=show if show in dict(CHIPS) else "",
             q=get("q", 100),
             finish=finish if finish in FINISH_WORDS else "",
             sort=sort if sort in dict(SORTS) else "",
-            offset=offset,
+            upto=upto,
             open=get("open", 64),
         )
 
@@ -99,7 +104,7 @@ class Query:
             "q": self.q,
             "finish": self.finish,
             "sort": self.sort,
-            "offset": self.offset,
+            "upto": self.upto,
             **change,
         }
         params = {k: v for k, v in values.items() if v}
@@ -583,14 +588,18 @@ def watchlist_page_html(
     cards = data["cards"]
     shown = shown_cards(cards, query)
     total = len(shown)
-    offset = query.offset if query.offset < max(1, total) else 0
-    page_rows = shown[offset : offset + PAGE]
+    upto = max(PAGE, query.upto)
+    # the open row (a price alert's link) is shown wherever it sits: the list grows to it
+    at = next((i for i, v in enumerate(shown) if str(v["watch_id"]) == query.open), -1) if query.open else -1
+    if at >= upto:
+        upto = (at // PAGE + 1) * PAGE
+    page_rows = shown[:upto]
     chips = ui.chips(
         [
             ui.Chip(
                 word,
                 sum(1 for v in cards if in_chip(v, key)),
-                query.href(show=key, offset=0),
+                query.href(show=key, upto=0),
                 key == query.show,
             )
             for key, word in CHIPS
@@ -624,12 +633,20 @@ def watchlist_page_html(
         body = "<p class='ui-empty'>No cards match. Clear the search or the filters to see them all.</p>"
     else:
         body = "<p class='ui-empty'>No cards watched yet.</p>"
-    pager = ui.pager(
-        offset,
-        total,
-        newer_href=query.href(offset=max(0, offset - PAGE)) if offset else None,
-        older_href=query.href(offset=offset + PAGE) if offset + PAGE < total else None,
-    )
+    # Load more, not pages: the list is sorted (by name or price), so it grows in place. Without a
+    # script the link loads the longer list and lands on the first new row.
+    if len(page_rows) < total:
+        nxt = shown[len(page_rows)]["watch_id"]
+        pager = ui.load_more(
+            query.href(upto=len(page_rows) + PAGE, open="") + f"#wr-{nxt}",
+            text="Load more cards",
+            shown=len(page_rows),
+            total=total,
+        )
+    elif total > PAGE:
+        pager = ui.load_more("", done=f"All {total:,} cards shown.")
+    else:
+        pager = ""
     card_list = (
         "<div id='w-cards'>"
         + ui.list_head("Cards", len(cards), f"Last check {checked}" if checked else "")
@@ -672,7 +689,6 @@ def watchlist_page_html(
         + deck_head
         + deck_body
         + "</div>"
-        + ui.pager(0, len(decks), newer_href=None, older_href=None, per_page=max(PAGE, len(decks)))
     )
     return (
         "<div class='watch-page gb-dash'>"

@@ -1467,7 +1467,7 @@ def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
         "<input id='addname' type='text' name='name' data-suggest='cards' "
         "placeholder='Name, or “name (SET) 123” for one printing' autocomplete='off' required></label>"
         "<label class='field'><span>Copies</span><input id='addqty' type='number' name='quantity' value='1' "
-        "min='1' max='999'></label>"
+        f"min='1' max='{MAX_QUANTITY}'></label>"
         f"<label class='field'><span>Finish</span><select id='addfinish' name='finish'>"
         f"{_opts(FINISHES, '', MODIFIERS)}</select></label>"
         f"<label class='field'><span>Condition</span><select id='addcond' name='condition'>"
@@ -2286,13 +2286,18 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 from .scan.service import parse_text
 
                 text = _clean(data.get("name"), 200)
-                qty = data.get("quantity", "1")
-                parsed = parse_text(f"{qty if str(qty).isdigit() else 1} {text}") if text else []
+                qty = str(data.get("quantity", "1")).strip()
+                # Copies up to MAX_QUANTITY (the text's own reader stops at 999); a count typed
+                # before the name ("3 Sol Ring") counts when Copies is left at 1
+                copies = min(MAX_QUANTITY, max(1, int(qty))) if qty.isdigit() else 1
+                parsed = parse_text(text) if text else []
                 if not parsed:
                     return RedirectResponse(
                         f"{back}{'&' if '?' in back else '?'}err=invalid", status_code=303
                     )
                 p = parsed[0]
+                if copies == 1:
+                    copies = p.quantity
                 out = await service.add(
                     sub,
                     [
@@ -2300,7 +2305,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                             "name": p.name,
                             "set": p.set_code,
                             "collector_number": p.collector_number,
-                            "quantity": p.quantity,
+                            "quantity": copies,
                             "finish": data.get("finish", "nonfoil"),
                             "condition": data.get("condition", ""),
                         }

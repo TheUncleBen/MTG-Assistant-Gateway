@@ -29,6 +29,7 @@ import secrets
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
@@ -123,12 +124,15 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
-def _ident(c: dict[str, Any]) -> dict[str, str]:
-    """The Scryfall collection identifier for a watched card or deck row."""
+def _ident(c: dict[str, Any]) -> dict[str, str] | None:
+    """The Scryfall collection identifier for a watched card or deck row, or None for a row that
+    names no card (no Scryfall id, no printing, no name), which the daily check skips."""
     if c.get("uid"):
         return {"id": str(c["uid"])}
     if c.get("set") and c.get("cn"):
         return {"set": str(c["set"]), "collector_number": str(c["cn"])}
+    if not str(c.get("name") or "").strip():
+        return None
     if c.get("set"):
         return {"name": str(c["name"]), "set": str(c["set"])}
     return {"name": str(c["name"])}
@@ -315,7 +319,7 @@ class PriceService:
         card: dict[str, Any] | None = None
         note = ""
         try:
-            found, _missing = await self._scry().collection([_ident(row)])
+            found, _missing = await self._scry().collection([_ident(row) or {"name": name}])
             card = found[0] if found else None
             if card is None:
                 raise DeckError("not_found", f"Scryfall knows no card {self._label(name, set_code, number)}.")
@@ -509,9 +513,9 @@ class PriceService:
             priced = await self._price_missing(day)
             self._store_deck_values(day)
             alerts = self._alerts_due(day)
-        for sub, title, message in alerts:
+        for sub, title, message, path in alerts:
             if self.notifier is not None:
-                await self.notifier.send(sub, "prices", title, message, "/watchlist")
+                await self.notifier.send(sub, "prices", title, message, path)
         return {
             "day": day,
             "watched": True,
@@ -570,13 +574,23 @@ class PriceService:
                     "cn": w["collector_number"],
                 }
             )
+            if ident is None:
+                logger.warning("price check: skipped watched card %s, which names no card", w["id"])
+                continue
             wanted[_ident_key(ident)] = ident
         deck_rows = {d["sub"] + "\0" + d["deck_id"]: json.loads(d["cards_json"] or "[]") for d in decks}
-        for rows in deck_rows.values():
+        for key, rows in deck_rows.items():
             for r in rows:
-                if r.get("uid") and r["uid"] in have:
+                if not isinstance(r, dict) or (r.get("uid") and r["uid"] in have):
                     continue
                 ident = _ident(r)
+                if ident is None:
+                    # one bad row must not stop the day's check for every member
+                    logger.warning(
+                        "price check: skipped a row of watched deck %s that names no card",
+                        key.split("\0", 1)[1],
+                    )
+                    continue
                 wanted[_ident_key(ident)] = ident
         if not wanted:
             return 0
@@ -592,14 +606,15 @@ class PriceService:
             for w in cards:
                 if not w["scryfall_id"]:
                     ident = _ident({"name": w["name"], "set": w["set_code"], "cn": w["collector_number"]})
-                    hit = by_key.get(_ident_key(ident))
+                    hit = by_key.get(_ident_key(ident)) if ident else None
                     if hit:
                         c.execute("UPDATE watch_cards SET scryfall_id = ? WHERE id = ?", (hit["id"], w["id"]))
             for key, rows in deck_rows.items():
                 changed = False
                 for r in rows:
-                    if not r.get("uid"):
-                        hit = by_key.get(_ident_key(_ident(r)))
+                    ident = _ident(r) if isinstance(r, dict) and not r.get("uid") else None
+                    if ident is not None:
+                        hit = by_key.get(_ident_key(ident))
                         if hit:
                             r["uid"], changed = str(hit["id"]), True
                 if changed:
@@ -651,9 +666,9 @@ class PriceService:
                     (d["sub"], d["deck_id"], day, round(usd, 2), round(eur, 2), total, priced),
                 )
 
-    def _alerts_due(self, day: str) -> list[tuple[str, str, str]]:
-        """(member, title, message) for each watched card whose alert fired between its last
-        point before ``day`` and today's."""
+    def _alerts_due(self, day: str) -> list[tuple[str, str, str, str]]:
+        """(member, title, message, path) for each watched card whose alert fired between its last
+        point before ``day`` and today's; the path opens that card's row on the Watchlist."""
         out = []
         rows = self._rows(
             "SELECT * FROM watch_cards WHERE scryfall_id IS NOT NULL AND (alert_pct IS NOT NULL OR "
@@ -686,6 +701,7 @@ class PriceService:
                         "Price alert",
                         f"{label} {' and '.join(reasons)}: "
                         f"{money(prev, currency)} to {money(cur, currency)}.",
+                        f"/watchlist?open={quote(str(w['id']), safe='')}#wr-{quote(str(w['id']), safe='')}",
                     )
                 )
         return out

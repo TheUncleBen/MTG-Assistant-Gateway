@@ -187,3 +187,23 @@ async def test_an_import_that_stops_says_what_was_added(stack: Stack, monkeypatc
     finally:
         stack.ark.transport.handler = orig
         await b.aclose()
+
+
+async def test_the_add_box_takes_up_to_9999_copies(stack: Stack) -> None:
+    b = await linked(stack)
+    try:
+        page = (await b.http.get("/collection?add=1")).text
+        assert "id='addqty' type='number' name='quantity' value='1' min='1' max='9999'" in page
+        csrf = await b.csrf("/collection")
+        r = await b.http.post(
+            "/collection", data={"csrf": csrf, "action": "add", "name": "Acidic Slime", "quantity": "1500"}
+        )
+        assert r.status_code == 303 and "ok=added" in r.headers["location"], r.headers
+        assert list(_slime(stack).values()) == [1500]
+        # a count typed before the name still counts when Copies is left at 1
+        r = await b.http.post(
+            "/collection", data={"csrf": csrf, "action": "add", "name": "3 Acidic Slime", "quantity": "1"}
+        )
+        assert list(_slime(stack).values()) == [1503]
+    finally:
+        await b.aclose()
