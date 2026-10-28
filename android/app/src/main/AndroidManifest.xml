@@ -32,6 +32,21 @@
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
+    <!-- Sign-in through the phone's browser (BrowserSignIn.kt): from Android 11 an app sees other
+         apps only when it asks to. Without these, CustomTabsClient finds no browser at all, so no
+         Auth Tab is opened and every sign-in ends on the page that waits for a tap. The first lists
+         the browsers that offer Custom Tabs (and Auth Tabs), the second the browsers themselves. -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <!-- Nothing the app stores leaves the phone: sign-in cookies and page storage live under
          app_webview/. allowBackup=false covers Android 11 and earlier; from Android 12 it no longer
          stops device-to-device transfer, so dataExtractionRules excludes everything from both cloud

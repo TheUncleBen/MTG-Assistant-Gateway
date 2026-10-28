@@ -48,6 +48,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.browser.customtabs.CustomTabsService
 import androidx.core.util.Consumer
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter
 import androidx.window.layout.FoldingFeature
@@ -543,29 +544,44 @@ class MainActivity : ComponentActivity() {
 
     /** The Auth Tab's answer: registered before the activity starts, as Android requires. */
     private val authTab = AuthTabIntent.registerActivityResultLauncher(this) { onAuthTabResult(it) }
-    /** The sign-in the Auth Tab is running, to start again in a Custom Tab if the gateway can't vouch for this app. */
+    /** The sign-in the Auth Tab is running, to start again in a Custom Tab if it can't finish. */
     private var authTabSignIn: Pair<String?, Boolean>? = null
+
+    /** The browser to open an Auth Tab in ([BrowserSignIn.pickAuthTabBrowser]), or null. */
+    private fun authTabBrowser(): String? {
+        val default = CustomTabsClient.getPackageName(this, emptyList())
+        @Suppress("DEPRECATION")
+        val installed = packageManager.queryIntentServices(Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION), 0)
+            .mapNotNull { it.serviceInfo?.packageName }
+        val browser = BrowserSignIn.pickAuthTabBrowser(default, installed) { CustomTabsClient.isAuthTabSupported(this, it) }
+        Log.i(TAG, "sign-in: default browser $default, Custom Tabs browsers $installed, Auth Tab in ${browser ?: "none"}")
+        return browser
+    }
 
     private fun startBrowserSignIn(next: String?, fresh: Boolean, authTabAllowed: Boolean = true) {
         val verifier = BrowserSignIn.newVerifier()
         prefs.setPendingSignIn(origin, verifier, System.currentTimeMillis())
-        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, BrowserSignIn.challengeOf(verifier), fresh))
-        val host = BrowserSignIn.authTabHost(origin)
-        val browser = CustomTabsClient.getPackageName(this, emptyList())
-        if (authTabAllowed && host != null && browser != null && CustomTabsClient.isAuthTabSupported(this, browser)) {
+        val challenge = BrowserSignIn.challengeOf(verifier)
+        val browser = if (authTabAllowed) authTabBrowser() else null
+        if (browser != null) {
             try {
-                // Returns, and closes itself, once the gateway sends it to its own RETURN_PATH.
+                // Returns, and closes itself, once the gateway sends it to this app's own scheme:
+                // no Digital Asset Links check, so it works whatever address the gateway has.
+                val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, schemeReturn = true))
                 val tab = AuthTabIntent.Builder().build()
                 tab.intent.setPackage(browser)
-                tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
+                tab.launch(authTab, url, BrowserSignIn.SCHEME)
                 authTabSignIn = next to fresh
+                Log.i(TAG, "sign-in: Auth Tab opened in $browser")
                 return
             } catch (e: ActivityNotFoundException) {
-                // the Custom Tab below
+                Log.i(TAG, "sign-in: Auth Tab could not open in $browser; a Custom Tab instead")
             }
         }
+        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh))
         try {
             CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
+            Log.i(TAG, "sign-in: Custom Tab opened; it ends on the page that opens the app")
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, getString(R.string.sign_in_no_browser), Toast.LENGTH_LONG).show()
         }
@@ -574,14 +590,15 @@ class MainActivity : ComponentActivity() {
     private fun onAuthTabResult(result: AuthTabIntent.AuthResult) {
         val started = authTabSignIn
         authTabSignIn = null
+        Log.i(TAG, "sign-in: Auth Tab result ${result.resultCode}")
         when (result.resultCode) {
             AuthTabIntent.RESULT_OK -> {
-                val code = BrowserSignIn.codeOfReturn(origin, result.resultUri?.toString())
+                val code = BrowserSignIn.codeOfSchemeReturn(result.resultUri?.toString())
                 if (code != null) finishBrowserSignIn(code)
                 else Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
             }
-            // The browser could not confirm the gateway vouches for this app (a build signed with
-            // another key, say): the same sign-in in a Custom Tab, ending on the page with the button.
+            // An Auth Tab on a scheme is never verified, so these should not come; if one does, the
+            // same sign-in in a Custom Tab, ending on the page that opens the app.
             AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->
                 started?.let { (next, fresh) -> startBrowserSignIn(next, fresh, authTabAllowed = false) }
             else -> Unit // closed by the person: nothing to finish
