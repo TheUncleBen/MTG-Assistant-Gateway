@@ -1,5 +1,5 @@
 """The printing picker (static/printpick.js) in headless Chromium: the deck page's card menu has
-"Change printing…" (the deck proper's rows only); the picker searches by set name or code,
+"Change printing…" (on every row); the picker searches by set name or code,
 filters by finish, frame and border, sorts newest, oldest or cheapest, hides digital-only and
 preview printings until the switch shows them (labelled), never lists another language, and
 pages past Scryfall's page with Load more (filtered on Scryfall's side then). Hovering a tile
@@ -327,10 +327,11 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         url = page.url
         card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
         side = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='side']")
-        # the maybeboard row's menu has no printing item (Archidekt's printing change is for the deck)
+        # the maybeboard row's menu has its own printing item (it changes that row only:
+        # test_row_targets_browser)
         _open_menu(page, side)
         labels = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
-        assert not any("Change printing" in x for x in labels), labels
+        assert any("Change printing…" in x for x in labels), labels
         page.keyboard.press("Escape")
         _open_menu(page, card)
         labels = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
