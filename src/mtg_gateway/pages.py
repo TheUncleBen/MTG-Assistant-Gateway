@@ -875,7 +875,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # an account action or collection change says what it did, not that a deck matches
             notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
-            f"New deck: {p['deck_name']}"
+            f"{_new_what(p)}: {p['deck_name']}"
             if p.get("kind") == "create_deck"
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
@@ -2107,10 +2107,7 @@ def _page_step(p: dict[str, Any]) -> str:
     if state == "failed" and result.get("error") == "rate_limited":
         return _rate_limited_step(p, result)
     if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
-        return (
-            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
-            "Check it, and delete it from its deck page if you don't want it."
-        )
+        return _made_but(p, result)
     if state == "failed" and p.get("kind") == "lists" and result.get("done"):
         n = int(result["done"])
         return (
@@ -2145,6 +2142,28 @@ def _page_step(p: dict[str, Any]) -> str:
     return "This proposal can no longer be applied."
 
 
+def _new_what(p: dict[str, Any]) -> str:
+    """ "New card package" for a proposal that makes one, else "New deck"."""
+    rows = p.get("rows") if isinstance(p.get("rows"), list) else []
+    package = any(isinstance(r, dict) and r.get("kind") == "new_deck" and r.get("package") for r in rows)
+    return "New card package" if package else "New deck"
+
+
+def _made_but(p: dict[str, Any], result: dict[str, Any]) -> str:
+    """A new deck or package made on Archidekt before the apply stopped: what differs, when the
+    check after it said so (the result's detail), and what to do."""
+    what = "card package" if _new_what(p) == "New card package" else "deck"
+    if result.get("error") == "verify_mismatch" and result.get("detail"):
+        return (
+            f"{result['detail']} Check the new {what} on Archidekt, and change it there or delete it from "
+            "its deck page if you don't want it."
+        )
+    return (
+        f"A new {what} was made on Archidekt before this stopped, so it may not match the proposal. "
+        "Check it, and delete it from its deck page if you don't want it."
+    )
+
+
 def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
     """The review page's one message for an apply that stopped because Archidekt asked the gateway
     to wait longer than an apply may: why, how far it got, and to try again later."""
@@ -2156,10 +2175,7 @@ def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
         else ""
     )
     if p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
-        got = (
-            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
-            "Check it, and delete it from its deck page if you don't want it."
-        )
+        got = _made_but(p, result)
     elif result.get("sent_entries"):
         sent, of = int(result["sent_entries"]), result.get("of_entries")
         got = (
@@ -2276,7 +2292,7 @@ def proposal_heading(p: dict[str, Any]) -> str:
     """The panel's heading: "#1 +1 Arcane Signet, −1 Counterspell" ("New deck: {name}" for a new
     deck). The number shows while it waits, as on the list."""
     if p.get("kind") == "create_deck":
-        return html.escape(f"New deck: {p['deck_name']}")
+        return html.escape(f"{_new_what(p)}: {p['deck_name']}")
     lines = str(p.get("diff") or "").splitlines()
     text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
     text = text[:300] or str(p.get("deck_name") or "Proposal")

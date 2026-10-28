@@ -771,7 +771,10 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
   text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid;min-width:0;
   hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}
 .changes .name{font-weight:700;font-size:1.05rem;overflow-wrap:anywhere}
-.changes .qty{font-weight:700;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+/* long text there (a new deck's or package's settings) wraps in its own column, never wider
+   than about half the row: the name beside it keeps its width */
+.changes .qty{font-weight:700;text-align:right;font-variant-numeric:tabular-nums;max-width:45cqi;
+  overflow-wrap:break-word}
 .changes .qty .was{color:var(--text-muted);font-weight:400;text-decoration:line-through}
 .changes li.add{border-left-color:var(--green);background:var(--green-tint)}
 .changes li.add .act,.changes li.add .qty{color:var(--green-text);border-color:var(--green)}

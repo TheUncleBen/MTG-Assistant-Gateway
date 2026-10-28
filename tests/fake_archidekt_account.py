@@ -45,6 +45,11 @@ class AccountFake:
         self.package_queries: list[dict[str, str]] = []
         self.package_imports: dict[int, int] = {}  # package deck id -> incrementPackageImport reads
         self.package_page_size = 0  # 0: the package listing comes on one page; else paged (the site: 50)
+        # a new package's block as stored: a function of the block sent (made up, to test how the
+        # check after a create reads a block saved in other words); None stores it as sent
+        self.package_saves: Any = None
+        self.package_late = False  # True: the first read of a new package has no block yet (made up)
+        self._late: dict[int, dict[str, Any]] = {}
         self.next_id = 7000
         self.max_pins = 150
 
@@ -267,6 +272,10 @@ class AccountFake:
                 "cards": [],
                 "cardPackage": {**body["cardPackage"], "id": self._new_id(), "importCount": 0},
             }
+            if self.package_saves is not None:
+                deck["cardPackage"] = self.package_saves(deck["cardPackage"])
+            if self.package_late:
+                self._late[deck["id"]] = deck.pop("cardPackage")
             self.ark.decks[deck["id"]] = deck
             if self.ark.create_honours_folder and body.get("parent_folder") is not None:
                 self.ark.deck_folder[deck["id"]] = int(body["parent_folder"])
@@ -282,6 +291,16 @@ class AccountFake:
                     block.update({k: body[k] for k in ("keywords", "budget", "intendedFormats") if k in body})
                     return _ok(block)
             return httpx.Response(404, json={"detail": "Not found."})
+        if len(parts) == 2 and parts[0] == "decks" and parts[1].isdigit() and m == "GET":
+            # package_late: the first read answers without the block, the next ones with it
+            late = int(parts[1])
+            if late in self._late:
+                if self._late[late].get("_read"):
+                    block = self._late.pop(late)
+                    block.pop("_read")
+                    self.ark.decks[late]["cardPackage"] = block
+                else:
+                    self._late[late]["_read"] = True
         if (
             len(parts) == 2
             and parts[0] == "decks"
