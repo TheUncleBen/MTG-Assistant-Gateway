@@ -191,8 +191,10 @@ HUB_CSS = """
   font-weight:400;text-align:left;cursor:pointer;justify-content:flex-start}
 .ygrp .rows > * + *{border-top:1px solid var(--border-soft)}
 .ygrp .yrow > svg.i,.ygrp summary > svg.i{width:20px;height:20px;color:var(--orange-text)}
-.ygrp .yrow .lbl{flex:1;min-width:0}
-.ygrp .yrow .val{color:var(--text-muted);font-size:.92rem}
+/* the label and the value (“Fit the screen”) each wrap by word at large text, neither squeezed
+   under its longest word, so one never runs over the other */
+.ygrp .yrow .lbl{flex:1 1 auto}
+.ygrp .yrow .val{flex:0 1 auto;text-align:right;color:var(--text-muted);font-size:.92rem}
 .ygrp .ch svg.i{width:16px;height:16px;color:var(--text-muted)}
 .ygrp details.yrow{display:block;padding:0;min-height:0}
 .ygrp details.yrow > summary{display:flex;align-items:center;gap:.8rem;min-height:50px;padding:0 1rem;
