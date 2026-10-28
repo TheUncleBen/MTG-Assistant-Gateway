@@ -132,7 +132,7 @@ services:
 
   # Mystic Forge: the research service. Only the gateway can reach it.
   mysticforge:
-    image: ghcr.io/theuncleben/mtg-assistant-mysticforge:1.3.2-mag6
+    image: ghcr.io/theuncleben/mtg-assistant-mysticforge:1.3.2-mag7
     restart: unless-stopped
     logging: *logging
     healthcheck:
