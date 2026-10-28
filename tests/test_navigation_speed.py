@@ -201,3 +201,67 @@ async def test_feedback_script_shows_the_navigation_bar_on_a_tap(stack: Stack) -
     assert "navprogress" in js and "navigating" in js
     assert ".navprogress{" in theme.CSS and "html.navigating .navprogress" in theme.CSS
     assert "prefers-reduced-motion" in theme.CSS.split(".navprogress{", 1)[1]
+
+
+# -- 0.7.46: a deck page seen before is shown at once, and read again behind it ------------------
+async def test_a_deck_page_seen_before_shows_at_once_while_archidekt_is_asked_again(stack: Stack) -> None:
+    """Past the few seconds a view is kept, the deck page shows the deck as last read straight
+    away and reads it again in the background; the next view shows what that read found."""
+    decks = stack.h.app.state.gateway.decks
+    b = await _linked(stack)
+    try:
+        assert (await b.http.get("/decks/42", headers=NAV)).status_code == 200
+        reads = _deck_reads(stack)
+        stack.ark.decks[42]["name"] = "Renamed on the site"
+        decks._page_decks = {
+            k: (t - decks.page_deck_seconds - 1, d) for k, (t, d) in decks._page_decks.items()
+        }
+        held = asyncio.Event()
+        real = decks.get_any_deck
+
+        async def slow_read(sub, ref, **kw):  # noqa: ANN001, ANN003
+            await asyncio.wait_for(held.wait(), 5)
+            return await real(sub, ref, **kw)
+
+        decks.get_any_deck = slow_read  # type: ignore[method-assign]
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        page = await b.http.get("/decks/42", headers=NAV)
+        assert loop.time() - t0 < 1.0  # not held up by the read
+        assert page.status_code == 200 and "Sample Commander Deck" in page.text
+        assert "Renamed on the site" not in page.text
+        held.set()
+        for _ in range(50):
+            if _deck_reads(stack) > reads and not decks._page_refreshing:
+                break
+            await asyncio.sleep(0.02)
+        assert _deck_reads(stack) == reads + 1
+        decks.get_any_deck = real  # type: ignore[method-assign]
+        page = await b.http.get("/decks/42", headers=NAV)
+        assert "Renamed on the site" in page.text and _deck_reads(stack) == reads + 1
+    finally:
+        await b.aclose()
+
+
+async def test_a_write_drops_only_what_it_changes_from_the_kept_deck_pages(stack: Stack) -> None:
+    decks = stack.h.app.state.gateway.decks
+    count = 0
+
+    async def read(sub, ref, **kw):  # noqa: ANN001, ANN003
+        nonlocal count
+        count += 1
+        return {"read": count, "deck": ref}
+
+    decks.get_any_deck = read  # type: ignore[method-assign]
+    assert await decks.page_deck("u1", "42") == {"read": 1, "deck": "42"}
+    assert await decks.page_deck("u1", "43") == {"read": 2, "deck": "43"}
+    decks._on_archidekt_write("/decks/43/modifyCards/v2/")  # a change to deck 43 only
+    assert await decks.page_deck("u1", "42") == {"read": 1, "deck": "42"}
+    assert await decks.page_deck("u1", "43") == {"read": 3, "deck": "43"}
+    # an old copy of a changed deck is never shown, however it is asked for
+    decks._page_decks = {k: (t - decks.page_deck_seconds - 1, d) for k, (t, d) in decks._page_decks.items()}
+    decks._on_archidekt_write("/decks/42/modifyCards/v2/")
+    assert await decks.page_deck("u1", "42") == {"read": 4, "deck": "42"}
+    # a write that is not to one deck (the collection, folders) drops every kept page
+    decks._on_archidekt_write("/collection/v2/")
+    assert await decks.page_deck("u1", "43") == {"read": 5, "deck": "43"}
