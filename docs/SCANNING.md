@@ -88,8 +88,9 @@ What's on it:
   art can't be told apart this way; that's what the collector number is for.
 - **Printing picker.** Lists every printing of a card, newest first, with
   finishes and art, so you can pick the exact one by hand.
-- **Photo.** Uses your camera app or gallery instead, for browsers that
-  can't stream video. It does the same edge-finding over the whole picture,
+- **Photo.** Scans a picture you choose from your gallery or files (on every
+  phone and in the app), for a shot taken earlier or a browser that can't
+  stream video. It does the same edge-finding over the whole picture,
   so the card doesn't have to fill the photo. HEIC pictures (the "high
   efficiency" setting of some phone cameras) can't be opened by the browser;
   the page says so, and JPEG or PNG works.
@@ -104,8 +105,13 @@ What's on it:
   way if it isn't yet.
 - **Sessions.** Your earlier scans. Open one to keep going, or delete it.
 
-The first visit shows a short "How scanning works" card; **Got it** hides
-it, and the "How it works" link under the tabs brings it back.
+The first visit shows a short "How scanning works" card; on later visits it
+is folded to its title, so the camera stays on the first screen. **Got it**
+hides it, and the **How it works** button under the tabs brings it back.
+
+A card lying on its side is found too: the page reads its name both ways up.
+A black-bordered card is hard to find on a dark table; lay it on something
+light.
 
 Once you've saved, you can also tell the assistant: *"get my scan session
 &lt;name&gt;"*. From there it can create a deck (`propose_new_deck`), add

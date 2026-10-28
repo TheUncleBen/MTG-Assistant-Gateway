@@ -60,8 +60,10 @@ def valid(name: str, value: Any) -> bool:
         return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.match(value))
     if name in CARD_SIZE_NAMES:
         return value in CARD_SIZES
-    if name in (EDHPLAY_STEPS, SCAN_INTRO):
+    if name == EDHPLAY_STEPS:
         return value is True
+    if name == SCAN_INTRO:  # "seen": shown once, folded from then on; True: dismissed with Got it
+        return value is True or value == "seen"
     if name == DECKSTATS:
         return (
             isinstance(value, dict)

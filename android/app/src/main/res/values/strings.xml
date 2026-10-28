@@ -116,7 +116,10 @@
     <string name="removed_card">Removed %1$s · %2$s</string>
     <string name="unsure_card">Not sure: %1$s. Tap Done to check it on the page.</string>
     <string name="unidentified_card">Could not place “%1$s”; kept in the unidentified list.</string>
-    <string name="no_card_outline">No card outline found. Use a plain, contrasting background.</string>
+    <string name="no_card_outline">No card outline found. Use a plain, contrasting background (a light one for a black-bordered card).</string>
+    <string name="status_ocr_loading">Getting text recognition ready (first use downloads about 8 MB): %1$d%%</string>
+    <string name="status_ocr_ready">Ready. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_ocr_unavailable">Text recognition could not be loaded, so names cannot be read. Tap Done and type them on the page.</string>
     <string name="scan_failed">Scan failed: %1$s</string>
     <string name="pending_on_page">Found a match. Tap Done to add it on the page; Shoot again replaces it.</string>
     <string name="auto_paused_pending">Auto paused: a read waits on the page. Tap Done to check it.</string>
