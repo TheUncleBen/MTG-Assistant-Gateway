@@ -2471,6 +2471,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     )
                     + notes
                 )
+        # the profile (the Visibility line by the title) is read beside the collection, not after
+        # it: one wait on Archidekt for the page, not two in a row
+        profile_read = asyncio.ensure_future(profile_or_none(state.decks, sub))
         try:
             got = await listing(sub, lq)
             whole = (
@@ -2524,7 +2527,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         )
         # the Visibility line by the title (profile_page): the profile as read a short while ago
         vis = collection_visibility(
-            await profile_or_none(state.decks, sub),
+            await profile_read,
             csrf,
             sub,
             stamp=press_stamp(state.settings, sub),
