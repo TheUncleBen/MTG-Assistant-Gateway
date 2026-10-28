@@ -120,6 +120,7 @@ class MainActivity : ComponentActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingCameraPermission: PermissionRequest? = null
     private var pendingCamera = false // open the camera as soon as the /scan page is ready
+    private var pendingAuto = false // ...with Auto on (the page's Auto switch asked for it)
     private var scanReloaded = false // the /scan page was reloaded once to get its hooks; never loop
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -359,7 +360,7 @@ class MainActivity : ComponentActivity() {
         menu.menuInflater.inflate(R.menu.main, menu.menu)
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                R.id.menu_scan -> startScan()
+                R.id.menu_scan -> startScan(auto = false)
                 R.id.menu_reload -> web.reload()
                 R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
@@ -515,9 +516,14 @@ class MainActivity : ComponentActivity() {
         fab.visibility = if (camera == null && !gatewayPage) View.VISIBLE else View.GONE
     }
 
-    /** Opens the phone-camera scan panel, going to the /scan page first if needed. */
-    private fun startScan() {
+    /**
+     * Opens the phone-camera scan panel, going to the /scan page first if needed; with [auto], it
+     * starts scanning on its own (the page's Auto switch). Calls that resume a deferred open keep the
+     * choice made when it was asked for.
+     */
+    private fun startScan(auto: Boolean = pendingAuto) {
         if (camera != null) return
+        pendingAuto = auto
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             pendingCamera = true
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_PERM_NATIVE_CAMERA)
@@ -528,7 +534,10 @@ class MainActivity : ComponentActivity() {
                 if (ready == "true") {
                     scanReloaded = false
                     // Park the page on its list tab (stops its own camera) while the panel has the lens.
-                    web.evaluateJavascript(ScanGlue.BEGIN) { if (camera == null && !isDestroyed) openCamera() }
+                    web.evaluateJavascript(ScanGlue.BEGIN) {
+                        if (camera == null && !isDestroyed) openCamera(pendingAuto)
+                        pendingAuto = false
+                    }
                 } else if (!scanReloaded) {
                     scanReloaded = true
                     pendingCamera = true
@@ -680,7 +689,7 @@ class MainActivity : ComponentActivity() {
 
     // -- the scan panel ----------------------------------------------------------
 
-    private fun openCamera() {
+    private fun openCamera(auto: Boolean = false) {
         lateinit var panel: CameraPanel
         panel = CameraPanel(this, root, object : CameraPanel.Host {
             override fun photo(jpeg: ByteArray, guide: FloatArray?) {
@@ -717,6 +726,7 @@ class MainActivity : ComponentActivity() {
         fab.visibility = View.GONE
         panel.onFold(fold)
         panel.resume()
+        if (auto) panel.startAuto()
         syncBackCallback()
     }
 
@@ -1268,7 +1278,11 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
-        fun openCamera() = onGatewayPage { startScan() }
+        fun openCamera() = onGatewayPage { startScan(auto = false) }
+
+        /** The scan page's Auto switch: the phone camera, scanning on its own. */
+        @JavascriptInterface
+        fun openCameraAuto() = onGatewayPage { startScan(auto = true) }
 
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""

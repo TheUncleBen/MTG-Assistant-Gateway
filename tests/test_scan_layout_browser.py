@@ -1,5 +1,5 @@
 """The Scan page in headless Chromium, in a browser and as inside the Android app (its user agent
-and its window.MtgNative, which adds the "Phone camera" button): one column at the form width,
+and its window.MtgNative, which makes the shutter open the phone camera): one column at the form width,
 the options row and the capture bar each one row, the capture button a circle in the middle, the
 site's icons and no emoji, one orange button, 44 px targets on touch, and the row menus of the
 list and of the saved scans. Needs no OCR assets, unlike test_scan_browser.py. Skipped without a
@@ -159,10 +159,9 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             # the page keeps the standard's form column, not a width of its own
             assert _style(page.locator("main.wrap"), "maxWidth") == "728px"
             assert _style(page.locator(".cam-panel"), "display") == "flex"
-            # the app's phone camera button closes the options row; a browser has none
-            assert page.locator("#phone-camera").count() == (1 if app else 0)
-            if app:
-                assert page.locator(".scan-opts > :last-child").get_attribute("id") == "phone-camera"
+            # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera
+            assert page.locator(".scan-opts > :last-child").get_attribute("id") == "auto-switch"
+            assert page.locator("#open-phone-camera").count() == (1 if app else 0)
             # the × sits inside the Set box, and the hint is its tooltip
             box, clear = (
                 page.locator(".setbox").bounding_box(),

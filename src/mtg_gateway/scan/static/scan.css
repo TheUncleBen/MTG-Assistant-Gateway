@@ -3,9 +3,9 @@
    mouse, 44px on touch) and panels are the shell's flat 3px cards.
 
    Layout: one column at the standard's form width at every size (the shell's main.wrap), the
-   blocks in a fixed order: tabs, the options row (Set, Foil, Auto and, in the Android app, the
-   phone camera), the viewfinder, status, result, then the capture bar (Photo, the round capture
-   button in the middle, Type). The options row and the capture bar are each one row that never
+   blocks in a fixed order: tabs, the options row (Set, Foil, Auto), the viewfinder (in the Android
+   app, a button that opens the phone camera), status, result, then the capture bar (Photo, the
+   round capture button in the middle, Type). The options row and the capture bar are each one row that never
    wraps; on phones the capture bar sticks to the bottom of the screen (thumb reach). */
 .scan{display:flex;flex-direction:column;gap:.75rem;container-type:inline-size}
 .scan .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
@@ -32,8 +32,7 @@
   color:var(--on-orange);border-color:var(--orange)}
 @media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;background:var(--bg);margin:0 -1rem;padding:0 1rem} }
 
-/* the options row: the Set box with its × inside, the Foil and Auto toggles, and in the app the
-   phone camera button at the end; one row at every width */
+/* the options row: the Set box with its × inside, the Foil and Auto toggles; one row at every width */
 .scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .scan .scan-opts > *{margin:0}
 /* the Set box draws the edge; the label, the field and the × sit inside it side by side */
@@ -58,7 +57,6 @@
 .scan .switch:hover{background:var(--surface-2)}
 .scan .switch[aria-checked=true]{background:var(--orange-tint);border-color:var(--orange);color:var(--orange-text)}
 .scan .scan-opts .switch{flex:1 1 auto;min-width:0}
-.scan .scan-opts #phone-camera{flex:none;width:var(--ctl);padding:0}
 .scan .shutter.live{animation:scan-live 1.2s ease-in-out infinite}
 @keyframes scan-live{0%,100%{outline:3px solid transparent;outline-offset:3px}50%{outline:3px solid var(--orange-select);outline-offset:9px}}
 
@@ -379,3 +377,19 @@ body.picker-open{overflow:hidden}
 .scan .next select{max-width:100%;margin-top:.25rem}
 .scan .next button{flex:0 0 auto;min-height:var(--ctl)}
 @media (max-width:480px){.scan .next .nextrow{flex-direction:column;align-items:stretch}}
+
+/* inside the Android app the viewfinder opens the phone camera: one big button over the card frame */
+.scan .camera .phone-cam{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:0;
+  background:transparent;color:var(--navbar-text);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.scan .camera .phone-cam .cap{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:.5rem 1.1rem;
+  max-width:calc(100% - 2rem);border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);
+  font-weight:700;text-align:left;box-shadow:var(--shadow)}
+.scan .camera .phone-cam:hover .cap{background:var(--navbar-bg)}
+.scan .camera .phone-cam:focus-visible{outline:3px solid var(--orange-select);outline-offset:-3px}
+/* the running count of the scan, in the viewfinder's top-left corner above the dashed name box */
+.scan .tally{position:absolute;left:.5rem;top:.5rem;z-index:2;min-height:var(--ctl);min-width:var(--ctl);margin:0;padding:.4rem .8rem;
+  border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
+  font-variant-numeric:tabular-nums;max-width:calc(100% - 5rem);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  backdrop-filter:blur(2px);cursor:pointer}
+.scan .tally[hidden]{display:none}
+.scan .tally:hover{background:var(--navbar-bg);color:var(--navbar-text)}

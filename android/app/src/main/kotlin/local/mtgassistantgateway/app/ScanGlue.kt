@@ -18,7 +18,10 @@ package local.mtgassistantgateway.app
  * nonce and the photo's sequence number so stale or spoofed events are dropped: the page's own
  * `scan:auto-added`, `scan:unsure`, `scan:unidentified` and `scan:undo` events, then `done` when
  * the photo has been fully processed, with the status line the page would have shown, or `no-card`
- * in its place when continuous mode found no card outline and so read nothing. The page's
+ * in its place when continuous mode found no card outline and read nothing. Without an outline the
+ * page's own rule applies (`noOutlineFrame`, pages from 0.7.46): after a few such photos in a row it
+ * reads the dashed box, and a card found there only ever waits on the page for a tap (`unsure`,
+ * then `done` with `pending`); older pages read nothing without an outline. The page's
  * text recognition starts loading as soon as the phone camera opens ([BEGIN]; the first use
  * downloads about 8 MB), and its progress comes back as `ocr` events (`state` loading, ready, failed
  * or missing, `progress` 0 to 1) for the panel's status line. In continuous mode the page's own rules apply
@@ -126,9 +129,14 @@ object ScanGlue {
       var info = s.flatInfoRegion ? s.flatInfoRegion(flat.width, flat.height) : s.infoRegionOf(0, 0, flat.width, flat.height);
       await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), info, flat);
     } else if (s.state.continuous) {
-      // Continuous mode reads nothing without an outline (the page does the same): count the
-      // frame so a card that has left comes back as new, and say so.
-      s.noCardFrame();
+      // No outline: the page counts the frame (so a card that has left comes back as new) and, after
+      // a few in a row, reads the dashed box; a card found there waits on the page for a tap. A photo
+      // that placed no card says so.
+      if (typeof s.noOutlineFrame === 'function') {
+        if (await s.noOutlineFrame(c, g) === 'read') return;
+      } else {
+        s.noCardFrame();
+      }
       send({ type: 'no-card', seq: n, frames: s.state.noCardFrames, total: total(s) });
       return 'no-card'; // stands in for 'done'
     } else {
