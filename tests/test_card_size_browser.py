@@ -331,3 +331,39 @@ def test_small_cards_keep_stack_names_and_card_names_readable(server: Server, wi
         _shot(page, f"small-names-{width}.png")
         browser.close()
     assert errors == []
+
+
+# Each deck tile's ⋮ against its picture: the gap from the picture's bottom (the colour bar's
+# bottom) to the ⋮'s top, and from the ⋮'s bottom to the info area's.
+KEBAB = """
+() => [...document.querySelectorAll('ul.decklist.grid li.deck')].map(li => {
+  const k = li.querySelector(':scope > .kebab').getBoundingClientRect();
+  const t = li.querySelector('.thumb').getBoundingClientRect();
+  const i = li.querySelector('.info').getBoundingClientRect();
+  return {gap: k.top - t.bottom, below: i.bottom - k.bottom};
+})
+"""
+
+
+@pytest.mark.parametrize("width", [375, 1280])
+def test_the_deck_tiles_menu_button_sits_below_the_colour_bar_at_every_size(
+    server: Server, width: int
+) -> None:
+    """Ben, 2026-10-28: the ⋮ overlapped the colour bar: its place was worked out for the M picture
+    alone. At S, M and L it sits under the picture, in the name's area."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        for size in ("s", "m", "l"):
+            _size(server, size)
+            page.goto(f"{server.base}/decks?view=grid", wait_until="networkidle")
+            tiles = page.evaluate(KEBAB)
+            assert tiles, size
+            for tile in tiles:
+                assert tile["gap"] >= 0, (size, tile)
+                assert tile["below"] >= 0, (size, tile)
+        browser.close()
+    assert errors == []

@@ -10,10 +10,12 @@ MENUS_CSS = """
   background:transparent;color:var(--text-muted);box-shadow:none;cursor:pointer}
 .kebab:hover,.kebab:focus-visible,button.kebab:hover{background:var(--surface-2);color:var(--text)}
 .kebab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-/* a deck tile: the ⋮ at the end of the title line, outside the tile's link; a press and hold on
-   the tile opens the same menu, so nothing is selected or called out under the finger */
+/* a deck tile: the ⋮ at the end of the title line, under the picture at every card size (its height
+   is --deck-thumb), outside the tile's link; a press and hold on the tile opens the same menu, so
+   nothing is selected or called out under the finger */
 ul.decklist .deck{position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-ul.decklist .deck > .kebab{position:absolute;right:.4rem;top:calc(175px + .5rem + (75px - var(--ctl)) / 2)}
+ul.decklist .deck > .kebab{position:absolute;right:.4rem;
+  top:calc(var(--deck-thumb,175px) + .5rem + (75px - var(--ctl)) / 2)}
 ul.decklist .deck .info{padding-right:calc(var(--ctl) + .75rem)}
 ul.decklist.list .deck > .kebab{top:50%;transform:translateY(-50%)}
 ul.decklist.list .deck a{padding-right:calc(var(--ctl) + .5rem)}
