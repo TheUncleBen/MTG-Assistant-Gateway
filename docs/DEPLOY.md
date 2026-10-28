@@ -533,7 +533,7 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from thirteen patches in
+Upstream code is unchanged apart from fourteen patches in
 `docker/mystic-forge/patches/`, which is where the `-mag7` in the image tag
 `1.3.2-mag7` comes from:
 
@@ -610,6 +610,10 @@ Upstream code is unchanged apart from thirteen patches in
   fixes in EDHREC, Commander Spellbook and precon output: no cut list from a
   handful of cards, no basic lands or meaningless scores in recommendations,
   numbered combo steps, combos and top cards by deck count, "sorceries".
+- `0015-rules-search-counts-and-annotate-heading.patch`: `rules_search` says
+  its count is of entries with at least one of the terms, and
+  `goldfish_annotate` no longer says permanents in its Out of scope section
+  are never cast.
 
 What to know about it:
 
