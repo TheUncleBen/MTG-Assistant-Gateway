@@ -34,21 +34,25 @@ STATUS_LABEL = {
     "partial": ("Partial", "orange", "triangle"),
     "failed": ("Failed", "red", "alert"),
 }
+# The research service's part still being asked (reports.ReportService._summary "research"), and a
+# report whose quick solo test or validation failed while its Forge games still play.
+TESTING_LABEL = ("Solo test running", "orange", "spinner")
+PARTIAL_GOING_LABEL = {
+    "running": ("Partial, Forge running", "orange", "triangle"),
+    "queued": ("Partial, Forge waiting", "orange", "triangle"),
+}
 # The chips: the query value, the words, and which reports each holds
 CHIPS = (
     ("", "All"),
     ("complete", "Complete"),
-    ("going", "Forge running or waiting"),
+    ("going", "Running or waiting"),  # the solo test or Forge still going
     ("problem", "Partial or failed"),
     ("forge", "With Forge games"),
 )
 WHEN = (("", "Any time"), ("today", "Today"), ("7", "Last 7 days"), ("30", "Last 30 days"))
 # Forge games that ended without a game played
 FORGE_NOT_RUN = frozenset({"failed", "timeout", "cancelled", "lost"})
-QUEUE_NOTE = (
-    "Your Forge games play one report at a time, in the order you ran them. Times are estimates from "
-    "the games played so far."
-)
+QUEUE_NOTE = "Your Forge games play one report at a time, in the order you ran them."
 SUB_LINE = (
     "Every deck report you or your assistants ran, newest first. The gateway keeps your newest 200; "
     "History lists them too."
@@ -155,27 +159,26 @@ def matches(row: dict[str, Any], query: Query, apps: dict[str, str], now: float)
     return True
 
 
-def _minutes(seconds: Any) -> str:
-    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or seconds <= 0:
-        return ""
-    minutes = max(1, round(seconds / 60))
-    return f"about {minutes} minute{'s' if minutes != 1 else ''}"
-
-
 def run_text(f: dict[str, Any]) -> str:
-    """One unfinished Forge run in words: its place in line, or its games played and time left."""
+    """One unfinished Forge run in words: its place in line, or its games played so far (counts,
+    never a time: the gateway can't know how long Forge's games will take)."""
     if f.get("waiting"):
         if f.get("engine_busy"):
             return "Waiting for Forge, which is busy with other members' games"
-        when = _minutes(f.get("expected_start_seconds"))
-        return f"Waiting: number {f.get('position') or 1} in line" + (f"; starts in {when}" if when else "")
+        return f"Waiting: number {f.get('position') or 1} in line"
     done, total = f.get("games_done") or 0, f.get("games_requested") or 0
-    left = _minutes(f.get("expected_seconds"))
-    return f"{done} of {total} games played" + (f"; done in {left}" if left else "")
+    return f"{done} of {total} games played"
 
 
-def status_label(status: Any, *, cls: str = "") -> str:
-    word, colour, ic = STATUS_LABEL.get(str(status), (str(status or ""), "grey", "clock"))
+def status_label(status: Any, *, cls: str = "", research: Any = None) -> str:
+    """A report's status label. ``research`` (the summary's): "running" while the solo test is being
+    asked for, "failed" when it or the validation did not come back."""
+    if research == "running":
+        word, colour, ic = TESTING_LABEL
+    elif research == "failed" and status in PARTIAL_GOING_LABEL:
+        word, colour, ic = PARTIAL_GOING_LABEL[str(status)]
+    else:
+        word, colour, ic = STATUS_LABEL.get(str(status), (str(status or ""), "grey", "clock"))
     return ui.label(word, colour, ic, cls=cls)
 
 
@@ -202,7 +205,9 @@ def deck_line(r: dict[str, Any]) -> str:
     games under way, Forge games that could not run, which checks it holds) or else the bracket."""
     state = r.get("forge_state")
     status = r.get("status")
-    if status == "running":
+    if r.get("research") == "running":
+        what = "The solo test is running"
+    elif status == "running":
         what = esc(f"{r.get('forge_done') or 0} of {r.get('forge_asked') or 0} Forge games played")
     elif status == "queued":
         what = "Waiting for Forge"
@@ -245,7 +250,9 @@ def won_cell(r: dict[str, Any]) -> tuple[str, str]:
     if win:
         return f"<span class='md-hide wr'><b>{_pct(win['rate'])}</b>{_ci_bar(win)}</span>", _pct(win["rate"])
     state = r.get("forge_state")
-    if r.get("status") == "running":
+    if r.get("research") == "running":
+        text = "waiting"
+    elif r.get("status") == "running":
         text = "playing"
     elif r.get("status") == "queued":
         text = "waiting"
@@ -282,12 +289,12 @@ def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
     return (
         "<div class='tr'>"
         f"<span class='title'{deck}><span class='t'><a href='{href}'>{name}</a>"
-        f"{status_label(r.get('status'), cls='stin')}</span>"
+        f"{status_label(r.get('status'), cls='stin', research=r.get('research'))}</span>"
         + (f"<span class='deck'>{line}</span>" if line else "")
         + "<span class='sub'>"
         f"<span class='kv'>Won <b>{esc(won_short)}</b></span>"
         f"<span class='kv'>{esc(kill)} <b>{esc(dmg_short)}</b></span>{app}{ran}</span></span>"
-        f"<span class='sm-hide'>{status_label(r.get('status'))}</span>"
+        f"<span class='sm-hide'>{status_label(r.get('status'), research=r.get('research'))}</span>"
         f"{won}{dmg}<span class='md-hide'>{app}</span><span class='md-hide'>{ran}</span>"
         f"{ui.open_link(href, 'Open')}</div>"
     )
@@ -335,7 +342,7 @@ def latest_widget(latest: dict[str, Any] | None, *, now: float) -> str:
         big = "–"
     href = f"/history/reports/{esc(latest['report_id'])}"
     det = (
-        status_label(latest.get("status"))
+        status_label(latest.get("status"), research=latest.get("research"))
         + f"<span><a href='{href}'>{esc(latest.get('deck_name') or 'Unnamed deck')}</a>, "
         f"{ui.when(latest.get('taken_at'), now=now)}</span>"
     )
@@ -460,8 +467,10 @@ def reports_page_html(
     latest: dict[str, Any] | None,
     trends: list[dict[str, Any]],
     now: float | None = None,
+    notice: str = "",
 ) -> str:
-    """The page. ``index``: every report (ReportService.index); ``rows``: the shown page's
+    """The page. ``notice``: a line under the head in the page's own words (a report just deleted).
+    ``index``: every report (ReportService.index); ``rows``: the shown page's
     summaries; ``total``: how many pass the chip, search and filters; ``counts``: each chip's
     count under the search and filters; ``apps``: client id to app name."""
     now = time.time() if now is None else now
@@ -533,6 +542,7 @@ def reports_page_html(
     return (
         "<div class='reports-page gb-dash'>"
         + head
+        + (f"<p class='notice ok' role='status'>{esc(notice)}</p>" if notice else "")
         + wid
         + listing
         + chips

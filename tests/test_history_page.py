@@ -479,9 +479,9 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert (await b.http.get("/history/reports/rep_nope/export.md")).status_code == 404
         anon = await stack.h.http.get("/history/reports/rep_real/export.html")
         assert anon.status_code == 302 and anon.headers["location"].startswith("/login")
-        # the deck page's button explains the wait and shows busy while the run blocks
+        # the deck page's button says the report opens at once (never how long it takes)
         deck = await b.http.get("/decks/42", headers=NAV)
-        assert "data-busy-label='Testing…'" in deck.text and "takes up to a minute" in deck.text
+        assert "data-busy-label='Testing…'" in deck.text and "The report opens at once" in deck.text
         assert "run_deck_report" not in deck.text
     finally:
         await b.aclose()

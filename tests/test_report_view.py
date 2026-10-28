@@ -66,7 +66,9 @@ def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
     assert h["unrecognized"][1]["drawn"] == pytest.approx(0.1667, abs=0.001)
     assert [grp["kind"] for grp in h["out_of_scope"]] == ["interaction_removal", "unmodeled_other"]
     assert h["out_of_scope"][0]["label"] == "Removal and other interaction"
-    assert len(h["out_of_scope"][0]["cards"]) == 11 and len(h["low_impact"]) == 25
+    # the basic lands (Plains, Swamp) are never cards that "never mattered": their effect is the mana
+    assert len(h["out_of_scope"][0]["cards"]) == 11 and len(h["low_impact"]) == 23
+    assert "Plains" not in h["low_impact"] and "Swamp" not in h["low_impact"]
     # the approximations exist only in the text
     assert {a["kind"] for a in h["approximations"]} >= {"any-color", "fetch", "residual-text"}
     assert "Lotus Field" in next(a["cards"] for a in h["approximations"] if a["kind"] == "any-color")
@@ -75,7 +77,7 @@ def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
     g2 = rv.parse_goldfish({"ok": True, "text": stripped})
     assert len(g2["honesty"]["unrecognized"]) == 32 and g2["honesty"]["unrecognized"][1]["drawn"] == 0.17
     assert [len(x["cards"]) for x in g2["honesty"]["out_of_scope"]] == [11, 6]
-    assert len(g2["honesty"]["low_impact"]) == 25
+    assert len(g2["honesty"]["low_impact"]) == 23  # no basic lands, as from the JSON
 
 
 def test_validation_verdicts() -> None:

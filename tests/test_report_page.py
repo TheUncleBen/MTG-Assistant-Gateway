@@ -87,7 +87,7 @@ def test_sections_are_flat_and_the_groups_are_inset_lists() -> None:
         ("rv-stats", "Deck statistics"),
         ("rv-raw", "Raw output"),
     ]
-    assert "<span class='n'>74</span>" in links  # 32 + 17 + 25 cards in the groups
+    assert "<span class='n'>72</span>" in links  # 32 + 17 + 23 cards in the groups (no basic lands)
     assert ">10 of 10 played</span>" in html  # the Forge state as a label
     assert "<h3>About these Forge games</h3>" in html and "class='ui-table rv-seats'" in html
     assert "<div class='tr mine'>" in html and ">your deck</span>" in html

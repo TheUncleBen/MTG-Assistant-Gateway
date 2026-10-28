@@ -27,6 +27,7 @@ from .deckpage import (
     precon_by_label,
 )
 from .decks import DeckError, current_client, is_outside_category, split_label
+from .history_view import DELETED_NOTICES
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -508,7 +509,8 @@ def add_deck_tool_routes(
         # forge=0 runs the report without Forge games (a quick goldfish-only run)
         no_forge = str(data.get("forge", "")).strip().lower() in ("0", "false", "off", "no")
         try:
-            report = await reports.run(sub, deck_id, forge=False if no_forge else None)
+            # answered once the report is stored: its page opens and fills in while the run goes on
+            report = await reports.start(sub, deck_id, forge=False if no_forge else None)
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
@@ -570,6 +572,8 @@ def add_deck_tool_routes(
             latest=latest,
             trends=trends,
             now=now,
+            # the address names what went; the words are the page's own
+            notice=DELETED_NOTICES.get(request.query_params.get("deleted") or "", ""),
         )
         return page(
             "Reports",

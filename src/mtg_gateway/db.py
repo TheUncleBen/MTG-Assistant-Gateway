@@ -2425,15 +2425,26 @@ class Database:
         return str(row[0]) if row and row[0] is not None else None
 
     def history_decks(self, owner_sub: str) -> dict[str, str]:
-        """The decks that appear in the member's proposals and snapshots: id -> last known name,
-        for a history filter."""
+        """The decks that appear in the member's proposals, snapshots and reports of their own decks:
+        id -> the newest name any of them recorded, for a history filter and Activity."""
         with self._lock:
-            rows = self._conn.execute(
+            # the reports table belongs to reports.ReportService, which may not have made it yet
+            reports = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reports'"
+            ).fetchone()
+            sql = (
                 "SELECT deck_id, deck_name, created_at AS at FROM proposals WHERE owner_sub = ? "
-                "UNION ALL SELECT deck_id, deck_name, taken_at FROM snapshots "
-                "WHERE owner_sub = ? ORDER BY at",
-                (owner_sub, owner_sub),
-            ).fetchall()
+                "UNION ALL SELECT deck_id, deck_name, taken_at FROM snapshots WHERE owner_sub = ? "
+            )
+            args: tuple[Any, ...] = (owner_sub, owner_sub)
+            if reports:
+                # a pasted list's, a proposal's or a comparison's report names something else
+                sql += (
+                    "UNION ALL SELECT deck_id, deck_name, taken_at FROM reports WHERE owner_sub = ? "
+                    "AND deck_id != '' AND json_extract(stats_json, '$._run.source') IS NULL "
+                )
+                args += (owner_sub,)
+            rows = self._conn.execute(sql + "ORDER BY at", args).fetchall()
         out: dict[str, str] = {}
         for r in rows:
             out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")

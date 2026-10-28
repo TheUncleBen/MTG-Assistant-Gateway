@@ -2,10 +2,14 @@
 // Report page: while a Forge run is queued or running (the Forge section, or the solo test played by
 // Forge, carries data-forge-live and the report's id), ask the JSON status route (/api/v1/reports/<id>/forge)
 // every 5 seconds and swap in the new section(s) and status, until every run has ended; then the page is
-// fetched once more so the Markdown copy matches. No polling while the tab is hidden; it stops for good
-// after a failed fetch or after five hours (the gateway gives a run up after four).
+// fetched once more so the Markdown copy matches. While the quick solo test still runs on the research
+// service (its section carries data-research; the report is stored before it is done), the page asks
+// every 2 seconds and is read again whole once that section is no longer live: the test fills most of
+// the page. No polling while the tab is hidden; it stops for good after a failed fetch or after five
+// hours (the gateway gives a run up after four).
 (function () {
   var INTERVAL = 5000;  // each finished game shows within about 8 s (the gateway asks Forge every 3 s)
+  var RESEARCH_INTERVAL = 2000;
   var LIMIT = 5 * 3600 * 1000;
   var started = Date.now();
   var timer = null;
@@ -86,6 +90,11 @@
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(function (data) {
         if (!data || data.ok !== true) return;
+        if (document.querySelector("#rv-solo[data-research]")) {
+          if (data.research === "running") { schedule(); return; }
+          location.reload();
+          return;
+        }
         var still = false;
         PARTS.forEach(function (p) { if (swapSection(p.sel, data[p.field])) still = true; });
         swapStatus(data.status_html);
@@ -94,7 +103,9 @@
       .catch(function () { /* signed out or offline: leave the page as it is */ });
   }
 
-  function schedule() { if (!timer) timer = setTimeout(tick, INTERVAL); }
+  function schedule() {
+    if (!timer) timer = setTimeout(tick, document.querySelector("#rv-solo[data-research]") ? RESEARCH_INTERVAL : INTERVAL);
+  }
 
   document.addEventListener("visibilitychange", function () { if (!document.hidden && live()) schedule(); });
   if (live()) schedule();

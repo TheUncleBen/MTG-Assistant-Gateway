@@ -124,6 +124,12 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
     how each seat lost."""
     results = job.get("results") or []
     games = len(results)
+
+    def seated(r: dict[str, Any]) -> bool:
+        """A winner at one of this run's seats; any other number (0, past the last seat) is unread."""
+        w = r.get("winner")
+        return isinstance(w, int) and not isinstance(w, bool) and 1 <= w and (not seats or w <= len(seats))
+
     out: dict[str, Any] = {
         "games": games,
         "games_requested": job.get("games_requested"),
@@ -161,23 +167,27 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
         out["median_turn"] = statistics.median(turns)
         out["turns_range"] = [min(turns), max(turns)]
     out["ended"] = {
-        "won": sum(1 for r in results if isinstance(r.get("winner"), int)),
+        "won": sum(1 for r in results if seated(r)),
         "draw": sum(1 for r in results if r.get("draw") and not r.get("stopped_slow")),
         "time_limit": out["stopped_slow"],
-        "unread": sum(1 for r in results if r.get("unparsed")),
+        "unread": sum(
+            1
+            for r in results
+            if r.get("unparsed") or (r.get("winner") is not None and not seated(r) and not r.get("draw"))
+        ),
     }
     out["game_list"] = [
         {
             "game": r.get("game"),
             "seconds": round(r["ms"] / 1000, 1) if isinstance(r.get("ms"), int) else None,
             "turn": r.get("turn") if isinstance(r.get("turn"), int) else None,
-            "winner": r.get("winner") if isinstance(r.get("winner"), int) else None,
+            "winner": r.get("winner") if seated(r) else None,
             "ended": "time_limit"
             if r.get("stopped_slow")
             else "draw"
             if r.get("draw")
             else "won"
-            if isinstance(r.get("winner"), int)
+            if seated(r)
             else "unread",
         }
         for r in results[:MAX_GAMES_LISTED]
