@@ -161,3 +161,91 @@ async def test_a_simulation_refused_for_its_input_says_so_in_its_code(stack: Sta
     )
     assert out["ok"] is False and "same size" in out["message"], out
     assert out["error_code"] == "INVALID_ARGUMENT", out
+
+
+async def test_removing_the_only_copy_twice_says_so(stack: Stack) -> None:
+    from .test_track_a_board import _mode, _propose
+
+    token = await linked_user(stack)
+    twice = [{"action": "remove", "card_name": "Sol Ring"}] * 2
+    p = structured(await call(stack.h, token, "propose_deck_changes", {"deck_id": "42", "changes": twice}))
+    assert p["ok"] is False
+    assert "is not in the deck" not in p["message"], p
+    assert "removed more than once" in p["message"] and "1 copy" in p["message"], p
+    # two waiting proposals that each remove it: combining them says the same, and why
+    await _mode(stack.h, "manual")
+    first = await _propose(stack.h, token, [{"action": "remove", "card_name": "Sol Ring"}])
+    second = await _propose(
+        stack.h, token, [{"action": "remove", "card_name": "Sol Ring"}, {"action": "add", "card_name": "Opt"}]
+    )
+    out = structured(
+        await call(
+            stack.h,
+            token,
+            "combine_proposals",
+            {"proposal_ids": [first["proposal_id"], second["proposal_id"]]},
+        )
+    )
+    assert out["ok"] is False and "removed more than once" in out["message"], out
+    assert "More than one of these proposals removes it" in out["message"], out
+
+
+async def test_an_overlap_comes_before_any_apply(stack: Stack) -> None:
+    token = await linked_user(stack)
+    await call(
+        stack.h,
+        token,
+        "propose_deck_changes",
+        {"deck_id": "42", "changes": [{"action": "add", "name": "Opt"}]},
+    )
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_changes",
+            {
+                "deck_id": "42",
+                "changes": [{"action": "add", "name": "Opt"}, {"action": "add", "name": "Ponder"}],
+            },
+        )
+    )
+    assert p["overlaps"], p
+    assert p["next_step"].startswith("Other waiting changes on this deck touch the same cards"), p[
+        "next_step"
+    ]
+
+
+async def test_a_category_change_and_a_card_moved_through_it_overlap(stack: Stack) -> None:
+    deck = stack.ark.decks[42]
+    deck["categories"].append({"id": 77, "name": "Draw", "isPremier": False, "includedInDeck": True})
+    for row in deck["cards"]:
+        if row["card"]["oracleCard"]["name"] == "Compulsive Research":
+            row["categories"] = ["Draw"]
+    token = await linked_user(stack)
+    moved = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_changes",
+            {
+                "deck_id": "42",
+                "changes": [
+                    {"action": "set_category", "name": "Compulsive Research", "category": "Card Draw"}
+                ],
+            },
+        )
+    )
+    assert moved["ok"], moved
+    renamed = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_categories",
+            {"deck_id": "42", "changes": [{"category": "Draw", "rename_to": "Cards"}]},
+        )
+    )
+    assert renamed["ok"], renamed
+    no = moved["board_no"]
+    assert renamed["overlaps"] == [
+        f"“Draw”: this request renames it to “Cards”; #{no} moves Compulsive Research in or out of it."
+    ], renamed
