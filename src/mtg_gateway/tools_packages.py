@@ -27,7 +27,8 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Archidekt card packages, most imported first, 50 a page, as Archidekt's Packages page "
             "lists them. whose: mine (default, the user's own), followed (ones the user bookmarked) "
-            "or all (everyone's public packages). Filters: name_contains, intended_format (a format "
+            "or all (everyone's public packages). Filters: name_contains (the package's name only), "
+            "intended_format (a format "
             "name such as commander) and budget (1 to 4, $ to $$$$). Each package: id, name, owner, "
             "keywords, budget, formats and how many times it was added to a deck. Changes nothing."
         ),

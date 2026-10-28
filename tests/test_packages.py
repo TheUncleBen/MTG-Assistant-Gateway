@@ -295,6 +295,7 @@ async def test_packages_are_listed_as_the_sites_packages_page_lists_them(stack: 
     other(901, "Amy shocks", {"keywords": "shocklands", "budget": 2, "intendedFormats": [3]})
     other(902, "Amy burn", {"keywords": "burn", "budget": 1, "intendedFormats": [2]})
     other(903, "Amy secret", {"keywords": "x", "budget": None, "intendedFormats": [3]}, private=True)
+    other(904, "Mana Rocks", {"keywords": "artifact ramp", "budget": 2, "intendedFormats": [2]})
     ark.bookmarks.setdefault("alice", set()).add(902)
 
     async def ids(**args: object) -> list[int]:
@@ -304,8 +305,11 @@ async def test_packages_are_listed_as_the_sites_packages_page_lists_them(stack: 
 
     assert await ids() == [mine_id]
     assert await ids(whose="followed") == [902]
-    assert sorted(await ids(whose="all")) == sorted([mine_id, 901, 902])  # never another's private one
+    assert sorted(await ids(whose="all")) == sorted([mine_id, 901, 902, 904])  # never another's private one
     assert await ids(whose="all", name_contains="shocks") == [901]
+    # the name only, though Archidekt's filter matches keywords too
+    assert await ids(whose="all", name_contains="artifact") == []
+    assert await ids(whose="all", name_contains="rocks") == [904]
     assert sorted(await ids(whose="all", intended_format="commander")) == sorted([mine_id, 901])
     assert await ids(whose="all", budget=1) == [902]
     sent = ark.account.package_queries[-1]

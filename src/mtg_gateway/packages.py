@@ -315,6 +315,9 @@ async def listing(
     for r in body["results"]:
         if not isinstance(r, dict) or not str(r.get("id") or "").isdigit():
             continue
+        # Archidekt's name filter matches keywords too; name_contains means the name
+        if name and name.casefold() not in " ".join(str(r.get("name") or "").split()).casefold():
+            continue
         # asked for by username: the account's id decides, as for the deck list
         if whose == "mine" and not _owned_by(r.get("owner"), owner or "", link.get("archidekt_user_id")):
             continue

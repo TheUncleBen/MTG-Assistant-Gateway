@@ -329,7 +329,10 @@ class AccountFake:
                     return False
                 if d["owner"]["username"] != who and d.get("private"):
                     return False
-                if q.get("name") and q["name"].casefold() not in d["name"].casefold():
+                # Archidekt's name filter matches a package's keywords too (seen 2026-10-28:
+                # "artifact" listed "Mana Rocks", "Lands" and "eggs")
+                text = (d["name"] + " " + str(block.get("keywords") or "")).casefold()
+                if q.get("name") and q["name"].casefold() not in text:
                     return False
                 if q.get("intendedFormat") and int(q["intendedFormat"]) not in block["intendedFormats"]:
                     return False
