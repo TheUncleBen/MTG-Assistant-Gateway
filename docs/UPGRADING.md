@@ -202,6 +202,9 @@ reach past the stack, so if your old version is older than the one named, also:
   `MTG_WATCHLISTS_ENABLED=false`. Forge follows `FORGE_REPLICAS` alone (`0` = off), with Compose
   too: if you had turned Forge off with `COMPOSE_PROFILES`, set `FORGE_REPLICAS=0`, or it comes
   back on.
+- **0.7.45 or older:** if your variables set `MTG_BROWSER_SESSION_TTL=7200` (the older example
+  files did), remove the line or set `604800`. It is now how long a sign-in lasts unused, so
+  `7200` keeps sign-ins to 2 hours unused.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.

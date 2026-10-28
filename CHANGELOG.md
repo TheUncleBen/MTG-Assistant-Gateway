@@ -7,6 +7,104 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.46] - 2026-10-28
+
+Assistants keep one live card per change in the chat, a new deck waiting for approval can be
+changed in place, signing in to the Android app comes back by itself and lasts as long as you use
+it, pages no longer wait behind Archidekt work in the background, and a new deck reaches Archidekt
+in a few requests. Every simulation is kept as a report, a single report or snapshot can be
+deleted, long work shows a moving progress ring, and many smaller fixes: one row of a card changes
+on its own, card packages say what Archidekt saved, the watchlist shows what you already watch,
+card forms no longer look like payment forms, printings include tokens, and card names open the
+card everywhere.
+
+### Upgrade notes
+- **Sign-ins now last 7 days unused** and renew as you use them, up to 30 days after you signed
+  in. `MTG_BROWSER_SESSION_TTL` is now that unused time (default `604800`, at most `2592000`). If
+  your variables still set `MTG_BROWSER_SESSION_TTL=7200` from an older example file, remove the
+  line or set `604800`, or sign-ins still end after 2 hours unused.
+- **`MTG_SERVER_NAME` is back.** Empty (the default) leaves the name to the Settings page's
+  **Gateway name** row; a name there locks the row.
+- **Forge games per report now defaults to 5.** A value you set on the Settings page stays.
+- **The database goes to schema 16** (one new column for the chat cards). The gateway saves a
+  copy before it upgrades, as in [docs/UPGRADING.md](docs/UPGRADING.md).
+- **The Android app changes**: update it from inside the app after the gateway update.
+
+### Added
+- `check_new_deck`: an assistant checks a new deck before proposing it, with no card in the chat.
+- `proposal_status`: an assistant checks a proposal with no card in the chat. `get_proposal` is now
+  the card's own.
+- Every simulation is kept as a report on the Reports page: a pasted list ("Pasted list"), the
+  deck a waiting proposal would make ("Proposal #N for “DECK”", linked from the proposal, with
+  `run_deck_report` `proposal_id`) and a simulated comparison ("Comparison"). None of them count in
+  a deck's trend. An app connected read-only still gets the comparison, without keeping it.
+- Delete one report or one snapshot from History, its menus or the report page, after a box that
+  asks first. A snapshot a waiting restore needs says why it can't go. An assistant can only hand
+  you the box to press.
+- A request that takes over 3 seconds is logged as a warning, with how much of it was Archidekt
+  and how much the identity provider.
+
+### Changed
+- **One live card per change in the chat.** Only the newest card for a change keeps Approve and
+  Reject; older cards and decided ones shrink to one line with no pictures and stop checking. The
+  gateway refuses a press from an older card ("Use the newest card"). Cards show a summary, 6 rows
+  and a few pictures, with Show all for the rest, and are about a fifth smaller.
+- **A new deck waiting for approval is changed in place**: `amend_proposal` takes the new deck's
+  list and settings, and the same name again from the same app updates the waiting proposal.
+  `propose_new_deck` takes `replaces`.
+- A card that can't reach the gateway tries again a few times, waiting longer each time.
+- Semi and Full auto: a change your assistant may apply has Apply now and Reject on its card, so
+  one it never applies doesn't wait with nothing to press.
+- The reason typed on Reject is kept and shown on the review page and the Proposals list.
+- A sign-in renews as you use the gateway (see the upgrade notes).
+- Pages no longer wait for the identity provider while you use the gateway; someone removed from
+  the group loses access within a minute.
+- A deck page or My decks you saw recently shows at once and updates for the next view.
+- Part of the Archidekt request limit is kept for your pages, and requests in the background no
+  longer hold the line while Archidekt answers.
+- Each page keeps its own card size (S, M or L), for your account and on each device.
+- The printings box says it filters these printings by set, and offers a search of all cards when
+  nothing matches.
+- One moving progress ring wherever a run or a load is going (it pulses instead when you ask for
+  less motion); Play more games says “Starting…”.
+- No more bare blue links on Proposals, Reports, History and My activity: small actions are grey
+  pill buttons, and titles read in the text colour.
+- The report's HTML download matches the site's look in light and dark, and its Markdown download
+  is clean Markdown.
+- ChatGPT setup: the phone apps work once the connector is added on chatgpt.com in a browser
+  (tried in the Android app). The website footer says “Assistant skill”.
+- Forge games per report defaults to 5.
+
+### Fixed
+- Signing in to the Android app comes back to the app by itself. The app could not see the phone's
+  browsers, so it never opened the tab that returns to the app. It now opens that tab on the
+  gateway's address first, prefers Chrome when the default browser can't return, and only then
+  tries the app's own address. The “Open the MTG Assistant Gateway app” page stays as the last way.
+- A page no longer waits behind a slow Archidekt request from the deck check or an assistant.
+- A new deck reaches Archidekt 50 cards to a request instead of one request per card. Edits to it
+  wait until it is made, and its page says how far it got.
+- A change to one row of a card that has several (for example a card both in the deck and in a
+  category outside it) changes that row only: remove, count, move and printing. The review names
+  the row's own category, and Maybeboard and Sideboard rows offer Change printing….
+- A new card package that Archidekt saved differently says what differs instead of “Archidekt
+  refused it”; pages and cards say “New card package: NAME”, and a long name no longer stands one
+  letter per line.
+- Every place you can watch a card shows when it is already on your watchlist, down to the
+  printing, and the same card is never added twice.
+- Card forms no longer make Android offer to fill in payment cards.
+- The printings list finds a row's card by its own printing, lists tokens, and tries again when
+  Scryfall is busy.
+- A card name shown as a button (for example under Played without their effect) opens the card.
+- The ⋮ on a deck tile sits under the picture at every card size.
+- Deck settings lists Archidekt's Maybeboard and Sideboard on a deck that hasn't changed them yet.
+- The Connected apps button on Proposals opens Account details instead of a missing page.
+- ChatGPT's logo shows at full size instead of a grey dot; admins see why an app has no logo.
+
+### Security
+- When the app's sign-in comes back on the app's own address, the identity provider is asked for a
+  fresh sign-in, and the gateway gives a sign-in code only when the ID token shows one made during
+  that attempt.
+
 ## [0.7.45] - 2026-10-26
 
 Shorter stack and example variables files with every feature on by default, the tuning settings on
