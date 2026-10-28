@@ -258,7 +258,8 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
             "more than this percent from one day to the next), alert_above and alert_below (a price "
             "crossed, in dollars, or euros when the card has no dollar price). The gateway checks prices "
             "once a day; alerts reach the member through their notifications. Changes only the member's "
-            "gateway data, never Archidekt. Returns today's price when Scryfall answered."
+            "gateway data, never Archidekt. Returns today's price when Scryfall answered, with "
+            "printing_now, the printing that price is for."
         ),
         annotations={
             "readOnlyHint": False,
