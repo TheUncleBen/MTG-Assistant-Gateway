@@ -297,11 +297,12 @@ def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) ->
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
         page.wait_for_timeout(300)
         tabs = page.locator(".lp-tabs a")
-        assert tabs.count() == 5
-        # a first visit draws the open tab's count; the other four arrive after the page has drawn
-        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 5")
-        tops = [_rect(tabs.nth(i))["t"] for i in range(5)]
-        heights = [_rect(tabs.nth(i))["h"] for i in range(5)]
+        # four lists: Pinned cards moved to Binder › Wants
+        assert tabs.count() == 4
+        # a first visit draws the open tab's count; the other three arrive after the page has drawn
+        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 4")
+        tops = [_rect(tabs.nth(i))["t"] for i in range(4)]
+        heights = [_rect(tabs.nth(i))["h"] for i in range(4)]
         if width < 600:
             # one row that scrolls sideways, every tab the same height, the current one in view
             assert len(set(round(t) for t in tops)) == 1, tops

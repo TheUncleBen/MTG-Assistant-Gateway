@@ -143,14 +143,16 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
         assert f"<h2>{name}</h2>" in hub, name
     for href in (
         "/account/details",
+        "/lists",  # My lists sits under Account (decision C8)
         "/activity",
-        "/forum",
         "/guide",
         "/install?for=skill",
         "/install?for=android",
     ):
         assert f"<a class='yrow' href='{href}'>" in hub, href
     assert "href='/admin'" not in hub and "<h2>This app</h2>" not in hub
+    # Forum is in More and on the rail now (decision C8), not on the Account page
+    assert "<a class='yrow' href='/forum'>" not in hub
     assert "<form method='post' action='/theme'>" in hub and "<form method='post' action='/layout'>" in hub
     # Sign out: one real button, centred at the foot
     assert re.search(
