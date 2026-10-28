@@ -2366,7 +2366,14 @@ class ReportService:
             "forge_status",
             "forge_solo",
         )
-        return {k: full.get(k) for k in keys}
+        out = {k: full.get(k) for k in keys}
+        # the games against precons once they are played: win rates, seats, the opponents' choice
+        # and the game list, without the rest of the report
+        forge = full.get("forge") if isinstance(full.get("forge"), dict) else {}
+        out["forge_result"] = (
+            {k: forge[k] for k in FORGE_RESULT_KEYS if k in forge} if _done_games(forge) else None
+        )
+        return out
 
     def decks_seen(self, sub: str) -> dict[str, str]:
         """The decks the member has reports for: id -> last known name."""
@@ -2612,6 +2619,9 @@ class ReportService:
             "settings": run_settings(stats, goldfish, forge),
         }
 
+
+# get_deck_report view "forge": the parts of a Forge section that say how the games went
+FORGE_RESULT_KEYS = ("state", "result", "opponent_choice", "seed", "games_requested", "games")
 
 PROPOSAL_NOT_WAITING = (
     "That proposal is no longer waiting, so its resulting deck can't be simulated. Run the report on "

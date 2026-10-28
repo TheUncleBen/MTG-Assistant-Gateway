@@ -574,7 +574,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "complete, partial or failed; engine_label; settings; statistics, the simulation "
             "result, the validation and the forge section); view 'forge' is only forge_status (state, "
             "games_done of games_requested, job_id, and while queued its position, the report it waits "
-            "for and expected_seconds) and forge_solo, small enough to poll while the Forge games play."
+            "for and expected_seconds), forge_solo and, once the games against precons are played, "
+            "forge_result (win rates, seats, the opponents chosen and the games), small enough to poll "
+            "while the Forge games play."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
