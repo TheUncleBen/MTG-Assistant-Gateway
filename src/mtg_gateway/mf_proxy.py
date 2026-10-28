@@ -286,9 +286,11 @@ BLOCKED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-# One member may run this many proxied calls at once; another is refused at once ("busy")
-# rather than queued, so one account cannot hold Mystic Forge's simulation slots for everyone.
+# One member may run this many proxied calls at once, so one account cannot hold Mystic Forge's
+# simulation slots for everyone. Another call waits up to QUEUE_WAIT_SECONDS for one of theirs to
+# finish (assistants send tool calls in parallel, AT-38), then is refused ("busy").
 MAX_CALLS_PER_USER = 2
+QUEUE_WAIT_SECONDS = 15.0
 # Every proxied call is cut off after this long (a goldfish run included), so no call holds a
 # slot for hours. Mystic Forge itself may keep working on a cancelled call until it finishes.
 CALL_DEADLINE_SECONDS = 120.0
@@ -335,7 +337,8 @@ def _busy(limit: int = MAX_CALLS_PER_USER, retry_after: int | None = None) -> ty
     structured content, error busy with ``retry_after``: the seconds until their oldest call is
     stopped at the latest (each call's deadline), so a slot is free by then."""
     message = (
-        f"{limit} research calls for your account are still running; wait for one to finish and try again"
+        f"{limit} research calls for your account are still running after a short wait; wait for one "
+        "to finish and try again"
     )
     structured: dict[str, Any] = {"ok": False, "error": "busy", "message": message}
     if retry_after is not None:
@@ -464,6 +467,17 @@ def _front_face_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _waited_note(result: types.CallToolResult, waited: float) -> types.CallToolResult:
+    """``result`` with a first line saying the call waited its turn (``waited`` seconds, a second
+    or more), so the assistant knows it was queued rather than slow."""
+    if waited < 1 or not result.content or not isinstance(result.content[0], types.TextContent):
+        return result
+    note = f"(This call waited {round(waited)} s for your other research calls to finish.)"
+    first = result.content[0]
+    content = [first.model_copy(update={"text": f"{note}\n\n{first.text}"}), *result.content[1:]]
+    return result.model_copy(update={"content": content})
+
+
 def is_busy(result: types.CallToolResult) -> bool:
     """True for the refusal ``call`` gives when the owner already runs their share of calls."""
     if not result.is_error or not result.content:
@@ -485,8 +499,10 @@ class MysticForgeProxy:
         client_factory: Any | None = None,
         max_calls_per_user: int = MAX_CALLS_PER_USER,
         deadline: float = CALL_DEADLINE_SECONDS,
+        queue_wait: float = QUEUE_WAIT_SECONDS,
     ):
         self.url = url
+        self.queue_wait = queue_wait
         self.cache_ttl = cache_ttl
         self.max_calls_per_user = max_calls_per_user
         self.deadline = deadline
@@ -634,7 +650,9 @@ class MysticForgeProxy:
             refused = self.archidekt_budget(owner)
             if refused:
                 return _refusal(refused)
+        waited = 0.0
         if owner is not None:
+            waited = await self._wait_turn(owner)
             if self._in_flight.get(owner, 0) >= self.max_calls_per_user:
                 return _busy(self.max_calls_per_user, self._retry_after(owner))
             self._in_flight[owner] = self._in_flight.get(owner, 0) + 1
@@ -660,7 +678,7 @@ class MysticForgeProxy:
             result = research_refusal(_rewrite_result(await self._forward(name, arguments)))
             if name == "validate_decklist":
                 result = _validation_checks(result, arguments)
-            return result
+            return _waited_note(result, waited)
         finally:
             if owner is not None:
                 left = self._in_flight.get(owner, 1) - 1
@@ -673,6 +691,15 @@ class MysticForgeProxy:
                     starts.remove(started)
                 if not starts:
                     self._started.pop(owner, None)
+
+    async def _wait_turn(self, owner: str) -> float:
+        """Wait up to ``queue_wait`` seconds while ``owner`` runs their share of calls; the seconds
+        waited. ``call`` takes the slot right after, with nothing awaited in between."""
+        start = time.monotonic()
+        end = start + self.queue_wait
+        while self._in_flight.get(owner, 0) >= self.max_calls_per_user and time.monotonic() < end:
+            await anyio.sleep(0.05)
+        return time.monotonic() - start
 
     def _retry_after(self, owner: str) -> int | None:
         """Seconds until the member's oldest running call is stopped at the latest: its deadline,
