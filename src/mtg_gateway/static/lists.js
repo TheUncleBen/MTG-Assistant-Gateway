@@ -213,7 +213,7 @@
         if (crop) resetCrop(crop, has, has ? "/lists/api/custom_picture/" + d.id + "?face=" + pf[1] : "");
       });
       setValue(box, "set_code", editing ? (d.setCode || "") : "");
-      setValue(box, "collector_number", editing ? (d.collectorNumber || "") : "");
+      setValue(box, "cn", editing ? (d.collectorNumber || "") : "");
       var back = $("#cc-back", box);
       if (back) back.checked = editing && !!d.hasBack;
       backFace(box);

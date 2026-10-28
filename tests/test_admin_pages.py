@@ -334,7 +334,7 @@ async def test_card_models_search_member_filter_and_widgets(gw: Harness) -> None
         assert _widgets(text) == ["Models kept", "Members with models", "Changed in 7 days"]
         assert "<span class='big'>2</span>" in text or "<span class='big'>2<small>" in text
         assert "<span class='big'>2<small>of 4</small></span>" in text
-        assert "<input type='search' name='q'" in text and "placeholder='Search card name'" in text
+        assert "<input type='search' name='q'" in text and "placeholder='Search by name'" in text
         opts = text.split("<select name='member'", 1)[1].split("</select>", 1)[0]
         assert "<option value='' selected>Every member</option>" in opts
         assert ">bob</option>" in opts and ">a member with no name</option>" in opts

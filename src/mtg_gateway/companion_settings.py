@@ -775,8 +775,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 else "<div class='pv coverart none'><span class='muted small'>Archidekt picks the image"
                 "</span></div>"
             )
-            + "<div class='field'><label for='cover_card'>Card whose art fronts the deck</label>"
-            "<div class='ds-inline'><select id='cover_card' name='card'>"
+            + "<div class='field'><label for='cover_pick'>Art that fronts the deck</label>"
+            "<div class='ds-inline'><select id='cover_pick' name='cover'>"
             f"<option value=''{'' if chosen else ' selected'}>Automatic (Archidekt picks)</option>"
             + "".join(options)
             + f"</select><button class='btn'>{icon('image')} Set cover</button></div></div></form>"
@@ -1242,7 +1242,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 cat = next((c for c in deck_categories(deck) if c["id"] == int(key)), None)
                 if cat is None:
                     raise stale_categories_error()
-                move = " ".join((data.get("move_cards_to") or "").split())
+                move = " ".join((data.get("move_to") or data.get("move_cards_to") or "").split())
                 changes = [{"action": "delete", "id": int(key), **({"move_cards_to": move} if move else {})}]
                 ok, yes = "category_deleted", f"Delete “{cat['name']}”"
                 title_name, move_n = cat["name"], int(cat["cards"])
@@ -1263,8 +1263,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     )
                     move_field = (
                         f"<p>{_esc(has_cards)}</p>"
-                        "<label class='mv' for='move_cards_to'>Move its cards to</label>"
-                        f"<select id='move_cards_to' name='move_cards_to' required>{targets}</select>"
+                        f"<label class='mv' for='move_to'>Move {'them' if n != 1 else 'it'} to</label>"
+                        f"<select id='move_to' name='move_to' required>{targets}</select>"
                     )
             elif unused:
                 changes = []
@@ -1295,7 +1295,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 or (data.get("move_ok") == "1" and why == modes.CATEGORY_DELETE_CONFIRM)
             )
             if why and not said_yes:
-                drop = ("csrf", "confirmed", "move_ok") + (("move_cards_to",) if move_field else ())
+                drop = ("csrf", "confirmed", "move_ok") + (("move_to", "move_cards_to") if move_field else ())
                 fields = {k: v for k, v in data.items() if k not in drop}
                 if action != "save":
                     fields["action"] = action
@@ -1382,7 +1382,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], _sid: str | None) -> str:
-            uid = (data.get("card") or "").strip() or None
+            uid = (data.get("cover") or data.get("card") or "").strip() or None
             done = await decks.set_cover(sub, deck_id, uid)
             if uid:
                 state.db.save_deck_cover(done["deck_id"], uid.lower(), done["card_name"], owner_sub=sub)

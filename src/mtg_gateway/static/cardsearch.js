@@ -612,6 +612,7 @@
     var l2 = el("label", null, "Copies"); l2.htmlFor = "ad-qty";
     qtyIn = el("input"); qtyIn.id = "ad-qty"; qtyIn.name = "quantity"; qtyIn.type = "number";
     qtyIn.min = "1"; qtyIn.max = "99"; qtyIn.step = "1"; qtyIn.value = "1"; qtyIn.inputMode = "numeric";
+    qtyIn.autocomplete = "off";
     f2.appendChild(l2); f2.appendChild(qtyIn);
     var f3 = el("div", "field");
     var l3 = el("label", null, "Category"); l3.htmlFor = "ad-cat";
@@ -819,10 +820,16 @@
   // goes through the shared static/cardmenu.js (a printing search sends the shown printing), as
   // do the menu and its toast with Undo.
   var norm = Menu.norm;
-  function setWatched(name, on) {
+  // what: {name, set_code, collector_number}; a printing's own button (a printing search) follows
+  // that printing only
+  function setWatched(what, on) {
     $$(".wbtn[data-watch]", results).forEach(function (b) {
       var n = b.getAttribute("data-watch");
-      if (norm(n) === norm(name)) Menu.drawButton(b, n, on);
+      if (norm(n) !== norm(what.name)) return;
+      var code = b.getAttribute("data-set-code"), num = b.getAttribute("data-number");
+      if (code && num && !(what.set_code && String(what.set_code).toLowerCase() === code.toLowerCase() &&
+        String(what.collector_number) === num)) return;
+      Menu.drawButton(b, n, on);
     });
   }
   function isWatched(name) {
@@ -830,7 +837,7 @@
   }
   // what: {name, set_code, collector_number, finish}; resolves with the watch, rejects on a refusal
   function watch(what, btn) {
-    return Menu.watch(what, { btn: btn, was: isWatched(what.name), onState: function (on) { setWatched(what.name, on); } });
+    return Menu.watch(what, { btn: btn, was: btn ? btn.classList.contains("on") : isWatched(what.name), onState: function (on) { setWatched(what, on); } });
   }
   function watchOf(btn) {
     var p = pinOf(btn) || {};
@@ -864,7 +871,7 @@
         onWatch: function () { watch(watchOf(wbtn), wbtn).catch(function () {}); },
         onArt: function () {
           Menu.artVariants(pic.getAttribute("data-card") || "", {
-            returnFocus: pic, onState: function (on) { setWatched(name, on); }, was: function () { return isWatched(name); }
+            returnFocus: pic, onState: function (on) { setWatched({ name: name }, on); }, was: function () { return isWatched(name); }
           });
         }
       } : null,

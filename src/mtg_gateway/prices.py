@@ -337,11 +337,19 @@ class PriceService:
                 )
             if set_code:  # a name with only a set: keep the printing Scryfall chose
                 number = number or str(card.get("collector_number") or "")
+        # the same printing in other letter case is the same watch; a watch by name of a card
+        # watched in any printing (in this finish) is the watch it has, never a second one
         existing = self._rows(
-            "SELECT * FROM watch_cards WHERE sub = ? AND name = ? AND set_code = ? AND collector_number = ? "
-            "AND finish = ?",
+            "SELECT * FROM watch_cards WHERE sub = ? AND lower(name) = lower(?) AND lower(set_code) = ? "
+            "AND lower(collector_number) = lower(?) AND finish = ?",
             (sub, name, set_code, number, finish),
         )
+        if not existing and not set_code:
+            existing = [
+                w
+                for w in self.watched_cards(sub)
+                if _norm(w["name"]) == _norm(name) and w["finish"] == finish
+            ][:1]
         t = int(now())
         with self.db.tx() as c:
             if existing:

@@ -241,6 +241,27 @@
     b.appendChild(icon(on ? "check" : "bookmark"));
     b.appendChild(el("span", null, on ? "Watching" : "Watch"));
   }
+  /* The names the member watches (any printing), read once a page from /watchlist/api/names:
+     every page's card menu then says "On your watchlist" for them instead of offering the watch
+     again. A watch or an Undo here keeps the list right. */
+  var watchedNames = null, watchedAsked = false;
+  function loadWatched() {
+    if (watchedAsked || !enabled() || !window.fetch) return;
+    watchedAsked = true;
+    fetch("/watchlist/api/names", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !d.names) return;
+        watchedNames = watchedNames || Object.create(null);
+        d.names.forEach(function (n) { watchedNames[norm(n)] = true; });
+      })
+      .catch(function () { /* the menus offer Watch; the server keeps one watch a card */ });
+  }
+  function isWatched(name) { return !!(watchedNames && watchedNames[norm(name)]); }
+  function markWatched(name, on) {
+    watchedNames = watchedNames || Object.create(null);
+    if (on) watchedNames[norm(name)] = true; else delete watchedNames[norm(name)];
+  }
   function listLink(name) {
     var a = el("a", null, "Open the watchlist");
     a.href = "/watchlist?q=" + enc(name);
@@ -265,6 +286,7 @@
       }
       var w = d.watch || {};
       var name = w.name || what.name;
+      markWatched(name, true);
       state(true);
       if (!w.created) { toast(name + " is on your watchlist.", { ok: true, actions: [listLink(name)] }); return w; }
       var undo = el("button", "btn-plain", "Undo");
@@ -273,7 +295,7 @@
         undo.disabled = true;
         post("/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
           if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
-          if (!o.was) state(false);
+          if (!o.was) { state(false); markWatched(name, false); }
           toast(name + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
@@ -579,7 +601,7 @@
     }
     if (s.collect) items.push(item("Add to collection", "collection", function () { collect(name); }));
     if (s.watch) {
-      if (s.watch.watched) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
+      if (s.watch.watched || isWatched(name)) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
       else items.push(item("Watch this card", "bookmark", s.watch.onWatch, { focusBack: true }));
       if (s.watch.onArt && window.MtgPrintPick) items.push(item("Art variants…", "image", s.watch.onArt));
     }
@@ -713,9 +735,13 @@
     });
   });
 
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", loadWatched);
+  else loadWatched();
+
   window.MtgCardMenu = {
     enabled: enabled, icon: icon, toast: toast, dismissToast: dismissToast, norm: norm,
     drawButton: drawButton, listLink: listLink, watch: watch, artVariants: artVariants, collect: collect,
+    isWatched: isWatched, markWatched: markWatched,
     open: open, close: close, isOpen: function () { return !!menu; }, bind: bind
   };
 })();

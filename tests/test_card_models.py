@@ -731,7 +731,7 @@ async def test_my_card_models_lists_only_the_members_own_and_removes_with_a_conf
         assert rows.count("<li data-name=") == 2 and "Arcane Signet" not in page.text
         assert "class='cardlink' data-card='Sol Ring'" in rows  # the shared card menu's hook
         assert "<time class='ui-when'" in rows and "changed <time" in rows and "added <time" in rows
-        assert "data-models-filter" in page.text and "Search by card name" in page.text
+        assert "data-models-filter" in page.text and "Search by name" in page.text
         assert "<textarea" not in rows and "<input" not in rows  # no hand editing
         assert "aria-label='Remove the saved description of Sol Ring'" in rows
         # someone else's name in ?remove= gets no confirm; an own one does

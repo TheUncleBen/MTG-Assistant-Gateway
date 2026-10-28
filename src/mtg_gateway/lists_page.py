@@ -539,7 +539,7 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
         + "<p class='ui-sub'>When you add one of these cards to a deck, it goes into these categories; ★ is "
         "the main one. Set them from a card's menu on a deck (Lock personal categories) or here. Choices "
         "come from your category templates.</p>"
-        + ui.toolbar(f"{PAGE}/defaults", search_label="Search by card name", placeholder="Card name", q=q)
+        + ui.toolbar(f"{PAGE}/defaults", search_label="Search by name", placeholder="Name", q=q)
         + "<p class='sr-only' data-filter-count role='status' aria-live='polite'></p>"
         + table
         + more
@@ -1049,7 +1049,7 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
     return (
         head + "<p class='ui-sub'>Cards you made on Archidekt. Add one to a deck from its menu; deleting one "
         "blanks it in every deck that has it.</p>"
-        + ui.toolbar(f"{PAGE}/custom", search_label="Search by card name", placeholder="Card name", q=q)
+        + ui.toolbar(f"{PAGE}/custom", search_label="Search by name", placeholder="Name", q=q)
         + table
         + more
         + custom_box(csrf, box if box.get("box") == "cc-box" else {})
@@ -1089,15 +1089,15 @@ def custom_add_box(csrf: str, st: dict[str, Any]) -> str:
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'><input type='hidden' name='action' "
         f"value='add_to_deck'><input type='hidden' name='custom_id' value='{esc(str(v.get('id', '')))}'>"
         f"<input type='hidden' name='was_name' value='{esc(name)}'>"
-        "<div class='field'><label for='cc-add-deck'>Deck</label><span class='sel'>"
-        f"<select id='cc-add-deck' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
+        "<div class='field'><label for='cu-add-deck'>Deck</label><span class='sel'>"
+        f"<select id='cu-add-deck' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
         "</div>"
         "<div class='lp-two lp-copies'>"
-        "<div class='field'><label for='cc-add-qty'>Copies</label>"
-        f"<input id='cc-add-qty' name='quantity' type='number' min='1' max='99' step='1' "
+        "<div class='field'><label for='cu-add-qty'>Copies</label>"
+        f"<input id='cu-add-qty' name='quantity' type='number' min='1' max='99' step='1' "
         f"inputmode='numeric' value='{esc(qty)}' required></div>"
-        "<div class='field'><label for='cc-add-cat'>Category</label><span class='sel'>"
-        "<select id='cc-add-cat' name='category' data-src='/api/v1/decks/{id}?cards=0'>"
+        "<div class='field'><label for='cu-add-cat'>Category</label><span class='sel'>"
+        "<select id='cu-add-cat' name='category' data-src='/api/v1/decks/{id}?cards=0'>"
         f"<option value=''>{esc(ADD_DEFAULT_CATEGORY)}</option>{cat_opt}</select></span></div>"
         "</div></form>"
         f"<p class='muted small'>{esc(ADD_CUSTOM_NOTE)}</p>" + box_note(st.get("error", ""))
@@ -1186,11 +1186,11 @@ def custom_box(csrf: str, st: dict[str, Any]) -> str:
         + face_fields("back", v, editing=editing, has_picture=bool(v.get("backImageUrl")))
         + switch("has_back", "Has a back face", has_back, fid="cc-back")
         + "<div class='lp-two'>"
-        + text_field("cc-set", "set_code", "Set code", str(v.get("setCode") or ""), limit=None, cls="lp-f")
+        + text_field("cu-set", "set_code", "Set code", str(v.get("setCode") or ""), limit=None, cls="lp-f")
         + text_field(
-            "cc-num",
-            "collector_number",
-            "Collector number",
+            "cu-cn",
+            "cn",
+            "Collector no.",
             str(v.get("collectorNumber") or ""),
             limit=None,
             cls="lp-f",
@@ -1839,7 +1839,9 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     c["notes"] = data["notes"]
                 if data.get("set_code"):
                     c["set_code"] = data["set_code"].strip()[:10]
-                    c["collector_number"] = (data.get("collector_number") or "").strip()[:20]
+                    c["collector_number"] = (data.get("cn") or data.get("collector_number") or "").strip()[
+                        :20
+                    ]
                 if data.get("finish"):
                     c["finish"] = data["finish"]
                 return c, "pin_saved", ""
@@ -1868,7 +1870,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 fields[f"{face}{suffix}"] = raw.strip() or None
         fields["hasBack"] = has_back
         fields["setCode"] = (data.get("set_code") or "").strip() or None
-        fields["collectorNumber"] = (data.get("collector_number") or "").strip() or None
+        fields["collectorNumber"] = (data.get("cn") or data.get("collector_number") or "").strip() or None
         fields["cmc"] = cmc_of(fields.get("frontManaCost") or "")
         return fields
 
@@ -1896,7 +1898,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             v["frontName"] = data.get("f_n", "")
             v["hasBack"] = flag(data, "has_back")
             v["setCode"] = data.get("set_code", "")
-            v["collectorNumber"] = data.get("collector_number", "")
+            v["collectorNumber"] = data.get("cn") or data.get("collector_number", "")
         if box_id == "pin-rm":
             v["id"] = data.get("pin_id", "")
         return {"box": box_id, "mode": mode, "values": v, "error": error}

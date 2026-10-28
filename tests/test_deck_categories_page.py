@@ -282,7 +282,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         assert "muted small" not in form.split("</form>")[0]
         # nothing is picked in advance (the first category is often Commander)
         assert (
-            "<select id='move_cards_to' name='move_cards_to' required>"
+            "<select id='move_to' name='move_to' required>"
             "<option value='' disabled selected hidden>Pick a category…</option><option value='Commander'>"
         ) in r.text
         assert "<option value='Ramp'>" not in r.text
@@ -294,7 +294,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         )
         assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
         assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<select id='move_to' name='move_to' required>" in r.text
         # a forged yes without a pick gets the same page, not a bare refusal
         r = await b.http.post(
             POST,
@@ -303,7 +303,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         )
         assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
         assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<select id='move_to' name='move_to' required>" in r.text
         r = await b.http.post(
             POST,
             data={

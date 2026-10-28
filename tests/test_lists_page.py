@@ -91,7 +91,7 @@ async def test_lists_opens_on_the_first_tab(member: Browser) -> None:
 async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     want = {
         "templates": ("Category templates", ["Ramp", "Commander"], "New template"),
-        "defaults": ("Default categories", ["Sol Ring"], "Search by card name"),
+        "defaults": ("Default categories", ["Sol Ring"], "Search by name"),
         "tags": ("Color tags", ["Cut"], "New color tag"),
         "pins": ("Pinned cards", ["Sol Ring"], "Remove all…"),
         "custom": ("Custom cards", ["Grizzled Mentor"], "New custom card"),

@@ -1290,9 +1290,9 @@ def add_box_html(csrf: str, *, tab: str = "add", open: bool = False) -> str:
         f"aria-labelledby='col-tab-add' data-pane='add'{' hidden' if imp else ''}>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<input type='hidden' name='action' value='add'>"
-        "<div class='fl'><label class='field span'><span>Card name</span>"
+        "<div class='fl'><label class='field span'><span>Name</span>"
         "<input id='addname' type='text' name='name' data-suggest='cards' "
-        "placeholder='Card name, or “name (SET) 123” for one printing' autocomplete='off' required></label>"
+        "placeholder='Name, or “name (SET) 123” for one printing' autocomplete='off' required></label>"
         "<label class='field'><span>Copies</span><input id='addqty' type='number' name='quantity' value='1' "
         "min='1' max='999'></label>"
         f"<label class='field'><span>Finish</span><select id='addfinish' name='finish'>"
@@ -1464,10 +1464,10 @@ def panel_html(*, q: str, sort: str, direction: str, view: str, count: int) -> s
     return (
         "<section class='panel spanel'><form id='listform' method='get' action='/collection'>"
         + sp.name_row(
-            label="Filter by card name",
+            label="Filter by name",
             name="q",
             value=q,
-            placeholder="Card name",
+            placeholder="Name",
             input_id="col-q",
             search_label="Filter",
             filters_button=False,

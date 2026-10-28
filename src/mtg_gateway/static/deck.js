@@ -932,7 +932,7 @@
     var lab = el("label", "", "Custom mana value");
     var input = el("input", "");
     input.type = "number"; input.min = "0"; input.max = "15"; input.step = "1"; input.inputMode = "numeric";
-    input.id = "mv-input"; lab.htmlFor = "mv-input";
+    input.id = "mv-input"; lab.htmlFor = "mv-input"; input.autocomplete = "off";
     input.value = cur === null ? "" : cur;
     var hint = el("p", "hint", "Archidekt's mana value override for this card, in this deck only.");
     var msg = el("p", "status", "");
@@ -1509,9 +1509,11 @@
     var name = card.getAttribute("data-card") || "";
     var body = { name: name, finish: finish || scryFinishOf(card) };
     if (printing) { body.set_code = printing.set; body.collector_number = printing.collector_number; }
+    var CardMenu = window.MtgCardMenu, was = !!(CardMenu && CardMenu.isWatched(name));
     return api("/watchlist/api/watch", body).then(function (d) {
       if (!d.ok) { toast(d.message || "The card could not be watched.", { error: true }); throw new Error("refused"); }
       var w = d.watch || {};
+      if (CardMenu) CardMenu.markWatched(w.name || name, true);
       var open = el("a", "", "Open the watchlist");
       open.href = "/watchlist?q=" + enc(w.name || name);
       if (!w.created) { toast((w.name || name) + " is on your watchlist.", { actions: [open] }); return w; }
@@ -1521,6 +1523,7 @@
         undo.disabled = true;
         api("/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
           if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
+          if (CardMenu && !was) CardMenu.markWatched(w.name || name, false);
           toast((w.name || name) + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
@@ -1721,7 +1724,18 @@
     m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
     if (document.body.hasAttribute("data-watchlist")) {
       // watch the card's price, or browse its printings and watch one (the picker's browse mode)
-      m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
+      var CardMenu = window.MtgCardMenu;
+      if (CardMenu && CardMenu.isWatched(name)) {
+        // watched already (any printing): the item opens its watchlist entry
+        var onList = el("a", "", "");
+        onList.href = "/watchlist?q=" + enc(name);
+        onList.setAttribute("role", "menuitem");
+        onList.appendChild(icon("check"));
+        onList.appendChild(document.createTextNode("On your watchlist"));
+        m.appendChild(onList);
+      } else {
+        m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
+      }
       if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(); artVariants(card); }));
     }
     // one copy into the collection, as the viewer's "I own this card" (the shared layer's call)

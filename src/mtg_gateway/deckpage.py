@@ -939,8 +939,8 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
     did = esc(deck.id)
     add = (
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
-        "<label for='quick'>Add card</label><div class='quickrow'>"
-        "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
+        "<label for='quick'>Add to the deck</label><div class='quickrow'>"
+        "<input id='quick' type='text' name='add' placeholder='Quick add (name)' data-suggest='cards' "
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same
         f"<button type='submit' aria-label='Card search'>{icon('search')} "

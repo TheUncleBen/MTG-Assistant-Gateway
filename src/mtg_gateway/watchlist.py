@@ -106,7 +106,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                     sub,
                     data.get("name", ""),
                     set_code=data.get("set_code"),
-                    collector_number=data.get("collector_number"),
+                    collector_number=data.get("cn") or data.get("collector_number"),
                     finish=data.get("finish", "nonfoil"),
                 )
                 done = "card_added" if out.get("created") else "card_updated"
@@ -134,6 +134,16 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             status = 404 if exc.kind == "not_found" else 429 if exc.kind == "rate_limited" else 400
             return page(watchlist_body(state, sub, csrf, err=str(exc)), sub=sub, sid=sid, status=status)
         return RedirectResponse(f"/watchlist?ok={done}", status_code=303)
+
+    @server.custom_route("/watchlist/api/names", methods=["GET"], include_in_schema=False)
+    async def names_api(request: Request) -> Response:
+        """The names of the cards the member watches (any printing): the pages' card menus say
+        "On your watchlist" for them instead of offering the watch again."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        names = sorted({w["name"] for w in state.prices.watched_cards(sub)}, key=str.casefold)
+        return JSONResponse({"ok": True, "names": names}, headers=NO_STORE)
 
     @server.custom_route("/watchlist/api/card", methods=["GET"], include_in_schema=False)
     async def card_api(request: Request) -> Response:

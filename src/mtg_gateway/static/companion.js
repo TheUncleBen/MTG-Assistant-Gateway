@@ -520,7 +520,7 @@
   // Chips above it say where the card goes; "3 sol ring" adds three; the printings of the
   // highlighted name show beside the list on wide screens, and a click on one adds that printing.
   var addForm = root.querySelector("form.addcard");
-  var input = root.querySelector("input[name=card]");
+  var input = root.querySelector("input[name=name]");
   var catIn = root.querySelector("input[name=addcat]"), zoneIn = root.querySelector("input[name=addzone]");
   var foilIn = root.querySelector("input[name=foil]");
   var addStatus = root.querySelector(".addstatus");
