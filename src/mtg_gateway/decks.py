@@ -759,6 +759,16 @@ def tag_change_text(r: dict[str, Any]) -> str:
     return "; ".join(bits)
 
 
+def diff_of(rows: list[dict[str, Any]]) -> str:
+    """A proposal's plain-text diff: one line per review row, and the note that open Archidekt tabs
+    keep the old categories said once, on the last category line (AT-36: it was on every one)."""
+    lines = [row_line(r) for r in rows]
+    last = max((i for i, r in enumerate(rows) if r.get("kind") == "deck_category"), default=None)
+    if last is not None:
+        lines[last] += f" {OPEN_TABS_NOTE}"
+    return "\n".join(lines)
+
+
 def row_line(r: dict[str, Any]) -> str:
     """The plain-text diff line for one review row."""
     kind = r.get("kind")
@@ -4905,7 +4915,7 @@ class DeckService:
                 expect_version=int(version if version is not None else row.get("version") or 1),
                 changes=plan["changes"],
                 rows=rows,
-                diff_text="\n".join(row_line(r) for r in rows),
+                diff_text=diff_of(rows),
                 by_client=current_client.get(),
                 what_changed=board.what_changed(row.get("rows"), rows),
                 deck_name=plan["name"],
@@ -5496,7 +5506,7 @@ class DeckService:
             {
                 **row,
                 "rows": rows,
-                "diff_text": "\n".join(row_line(r) for r in rows),
+                "diff_text": diff_of(rows),
                 "expires_at": int(time.time()) + self.expiry_seconds(),
                 "created_by_client": current_client.get(),
             },
@@ -8006,7 +8016,7 @@ class DeckService:
                 expect_version=int(version),
                 changes=stored,
                 rows=rows,
-                diff_text="\n".join(row_line(r) for r in rows),
+                diff_text=diff_of(rows),
                 by_client=current_client.get(),
                 what_changed=board.what_changed(row.get("rows"), rows),
                 baseline_fingerprint=deck.fingerprint(),
@@ -10775,19 +10785,17 @@ def category_line(r: dict[str, Any]) -> str:
         else:
             move = ""
         why = " (added since the snapshot)" if r.get("since") else ""
-        return f"Delete category “{name}”{why}{move}. {OPEN_TABS_NOTE}"
+        return f"Delete category “{name}”{why}{move}."
     if r.get("create"):
         why = " (deleted since the snapshot)" if r.get("since") else ""
-        return (
-            f"New category “{name}”{why}" + (": " + ", ".join(flags) if flags else "") + f". {OPEN_TABS_NOTE}"
-        )
+        return f"New category “{name}”{why}" + (": " + ", ".join(flags) if flags else "") + "."
     bits = []
     if r.get("rename_to"):
         n = int(r.get("cards") or 0)
         cards = f" (its {n} card{'s go' if n != 1 else ' goes'} with it)" if n else ""
         bits.append(f"rename to “{r['rename_to']}”{cards}")
     bits += flags
-    return f"Category “{name}”: " + ", ".join(bits) + f". {OPEN_TABS_NOTE}"
+    return f"Category “{name}”: " + ", ".join(bits) + "."
 
 
 def category_restore_plan(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

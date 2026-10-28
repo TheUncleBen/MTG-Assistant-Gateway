@@ -73,7 +73,8 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     info = structured(res)["deck_waiting"]
     assert info["this_app"].startswith("app: ")
     ids = res["_meta"][APPROVAL_SET_META_KEY]["ids"]
-    lines = {x["proposal_id"]: x for x in info["set_lines"]}
+    assert "set_lines" not in info  # card-only: the lines go with the set's code in _meta
+    lines = {x["proposal_id"]: x for x in res["_meta"][APPROVAL_SET_META_KEY]["lines"]}
     assert set(lines) == set(ids) and lines[first["proposal_id"]]["summary"]
     # a held one and one its own app changed say so in the list the confirm draws
     maker = h.db.get_proposal(first["proposal_id"], SUB)["created_by_client"]
@@ -87,7 +88,7 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     )
     res = await _propose(h, token, "Brainstorm")
     info = structured(res)["deck_waiting"]
-    lines = {x["proposal_id"]: x for x in info["set_lines"]}
+    lines = {x["proposal_id"]: x for x in res["_meta"][APPROVAL_SET_META_KEY]["lines"]}
     held = lines.get(first["proposal_id"])
     assert held is not None, lines
     assert held["version"] == 2 and held["what_changed"] == "Opt again"
@@ -103,7 +104,9 @@ async def test_apply_all_lists_its_changes_with_held_and_changed_and_names_the_a
     res = await _propose(h, token, "Ponder")
     info = structured(res)["deck_waiting"]
     assert first["proposal_id"] not in res["_meta"][APPROVAL_SET_META_KEY]["ids"]
-    assert first["proposal_id"] not in {x["proposal_id"] for x in info["set_lines"]}
+    assert first["proposal_id"] not in {
+        x["proposal_id"] for x in res["_meta"][APPROVAL_SET_META_KEY]["lines"]
+    }
     assert info["left_out"] == 1
     # an amend back by its own app still leaves it out: another app wrote one of its versions
     _amend(

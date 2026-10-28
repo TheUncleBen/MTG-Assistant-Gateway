@@ -45,6 +45,7 @@ from .decks import (
     commander_stays_text,
     current_client,
     custom_card_line,
+    diff_of,
     row_label,
     row_line,
     tag_change_text,
@@ -2132,7 +2133,7 @@ def _category_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, i
             _li("chg", "Category", html.escape(ln)) for ln in filter(None, map(str.strip, diff.splitlines()))
         ]
         return "".join(items), len(items)
-    items = [_li("chg", "Category", html.escape(row_line(r))) for r in rows]
+    items = [_li("chg", "Category", html.escape(ln)) for ln in diff_of(rows).splitlines()]
     return "".join(items), len(items)
 
 

@@ -285,21 +285,24 @@ PROPOSAL = {
         "other_apps": [{"app": "ChatGPT", "count": 1}],
         "review_all_url": "https://gateway.example.com/proposals#deck-42",
         "this_app": "app: Claude (c1)",
-        "set_lines": [
-            {
-                "proposal_id": "p1",
-                "board_no": 1,
-                "summary": "+1 Opt",
-                "status": "held",
-                "status_reason": "#3 it depends on was rejected.",
-                "version": 2,
-                "changed_by": "app: ChatGPT (c2)",
-                "what_changed": "Opt instead of Ponder",
-            },
-            {"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "version": 1},
-        ],
     },
 }
+
+
+# what Apply all applies, one line each: card-only, so in _meta with the set's code (standard 16)
+SET_LINES = [
+    {
+        "proposal_id": "p1",
+        "board_no": 1,
+        "summary": "+1 Opt",
+        "status": "held",
+        "status_reason": "#3 it depends on was rejected.",
+        "version": 2,
+        "changed_by": "app: ChatGPT (c2)",
+        "what_changed": "Opt instead of Ponder",
+    },
+    {"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "version": 1},
+]
 
 
 @pytest.mark.parametrize("width,theme", [(360, "dark"), (1280, "light")])
@@ -316,7 +319,7 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             page.route("https://api.scryfall.com/**", lambda r: r.abort())
             meta = {
                 APPROVAL_META_KEY: "code-2",
-                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code", "lines": SET_LINES},
             }
             applied = {**PROPOSAL, "state": "applied", "applied_at": NOW}
             card = _open(
@@ -855,7 +858,7 @@ def test_apply_all_on_the_proposal_card_lists_what_it_did_not_send_and_why(width
             page.route("https://api.scryfall.com/**", lambda r: r.abort())
             meta = {
                 APPROVAL_META_KEY: "code-2",
-                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code", "lines": SET_LINES},
             }
             card = _open(
                 page,
@@ -918,7 +921,7 @@ def test_the_proposal_cards_not_sent_list_goes_when_its_own_change_is_decided(de
             page.route("https://api.scryfall.com/**", lambda r: r.abort())
             meta = {
                 APPROVAL_META_KEY: "code-2",
-                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code", "lines": SET_LINES},
             }
             card = _open(
                 page,
