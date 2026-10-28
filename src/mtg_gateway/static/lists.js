@@ -32,6 +32,7 @@
           span.textContent = n.toLocaleString("en");
           a.appendChild(span);
         });
+        showTab(); // the tabs before the current one grew: bring it back into view
       })
       .catch(function () { /* the counts stay blank */ });
   }

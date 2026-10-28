@@ -17,6 +17,8 @@ import re
 import httpx
 import pytest
 
+from mtg_gateway import account_lists
+
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import _chromium, _page
 from .test_deck_custom_cards import _custom
@@ -289,12 +291,15 @@ def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) ->
 
     sid = _link(server)
     exe = _chromium()
+    account_lists.forget_counts("user-1")
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
         page.wait_for_timeout(300)
         tabs = page.locator(".lp-tabs a")
         assert tabs.count() == 5
+        # a first visit draws the open tab's count; the other four arrive after the page has drawn
+        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 5")
         tops = [_rect(tabs.nth(i))["t"] for i in range(5)]
         heights = [_rect(tabs.nth(i))["h"] for i in range(5)]
         if width < 600:

@@ -197,9 +197,19 @@ async def test_the_package_panels_budget_sits_in_the_controls_column(member: Bro
 
 
 async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None:
+    """Since 0.7.46 (audit SH-03, My lists draws at once) a first visit draws the open tab's count
+    and the tab bar asks the other four after the page is there (data-counts, static/lists.js):
+    that answer has a number for every tab's link."""
     account_lists.forget_counts("user-1")
     page = (await member.http.get("/lists/pins")).text
     tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", page).group(0)
+    assert "Pinned cards<span class='n'>" in tabs and "data-counts='/lists/api/counts'" in tabs, tabs
+    links = re.findall(r"<a href='/lists/([a-z]+)'", tabs)
+    got = (await member.http.get("/lists/api/counts")).json()
+    assert len(links) == 5 and sorted(got["counts"]) == sorted(links), (links, got)
+    assert all(isinstance(n, int) for n in got["counts"].values()), got
+    again = (await member.http.get("/lists/pins")).text
+    tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", again).group(0)
     assert tabs.count("<span class='n'>") == 5, tabs
 
 
