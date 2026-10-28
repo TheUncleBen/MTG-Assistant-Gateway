@@ -72,6 +72,11 @@ class FakeIdP:
         # touching userinfo or the default behaviour.
         self.id_token_claims: dict[str, object] = {}
         self.id_token_omit: set[str] = set()
+        # When the person last entered credentials here: set by an authorize request with
+        # prompt=login (unless honours_prompt_login is off) and sent as the ID token's auth_time.
+        # None sends no auth_time, as before.
+        self.honours_prompt_login = True
+        self.auth_time: int | None = None
         # "HS256" signs the ID token with the client secret, as Authentik does when the provider
         # has no Signing Key.
         self.id_token_alg = "RS256"
@@ -132,6 +137,8 @@ class FakeIdP:
         assert q["client_id"] == CLIENT_ID
         assert q["code_challenge_method"] == "S256"
         code = secrets.token_urlsafe(16)
+        if q.get("prompt") == "login" and self.honours_prompt_login:
+            self.auth_time = int(time.time())
         self.pending[code] = q
         return RedirectResponse(f"{q['redirect_uri']}?{urlencode({'code': code, 'state': q['state']})}", 302)
 
@@ -183,6 +190,7 @@ class FakeIdP:
             "nonce": q["nonce"],
             **{k: v for k, v in self.user.items() if k not in self.id_token_omit},
             **self._uploaded_claims(str(self.user["sub"]), full=False),
+            **({"auth_time": self.auth_time} if self.auth_time is not None else {}),
             **self.id_token_claims,
         }
         if self.id_token_alg == "HS256":

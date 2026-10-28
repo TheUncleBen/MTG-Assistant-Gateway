@@ -1,6 +1,7 @@
 package local.mtgassistantgateway.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -80,6 +81,44 @@ class BrowserSignInTest {
             "evil://signin?code=$code",
         )) {
             assertNull(bad, BrowserSignIn.codeOfSchemeReturn(bad))
+        }
+    }
+
+    @Test fun anAuthTabReturnsOnlyOnThePlainHttpsGateway() {
+        assertEquals("mtg.example.com", BrowserSignIn.authTabHost("https://mtg.example.com"))
+        for (bad in listOf("http://mtg.example.com", "https://mtg.example.com:8443", "https://u@mtg.example.com", "https://mtg.example.com/x", "not a url", "")) {
+            assertNull(bad, BrowserSignIn.authTabHost(bad))
+        }
+    }
+
+    @Test fun onlyTheGatewaysReturnAddressWithAWellFormedCodeCounts() {
+        val g = "https://mtg.example.com"
+        val code = "a".repeat(43)
+        assertEquals(code, BrowserSignIn.codeOfReturn(g, "$g/login/app-return?code=$code"))
+        for (bad in listOf(
+            null,
+            "https://evil.test/login/app-return?code=$code",
+            "http://mtg.example.com/login/app-return?code=$code",
+            "https://mtg.example.com:444/login/app-return?code=$code",
+            "https://u@mtg.example.com/login/app-return?code=$code",
+            "$g/login/app-returns?code=$code",
+            "$g/login/app-return?code=short",
+            "$g/login/app-return?code=$code&code=$code",
+            "$g/login/app-return?x=1&code=$code",
+            "$g/login/app-return",
+            "mtgassistant-signin://signin?code=$code",
+        )) {
+            assertNull(bad, BrowserSignIn.codeOfReturn(g, bad))
+        }
+        assertNull(BrowserSignIn.codeOfReturn("https://mtg.example.com:8443", "https://mtg.example.com:8443/login/app-return?code=$code"))
+    }
+
+    @Test fun aRefusedSchemeLegCarriesNoCodeAndIsKnownAsRefused() {
+        assertEquals("mtgassistant-signin://signin?error=sign_in_not_fresh", BrowserSignIn.SCHEME_REFUSED)
+        assertTrue(BrowserSignIn.isSchemeRefusal(BrowserSignIn.SCHEME_REFUSED))
+        assertNull(BrowserSignIn.codeOfSchemeReturn(BrowserSignIn.SCHEME_REFUSED))
+        for (other in listOf(null, "mtgassistant-signin://signin?code=${"a".repeat(43)}", "evil://signin?error=sign_in_not_fresh")) {
+            assertFalse(other.toString(), BrowserSignIn.isSchemeRefusal(other))
         }
     }
 

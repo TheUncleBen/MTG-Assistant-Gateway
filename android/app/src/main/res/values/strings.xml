@@ -68,6 +68,7 @@
     <string name="download_signed_out">Your sign-in has ended. Reload the page, sign in again and retry the download.</string>
     <string name="no_app_for_link">No app can open that link.</string>
     <string name="sign_in_no_browser">No browser is installed to sign in with. Use “Sign in inside the app instead” on the page.</string>
+    <string name="sign_in_finish_in_browser">The browser didn\'t ask you to sign in again, so finish signing in there and tap “Open the MTG Assistant Gateway app”.</string>
     <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
     <string name="camera_permission_settings">The camera is off for this app. Allow Camera under Permissions, then try again.</string>

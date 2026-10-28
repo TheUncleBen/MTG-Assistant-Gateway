@@ -22,9 +22,10 @@ from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from .fake_archidekt_account import AccountFake
 
 
-def _now_iso() -> str:
-    """The time now as Archidekt writes it: UTC, with microseconds and a "Z"."""
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+def _now_iso(ago: float = 0.0) -> str:
+    """The time now (less ``ago`` seconds) as Archidekt writes it: UTC, with microseconds and a "Z"."""
+    then = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=ago)
+    return then.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_deck.csv"
@@ -567,7 +568,9 @@ class FakeArchidekt:
                     # N" from it and loads children while fewer are held)
                     "childrenCount": len([c for c in self.comments.get(tid, []) if c["parent"] == tid]),
                     "points": 3,
-                    "recentPost": {"createdAt": "2026-10-20T10:00:00Z", "owner": {"username": t["owner"]}},
+                    # two hours before now, so the list reads "2 h ago" whatever the day (a fixed date
+                    # turned into a plain date a week later)
+                    "recentPost": {"createdAt": _now_iso(ago=7200), "owner": {"username": t["owner"]}},
                 }
                 for tid, t in self.forum_threads.items()
                 if t["section"] == parts[2] and params.get("q", "").lower() in t["title"].lower()

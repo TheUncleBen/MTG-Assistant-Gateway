@@ -274,9 +274,11 @@ else your gateway serves. A few things are native:
   whose default is Samsung Internet the sign-in opens in Chrome if Chrome is
   installed. With no such browser, the last page opens the app by itself
   where the browser allows it; otherwise tap **Open the MTG Assistant Gateway
-  app** there. The sign-in service always asks you to sign in for the app
-  (your passkey, say), even when the browser is still signed in to it. The
-  browser itself stays signed out of the gateway.
+  app** there. If the browser is already signed in to the sign-in service,
+  you may not be asked anything. Only when the browser can't confirm the app
+  belongs to the gateway does the app try once more in a way where the sign-in
+  service asks you to sign in (your passkey, say). The browser itself stays
+  signed out of the gateway.
   Whether a passkey or autofill works is up to your browser and password
   manager: if it works on the website in that browser, it works here. If you
   would rather sign in inside the app, the sign-in page has a link for that;
@@ -714,18 +716,24 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
   each sign-in, keeps it on the phone, and sends only its SHA-256 with the
   browser's `/login`. After the sign-in service, the gateway sets no cookie in
-  the browser and keeps a one-time code for two minutes. Where a browser on
-  the phone has Auth Tabs, the app opened the sign-in in one on its own
-  scheme, and the gateway sends the browser to
-  `mtgassistant-signin://signin?code=...`: the Auth Tab hands that address to
-  the app that opened it and closes, with no Digital Asset Links check, so it
-  works whatever address the gateway has. Any app could open such an Auth Tab
-  at the gateway's `/login` with a secret of its own, so for these sign-ins the
-  gateway always asks the sign-in service to make you sign in (`prompt=login`):
-  no app gets a code without you signing in on the sign-in service's page.
-  Otherwise the gateway sends the browser to `/login/app-return?code=...` on
-  its own address, a page that opens the app once by itself (where the browser
-  allows) through an `intent:` link naming the app's package ID, so Android
+  the browser and keeps a one-time code for two minutes, and sends the browser
+  to `/login/app-return?code=...` on its own address. Where a browser on the
+  phone has Auth Tabs, the app opened the sign-in in one that returns on that
+  address: the browser hands it back, and closes, only to the app the
+  gateway's `/.well-known/assetlinks.json` names (Digital Asset Links), so no
+  other app gets the code. Only if the browser reports that it could not
+  verify the app (or the gateway's address has a port, which an Auth Tab can't
+  return on) does the app try again with an Auth Tab on its own scheme, which
+  gets `mtgassistant-signin://signin?code=...` back with no such check. Any
+  app could open that kind of Auth Tab at the gateway's `/login` with a secret
+  of its own, so for these sign-ins the gateway asks the sign-in service to
+  make you sign in (`prompt=login`), and does not take its word for it: the
+  sign-in service's ID token must say you signed in after that try started
+  (`auth_time`, with a minute allowed for clocks that differ). If it doesn't,
+  or the sign-in service sends no `auth_time`, the gateway makes no code and
+  the app finishes in a Custom Tab instead.
+  In a Custom Tab, `/login/app-return?code=...` is a page that opens the app
+  once by itself (where the browser allows) through an `intent:` link naming the app's package ID, so Android
   hands it only to the installed app with that ID, and keeps a button for it;
   that relies on the browser honouring the package in `intent:` links, which
   Chrome does (other browsers not checked). The one-time code is in these

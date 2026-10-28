@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -13,7 +14,7 @@ import httpx
 import pytest
 
 from mtg_gateway.app_page import app_package
-from mtg_gateway.app_signin import RETURN_PATH, AppSignins, challenge_of, intent_url
+from mtg_gateway.app_signin import FRESH_SKEW, RETURN_PATH, AppSignins, challenge_of, intent_url
 
 from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
 
@@ -238,6 +239,9 @@ async def test_the_callback_returns_through_the_gateways_own_address(harness: Ha
     _v, challenge = pair()
     async with client(harness) as browser:
         r = await browser.get("/login", params={"next": "/decks", "app_challenge": challenge})
+        # the app's first try: the verified https Auth Tab, which needs no new sign-in at the
+        # identity provider (only the app assetlinks.json names gets this address back)
+        assert "prompt" not in parse_qs(urlparse(r.headers["location"]).query)
         cb = urlparse(await harness.idp_leg(r))
         back = await browser.get(f"{cb.path}?{cb.query}")
         assert back.status_code == 303, back.text
@@ -296,7 +300,7 @@ async def test_assetlinks_vouch_for_the_bundled_app_without_a_setting(
         assert (await web.get("/.well-known/assetlinks.json")).json() == []
 
 
-# -- 0.7.46: the app's own scheme, so the Auth Tab comes back without Digital Asset Links ---------
+# -- 0.7.46: the retry on the app's own scheme, when Digital Asset Links can't verify the app -------
 async def scheme_leg(h: Harness, browser: httpx.AsyncClient, challenge: str, next_path: str = "/decks"):
     r = await browser.get(
         "/login", params={"next": next_path, "app_challenge": challenge, "app_return": "scheme"}
@@ -306,7 +310,7 @@ async def scheme_leg(h: Harness, browser: httpx.AsyncClient, challenge: str, nex
 
 
 async def test_a_sign_in_started_for_the_apps_scheme_comes_back_by_itself(harness: Harness) -> None:
-    """The app's Auth Tab names its own scheme (mtgassistant-signin): the callback ends the browser
+    """The app's retry names its own scheme (mtgassistant-signin): the callback ends the browser
     leg with a redirect there, which the Auth Tab hands to the app that opened it and closes, no
     tap and no assetlinks.json. The code is the same one-time code, bound to the app's challenge."""
     verifier, challenge = pair()
@@ -348,6 +352,44 @@ async def test_only_the_apps_scheme_can_be_asked_for(harness: Harness) -> None:
         # and only with the app's challenge: a plain browser sign-in has no code to hand over
         r = await browser.get("/login", params={"next": "/", "app_return": "scheme"})
         assert r.status_code == 302 and "app_return" not in r.headers["location"]
+
+
+async def test_a_scheme_leg_needs_a_sign_in_made_after_it_started(harness: Harness, idp: FakeIdP) -> None:
+    """The gateway does not rely on the identity provider honouring prompt=login: the ID token's
+    auth_time must be no older than the leg (a minute's clock skew allowed). Without it the leg
+    ends on the app's scheme with no code at all, and the app finishes in a Custom Tab instead."""
+    idp.honours_prompt_login = False  # a provider that passes the browser straight through
+    for auth_time in (None, int(time.time()) - 3600, int(time.time()) - FRESH_SKEW - 30):
+        idp.auth_time = auth_time
+        _v, challenge = pair()
+        async with client(harness) as browser:
+            _start, back = await scheme_leg(harness, browser, challenge)
+            assert back.status_code == 303, back.text
+            assert back.headers["location"] == "mtgassistant-signin://signin?error=sign_in_not_fresh"
+            assert back.headers["cache-control"] == "no-store"
+            assert "mtg_session=" not in back.headers.get("set-cookie", "")
+        assert not harness.app.state.gateway.app_signins._codes, auth_time  # no code was made for anyone
+
+    # a sign-in at the provider within the skew counts (clocks differ a little)
+    verifier, challenge = pair()
+    idp.auth_time = int(time.time()) - FRESH_SKEW + 20
+    async with client(harness) as browser, client(harness) as app:
+        _start, back = await scheme_leg(harness, browser, challenge)
+        (code,) = parse_qs(urlparse(back.headers["location"]).query)["code"]
+        done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
+        assert done.status_code == 303 and "mtg_session=" in done.headers["set-cookie"]
+
+
+async def test_the_https_leg_needs_no_auth_time(harness: Harness, idp: FakeIdP) -> None:
+    """The first try (the verified https Auth Tab, or a Custom Tab) asks for no new sign-in and so
+    checks no auth_time: the address it returns on reaches only the app assetlinks.json names, or
+    the page whose button opens only the app's package."""
+    idp.honours_prompt_login = False
+    idp.auth_time = int(time.time()) - 86400
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)
+        assert page.status_code == 200 and code_from(page)
 
 
 def test_the_app_can_see_the_browsers_that_offer_auth_tabs() -> None:
