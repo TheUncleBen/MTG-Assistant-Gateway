@@ -544,8 +544,11 @@ class MainActivity : ComponentActivity() {
 
     /** The Auth Tab's answer: registered before the activity starts, as Android requires. */
     private val authTab = AuthTabIntent.registerActivityResultLauncher(this) { onAuthTabResult(it) }
-    /** The sign-in the Auth Tab is running, to start again in a Custom Tab if it can't finish. */
-    private var authTabSignIn: Pair<String?, Boolean>? = null
+    /** The ways the browser's part can return, tried in this order ([BrowserSignIn]). */
+    private enum class SignInLeg { HTTPS_AUTH_TAB, SCHEME_AUTH_TAB, CUSTOM_TAB }
+    private data class AuthTabSignIn(val next: String?, val fresh: Boolean, val leg: SignInLeg)
+    /** The sign-in the Auth Tab is running, to start again the next way if it can't finish. */
+    private var authTabSignIn: AuthTabSignIn? = null
 
     /** The browser to open an Auth Tab in ([BrowserSignIn.pickAuthTabBrowser]), or null. */
     private fun authTabBrowser(): String? {
@@ -558,21 +561,29 @@ class MainActivity : ComponentActivity() {
         return browser
     }
 
-    private fun startBrowserSignIn(next: String?, fresh: Boolean, authTabAllowed: Boolean = true) {
+    private fun startBrowserSignIn(next: String?, fresh: Boolean, first: SignInLeg = SignInLeg.HTTPS_AUTH_TAB) {
         val verifier = BrowserSignIn.newVerifier()
         prefs.setPendingSignIn(origin, verifier, System.currentTimeMillis())
         val challenge = BrowserSignIn.challengeOf(verifier)
-        val browser = if (authTabAllowed) authTabBrowser() else null
+        val browser = if (first != SignInLeg.CUSTOM_TAB) authTabBrowser() else null
         if (browser != null) {
+            // First the Auth Tab on the gateway's own https address, which the browser returns
+            // only to this app (Digital Asset Links); the one on this app's scheme only as a retry,
+            // or when the address can't take an https return (the gateway then asks for a new
+            // sign-in at the identity provider).
+            val host = if (first == SignInLeg.HTTPS_AUTH_TAB) BrowserSignIn.authTabHost(origin) else null
+            val leg = if (host != null) SignInLeg.HTTPS_AUTH_TAB else SignInLeg.SCHEME_AUTH_TAB
+            if (first == SignInLeg.HTTPS_AUTH_TAB && host == null) {
+                Log.i(TAG, "sign-in: the gateway's address can't take an https Auth Tab return; the app's scheme instead")
+            }
             try {
-                // Returns, and closes itself, once the gateway sends it to this app's own scheme:
-                // no Digital Asset Links check, so it works whatever address the gateway has.
-                val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, schemeReturn = true))
+                val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, schemeReturn = host == null))
                 val tab = AuthTabIntent.Builder().build()
                 tab.intent.setPackage(browser)
-                tab.launch(authTab, url, BrowserSignIn.SCHEME)
-                authTabSignIn = next to fresh
-                Log.i(TAG, "sign-in: Auth Tab opened in $browser")
+                if (host != null) tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
+                else tab.launch(authTab, url, BrowserSignIn.SCHEME)
+                authTabSignIn = AuthTabSignIn(next, fresh, leg)
+                Log.i(TAG, "sign-in: Auth Tab ($leg) opened in $browser")
                 return
             } catch (e: ActivityNotFoundException) {
                 Log.i(TAG, "sign-in: Auth Tab could not open in $browser; a Custom Tab instead")
@@ -590,17 +601,29 @@ class MainActivity : ComponentActivity() {
     private fun onAuthTabResult(result: AuthTabIntent.AuthResult) {
         val started = authTabSignIn
         authTabSignIn = null
-        Log.i(TAG, "sign-in: Auth Tab result ${result.resultCode}")
+        Log.i(TAG, "sign-in: Auth Tab (${started?.leg}) result ${result.resultCode}")
         when (result.resultCode) {
             AuthTabIntent.RESULT_OK -> {
-                val code = BrowserSignIn.codeOfSchemeReturn(result.resultUri?.toString())
-                if (code != null) finishBrowserSignIn(code)
-                else Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+                val returned = result.resultUri?.toString()
+                val code = BrowserSignIn.codeOfReturn(origin, returned) ?: BrowserSignIn.codeOfSchemeReturn(returned)
+                when {
+                    code != null -> finishBrowserSignIn(code)
+                    BrowserSignIn.isSchemeRefusal(returned) -> {
+                        // The gateway saw no new sign-in on the scheme leg, so it gave no code.
+                        Log.i(TAG, "sign-in: the gateway refused the scheme return; a Custom Tab instead")
+                        Toast.makeText(this, getString(R.string.sign_in_finish_in_browser), Toast.LENGTH_LONG).show()
+                        started?.let { startBrowserSignIn(it.next, it.fresh, SignInLeg.CUSTOM_TAB) }
+                    }
+                    else -> Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+                }
             }
-            // An Auth Tab on a scheme is never verified, so these should not come; if one does, the
-            // same sign-in in a Custom Tab, ending on the page that opens the app.
-            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->
-                started?.let { (next, fresh) -> startBrowserSignIn(next, fresh, authTabAllowed = false) }
+            // The browser could not verify this app for the gateway's address: the same sign-in on
+            // this app's scheme; and should that report it too, in a Custom Tab.
+            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT -> started?.let {
+                val nextLeg = if (it.leg == SignInLeg.HTTPS_AUTH_TAB) SignInLeg.SCHEME_AUTH_TAB else SignInLeg.CUSTOM_TAB
+                Log.i(TAG, "sign-in: Auth Tab could not verify the app; trying $nextLeg")
+                startBrowserSignIn(it.next, it.fresh, nextLeg)
+            }
             else -> Unit // closed by the person: nothing to finish
         }
     }

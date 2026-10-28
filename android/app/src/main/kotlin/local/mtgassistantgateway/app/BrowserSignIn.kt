@@ -15,13 +15,17 @@ import java.util.Base64
  * 2. The app keeps a random verifier and opens [startUrl] (with the verifier's SHA-256) in a
  *    Custom Tab; the person signs in at the identity provider there.
  * 3. Where a browser on the phone has an Auth Tab ([pickAuthTabBrowser]: the default browser,
- *    else Chrome, else any other that has one), the app opened the sign-in in one on its own
- *    scheme ([SCHEME_RETURN]): the gateway ends the browser's part with
- *    `mtgassistant-signin://signin?code=...`, which the Auth Tab hands back to this app and
- *    closes, with no tap and no Digital Asset Links check ([codeOfSchemeReturn]). Otherwise, in a
- *    Custom Tab, the gateway sends the browser to [RETURN_PATH]`?code=...` on its own address,
- *    whose page opens `mtgassistant-signin://signin?code=...` through an `intent:` link naming
- *    this app's package, once by itself where the browser allows and else on a tap.
+ *    else Chrome, else any other that has one), the app opens the sign-in in one that returns on
+ *    the gateway's own https address ([authTabHost], [RETURN_PATH]): the browser checks the
+ *    gateway's Digital Asset Links (assetlinks.json names this app), hands the address back and
+ *    closes, with no tap ([codeOfReturn]). Only when the browser reports that check failed or
+ *    timed out, or the gateway's address can't take an https return, does the app try again in
+ *    an Auth Tab on its own scheme ([SCHEME_RETURN], [codeOfSchemeReturn]); the gateway then asks
+ *    the identity provider for a new sign-in and gives a code only when the ID token shows one,
+ *    else it returns [isSchemeRefusal]'s address and the app finishes in a Custom Tab. In a
+ *    Custom Tab the gateway's page opens `mtgassistant-signin://signin?code=...` through an
+ *    `intent:` link naming this app's package, once by itself where the browser allows and else
+ *    on a tap.
  * 4. The app posts the code with its verifier to [FINISH_PATH] in the WebView, which gets the
  *    session cookie. A code is worthless without the verifier, which never leaves this app.
  *
@@ -33,7 +37,7 @@ object BrowserSignIn {
     const val FINISH_PATH = "/login/app"
     /** Where the gateway hands the code back to a Custom Tab (app_signin.RETURN_PATH). */
     const val RETURN_PATH = "/login/app-return"
-    /** Asks the gateway to end the browser's part on [SCHEME] instead (app_signin.SCHEME_RETURN). */
+    /** The retry: asks the gateway to end the browser's part on [SCHEME] (app_signin.SCHEME_RETURN). */
     const val SCHEME_RETURN = "scheme"
     /** Preferred when the default browser has no Auth Tab. */
     const val CHROME = "com.android.chrome"
@@ -70,6 +74,37 @@ object BrowserSignIn {
         val others = installed.filter { it != default }.distinct()
         return others.firstOrNull { it == CHROME && hasAuthTab(it) } ?: others.firstOrNull { it != CHROME && hasAuthTab(it) }
     }
+
+    /**
+     * The host an Auth Tab returns on: the gateway's own, when [origin] is plain `https://host`.
+     * Null (the Auth Tab on [SCHEME] instead) for anything else, a port included: an Auth Tab
+     * matches a host and a path only.
+     */
+    fun authTabHost(origin: String): String? {
+        val uri = try { URI(origin) } catch (e: URISyntaxException) { return null }
+        val host = uri.host ?: return null
+        return if (uri.scheme == "https" && uri.port == -1 && (uri.rawPath ?: "").isEmpty() && uri.rawQuery == null &&
+            uri.rawUserInfo == null) host else null
+    }
+
+    /** The one-time code from the address an Auth Tab returned, or null when it isn't [RETURN_PATH] on [origin]. */
+    fun codeOfReturn(origin: String, returned: String?): String? {
+        val host = authTabHost(origin) ?: return null
+        val uri = try { URI(returned ?: return null) } catch (e: URISyntaxException) { return null }
+        if (uri.scheme != "https" || uri.host != host || uri.port != -1 || uri.rawUserInfo != null || uri.rawPath != RETURN_PATH) {
+            return null
+        }
+        val params = (uri.rawQuery ?: "").split('&').filter { it.isNotEmpty() }
+        if (params.size != 1 || !params[0].startsWith("code=")) return null
+        val code = params[0].removePrefix("code=")
+        return if (CODE.matches(code)) code else null
+    }
+
+    /** The address the gateway ends a scheme leg on when it saw no new sign-in (app_signin.SCHEME_REFUSED). */
+    const val SCHEME_REFUSED = "$SCHEME://$HOST?error=sign_in_not_fresh"
+
+    /** Whether an Auth Tab on [SCHEME] came back refused: no code, so finish in a Custom Tab. */
+    fun isSchemeRefusal(returned: String?): Boolean = returned == SCHEME_REFUSED
 
     /** The one-time code from the address an Auth Tab on [SCHEME] returned, or null when it isn't ours. */
     fun codeOfSchemeReturn(returned: String?): String? {
