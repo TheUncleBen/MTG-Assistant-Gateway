@@ -36,6 +36,7 @@ from .pages import (
     read_limited,
 )
 from .theme import display_name, icon, plural, render
+from .timing import SLOW_REQUEST_SECONDS, speed_log
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -990,8 +991,63 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         "<div class='adm ao'>"
         + _head("Admin: overview", "Members, the last 30 days and the system.", "/admin")
         + ui.widgets(widgets)
-        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}{by_day_card}</div></div></div>"
+        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}"
+        f"{_speed_card(speed_log.summary(now))}{by_day_card}</div></div></div>"
     )
+
+
+SPEED_ROUTES = 5  # the slowest pages the Speed card lists
+
+
+def _seconds(value: float) -> str:
+    return f"{value:.1f} s" if value < 60 else f"{value / 60:.1f} min"
+
+
+def _speed_why(r: Mapping[str, Any]) -> str:
+    """Why a page was slow, from where its time went (timing.SpeedLog.summary's route row)."""
+    if r["failures"]:
+        n = r["failures"]
+        return f"Archidekt failed or asked to slow down {n} time{'' if n == 1 else 's'}"
+    if r["pacer"] >= 0.5 and r["pacer"] >= r["archidekt"]:
+        return "mostly waiting for a turn with Archidekt (the shared pacing)"
+    if r["archidekt"] >= 0.5:
+        return "mostly Archidekt answering slowly"
+    return "the gateway itself"
+
+
+def _speed_card(d: Mapping[str, Any]) -> str:
+    """Admin's "Speed, last 24 h" card (owner decision, 0.7.46): page views, the slow ones, and
+    where their time went (the shared pacer's waits, Archidekt's answers, Archidekt's failures).
+    Pages by their address pattern only: never a member, a deck or a query."""
+    head = (
+        "<section class='ui-card' id='speed' aria-labelledby='speed-h'><h2 id='speed-h'>Speed, last 24 h</h2>"
+    )
+    since = _dt.datetime.fromtimestamp(d["since"], tz=_dt.UTC).strftime("%d %b %H:%M UTC")
+    foot = (
+        f"<p class='muted small' style='margin:.5rem 0 0'>Since {html.escape(since)}, kept in memory: "
+        "a restart starts it again. A page that drew its frame first counts when its content was there.</p>"
+    )
+    if not d["views"]:
+        return head + "<p class='muted'>No page views yet.</p>" + foot + "</section>"
+    slow = int(d["slow"])
+    rows = _row(
+        "Page views",
+        f"{d['views']:,}, {slow:,} slower than {SLOW_REQUEST_SECONDS:g} s",
+    ) + _row(
+        "Where the time went",
+        f"{_seconds(d['pacer'])} waiting for a turn with Archidekt, {_seconds(d['archidekt'])} "
+        f"Archidekt answering, {d['failures']:,} failed Archidekt call{'' if d['failures'] == 1 else 's'}",
+    )
+    listed = [r for r in d["routes"] if r["max"] >= 1.0][:SPEED_ROUTES]
+    for r in listed:
+        rows += _row(
+            r["route"],
+            f"{_seconds(r['p95'])} for 95 in 100 views, at most {_seconds(r['max'])}; {_speed_why(r)}",
+            note=f"{r['views']:,} view{'' if r['views'] == 1 else 's'}",
+        )
+    if not listed:
+        rows += "<p class='muted'>No page took a second or more.</p>"
+    return head + rows + foot + "</section>"
 
 
 def _update_state_text(u: dict[str, Any]) -> str:
@@ -1131,7 +1187,8 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
     )
     counts = (
         f"{a['requests']} sent, {a['cache_hits']} answered from cache, {a['retries']} retried, "
-        f"{a['rate_limited']} slowed down by Archidekt"
+        f"{a['rate_limited']} slowed down by Archidekt, {a.get('shared', 0)} shared with the same read "
+        "under way"
     )
     return _row("Archidekt request limits", limits) + _row("Archidekt requests since start", counts)
 

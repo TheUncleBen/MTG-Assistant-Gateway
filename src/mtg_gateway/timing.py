@@ -121,7 +121,7 @@ class SpeedLog:
         return list(self._rows)
 
     def summary(self, now: float | None = None, *, slow: float = SLOW_REQUEST_SECONDS) -> dict[str, Any]:
-        """Totals and the slowest routes by their 95th percentile, with why they were slow."""
+        """Totals and the routes, those with the most slow views first, with where their time went."""
         rows = self.rows(now)
         by_route: dict[str, list[PageTime]] = {}
         for r in rows:
@@ -142,7 +142,7 @@ class SpeedLog:
                     "failures": sum(r.failures for r in rs),
                 }
             )
-        routes.sort(key=lambda r: r["p95"], reverse=True)
+        routes.sort(key=lambda r: (r["slow"], r["max"]), reverse=True)  # the most slow views first
         return {
             "views": len(rows),
             "slow": sum(1 for r in rows if r.seconds > slow),
