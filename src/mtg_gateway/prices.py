@@ -160,6 +160,11 @@ def _card_keys(card: dict[str, Any]) -> list[tuple[str, ...]]:
     return keys
 
 
+# Where a watched deck's value comes from, said beside it: deck_stats' price_total is Archidekt's.
+DECK_VALUE_SOURCE = (
+    "Scryfall's daily prices (TCGplayer's, in US dollars) for the printing and finish of each card"
+)
+
 # Beside a card watched by name alone (no set): which printing its price is.
 FOLLOWS_NAME = (
     "the printing Scryfall gives for the name, which can change; watch a set and collector number "
@@ -260,6 +265,7 @@ class PriceService:
             "name": d["deck_name"],
             "cards": sum(int(c.get("qty") or 0) for c in cards),
             "currency": "usd",
+            "price_source": DECK_VALUE_SOURCE,
             **self._changes([(r["day"], r["usd"]) for r in rows]),
             "history": [{"day": r["day"], "price": r["usd"], "eur": r["eur"]} for r in rows],
             "refreshed_at": d.get("refreshed_at"),

@@ -801,3 +801,15 @@ async def test_a_card_watched_by_name_says_which_printing_is_priced(stack: Stack
     assert "Scryfall gives for the name" in watch["follows"], watch
     listed = structured(await call(stack.h, token, "list_watchlist"))
     assert "Scryfall gives for the name" in listed["cards"][0]["follows"], listed
+
+
+async def test_both_deck_prices_name_their_source(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28): watch_deck and deck_stats gave two prices for one deck
+    with nothing to say why."""
+    b = await _browser(stack, link=True)
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    deck = structured(await call(stack.h, token, "watch_deck", {"deck_id": "42"}))["deck"]
+    stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))
+    found = stats["stats"]
+    assert "Scryfall" in deck["price_source"] and "Archidekt" in found["price_source"], (deck, found)
