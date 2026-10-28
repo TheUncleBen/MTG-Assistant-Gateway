@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field
 
 from . import card_models, deck_stats
-from .app import AppState, _tool_error
+from .app import AppState, _tool_error, token_may_write
 from .archidekt import parse_deck
 from .decklist import DecklistError, clean_text, parse_decklist, to_text
 from .decks import (
@@ -181,7 +181,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
             "comparison of two decks. A simulated comparison is stored as one of the user's reports "
             "(source Comparison, on their Reports page; report_id in the result), filed under deck a "
-            "when it is a deck. Forge seats each deck against precons of its own bracket, so two "
+            "when it is a deck (not for an app connected read-only). Forge seats each deck against "
+            "precons of its own bracket, so two "
             "decks' Forge win rates (one run_deck_report each) are each against their own bracket's table, "
             "even with the same options.seed; for the same table, run deck a's report with compare_with "
             "set to deck b (opponents for the higher of the two decks' brackets, so the order doesn't "
@@ -271,7 +272,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "message": "the research service is not configured on this gateway",
             }
             failed = _simulation_failure(out["goldfish_ab"])
-            if not failed:
+            if not failed and not token_may_write():
+                out["stored"] = False  # a read-only app (mtg.read) compares but keeps nothing
+            elif not failed:
                 try:
                     kept = await _store_comparison(deck_a, text_a, deck_b, out["goldfish_ab"])
                 except DeckError as exc:
