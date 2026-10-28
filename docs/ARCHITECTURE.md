@@ -239,7 +239,8 @@ For the exact devices and plans tested, see
   will send the sign-in, with Approve and Deny, before the identity
   provider is involved. An identity provider that signs people in silently
   can't skip it. An app can ask for the read-only scope `mtg.read`; its
-  token can then read but never propose, apply or store anything.
+  token can then read but never propose or apply, and stores nothing but
+  its deck comparisons (kept as reports labelled with the app).
 - **Sign-out.** **Sign out on all my devices** (on the `/logout` page)
   ends every browser and Android app session. For an hour after signing out, a sign-in on that
   device asks the identity provider for the password again, so a shared

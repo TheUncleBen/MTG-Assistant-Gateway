@@ -754,7 +754,10 @@ longer be applied. A member may hold at most 100 pending proposals in all.
 An app connected with the read-only scope `mtg.read` can read decks,
 proposals, snapshots, reports and the collection but can't propose (deck or
 collection changes), apply, confirm, reject, run reports or save scans
-(`insufficient_scope`).
+(`insufficient_scope`). The one thing it keeps is a deck comparison with a
+paired simulation (`compare_decks` with `simulate`): stored as a report in the
+gateway's own database, labelled with the app's name. It changes nothing on
+Archidekt; `run_deck_report` stays a write tool.
 
 ### Archidekt rate limiting
 

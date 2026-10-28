@@ -45,7 +45,7 @@ A change to one of your decks keeps a snapshot first. Deck and collection change
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts (0.7.24: one legality engine, the deck page's, for every legality figure; the curve, average, grouping, sorting and draw odds use a card's custom mana value when the deck sets one; whether archidekt.com does the same in its own curve is not confirmed) | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the A/B takes two Commander decks or two 60-card decks; the deck page's Compare view is the hand path |
-| Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats and validation (a pasted list is returned, not stored); trends across a deck's reports | `run_deck_report` (+ `list_deck_reports` with its `trend`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; a Commander deck plays from the command zone at 40 life, a deck without a commander and with 60 or more cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper...) plays a 60-card game (0.7.23: 20 life, London mulligan with no free one, on the play, sideboard left out); Forge games (Commander decks) seat precons of the deck's bracket and say why (0.7.23); the deck page's Run full test is the hand path, its History page draws the trends |
+| Solo test (300 games, no opponents) of one deck or pasted list, stored with its stats, validation and the exact list it played (a pasted list too, filed under no deck); trends across a deck's reports | `run_deck_report` (+ `list_deck_reports` with its `trend`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; a Commander deck plays from the command zone at 40 life, a deck without a commander and with 60 or more cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper...) plays a 60-card game (0.7.23: 20 life, London mulligan with no free one, on the play, sideboard left out); Forge games (Commander decks) seat precons of the deck's bracket and say why (0.7.23); the deck page's Run full test is the hand path, its History page draws the trends |
 | Play more Forge games for a report whose games have finished, against the same opponents (on a comparison, both decks get the same number) | `play_more_games` | starts Forge games | the report page's Play more games button is the hand path, with the same rules: up to 50 games a report, and nothing starts when the member's Forge queue is full |
 | Draw odds; what the engine models for a deck | `goldfish_odds`, `goldfish_annotate` (Mystic Forge) | no | annotations feed `run_deck_report`; the deck page's Probability of draw is the hand path to the same odds |
 | Validate a pasted list that is not a deck yet | `validate_decklist` (Mystic Forge) | no | an Archidekt deck's checks are in `deck_stats` |
@@ -165,9 +165,13 @@ tools.
   a read-back, an audit row. The review page and the in-chat card open the
   same proposal. Reports started from a deck's Test and play button (Run
   full test or Solo test only) and from `run_deck_report` are the same
-  reports on the same History page.
+  reports on the same Reports page. The website starts every kind of test an
+  assistant can: a stored deck, a pasted list (Reports), a waiting proposal
+  (its page's Test this change), a snapshot (Test this version under History)
+  and a paired A/B of two decks or a deck and its snapshot (Compare).
 - **Only the assistant does:** research lookups (Scryfall, EDHREC, combos,
-  rules), the paired goldfish A/B with the simulator's options, reading a card
+  rules), the paired goldfish A/B with the simulator's own options (the
+  Compare page runs it with the defaults), reading a card
   photo shared in the chat into names (the Scan page reads its own camera
   photos), proposing changes it worked out itself.
 - **Only a person plays:** the deck page's Goldfish, a game played by hand in

@@ -172,8 +172,22 @@ One deck:
   use the Compare page's Forge button (or your assistant asks for the same
   opponents), each deck meets precons picked for its own bracket (or
   Archidekt's estimate when none is set), so two decks' Forge
-  win rates are not a like-for-like comparison; the paired goldfish A/B, which
-  your assistant can run for the two decks, is.
+  win rates are not a like-for-like comparison; the paired solo test (A/B) on
+  the Compare page, which your assistant can run too, is.
+- Until Forge has played enough games for its win rate to mean something (its
+  95% interval at most 30 points wide), a report leads with the solo test and
+  the Forge widget says **Too few games to tell yet**; the Reports list shows
+  the number of games instead of a win rate.
+- Each report keeps the exact list it played (**Tested list**, with Copy).
+  When the deck has changed since, the report says what moved, and **Put this
+  list back (review first)** makes an ordinary proposal that puts the deck back
+  to that list: you review and confirm it on its page. **Since your last
+  test** compares the report's solo test numbers with the deck's test before
+  it and lists the cards that moved between them.
+- A waiting proposal's page has **Test this change**: the deck after the change
+  is played against the deck as it is now, game for game under the same seeds
+  (a paired solo test), and the page then shows what got better or worse and
+  whether each difference is clear or could be chance.
 - A report without Forge games (Forge not set up, a 60-card deck, a deck
   with no commander marked, Forge left out of the report, or too many of
   your reports already waiting for Forge) is labelled **Preflight only (no rules engine)**
@@ -190,8 +204,10 @@ One deck:
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what
   it put in, changed counts, basic lands, and the statistics' differences.
-  Tap a card name for the whole card. Your assistant makes the same
-  comparison when you ask it to compare two decks.
+  Tap a card name for the whole card. Your own decks and this deck's
+  snapshots are listed under the box to pick from. **Solo test both (A/B)**
+  plays the two decks game for game and keeps the result as a report. Your
+  assistant makes the same comparison when you ask it to compare two decks.
 - The **More** menu in the banner holds **Solo test only** (when the gateway
   runs Forge: the same run without the Forge games), Deck settings, Export
   deck, History and snapshots, **Delete deck**, Compare with another deck,
@@ -386,18 +402,25 @@ assistant applies what that mode allows, with a snapshot first for a change to o
   Apply sends nothing: ask your assistant to update it, or reject it. The
   check never changes a deck, a snapshot or your undo history, and it waits
   while you or your assistant are working.
-- **History** shows proposals, snapshots and deck reports over time.
+- **History** is your decks' timeline: the changes applied to them (restores
+  among them), their snapshots and their tests, with chips for each. A test
+  opens its report page, its one home; **Reports** is the list of every test
+  run. A snapshot's details have **Test this version**, which tests the deck
+  as the snapshot recorded it.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
 - **Reports** (under More) list your stored deck reports, newest first (the
   gateway keeps the newest 200), with what Forge has going for you now. Each holds
   the deck's statistics, a legality check, and the solo test, the Forge games
-  or both, so you can follow how a deck develops.
+  or both, so you can follow how a deck develops. **Test a pasted list**
+  at the foot of the page tests a list that is not one of your decks.
 - **Compare** has **Test both in Forge against the same opponents** when
   Forge is on and both decks have a commander: both decks play Forge games
   against the same three precons, picked for the higher of the two decks'
-  brackets, so it doesn't matter which deck you compare from.
+  brackets, so it doesn't matter which deck you compare from. The two then
+  open **Head to head**: both win rates side by side against the same table.
+  These games stay out of each deck's own trend.
 - The **Goldfish** page's **How to play** guide walks a first game step by
   step; you can hide it.
 
