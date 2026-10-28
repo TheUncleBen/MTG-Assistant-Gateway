@@ -576,6 +576,54 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _tool_error(exc)
 
+    _DELETE_NOTE = (
+        "Nothing is deleted until the user presses Delete in the box on that page; give them the "
+        "link. It can't be undone there, and nothing changes on Archidekt."
+    )
+
+    @server.tool(
+        name="propose_delete_report",
+        title="Ask to delete a stored report",
+        description=(
+            "Ask the user to delete one of their stored reports. It never deletes anything itself: it "
+            "checks the report is the user's and returns delete_url, the report's page with its "
+            "Delete box open, where only the user's own press deletes it. Use it only when the user "
+            "asked for the report to go."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_report(report_id: str) -> dict[str, object]:
+        try:
+            r = state.reports.get(_sub(), report_id)
+        except DeckError as exc:
+            return _tool_error(exc)
+        url = f"{state.settings.public_url}/history/reports/{r['report_id']}?box=delete"
+        return {"ok": True, "deleted": False, "delete_url": url, "message": _DELETE_NOTE}
+
+    @server.tool(
+        name="propose_delete_snapshot",
+        title="Ask to delete a snapshot",
+        description=(
+            "Ask the user to delete one of their snapshots (list_snapshots). It never deletes anything "
+            "itself: it returns delete_url, the snapshot's History details with the Delete box open, "
+            "where only the user's own press deletes it. A snapshot a waiting restore puts back, or one "
+            "that holds the record of a backup copy the gateway may still delete, can't be deleted: the "
+            "result says why. Use it only when the user asked for the snapshot to go."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_snapshot(snapshot_id: str) -> dict[str, object]:
+        sub = _sub()
+        sid = str(snapshot_id or "").strip()
+        sid = sid[5:] if sid.startswith("snap_") else sid
+        if not sid or state.db.get_snapshot(sid, sub) is None:
+            return {"ok": False, "error": "not_found", "message": "No such snapshot for your account."}
+        held = state.db.snapshot_held(sid, sub)
+        if held:
+            return {"ok": False, "error": "held", "message": held}
+        url = f"{state.settings.public_url}/history?open=s-{sid}&box=delete"
+        return {"ok": True, "deleted": False, "delete_url": url, "message": _DELETE_NOTE}
+
     @server.tool(
         name="play_more_games",
         title="Play more Forge games for a report",

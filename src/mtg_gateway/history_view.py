@@ -420,8 +420,47 @@ def events_html(
     return "".join(out)
 
 
-def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
-    """One row's Details: beside the list from 1100 px, its own page below that."""
+DELETED_NOTICES = {"report": "The report was deleted.", "snapshot": "The snapshot was deleted."}
+
+
+def delete_box_html(
+    what: str,
+    action: str,
+    csrf_input: str,
+    *,
+    box_id: str,
+    held: str = "",
+    open: bool = False,
+    close_href: str,
+) -> tuple[str, str]:
+    """(the red-outline Delete… opener, its confirm box) for one report or snapshot. ``held``: why
+    it can't be deleted now; the box then says so and has no Delete button."""
+    opener_href = close_href + ("&" if "?" in close_href else "?") + "box=delete"
+    opener = ui.box_opener("Delete…", opener_href, box_id, kind="danger")
+    if held:
+        body = f"<p>{_esc(held)}</p>"
+        actions = [ui.box_button("Close", cancel=True)]
+    else:
+        gone = (
+            "Its numbers leave your Reports and History pages and any deck trend it was part of."
+            if what == "report"
+            else "Restore can no longer put the deck back to it."
+        )
+        body = (
+            f"<form id='{box_id}f' class='inbox' method='post' action='{_esc(action)}'>{csrf_input}"
+            f"<p>{gone} This can't be undone. Nothing changes on Archidekt.</p></form>"
+        )
+        actions = [
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button(f"Delete {what}", kind="danger-solid", form=f"{box_id}f"),
+        ]
+    box = ui.box(box_id, f"Delete this {what}?", body, actions=actions, open=open, close_href=close_href)
+    return opener, box
+
+
+def details_panel(e: dict[str, Any], query: dict[str, Any], *, extra_html: str = "") -> str:
+    """One row's Details: beside the list from 1100 px, its own page below that. ``extra_html``
+    (a Delete opener and its box) goes under the row's own actions."""
     word = KIND_LABELS[e["kind"]][0]
     body = (
         f"<div class='pills'>{_type_html(e)}</div>"
@@ -436,6 +475,7 @@ def details_panel(e: dict[str, Any], query: dict[str, Any]) -> str:
             ]
         )
         + e["details"]
+        + extra_html
     )
     return ui.side_panel(
         _esc(f"{word}: {e['deck_name']}"),

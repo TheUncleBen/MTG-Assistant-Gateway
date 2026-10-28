@@ -86,6 +86,8 @@ TOOLS: dict[str, ToolWords] = {
     "remove_card_model": ToolWords("Remove a saved description", "Remove my saved description for this card"),
     "get_deck_report": ToolWords("Read a test report", "Show me that test report"),
     "play_more_games": ToolWords("Play more games", "Play more games on that report"),
+    "propose_delete_report": ToolWords("Ask to delete a test report", "Delete that test report"),
+    "propose_delete_snapshot": ToolWords("Ask to delete a snapshot", "Delete that snapshot"),
     # scan/ (the card scanner's tools)
     "resolve_cards": ToolWords("Find exact printings", "Which printing is this card?"),
     "card_printings": ToolWords("List a card's printings", "Show me this card's printings"),

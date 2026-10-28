@@ -2084,6 +2084,7 @@ class ReportService:
             cur = c.execute(sql, args)
         if cur.rowcount == 0:
             raise DeckError("not_found", "No such report for your account.")
+        self.db.audit("report_deleted", sub=sub, detail={"report_id": str(report_id)})
         # An unfinished Forge run goes with its report: otherwise it keeps the engine busy, and the
         # one-unfinished-run-per-member check (which reads only stored reports) would let a member
         # queue another run by deleting this one.
