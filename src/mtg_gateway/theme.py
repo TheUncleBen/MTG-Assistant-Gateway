@@ -1077,9 +1077,10 @@ _MOBILE_RULES = """
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
-# the account menu and loses its text links. The rail lists every page (More's too) and drops
-# More; its 64 px tabs give up a little height (down to 52 px) when the screen is too short for
-# all of them, and on a shorter one still it scrolls. The body is padded by the rail's width so
+# the account menu and loses its text links and its bell. The rail lists the tab bar's pages, then
+# Alerts (the bell) and More, whose sheet opens beside the rail at its foot; its 64 px tabs give
+# up a little height (down to 52 px) when the screen is too short for all of them, and on a
+# shorter one still it scrolls. The body is padded by the rail's width so
 # every page re-centres in the remaining space.
 _RAIL_RULES = """
   body{b} .topbar nav.site{display:none}
@@ -2597,7 +2598,7 @@ def render(
             # The website footer; the Android app has no footer (its pages end at the tab bar).
             # (the top bar already has Decks, Binder, Search and Scan)
             "<footer class='site'><div class='links'>"
-            "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant</a>"
+            "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant skill</a>"
             + "<a href='/install?for=android'>Apps</a>"
             + ("<a href='/account'>Account</a>" if signed_in else "<a href='/login'>Sign in</a>")
             + "</div>"
