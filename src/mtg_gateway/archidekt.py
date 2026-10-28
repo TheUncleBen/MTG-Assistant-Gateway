@@ -380,9 +380,14 @@ class ArchidektError(Exception):
         retryable: bool = False,
         sent: bool = True,
         retry_after: float | None = None,
+        status: int | None = None,
     ):
         super().__init__(message)
         self.kind = kind
+        # the HTTP status of the answer a contract error is about (None: no answer, or not one
+        # whose status says anything): a 400 refused the request, a 2xx whose body could not be
+        # read was taken by Archidekt all the same
+        self.status = status
         # a GET that failed this way (timeout, network error, 5xx) may be retried after a backoff
         self.retryable = retryable
         # False when the request never left the gateway (the pacer refused it): nothing can have
@@ -1564,14 +1569,20 @@ class ArchidektClient(AccountRequests):
                 )
             if resp.status_code >= 400:
                 self.pacer.record(True)
-                raise ArchidektError("contract", f"Archidekt rejected the request (HTTP {resp.status_code})")
+                raise ArchidektError(
+                    "contract",
+                    f"Archidekt rejected the request (HTTP {resp.status_code})",
+                    status=resp.status_code,
+                )
             self.pacer.record(True)
             if resp.status_code == 204 or not resp.content:
                 return None
             try:
                 return resp.json()
             except ValueError as exc:
-                raise ArchidektError("contract", "Archidekt returned a non-JSON body") from exc
+                raise ArchidektError(
+                    "contract", "Archidekt returned a non-JSON body", status=resp.status_code
+                ) from exc
 
     # -- auth ---------------------------------------------------------------
     async def login(self, username_or_email: str, password: str) -> dict[str, Any]:
