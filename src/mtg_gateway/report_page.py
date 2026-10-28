@@ -443,7 +443,7 @@ def more_html(f: Any, csrf: str, report_id: str) -> str:
         return block
     return (
         block.replace("id='forge-more' class='card more-games'", "id='forge-more' class='rv-more'")
-        .replace("<button type='submit' class='btn'>", "<button type='submit' class='btn-primary'>")
+        .replace("<button type='submit' class='btn' ", "<button type='submit' class='btn-primary' ")
         .replace("<p class='muted small'>", "<p class='ui-hint'>")
     )
 
