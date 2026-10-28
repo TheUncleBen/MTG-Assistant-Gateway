@@ -354,3 +354,24 @@ async def test_background_refresh_runs_outside_the_callers_context() -> None:
     finally:
         _slot_holder.reset(token)
     assert seen == [None, None]
+
+
+async def test_a_list_read_hours_ago_is_shown_at_once_and_read_again_behind(stack: Stack) -> None:
+    """0.7.46: coming back to My decks after a few hours shows the list as last read straight away
+    (refreshed in the background), not a wait for Archidekt."""
+    b = await _linked(stack, "/decks")
+    svc = stack.h.app.state.gateway.decks
+    try:
+        assert "Sample Commander Deck" in (await b.http.get("/decks", headers=NAV)).text
+        stack.ark.decks[44] = dict(stack.ark.decks[42], id=44, name="Made on the site")
+        entries = svc.deck_lists._entries
+        for sub, (mono, wall, value) in list(entries.items()):
+            entries[sub] = (mono - 3 * 3600, wall - 3 * 3600, value)
+        r = await b.http.get("/decks", headers=NAV)
+        assert r.status_code == 200 and "Sample Commander Deck" in r.text
+        assert "Made on the site" not in r.text and "data-decks-src" not in r.text
+        await asyncio.sleep(0.05)  # the background refresh
+        assert _lists(stack) == 2
+        assert "Made on the site" in (await b.http.get("/decks", headers=NAV)).text
+    finally:
+        await b.aclose()

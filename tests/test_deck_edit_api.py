@@ -6,6 +6,8 @@ refused; a big removal asks first and the follow-up names the proposal."""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mtg_gateway import api as api_module
@@ -368,9 +370,13 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         # switches asks Archidekt once); the browser's Reload reads it again at once
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 100" in page.text
-        # ... and once those seconds are over, a plain view reads it again
+        # ... and once those seconds are over, a plain view still shows it at once (0.7.46) but
+        # reads it again behind it, so the view after shows the deck as it is now
         decks = stack.h.app.state.gateway.decks
         decks._page_decks = {k: (t - decks.page_deck_seconds, d) for k, (t, d) in decks._page_decks.items()}
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
+        assert "Size: 100" in page.text
+        await asyncio.gather(*decks._page_refreshing.values())
 
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 101" in page.text and "class='legal ok'" not in page.text
