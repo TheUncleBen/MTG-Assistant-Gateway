@@ -807,9 +807,9 @@ async def test_a_card_watched_by_name_says_which_printing_is_priced(stack: Stack
     watch = out["watch"]
     assert watch["set"] is None and watch["collector_number"] is None  # it follows the name
     assert watch["printing_now"]["set"] and watch["printing_now"]["collector_number"], watch
-    assert "Scryfall gives for the name" in watch["follows"], watch
+    assert "cheapest printing in this finish" in watch["follows"], watch
     listed = structured(await call(stack.h, token, "list_watchlist"))
-    assert "Scryfall gives for the name" in listed["cards"][0]["follows"], listed
+    assert "cheapest printing in this finish" in listed["cards"][0]["follows"], listed
 
 
 async def test_both_deck_prices_name_their_source(stack: Stack) -> None:
