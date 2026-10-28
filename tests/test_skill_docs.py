@@ -159,3 +159,10 @@ def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:
 def test_the_android_guide_says_confirm_for_the_browsers_app_check() -> None:
     text = " ".join((ROOT / "docs" / "ANDROID.md").read_text(encoding="utf-8").split())
     assert "could not confirm the app" in text and "could not verify the app" not in text
+
+
+def test_removal_from_the_group_is_told_without_a_time_promise() -> None:
+    for name in ("CHANGELOG.md", "docs/IDP-AUTHENTIK.md"):
+        text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
+        assert "loses access within a minute" not in text and "within a minute it revokes" not in text, name
+        assert "asked again in the background, at most 60 seconds after it last let them in" in text, name

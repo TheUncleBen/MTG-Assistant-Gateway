@@ -279,10 +279,11 @@ cover MFA or Sources.)
 
 **Remove someone.** Take them out of `MTG Assistant Gateway Users`, or
 deactivate or delete the user. That's all. The gateway asks Authentik on
-every request (in the background for up to 60 seconds after it last let
-them in, so pages don't wait for Authentik), so within a minute it revokes their gateway tokens, browser
-sessions and the Authentik tokens it kept, and they are signed out
-everywhere. Taking them out of the group also revokes their Archidekt link;
+every request; so that pages don't wait for Authentik, the identity
+provider is asked again in the background, at most 60 seconds after it
+last let them in. When Authentik says no, the gateway revokes their gateway
+tokens, browser sessions and the Authentik tokens it kept, and they are
+signed out everywhere. Taking them out of the group also revokes their Archidekt link;
 for a deactivated or deleted user the link stays until an admin presses
 **Disable**, **Unlink Archidekt** or **Delete data** on the admin page, until
 it expires (about 40 days after they linked; the hourly purge then deletes
