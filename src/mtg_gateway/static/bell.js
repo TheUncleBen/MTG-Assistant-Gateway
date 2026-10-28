@@ -22,9 +22,12 @@
       bell.setAttribute("aria-label", n > 0 ? name + ", " + n + " new" : name);
       bell.title = bell.getAttribute("aria-label");
     });
-    var big = document.querySelector("[data-bell-big]"), det = document.querySelector("[data-bell-det]");
-    if (big) big.textContent = String(n);
-    if (det) det.textContent = n > 0 ? (n === 1 ? "new notification" : "new notifications") : "nothing new";
+    // Home's Needs you row (home.py): shown with the count once it is above zero
+    var row = document.querySelector("[data-bell-row]"), num = document.querySelector("[data-bell-n]");
+    var word = document.querySelector("[data-bell-word]");
+    if (num) num.textContent = String(n);
+    if (word) word.textContent = n === 1 ? "alert" : "alerts";
+    if (row) row.hidden = !(n > 0);
   }
   function getJSON(href) {
     if (window.MtgFetch) return window.MtgFetch.json(href);

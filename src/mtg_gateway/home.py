@@ -1,12 +1,12 @@
-"""The signed-in home page: a dashboard in the shape of Archidekt's landing page.
+"""The signed-in home page: your recent decks and what needs you (decision C8, 0.7.46).
 
-Under the newest decks and the deck search, Quick access has one widget per section, in the
-app side bar's order (Decks, Search, Scan, Collection, Proposals, History, Reports, Watchlist,
-Guide, Account, then Admin for admins), each with at most two quick starts; on a phone they are
-compact tiles, two a row, with the label and number only. The top navigation stays visible like
-on every other page, and the assistant connection details sit in a
-collapsed panel at the end, where a member who only uses the pages never has to see them. The page
-is for signed-in members only; MCP clients use /mcp and the OAuth routes.
+Under the greeting and New deck come the things waiting for the member, each only when there
+is one: proposals waiting for their press, Forge tests running, Archidekt alerts (the bell's
+count, read after the page has loaded by static/bell.js) and watched cards past an alert line.
+Then the newest decks as covers (more of them than before; a row to swipe on a phone), and the
+assistant connection details only while no assistant is connected. The navigation stays in the
+bars, so the page repeats none of it. The page is for signed-in members only; MCP clients use
+/mcp and the OAuth routes.
 """
 
 from __future__ import annotations
@@ -36,60 +36,38 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 _esc = html.escape
-RECENT = 6
+RECENT = 8
 DECKS_TIMEOUT = 6.0  # seconds; the home page must not hang on Archidekt
 
 
 HOME_CSS = """
-/* Quick access: the dashboard widgets, the label is the section's link */
-.hq{grid-template-columns:repeat(auto-fill,minmax(min(100%,15.5rem),1fr))}
-.hq .wdg a.lab{color:var(--text);text-decoration:none;font-size:.95rem}
-.hq .wdg a.lab:hover{text-decoration:underline}
-.hq .wdg a.lab svg{stroke:var(--orange-text)}
-.hq .wdg .big{font-size:1.6rem}
+/* Needs you: one row a thing waiting for the member, the way to it at the row's end */
+.home .needs{margin:0 0 1rem}
+.home .needs h2{margin:0 0 .5rem}
+.home .needs ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.5rem}
+.home .needs li{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.6rem .9rem;
+  border-radius:var(--radius);background:var(--surface);border:1px solid var(--border)}
+.home .needs li.accent{border-left:4px solid var(--orange)}
+.home .needs li svg.i{width:20px;height:20px;flex:none;color:var(--orange-text)}
+.home .needs li .what{flex:1 1 14rem;min-width:0}
+.home .needs li .what b{font-variant-numeric:tabular-nums}
+.home .needs li .what small{display:block;color:var(--text-muted);overflow-wrap:anywhere}
+.home .needs li .go{margin:0;flex:none}
+.home .needs li[hidden]{display:none}
 .home .list-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:1.5rem 0 .75rem}
 .home .list-head h2{margin:0}
-@media (min-width:600px) and (max-width:899.98px){.hq{grid-template-columns:repeat(2,minmax(0,1fr))}}
-/* phones: compact tiles, two a row, label and number only; the whole tile is the link */
+/* phones: the covers as one row to swipe, each cover a screen's half */
 @media (max-width:599.98px){
-  .hq{grid-template-columns:1fr 1fr;gap:.5rem}
-  .hq .wdg{position:relative;padding:.6rem .7rem;min-height:64px;justify-content:center;gap:.15rem}
-  .hq .wdg .det,.hq .wdg .go{display:none}
-  .hq .wdg a.lab{text-transform:none;letter-spacing:0;font-size:1rem;min-height:28px;overflow-wrap:anywhere}
-  .hq .wdg a.lab::after{content:'';position:absolute;inset:0}
-  .hq .wdg .big{font-size:1.15rem}
+  .home .recent{display:flex;overflow-x:auto;scroll-snap-type:x proximity;gap:.6rem;
+    padding:0 0 .35rem;scrollbar-width:none}
+  .home .recent::-webkit-scrollbar{display:none}
+  .home .recent>*{flex:0 0 min(11rem,58vw);scroll-snap-align:start}
 }
 """
 
 
-def quick(
-    href: str,
-    ic: str,
-    title: str,
-    detail: str = "",
-    *,
-    big_html: str = "",
-    detail_html: str = "",
-    actions: tuple[str, ...] = (),
-    tone: str = "",
-) -> str:
-    """One Quick access widget: the section's name as its link, a number when there is one, one
-    line and at most two quick starts (ui.button_link)."""
-    if len(actions) > 2:
-        raise ValueError("a widget has at most two quick starts")
-    det = detail_html or _esc(detail)
-    return (
-        f"<div class='wdg{' ' + tone if tone else ''}'><a class='lab' href='{_esc(href)}'>{icon(ic)}"
-        f"{_esc(title)}</a>"
-        + (f"<span class='big'>{big_html}</span>" if big_html else "")
-        + (f"<span class='det'>{det}</span>" if det else "")
-        + (f"<span class='go'>{''.join(actions)}</span>" if actions else "")
-        + "</div>"
-    )
-
-
 def _n(n: int, one: str, many: str) -> str:
-    return f"{n:,}<small>{_esc(one if n == 1 else many)}</small>"
+    return f"{n:,} {one if n == 1 else many}"
 
 
 def _span(seconds: float) -> str:
@@ -104,7 +82,7 @@ def _span(seconds: float) -> str:
 
 
 def proposals_line(rows: list[dict[str, Any]], *, now: float) -> str:
-    """The Proposals widget's line, the words of the Proposals page's "Waiting for you" widget:
+    """The proposals row's line, the words of the Proposals page's "Waiting for you" widget:
     "6 on 4 decks, 2 not tied to a deck · oldest 6 days · next expires in 20 h · 1 needs a look"."""
     if not rows:
         return "Nothing is waiting."
@@ -130,44 +108,79 @@ def proposals_line(rows: list[dict[str, Any]], *, now: float) -> str:
     return " · ".join(parts)
 
 
-def reports_widget(
-    index: list[dict[str, Any]], latest: dict[str, Any] | None, going: int, *, now: float
-) -> str:
-    """Reports: Forge runs going as the number, the newest report as the line."""
-    det = "No reports yet."
-    actions: tuple[str, ...] = (ui.button_link("All reports", "/reports"),)
-    if latest is not None:
-        win = latest.get("win")
-        how = ""
-        if win and win.get("rate") is not None:
-            how = f", {100 * win['rate']:.0f}% won against precons"
-        ago = ui.when_text(latest.get("taken_at"), now=now)
-        det = f"Latest: {latest.get('deck_name') or 'an unnamed deck'}, {ago}{how}"
-        actions = (
-            ui.button_link("Open latest", f"/history/reports/{latest['report_id']}"),
-            ui.button_link("All reports", "/reports"),
-        )
-    return quick(
-        "/reports",
-        "report",
-        "Reports",
-        det,
-        big_html=_n(going, "Forge running", "Forge running") if going else "",
-        actions=actions,
+def need_row(ic: str, text: str, detail: str, button: str, *, accent: bool = False, attrs: str = "") -> str:
+    """One Needs you row: an icon, what waits (``text`` with its count in bold, ``detail`` the
+    small line under it) and the button that goes there."""
+    det = f"<small>{_esc(detail)}</small>" if detail else ""
+    return (
+        f"<li{' class=accent' if accent else ''}{attrs}>{icon(ic)}<span class='what'>{text}{det}</span>"
+        f"<span class='go'>{button}</span></li>"
     )
 
 
-def watchlist_widget(data: dict[str, Any]) -> str:
-    """Watchlist: how many cards and decks, and today's first alert past its line."""
-    cards, decks = data.get("cards") or [], data.get("decks") or []
-    due = [d for d in (due_line(v) for v in cards if v.get("alerts")) if d]
-    return quick(
-        "/watchlist",
-        "stats",
-        "Watchlist",
-        due[0] if due else "",
-        big_html=_n(len(cards), "card", "cards") + " " + _n(len(decks), "deck", "decks"),
-        actions=(ui.button_link("Open watchlist", "/watchlist"),),
+def needs_you_html(
+    *,
+    pending: int,
+    board: list[dict[str, Any]],
+    forge_running: int,
+    watch_hits: list[str],
+    linked: bool,
+    now: float,
+) -> str:
+    """Needs you: the rows for what waits, each only when there is something; nothing at all
+    when nothing waits and no alert can come (the bell's row needs a linked account). With a
+    link, Review it (them) is the page's orange button; without one, Link Archidekt keeps it."""
+    rows = []
+    if pending:
+        rows.append(
+            need_row(
+                "proposals",
+                f"<b>{_n(pending, 'proposal', 'proposals')}</b> waiting for you",
+                proposals_line(board, now=now),
+                ui.button_link(
+                    "Review it" if pending == 1 else "Review them",
+                    "/proposals",
+                    kind="primary" if linked else "plain",
+                ),
+                accent=True,
+            )
+        )
+    if forge_running:
+        rows.append(
+            need_row(
+                "report",
+                f"<b>{_n(forge_running, 'Forge test', 'Forge tests')}</b> running",
+                "The report lands under Reports when the games are done.",
+                ui.button_link("Open reports", "/reports"),
+            )
+        )
+    if linked:
+        # Archidekt's unseen alerts: the count comes after the page has loaded (static/bell.js
+        # fills data-bell-n and shows the row when the count is above zero)
+        rows.append(
+            need_row(
+                "bell",
+                "<b><span data-bell-n>0</span> new <span data-bell-word>alerts</span></b> on Archidekt",
+                "",
+                f"<a class='btn btn-plain' href='/notifications' data-bell-open>{icon('bell')} "
+                "Open alerts</a>",
+                attrs=" data-bell-row hidden",
+            )
+        )
+    if watch_hits:
+        rows.append(
+            need_row(
+                "stats",
+                f"<b>{_n(len(watch_hits), 'watched card', 'watched cards')}</b> past an alert line",
+                " · ".join(watch_hits[:2]),
+                ui.button_link("Open watchlist", "/watchlist"),
+            )
+        )
+    if not rows:
+        return ""
+    return (
+        "<section class='needs' aria-labelledby='needs-h'><h2 id='needs-h'>Needs you</h2>"
+        f"<ul>{''.join(rows)}</ul></section>"
     )
 
 
@@ -236,7 +249,7 @@ def recent_panel_inner(
 
 
 def recent_skeleton() -> str:
-    """The panel while the deck list is still being read: six grey covers the script replaces."""
+    """The panel while the deck list is still being read: grey covers the script replaces."""
     return (
         "<div class='panel-head'><h2>My decks</h2><a class='btn' href='/decks'>All decks</a></div>"
         "<div class='recent skeleton' aria-hidden='true'>" + "<span></span>" * RECENT + "</div>"
@@ -260,6 +273,22 @@ def recent_html(decks: list[dict[str, Any]], covers: dict[str, dict[str, Any]]) 
     return "<div class='recent'>" + "".join(out) + "</div>"
 
 
+def connect_html(mcp_url: str) -> str:
+    """Connect an AI assistant: the connector address and the ways in, shown only while no
+    assistant is connected (afterwards the Account page has it)."""
+    return (
+        "<details class='connect panel'><summary>Connect an AI assistant "
+        f"<span class='muted addr'>{_esc(mcp_url)}</span></summary>"
+        "<p>Claude and ChatGPT talk to this gateway through its connector URL. Add it as a custom "
+        "connector and sign in when asked; the assistant can then read your decks, research cards and "
+        "propose edits you approve here.</p>"
+        f"<pre>{_esc(mcp_url)}</pre>"
+        f"<div class='actions'><a class='btn' href='/install'>{icon('download')} Guided setup"
+        f"</a><a class='btn' href='/install?for=skill'>{icon('report')} Assistant skill</a>"
+        f"<a class='btn' href='/install?for=android'>{icon('download')} Android app</a></div></details>"
+    )
+
+
 def add_home_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
@@ -279,7 +308,6 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         who = user.get("name") or user.get("preferred_username") or user.get("email") or "there"
         link = state.decks.status(sub)
         pending = state.db.count_pending_proposals(sub)
-        scans = len(state.scan.list_sessions(sub)) if getattr(state, "scan", None) else 0
 
         decks: list[dict[str, Any]] | str | None = None
         if link["linked"]:
@@ -290,6 +318,10 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             else {}
         )
 
+        now = time.time()
+        board = state.db.pending_board(sub) if pending else []
+        # New deck is the page's orange button, unless proposals wait: then Review them is
+        new_deck_cls = "btn" if pending else "btn btn-primary"
         hero = (
             f"<div class='hero'><div><h1>Hi {_esc(who)}</h1>"
             + (
@@ -303,10 +335,23 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                 "<a class='btn btn-primary' href='/account/details#archidekt'>"
                 f"{icon('account')} Link Archidekt</a>"
                 if not link["linked"]
-                else f"<a class='btn btn-primary' href='/decks/new' data-box-open='newdeck'>{icon('plus')} "
+                else f"<a class='{new_deck_cls}' href='/decks/new' data-box-open='newdeck'>{icon('plus')} "
                 "New deck</a>"
             )
             + "</div>"
+        )
+        forge_running = len(state.reports.forge_queue(sub)) if state.reports is not None else 0
+        hits: list[str] = []
+        if state.prices is not None:
+            data = state.prices.overview(sub, history=False)
+            hits = [d for d in (due_line(v) for v in data.get("cards") or [] if v.get("alerts")) if d]
+        needs = needs_you_html(
+            pending=pending,
+            board=board,
+            forge_running=forge_running,
+            watch_hits=hits,
+            linked=bool(link["linked"]),
+            now=now,
         )
         if decks == PENDING:
             # Cold start: the page goes out now and decks.js fills the panel from the cache.
@@ -327,131 +372,14 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
         else:
             recent = ""
-        search = (
-            "<section class='panel'><h2>Find a deck</h2>"
-            "<form method='get' action='/search' class='searchbox'>"
-            "<div class='field'><label for='home-q'>Deck name</label>"
-            "<input id='home-q' type='search' name='q' placeholder='Deck name'></div>"
-            "<div class='field'><label for='home-c'>Commander</label>"
-            "<input id='home-c' type='text' name='commander' data-suggest='cards' autocomplete='off' "
-            "placeholder='Commander'></div>"
-            # plain: the hero's New deck is the page's one orange button
-            f"<button class='btn-plain'>{icon('search')} Search Archidekt</button></form></section>"
-        )
-        now = time.time()
-        board = state.db.pending_board(sub) if pending else []
-        # The navigation's order (Ben, 2026-10-25): its places (Decks, Binder, Assistant's Proposals,
-        # History and Reports), then the More menu's (Search, Scan, Watchlist), then Guide and Account
-        items = [
-            quick(
-                "/decks",
-                "decks",
-                "Decks",
-                "Your decks as stacks, grid or text, with stats and edits.",
-                big_html=_n(len(decks), "deck", "decks") if isinstance(decks, list) else "",
-                actions=(ui.button_link("All decks", "/decks"),),
-            ),
-            quick(
-                "/collection",
-                "collection",
-                "Binder",
-                "The cards you own, your Archidekt collection; they get a green dot on every deck.",
-                actions=(ui.button_link("Open binder", "/collection"),),
-            ),
-            quick(
-                "/proposals",
-                "proposals",
-                "Proposals",
-                proposals_line(board, now=now),
-                big_html=_n(pending, "waiting", "waiting") if pending else "",
-                actions=(ui.button_link("Review them" if pending else "Open proposals", "/proposals"),),
-                tone="accent" if pending else "",
-            ),
-            quick(
-                "/history",
-                "history",
-                "History",
-                "Snapshots, restores, deck reports and backup copies.",
-                actions=(ui.button_link("Open history", "/history"),),
-            ),
-        ]
-        if state.reports is not None:
-            index = state.reports.index(sub)
-            latest = (state.reports.summaries(sub, [index[0]["report_id"]]) or [None])[0] if index else None
-            items.append(reports_widget(index, latest, len(state.reports.forge_queue(sub)), now=now))
-        items += [
-            quick(
-                "/search",
-                "search",
-                "Search",
-                "Public decks by name, commander, format or owner.",
-                actions=(ui.button_link("Card search", "/cards"), ui.button_link("Precons", "/precons")),
-            ),
-            quick(
-                "/scan",
-                "scan",
-                "Scan",
-                "Point your phone at cards to build a list, a deck or your binder.",
-                big_html=_n(scans, "open", "open") if scans else "",
-                actions=(ui.button_link("Start a scan", "/scan"),),
-            ),
-        ]
-        if state.prices is not None:
-            items.append(watchlist_widget(state.prices.overview(sub, history=False)))
-        if link["linked"]:
-            # On Archidekt: the bell's count, read after the page has loaded (static/bell.js)
-            from .profile_page import home_widget
-
-            items.append(home_widget())
-        items += [
-            quick(
-                "/guide",
-                "guide",
-                "Guide",
-                "What you can do here, with or without an assistant.",
-                actions=(ui.button_link("Open guide", "/guide"),),
-            ),
-            quick(
-                "/account",
-                "account",
-                "Account",
-                "Your Archidekt link, notifications, look and apps.",
-                actions=(ui.button_link("Open account", "/account"),),
-            ),
-        ]
-        if admin:
-            items.append(
-                quick(
-                    "/admin",
-                    "shield",
-                    "Admin",
-                    "Members, activity and the system.",
-                    actions=(ui.button_link("Open admin", "/admin"),),
-                )
-            )
-        tiles = (
-            ui.list_head("Quick access", note="In the same order as the navigation")
-            + "<section class='ui-widgets hq' aria-label='Quick access'>"
-            + "".join(items)
-            + "</section>"
-        )
-        connect = (
-            "<details class='connect panel'><summary>Connect an AI assistant "
-            f"<span class='muted addr'>{_esc(s.mcp_url)}</span></summary>"
-            "<p>Claude and ChatGPT talk to this gateway through its connector URL. Add it as a custom "
-            "connector and sign in when asked; the assistant can then read your decks, research cards and "
-            "propose edits you approve here.</p>"
-            f"<pre>{_esc(s.mcp_url)}</pre>"
-            f"<div class='actions'><a class='btn btn-primary' href='/install'>{icon('download')} Guided setup"
-            f"</a><a class='btn' href='/install?for=skill'>{icon('report')} Assistant skill</a>"
-            f"<a class='btn' href='/install?for=android'>{icon('download')} Android app</a></div></details>"
-        )
+        # the connection details only while no assistant is connected (Account details lists them after)
+        connect = connect_html(s.mcp_url) if not state.db.user_clients(sub) else ""
         # the New deck box (F4): the hero's New deck and the empty panel's "Create one" open it here
         csrf = _csrf(s, sid)
         newdeck = new_deck_box_html(csrf, None, back="/") if link["linked"] and csrf else ""
         resp = render(
             "Home",
-            hero + recent + search + tiles + connect + newdeck,
+            hero + needs + recent + connect + newdeck,
             site=s.server_name,
             signed_in=True,
             csrf=csrf,

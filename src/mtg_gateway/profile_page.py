@@ -603,17 +603,6 @@ BELL_NOTE = (
 )
 
 
-def home_widget() -> str:
-    """Home's On Archidekt widget: the count comes after the page has loaded (static/bell.js)."""
-    return (
-        f"<div class='wdg' data-bell-widget><a class='lab' href='/notifications'>{icon('bell')}On Archidekt"
-        "</a>"
-        "<span class='big'><span data-bell-big>…</span></span>"
-        "<span class='det'><span data-bell-det>Archidekt's notifications</span></span>"
-        "<span class='go'><a class='btn btn-plain' href='/notifications' data-bell-open>Open</a></span></div>"
-    )
-
-
 # -- the routes --------------------------------------------------------------------------------------------
 
 

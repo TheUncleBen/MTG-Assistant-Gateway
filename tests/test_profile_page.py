@@ -441,8 +441,10 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     assert not [c for c in stack.ark.calls if "notification" in c[1]]
     assert "<a class='icon-btn bell' href='/notifications' aria-label='Notifications'" in page
     assert "<span class='n' hidden aria-hidden='true'></span>" in page and "/static/bell.js" in page
-    widget = page.split("data-bell-widget", 1)[1].split("</div>", 1)[0]
-    assert "On Archidekt" in widget and "data-bell-big" in widget and "data-bell-open>Open</a>" in widget
+    # Home's Needs you row for the alerts: hidden until the script has the count (decision C8)
+    row = page.split("<li data-bell-row hidden>", 1)[1].split("</li>", 1)[0]
+    assert "<span data-bell-n>0</span> new <span data-bell-word>alerts</span>" in row
+    assert "href='/notifications' data-bell-open>" in row and "Open alerts</a>" in row
     r = await member.http.get("/notifications/count")
     assert r.json() == {"ok": True, "unseen": 2} and r.headers["cache-control"] == "no-store"
     await member.http.get("/notifications/count")

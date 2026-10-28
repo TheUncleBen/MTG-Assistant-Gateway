@@ -114,6 +114,7 @@
     var rich = input.hasAttribute("data-suggest-rich"), peeking = null;
     var site = input.getAttribute("data-suggest-site");  // the top bar: card rows open this page, plus a Decks group
     if (site) rich = true;
+    if (site) input.addEventListener("focus", function () { askMyDecks(); });
     // data-suggest-qty: a count in front ("3 sol ring") is kept out of the lookup and kept on pick
     var qtyMode = input.hasAttribute("data-suggest-qty");
     var pendingEnter = false;  // Enter pressed while the list still showed an older text
@@ -242,9 +243,30 @@
       items.push(li);
       return li;
     }
+    /* The member's own decks (/api/decks/names, asked once a page): the ones whose name holds
+       the typed text come first under "Your decks", each opening its deck page. */
+    var myDecks = null, myDecksAsked = false;
+    function askMyDecks() {
+      if (myDecksAsked || !window.fetch) return;
+      myDecksAsked = true;
+      fetch("/api/decks/names", { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { myDecks = d && d.ok ? d.decks || [] : []; })
+        .catch(function () { myDecks = []; });
+    }
+    function myDeckRows(raw) {
+      var q = fold(raw);
+      if (!q || !myDecks) return 0;
+      var hits = myDecks.filter(function (d) { return fold(d.name).indexOf(q) >= 0; }).slice(0, 5);
+      if (!hits.length) return 0;
+      list.appendChild(head("Your decks"));
+      hits.forEach(function (d) { list.appendChild(goRow(d.name, "/decks/" + encodeURIComponent(d.id), "decks")); });
+      return hits.length;
+    }
     function siteRows(names) {
       var raw = text().trim();
       if (names.length) list.insertBefore(head("Cards"), list.firstChild);
+      myDeckRows(raw);
       list.appendChild(head("Decks"));
       list.appendChild(goRow("Search decks named “" + raw + "”", "/search?name=" + encodeURIComponent(raw), "search"));
       commanderRows();
