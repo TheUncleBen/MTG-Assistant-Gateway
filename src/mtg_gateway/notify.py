@@ -12,9 +12,10 @@ host of their own, and ntfy's cache gives a phone that was offline what it misse
 What is sent: changes an assistant left waiting for the member's press, grouped per deck (one
 message per deck, replaced as the count changes and removed when nothing waits), a deck report
 that finished (Forge runs that waited in the queue included), a price alert they set, a new alert
-on Archidekt (alerts_push.py) and their scheduled summary. Each message carries the least that is useful: a short title and line, and a
-link to the gateway page. Deck contents are never sent. The token is sent only in the
-Authorization header and never logged; a failed publish is logged with the HTTP status alone.
+on Archidekt (alerts_push.py) and their scheduled summary. Each message carries the least that
+is useful: a short title and line, and a link to the gateway page. Deck contents are never sent.
+The token is sent only in the Authorization header and never logged;
+a failed publish is logged with the HTTP status alone.
 
 The Account page's Notifications card is here too (``account_card_html``, ``account_action``):
 the opt-in (one switch for the whole account), the events, Send test, the app's connect button,
