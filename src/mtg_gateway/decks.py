@@ -160,6 +160,9 @@ MAX_PACKAGE_PAGES = 4  # the member's own card packages read for My decks, 50 a 
 # than an assistant app waits for one tool call); get_proposal and the review page show its
 # progress until it ends.
 APPLY_WAIT_SECONDS = 20.0
+# A new deck's cards go to Archidekt this many to a request (modifyCards takes a list), instead of
+# one request per card: a 125-card deck is three writes, not 125.
+CARD_WRITE_BATCH = 50
 # At shutdown (a redeploy), how long a running apply may go on before it is cut off and recorded
 # as interrupted: long enough for a paced 100-card apply. It runs after the server's own graceful
 # wait for requests (GRACEFUL_SHUTDOWN_SECONDS in __main__), and the two together stay under the
@@ -2748,6 +2751,9 @@ class DeckService:
         self.client = client
         self.fernet = Fernet(settings.fernet_key.encode())
         self._deck_locks: dict[str, asyncio.Lock] = {}
+        # deck id -> the progress of the new-deck apply still putting its cards in (_apply_create):
+        # every other change to that deck is refused until it ends (being_made)
+        self._being_made: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
         # the folders (with all inside) a member's running folder delete will delete: nothing is
         # moved or made in them meanwhile
         self._deleting: dict[str, set[int]] = {}
@@ -3611,6 +3617,23 @@ class DeckService:
         """Whether any member's Archidekt work is running or waiting, or an apply is under way:
         the deck sync waits for that to finish, so it never holds up a member or an assistant."""
         return bool(self._archidekt_in_flight) or bool(self._running) or self.client.pacer.busy()
+
+    def being_made(self, deck_id: str) -> str | None:
+        """The notice for a deck whose new-deck apply is still putting its cards in, else None."""
+        made = self._being_made.get(str(deck_id))
+        if made is None:
+            return None
+        progress, entries = made
+        sent = int(progress.get("sent_entries") or 0)
+        cards = sum(int(e["modifications"]["quantity"]) for e in entries[:sent])
+        total = sum(int(e["modifications"]["quantity"]) for e in entries)
+        return f"This deck is still being made: {cards} of {total} cards in."
+
+    def refuse_while_made(self, deck_id: str) -> None:
+        """Refuse a change to a deck that is still being made (its apply would race the edit)."""
+        notice = self.being_made(deck_id)
+        if notice is not None:
+            raise DeckError("deck_being_made", f"{notice} Try again once it is done.")
 
     def deck_busy(self, sub: str, deck_id: str) -> bool:
         """Whether an apply (or restore) on this deck is running: the sync leaves the deck alone
@@ -4879,6 +4902,8 @@ class DeckService:
                 "This proposal was already applied; nothing was sent again.",
                 state="applied",
             )
+        if row["state"] == "pending":
+            self.refuse_while_made(str(row.get("deck_id") or ""))
         # Structural: only the review page's own form passes REVIEW_PAGE, and an account
         # action (kind "action") is refused for every other caller, whichever route it came by.
         review_page = via == REVIEW_PAGE
@@ -5578,6 +5603,28 @@ class DeckService:
                     entry["modifications"]["companion"] = bool(rows[rid].companion)  # kept as it is
                     out.append(entry)
         return out
+
+    async def _send_batched(
+        self, sub: str, deck_id: str, payload: list[dict[str, Any]], progress: dict[str, Any]
+    ) -> None:
+        """A new deck's add entries, CARD_WRITE_BATCH to a PATCH, counting in ``progress`` how many
+        went out. A batch Archidekt refuses as a request (HTTP 400) goes again one card at a time."""
+        progress["sent_entries"], progress["of_entries"] = 0, len(payload)
+        for start in range(0, len(payload), CARD_WRITE_BATCH):
+            batch = payload[start : start + CARD_WRITE_BATCH]
+            try:
+                await _writing(progress, self._call(sub, self.client.modify_cards, deck_id, batch))
+            except DeckError as exc:
+                if exc.kind != "contract" or len(batch) == 1:
+                    raise
+                logger.warning(
+                    "Archidekt refused %d cards in one request; sending them one at a time", len(batch)
+                )
+                for entry in batch:
+                    await _writing(progress, self._call(sub, self.client.modify_card, deck_id, entry))
+                    progress["sent_entries"] += 1
+                continue
+            progress["sent_entries"] += len(batch)
 
     async def _send(
         self, sub: str, deck_id: str, payload: list[dict[str, Any]], progress: dict[str, Any]
@@ -6449,24 +6496,29 @@ class DeckService:
         resolve: dict[tuple[str, str, str], int] = {}
         modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
+        found: dict[tuple[str, str, str], dict[str, Any]] = {}  # each printing looked up once
         progress["resolved_cards"], progress["of_cards"] = 0, len(cards)
         for c in cards:  # resolve every printing before creating anything
-            card = await self._call(
-                sub,
-                lambda token, *_, c=c: self.client.resolve_card(
-                    token,
-                    c["name"],
-                    set_code=c.get("set_code") or None,
-                    collector_number=c.get("collector_number") or None,
-                ),
-            )
+            card = found.get(row_key(c))
+            repeat = card is not None
+            if card is None:
+                card = await self._call(
+                    sub,
+                    lambda token, *_, c=c: self.client.resolve_card(
+                        token,
+                        c["name"],
+                        set_code=c.get("set_code") or None,
+                        collector_number=c.get("collector_number") or None,
+                    ),
+                )
+                found[row_key(c)] = card
             resolve[row_key(c)] = card["id"]
             progress["resolved_cards"] += 1
             finish = str(c.get("finish") or ("Foil" if c.get("foil") else ""))
             modifiers[row_key(c)] = finish_modifier(
                 card["options"], foil=finish == "Foil", etched=finish == "Etched"
             )
-            if c.get("set_code") and not card["exact_printing"]:
+            if c.get("set_code") and not card["exact_printing"] and not repeat:
                 # a list's printing that Archidekt does not have is never swapped quietly
                 wanted = f"{c['set_code'].upper()} {c.get('collector_number') or ''}".strip()
                 got = (
@@ -6502,13 +6554,23 @@ class DeckService:
             )
         self.db.finish_proposal(row["id"], state="applying", deck_id=created.id)
         progress.update(deck_id=created.id, deck_url=f"https://archidekt.com/decks/{created.id}")
-        # each custom category with its switches first, so the cards go into it as it should be
-        for f in spec.get("category_flags") or []:
-            await self._call(
-                sub, lambda token, *_, f=f: self.client.create_category(token, created.id, {**f, "id": None})
-            )
         entries = new_deck_entries(cards, resolve, modifiers)
-        await self._send(sub, created.id, entries, progress)
+        # From here the deck exists: until its cards are in, it is held under its own id too, and any
+        # other change to it (the member's own edits on its page) is refused with how far it got
+        lock = self._deck_locks.setdefault(f"{sub}:{created.id}", asyncio.Lock())
+        await lock.acquire()
+        self._being_made[str(created.id)] = (progress, entries)
+        try:
+            # each custom category with its switches first, so the cards go into it as it should be
+            for f in spec.get("category_flags") or []:
+                await self._call(
+                    sub,
+                    lambda token, *_, f=f: self.client.create_category(token, created.id, {**f, "id": None}),
+                )
+            await self._send_batched(sub, created.id, entries, progress)
+        finally:
+            self._being_made.pop(str(created.id), None)
+            lock.release()
         verified = await self.get_deck(sub, created.id)
         want_folder = spec.get("folder_id")
         if want_folder is not None and verified.parent_folder != want_folder:

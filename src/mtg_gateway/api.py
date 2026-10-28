@@ -65,6 +65,7 @@ STATUS_FOR = {
     "auth": 409,
     "backup_failed": 502,
     "verify_mismatch": 502,
+    "deck_being_made": 409,
 }
 
 
@@ -346,6 +347,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 raise DeckError("invalid", "names must be a list of up to 40 card names")
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
+        decks.refuse_while_made(deck_id)  # its new-deck apply is still putting the cards in
         pid = data.get("proposal_id")
         answer = pid is not None
         if answer:
