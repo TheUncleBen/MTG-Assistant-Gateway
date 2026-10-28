@@ -3329,7 +3329,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .stackhead{padding-top:.5rem;margin-bottom:.25rem}
 .stackhead h2{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:14px;
   font-weight:700;min-height:28px;margin:0}
-.stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* min-width 0: a long unbroken name shortens with … instead of widening the stack past the screen */
+.stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .stackhead .title.strike{text-decoration:line-through;color:var(--text-muted)}
 .stackhead .meta{font-size:12px;color:var(--text-muted);display:block}
 .stackhead summary.icon-only{width:28px;height:28px;border:0;background:transparent;color:var(--text-muted)}
@@ -3460,6 +3461,8 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview.scroll .c{flex:0 0 clamp(140px,22vw,200px);scroll-snap-align:start}
 /* image cards: stacks and grid (basicCard 5:7, 4.5% radius, 2px border, corner quantity) */
 .deckview.stacks,.deckview.grid{display:grid;gap:1rem;align-items:start}
+/* a stack never widens its column for a long unbroken category name (its heading shortens with …) */
+.deckview .stack{min-width:0}
 .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(min(100%,170px),1fr))}
 .deckview.grid{grid-template-columns:1fr}
 .deckview .c{position:relative;aspect-ratio:5/7;border-radius:4.5%;border:2px solid var(--card-border);
