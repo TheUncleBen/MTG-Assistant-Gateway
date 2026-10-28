@@ -134,6 +134,24 @@ async def test_a_simulated_comparison_is_kept_as_a_comparison_report(stack: Stac
         await b.aclose()
 
 
+async def test_a_read_only_app_compares_but_keeps_no_report(stack: Stack) -> None:
+    """compare_decks stays open to a read-only app (mtg.read); only a full-scope app stores the
+    simulated comparison as a report."""
+    from .test_round4_data import _app_token
+
+    h = stack.h
+    await linked_user(stack)
+    token, _cid = await _app_token(h, "reader", scope="mtg.read")
+    other = LIST.replace("99 Island", "98 Island\n1 Opt")
+    out = structured(
+        await call(h, token, "compare_decks", {"a": "42", "b_list": other, "simulate": True, "games": 20})
+    )
+    assert out["ok"] and out["goldfish_ab"]["ok"], out
+    assert out["stored"] is False and "report_id" not in out, out
+    sub = h.app.state.gateway.db._one("SELECT sub FROM users", ())["sub"]
+    assert h.app.state.gateway.reports.list(sub, None) == []
+
+
 async def test_forge_plays_a_pasted_list_as_it_plays_a_deck(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])

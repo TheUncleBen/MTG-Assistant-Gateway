@@ -244,6 +244,9 @@ WRITE_TOOLS = frozenset(
         "propose_report",
         "propose_profile_change",
         "propose_contest_entry",
+        # 0.7.46: they delete nothing (the member presses Delete), but a read-only app has no say
+        "propose_delete_report",
+        "propose_delete_snapshot",
         # sends the typed name, DCI number and event to Archidekt in the member's name (security
         # review 0.7.43)
         "get_registration_pdf",
