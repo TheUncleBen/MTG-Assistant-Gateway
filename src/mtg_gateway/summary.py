@@ -245,7 +245,7 @@ def add_summary_tool(server: MCPServer, state: AppState) -> None:
         title="Get my summary",
         description=(
             "The member's plain summary of the last day or week (period: day or week): watched card "
-            "prices that moved and watched deck values (when the gateway has watchlists on), deck reports "
+            "prices that moved (cards lists those; cards_unchanged counts the rest) and watched deck values (when the gateway has watchlists on), deck reports "
             "finished, proposals waiting and applied, plus the same as sentences in `text`. Written by the "
             "gateway from its own data, without AI; turn it into your own words for the member (for example "
             "in a scheduled task). Read-only."
@@ -256,7 +256,14 @@ def add_summary_tool(server: MCPServer, state: AppState) -> None:
         token = get_access_token()
         if token is None or not token.subject:
             raise RuntimeError("no authenticated user on this request")
-        return {"ok": True, **state.summaries.build(token.subject, period)}
+        return {"ok": True, **tool_view(state.summaries.build(token.subject, period))}
 
 
-__all__ = ["PERIODS", "Summaries", "add_summary_tool", "short_text", "text"]
+def tool_view(s: dict[str, Any]) -> dict[str, Any]:
+    """The summary as get_summary returns it: the cards whose price moved, and how many watched
+    cards did not (a watchlist of 45 cards was about 5 kB of zero changes)."""
+    moved = [c for c in s["cards"] if c["change_pct"]]
+    return {**s, "cards": moved, "cards_unchanged": len(s["cards"]) - len(moved)}
+
+
+__all__ = ["PERIODS", "Summaries", "add_summary_tool", "short_text", "text", "tool_view"]

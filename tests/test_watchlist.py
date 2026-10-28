@@ -533,6 +533,7 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
         r = await _post(b, "/account", {"action": "summary_save", "summary_every": "hourly"})
         assert "err=" in r.headers["location"]
         assert (await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")).status_code == 303
+        assert (await _watch(b, name="Command Tower")).status_code == 303  # its price stays put
     finally:
         await b.aclose()
     sol = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "frc")
@@ -547,10 +548,13 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
     assert (
         msg["title"] == "Your weekly summary" and msg["click"] == "https://mtg.test/account/details#summary"
     )
-    assert "1 watched cards, biggest move Sol Ring +25%" in msg["message"]
+    assert "2 watched cards, biggest move Sol Ring +25%" in msg["message"]
     token = await mcp_token(h)
     s = structured(await call(h, token, "get_summary", {"period": "week"}))
     assert s["ok"] and s["cards"][0]["from"] == 1.28 and s["cards"][0]["to"] == 1.6
+    # get_summary lists the cards whose price moved; the others are a count (the text says both)
+    assert [c["name"] for c in s["cards"]] == ["Sol Ring"] and s["cards_unchanged"] == 1, s
+    assert "Watched cards: 2, 1 changed price this week." in s["text"]
     assert "Sol Ring: $1.28 to $1.60 (+25%)" in s["text"] and "no AI" in s["written_by"]
     b = await _browser(stack)
     try:
