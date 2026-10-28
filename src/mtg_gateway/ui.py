@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import ASSISTANT_PAGES, card_size_control, esc, hub_switch, icon
+from .theme import ASSISTANT_PAGES, SPINNER, card_size_control, esc, hub_switch, icon
 
 __all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
 
@@ -99,7 +99,9 @@ def label(word: str, colour: str, icon_name: str, *, title: str = "", cls: str =
         raise ValueError(f"unknown label colour {colour!r}")
     extra = f" {esc(cls)}" if cls else ""
     tip = f" title='{esc(title)}'" if title else ""
-    return f"<span class='ui-lbl {colour}{extra}'{tip}>{icon(icon_name)}{esc(word)}</span>"
+    # a run in progress draws the theme's one animated spinner, not a still icon
+    mark = SPINNER if icon_name == "spinner" else icon(icon_name)
+    return f"<span class='ui-lbl {colour}{extra}'{tip}>{mark}{esc(word)}</span>"
 
 
 def label_for(key: str, *, title: str = "", cls: str = "", word: str = "") -> str:

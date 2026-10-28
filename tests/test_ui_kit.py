@@ -83,7 +83,9 @@ def test_new_icons_are_drawn_in_the_theme_style() -> None:
 @pytest.mark.parametrize("key,word,colour,icon", STATUS_TABLE)
 def test_status_labels_match_the_standard(key: str, word: str, colour: str, icon: str) -> None:
     out = ui.status_label(key)
-    assert out == f"<span class='ui-lbl {colour}'>{theme.icon(icon)}{word}</span>"
+    # Applying draws the theme's one animated spinner (0.7.46), the others their icon
+    mark = theme.SPINNER if icon == "spinner" else theme.icon(icon)
+    assert out == f"<span class='ui-lbl {colour}'>{mark}{word}</span>"
 
 
 @pytest.mark.parametrize("key,word,colour,icon", RISK_TABLE)

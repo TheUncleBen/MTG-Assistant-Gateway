@@ -552,12 +552,35 @@ button[aria-busy=true],.btn[aria-busy=true]{cursor:progress;opacity:.75}
 /* a list being filtered as you type dims at once (static/decks.js, static/precons.js) and the
    answer undims it; the dim never hides the list that is there */
 #decks-list[aria-busy=true]:not(:empty),main[aria-busy=true] .pre-grp{opacity:.6;transition:opacity .15s}
-button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none;
-  border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
-  animation:busy .8s linear infinite}
-@keyframes busy{to{transform:rotate(360deg)}}
+button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none}
+/* The one progress spinner (ui.spinner, a busy button, a box that is loading): a Material-style arc
+   that grows and shrinks as it turns, in CSS alone. It is drawn only while the run or load is going
+   (the live status puts it there and takes it away), never on a timer. Under reduced motion the
+   ring stays whole and pulses instead. */
+.ui-spin,button[aria-busy=true]::after,.btn[aria-busy=true]::after,
+.mtgbox .loading::before,.mtgbox .progress::before{box-sizing:border-box;display:inline-block;
+  border-radius:50%;border:2px solid currentColor;
+  animation:ui-spin-arc .8s infinite linear alternate,ui-spin-turn 1.6s infinite linear}
+.ui-spin{width:1em;height:1em;flex:none;vertical-align:-.15em}
+@keyframes ui-spin-arc{
+  0%{clip-path:polygon(50% 50%,0 0,50% 0,50% 0,50% 0,50% 0,50% 0)}
+  12.5%{clip-path:polygon(50% 50%,0 0,50% 0,100% 0,100% 0,100% 0,100% 0)}
+  25%{clip-path:polygon(50% 50%,0 0,50% 0,100% 0,100% 100%,100% 100%,100% 100%)}
+  50%{clip-path:polygon(50% 50%,0 0,50% 0,100% 0,100% 100%,50% 100%,0 100%)}
+  62.5%{clip-path:polygon(50% 50%,100% 0,100% 0,100% 0,100% 100%,50% 100%,0 100%)}
+  75%{clip-path:polygon(50% 50%,100% 100%,100% 100%,100% 100%,100% 100%,50% 100%,0 100%)}
+  100%{clip-path:polygon(50% 50%,50% 100%,50% 100%,50% 100%,50% 100%,50% 100%,0 100%)}}
+@keyframes ui-spin-turn{
+  0%{transform:scaleY(1) rotate(0deg)}
+  49.99%{transform:scaleY(1) rotate(135deg)}
+  50%{transform:scaleY(-1) rotate(0deg)}
+  100%{transform:scaleY(-1) rotate(-135deg)}}
+@keyframes ui-spin-pulse{from{opacity:1}to{opacity:.3}}
 @media (prefers-reduced-motion:reduce){
-  button[aria-busy=true]::after,.btn[aria-busy=true]::after{animation:none} }
+  /* the spinner pulses in place: no turning, no growing arc (over the page-wide animation:none) */
+  .ui-spin,button[aria-busy=true]::after,.btn[aria-busy=true]::after,
+  .mtgbox .loading::before,.mtgbox .progress::before{clip-path:none;transform:none;
+    animation:ui-spin-pulse 1s infinite ease-in-out alternate !important}}
 .btn-primary,button.primary{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
 .btn-primary:hover,button.primary:hover{background:var(--orange);color:var(--on-orange);
   filter:brightness(1.1)}
@@ -1280,6 +1303,7 @@ main.wrap.ui-wide{max-width:1200px}
   border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
   border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
 .ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;vertical-align:0}
+.ui-lbl .ui-spin{width:14px;height:14px;vertical-align:0}
 .ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}
 .ui-lbl.green{background:var(--green-tint);color:var(--green-text)}
 .ui-lbl.red{background:var(--red-tint);color:var(--red-text)}
@@ -1727,13 +1751,10 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .acts button,.mtgbox .acts .btn{margin:0}
 .mtgbox .acts svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
 .mtgbox .loading,.mtgbox .progress{display:flex;align-items:center;gap:.6rem}
-.mtgbox .loading::before,.mtgbox .progress::before{content:'';width:1rem;height:1rem;flex:none;
-  border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
-  animation:mtgbox-spin .8s linear infinite}
-@keyframes mtgbox-spin{to{transform:rotate(360deg)}}
+/* the spinner itself is the theme's one spinner (CSS, "The one progress spinner") */
+.mtgbox .loading::before,.mtgbox .progress::before{content:'';width:1rem;height:1rem;flex:none}
 @media (prefers-reduced-motion:reduce){
-  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}
-  .mtgbox .loading::before,.mtgbox .progress::before{animation:none}}
+  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}}
 /* a box the page holds (ui.box) before a script opens it: hidden; drawn open without scripts (the
    old address), it is a plain panel at the top of the page and its Cancel buttons are not shown */
 .ui-box[hidden]{display:none}
@@ -2196,6 +2217,10 @@ def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
         one = False
     count = f"{int(n):,}" if isinstance(n, int) or float(n).is_integer() else f"{n:g}"
     return f"{count} {word if one else (plural_word or word + 's')}"
+
+
+# The one progress spinner (styled in CSS above); ui.label draws it for the "spinner" icon.
+SPINNER = "<span class='ui-spin' aria-hidden='true'></span>"
 
 
 def icon(name: str, *, cls: str = "i") -> str:
