@@ -16,6 +16,10 @@ from .test_cards_browser import HOST as SIZED_HOST
 from .test_cards_browser import PNG
 from .test_consent_browser import _chromium_or_skip, _launch
 
+# the proposal card's way to the review page: a grey capsule under the status line
+OPEN_CAP = "#status + .open-row a.cap"
+OPEN_WORDS = "Open in the app or browser"
+
 pytest.importorskip("playwright")
 
 PROPOSAL = {
@@ -264,7 +268,15 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             page.wait_for_timeout(900)
             assert "lets your assistant apply this itself" in card.locator("#note").inner_text()
             assert card.locator("button:visible").count() == 0
-            assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
+            assert card.locator(OPEN_CAP, has_text=OPEN_WORDS).count() == 1
+            # a grey capsule, not a bare blue link, with a 44 px target
+            cap = card.locator(".open-row a.cap")
+            look = cap.evaluate(
+                "e => { const s = getComputedStyle(e), b = getComputedStyle(document.body);"
+                " return [s.color === b.color, parseFloat(s.borderTopLeftRadius) >= 18,"
+                " s.textDecorationLine, e.getBoundingClientRect().height]; }"
+            )
+            assert look[:3] == [True, True, "none"] and look[3] >= 44, look
             assert not errors, errors
         finally:
             browser.close()

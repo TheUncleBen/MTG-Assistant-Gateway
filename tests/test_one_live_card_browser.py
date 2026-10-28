@@ -15,6 +15,10 @@ from . import test_card_browser as tcb
 from .test_card_browser import PROPOSAL, _calls, _confirms, _open
 from .test_consent_browser import _chromium_or_skip, _launch
 
+# the proposal card's way to the review page: a grey capsule under the status line
+OPEN_CAP = "#status + .open-row a.cap"
+OPEN_WORDS = "Open in the app or browser"
+
 pytest.importorskip("playwright")
 
 NEW_DECK = {
@@ -159,7 +163,7 @@ def test_a_decided_proposals_card_is_one_line_without_pictures() -> None:
                 assert words in card.locator("#status").inner_text(), state
                 assert card.locator("#approve").count() == 0 and card.locator("img").count() == 0, state
                 assert card.locator("ul.changes li").count() == 0, state
-                assert card.locator("a.link", has_text="Open in the app or browser").count() == 1, state
+                assert card.locator(OPEN_CAP, has_text=OPEN_WORDS).count() == 1, state
             # a card drawn with its outcome (an apply's answer) keeps what was done
             applied = {**NEW_DECK, "state": "applied", "closed_at": int(time.time())}
             card = _open(page, {"structuredContent": applied, "_meta": {}}, get_reply=applied)

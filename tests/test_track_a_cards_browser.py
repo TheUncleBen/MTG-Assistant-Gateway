@@ -14,6 +14,10 @@ from mtg_gateway.cards import card_html as cards_html
 
 from .test_consent_browser import _chromium_or_skip, _launch
 
+# the proposal card's way to the review page: a grey capsule under the status line
+OPEN_CAP = "#status + .open-row a.cap"
+OPEN_WORDS = "Open in the app or browser"
+
 pytest.importorskip("playwright")
 
 NOW = int(time.time())
@@ -414,7 +418,7 @@ def test_the_card_quotes_the_comment_and_offers_no_undo_for_an_account_action(wi
             text = card.locator("#rows").inner_text()
             assert "Delete your comment on the deck by amy: “Cut the second Sol Ring.”" in text, text
             assert card.locator("a.link", has_text="Undo on the review page").count() == 0
-            assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
+            assert card.locator(OPEN_CAP, has_text=OPEN_WORDS).count() == 1
             _shot(page, f"proposal-card-comment-delete-{width}-{theme}")
         finally:
             browser.close()
