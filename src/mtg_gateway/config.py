@@ -137,6 +137,19 @@ def _sync_minutes_env(name: str) -> int:
     return value
 
 
+def _text_env(name: str, key: str) -> str:
+    """A text setting the Settings page manages, set in the stack: the page's own rules (spaces
+    tidied, its length limit); empty = the code default."""
+    spec = MANAGED_SETTINGS[key]
+    raw = _env(name)
+    if raw is None:
+        return spec.default
+    try:
+        return spec.parse(raw)
+    except SettingError as exc:
+        raise ConfigError(f"{name} {exc.message}") from exc
+
+
 def _float_env(name: str, default: float, *, lo: float, hi: float, seconds: bool = False) -> float:
     raw = _env(name, str(default)) or str(default)
     try:
@@ -181,9 +194,9 @@ class Settings:
     # The Forge simulation service (docker/forge/); unset, reports run the goldfish only.
     forge_url: str | None = None
     # Games per Forge run: four-player Commander games are slow on a Pi, so runs stay short.
-    forge_games: int = 4
+    forge_games: int = 5
     # Forge games a report asks to play at the same time (1 to 16); the Forge service plays as many as
-    # its machine has places for. The default asks for as many as a report has games by default.
+    # its machine has places for. The default is the most the older Forge image plays at once.
     forge_parallel_games: int = 4
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
@@ -457,6 +470,7 @@ def load_settings() -> Settings:
         ntfy_url=_ntfy_url_env("MTG_NTFY_URL"),
         ntfy_token=ntfy_token,
         scan_art_enabled=_bool_env("MTG_SCAN_ART_ENABLED", True),
+        server_name=_text_env("MTG_SERVER_NAME", "server_name"),
         # set = a value other than blanks; a blank (or only spaces) leaves it to the page
         env_set=frozenset(
             key
@@ -640,7 +654,7 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec("backup_hour_utc", "int", 3, "backups", "B", lo=0, hi=23, restart=True),
         _spec("backup_keep_days", "int", 14, "backups", "B", lo=1, hi=3650, restart=True),
         # simulation
-        _spec("forge_games", "int", 4, "simulation", "C", lo=1, hi=50),
+        _spec("forge_games", "int", 5, "simulation", "C", lo=1, hi=50),
         _spec("forge_parallel_games", "int", 4, "simulation", "C", lo=1, hi=16),
         # watchlists and prices
         _spec(
@@ -668,6 +682,7 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             "B",
             max_len=100,
             restart=True,
+            env="MTG_SERVER_NAME",
         ),
         _spec("update_check", "bool", True, "general", "B", restart=True, env="MTG_UPDATE_CHECK"),
         _spec("log_level", "choice", "INFO", "general", "B", choices=_LOG_LEVELS, restart=True),

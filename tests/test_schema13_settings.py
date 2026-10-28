@@ -944,3 +944,31 @@ def test_the_stack_keeps_the_deck_checks_floor(tmp_path: Path, monkeypatch: pyte
         monkeypatch.setenv("MTG_DECK_SYNC_MINUTES", bad)
         with pytest.raises(ConfigError, match=r"MTG_DECK_SYNC_MINUTES must be 0 \(off\), or between 30"):
             load_settings()
+
+
+def test_mtg_server_name_locks_the_gateway_name_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ben, 2026-10-28: MTG_SERVER_NAME is back. Empty leaves the Gateway name to the Settings page;
+    a name locks that row with the stack's value."""
+    _env(tmp_path, monkeypatch)
+    assert MANAGED_SETTINGS["server_name"].env == "MTG_SERVER_NAME"
+    monkeypatch.setenv("MTG_SERVER_NAME", "")
+    s = load_settings()
+    assert s.server_name == "MTG Assistant Gateway" and "server_name" not in s.env_set
+    monkeypatch.setenv("MTG_SERVER_NAME", "  Kitchen Table Magic ")
+    s = load_settings()
+    assert s.server_name == "Kitchen Table Magic" and s.env_set == {"server_name"}
+    db = Database(tmp_path / "x.sqlite")
+    try:
+        live = LiveSettings(s, db)
+        assert live.locked("server_name") and live.get("server_name") == "Kitchen Table Magic"
+        with pytest.raises(SettingError, match=r"\(MTG_SERVER_NAME\)"):
+            live.set("server_name", "Other", by="admin-1")
+    finally:
+        db.close()
+
+
+def test_a_report_plays_five_forge_games_by_default() -> None:
+    from mtg_gateway.config import Settings
+
+    assert MANAGED_SETTINGS["forge_games"].default == 5
+    assert Settings.__dataclass_fields__["forge_games"].default == 5

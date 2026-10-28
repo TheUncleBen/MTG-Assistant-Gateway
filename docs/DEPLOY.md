@@ -674,7 +674,7 @@ have the solo test's estimate and no Forge games.
   publish its port, don't proxy it, and don't attach other containers to that network.
 - **Load:** Java starts only while Forge plays, limited by `FORGE_MEMORY_LIMIT` (default 1536M) and
   `FORGE_CPUS` (default 2); where Docker can't cap memory, see the memory note below. **Forge games
-  per report** on the Settings page (default 4) sets the games per report; **Play more games** on a finished report plays that many again against the same
+  per report** on the Settings page (default 5) sets the games per report; **Play more games** on a finished report plays that many again against the same
   opponents and adds them to the results (50 games a report at most; on a comparison, the same
   number to both decks). An idle Forge service holds
   no Java memory.
@@ -813,6 +813,7 @@ without touching the stack.
 | --- | --- | --- |
 | `MTG_TAG` | `latest` | Gateway image tag. A version such as `0.7.45` stays on it |
 | `TIMEZONE` | `UTC` | Passed to the containers as `TZ` |
+| `MTG_SERVER_NAME` | empty (the Settings page's **Gateway name**, `MTG Assistant Gateway` until changed there) | Commented out in the example files. The name in the top bar, on sign-in and in the assistants' connector lists, up to 100 characters. A name here locks the Settings page's **Gateway name** row, which then shows it is set in your stack |
 | `MTG_BACKUP_COPY_DIR` | empty (no second copy) | A host folder (another disk, or shared storage) every backup is also copied to and pruned the same way. It must already exist. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |
 | `MTG_MEMORY_LIMIT` | `256M` | The gateway's memory cap |
 

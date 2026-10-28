@@ -158,7 +158,7 @@ One deck:
   enough precons of that bracket, the nearest bracket fills in, and an older
   version of Forge without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
-  4 games per report by default (your gateway's operator can change this)
+  5 games per report by default (your gateway's operator can change this)
   and shows each win rate with its 95% interval. Once they have finished,
   **Play more games** on the report page plays that many more against the
   same opponents and adds them to the results, up to 50 games a report

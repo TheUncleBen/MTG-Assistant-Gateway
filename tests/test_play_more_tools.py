@@ -54,6 +54,8 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
     h = stack.h
     fake = FakeForge(brackets=BRACKETED)
     reports = _forge(stack, fake)
+    # 4 games a report (the Settings page's number), so the rounds below reach the cap of 50
+    h.app.state.gateway.live.set("forge_games", 4, by=None)
     token = await mcp_token(h)
     auth = {"Authorization": f"Bearer {token}"}
     out = structured(
@@ -160,7 +162,7 @@ async def test_a_comparison_gets_the_same_number_on_both_decks_through_the_tool(
     fake.finish(_section(stack, first)["job_id"], [1, 1, 2, 2])
     await _until(lambda: len(fake.started) == played + 2)
     new = fake.started[played:]
-    assert new[0]["games"] == new[1]["games"] == 4
+    assert new[0]["games"] == new[1]["games"] == 5
     assert new[0]["decks"][1:] == new[1]["decks"][1:] == fake.started[0]["decks"][1:]
 
 
