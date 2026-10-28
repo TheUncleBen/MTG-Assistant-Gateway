@@ -51,16 +51,24 @@ class BrowserSignInTest {
         assertEquals("https://g/login?next=%2F&app_challenge=$c", BrowserSignIn.startUrl("https://g", "/", c, fresh = false))
     }
 
-    @Test fun theDefaultBrowserFirstThenChromeThenAnyWithAnAuthTab() {
-        val has = setOf("com.android.chrome", "org.other.browser")
-        val pick = { default: String?, installed: List<String> -> BrowserSignIn.pickAuthTabBrowser(default, installed) { it in has } }
+    @Test fun theDefaultBrowserFirstThenAChromeThatCameWithThePhoneAndNothingElse() {
+        val has = setOf("com.android.chrome", "org.other.browser", "evil")
+        val system = setOf("com.android.chrome", "com.sec.android.app.sbrowser")
+        val pick = { default: String?, installed: List<String> ->
+            BrowserSignIn.pickAuthTabBrowser(default, installed, { it in system }) { it in has }
+        }
         assertEquals("org.other.browser", pick("org.other.browser", listOf("com.android.chrome", "org.other.browser")))
         // Samsung Internet as the default, without Auth Tabs: Chrome, though listed after another
         assertEquals("com.android.chrome", pick("com.sec.android.app.sbrowser", listOf("org.other.browser", "com.android.chrome")))
-        assertEquals("org.other.browser", pick("com.sec.android.app.sbrowser", listOf("com.sec.android.app.sbrowser", "org.other.browser")))
         assertEquals("com.android.chrome", pick(null, listOf("com.android.chrome")))
+        // never another app that says it has Auth Tabs (security review A-01)
+        assertNull(pick("x", listOf("evil")))
+        assertNull(pick("com.sec.android.app.sbrowser", listOf("com.sec.android.app.sbrowser", "org.other.browser")))
         assertNull(pick("com.sec.android.app.sbrowser", listOf("com.sec.android.app.sbrowser", "org.firefox")))
         assertNull(pick(null, emptyList()))
+        // an app that took Chrome's package name without coming with the phone
+        val sideloaded = BrowserSignIn.pickAuthTabBrowser("org.firefox", listOf("com.android.chrome"), { false }) { it == "com.android.chrome" }
+        assertNull(sideloaded)
     }
 
     @Test fun onlyTheAppsSchemeWithAWellFormedCodeCountsFromAnAuthTab() {

@@ -270,11 +270,13 @@ else your gateway serves. A few things are native:
   work, exactly as they do on the website. When you are done there, the
   browser closes and you are back in the app, signed in. That needs a browser
   with Auth Tabs, such as Chrome: the app uses your default browser when it
-  has them, else Chrome, else another browser that has them, so on a phone
-  whose default is Samsung Internet the sign-in opens in Chrome if Chrome is
-  installed. With no such browser, the last page opens the app by itself
-  where the browser allows it; otherwise tap **Open the MTG Assistant Gateway
-  app** there. If the browser is already signed in to the sign-in service,
+  has them, else Chrome when it came with the phone (as a system app), and
+  never any other app that says it has them, so on a phone whose default is
+  Samsung Internet the sign-in opens in Chrome if the phone came with it.
+  With neither, the sign-in opens in your default browser as before, and its
+  last page has a button: tap **Open the MTG Assistant Gateway app** there.
+  That page opens the app by itself only right after you signed in during
+  that sign-in (after **Sign out**, say). If the browser is already signed in to the sign-in service,
   you may not be asked anything. Only when the browser can't confirm the app
   belongs to the gateway does the app try once more in a way where the sign-in
   service asks you to sign in (your passkey, say). The browser itself stays
@@ -727,15 +729,22 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   gets `mtgassistant-signin://signin?code=...` back with no such check. Any
   app could open that kind of Auth Tab at the gateway's `/login` with a secret
   of its own, so for these sign-ins the gateway asks the sign-in service to
-  make you sign in (`prompt=login`), and does not take its word for it: the
-  sign-in service's ID token must say you signed in after that try started
-  (`auth_time`, with a minute allowed for clocks that differ). If it doesn't,
+  make you sign in (`prompt=login` and `max_age=0`), and does not take its
+  word for it: the sign-in service's ID token must say you signed in after
+  that try started (`auth_time`, with 5 seconds allowed for clocks that
+  differ, so the two machines' clocks must agree). If it doesn't,
   or the sign-in service sends no `auth_time`, the gateway makes no code and
   the app finishes in a Custom Tab instead.
-  In a Custom Tab, `/login/app-return?code=...` is a page that opens the app
-  once by itself (where the browser allows) through an `intent:` link naming the app's package ID, so Android
-  hands it only to the installed app with that ID, and keeps a button for it;
-  that relies on the browser honouring the package in `intent:` links, which
+  In a Custom Tab, `/login/app-return?code=...` is a page whose button opens the app
+  through an `intent:` link naming the app's package ID, so Android
+  hands it only to the installed app with that ID. Any app can open the
+  gateway's `/login` with a secret of its own in a plain browser tab, and a
+  browser still signed in to the sign-in service passes straight through, so
+  the page follows the link once by itself (where the browser allows) only
+  when that sign-in asked for a new sign-in (`prompt=login`, `max_age=0`,
+  after a sign-out on the device) and the ID token shows one made during it;
+  otherwise it waits for your tap under its warning. The link
+  relies on the browser honouring the package in `intent:` links, which
   Chrome does (other browsers not checked). The one-time code is in these
   addresses, so a reverse proxy that logs full addresses (many do by default)
   may keep `/login/app-return`'s in its access log;

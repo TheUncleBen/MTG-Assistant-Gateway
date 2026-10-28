@@ -15,7 +15,7 @@ import java.util.Base64
  * 2. The app keeps a random verifier and opens [startUrl] (with the verifier's SHA-256) in a
  *    Custom Tab; the person signs in at the identity provider there.
  * 3. Where a browser on the phone has an Auth Tab ([pickAuthTabBrowser]: the default browser,
- *    else Chrome, else any other that has one), the app opens the sign-in in one that returns on
+ *    else Chrome when it came with the phone, never any other app), the app opens the sign-in in one that returns on
  *    the gateway's own https address ([authTabHost], [RETURN_PATH]): the browser checks the
  *    gateway's Digital Asset Links (assetlinks.json names this app), hands the address back and
  *    closes, with no tap ([codeOfReturn]). Only when the browser reports that check failed or
@@ -24,8 +24,8 @@ import java.util.Base64
  *    the identity provider for a new sign-in and gives a code only when the ID token shows one,
  *    else it returns [isSchemeRefusal]'s address and the app finishes in a Custom Tab. In a
  *    Custom Tab the gateway's page opens `mtgassistant-signin://signin?code=...` through an
- *    `intent:` link naming this app's package, once by itself where the browser allows and else
- *    on a tap.
+ *    `intent:` link naming this app's package, on a tap, or once by itself (where the browser
+ *    allows) when the gateway saw a sign-in made during the leg.
  * 4. The app posts the code with its verifier to [FINISH_PATH] in the WebView, which gets the
  *    session cookie. A code is worthless without the verifier, which never leaves this app.
  *
@@ -39,7 +39,7 @@ object BrowserSignIn {
     const val RETURN_PATH = "/login/app-return"
     /** The retry: asks the gateway to end the browser's part on [SCHEME] (app_signin.SCHEME_RETURN). */
     const val SCHEME_RETURN = "scheme"
-    /** Preferred when the default browser has no Auth Tab. */
+    /** Used when the default browser has no Auth Tab, if it came with the phone (a system app). */
     const val CHROME = "com.android.chrome"
     /** How long a started sign-in waits for the browser to come back. */
     const val MAX_AGE_MS = 10 * 60 * 1000L
@@ -66,13 +66,20 @@ object BrowserSignIn {
 
     /**
      * The browser to open an Auth Tab in: the default one when it has Auth Tabs, else Chrome when
-     * it has them, else the first of [installed] that has them; null when none has (a Custom Tab
-     * then). [installed] lists the browsers that offer Custom Tabs, as the phone lists them.
+     * it has them and came with the phone ([isSystemApp]: a sideloaded app can take Chrome's
+     * package name where Chrome is missing); null otherwise (a Custom Tab in the default browser
+     * then). Never any other app of [installed]: any app can say it offers Auth Tabs, and the
+     * sign-in page it would draw sees the password. [installed] lists the browsers that offer
+     * Custom Tabs, as the phone lists them.
      */
-    fun pickAuthTabBrowser(default: String?, installed: List<String>, hasAuthTab: (String) -> Boolean): String? {
+    fun pickAuthTabBrowser(
+        default: String?,
+        installed: List<String>,
+        isSystemApp: (String) -> Boolean,
+        hasAuthTab: (String) -> Boolean,
+    ): String? {
         if (default != null && hasAuthTab(default)) return default
-        val others = installed.filter { it != default }.distinct()
-        return others.firstOrNull { it == CHROME && hasAuthTab(it) } ?: others.firstOrNull { it != CHROME && hasAuthTab(it) }
+        return if (CHROME != default && CHROME in installed && isSystemApp(CHROME) && hasAuthTab(CHROME)) CHROME else null
     }
 
     /**

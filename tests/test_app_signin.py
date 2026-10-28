@@ -227,7 +227,10 @@ async def test_return_page_opens_the_app_once_and_keeps_the_button(harness: Harn
     async with client(harness) as browser:
         page = await browser_leg(harness, browser, challenge)
         assert "Open the MTG Assistant Gateway app" in page.text
-        assert re.search(r"<script src='/static/app-signin.js\?v=[0-9a-f]{12}'></script>", page.text)
+        # after the panel, run once the page has loaded (U1: the small print is drawn first)
+        assert re.search(
+            r"</section></div><script src='/static/app-signin.js\?v=[0-9a-f]{12}' defer></script>", page.text
+        )
         assert "script-src 'self'" in page.headers["content-security-policy"]
         js = (await browser.get("/static/app-signin.js")).text
         assert 'getElementById("app-return")' in js and "sessionStorage" in js
@@ -318,7 +321,10 @@ async def test_a_sign_in_started_for_the_apps_scheme_comes_back_by_itself(harnes
         start, back = await scheme_leg(harness, browser, challenge)
         # the identity provider is asked for a sign-in of its own (security note: another app on
         # the phone could start this leg too, and a silent pass-through must not hand it a session)
-        assert parse_qs(urlparse(start.headers["location"]).query).get("prompt") == ["login"]
+        asked = parse_qs(urlparse(start.headers["location"]).query)
+        assert asked.get("prompt") == ["login"]
+        # and max_age=0, which providers enforce more often than prompt=login
+        assert asked.get("max_age") == ["0"]
         assert back.status_code == 303, back.text
         assert back.headers["cache-control"] == "no-store"
         assert back.headers["referrer-policy"] == "no-referrer"
@@ -356,10 +362,13 @@ async def test_only_the_apps_scheme_can_be_asked_for(harness: Harness) -> None:
 
 async def test_a_scheme_leg_needs_a_sign_in_made_after_it_started(harness: Harness, idp: FakeIdP) -> None:
     """The gateway does not rely on the identity provider honouring prompt=login: the ID token's
-    auth_time must be no older than the leg (a minute's clock skew allowed). Without it the leg
-    ends on the app's scheme with no code at all, and the app finishes in a Custom Tab instead."""
+    auth_time must be no older than the leg (a few seconds' clock skew allowed, FRESH_SKEW). Without
+    it the leg ends on the app's scheme with no code at all, and the app finishes in a Custom Tab
+    instead. A sign-in made 30 seconds before the leg started (on the gateway's website, say) is
+    not one made during it."""
+    assert FRESH_SKEW <= 5
     idp.honours_prompt_login = False  # a provider that passes the browser straight through
-    for auth_time in (None, int(time.time()) - 3600, int(time.time()) - FRESH_SKEW - 30):
+    for auth_time in (None, int(time.time()) - 3600, int(time.time()) - 30):
         idp.auth_time = auth_time
         _v, challenge = pair()
         async with client(harness) as browser:
@@ -372,12 +381,56 @@ async def test_a_scheme_leg_needs_a_sign_in_made_after_it_started(harness: Harne
 
     # a sign-in at the provider within the skew counts (clocks differ a little)
     verifier, challenge = pair()
-    idp.auth_time = int(time.time()) - FRESH_SKEW + 20
+    idp.auth_time = int(time.time()) - FRESH_SKEW + 2
     async with client(harness) as browser, client(harness) as app:
         _start, back = await scheme_leg(harness, browser, challenge)
         (code,) = parse_qs(urlparse(back.headers["location"]).query)["code"]
         done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
         assert done.status_code == 303 and "mtg_session=" in done.headers["set-cookie"]
+
+
+def _opens_by_itself(page: httpx.Response) -> bool:
+    m = re.search(r"<a class='btn btn-primary' id='app-return'[^>]*>", page.text)
+    assert m, page.text
+    return "data-auto='1'" in m.group(0)
+
+
+async def test_the_return_page_opens_the_app_by_itself_only_after_a_fresh_sign_in(
+    harness: Harness, idp: FakeIdP
+) -> None:
+    """Any app can start a sign-in at /login?app_challenge=... with a plain link: a browser still
+    signed in at the identity provider passes straight through to the return page. So that page
+    opens the app by itself only when the leg asked for a sign-in of its own (prompt=login and
+    max_age=0, after a sign-out) and the ID token shows one made during the leg; otherwise it waits
+    for the tap under its warning, as in 0.7.45."""
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)  # no fresh sign-in asked for
+        assert not _opens_by_itself(page)
+        assert "If you didn't start this sign-in from the MTG Assistant Gateway app, don't tap" in page.text
+
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await browser.get("/login", params={"next": "/", "app_challenge": challenge, "fresh": "1"})
+        asked = parse_qs(urlparse(r.headers["location"]).query)
+        assert asked.get("prompt") == ["login"] and asked.get("max_age") == ["0"]
+        cb = urlparse(await harness.idp_leg(r))
+        to = urlparse((await browser.get(f"{cb.path}?{cb.query}")).headers["location"])
+        page = await browser.get(f"{to.path}?{to.query}")
+        assert _opens_by_itself(page)
+        # the flag is the gateway's own, kept with the code: the address carries the code only
+        assert to.query == "code=" + code_from(page)
+
+    # a provider that passed the browser through all the same (an old auth_time): the tap
+    idp.honours_prompt_login = False
+    idp.auth_time = int(time.time()) - 600
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await browser.get("/login", params={"next": "/", "app_challenge": challenge, "fresh": "1"})
+        cb = urlparse(await harness.idp_leg(r))
+        to = urlparse((await browser.get(f"{cb.path}?{cb.query}")).headers["location"])
+        page = await browser.get(f"{to.path}?{to.query}")
+        assert not _opens_by_itself(page) and code_from(page)
 
 
 async def test_the_https_leg_needs_no_auth_time(harness: Harness, idp: FakeIdP) -> None:

@@ -73,7 +73,8 @@ class FakeIdP:
         self.id_token_claims: dict[str, object] = {}
         self.id_token_omit: set[str] = set()
         # When the person last entered credentials here: set by an authorize request with
-        # prompt=login (unless honours_prompt_login is off) and sent as the ID token's auth_time.
+        # prompt=login or max_age=0 (unless honours_prompt_login is off) and sent as the ID token's
+        # auth_time.
         # None sends no auth_time, as before.
         self.honours_prompt_login = True
         self.auth_time: int | None = None
@@ -137,7 +138,7 @@ class FakeIdP:
         assert q["client_id"] == CLIENT_ID
         assert q["code_challenge_method"] == "S256"
         code = secrets.token_urlsafe(16)
-        if q.get("prompt") == "login" and self.honours_prompt_login:
+        if (q.get("prompt") == "login" or q.get("max_age") == "0") and self.honours_prompt_login:
             self.auth_time = int(time.time())
         self.pending[code] = q
         return RedirectResponse(f"{q['redirect_uri']}?{urlencode({'code': code, 'state': q['state']})}", 302)
