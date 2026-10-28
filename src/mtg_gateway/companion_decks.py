@@ -27,6 +27,7 @@ from .companion import (
 from .deckpage import (
     DECK_BOXES,
     VIEWS,
+    compare_mine_html,
     covers_for,
     deck_boxes_html,
     deck_check_html,
@@ -513,8 +514,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def my_decks_json(request: Request) -> Response:
         """The signed-in member's deck list for the pages' placeholders (decks.js): the rows, plus
         the HTML the page itself would have rendered (``shape=list`` with the /decks controls'
-        q, order, view and folder; ``shape=recent`` for the home panel) so there is one renderer.
-        Browser session only; a GET that changes nothing needs no CSRF token."""
+        q, order, view and folder; ``shape=recent`` for the home panel; ``shape=pick`` the Compare
+        page's My decks chips for ``deck``, compare.js) so there is one renderer. Browser session
+        only; a GET that changes nothing needs no CSRF token."""
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse(
@@ -525,7 +527,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 {"ok": False, "error": "cross_site"}, 403, headers={"Cache-Control": "no-store"}
             )
         qp = request.query_params
-        shape = "recent" if qp.get("shape") == "recent" else "list"
+        shape = qp.get("shape") if qp.get("shape") in ("recent", "pick") else "list"
         q, order, view, folder = list_query(qp)
         filters = read_filters(qp)
         try:
@@ -554,7 +556,16 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         }
         if problem is not None:
             out["error"], out["message"] = problem
-        if shape == "recent":
+        if shape == "pick":
+            # the Compare page's other decks: no folder tree, so no second read
+            deck_id = re.sub(r"[^0-9]", "", qp.get("deck") or "")[:12]
+            out["html"] = (
+                compare_mine_html(deck_id, rows, other_ref=(qp.get("with") or "").strip()[:2000])
+                if rows is not None and deck_id
+                else ""
+            )
+            out["count"] = sum(1 for d in rows or [] if str(d.get("id")) != deck_id)
+        elif shape == "recent":
             from .home import recent_panel_inner
 
             recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
