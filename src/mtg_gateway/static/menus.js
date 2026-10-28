@@ -861,7 +861,7 @@
       if (act && act.tagName !== "A") { act.appendChild(k); return; }
       if (!t) return;
       k.classList.add("inline");
-      t.parentNode.insertBefore(k, t.nextSibling);
+      t.parentNode.insertBefore(k, t);  // before the name: the float sits on its first line
     });
     $$(".home .recent a[data-deck-id]").forEach(function (a) {
       if (a.parentNode.classList.contains("rd")) return;
@@ -876,6 +876,7 @@
   }
   decorate();
   document.addEventListener("decks:loaded", decorate);
+  document.addEventListener("rows:loaded", decorate);  // Load more brought rows (reports.js)
 
   // -- My decks' heading: + New folder -----------------------------------------------------------
   document.addEventListener("click", function (e) {

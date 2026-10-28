@@ -595,6 +595,7 @@ def add_deck_tool_routes(
             heading=False,
             main_class="ui-wide",
             extra_css=REPORTS_PAGE_CSS,
+            extra_scripts=("reports.js",),
         )
 
     @server.custom_route("/decks/{deck_id}/goldfish", methods=["GET"], include_in_schema=False)
