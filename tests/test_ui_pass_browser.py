@@ -77,9 +77,11 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
         ctx = _context(browser, server, sid, 344, touch=True)
         page = ctx.new_page()
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        # every box and select; a tick box (Add's "Use this finish and alert next time") is not a box
         heights = page.evaluate(
             "() => [...document.querySelectorAll("
-            "'.watch-page input:not([type=hidden]), .watch-page select:not([aria-hidden=true]),"
+            "'.watch-page input:not([type=hidden]):not([type=checkbox]),"
+            " .watch-page select:not([aria-hidden=true]),"
             " .watch-page .msel-btn')].filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
             ".map(e => [e.id || e.className, Math.round(e.getBoundingClientRect().height),"
             " getComputedStyle(e).borderRadius])"
@@ -266,8 +268,10 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
             if zoom:
                 page.evaluate(ROOT_200)
                 page.wait_for_timeout(100)
+            # the main deck's Sol Ring, from the stack under Commander: the Maybeboard copy sits
+            # below every stack that counts now (0.7.46 audit D-14), a drag of thousands of pixels
             page.drag_and_drop(
-                ".deckview .row[data-card='Sol Ring'][data-zone='side']",
+                ".deckview .row[data-card='Sol Ring'][data-zone='main']",
                 ".stack[data-group='Commander'] .stackhead",
             )
             dialog = page.locator(".deck-toast[role='alertdialog']")
