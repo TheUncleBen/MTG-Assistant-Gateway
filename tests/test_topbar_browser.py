@@ -750,7 +750,7 @@ APP_BAR = """() => {
 }"""
 
 
-@pytest.mark.parametrize("width", [344, 360, 412, 884])
+@pytest.mark.parametrize("width", [344, 360, 412, 600, 700, 884])
 def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int) -> None:
     sid = server.sign_in()
     settings = server.app.state.gateway.settings
@@ -774,11 +774,15 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         finally:
             object.__setattr__(settings, "server_name", short_name)
     for name, got in seen.items():
-        assert got["app"] and got["shown"] != "none", (name, got)
+        # on a phone the app shows only the brand's mark, as the website does (0.7.46: the name
+        # was cut short beside it); its name from 600 px
+        assert got["app"] and (got["shown"] == "none") == (width < 600), (name, got)
         # the brand gets the room the old way
         assert got["left"] == "flex" and got["pad"] == "0px", (name, got)
         assert got["doc"] == got["win"], (name, got)
         assert got["leftEnd"] <= got["rightStart"] - got["gap"] + 0.5, (name, got)
+        if width < 600:
+            continue
         # where the brand's room ends: the left side's end (the places are in the tab bar or the
         # rail, so the bar has no links, navigation round 2)
         assert not got["nav"], (name, got)
@@ -789,7 +793,7 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
             assert abs(got["wordEnd"] - end) <= 0.5, (name, got)
     # at 884 px the brand has about 400 px, about as wide as the long name itself (418 px in Inter,
     # 374 px in serif), so whether it is cut there depends on the font; the check above covers it
-    if width < 800:
+    if 600 <= width < 800:
         assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
 
 

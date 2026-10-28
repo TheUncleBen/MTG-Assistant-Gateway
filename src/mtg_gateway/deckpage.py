@@ -848,8 +848,14 @@ def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
         f"data-root='{esc(deck.comment_root or '')}'>"
         f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
         f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
-        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
-        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+        "Archidekt appear here. "
+        + ui.cap_link(
+            "Read the thread on Archidekt",
+            f"https://archidekt.com/decks/{did}",
+            icon_name="external",
+            attrs="target='_blank' rel='noreferrer noopener'",
+        )
+        + "</p></div>"
         f"{form}</section>"
     )
 
@@ -2208,7 +2214,7 @@ def compare_page_html(
     )
     compare_kind = "" if forge_html else "primary"
     form = (
-        f"<a class='cmp-back' href='/decks/{did}'>← {name}</a>"
+        f"<a class='cmp-back ui-cap' href='/decks/{did}'>← {name}</a>"
         + ui.page_head("Compare decks", f"What “{name}” took out of another deck, put in and changed.")
         + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form'>"
         "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
@@ -2329,7 +2335,7 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
 
 
 COMPARE_CSS = """
-.cmp-back{display:inline-flex;align-items:center;min-height:44px}
+.cmp-back{margin-bottom:.25rem}
 .cmp-form{padding:.75rem 1rem;margin:0 0 1rem}
 .cmp-form .row{display:flex;gap:.5rem;align-items:flex-end}
 .cmp-form .row .fld{flex:1;min-width:0;margin:0}

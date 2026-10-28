@@ -80,8 +80,6 @@ ORDERS = (("recent", "Most recent"), ("points", "Points"))
 CSS = """
 .fm .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;
   color:var(--text-muted);font-size:.9rem}
-.fm .crumbs a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;
-  padding:0 .25rem}
 .fm .fm-why{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .75rem;margin:0 0 .75rem}
 .fm .fm-why .btn{margin:0;flex:none}
 .fm .fm-why span{flex:1 1 14rem;color:var(--text-muted);font-size:.9rem}
@@ -225,11 +223,12 @@ def group_anchor(group: str) -> str:
 
 
 def crumbs_html(*parts: tuple[str, str]) -> str:
-    """Forum › group › section: every crumb a link (a group's goes to its list on the front page)."""
-    out = [f"<a href='{PAGE}'>Forum</a>"]
+    """Forum › group › section: every crumb a way back, the theme's grey capsule (a group's goes to
+    its list on the front page)."""
+    out = [ui.cap_link("Forum", PAGE)]
     for text, href in parts:
         out.append("<span aria-hidden='true'>›</span>")
-        out.append(f"<a href='{esc(href)}'>{esc(text)}</a>" if href else f"<span>{esc(text)}</span>")
+        out.append(ui.cap_link(text, href) if href else f"<span>{esc(text)}</span>")
     return f"<nav class='crumbs' aria-label='You are in'>{''.join(out)}</nav>"
 
 

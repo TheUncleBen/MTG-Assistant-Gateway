@@ -275,7 +275,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse("/", 303)
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
-        who = user.get("preferred_username") or user.get("email") or "there"
+        # the name the sign-in provider gives ("Alice"), else the username
+        who = user.get("name") or user.get("preferred_username") or user.get("email") or "there"
         link = state.decks.status(sub)
         pending = state.db.count_pending_proposals(sub)
         scans = len(state.scan.list_sessions(sub)) if getattr(state, "scan", None) else 0

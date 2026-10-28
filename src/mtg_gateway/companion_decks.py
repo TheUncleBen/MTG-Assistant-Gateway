@@ -466,7 +466,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 f"<p class='muted small backups-note'>{hidden} backup "
                 f"{'copy' if hidden == 1 else 'copies'} made before changes "
                 "are kept out of this list (a deck named like a copy counts as one): "
-                "<a href='/history#backups'>see them under History</a>.</p>"
+                + ui.cap_link("See them under History", "/history#backups")
+                + "</p>"
                 if hidden
                 else ""
             )

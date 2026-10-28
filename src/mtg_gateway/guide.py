@@ -68,6 +68,11 @@ details.gnav > summary::-webkit-details-marker{display:none}
   box-shadow:inset 3px 0 0 var(--orange)}
 .gnav a.part.in{color:var(--orange-text)}
 .gmain{min-width:0}
+/* a link inside the guide's sentences (Open Account details, take your first edit): the text's
+   colour, bold and underlined in orange, never blue */
+.gmain a:not([class]){color:var(--text);font-weight:700;text-decoration:underline;
+  text-decoration-color:var(--orange);text-underline-offset:2px}
+.gmain a:not([class]):hover{color:var(--orange-text)}
 .gpart{margin:0 0 1.5rem}
 .gpart > header{margin:0 0 .75rem}
 .gpart > header h2{display:flex;align-items:center;gap:.5rem;font-size:1.6rem;margin:0 0 .15rem}
@@ -369,8 +374,9 @@ def guide_body(
         "proposal.</span></li></ol>"
         "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant and More; "
         "the magnifier at the top opens the search box for cards and decks. Assistant holds Proposals, "
-        "History and Reports, switched at its top; More opens Search, Precons, Scan, Watchlist and My "
-        "lists. Unfolded or on a tablet the same tabs move to a rail down the left edge, with Alerts. "
+        "History and Reports, switched at its top; More opens Search, Precons, Scan, Watchlist, My lists "
+        "and My card models. Unfolded or on a tablet the same tabs move to a rail down the left edge, "
+        "with Alerts. "
         "Your picture at the top right opens the <a href='/account'>Account</a> page.</p>"
     )
     tut_link = (
@@ -897,7 +903,8 @@ def guide_body(
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
         "<p>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant (Proposals, History and "
-        "Reports) and More (Search, Precons, Scan, Watchlist when it is on, and My lists); Search is also "
+        "Reports) and More (Search, Precons, Scan, Watchlist when it is on, My lists and My card "
+        "models); Search is also "
         "the magnifier at the top, and your picture opens Account (Guide, and Admin for admins, are "
         "there). From 600 px on a touch screen the same tabs are on a rail down the left edge, with "
         "Alerts; a wider browser has them in the top bar, Home first.</p>"

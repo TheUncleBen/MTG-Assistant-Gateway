@@ -207,7 +207,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         assert "MTG Gateway Backups" not in top and "folder-field" not in top
         assert "data-new-folder" in top and "Precon in a folder" not in top
         inside = (await b.http.get("/decks?folder=502", headers=NAV)).text
-        assert re.search(r"<li><a href='/decks\?folder=501'>Commander</a></li>", inside)
+        assert re.search(r"<li><a class='ui-cap' href='/decks\?folder=501'>Commander</a></li>", inside)
         assert "Precon in a folder" in inside and "Sample Commander Deck" not in inside
         assert "<input type='hidden' name='folder' value='502'>" in inside
         found = (await b.http.get("/decks?folder=502&q=sample", headers=NAV)).text  # every folder
