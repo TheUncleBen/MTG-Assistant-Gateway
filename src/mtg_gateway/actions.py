@@ -473,7 +473,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     elif action == "delete_deck":
         cards = sum(c.quantity for c in deck.cards)
         changes["name"] = deck.name
-        row["text"] = f"Delete your deck '{deck.name}' ({cards} cards) from your Archidekt account"
+        changes["cards"] = cards  # the review page's confirm names the deck and its size
+        row["text"] = f"Delete your deck “{deck.name}” ({cards} cards) from your Archidekt account"
         row["note"] = (
             "Archidekt itself has no undo for a deleted deck. The gateway keeps a snapshot first"
             + (" and a backup copy on Archidekt" if decks.live.get("archidekt_backups") else "")

@@ -926,7 +926,14 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         panel = ui.side_panel(
             proposal_heading(p),
             notice
-            + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top, others=others)
+            + _proposal_body(
+                p,
+                _csrf(s, sid),
+                stamp,
+                step=not on_top,
+                others=others,
+                backups=bool(state.decks.live.get("archidekt_backups")),
+            )
             + (
                 ""
                 if full
@@ -2358,8 +2365,112 @@ def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str
     href = f"/proposals?deck_id={quote(str(p['deck_id']), safe='')}"
     return (
         f"<p class='ui-hint pr-also'>{html.escape(text)} "
-        f"<a href='{href}'>Review all {len(others) + 1}</a></p>"
+        f"{ui.cap_link(f'Review all {len(others) + 1}', href)}</p>"
     )
+
+
+# The confirm box a destructive approval opens from its Apply button (ui.box, static/box.js): the
+# title names the thing in curly quotes, the body says what happens and that it cannot be undone,
+# Keep it first, the one solid red button last; that button submits the review page's guarded form
+# (``form='applyf'``), so the stamp, version, status and CSRF checks are the same as for one press.
+CONFIRM_BOX = "confirm-delete"
+
+
+def _confirm_box(title: str, body: str, keep: str, final: str) -> str:
+    return ui.box(
+        CONFIRM_BOX,
+        title,
+        body,
+        actions=[
+            ui.box_button(keep, cancel=True),
+            ui.box_button(
+                final, kind="danger-solid", name="action", value="apply", form="applyf", icon_name="trash"
+            ),
+        ],
+        cls="dangerbox",
+    )
+
+
+def _delete_deck_box(p: dict[str, Any], *, backups: bool) -> str:
+    """Deleting a deck: the deck and its size, the snapshot (and backup copy) kept first."""
+    name = str(p.get("deck_name") or "this deck")
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    size = f" ({plural(int(changes['cards']), 'card')})" if str(changes.get("cards") or "").isdigit() else ""
+    kept = "The gateway keeps a snapshot of it under History first" + (
+        ", and a private copy is made in your backup folder on Archidekt" if backups else ""
+    )
+    body = (
+        f"<p>This deletes <strong>“{html.escape(name)}”</strong>{size} from your Archidekt account. "
+        f"{kept}, and checks that the deck is unchanged since this proposal. "
+        "<strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Delete this deck.</p>"
+    )
+    return _confirm_box(f"Delete “{name}”?", body, "Keep it", "Delete this deck")
+
+
+def _custom_cards_box(p: dict[str, Any]) -> str:
+    """Taking custom cards out of a deck (modes.custom_cards_risk): each card that ends with
+    fewer copies, by name; a snapshot restore does not put them back."""
+    name = str(p.get("deck_name") or "this deck")
+    fewer = []
+    for r in p.get("rows") or []:
+        try:
+            before, after = int(r.get("before") or 0), int(r.get("after") or 0)
+        except (TypeError, ValueError):
+            continue
+        if after < before:
+            fewer.append((str(r.get("name") or ""), before, after))
+    n = len(fewer) or 1
+
+    def copies(before: int, after: int) -> str:
+        return f" ({before} copies → {after})" if after else ""
+
+    if len(fewer) == 1:
+        card, before, after = fewer[0]
+        what = (
+            f"This takes <strong>“{html.escape(card)}”</strong> out of the deck on Archidekt"
+            f"{copies(before, after)}."
+        )
+    elif fewer:
+        cards = ", ".join(f"<strong>“{html.escape(c)}”</strong>{copies(b, a)}" for c, b, a in fewer)
+        what = f"This takes {n} custom cards out of the deck on Archidekt: {cards}."
+    else:
+        what = "This takes custom cards out of the deck on Archidekt."
+    body = (
+        f"<p>{what} The gateway checks the deck again first and reads it back after. "
+        "<strong>Restoring a snapshot doesn't put custom cards back.</strong> To have one again, add it "
+        "from My lists › Custom cards.</p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Take them out.</p>"
+    )
+    title = f"Take {plural(n, 'custom card')} out of “{name}”?"
+    return _confirm_box(title, body, "Keep them", "Take them out")
+
+
+def _lists_delete_box(p: dict[str, Any]) -> str:
+    """A list change that deletes (account_lists.DELETES): the entries that go, by name; the
+    proposal's other changes are applied with them."""
+    rows = p.get("rows") or []
+    gone = [str(r.get("text") or "") for r in rows if r.get("destructive")]
+    rest = len(rows) - len(gone)
+    items = "".join(f"<li>{html.escape(t)}</li>" for t in gone)
+    others = (
+        " The other change in this proposal is applied with it."
+        if rest == 1
+        else f" The other {rest} changes in this proposal are applied with it."
+        if rest
+        else ""
+    )
+    body = (
+        f"<p>This deletes from your lists on Archidekt:</p><ul>{items}</ul>"
+        f"<p>The gateway reads the list again first and keeps a copy of the entries it changes from just "
+        f"before, then reads the list back.{others} <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        f"you press Delete {plural(len(gone), 'entry', 'entries')}.</p>"
+    )
+    final = f"Delete {plural(len(gone), 'entry', 'entries')}"
+    return _confirm_box("Delete from your Archidekt lists?", body, "Keep them", final)
 
 
 def _proposal_body(
@@ -2369,10 +2480,12 @@ def _proposal_body(
     *,
     step: bool = True,
     others: list[dict[str, Any]] | None = None,
+    backups: bool = False,
 ) -> str:
     """One proposal's review: the panel beside the list from 1100 px, its own page below that
     (a side panel on wide screens). ``step=False``: what happens next is already in the error box above
-    (_failure_on_top). ``others``: the deck's other waiting changes."""
+    (_failure_on_top). ``others``: the deck's other waiting changes. ``backups``: Archidekt backup
+    copies are on (the deck delete's confirm says so)."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [
@@ -2525,8 +2638,10 @@ def _proposal_body(
     )
     if pending and p["writes_enabled"]:
         # the member-only tier is shared: deleting a deck, deleting from the lists (below) and
-        # taking custom cards out of a deck each say what they do
+        # taking custom cards out of a deck each say what they do, and each asks once more in the
+        # site's one confirm box (_confirm_box) before the solid red button sends it
         destroy = p.get("risk") == "destructive" and p.get("kind") == "action"
+        box = ""
         if p.get("risk") == "destructive" and p.get("kind") == "custom_cards":
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Take custom cards out of the deck?</h3>"
@@ -2537,6 +2652,7 @@ def _proposal_body(
                 "Take them out on Archidekt.</p>"
             )
             apply_button = ("apply", "Take them out on Archidekt", "btn-outline-danger")
+            box = _custom_cards_box(p)
         elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
@@ -2546,10 +2662,12 @@ def _proposal_body(
                 "keeps a snapshot of it first. Only you can approve this, in every approval mode. "
                 "Nothing happens until you tap Delete.</p>"
             )
-            # a red outline first; static/proposals.js asks once more with the solid red button
-            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger pr-ask")
+            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger")
+            box = _delete_deck_box(p, backups=backups)
         elif p.get("kind") == "lists":
             deletes = any(r.get("destructive") for r in p.get("rows") or [])
+            if deletes:
+                box = _lists_delete_box(p)
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to your Archidekt lists?</h3>"
                 "<p>Applying writes these changes to your lists on Archidekt. The gateway reads the list "
@@ -2586,8 +2704,11 @@ def _proposal_body(
             ask
             # Apply and Reject stay disabled until the click guard sees the page in use: a
             # connected app must not get its own proposal applied by a double-click on a page it
-            # controls that swaps this window in (clickguard.py).
+            # controls that swaps this window in (clickguard.py). A destructive one's Apply opens
+            # the confirm box, whose red button submits this form (CONFIRM_BOX).
             + guarded_form(
+                form_id="applyf",
+                opens={"apply": CONFIRM_BOX} if box else None,
                 # The version shown; an apply of a proposal amended since is refused
                 hidden={
                     "csrf": csrf or "",
@@ -2604,6 +2725,7 @@ def _proposal_body(
                 extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
             )
             + "</div>"
+            + box
         )
     elif pending:
         body += (
