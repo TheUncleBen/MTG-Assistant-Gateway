@@ -381,14 +381,19 @@ body.picker-open{overflow:hidden}
 /* inside the Android app the viewfinder opens the phone camera: one big button over the card frame */
 .scan .camera .phone-cam{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:0;
   background:transparent;color:var(--navbar-text);display:flex;align-items:center;justify-content:center;cursor:pointer}
-.scan .camera .phone-cam .cap{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:.5rem 1.1rem;
+.scan .camera .phone-cam .cap{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:.4rem 1.1rem;
+  font-size:min(1rem,20px);
   max-width:calc(100% - 2rem);border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);
   font-weight:700;text-align:left;box-shadow:var(--shadow)}
 .scan .camera .phone-cam:hover .cap{background:var(--navbar-bg)}
 .scan .camera .phone-cam:focus-visible{outline:3px solid var(--orange-select);outline-offset:-3px}
-/* the running count of the scan, in the viewfinder's top-left corner above the dashed name box */
-.scan .tally{position:absolute;left:.5rem;top:.5rem;z-index:2;min-height:var(--ctl);min-width:var(--ctl);margin:0;padding:.4rem .8rem;
-  border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);color:var(--navbar-text);font-weight:700;
+/* the running count of the scan, a tab in the viewfinder's top-left corner above the dashed name box:
+   tucked into the corner and its text capped, so even on a narrow phone at large text sizes it ends
+   above the name box (which starts about 46 px down in a 280 px wide viewfinder) */
+.scan .tally{position:absolute;left:0;top:0;z-index:2;min-height:var(--ctl);min-width:var(--ctl);margin:0;padding:0 .8rem;
+  font-size:min(.9rem,18px);line-height:1.2;
+  border-radius:0 0 22px 0;border:1px solid var(--navbar-muted);border-width:0 1px 1px 0;
+  background:var(--banner-a);color:var(--navbar-text);font-weight:700;
   font-variant-numeric:tabular-nums;max-width:calc(100% - 5rem);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   backdrop-filter:blur(2px);cursor:pointer}
 .scan .tally[hidden]{display:none}

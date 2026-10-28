@@ -291,3 +291,34 @@ def test_a_running_count_shows_over_the_viewfinder(server: Server) -> None:  # n
         assert page.evaluate("() => window.__scan.state.tab") == "list"
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 390, 840])
+@pytest.mark.parametrize("text", ["16px", "32px"], ids=["text-100", "text-200"])
+def test_the_running_count_leaves_the_name_box_clear_at_any_text_size(
+    server: Server,  # noqa: F811
+    width: int,
+    text: str,
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, exe, server, init=TABLE_CAMERA + APP_BRIDGE, width=width)
+        page.evaluate(f"() => {{ document.documentElement.style.fontSize = '{text}'; }}")
+        page.evaluate(
+            "() => { window.__scan.state.items = [{quantity: 128, name: 'Island', status: 'exact', "
+            "card: {name: 'Island', scryfall_id: 'i1'}}]; window.__scan.showTab('camera'); }"
+        )
+        tally = page.locator("#scan-tally")
+        assert tally.text_content().strip() == "128 cards"
+        b = tally.bounding_box()
+        name = page.locator("#camera .guide .title").bounding_box()
+        cam = page.locator("#camera").bounding_box()
+        assert b["height"] >= 44 and b["y"] + b["height"] <= name["y"] + 0.5, (b, name)
+        assert b["x"] >= cam["x"] and b["x"] + b["width"] <= cam["x"] + cam["width"], (b, cam)
+        # The phone camera button in the middle stays a full target too.
+        open_btn = page.locator("#open-phone-camera .cap").bounding_box()
+        assert open_btn["height"] >= 44 and open_btn["x"] >= cam["x"], open_btn
+        assert errors == []
+        browser.close()
