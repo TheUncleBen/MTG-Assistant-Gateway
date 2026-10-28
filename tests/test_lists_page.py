@@ -449,8 +449,8 @@ async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Brows
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # More's Your cards group, after Watchlist (watchlists are on by default)
-    assert labels[-3:] == ["Scan", "Watchlist", "My lists"]
+    # More's Your cards group, after Watchlist (watchlists are on by default), before My card models
+    assert labels[-4:] == ["Scan", "Watchlist", "My lists", "My card models"]
     assert "<a href='/lists'>" in menu
     # the phone's More sheet and the rail list the same pages
     assert page.count("href='/lists'") >= 2
