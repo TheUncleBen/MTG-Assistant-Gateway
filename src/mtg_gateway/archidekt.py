@@ -1263,6 +1263,8 @@ class ArchidektClient(AccountRequests):
         self.cache_seconds = max(0.0, float(cache_seconds))
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
+        self._writes_begun = 0  # counts every write's start and end
+        self._writes_out = 0
         self.stats = {
             "requests": 0,
             "cache_hits": 0,
@@ -1362,11 +1364,49 @@ class ArchidektClient(AccountRequests):
                 logger.debug("archidekt cache hit %s", path)
                 return copy.deepcopy(value)
         is_write = method != "GET" and not path.startswith("/rest-auth/")
+        # Two calls may be out at once: a read answered before a write landed but finished after it
+        # (or made while one is out) is not kept, or the cache would serve the deck as it was.
+        writes_seen = self._writes_begun
         if is_write:
+            self._writes_begun += 1
+            self._writes_out += 1
             # cleared before the write is sent: a write that fails halfway may still have landed
             self.forget_deck_reads()
             for listener in self.write_listeners:
                 listener(path)
+        try:
+            return await self._attempts(
+                method,
+                path,
+                key,
+                is_write,
+                writes_seen,
+                token=token,
+                scheme=scheme,
+                json_body=json_body,
+                params=params,
+                upload=upload,
+            )
+        finally:
+            if is_write:
+                self._writes_out -= 1
+                self._writes_begun += 1
+
+    async def _attempts(
+        self,
+        method: str,
+        path: str,
+        key: str | None,
+        is_write: bool,
+        writes_seen: int,
+        *,
+        token: str | None,
+        scheme: str,
+        json_body: Any | None,
+        params: dict[str, Any] | None,
+        upload: tuple[bytes, str] | None,
+    ) -> Any:
+        """The sends of one request, with its retries and rate-limit waits (see ``_request``)."""
         attempts = 1 + (self.retries if method == "GET" and not no_retry.get() else 0)
         attempt = 0
         while True:
@@ -1419,7 +1459,8 @@ class ArchidektClient(AccountRequests):
             if is_write:
                 _note_write(None)
             if key is not None:
-                self._cache_put(key, copy.deepcopy(value))
+                if writes_seen == self._writes_begun and not self._writes_out:
+                    self._cache_put(key, copy.deepcopy(value))
             elif is_write:
                 # and again once the write has landed: a list fetched while it was under way could
                 # otherwise be kept as fresh with the old rows
