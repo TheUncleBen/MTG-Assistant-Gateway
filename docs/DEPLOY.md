@@ -848,9 +848,9 @@ Settings page row, which then shows it is set in your stack.
 | `MTG_CIMD_ALLOWED_HOSTS` | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
 | `MTG_ACCESS_TOKEN_TTL` | `3600` | Assistant access token lifetime, seconds (60 to 86400) |
 | `MTG_REFRESH_TOKEN_TTL` | `2592000` | Assistant refresh token lifetime, seconds (3600 to 31536000) |
-| `MTG_BROWSER_SESSION_TTL` | `7200` | Browser session lifetime, seconds (300 to 86400) |
+| `MTG_BROWSER_SESSION_TTL` | `604800` | How long a sign-in in a browser or the Android app lasts while it is not used, seconds (300 to 2592000; 7 days by default). Using the gateway renews it, at most once per half of this time. Whatever the use, a sign-in ends 30 days after it was made. Before 0.7.46 this was the whole lifetime (2 hours by default): a stack file that still sets `7200` keeps sign-ins to 2 hours unused |
 | `MTG_REAUTH_INTERVAL` | `604800` | How long after signing in an assistant can keep refreshing its tokens before the person signs in again, seconds (3600 to 31536000). Group membership doesn't wait for this: it is checked live |
-| `MTG_MEMBERSHIP_CHECK_TTL` | `5` | Seconds a group-membership answer from the identity provider is reused, the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
+| `MTG_MEMBERSHIP_CHECK_TTL` | `5` | Seconds a group-membership answer from the identity provider is reused. After that, for up to 60 seconds after the provider last let the person in, a request is answered at once and the provider is asked in the background, so a removed member can keep going for at most 60 seconds. `0` makes every request wait for the provider's answer; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
 | `MTG_ALLOW_ANY_IDP_USER` | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
 
 **Other identity providers** ([IDP-OTHERS.md](IDP-OTHERS.md))

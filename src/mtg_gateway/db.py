@@ -144,6 +144,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 
 UNUSED_CLIENT_TTL = 7 * 86400
+# A browser or Android app sign-in ends this long after it was made, however much it is used
+# (renew_browser_session); MTG_BROWSER_SESSION_TTL is how long it lasts unused.
+BROWSER_SESSION_MAX_AGE = 30 * 86400
 # Retention and size caps applied by purge_expired. Registration and /authorize are open to
 # anyone, so rows nobody has signed in for are capped as well as aged out.
 AUDIT_RETENTION_SECONDS = 365 * 86400
@@ -1875,15 +1878,40 @@ class Database:
         with self.tx() as c:
             c.execute(
                 "INSERT INTO browser_sessions (id_hash, sub, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                (hash_token(session_id), sub, now, now + ttl),
+                (hash_token(session_id), sub, now, now + min(ttl, BROWSER_SESSION_MAX_AGE)),
             )
 
     def get_browser_session(self, session_id: str) -> str | None:
+        now = int(time.time())
         row = self._one(
-            "SELECT sub FROM browser_sessions WHERE id_hash = ? AND expires_at >= ?",
-            (hash_token(session_id), int(time.time())),
+            "SELECT sub FROM browser_sessions WHERE id_hash = ? AND expires_at >= ? AND created_at > ?",
+            (hash_token(session_id), now, now - BROWSER_SESSION_MAX_AGE),
         )
         return row["sub"] if row else None
+
+    def renew_browser_session(self, session_id: str, ttl: int) -> int | None:
+        """Sliding renewal: once more than half of ``ttl`` has passed since the session was made or
+        last renewed, its end moves to ``ttl`` from now, never past BROWSER_SESSION_MAX_AGE after
+        the sign-in. The seconds the session now has left when it was renewed, else None (not due,
+        or no such live session). Reads only, unless a renewal is due."""
+        now = int(time.time())
+        key = hash_token(session_id)
+        row = self._one(
+            "SELECT created_at, expires_at FROM browser_sessions WHERE id_hash = ? AND expires_at >= ? "
+            "AND created_at > ?",
+            (key, now, now - BROWSER_SESSION_MAX_AGE),
+        )
+        if row is None or int(row["expires_at"]) - now >= ttl / 2:
+            return None
+        until = min(now + ttl, int(row["created_at"]) + BROWSER_SESSION_MAX_AGE)
+        if until <= int(row["expires_at"]):
+            return None  # already as long as it may last
+        with self.tx() as c:
+            done = c.execute(
+                "UPDATE browser_sessions SET expires_at = ? WHERE id_hash = ? AND expires_at = ?",
+                (until, key, row["expires_at"]),
+            ).rowcount
+        return until - now if done else None
 
     def delete_browser_session(self, session_id: str) -> None:
         with self.tx() as c:

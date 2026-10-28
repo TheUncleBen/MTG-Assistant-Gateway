@@ -35,6 +35,7 @@ from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
+from .db import BROWSER_SESSION_MAX_AGE
 from .decks import (
     REVIEW_PAGE,
     DeckError,
@@ -1023,7 +1024,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.set_cookie(
             session_cookie,
             sid,
-            max_age=s.browser_session_ttl,
+            max_age=min(s.browser_session_ttl, BROWSER_SESSION_MAX_AGE),
             path="/",
             httponly=True,
             secure=secure,

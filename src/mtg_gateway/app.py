@@ -646,6 +646,56 @@ class MembershipMiddleware:
         await self.app(scope, receive, send)
 
 
+class SessionRenewalMiddleware:
+    """Sliding browser sessions: a request with a live session cookie, once more than half of
+    MTG_BROWSER_SESSION_TTL has passed since the session was made or last renewed, moves its end to
+    a full window from now (never past db.BROWSER_SESSION_MAX_AGE after the sign-in) and sets the
+    cookie again with the time left. Inside MembershipMiddleware, so a removed member's session is
+    gone before it could be renewed; sign-in and sign-out set or clear the cookie themselves, and a
+    response that sets it already is left alone."""
+
+    EXEMPT_PREFIXES = MembershipMiddleware.EXEMPT_PREFIXES
+
+    def __init__(self, app: ASGIApp, state: AppState):
+        self.app = app
+        self.state = state
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        settings = self.state.settings
+        name = cookie_name(SESSION_COOKIE, settings)
+        sid = Request(scope).cookies.get(name)
+        left = self.state.db.renew_browser_session(sid, settings.browser_session_ttl) if sid else None
+        if left is None:
+            await self.app(scope, receive, send)
+            return
+        holder = Response()
+        holder.set_cookie(
+            name,
+            sid or "",
+            max_age=left,
+            path="/",
+            httponly=True,
+            secure=settings.public_url.startswith("https://"),
+            samesite="lax",
+        )
+        cookie = next(v for k, v in holder.raw_headers if k == b"set-cookie")
+        prefix = name.encode() + b"="
+
+        async def send_renewed(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                if not any(k.lower() == b"set-cookie" and v.startswith(prefix) for k, v in headers):
+                    headers.append((b"set-cookie", cookie))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_renewed)
+
+
 class BodyLimitMiddleware:
     """Refuse oversized bodies on the anonymous OAuth endpoints before the SDK parses them
     (registration is open, and its JSON is otherwise read and validated up to the SDK's 4 MB)."""
@@ -1069,6 +1119,7 @@ def create_app(
     app.add_middleware(
         LoginCookieMiddleware, provider=provider, secure=settings.public_url.startswith("https://")
     )
+    app.add_middleware(SessionRenewalMiddleware, state=state)  # inside the membership check
     app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
     app.add_middleware(PageGzip)
