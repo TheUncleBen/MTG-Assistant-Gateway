@@ -106,6 +106,10 @@ def _open(page):
     page.locator("[data-box-open='confirm-delete']").click()
     box = page.locator(BOX)
     box.wait_for(timeout=5000)
+    # measured once it has slid or scaled into place: mid-way it is lower and 2% smaller
+    page.wait_for_function(
+        "() => document.getAnimations().every(a => a.playState !== 'running')", timeout=5000
+    )
     return box
 
 
