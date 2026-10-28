@@ -63,8 +63,8 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         assert "Price paid" not in widgets
         # the shared search panel with the results bar at its foot
         assert "class='panel spanel'" in page
-        assert "<label for='col-q'>Filter by card name</label>" in page
-        assert "placeholder='Card name'" in page
+        assert "<label for='col-q'>Filter by name</label>" in page
+        assert "placeholder='Name'" in page
         assert "aria-label='Filter'" in page
         assert "id='col-count' aria-live='polite'>3 entries</h2>" in page
         assert "<option value='added' selected>Recently added</option>" in page
@@ -173,7 +173,7 @@ async def test_the_add_cards_box_has_two_tabs_and_opens_from_the_old_address(sta
         assert "<option value='nonfoil'>Normal</option>" in box and "Non-foil" not in page
         assert "<option value='NM' selected>Near Mint (NM)</option>" in box
         assert "<option value='DMG'>Damaged (DMG)</option>" in box
-        assert "placeholder='Card name, or “name (SET) 123” for one printing'" in box
+        assert "placeholder='Name, or “name (SET) 123” for one printing'" in box
         assert "Scanning a pile is quicker" in box
         assert (
             "A collection CSV or a card list, one card per line, up to 100 rows at a time. "

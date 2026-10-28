@@ -960,10 +960,10 @@
           extra = el("div");
           extra.appendChild(el("p", null, "“" + name + "” still has " + n + " card" + (n === 1 ? "" : "s") +
             ". Archidekt only deletes an empty category: pick a category to move " + (n === 1 ? "it" : "them") + " to first."));
-          var lab = el("label", null, "Move its cards to");
-          lab.setAttribute("for", "move_cards_box");
+          var lab = el("label", null, "Move " + (n === 1 ? "it" : "them") + " to");
+          lab.setAttribute("for", "move_to_box");
           var sel = el("select");
-          sel.id = "move_cards_box";
+          sel.id = "move_to_box";
           // nothing picked to start with (the first category is often Commander): Delete waits for a pick
           var none = el("option", null, "Pick a category…");
           none.value = ""; none.disabled = true; none.hidden = true; none.selected = true;

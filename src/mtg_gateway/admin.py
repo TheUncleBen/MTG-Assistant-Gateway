@@ -1946,7 +1946,7 @@ def _models_body(
     tools = ui.toolbar(
         path,
         search_label="Search card models",
-        placeholder="Search card name",
+        placeholder="Search by name",
         q=q,
         filters=[ui.filter_select("member", "Member", member_opts, member)],
         keep={"changed": changed},

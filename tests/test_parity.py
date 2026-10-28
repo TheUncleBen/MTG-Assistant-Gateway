@@ -36,7 +36,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-card-size=m>" in page.text
+        assert "<html lang='en' data-card-size=m " in page.text
         assert "class='tabbar'" in page.text and "class='icon-btn acct' href='/account'" in page.text
         # Theme lives on the Account page (Look), as a form posting to /theme
         hub = await b.http.get("/account", headers=NAV)
@@ -45,7 +45,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         assert r.status_code == 303 and r.headers["location"] == "/decks"
         assert "mtg_theme=light" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-theme=light data-card-size=m>" in page.text
+        assert "<html lang='en' data-theme=light data-card-size=m " in page.text
         # an unknown theme falls back to system (cookie cleared), an off-site next is ignored
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "neon", "next": "https://evil.test/"})
         assert r.status_code == 303 and r.headers["location"] == "/account"

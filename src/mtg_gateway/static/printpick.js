@@ -293,9 +293,10 @@
     st = {
       opts: opts, oid: null, list: [], page: 0, hasMore: false, total: 0, complete: false, loading: false,
       params: { finish: "", frame: "", border: "", order: "newest" }, q: "", all: false, pinned: null, seq: 0,
-      mine: Object.create(null), mineAsked: false,
+      mine: Object.create(null), mineAsked: false, watched: Object.create(null),
       finish: scryFinish(opts.finish)
     };
+    if (typeof opts.onWatch === "function") askWatched(st);
     var box = el("div", "ppbox");
     st.box = box;
     // head: the card's name and the close button
@@ -687,6 +688,21 @@
     if (use && !use.disabled) use.focus();
     else { var back = st.pv.querySelector(".ppback"); if (back && !wide()) back.focus(); }
   }
+  // browse mode: the printings of this card the member watches (set, number and finish), so the
+  // preview says "On your watchlist" for one instead of offering it again
+  function watchKey(set, number, finish) { return String(set || "").toLowerCase() + "#" + number + "#" + finish; }
+  function askWatched(mine) {
+    getJSON("/watchlist/api/card?name=" + encodeURIComponent(mine.opts.name)).then(function (d) {
+      if (st !== mine) return;
+      (d.watches || []).forEach(function (w) {
+        if (w.set && w.collector_number) mine.watched[watchKey(w.set, w.collector_number, w.finish)] = true;
+      });
+      if (st.pv && st.pv.querySelector(".ppwatch") && !st.pv.contains(document.activeElement)) {
+        st.pv.dataset.shows = "";
+        showPreview(st.pvShown || null);
+      }
+    }).catch(function () { /* Watch stays offered; the server keeps one watch a printing */ });
+  }
   function hidePreview() {
     st.box.classList.remove("previewing");
     st.tools.inert = false;
@@ -694,6 +710,7 @@
     if (st.pinnedTile && st.pinnedTile.isConnected) st.pinnedTile.focus();
   }
   function showPreview(p) {
+    if (st) st.pvShown = p;
     var pv = st.pv;
     if (pv.dataset.shows === (p ? p.set + "#" + p.collector_number : "") && pv.childNodes.length) return;
     pv.dataset.shows = p ? p.set + "#" + p.collector_number : "";
@@ -743,16 +760,31 @@
       acts.appendChild(use);
     }
     if (typeof o.onWatch === "function") {
-      // browse mode: watch this printing's price (in the finish shown), the dialog stays open
+      // browse mode: watch this printing's price (in the finish shown), the dialog stays open; a
+      // printing watched already says so, with its watchlist entry a tap away
+      var key = watchKey(p.set, p.collector_number, fit.finish);
       var watch = el("button", (typeof o.onPick === "function" ? "btn" : "btn-primary") + " ppwatch", "Watch this printing");
       watch.type = "button";
+      var onList = el("a", "btn ppwatched", "Open the watchlist");
+      onList.href = "/watchlist?q=" + encodeURIComponent(p.name || o.name);
+      var watched = function () {
+        watch.textContent = "On your watchlist";
+        watch.disabled = true;
+        watch.className = "btn ppwatch";
+        if (!onList.parentNode) acts.insertBefore(onList, watch.nextSibling);
+      };
       watch.addEventListener("click", function () {
         watch.disabled = true;
+        var mine = st;
         Promise.resolve(o.onWatch(p, fit.finish)).then(function () {
-          watch.textContent = "Watching";
+          mine.watched[key] = true;
+          var had = document.activeElement === watch || document.activeElement === document.body;
+          watched();
+          if (had) onList.focus();  // the button it was on is disabled now
         }, function () { watch.disabled = false; });
       });
       acts.appendChild(watch);
+      if (st.watched[key]) watched();
     }
     var back = el("button", "btn ppback", "Back to printings");
     back.type = "button";

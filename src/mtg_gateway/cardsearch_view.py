@@ -386,7 +386,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
         + "><summary class='fold-btn'>More filters</summary><div class='cs-grid'>"
         "<h3 class='sub'>Card text</h3>"
         + _text_field(
-            "o", "Rules text", f.oracle, placeholder="draw a card", hint="Use ~ for the card's own name."
+            "o", "Rules text", f.oracle, placeholder="destroy target", hint="Use ~ for the card's own name."
         )
         + _text_field(
             "m", "Mana cost", f.mana, placeholder="{2}{G}{G}", hint="Symbols like {W}, {2} or {R/G}."
@@ -445,10 +445,10 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
         f"<form id='cs-form' class='cs' method='get' action='/cards' role='search' data-view='{_esc(view)}' "
         "data-count-own>"
         + sp.name_row(
-            label="Card name",
+            label="Name",
             name="q",
             value=f.name,
-            placeholder="Any part of a card name",
+            placeholder="Any part of a name",
             input_id="c-q",
             search_label="Search cards",
             cross_html=sp.cross_link("Search decks instead", "/search", "decks"),
@@ -573,9 +573,12 @@ def watch_button(card: dict[str, Any], *, watched: frozenset[str], printing: boo
     already watches the card. A printing search watches the shown printing."""
     name = str(card.get("name") or "")
     pin = ""
+    on = _norm(name) in watched
     if printing and card.get("set") and card.get("collector_number"):
         pin = f" data-set-code='{_esc(card['set'])}' data-number='{_esc(card['collector_number'])}'"
-    if _norm(name) in watched:
+        # a printing's own button: that printing watched, not another one of the card
+        on = _print_key(card["set"], card["collector_number"]) in watched
+    if on:
         return (
             f"<button type='button' class='wbtn on' data-watch='{_esc(name)}'{pin} aria-pressed='true' "
             f"aria-label='{_esc(name)} is on your watchlist' title='On your watchlist'>"
@@ -592,9 +595,28 @@ def _norm(name: str) -> str:
     return " ".join(name.lower().split())
 
 
+_PRINT = "#print "  # a watched printing's key in watched_names (no card name starts with "#")
+
+
+def _print_key(set_code: object, number: object) -> str:
+    return f"{_PRINT}{str(set_code).lower()} {str(number).lower()}"
+
+
 def watched_names(rows: list[dict[str, Any]]) -> frozenset[str]:
-    """The names a member watches (any printing), as the Watch buttons compare them."""
-    return frozenset(_norm(str(r.get("name") or "")) for r in rows)
+    """The names a member watches (any printing), as the Watch buttons compare them, and each
+    watched printing's key (a printing search's buttons)."""
+    out = {_norm(str(r.get("name") or "")) for r in rows}
+    out |= {
+        _print_key(r["set_code"], r["collector_number"])
+        for r in rows
+        if r.get("set_code") and r.get("collector_number")
+    }
+    return frozenset(out)
+
+
+def watched_name_list(watched: frozenset[str]) -> list[str]:
+    """The names alone, sorted (the deck editor's list)."""
+    return sorted(n for n in watched if not n.startswith(_PRINT))
 
 
 def card_tile_html(

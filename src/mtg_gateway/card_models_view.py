@@ -85,8 +85,8 @@ def box_html(
     body = [f"<p class='ui-sub'>{esc(SUB_TEXT)}</p>"]
     if models:
         body.append(
-            "<div class='field mm-search'><label for='mm-q'>Search by card name</label>"
-            "<input id='mm-q' type='search' data-models-filter placeholder='Card name' autocomplete='off'>"
+            "<div class='field mm-search'><label for='mm-q'>Search by name</label>"
+            "<input id='mm-q' type='search' data-models-filter placeholder='Name' autocomplete='off'>"
             "</div>"
             f"<p class='sr-only' data-models-count role='status' aria-live='polite'></p>"
             f"<ul class='mm-list' data-models-list>{''.join(_row(m) for m in models)}</ul>"

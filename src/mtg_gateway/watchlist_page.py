@@ -569,11 +569,11 @@ def watchlist_page_html(
         "<form method='post' class='ui-card w-add' id='w-add' aria-labelledby='w-add-h'>"
         f"{csrf_in}<input type='hidden' name='action' value='add_card'>"
         "<h2 id='w-add-h'>Watch a card</h2><div class='w-addrow'>"
-        "<label class='wide' for='w-name'>Card name<input id='w-name' name='name' maxlength='150' "
+        "<label class='wide' for='w-name'>Name<input id='w-name' name='name' maxlength='150' "
         "autocomplete='off' data-suggest='cards'></label>"
         "<label for='w-set'>Set code (optional)<input id='w-set' name='set_code' maxlength='6' "
         "autocomplete='off'></label>"
-        "<label for='w-cn'>Number (optional)<input id='w-cn' name='collector_number' maxlength='10' "
+        "<label for='w-cn'>Collector no. (optional)<input id='w-cn' name='cn' maxlength='10' "
         "autocomplete='off'></label>"
         "<label for='w-fin'>Finish<select id='w-fin' name='finish'>"
         + "".join(f"<option value='{k}'>{w}</option>" for k, w in FINISH_WORDS.items())
@@ -599,7 +599,7 @@ def watchlist_page_html(
     tools = ui.toolbar(
         "/watchlist",
         search_label="Search your watchlist",
-        placeholder="Search card name",
+        placeholder="Search by name",
         q=query.q,
         filters=[
             ui.filter_select("finish", "Finish", [("", "Any finish"), *FINISH_WORDS.items()], query.finish),
@@ -664,7 +664,7 @@ def watchlist_page_html(
         f"<div id='w-decks'>{ui.list_head('Decks', len(decks))}</div>"
         f"<form method='post' class='w-deckadd' aria-label='Watch a deck'>{csrf_in}"
         "<input type='hidden' name='action' value='add_deck'>"
-        "<label class='wide' for='w-deck'>Archidekt deck link or number"
+        "<label class='wide' for='w-deck'>Archidekt deck link or ID"
         "<input id='w-deck' name='deck' maxlength='200' autocomplete='off' required></label>"
         "<button class='btn-plain' type='submit'>Watch deck</button></form>"
         f"<p class='ui-hint'>{DECK_HINT}</p>"
