@@ -7,7 +7,7 @@ import asyncio
 
 import pytest
 
-from mtg_gateway.scan.names import NameCatalog, fold, rank
+from mtg_gateway.scan.names import TOKEN_NAMES, NameCatalog, fold, rank
 from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.scan.service import ScanService
 
@@ -63,7 +63,15 @@ def test_catalog_close_cancels_a_running_download() -> None:
 def test_suggest_ranks_prefix_then_word_start_then_inside() -> None:
     cat = NameCatalog(lambda: None)
     cat.set_names(NAMES)
-    assert cat.suggest("sol") == ["Sol Ring", "Solemn Simulacrum", "Marisol Fighter", "Unsol Ring Of Fire"]
+    assert cat.suggest("sol") == [
+        "Sol Ring",
+        "Solemn Simulacrum",
+        "Marisol Fighter",
+        "Unsol Ring Of Fire",
+        # the token names come after every card (0.7.46)
+        "Human Soldier",
+        "Soldier",
+    ]
     assert cat.suggest("shelo") == ["Shelob, Child of Ungoliant", "Shelob, Dread Weaver", "Shelob's Ambush"]
     assert cat.suggest("lim-dul") == ["Lim-Dûl the Necromancer"]
     assert cat.suggest("lim dul") == ["Lim-Dûl the Necromancer"]
@@ -174,3 +182,17 @@ def whole_small(names: list[str], q: str) -> list[str]:
     c = NameCatalog(lambda: None)
     c.set_names(names)
     return c.suggest(q) or []
+
+
+def test_token_names_are_suggested_beside_the_catalog() -> None:
+    """Scryfall's name catalog leaves tokens out, so Add to binder, Watch a card and Add to deck
+    never offered "Treasure" or "Soldier" (0.7.46): a list of token names sits beside it, after
+    the cards that match unless the token is typed in full."""
+    cat = NameCatalog(lambda: None)
+    cat.set_names([*NAMES, "Treasure Map"])
+    assert cat.suggest("treas") == ["Treasure Map", "Treasure"]  # cards first
+    assert cat.suggest("treasure") == ["Treasure", "Treasure Map"]  # the token typed in full
+    assert "Food" in cat.suggest("food") and "Clue" in cat.suggest("clue")
+    assert "Eldrazi Spawn" in cat.suggest("eldrazi sp")
+    assert cat.known("Treasure") is True and cat.known("Not A Token") is False
+    assert cat.size == len(NAMES) + 1 + len(set(TOKEN_NAMES) - {*NAMES, "Treasure Map"})
