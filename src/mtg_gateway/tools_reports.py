@@ -586,7 +586,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
 
     @server.tool(
         name="propose_delete_report",
-        title="Ask to delete a stored report",
+        title="Ask to delete a report",
         description=(
             "Ask the user to delete one of their stored reports. It never deletes anything itself: it "
             "checks the report is the user's and returns delete_url, the report's page with its "

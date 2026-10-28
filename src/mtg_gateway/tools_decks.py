@@ -936,7 +936,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
 
     @server.tool(
         name="proposal_status",
-        title="Check a proposal",
+        title="Read a proposal",
         description=(
             "Read one of the user's proposals without drawing a card: its state (pending, applying, "
             "applied, rejected, expired, failed, withdrawn, replaced), version, board number, risk, "
@@ -965,7 +965,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
 
     @server.tool(
         name="get_proposal",
-        title="Read a proposal for its card",
+        title="Read a proposal from its chat card",
         description=(
             "Called by the proposal card in the chat to read its proposal again; not for the "
             "assistant, which uses proposal_status. Shows one proposal (diff, state, review URL) "
