@@ -874,6 +874,14 @@ def archidekt_wait(exc: BaseException) -> int | None:
     return max(1, math.ceil(min(asked, Pacer.MAX_RETRY_AFTER)))
 
 
+# Before a proposal that overlaps another waiting change (board.overlaps) is applied.
+OVERLAP_STEP = (
+    "Other waiting changes on this deck touch the same cards or categories (overlaps). Before "
+    "anything is applied, combine them (combine_proposals), amend one (amend_proposal) or withdraw "
+    "one (withdraw_proposal), so one does not undo or break the other. Then:"
+)
+
+
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
@@ -2061,6 +2069,14 @@ def plan_zones(
         elif ch.action == "remove":
             if cur == 0:
                 where = "the deck" if ch.zone == "main" else "the maybeboard or sideboard"
+                had = (before_side if ch.zone == "side" else before).get(key, 0)
+                if had:  # an earlier change in this list already took every copy
+                    copies = f"{had} {'copy' if had == 1 else 'copies'}"
+                    raise DeckError(
+                        "invalid",
+                        f"'{ch.card_name}' is removed more than once in these changes, and {where} has "
+                        f"only {copies}. Remove it once.",
+                    )
                 raise DeckError("invalid", f"'{ch.card_name}' is not in {where}, so it cannot be removed")
             target[key] = max(0, cur - ch.quantity) if ch.quantity else 0
         else:
@@ -7485,6 +7501,9 @@ class DeckService:
         }
         if found:
             extra["overlaps"] = found
+            if out.get("next_step"):
+                # whatever the approval mode allows, the overlap comes first
+                extra["next_step"] = OVERLAP_STEP + " " + str(out["next_step"])
         if len(others) + 1 >= board.SOFT_PER_DECK:
             extra["hint"] = (
                 f"This deck has {len(others) + 1} changes waiting. Combine or amend them "
@@ -7771,7 +7790,16 @@ class DeckService:
         rows.sort(key=lambda r: (r["created_at"], r.get("board_no") or 0))
         changes = [c for r in rows for c in r["changes"]]
         parts = [r["id"] for r in rows]
-        out = await self.propose_linked(sub, rows[0]["deck_id"], changes, replaces=parts)
+        try:
+            out = await self.propose_linked(sub, rows[0]["deck_id"], changes, replaces=parts)
+        except DeckError as exc:
+            if "removed more than once" not in str(exc):
+                raise
+            raise DeckError(
+                exc.kind,
+                f"{exc} More than one of these proposals removes it: amend or withdraw one of them, "
+                "then combine.",
+            ) from None
         if out.get("duplicate_of"):
             return out
         pid = out["proposal_id"]
@@ -7997,7 +8025,8 @@ class DeckService:
             sub=sub,
             detail={"proposal_id": pid, "deck_id": deck.id, "restores_snapshot": snap["id"]},
         )
-        return self.describe(sub, pid)
+        # the other waiting changes it shares cards with, as a card edit is told
+        return self._board_note(sub, self.describe(sub, pid), deck.id, lines, pid)
 
     # -- deck details -----------------------------------------------------------
     @_dedupe
@@ -8323,7 +8352,8 @@ class DeckService:
             sub=sub,
             detail={"proposal_id": pid, "deck_id": deck.id, "kind": "categories", "count": len(plan)},
         )
-        return self.describe(sub, pid)
+        # a card edit waiting on the deck may move cards into or out of these categories
+        return self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
 
     async def _categories_unchanged(self, sub: str, deck: Deck) -> Deck:
         """Re-read the deck just before category writes and refuse (needs a look, nothing sent)

@@ -61,17 +61,61 @@ def overlaps(
     "Sol Ring: #2 changes its printing; this request removes it." ``waiting`` are full proposal
     rows (with ``rows``), oldest first; ``numbers`` maps their ids to board numbers."""
     mine = _cards(rows)
+    my_cats, my_moves = _deck_categories(rows), _filed(rows)
     out: list[str] = []
     for note in waiting:
         theirs = _cards(note.get("rows"))
+        no = numbers.get(note["id"])
+        label = f"#{no}" if no else "another waiting change"
         for key, r in mine.items():
             other = theirs.get(key)
             if other is None:
                 continue
-            no = numbers.get(note["id"])
-            label = f"#{no}" if no else "another waiting change"
             out.append(f"{r.get('name')}: {label} {_verb(other)}; this request {_verb(r)}.")
+        # across kinds: a change to a deck category and a card moved into or out of it
+        their_cats, their_moves = _deck_categories(note.get("rows")), _filed(note.get("rows"))
+        for key, cat in my_cats.items():
+            for card in their_moves.get(key, []):
+                where = f"“{cat.get('name')}”"
+                out.append(f"{where}: this request {_cat_verb(cat)}; {label} moves {card} in or out of it.")
+        for key, cat in their_cats.items():
+            for card in my_moves.get(key, []):
+                where = f"“{cat.get('name')}”"
+                out.append(f"{where}: {label} {_cat_verb(cat)}; this request moves {card} in or out of it.")
     return out
+
+
+def _deck_categories(rows: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    """Deck category name (case-folded) -> the row of a categories change that renames, deletes or
+    switches it."""
+    return {
+        str(r["name"]).casefold(): r
+        for r in rows or []
+        if r.get("kind") == "deck_category" and str(r.get("name") or "").strip()
+    }
+
+
+def _filed(rows: list[dict[str, Any]] | None) -> dict[str, list[str]]:
+    """Deck category name (case-folded) -> the cards a card edit moves into or out of it."""
+    out: dict[str, list[str]] = {}
+    for r in rows or []:
+        if r.get("kind") != "category" or not r.get("name"):
+            continue
+        before = {c.strip() for part in str(r.get("before") or "").split(" / ") for c in part.split(", ")}
+        after = {c.strip() for part in str(r.get("after") or "").split(" / ") for c in part.split(", ")}
+        for cat in (before ^ after) - {""}:
+            cards = out.setdefault(cat.casefold(), [])
+            if r["name"] not in cards:
+                cards.append(str(r["name"]))
+    return out
+
+
+def _cat_verb(r: dict[str, Any]) -> str:
+    if r.get("delete"):
+        return "deletes it"
+    if r.get("rename_to"):
+        return f"renames it to “{r['rename_to']}”"
+    return "changes it"
 
 
 def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str, Any]] | None) -> str:
