@@ -1300,7 +1300,11 @@ UI_CSS = """
 main.wrap.ui-wide{max-width:1200px}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
-.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%}
+/* its parts never shrink under their words: when they are wider than the screen (large text on a
+   Fold's inner screen beside the rail), the switch scrolls sideways inside, never the page */
+.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%;
+  overflow-x:auto;scrollbar-width:none}
+.hubseg::-webkit-scrollbar{display:none}
 .hubseg a{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;flex:1 1 0;min-height:38px;
   padding:0 1.1rem;border-radius:9px;color:var(--text);text-decoration:none;font-weight:700}
 .hubseg a{white-space:nowrap}
@@ -1308,7 +1312,7 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a[aria-current=page]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
 @media (pointer:coarse){ .hubseg a{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
-@media (max-width:599.98px){ .hubseg{display:flex;width:100%;overflow-x:auto;scrollbar-width:none}
+@media (max-width:599.98px){ .hubseg{display:flex;width:100%}
   .hubbar{display:block}
   /* large text on a narrow phone: a part's name wraps between words, and a word longer than its
      part scrolls the switch sideways instead of the page */

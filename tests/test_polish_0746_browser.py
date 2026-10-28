@@ -134,3 +134,69 @@ def test_the_review_facts_stay_inside_the_page_at_344_px_and_200_percent(chromiu
         page.wait_for_timeout(30)
         assert page.evaluate(SCROLLS) == 0
         assert all(page.evaluate(FACTS))
+
+
+# -- Reports: the switch and the chip row -------------------------------------------------------------
+
+# The Proposals / History / Reports switch and the chip row: each scrolls inside its own box when
+# its parts are wider than the screen (scrollLeft moves), and the page never scrolls sideways.
+STRIPS = """
+() => ['.hubseg', '.ui-chips'].map((sel) => { const c = document.querySelector(sel);
+  c.scrollLeft = 9999; return { sel, wider: c.scrollWidth > c.clientWidth + 1, scrolls: c.scrollLeft > 0,
+    inside: c.getBoundingClientRect().right <= document.documentElement.clientWidth + 0.5 }; })
+"""
+
+
+@pytest.mark.parametrize("zoom", ["root", "text"])
+@pytest.mark.parametrize("width", [344, 390, 600, 640, 840])
+def test_reports_strips_scroll_inside_and_never_the_page(chromium, server, width, zoom) -> None:
+    """At 600 and 640 px (the Fold's inner screen beside the rail) with the text at twice its size
+    the switch's three parts pushed the page sideways; the chip row is the site's scroller."""
+    sid = _link(server)
+    store_report(server.db, "user-1", "r1", deck_name=LONGER)
+    with _page(chromium, server, sid, width) as page:
+        page.goto(f"{server.base}/reports", wait_until="networkidle")
+        page.evaluate(ZOOMS[zoom])
+        page.wait_for_timeout(30)
+        assert page.evaluate(SCROLLS) == 0
+        strips = page.evaluate(STRIPS)
+        assert all(s["inside"] and (s["scrolls"] or not s["wider"]) for s in strips), strips
+
+
+# -- the report page: Forge's seats at large text ------------------------------------------------------
+
+# Every cell of the seats table sits inside the table, and each deck's name has room for more
+# than a letter a line: its box is at least a quarter of the row.
+SEATS = """
+() => { const t = document.querySelector('.rv-seats'), tb = t.getBoundingClientRect();
+  return [...t.querySelectorAll('.tr:not(.th)')].map((tr) => {
+    const cells = [...tr.children].filter((c) => getComputedStyle(c).display !== 'none');
+    const title = tr.querySelector('.title').getBoundingClientRect();
+    return { inside: cells.every((c) => { const r = c.getBoundingClientRect(); return r.left >= tb.left - 0.5 && r.right <= tb.right + 0.5; }),
+      room: title.width >= tr.getBoundingClientRect().width / 4 }; }); }
+"""
+
+
+@pytest.mark.parametrize("zoom", ["100", "root", "text"])
+@pytest.mark.parametrize("width", [320, 344, 390, 673, 840])
+def test_forge_seats_fit_the_table_at_large_text(chromium, server, width, zoom) -> None:
+    """With the text at twice its size the win-rate column (sized in rem) left the deck's name a
+    few pixels; the name's words ran over the rate. The rate now goes under the name on a table
+    narrower than 20rem."""
+    from .test_reports_browser import FORGE_DONE
+
+    sid = _link(server)
+    store_report(server.db, "user-1", "rep_forge", deck_name=LONGER)
+    with server.db.tx() as c:
+        c.execute(
+            "UPDATE reports SET forge_json = ?, forge_state = 'done' WHERE id = 'rep_forge'",
+            (json.dumps(FORGE_DONE),),
+        )
+    with _page(chromium, server, sid, width) as page:
+        page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
+        if zoom != "100":
+            page.evaluate(ZOOMS[zoom])
+        page.wait_for_timeout(30)
+        assert page.evaluate(SCROLLS) == 0
+        rows = page.evaluate(SEATS)
+        assert len(rows) == 4 and all(r["inside"] and r["room"] for r in rows), rows
