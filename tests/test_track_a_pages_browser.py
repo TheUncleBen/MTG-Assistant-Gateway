@@ -320,10 +320,10 @@ def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
 
 
 def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> None:
-    """Reject on the Proposals page and the deck's Proposals box asks in the bar first
-    ("Reject 2 changes?"); Cancel rejects nothing and gives the focus back; the confirm's Reject
-    rejects only the checked ones. Phone, Fold and desktop, light and dark: readable, a ring on
-    the focused button, no sideways scroll."""
+    """Reject on the Proposals page and the deck's Proposals box asks first in the shared box
+    ("Reject 2 changes?": Cancel, then the solid red Reject 2, as every delete on the site asks);
+    Cancel rejects nothing and gives the focus back; the box's Reject rejects only the checked
+    ones. Phone, Fold and desktop, light and dark: readable, no sideways scroll."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -331,6 +331,7 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
         pytest.skip("no Chromium available for Playwright")
     sid, ids, fmt = _waiting(server)
     db = server.app.state.gateway.db
+    shots = os.environ.get("MTG_SHOTS_DIR")
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
         try:
@@ -345,22 +346,31 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
                 page.locator(f"input[name=pick][value='{ids[0]}']").check()
                 page.locator(f"input[name=pick][value='{ids[1]}']").check()
                 bar.locator("button[name=action][value=reject]").click()
-                ask = bar.locator(".rejectask")
+                ask = page.locator(".mtgbox-scrim.in .mtgbox")
                 ask.wait_for(timeout=5000)
-                assert "Reject 2 changes?" in ask.inner_text(), where
-                got = ask.locator("button").first.evaluate(
-                    "e => ({focused: e === document.activeElement, ring: getComputedStyle(e).outlineStyle,"
-                    " text: e.textContent})"
+                assert ask.locator(".bh h2").inner_text() == "Reject 2 changes?", where
+                assert "can't be brought back" in ask.locator(".body").inner_text(), where
+                assert bar.locator(".rejectask").count() == 0, where  # no second row in the bar
+                got = ask.locator(".acts button").evaluate_all(
+                    "els => els.map(e => ({focused: e === document.activeElement, cls: e.className,"
+                    " text: e.textContent.trim()}))"
                 )
-                assert got == {"focused": True, "ring": "solid", "text": "Reject 2"}, (where, got)
-                _readable(page, ".ui-bar .rejectask span, .ui-bar .rejectask button", where)
+                assert got == [
+                    {"focused": True, "cls": "btn", "text": "Cancel"},
+                    {"focused": False, "cls": "danger", "text": "Reject 2"},
+                ], (where, got)
+                _readable(page, ".mtgbox .bh h2, .mtgbox .body p, .mtgbox .acts button", where)
                 _no_sideways(page, vw, where)
+                if shots:
+                    page.screenshot(path=f"{shots}/a-reject-box-{where}.png")
                 ask.locator("button", has_text="Cancel").click()
-                assert ask.count() == 0 and bar.locator("button[name=action][value=reject]").is_visible()
+                page.locator(".mtgbox-scrim").wait_for(state="detached", timeout=5000)
+                reject = bar.locator("button[name=action][value=reject]")
+                assert reject.is_visible() and reject.evaluate("e => e === document.activeElement"), where
                 assert all(db.get_proposal(i, "user-1")["state"] == "pending" for i in ids), where
                 assert errors == [], (where, errors)
                 ctx.close()
-            # the confirm's Reject rejects the checked ones, in the deck's Proposals box too
+            # the box's Reject rejects the checked ones, in the deck's Proposals box too
             ctx = _context(browser, server, sid, 390, 844, True, "light")
             page = ctx.new_page()
             page.goto(f"{server.base}/decks/42", wait_until="networkidle")
@@ -370,12 +380,12 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
             strip.wait_for(timeout=5000)
             strip.locator(f"input[name=pick][value='{ids[2]}']").check()
             strip.locator("button[name=action][value=reject]").click()
-            ask = strip.locator(".rejectask")
+            ask = page.locator(".mtgbox-scrim.in .mtgbox")
             ask.wait_for(timeout=5000)
-            assert "Reject this change?" in ask.inner_text()
+            assert ask.locator(".bh h2").inner_text() == "Reject this change?"
             assert db.get_proposal(ids[2], "user-1")["state"] == "pending"
             with page.expect_navigation():
-                ask.locator("button").first.click()
+                ask.locator(".acts button.danger", has_text="Reject").click()
             assert db.get_proposal(ids[2], "user-1")["state"] == "rejected"
             assert [db.get_proposal(i, "user-1")["state"] for i in (ids[0], ids[1], fmt)] == ["pending"] * 3
             ctx.close()

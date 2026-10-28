@@ -272,7 +272,7 @@
     if (e.key !== "Escape" || e.defaultPrevented) return;
     var close = document.querySelector(".ui-split.with-panel .ui-drawer .close");
     if (!close || !close.offsetParent) return;
-    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open]")) return;
+    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open], .mtgbox-scrim")) return;
     close.click();
   });
   // "1 card" / "7 cards" next to a number field: the word follows the value (the odds form).

@@ -544,6 +544,8 @@ button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--text);
   text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
+/* a button a script hides stays hidden (inline-flex above would beat the browser's own rule) */
+button[hidden],.btn[hidden]{display:none}
 button:hover,.btn:hover{background:var(--surface-2);color:var(--text)}
 button:disabled,.btn[aria-disabled=true]{opacity:.5;cursor:default}
 /* Every press shows at once: pressed look on touch, and a busy state while a form submits
@@ -1750,6 +1752,8 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .bx:hover,.mtgbox .bx:focus-visible{background:var(--surface-2);color:var(--text)}
 .mtgbox .bx svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .mtgbox[data-locked=true] .bx{display:none}
+/* a delete box (ui.box cls="dangerbox"): the title in red, its final button the solid red one */
+.mtgbox.dangerbox .bh h2{color:var(--danger-text)}
 .mtgbox > h2{margin:0 0 .75rem;font-size:1.25rem}
 .mtgbox .body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
 .mtgbox .body > .stack{display:flex;flex-direction:column;gap:.75rem}

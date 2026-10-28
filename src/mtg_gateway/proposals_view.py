@@ -972,12 +972,6 @@ PROPOSALS_CSS = """
 .ui-drawer details[open]>summary:not(.fold-btn)::before{transform:rotate(90deg)}
 .ui-drawer form.reject{margin:.75rem 0 .25rem}
 .pr-undo{display:inline;margin:0}
-.ui-bar .rejectask,.ui-drawer .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
-  flex:1 1 100%}
-.ui-bar .rejectask span,.ui-drawer .rejectask span{flex:1 1 10rem;font-weight:700}
-.ui-bar .rejectask button,.ui-drawer .rejectask button{min-height:44px;margin:0}
-.ui-bar .rejectask button:focus,.ui-drawer .rejectask button:focus{
-  outline:2px solid var(--focus);outline-offset:2px}
 .ui-bar button[disabled]{opacity:.55}
 .ui-bar [hidden]{display:none}
 @media (max-width:599.98px){

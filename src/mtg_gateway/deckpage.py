@@ -922,7 +922,6 @@ DECK_CSS_A = (
 .mtgbox .body .fold textarea{min-height:7rem;margin-top:.5rem}
 .mtgbox .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .mtgbox .body .field input:not([type=file]),.mtgbox .body .field select{width:100%}
-.mtgbox.dangerbox .bh h2{color:var(--danger-text)}
 /* a phone at card size L: one stack a row (S and M stay two a row) */
 @media (max-width:420px){ html[data-card-size=l] .deckview.stacks{grid-template-columns:minmax(0,1fr)} }
 """
