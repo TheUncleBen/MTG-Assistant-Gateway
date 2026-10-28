@@ -1723,6 +1723,10 @@ ul.colllist .smline{display:none}
 ul.colllist .thumbbtn{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;
   flex:none;min-width:44px;min-height:48px}
 ul.colllist .thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* the import's progress strip: the words take the room, Refresh keeps its own width (wraps on phone) */
+.notice.importing{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
+.notice.importing .itext{flex:1 1 14rem;min-width:0}
+.notice.importing .btn{flex:0 0 auto;margin:0}
 ul.colllist .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:block}
 ul.colllist .setc{min-width:0;overflow-wrap:anywhere}
