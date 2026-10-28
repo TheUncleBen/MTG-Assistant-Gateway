@@ -1212,8 +1212,8 @@ html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
 /* My decks and the folders in it: as many deck tiles as fit (S 160, M 220, L 300 px at least) */
 html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr))}
 html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))}
-html[data-card-size=s] ul.decklist .thumb{height:140px}
-html[data-card-size=l] ul.decklist .thumb{height:220px}
+html[data-card-size=s] ul.decklist{--deck-thumb:140px}
+html[data-card-size=l] ul.decklist{--deck-thumb:220px}
 html[data-card-size=s] ul.folderlist.grid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,11.25rem),1fr))}
 html[data-card-size=l] ul.folderlist.grid{

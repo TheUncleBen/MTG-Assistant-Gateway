@@ -3590,7 +3590,9 @@ ul.decklist .deck,ul.decklist .deck a,ul.decklist .info{min-width:0}
 ul.decklist .deck a{display:flex;flex-direction:column;color:var(--text);text-decoration:none;
   border-radius:5px;overflow:hidden;border:1px solid var(--border);background:var(--surface)}
 ul.decklist .deck.selected a{outline:2px solid var(--orange)}
-ul.decklist .thumb{position:relative;display:block;height:175px;
+/* the picture's height, S 140, M 175, L 220 px (theme.py); the ⋮ is placed under it (menus.py) */
+ul.decklist{--deck-thumb:175px}
+ul.decklist .thumb{position:relative;display:block;height:var(--deck-thumb);
   background:var(--surface-3) center/cover no-repeat;
   overflow:hidden;transition:transform .2s ease}
 ul.decklist .thumb::after{content:'';position:absolute;inset:0;
