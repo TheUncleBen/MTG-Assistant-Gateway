@@ -253,7 +253,9 @@ async def test_a_page_call_starts_while_a_slow_background_call_is_still_out() ->
     await asyncio.wait_for(_as_page(_held_call(pacer, "page", started, quick)), 1.0)
     took = time.monotonic() - t0
     assert started == ["sync", "page"] and not bg.done()
-    assert 0.07 <= took < 0.5, took  # the gap between the two starts, nothing more
+    # a page read starts from the burst (archidekt.PAGE_BURST) without the gap, never after the
+    # slow answer
+    assert took < 0.5, took
     slow.set()
     await bg
 
@@ -269,7 +271,8 @@ async def test_background_calls_keep_one_of_the_two_slots_free_for_pages() -> No
     p1 = _as_page(_held_call(pacer, "page1", started, release))
     p2 = _as_page(_held_call(pacer, "page2", started, release))
     await asyncio.sleep(0.05)
-    assert started == ["a", "page1"]  # at most two out in all
+    # pages may have up to PAGE_BURST out at once (owner decision, 0.7.46); background still one
+    assert started == ["a", "page1", "page2"]
     release.set()
     await asyncio.gather(a, b, p1, p2)
     assert sorted(started) == ["a", "b", "page1", "page2"]

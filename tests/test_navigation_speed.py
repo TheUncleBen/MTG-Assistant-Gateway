@@ -11,6 +11,7 @@ import asyncio
 import gzip
 import re
 
+from mtg_gateway import decks as decks_mod
 from mtg_gateway import theme
 from mtg_gateway.deckpage import DECK_CSS
 
@@ -110,11 +111,22 @@ async def test_a_deck_page_shown_again_asks_archidekt_once_until_a_write_or_relo
             r = await b.http.get(f"/decks/42?view={view}", headers=NAV)
             assert r.status_code == 200 and "Sample" in r.text
         assert _deck_reads(stack) == before + 1  # one read for five views
-        # the browser's Reload (and a hard reload) reads it again
+        # the browser's Reload (and a hard reload) reads it again once the read on show is older
+        # than PAGE_DECK_RELOAD (owner decision, 0.7.46: a Reload right after a read is not re-read)
         await b.http.get("/decks/42", headers={**NAV, "Cache-Control": "max-age=0"})
-        assert _deck_reads(stack) == before + 2
-        await b.http.get("/decks/42", headers={**NAV, "Cache-Control": "no-cache", "Pragma": "no-cache"})
-        assert _deck_reads(stack) == before + 3
+        assert _deck_reads(stack) == before + 1
+        decks = stack.h.app.state.gateway.decks
+        for hard in ({"Cache-Control": "max-age=0"}, {"Cache-Control": "no-cache", "Pragma": "no-cache"}):
+            reads = _deck_reads(stack)
+            decks._page_decks = {
+                k: (t - decks_mod.PAGE_DECK_RELOAD - 1, d) for k, (t, d) in decks._page_decks.items()
+            }
+            await b.http.get("/decks/42", headers={**NAV, **hard})
+            for _ in range(100):  # read behind the page shown at once
+                if _deck_reads(stack) > reads and not decks._page_refreshing:
+                    break
+                await asyncio.sleep(0.02)
+            assert _deck_reads(stack) == reads + 1
         await b.http.get("/decks/42", headers=NAV)
         assert _deck_reads(stack) == before + 3
         # a change through the gateway shows on the very next view
@@ -170,7 +182,12 @@ async def test_reload_skips_the_shared_read_cache_for_a_deck_read_without_a_link
 
     decks.client.get_deck = get_deck  # type: ignore[method-assign]
     await decks.page_deck("nobody-linked", "42")
+    # a Reload of a read older than PAGE_DECK_RELOAD (owner decision, 0.7.46) reads it behind the page
+    decks._page_decks = {
+        k: (t - decks_mod.PAGE_DECK_RELOAD - 1, d) for k, (t, d) in decks._page_decks.items()
+    }
     await decks.page_deck("nobody-linked", "42", fresh=True)
+    await decks.page_check("nobody-linked", "42", wait=5)
     assert seen == [{"token": None}, {"token": None, "fresh": True}]
 
 

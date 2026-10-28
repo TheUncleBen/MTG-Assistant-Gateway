@@ -2835,6 +2835,47 @@ def deck_list_held_html(read_at: float) -> str:
     return f"<p class='notice warn' role='status'>{esc(deck_list_held_text(read_at))}</p>"
 
 
+def _age_words(read_at: float, now: float | None = None) -> str:
+    seconds = max(0, int((time.time() if now is None else now) - read_at))
+    n, unit = (max(1, seconds // 60), "minute") if seconds < 3600 else (seconds // 3600, "hour")
+    return f"{n} {unit}{'' if n == 1 else 's'}"
+
+
+def deck_held_text(read_at: float, why: str, *, now: float | None = None) -> str:
+    """What the deck page says over a deck shown as last read because Archidekt can't be asked
+    (DeckService.page_deck_view's ``held_at``); ``why`` is the busy page's title for the refusal."""
+    return (
+        f"{why.rstrip('.')}, so this is the deck as it was read {_age_words(read_at, now)} ago. "
+        "Changes are off until Archidekt can be asked again."
+    )
+
+
+def deck_held_html(read_at: float, why: str, url: str) -> str:
+    """The deck page's strip over a held copy, with Try again (a fresh read of the page)."""
+    return (
+        f"<p class='notice warn held' role='status'>{esc(deck_held_text(read_at, why))} "
+        f"<a class='btn' href='{esc(url)}'>Try again</a></p>"
+    )
+
+
+def deck_check_html(deck_id: str, read_at: float | None, *, reload: bool) -> str:
+    """A deck shown as last read while it is read again (DeckService.page_deck_view's
+    ``checking``): static/feedback.js asks /decks/{id}/check what that read found. On a Reload
+    the strip says so and the page is loaded again when the deck changed; on another view it stays
+    hidden unless the deck changed or Archidekt could not be asked."""
+    age = _age_words(read_at) if read_at else ""
+    failed = (
+        f"Archidekt can't be reached right now, so this is the deck as it was read {age} ago."
+        if age
+        else "Archidekt can't be reached right now, so this is the deck as it was last read."
+    )
+    return (
+        f"<p class='notice deck-check' role='status' data-check='/decks/{esc(deck_id)}/check'"
+        f" data-reload='{'1' if reload else '0'}' data-failed='{esc(failed)}'"
+        f"{'' if reload else ' hidden'}>{'Checking Archidekt for changes…' if reload else ''}</p>"
+    )
+
+
 def deck_count_text(total: int | None, *, pending: bool = False) -> str:
     """The count in the deck list's results bar ("3 decks"); blank while the list is being read."""
     if pending or total is None:

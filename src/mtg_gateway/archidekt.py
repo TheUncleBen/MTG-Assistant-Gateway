@@ -33,7 +33,7 @@ from typing import Any
 
 import httpx
 
-from .timing import add_time, archidekt_time
+from .timing import add_time, archidekt_failures, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
 # The page data archidekt.com's own pages carry (Next.js), and the most of a page the gateway reads
@@ -943,6 +943,11 @@ class TurnLock:
 # assistants, applies) has at most MAX_IN_FLIGHT - 1 of them, so a member's page always has a slot
 # and never waits behind a slow background answer.
 MAX_IN_FLIGHT = 2
+# A member's page reads may start up to this many at once instead of one per ``min_interval``
+# (owner decision, 0.7.46): the starts are drawn from a bucket of PAGE_BURST that refills one per
+# ``min_interval``, so over time the rate is the same, and the per-minute cap still counts every
+# call. Up to PAGE_BURST page reads may be out at once; background work keeps the gap and its slot.
+PAGE_BURST = 5
 # A sixth of the per-minute cap is kept for the reads of a member's own pages: background work may
 # use the rest, so a long apply or sync never leaves a page waiting for the next minute.
 PAGE_SHARE = 6
@@ -955,7 +960,9 @@ class Pacer:
     for pages, Retry-After respected, and a breaker that opens for a minute after five consecutive
     failures. A call past the per-minute cap waits for a slot rather than failing, so a long apply
     slows down instead of stopping halfway. A call made for a member's page (``page_turn``) goes
-    before the waiting calls that are not.
+    before the waiting calls that are not. A page's reads may start in a burst (see PAGE_BURST):
+    every start, a page's or not, takes one from a bucket of ``burst`` that refills one per
+    ``min_interval``; a page read waits only for the bucket, other calls for the gap as well.
 
     The pacer's turn is held only while a call waits for its start, never while Archidekt answers:
     a slow answer to one call does not hold up the start of the next."""
@@ -963,10 +970,19 @@ class Pacer:
     MAX_RETRY_AFTER = 120.0  # a larger (or garbled) Retry-After must not stall every user for longer
     WINDOW = 60.0
 
-    def __init__(self, min_interval: float, max_per_minute: int = 0, max_in_flight: int = MAX_IN_FLIGHT):
+    def __init__(
+        self,
+        min_interval: float,
+        max_per_minute: int = 0,
+        max_in_flight: int = MAX_IN_FLIGHT,
+        burst: int = PAGE_BURST,
+    ):
         self.min_interval = min_interval
         self.max_per_minute = max(0, int(max_per_minute))
         self.max_in_flight = max(1, int(max_in_flight))
+        self.burst = max(1, int(burst))
+        self._tokens = float(self.burst)  # starts left in the bucket
+        self._filled_at = time.monotonic()
         # the calls of the per-minute cap only a page's read may use
         self.page_reserve = self.max_per_minute // PAGE_SHARE
         self._sent: deque[float] = deque()  # start times of the calls in the last WINDOW seconds
@@ -1024,9 +1040,19 @@ class Pacer:
         return max(0.001, self._sent[len(self._sent) - limit] + self.WINDOW - now)
 
     def _slot_free(self, page: bool) -> bool:
+        if page:
+            return self._in_flight < max(self.max_in_flight, self.burst)
         if self._in_flight >= self.max_in_flight:
             return False
-        return page or self.max_in_flight == 1 or self._background_in_flight < self.max_in_flight - 1
+        return self.max_in_flight == 1 or self._background_in_flight < self.max_in_flight - 1
+
+    def _bucket_wait(self, now: float) -> float:
+        """Seconds until the bucket holds a start (0: now), after refilling it up to ``now``."""
+        if self.min_interval <= 0:
+            return 0.0
+        self._tokens = min(float(self.burst), self._tokens + (now - self._filled_at) / self.min_interval)
+        self._filled_at = now
+        return 0.0 if self._tokens >= 1.0 else (1.0 - self._tokens) * self.min_interval
 
     async def _until_freed(self, timeout: float | None) -> None:
         if self._freed is None or self._freed.done():
@@ -1034,6 +1060,13 @@ class Pacer:
         await asyncio.wait({self._freed}, timeout=timeout)
 
     async def enter(self, *, first: bool, page: bool) -> None:
+        started = time.perf_counter()
+        try:
+            await self._enter(first=first, page=page)
+        finally:
+            add_time(pacer_time, time.perf_counter() - started)  # for Admin's Speed card
+
+    async def _enter(self, *, first: bool, page: bool) -> None:
         while True:
             await self._lock.acquire(first=first)
             held = True  # whether this call holds the turn, so it is released once at most
@@ -1059,9 +1092,14 @@ class Pacer:
                         self._waiting -= 1
                     continue
                 now = time.monotonic()
-                if now < self._next_allowed:
-                    await asyncio.sleep(self._next_allowed - now)
+                # a page waits for the bucket only; anything else for the gap after the last start too
+                gap = 0.0 if page else self._next_allowed - now
+                wait = max(gap, self._bucket_wait(now))
+                if wait > 0:
+                    await asyncio.sleep(wait)
                 now = time.monotonic()
+                self._bucket_wait(now)
+                self._tokens = max(0.0, self._tokens - 1.0)
                 if self.max_per_minute:
                     self._sent.append(now)
                 self._next_allowed = now + self.min_interval
@@ -1240,6 +1278,10 @@ def _refusal_detail(resp: httpx.Response) -> str:
 from .archidekt_account import AccountRequests  # noqa: E402
 
 
+class _ReaderGone(Exception):
+    """The first reader of a shared read was cancelled: a waiter sends the read itself."""
+
+
 class ArchidektClient(AccountRequests):
     """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
     gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
@@ -1268,6 +1310,10 @@ class ArchidektClient(AccountRequests):
         self.cache_seconds = max(0.0, float(cache_seconds))
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
+        # Cacheable reads under way (single-flight): cache key -> (``_writes_begun`` when it was
+        # sent, its answer). The same read asked for meanwhile waits for that answer instead of
+        # being sent again, unless a write began after it was sent.
+        self._flights: dict[str, tuple[int, asyncio.Future[Any]]] = {}
         self._writes_begun = 0  # counts every write's start and end
         self._writes_out = 0
         self.stats = {
@@ -1277,6 +1323,7 @@ class ArchidektClient(AccountRequests):
             "rate_limited": 0,
             "rate_limit_waits": 0,
             "failures": 0,
+            "shared": 0,  # reads answered by an identical read already under way
         }
         # Called with the path of every write about to be sent (decks.py drops the member caches
         # that write makes stale: the deck list, the collection's first page).
@@ -1368,10 +1415,25 @@ class ArchidektClient(AccountRequests):
                 self.stats["cache_hits"] += 1
                 logger.debug("archidekt cache hit %s", path)
                 return copy.deepcopy(value)
+        if key is not None and not fresh:
+            flight = self._flights.get(key)
+            if flight is not None and flight[0] == self._writes_begun and not self._writes_out:
+                started = time.perf_counter()
+                try:
+                    value = await asyncio.shield(flight[1])
+                except _ReaderGone:
+                    pass  # the first reader was cancelled: send it ourselves
+                else:
+                    self.stats["shared"] += 1
+                    return copy.deepcopy(value)
+                finally:
+                    add_time(archidekt_time, time.perf_counter() - started)
         is_write = method != "GET" and not path.startswith("/rest-auth/")
         # Two calls may be out at once: a read answered before a write landed but finished after it
         # (or made while one is out) is not kept, or the cache would serve the deck as it was.
         writes_seen = self._writes_begun
+        if key is not None and key not in self._flights:
+            return await self._first_reader(method, path, key, writes_seen, token, scheme, params)
         if is_write:
             self._writes_begun += 1
             self._writes_out += 1
@@ -1396,6 +1458,47 @@ class ArchidektClient(AccountRequests):
             if is_write:
                 self._writes_out -= 1
                 self._writes_begun += 1
+
+    async def _first_reader(
+        self,
+        method: str,
+        path: str,
+        key: str,
+        writes_seen: int,
+        token: str | None,
+        scheme: str,
+        params: dict[str, Any] | None,
+    ) -> Any:
+        """Send a cacheable read that others asking for it meanwhile wait for (``_flights``)."""
+        answer: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self._flights[key] = (writes_seen, answer)
+        try:
+            value = await self._attempts(
+                method,
+                path,
+                key,
+                False,
+                writes_seen,
+                token=token,
+                scheme=scheme,
+                json_body=None,
+                params=params,
+                upload=None,
+            )
+        except asyncio.CancelledError:
+            answer.set_exception(_ReaderGone())
+            raise
+        except BaseException as exc:
+            answer.set_exception(exc)
+            raise
+        else:
+            answer.set_result(copy.deepcopy(value))
+            return value
+        finally:
+            if answer.done():
+                answer.exception()  # retrieved: no "never retrieved" warning when nobody waited
+            if self._flights.get(key, (0, None))[1] is answer:
+                del self._flights[key]
 
     async def _attempts(
         self,
@@ -1504,6 +1607,10 @@ class ArchidektClient(AccountRequests):
         started = time.perf_counter()
         try:
             return await self._paced_send(method, path, headers, json_body, params, upload)
+        except ArchidektError as exc:
+            if exc.kind in ("unavailable", "rate_limited"):  # not a refusal of this one request
+                add_time(archidekt_failures, 1)
+            raise
         finally:
             add_time(archidekt_time, time.perf_counter() - started)  # pacer wait and transfer alike
 
