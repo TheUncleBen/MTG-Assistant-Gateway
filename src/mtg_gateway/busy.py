@@ -102,8 +102,11 @@ def busy_plan(exc: BaseException) -> BusyPlan | None:
     return BusyPlan(kind, title, text, _STATUS[kind], min(retry, 3600), str(exc))
 
 
-def _headers(plan: BusyPlan) -> dict[str, str]:
+def busy_headers(plan: BusyPlan) -> dict[str, str]:
     return {"Retry-After": str(plan.retry_after), "Cache-Control": "no-store"}
+
+
+_headers = busy_headers  # the older name (companion_tools.py)
 
 
 def same_url(request: Request) -> str:
@@ -111,12 +114,49 @@ def same_url(request: Request) -> str:
     return request.url.path + (f"?{request.url.query}" if request.url.query else "")
 
 
+# The area a page belongs to, by its address: the noun the busy text names ("Nothing is wrong
+# with your collection") and the second button. A page outside these names no area of its own.
+AREAS = (
+    ("/collection", "collection", "/collection", "Binder"),
+    ("/watchlist", "watchlist", "/collection", "Binder"),
+    ("/lists", "lists", "/lists", "My lists"),
+    ("/decks", "decks", "/decks", "My decks"),
+    ("/folders", "decks", "/decks", "My decks"),
+    ("/compare", "decks", "/decks", "My decks"),
+)
+
+
+def area_of(url: str) -> tuple[str | None, str, str]:
+    """(noun, back address, back label) for a page's address."""
+    path = url.split("?", 1)[0]
+    for prefix, noun, href, label in AREAS:
+        if path == prefix or path.startswith(prefix + "/"):
+            return noun, href, label
+    return None, "/", "Home"
+
+
+def area_text(text: str, noun: str | None) -> str:
+    """The busy text for an area: "your decks" names the page's own area, or none."""
+    if noun == "decks":
+        return text
+    return text.replace(
+        "your decks or your account", f"your {noun} or your account" if noun else "your account"
+    )
+
+
 def busy_body(plan: BusyPlan, url: str) -> str:
-    detail = f"<p class='muted small'>{html.escape(plan.detail)}</p>" if plan.detail else ""
+    """The busy panel for the page at ``url``. Archidekt's own words (``plan.detail``: codes,
+    seconds) are left out: the text says what happened and that nothing is wrong."""
+    noun, back, label = area_of(url)
+    second = (
+        f" <a class='btn' href='{html.escape(back)}'>{html.escape(label)}</a>"
+        if back != url.split("?", 1)[0]
+        else ""
+    )
     return (
-        f"<div class='panel'><p>{html.escape(plan.text)}</p>{detail}"
-        f"<div class='actions'><a class='btn btn-primary' href='{html.escape(url)}'>Try again</a> "
-        "<a class='btn' href='/decks'>My decks</a></div></div>"
+        f"<div class='panel'><p>{html.escape(area_text(plan.text, noun))}</p>"
+        f"<div class='actions'><a class='btn btn-primary' href='{html.escape(url)}'>Try again</a>"
+        f"{second}</div></div>"
     )
 
 
@@ -177,6 +217,7 @@ __all__ = [
     "UNREACHABLE_TITLE",
     "BusyPlan",
     "busy_body",
+    "busy_headers",
     "busy_json_response",
     "busy_plan",
     "busy_response",

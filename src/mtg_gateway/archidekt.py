@@ -1018,11 +1018,11 @@ class Pacer:
                 sent=False,
             )
         if now < self._retry_until:
-            wait = int(self._retry_until - now) + 1
+            # no number of seconds in the words (no time promises); the wait is in retry_after
             return ArchidektError(
                 "rate_limited",
-                f"Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for "
-                f"{wait} second{'' if wait == 1 else 's'}. Try again after that.",
+                "Archidekt asked the gateway to slow down, so its Archidekt requests are paused for now. "
+                "Try again a little later.",
                 sent=False,
                 retry_after=self._retry_until - now,
             )
@@ -1640,9 +1640,13 @@ class ArchidektClient(AccountRequests):
                     )
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
-                raise ArchidektError(
-                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
-                ) from exc
+                # plain words for a member's page or card: never an exception's class name
+                words = (
+                    "Archidekt didn't answer in time."
+                    if isinstance(exc, httpx.TimeoutException)
+                    else "Archidekt couldn't be reached."
+                )
+                raise ArchidektError("unavailable", words, retryable=True) from exc
             if resp.status_code == 429:
                 asked = retry_after_seconds(resp.headers.get("Retry-After"))
                 # During a member's apply a 429 is waited out, not counted towards the breaker
@@ -1664,22 +1668,18 @@ class ArchidektClient(AccountRequests):
                 self.pacer.record(True)
                 why = _refusal_detail(resp)
                 raise ArchidektError(
-                    "forbidden", "Archidekt refused this request" + (f": {why}" if why else " (HTTP 403)")
+                    "forbidden", "Archidekt refused this request" + (f": {why}" if why else ".")
                 )
             if resp.status_code == 404:
                 self.pacer.record(True)
                 raise ArchidektError("not_found", "Archidekt could not find that deck.")
             if resp.status_code >= 500:
                 self.pacer.record(False)
-                raise ArchidektError(
-                    "unavailable", f"Archidekt returned HTTP {resp.status_code}", retryable=True
-                )
+                raise ArchidektError("unavailable", "Archidekt had a problem answering.", retryable=True)
             if resp.status_code >= 400:
                 self.pacer.record(True)
                 raise ArchidektError(
-                    "contract",
-                    f"Archidekt rejected the request (HTTP {resp.status_code})",
-                    status=resp.status_code,
+                    "contract", "Archidekt did not accept this request.", status=resp.status_code
                 )
             self.pacer.record(True)
             if resp.status_code == 204 or not resp.content:
@@ -2413,9 +2413,13 @@ class ArchidektClient(AccountRequests):
                                 break
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
-                raise ArchidektError(
-                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
-                ) from exc
+                # plain words for a member's page or card: never an exception's class name
+                words = (
+                    "Archidekt didn't answer in time."
+                    if isinstance(exc, httpx.TimeoutException)
+                    else "Archidekt couldn't be reached."
+                )
+                raise ArchidektError("unavailable", words, retryable=True) from exc
             self.pacer.record(resp.status_code < 500 and resp.status_code != 429)
         if resp.status_code == 404:
             raise ArchidektError("not_found", "Archidekt has no such forum page.")
@@ -2427,7 +2431,10 @@ class ArchidektClient(AccountRequests):
             )
         if resp.status_code >= 400:
             status = resp.status_code
-            raise ArchidektError("unavailable", f"Archidekt returned HTTP {status}", retryable=status >= 500)
+            words = (
+                "Archidekt had a problem answering." if status >= 500 else "Archidekt did not show that page."
+            )
+            raise ArchidektError("unavailable", words, retryable=status >= 500)
         if too_big:
             raise ArchidektError("changed", "the forum page is larger than the gateway reads")
         m = NEXT_DATA_RE.search(body.decode(resp.encoding or "utf-8", errors="replace"))

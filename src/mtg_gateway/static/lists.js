@@ -17,6 +17,24 @@
   }
   showTab();
   if (curTab && window.ResizeObserver) new ResizeObserver(showTab).observe(curTab);
+  // the other tabs' counts, read after the page has drawn (lists_page.COUNTS_API)
+  var tabBar = document.querySelector(".lp-tabs[data-counts]");
+  if (tabBar && window.fetch) {
+    fetch(tabBar.getAttribute("data-counts"), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.counts) return;
+        Array.prototype.forEach.call(tabBar.querySelectorAll("a[href]"), function (a) {
+          var n = d.counts[a.getAttribute("href").split("/").pop()];
+          if (typeof n !== "number" || a.querySelector(".n")) return;
+          var span = document.createElement("span");
+          span.className = "n";
+          span.textContent = n.toLocaleString("en");
+          a.appendChild(span);
+        });
+      })
+      .catch(function () { /* the counts stay blank */ });
+  }
   var Menu = window.MtgMenu, Box = window.MtgBox;
   var root = document.querySelector(".lp[data-tab]");
   if (!root || !Menu || !Box) return;

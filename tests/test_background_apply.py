@@ -805,7 +805,7 @@ async def test_a_clone_whose_read_back_fails_says_the_copy_was_made(stack: Stack
     [made] = [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Down copy"]
     assert row["state"] == "failed" and row["result"]["deck_id"] == str(made), row["result"]
     assert row["result"]["detail"] == out["message"], row["result"]
-    assert out["message"].startswith("Archidekt returned HTTP 503"), out
+    assert out["message"].startswith("Archidekt had a problem answering."), out
     assert out["message"].endswith(f" {_copy_made(str(made))}"), out
     assert "no cards were added" not in out["message"]
 
@@ -837,8 +837,8 @@ async def test_a_partly_landed_failure_stores_the_message_its_caller_got(stack: 
     row = await _finished(h, p["proposal_id"])
     assert row["state"] == "failed" and row["result"]["sent_entries"] == 1, row["result"]
     assert "1 of 3 deck row changes had already been sent" in out["message"], out
-    # the reason ends its own sentence before the note ("... HTTP 503. 1 of 3 ...")
-    assert out["message"].startswith("Archidekt returned HTTP 503. 1 of 3 "), out["message"]
+    # the reason ends its own sentence before the note ("... answering. 1 of 3 ...")
+    assert out["message"].startswith("Archidekt had a problem answering. 1 of 3 "), out["message"]
     assert row["result"]["detail"] == out["message"], (row["result"], out)
 
 

@@ -464,10 +464,12 @@ async def test_outside_an_apply_a_running_pause_refuses_at_once(clock: list[floa
     ark_mod.wait_note.set({"x": 1})  # a note alone does not make a request wait
     with pytest.raises(ArchidektError) as err:
         await client.search_decks(name="Sample")
+    # no number of seconds in the words (0.7.46 audit C-15: no time promises); the wait is a field
     assert err.value.kind == "rate_limited" and (
-        "Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for 21 seconds. "
-        "Try again after that."
+        "Archidekt asked the gateway to slow down, so its Archidekt requests are paused for now. "
+        "Try again a little later."
     ) in str(err.value)
+    assert 20 <= err.value.retry_after <= 21
     assert clock == [] and ark.calls == []
 
 

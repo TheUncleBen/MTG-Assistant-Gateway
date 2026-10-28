@@ -2726,7 +2726,7 @@ def render(
         versioned_static(doc),
         status_code=status,
         headers={
-            "Cache-Control": "no-store",
+            "Cache-Control": page_cache_control(current_path(), status),
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             # Scripts only from the gateway's own origin, never inline: every page loads
@@ -2736,6 +2736,33 @@ def render(
             "Content-Security-Policy": DEFAULT_CSP + "".join(f" {src}" for src in form_action),
         },
     )
+
+
+# Ordinary pages may be kept by the member's own browser, always asked again before use, so Back
+# shows the page at once from the back/forward cache (owner decision, 0.7.46). Pages under these
+# addresses stay no-store: sign-in and sign-out, the Account pages (the Archidekt link, connected
+# apps), Admin, the assistant connection consent, the app's install pages; and any page that is
+# not a plain 200 (an error, a busy page).
+PAGE_CACHE = "private, no-cache"
+NO_STORE_PREFIXES = (
+    "/account",
+    "/admin",
+    "/login",
+    "/logout",
+    "/signed-out",
+    "/data-deleted",
+    "/auth",
+    "/install",
+    "/app",
+    "/authorize",
+)
+
+
+def page_cache_control(path: str, status: int) -> str:
+    """The Cache-Control of a page rendered for ``path`` with ``status``."""
+    if status != 200 or path.startswith(NO_STORE_PREFIXES):
+        return "no-store"
+    return PAGE_CACHE
 
 
 class ThemeMiddleware:
