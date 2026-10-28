@@ -171,14 +171,19 @@
   const lineKey = (x) => (x && x.card ? x.card.scryfall_id + '|' + String(isFoil(x)) : null);
 
   // ----------------------------------------------------------------- layout
-  // A first-visit explanation of the three steps; "Got it" hides it on every device (kept on the
-  // account from 0.7.29, prefs.js), the "How it works" link under the tabs brings it back.
+  // An explanation of the three steps, open on the first visit and folded to its title after that
+  // ("seen"), so on a phone the camera is on the first screen; "Got it" hides it on every device
+  // (true; both kept on the account, prefs.js), and the "How it works" button under the tabs
+  // brings it back open.
   const INTRO_KEY = 'scan.intro';
-  const introSeen = () => !!(window.MtgPrefs && window.MtgPrefs.get(INTRO_KEY) === true);
-  function introCard() {
+  const introPref = () => (window.MtgPrefs ? window.MtgPrefs.get(INTRO_KEY) : undefined);
+  const introSeen = () => introPref() === true;
+  // Read once: the visit that first shows the intro keeps it open however often the page redraws.
+  const introFirstVisit = introPref() === undefined;
+  function introCard(open) {
     const step = (n, title, text) => h('li', null, h('span', { class: 'num', text: String(n) }), h('div', null, h('strong', { text: title }), ' ', text));
-    const box = h('section', { class: 'card intro', id: 'intro' },
-      h('h2', { text: 'How scanning works' }),
+    const box = h('details', { class: 'card intro', id: 'intro', open: !!open },
+      h('summary', { class: 'fold-btn' }, h('h2', { text: 'How scanning works' })),
       h('ol', { class: 'steps' },
         step(1, 'Scan.', 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
         step(2, 'Check the list.', 'Fix a wrong match, pick the exact printing or foil, change quantities.'),
@@ -187,15 +192,26 @@
     return box;
   }
 
+  function showIntro() {
+    let box = $('#intro');
+    if (!box) { box = introCard(true); root.prepend(box); }
+    box.open = true;
+    window.scrollTo(0, 0);
+    const s = box.querySelector('summary'); if (s) s.focus({ preventScroll: true });
+  }
+
   function render() {
     root.textContent = '';
-    if (!introSeen() && !state.items.length) root.append(introCard());
+    if (!introSeen() && !state.items.length) {
+      root.append(introCard(introFirstVisit));
+      if (introFirstVisit && window.MtgPrefs && introPref() === undefined) window.MtgPrefs.set(INTRO_KEY, 'seen');
+    }
     const tabs = h('div', { class: 'tabs', role: 'tablist' },
       tabButton('camera', 'Camera'), tabButton('type', 'Type'), tabButton('list', 'List'), tabButton('sessions', 'Sessions'));
     root.append(tabs);
     root.append(h('div', { id: 'panel' }));
     root.append(h('p', { class: 'muted snote' }, 'Scanned cards stay on this gateway until you delete them. ',
-      h('a', { href: '#intro', onclick: (e) => { e.preventDefault(); if (!$('#intro')) root.prepend(introCard()); window.scrollTo(0, 0); } }, 'How it works')));
+      h('button', { type: 'button', class: 'ui-cap', id: 'how-it-works', onclick: showIntro }, 'How it works')));
     const installBtn = h('button', { class: 'install', id: 'install-btn', onclick: install }, 'Add to home screen');
     root.append(installBtn);
     if (state.installPrompt) installBtn.classList.add('show');
@@ -296,10 +312,13 @@
       icon('alert'), 'Glare: tilt the card away from the light');
     const cam = h('div', { class: 'camera', id: 'camera' }, video,
       h('div', { class: 'guide' }, h('div', { class: 'title' })),
-      h('div', { class: 'hint', text: 'Fit the card in the frame, name in the dashed box' }),
       h('div', { class: 'flash', id: 'flash' }), torch, glare);
+    // Under the viewfinder, not over it: at large text sizes it would cover the dashed name box.
+    const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: 'Fit the card in the frame, name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', text: '' });
-    const file = h('input', { type: 'file', accept: 'image/*', capture: 'environment', id: 'photo-file', class: 'sr',
+    // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
+    // open the camera with one, the app's file chooser never does); the shutter is the camera.
+    const file = h('input', { type: 'file', accept: 'image/*', id: 'photo-file', class: 'sr',
       onchange: (e) => e.target.files[0] && scanFile(e.target.files[0]) });
     const shutter = h('button', { class: 'shutter', id: 'shutter', title: 'Scan card', 'aria-label': 'Scan card',
       onclick: () => captureFrame(video) }, cameraIcon(), h('span', { class: 'sr', text: 'Scan' }));
@@ -310,7 +329,7 @@
       h('button', { class: 'ctl', title: 'Type the card name instead', onclick: () => showTab('type') }, icon('edit'), h('span', { text: 'Type' })));
     // Status and the match result sit between the preview and the control bar,
     // so on a phone the thing to confirm is right above the thumb.
-    panel.append(h('div', { class: 'cam-panel' }, renderScanOptions(), cam, status, h('div', { id: 'result' }), controls, file));
+    panel.append(h('div', { class: 'cam-panel' }, renderScanOptions(), cam, hint, status, h('div', { id: 'result' }), controls, file));
     if (state.ocrState === 'missing') {
       status.textContent = 'On-device text recognition is not installed on this gateway; use Photo or Type, or ask the owner to run the asset fetch step.';
     }
@@ -521,25 +540,42 @@
     await ocrLoading;
     return state.ocr;
   }
+  /* The first load fetches about 8 MB (the service worker keeps it for later visits). Its progress
+     is one number over the whole load: the engine script, then the steps the engine reports, each
+     an equal share. It shows in the status line and goes out as a scan:ocr event ({state,
+     progress}), which the Android app's camera panel shows while it has the camera; there each
+     event also tells the app the page is still working on the photo it was given. */
+  const OCR_STEPS = ['script', 'loading tesseract core', 'initializing tesseract', 'loading language traineddata', 'initializing api'];
+  function ocrProgress(step, progress) {
+    const i = OCR_STEPS.indexOf(step);
+    if (i < 0 || state.ocrState !== 'loading') return; // recognising a card reports through here too
+    const p = Math.max(state.ocrProgress || 0, (i + Math.max(0, Math.min(1, progress || 0))) / OCR_STEPS.length);
+    state.ocrProgress = p;
+    setStatus('Getting text recognition ready (first use downloads about 8 MB): ' + Math.round(p * 100) + '%');
+    emit('ocr', { state: 'loading', progress: p });
+  }
   async function loadOcr() {
-    state.ocrState = 'loading';
-    setStatus('Loading text recognition (one-time download, about 8 MB)…');
+    state.ocrState = 'loading'; state.ocrProgress = 0;
+    ocrProgress('script', 0);
     try {
       await loadScript(cfg.static + '/vendor/tesseract.min.js');
+      ocrProgress('script', 1);
       const worker = await window.Tesseract.createWorker('eng', 1, {
         workerPath: cfg.static + '/vendor/worker.min.js',
         corePath: cfg.static + '/vendor/core',
         langPath: cfg.static + '/vendor/lang',
         gzip: false,
         workerBlobURL: false,
-        logger: (m) => { if (m && m.status && typeof m.progress === 'number') setStatus(m.status + ' ' + Math.round(m.progress * 100) + '%'); },
+        logger: (m) => { if (m && m.status) ocrProgress(m.status, typeof m.progress === 'number' ? m.progress : 0); },
       });
       await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: OCR_WHITELIST, preserve_interword_spaces: '1' });
-      state.ocr = worker; state.ocrState = 'ready';
+      state.ocr = worker; state.ocrState = 'ready'; state.ocrProgress = 1;
       setStatus('Ready. Hold the card flat and tap Scan.');
+      emit('ocr', { state: 'ready', progress: 1 });
     } catch (err) {
       state.ocrState = 'failed';
-      setStatus('Text recognition failed to load (' + (err && err.message || err) + '). You can still type names.');
+      setStatus('Text recognition could not be loaded, so names cannot be read from pictures. You can still type them on the Type tab.');
+      emit('ocr', { state: 'failed' });
     }
   }
   function loadScript(src) {
@@ -721,7 +757,8 @@
     const flat = flattenCard(frame, guideRegion(video, cam));
     if (flat) {
       state.noCardFrames = 0; // an outline was found, whatever the title read says
-      const r = flatRegions(flat); await scanRegion(flat.canvas, r.title, r.info, flat); return;
+      const plain = state.continuous ? null : { source: frame, region: titleRegion(video, cam), info: infoRegion(video, cam) };
+      const r = flatRegions(flat); await scanRegion(flat.canvas, r.title, r.info, flat, plain); return;
     }
     if (state.continuous) { noCardFrame(); return; } // no outline: nothing to read, and no lookup
     await scanRegion(frame, titleRegion(video, cam), infoRegion(video, cam), null);
@@ -743,9 +780,10 @@
       // A photo of one card: find its edges anywhere in the picture and flatten it. Failing
       // that, assume the card fills the picture: title in the top band, info line bottom left.
       const flat = flattenCard(c, null);
-      if (flat) { const r = flatRegions(flat); await scanRegion(flat.canvas, r.title, r.info, flat); return; }
-      await scanRegion(c, { x: c.width * 0.06, y: c.height * 0.035, w: c.width * 0.72, h: c.height * 0.085 },
-        infoRegionOf(0, 0, c.width, c.height), null);
+      const plain = { source: c, region: { x: c.width * 0.06, y: c.height * 0.035, w: c.width * 0.72, h: c.height * 0.085 },
+        info: infoRegionOf(0, 0, c.width, c.height) };
+      if (flat) { const r = flatRegions(flat); await scanRegion(flat.canvas, r.title, r.info, flat, plain); return; }
+      await scanRegion(plain.source, plain.region, plain.info, null);
     } catch (e) {
       setStatus('Could not read that photo: ' + ((e && e.message) || e) + '.');
     } finally { URL.revokeObjectURL(url); }
@@ -798,24 +836,49 @@
     } catch (e) { return 0; }
   }
 
+  /* The flattened card turned upside down. */
+  function turned(source) {
+    const c = document.createElement('canvas'); c.width = source.width; c.height = source.height;
+    const ctx = c.getContext('2d'); ctx.translate(c.width, c.height); ctx.rotate(Math.PI); ctx.drawImage(source, 0, 0);
+    return c;
+  }
+  /* The title read: once, or for a card that lay sideways (flattened upright one way or the other,
+     see geometry.js) both ways up, keeping the way that reads a name with more confidence. The
+     source returned is the card the right way up, for the info line and the art. */
+  async function readTitle(source, region, flat) {
+    const tries = flat && flat.sideways ? [source, turned(source)] : [source];
+    let best = null;
+    for (const src of tries) {
+      const strip = preprocess(src, region);
+      const ocr = await recognize(strip, 'title');
+      const score = (cleanOcr(ocr.text).length >= 3 ? 1000 : 0) + (ocr.confidence || 0);
+      if (!best || score > best.score) best = { source: src, strip, ocr, score };
+    }
+    return best;
+  }
+
   /* source: the flattened card or the raw frame; region/info: title and info crops in its pixels;
-     flat: the flattening result (corners, score) or null when the guide box was used as is. */
-  async function scanRegion(source, region, info, flat) {
+     flat: the flattening result (corners, score, sideways) or null when the guide box was used as is.
+     plain: { source, region, info } as read without an outline, for a sideways outline that reads
+     no name either way up: it may have been a box inside an upright card (its art), not a card. */
+  async function scanRegion(source, region, info, flat, plain) {
     const cam = $('#camera'); const shutter = $('#shutter');
     cam && cam.classList.add('busy'); if (shutter) shutter.disabled = true;
     setStatus('Reading the card name…');
     try {
+      const read = await readTitle(source, region, flat);
+      source = read.source;
+      const { strip, ocr } = read;
       const glare = glareOf(source, region);
       const glareHint = glare >= T.glare_ratio ? ' Glare on the card: tilt it away from the light.' : '';
-      const strip = preprocess(source, region);
-      const ocr = await recognize(strip, 'title');
       const text = cleanOcr(ocr.text);
+      if (text.length < 3 && flat && flat.sideways && plain) return await scanRegion(plain.source, plain.region, plain.info, null);
       if (text.length < 3) {
         // Say which step failed: no card outline at all is a background or framing problem, an
         // outline with no readable name is focus, light or glare.
         setStatus(flat
           ? 'Found the card but could not read its name.' + (glareHint || ' Hold it steady in good light, a little further away if the picture is blurred.')
-          : 'Could not find the card’s edges or read a name.' + (glareHint || ' Lay the card on a plain background that contrasts with its border, name at the top, and keep it inside the frame.'));
+          : 'Could not find the card’s edges or read a name.' + (glareHint || ' Lay the card on a plain background that contrasts with its border (a light one for a black-bordered card), name at the top, and keep it inside the frame.'));
         return;
       }
       if (state.continuous) {
@@ -959,7 +1022,7 @@
     state.noCardFrames++;
     if (state.noCardFrames >= NO_CARD_FRAMES) { state.lastAutoKey = null; state.rejectedKey = null; }
     if (state.noCardFrames === NO_EDGES_HINT_FRAMES) {
-      setStatus('Can’t find the card’s edges: use a plain, contrasting background, or tap the shutter.');
+      setStatus('Can’t find the card’s edges: use a plain, contrasting background (a light one for a black-bordered card), or tap the shutter.');
     }
   }
 
@@ -1634,7 +1697,7 @@
   window.__scan = { state, cleanOcr, preprocess, addItem, scanRegion, showTab, api,
     parseInfoLine, cardRequest, infoRegionOf, setSetLock, getSetLock, setFoilDefault, getFoilDefault,
     flattenCard, flatTitleRegion, flatInfoRegion, glareOf, torchSupported, setTorch, getTorch, cameraRanges, setCamera,
-    tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, nameIsComplete,
+    tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, nameIsComplete, ensureOcr,
     loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker };
 
   loadDraft();

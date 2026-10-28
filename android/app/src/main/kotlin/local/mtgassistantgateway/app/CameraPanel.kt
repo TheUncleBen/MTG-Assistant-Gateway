@@ -485,6 +485,26 @@ class CameraPanel(
         if (autoToggle.isChecked && !closed) ui.postDelayed(nextAuto, AUTO_GAP_MS)
     }
 
+    /**
+     * The page's text recognition loading (the first use downloads it): its progress in the status
+     * line. While a photo is with the page, each step also shows the page is at work on it, so the
+     * watchdog starts over instead of calling a slow first download a lost photo.
+     */
+    private fun onOcr(state: String, progress: Double) {
+        when (state) {
+            "loading" -> status.text = activity.getString(
+                R.string.status_ocr_loading, Math.round(progress.coerceIn(0.0, 1.0) * 100).toInt()
+            )
+            "ready" -> status.text = activity.getString(if (awaitingPage) R.string.status_reading else R.string.status_ocr_ready)
+            "failed", "missing" -> status.text = activity.getString(R.string.status_ocr_unavailable)
+            else -> return
+        }
+        if (awaitingPage && (state == "loading" || state == "ready")) {
+            ui.removeCallbacks(watchdog)
+            ui.postDelayed(watchdog, PAGE_TIMEOUT_MS)
+        }
+    }
+
     private fun showResult(text: String, undoable: Boolean) {
         result.text = text
         result.visibility = View.VISIBLE
@@ -519,6 +539,7 @@ class CameraPanel(
             "unsure" -> showResult(activity.getString(R.string.unsure_card, name), undoable)
             "unidentified" -> showResult(activity.getString(R.string.unidentified_card, name), undoable)
             "no-card" -> pageDone(activity.getString(R.string.no_card_outline))
+            "ocr" -> onOcr(ev.optString("state", ""), ev.optDouble("progress", 0.0))
             "done" -> {
                 val error = ev.optString("error", "")
                 val pageStatus = ev.optString("status", "")
@@ -610,7 +631,10 @@ class CameraPanel(
         private const val MAX_JPEG_SIDE = 2048
         /** Pause between automatic shots once the page has answered, like the page's own frame gap. */
         private const val AUTO_GAP_MS = 600L
-        /** OCR on a slow phone can take a while (the first read also loads the OCR engine); past this the photo counts as lost. */
+        /**
+         * OCR on a slow phone can take a while; past this with no word from the page the photo counts
+         * as lost. The first use's download reports progress (`ocr` events), each of which starts it over.
+         */
         private const val PAGE_TIMEOUT_MS = 45_000L
         /** A still capture that neither delivers nor fails within this is given up on. */
         private const val CAPTURE_TIMEOUT_MS = 6_000L

@@ -292,3 +292,12 @@ async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
         assert db.get_pref(SUB, "card.size.deck") is None and db.get_pref(SUB, "card.size.printings") is None
     finally:
         await b.aclose()
+
+
+def test_the_scan_intro_is_seen_or_dismissed() -> None:
+    """The scan intro is open on the first visit and folded after it ("seen"); Got it hides it
+    (True). Nothing else is kept for it."""
+    assert prefs.valid(prefs.SCAN_INTRO, "seen") and prefs.valid(prefs.SCAN_INTRO, True)
+    for bad in ("yes", "Seen", False, 1, None):
+        assert not prefs.valid(prefs.SCAN_INTRO, bad), bad
+    assert not prefs.valid(prefs.EDHPLAY_STEPS, "seen")

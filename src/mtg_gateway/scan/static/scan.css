@@ -20,6 +20,7 @@
   stroke-linejoin:round;flex:none}
 .scan button svg.i+span,.scan .btn svg.i+span{margin-left:.4rem}
 .scan .snote{text-align:center;margin:0}
+.scan .snote .ui-cap{margin:.25rem 0 0}
 
 /* tabs: one row, the open tab underlined in orange; sticky on phones */
 .scan .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}  /* a second row at large text sizes */
@@ -174,7 +175,7 @@ body.picker-open{overflow:hidden}
    Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop
    (and keeps the guide's card name box inside the preview). */
 .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
-.scan .cam-panel.has-result .camera .hint{display:none}
+.scan .cam-panel.has-result .cam-hint{display:none}
 .scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:78%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
   box-shadow:0 0 0 999px var(--scrim);pointer-events:none}
@@ -187,8 +188,7 @@ body.picker-open{overflow:hidden}
 .scan .camera .guide .title::after{content:"card name";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
   text-align:center;color:var(--navbar-text);font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;
   text-shadow:0 1px 2px var(--navbar-bg);opacity:.9}
-.scan .camera .hint{position:absolute;left:0;right:0;top:0;padding:.45rem .75rem;text-align:center;color:var(--navbar-text);
-  font-size:.86rem;font-weight:700;background:linear-gradient(var(--banner-a),transparent);text-shadow:0 1px 2px var(--navbar-bg)}
+.scan .cam-hint{margin:0;text-align:center;font-size:.9rem;font-weight:700}
 .scan .camera.busy video{filter:brightness(.5)}
 .scan .camera.busy::after{content:"Reading…";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   color:var(--navbar-text);font-weight:900;font-size:1.1rem;text-shadow:0 1px 3px var(--navbar-bg)}
@@ -236,7 +236,6 @@ body.picker-open{overflow:hidden}
 .scan .torch[hidden]{display:none}
 .scan .torch:hover{background:var(--navbar-bg);color:var(--navbar-text)}
 .scan .torch[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
-.scan .camera:has(.torch:not([hidden])) .hint{padding-right:6rem}
 /* camera controls: zoom and brightness sliders, 44px rows, only when the camera reports them */
 .scan .cam-ctl{display:flex;flex-direction:column;gap:.35rem}
 .scan .cam-ctl[hidden]{display:none}
@@ -257,10 +256,10 @@ body.picker-open{overflow:hidden}
 /* on phones the sliders must fit between the preview and the sticky capture bar */
 @media (max-width:699px){
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
+  .scan .cam-panel:has(.cam-ctl:not([hidden])) .cam-hint{display:none}
   /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
   .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
+  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .cam-hint{display:none}
 }
 
 /* match result: the confirm or fix step (the status pill carries the colour) */
@@ -361,8 +360,12 @@ body.picker-open{overflow:hidden}
 .scan .install.show{display:inline-flex}
 @media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;outline:3px solid var(--orange-select);outline-offset:6px} }
 
-/* first-visit intro and the "what next" block of the list tab */
-.scan .intro h2,.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
+/* the intro (open on the first visit, folded to its title after) and the "what next" block of the list tab */
+.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
+.scan details.intro{padding:.5rem .75rem}
+.scan details.intro > summary h2{margin:0;font-size:1.05rem;font-weight:700}
+.scan details.intro[open] > summary{margin-bottom:.6rem}
+.scan details.intro[open]{padding-bottom:.9rem}
 .scan .intro .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
 .scan .intro .steps li{display:flex;gap:.6rem;align-items:flex-start;line-height:1.4}
 .scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--orange);color:var(--on-orange);
