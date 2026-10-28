@@ -253,8 +253,12 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         assert r.status_code == 303, r.text
         assert [s[:3] for s in seen] == [("42", False, True), ("43", False, True)] and seen[0][3] is None
         first_id = seen[1][3]
-        assert r.headers["location"].startswith("/history/reports/rep_") and first_id
-        shown = await b.http.get(r.headers["location"], headers=NAV)
+        # the pair opens side by side (owner decision C7), each deck's report one press away
+        where = r.headers["location"]
+        assert where.startswith("/history/reports/rep_") and where.endswith("/head-to-head") and first_id
+        both = await b.http.get(where, headers=NAV)
+        assert both.status_code == 200 and f"href='/history/reports/{first_id}'" in both.text
+        shown = await b.http.get(where.removesuffix("/head-to-head"), headers=NAV)
         assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck’s report" in shown.text
         assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
         bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "nope"})
@@ -684,7 +688,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         listed = await b.http.get("/reports", headers=NAV)
         assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
         assert "Sample Commander Deck" in listed.text and "Deck trend and history" not in listed.text
-        assert "/history?deck_id=42&amp;type=reports" in listed.text  # the Latest report widget's Deck trend
+        assert "/history?deck_id=42&amp;type=tests" in listed.text  # the Latest report widget's Deck trend
         assert "<option value='42'" in listed.text and "1–1 of 1" in listed.text
         assert "aria-current='true'>All <span class='n'>1</span>" in listed.text
         none = await b.http.get("/reports?deck_id=999", headers=NAV)

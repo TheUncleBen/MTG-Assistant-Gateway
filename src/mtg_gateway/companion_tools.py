@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from types import SimpleNamespace
@@ -11,10 +12,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import card_models_view, deck_stats, prefs, ui
-from .archidekt import Deck
+from .archidekt import Deck, parse_deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
 from .cardsearch_view import watched_name_list, watched_names
-from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
+from .companion import (
+    DECK_CSP,
+    DECK_ERR_MESSAGES,
+    DECKS_JSON_TIMEOUT,
+    EDITOR_CSP,
+    TEXT_PLAIN,
+    _filename,
+    _json_for_html,
+)
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     COMPARE_CSS,
@@ -46,6 +55,7 @@ from .reports_page import matches as reports_matches
 from .theme import (
     card_size_control,
     icon,
+    time_text,
 )
 from .theme import (
     esc as _esc,
@@ -574,6 +584,7 @@ def add_deck_tool_routes(
             now=now,
             # the address names what went; the words are the page's own
             notice=DELETED_NOTICES.get(request.query_params.get("deleted") or "", ""),
+            csrf=_csrf(s, sid) or "",
         )
         return page(
             "Reports",
@@ -759,14 +770,17 @@ def add_deck_tool_routes(
             )
         finally:
             reports.release_pair(sub, hold)
-        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}", status_code=303)
+        # the pair side by side (owner decision C7); each report links to it
+        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}/head-to-head", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
         """This deck against another: a preconstructed deck (the picker lists Archidekt's), any
-        deck id or link, or a pasted list. The same comparison the assistant's compare_decks
-        makes: what was taken out of the other deck, what was put in, what changed count, and
-        the statistics' differences."""
+        deck id or link, one of the member's decks or this deck's snapshots (listed under the box,
+        ``with=snap_<id>`` for a snapshot), or a pasted list. The same comparison the assistant's
+        compare_decks makes: what was taken out of the other deck, what was put in, what changed
+        count, and the statistics' differences; then the paired solo test of both (kept as a
+        report) and, for two Commander decks, Forge games against the same opponents."""
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
@@ -793,6 +807,14 @@ def add_deck_tool_routes(
                 other_name = "the pasted list"
             except DecklistError as exc:
                 error, status = f"The pasted list could not be read: {_esc(exc)}", 400
+        elif other_ref.startswith("snap_"):
+            # one of the member's snapshots (the picker under the box): the deck as it stood then
+            snap = state.db.get_snapshot(other_ref[5:], sub)
+            if snap:
+                other = parse_deck(snap["deck"])
+                other_name = f"{other.name or 'this deck'} (snapshot, {time_text(snap['taken_at'])})"
+            else:
+                error, status = "That snapshot isn't in your history. It may have been deleted.", 404
         elif other_ref:
             try:
                 # a precon picked by name (the suggestion list) is looked up in the precon listing
@@ -805,6 +827,15 @@ def add_deck_tool_routes(
                     400 if exc.kind != "not_found" else 404,
                 )
         result = deck_stats.compare(other, deck) if other is not None else None
+        try:  # the member's decks for the picker, as cached: the page never waits on Archidekt for it
+            mine = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), DECKS_JSON_TIMEOUT)
+        except (DeckError, TimeoutError):
+            mine = None
+        if mine is None:  # cold or Archidekt unavailable: the list as last read, if any
+            try:
+                mine = decks.last_deck_list(sub)
+            except DeckError:
+                mine = None
         body = compare_page_html(
             deck,
             other=other,
@@ -816,6 +847,9 @@ def add_deck_tool_routes(
             error=error,
             csrf=_csrf(s, sid),
             forge_on=reports.forge is not None,
+            mine=mine,
+            snapshots=decks.list_snapshots(sub, deck_id=str(deck.id), limit=8),
+            ab_on=reports.mf is not None,
         )
         return page(
             f"Compare: {deck_title(deck)}",

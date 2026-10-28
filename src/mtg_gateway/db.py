@@ -874,6 +874,9 @@ def _like_prefix(prefix: str) -> str:
 # job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
 BACKUP_MADE_JOB = "backup_made:"
 # Why a snapshot can't be deleted now (Database.snapshot_held), in the member's words.
+# The proposals History lists as changes to a deck once applied (owner decision C7: History is the
+# deck's timeline); account-wide ones (lists, collection, Archidekt actions) are not a deck's.
+DECK_CHANGE_KINDS = ("edit", "restore", "details", "categories", "create_deck")
 SNAPSHOT_HELD_RESTORE = (
     "A restore that is waiting puts the deck back to this snapshot, so it can't be deleted. Reject "
     "or apply that restore first."
@@ -2537,7 +2540,8 @@ class Database:
         search: str | None = None,
         since: int | None = None,
     ) -> dict[str, int]:
-        """How many snapshots, applied restores and deck reports the History page holds under its
+        """How many snapshots, applied changes (``changes``, DECK_CHANGE_KINDS; ``restores`` the
+        restores among them) and tests (``tests``, also ``reports``) the History page holds under its
         filters (deck, a search, a start time): its chips and its pager. Each count narrows as the
         rows it counts do (list_snapshots, list_proposals, ReportService.list): the search matches
         a deck's name, and for a restore its change summary too."""
@@ -2573,6 +2577,14 @@ class Database:
                 else 0
             )
             w, a = narrow("created_at", diff=True)
+            kinds = ",".join("?" * len(DECK_CHANGE_KINDS))
+            out["changes"] = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM proposals" + w + f" AND kind IN ({kinds}) AND state = 'applied'",
+                    [*a, *DECK_CHANGE_KINDS],
+                ).fetchone()[0]
+            )
+            out["tests"] = out["reports"]
             out["restores"] = int(
                 self._conn.execute(
                     "SELECT COUNT(*) FROM proposals" + w + " AND kind = 'restore' AND state = 'applied'", a

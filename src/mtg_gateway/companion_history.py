@@ -13,13 +13,15 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from . import activity_view, card_models_view, ui
+from .busy import _headers as busy_headers
+from .busy import busy_body, busy_plan
 from .companion import (
     DECKS_JSON_TIMEOUT,
     _filename,
     stats_strip,
 )
-from .db import SNAPSHOT_HELD_RESTORE
-from .decks import DeckError, current_client, mark_gone
+from .db import DECK_CHANGE_KINDS, SNAPSHOT_HELD_RESTORE
+from .decks import DeckError, current_client, mark_gone, owns_deck
 from .history_view import (
     DELETED_NOTICES,
     HISTORY_CSS,
@@ -69,6 +71,21 @@ if TYPE_CHECKING:
     from .reports import ReportService
 
 
+# How long a report page waits for its deck's read before it draws the "changed since" line as a
+# placeholder that report.js fills (the page never waits on a slow Archidekt).
+CHANGES_WAIT = 0.6
+RESTORE_NO_LIST = (
+    "This report was made before reports kept the list they played, or it is not of one of your decks, "
+    "so there is no list to put back."
+)
+
+# The website's tests (owner decision C7: it starts every kind an assistant can).
+TEST_NOT_STARTED = "Test not started"
+NO_LIST_PASTED = "Paste a decklist to test: one card per line, like “1 Sol Ring”."
+SNAPSHOT_GONE = "That snapshot isn't in your history. It may have been deleted."
+AB_UNAVAILABLE = "The paired solo test needs the research service, which is not set up on this gateway."
+AB_PICK_ONE = "Pick a deck or a snapshot to test against."
+
 # A missing report, or someone else's (NEW-WORDING 34): the shared small-page look.
 REPORT_NOT_FOUND_TITLE = "Report not found"
 REPORT_NOT_FOUND_TEXT = "This report isn't in your history. It may have been deleted."
@@ -97,6 +114,9 @@ def add_history_routes(
         if not sub:
             return login_redirect("/history")
         query = read_query(request.query_params)
+        if query["open"].startswith("r-"):  # a test's one home is its report page (owner decision C7)
+            box = "?box=delete" if request.query_params.get("box") == "delete" else ""
+            return RedirectResponse(f"/history/reports/{quote(query['open'][2:])}{box}", status_code=303)
         deck_id = query["deck_id"] or None
         want = query["type"]
         since = when_since(query["when"])
@@ -108,25 +128,30 @@ def add_history_routes(
         restores: list[dict[str, Any]] = []
         snapshots: list[dict[str, Any]] = []
         reps: list[dict[str, Any]] = []
-        if want in ("all", "restores"):
+        if want in ("all", "changes"):
             restores = decks.list_proposals(
                 sub,
                 full=True,
                 deck_id=deck_id,
-                kinds=["restore"],
+                kinds=list(DECK_CHANGE_KINDS),
                 states=["applied"],
                 search=search,
                 since=since,
                 limit=fetch,
             )
             for r in restores:  # when the snapshot it put back was taken (its first review row)
+                if r.get("kind") != "restore":
+                    continue
                 full = state.db.get_proposal(r["id"], sub) or {}
                 head = (full.get("rows") or [{}])[0]
                 r["taken"] = head.get("taken") if head.get("kind") == "restore" else None
         if want in ("all", "snapshots"):
             snapshots = decks.list_snapshots(sub, deck_id=deck_id, search=search, since=since, limit=fetch)
-        if want in ("all", "reports"):
+        if want in ("all", "tests"):
             reps = reports.list(sub, deck_id, limit=fetch, search=search, since=since)
+            heads = reports.headlines(sub, [r["report_id"] for r in reps])
+            for r in reps:
+                r["headline"] = heads.get(r["report_id"]) or {}
         client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
         names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
         # The member's Archidekt deck list, the one the backup copies table reads too (cached; no
@@ -159,7 +184,7 @@ def add_history_routes(
             else set(),
         )
         counts = state.db.history_counts(sub, deck_id=deck_id, search=search, since=since)
-        counts["all"] = counts["snapshots"] + counts["restores"] + counts["reports"]
+        counts["all"] = counts["snapshots"] + counts["changes"] + counts["tests"]
         total = counts[want]
         # The backup copies the gateway made on Archidekt: kept out of Home and My decks, listed
         # under the list (and on a deck's own history), counted in their widget.
@@ -250,7 +275,7 @@ def add_history_routes(
         )
         opened = next((e for e in shown if e["key"] == query["open"]), None) if query["open"] else None
         extra = ""
-        if opened and opened["kind"] in ("report", "snapshot"):
+        if opened and opened["kind"] == "snapshot":
             # Delete…: the shared confirm box, open when the address asks (a row menu's Delete…)
             oid = opened["key"][2:]
             held = state.db.snapshot_held(oid, sub) or "" if opened["kind"] == "snapshot" else ""
@@ -318,10 +343,10 @@ def add_history_routes(
             w2 = ui.widget("Last restore", "undo", "—", detail="No restore yet.")
         t = time.gmtime(now)
         month = int(calendar.timegm((t.tm_year, t.tm_mon, 1, 0, 0, 0)))
-        n_month = state.db.history_counts(sub, deck_id=deck_id, since=month)["reports"]
+        n_month = state.db.history_counts(sub, deck_id=deck_id, since=month)["tests"]
         latest = reports.list(sub, deck_id, limit=1)
         w3 = ui.widget(
-            "Reports",
+            "Tests",
             "report",
             n_month,
             unit="this month",
@@ -329,7 +354,7 @@ def add_history_routes(
                 f"Latest: {latest[0].get('deck_name') or 'an unnamed deck'}, "
                 f"{ui.when_text(latest[0].get('taken_at'), now=now)}"
                 if latest
-                else "No report yet."
+                else "No test yet."
             ),
             actions=[ui.button_link("All reports", "/reports")],
         )
@@ -572,6 +597,18 @@ def add_history_routes(
         for block in (r.get("forge"), r.get("forge_solo")):
             if isinstance(block, dict) and isinstance(block.get("not_played"), list):
                 left_out += block["not_played"]
+        from .report_page import since_last_html
+        from .reports_page import asked_by
+
+        # owner decision C7: who ran it, the list it tested, whether the deck changed since, the
+        # deck's test before it, and a Forge pair's head-to-head view
+        client = r.get("created_by_client")
+        who = asked_by(r, state.db.client_names({client}) if client else {})
+        by_html = ui.app_chip(who, client_id=str(client)) if who else ""
+        tested = reports.tested(sub, rid)
+        changes = await _changes_html(sub, r, tested, wait=CHANGES_WAIT, csrf=_csrf(s, sid) or "")
+        prev = reports.previous(sub, rid)
+        pair = reports.pair_of(sub, rid)
         body = report_page_html(
             r,
             stats_html=stats_strip(r.get("stats")),
@@ -582,6 +619,11 @@ def add_history_routes(
             csrf=_csrf(s, sid) or "",
             card_types=_card_types(left_out) if left_out else {},
             my_models=my_models + delete_box,
+            by_html=by_html,
+            changes_html=changes,
+            since_html=since_last_html(r, prev, tested=tested),
+            tested=tested,
+            pair_href=f"/history/reports/{safe}/head-to-head" if pair else "",
         )
         return page(
             f"Report: {r['deck_name']}",
@@ -595,6 +637,267 @@ def add_history_routes(
             extra_css=REPORT_CSS + REPORT_PAGE_CSS + card_models_view.CSS,
             main_class="ui-wide",
         )
+
+    # -- what a test kept: has the deck changed since, put the list back (owner decision C7) --------
+    async def _changes_html(
+        sub: str, r: dict[str, Any], tested: list[dict[str, Any]] | None, *, wait: float, csrf: str
+    ) -> str:
+        """Whether the deck changed since report r was made, for a report of an Archidekt deck: the
+        deck as Archidekt has it now (the read cache first), waited for ``wait`` seconds at most so
+        the page never waits on a slow Archidekt; then a placeholder that report.js fills from
+        /changes. '' for a report of no deck, or when the deck can't be read."""
+        from .report_page import changes_placeholder_html, deck_changes_html
+        from .reports import list_diff, tested_rows
+
+        deck_id = str(r.get("deck_id") or "")
+        if not deck_id.isdigit():
+            return ""
+        task = _deck_reads.get((sub, deck_id))
+        if task is None or (task.done() and (task.cancelled() or task.exception() is not None)):
+            task = asyncio.ensure_future(decks.get_any_deck(sub, deck_id))
+            _deck_reads[(sub, deck_id)] = task
+            task.add_done_callback(lambda _t, key=(sub, deck_id): _deck_reads.pop(key, None))
+        try:
+            deck = await asyncio.wait_for(asyncio.shield(task), wait)
+        except TimeoutError:
+            return changes_placeholder_html(r.get("report_id"))
+        except DeckError:
+            return ""
+        diff = list_diff(tested, tested_rows(deck)) if tested is not None else None
+        # the list can be put back only onto one of the member's own decks
+        link = state.db.get_link(sub)
+        own = bool(link) and owns_deck(deck, link) is True
+        return deck_changes_html(r, tested, deck, csrf=csrf if own else "", diff=diff)
+
+    # the deck reads a report page started, so a second look (report.js) waits for the same read
+    _deck_reads: dict[tuple[str, str], asyncio.Future[Any]] = {}
+
+    @server.custom_route("/history/reports/{rid}/changes", methods=["GET"], include_in_schema=False)
+    async def report_changes(request: Request) -> Response:
+        """The report page's "changed since this test" line, once the deck's read is in (report.js
+        asks for it when the page drew its placeholder)."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return Response(status_code=401)
+        rid = request.path_params["rid"]
+        r = _report_or_404(sub, rid)
+        if r is None:
+            return Response(status_code=404)
+        body = await _changes_html(
+            sub, r, reports.tested(sub, rid), wait=DECKS_JSON_TIMEOUT, csrf=_csrf(s, sid) or ""
+        )
+        return Response(
+            body if "data-changes-url" not in body else "",
+            media_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @server.custom_route("/history/reports/{rid}/restore", methods=["POST"], include_in_schema=False)
+    async def report_restore(request: Request) -> Response:
+        """Put back the list a test played: an ordinary proposal of the count changes from the deck
+        as it is now (reports.restore_changes), reviewed and confirmed on its page like any other.
+        Nothing is written here."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect(f"/history/reports/{rid}")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return _expired(sub, sid)
+        current_client.set(BROWSER_CLIENT_ID)
+        r = _report_or_404(sub, rid)
+        if r is None:
+            return _not_found(sub, sid)
+        from .reports import restore_changes
+
+        back = f"<a class='btn btn-primary' href='/history/reports/{_esc(rid)}'>Back to the report</a>"
+        try:
+            tested = reports.tested(sub, rid)
+            deck_id = str(r.get("deck_id") or "")
+            if tested is None or not deck_id.isdigit():
+                raise DeckError("invalid", RESTORE_NO_LIST)
+            deck = await decks.get_own_deck(sub, deck_id)
+            p = await decks.propose(sub, deck_id, restore_changes(tested, deck))
+        except DeckError as exc:
+            if (plan := busy_plan(exc)) is not None:
+                busy = page(
+                    plan.title,
+                    busy_body(plan, f"/history/reports/{rid}"),
+                    sub=sub,
+                    sid=sid,
+                    status=plan.status,
+                )
+                busy.headers.update(busy_headers(plan))
+                return busy
+            return page(
+                "Nothing to put back" if exc.kind == "invalid" else "Restore not started",
+                f"<div class='card'><p class='notice error'>{_esc(exc)}</p>"
+                f"<p>Nothing was changed on Archidekt.</p><div class='actions'>{back}</div></div>",
+                sub=sub,
+                sid=sid,
+                status=409 if exc.kind == "invalid" else 400,
+            )
+        return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
+
+    @server.custom_route("/history/reports/{rid}/head-to-head", methods=["GET"], include_in_schema=False)
+    async def report_pair(request: Request) -> Response:
+        """A Forge pair side by side: both decks' games against the same table (owner decision C7).
+        The pair's two reports stay out of either deck's trend."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect(f"/history/reports/{rid}/head-to-head")
+        pair = reports.pair_of(sub, rid)
+        sides = [_report_or_404(sub, x) for x in pair] if pair else []
+        if not pair or any(x is None for x in sides):
+            return _not_found(sub, sid)
+        from .report_page import HEAD_TO_HEAD_CSS, head_to_head_html
+
+        return page(
+            "Head to head",
+            head_to_head_html(sides[0], sides[1], csrf=_csrf(s, sid) or ""),  # type: ignore[arg-type]
+            sub=sub,
+            sid=sid,
+            heading=False,
+            current="/reports",
+            extra_scripts=("forge-live.js",),
+            extra_css=REPORT_CSS + HEAD_TO_HEAD_CSS,
+            main_class="ui-wide",
+        )
+
+    # -- every kind of test from the website (owner decision C7) ----------------------------------
+    async def _start_test(
+        request: Request, job: Any, *, title: str, back: tuple[str, str]
+    ) -> Response | tuple[str, str]:
+        """Start a test the way Run full test does (reports.start): its report page opens as soon
+        as its row is stored. A refusal is a small page with a way back; a busy Archidekt its busy
+        page. ``job`` takes the stored-callback and returns the run."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(back[0])
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return _expired(sub, sid)
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            report = await reports.start(sub, job=lambda mark: job(sub, data, mark))
+        except DeckError as exc:
+            if (plan := busy_plan(exc)) is not None:
+                busy = page(plan.title, busy_body(plan, back[0]), sub=sub, sid=sid, status=plan.status)
+                busy.headers.update(busy_headers(plan))
+                return busy
+            return page(
+                title,
+                f"<div class='card'><p class='notice error'>{_esc(exc)}</p>"
+                f"<div class='actions'><a class='btn btn-primary' href='{_esc(back[0])}'>{_esc(back[1])}</a>"
+                "</div></div>",
+                sub=sub,
+                sid=sid,
+                status=409 if exc.kind == "invalid" else 400,
+            )
+        reused = "?reused=1" if report.get("reused") else ""
+        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}{reused}", status_code=303)
+
+    @server.custom_route("/proposals/{pid}/test", methods=["POST"], include_in_schema=False)
+    async def proposal_test(request: Request) -> Response:
+        """Test a waiting proposal: the deck after the change, paired against the deck as it is now
+        (reports.run_proposal). Nothing is written to Archidekt."""
+        pid = request.path_params["pid"]
+
+        def job(sub: str, _data: dict[str, str], mark: Any) -> Any:
+            return reports.run_proposal(sub, pid, on_stored=mark)
+
+        back = (f"/proposals/{pid}", "Back to it")
+        out = await _start_test(request, job, title=TEST_NOT_STARTED, back=back)
+        return out  # type: ignore[return-value]
+
+    @server.custom_route("/reports/test", methods=["POST"], include_in_schema=False)
+    async def list_test(request: Request) -> Response:
+        """Test a pasted list (reports.run_text): filed under no deck, so no deck's trend counts it."""
+
+        def job(sub: str, data: dict[str, str], mark: Any) -> Any:
+            text = str(data.get("decklist") or "").strip()
+            if not text:
+                raise DeckError("invalid", NO_LIST_PASTED)
+            return reports.run_text(sub, text, on_stored=mark)
+
+        out = await _start_test(request, job, title=TEST_NOT_STARTED, back=("/reports", "Back to Reports"))
+        return out  # type: ignore[return-value]
+
+    @server.custom_route("/history/snapshots/{snap_id}/test", methods=["POST"], include_in_schema=False)
+    async def snapshot_test(request: Request) -> Response:
+        """Test one of the member's snapshots as the deck stood then, filed under its deck."""
+        snap_id = request.path_params["snap_id"]
+        back = "/history" + query_string({"open": f"s-{snap_id}"})
+
+        def job(sub: str, _data: dict[str, str], mark: Any) -> Any:
+            from .archidekt import parse_deck
+
+            snap = state.db.get_snapshot(snap_id, sub)
+            if not snap:
+                raise DeckError("not_found", SNAPSHOT_GONE)
+            deck = parse_deck(snap["deck"])
+            return reports.run(sub, snap_id, deck=deck, snapshot_id=snap_id, on_stored=mark)
+
+        out = await _start_test(request, job, title=TEST_NOT_STARTED, back=(back, "Back to the snapshot"))
+        return out  # type: ignore[return-value]
+
+    @server.custom_route("/decks/{deck_id}/compare/ab", methods=["POST"], include_in_schema=False)
+    async def compare_ab(request: Request) -> Response:
+        """A paired solo test of this deck (A) against another of the member's decks or a snapshot
+        (B), kept as a comparison report: the website's compare_decks with an A/B."""
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, other: str, mark: Any) -> dict[str, Any]:
+            import dataclasses
+
+            from . import deck_stats
+            from .archidekt import parse_deck
+            from .decks import deck_to_text
+            from .reports import SOURCE_COMPARE, sim_mode
+
+            if reports.mf is None:
+                raise DeckError("invalid", AB_UNAVAILABLE)
+            if not other:
+                raise DeckError("invalid", AB_PICK_ONE)
+            deck_a = await decks.get_any_deck(sub, deck_id)
+            if other.startswith("snap_"):
+                snap = state.db.get_snapshot(other[5:], sub)
+                if not snap:
+                    raise DeckError("not_found", SNAPSHOT_GONE)
+                deck_b = parse_deck(snap["deck"])
+                b_name = f"{deck_b.name or 'Snapshot'} (snapshot, {time_text(snap.get('taken_at'))})"
+            else:
+                deck_b = await decks.get_any_deck(sub, other)
+                b_name = str(deck_b.name or f"Deck {deck_b.id}")
+            a_name = str(deck_a.name or f"Deck {deck_a.id}")
+            stats = deck_stats.compute(deck_a)
+            source = {
+                "kind": "compare",
+                "label": SOURCE_COMPARE,
+                "a": a_name,
+                "b": b_name,
+                **({"b_deck_id": str(deck_b.id)} if not other.startswith("snap_") and deck_b.id else {}),
+            }
+            modes = (sim_mode(stats), sim_mode(deck_stats.compute(deck_b)))
+            return await reports.run_source(
+                sub,
+                dataclasses.replace(deck_a, name=f"{a_name} vs {b_name}"),
+                source=source,
+                stats=stats,
+                simulate=False,
+                forge=False,
+                on_stored=mark,
+                ab_with=(deck_to_text(deck_a), deck_to_text(deck_b), modes),
+            )
+
+        def job(sub: str, data: dict[str, str], mark: Any) -> Any:
+            return run(sub, str(data.get("with") or "").strip(), mark)
+
+        out = await _start_test(
+            request, job, title=TEST_NOT_STARTED, back=(f"/decks/{deck_id}/compare", "Back to Compare")
+        )
+        return out  # type: ignore[return-value]
 
     # -- My card models: the member's own saved descriptions (card_models_view) -------------------
     @server.custom_route(card_models_view.PAGE, methods=["GET"], include_in_schema=False)

@@ -26,8 +26,11 @@ from .theme import icon, time_html
 
 PAGE = ui.PER_PAGE
 MAX_OFFSET = 2000
-# The chips. "changes" (a link from before proposals moved to Proposals) reads as Everything.
-TYPES = (("all", "Everything"), ("snapshots", "Snapshots"), ("restores", "Restores"), ("reports", "Reports"))
+# The chips (owner decision C7: History is the deck's timeline): the changes applied to a deck
+# (restores among them), its snapshots and its tests. A test's own home is its report page.
+TYPES = (("all", "Everything"), ("changes", "Changes"), ("snapshots", "Snapshots"), ("tests", "Tests"))
+# the chips' names before C7, still in old links
+OLD_TYPES = {"restores": "changes", "reports": "tests"}
 # The "When" presets: UTC calendar days (every time on the site is UTC), each a window that
 # starts at the beginning of a day and runs to now. The value is what the query string carries.
 WHENS = (
@@ -41,16 +44,21 @@ WHENS = (
 WHEN_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
 GROUPS = (("day", "Group by day"), ("deck", "Group by deck"))
 DEFAULTS = {"type": "all", "group": "day"}
-PAGE_SUB_TEXT = "Snapshots of your decks, restores and deck reports. Changes your assistants proposed are on"
+PAGE_SUB_TEXT = (
+    "Your decks' timeline: the changes applied to them, their snapshots and their tests. Changes waiting "
+    "for you are on"
+)
 NO_WHO = "Snapshots do not record who made them"
 NOTHING_YET = (
-    "Nothing yet. The snapshots taken before a change is applied, the restores and deck reports appear here."
+    "Nothing yet. The changes applied to your decks, the snapshots taken before them and your tests appear "
+    "here."
 )
 
 
 def read_query(params: Any) -> dict[str, Any]:
     """The page's filters from the query string, each limited to what the page offers."""
     kind = (params.get("type") or "all").strip().lower()
+    kind = OLD_TYPES.get(kind, kind)
     when = (params.get("when") or "").strip().lower()
     group = (params.get("group") or "day").strip().lower()
     opened = (params.get("open") or "").strip()
@@ -127,6 +135,64 @@ def _taken(text: str) -> int | None:
         return None
 
 
+CHANGE_WORDS = {
+    "create_deck": "Made the deck",
+    "details": "Changed the deck's details",
+    "categories": "Changed the deck's categories",
+}
+
+
+def _change_event(p: dict[str, Any]) -> dict[str, Any]:
+    """A change applied to a deck (not a restore): what it did, from its own summary."""
+    summary = str(p.get("summary") or "").strip()
+    lead = CHANGE_WORDS.get(str(p.get("kind") or ""), "Applied a change")
+    line = (
+        _esc(f"{lead}: {summary}" if summary else lead)
+        + " · "
+        + ui.cap_link("Proposal", f"/proposals/{p['id']}")
+    )
+    diff = str(p.get("diff_text") or "")
+    details = (
+        (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
+        + "<div class='ui-actions'>"
+        + ui.button_link("Open the review page", f"/proposals/{p['id']}")
+        + "</div>"
+    )
+    return {
+        "key": f"p-{p['id']}",
+        "ts": int(p.get("applied_at") or p.get("created_at") or 0),
+        "kind": "change",
+        "deck_id": p.get("deck_id"),
+        "deck_name": p.get("deck_name") or p.get("deck_id"),
+        "line": line,
+        "app": _app(p.get("created_by")),
+        "client": _client(p.get("created_by")),
+        "who": True,
+        "action": "",
+        "details": details,
+    }
+
+
+def result_words(r: dict[str, Any]) -> list[str]:
+    """A test's result in a few words for its History row (owner decision C7): when the commander
+    came down, the lethal turn, and Forge's win rate once there are enough games for it to mean
+    something. [] when the test has no result yet."""
+    h = r.get("headline") or {}
+    out = []
+    turn = h.get("commander_turn")
+    if isinstance(turn, (int, float)):
+        out.append(f"Commander turn {turn:g}")
+    kill = h.get("kill_median_turn")
+    if isinstance(kill, (int, float)):
+        out.append(f"{'lethal' if out else 'Lethal'} ({h.get('kill_damage') or 40} damage) by turn {kill:g}")
+    win = h.get("win") or {}
+    if win and win.get("enough", True) and isinstance(win.get("rate"), (int, float)):
+        out.append(f"Forge won {round(100 * float(win['rate']))}% of {int(win.get('games') or 0)} games")
+    elif win:
+        out.append(f"{int(win.get('games') or 0)} Forge games so far")
+    return out
+
+
 def build_events(
     restores: list[dict[str, Any]],
     snapshots: list[dict[str, Any]],
@@ -139,6 +205,9 @@ def build_events(
     under the deck's name (markup), who made it, the time, its quick action and its Details."""
     events: list[dict[str, Any]] = []
     for p in restores:
+        if p.get("kind") != "restore":
+            events.append(_change_event(p))
+            continue
         taken = _taken(p.get("taken") or "")
         when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
         line = f"{when} · " + ui.cap_link("Proposal", f"/proposals/{p['id']}")
@@ -200,6 +269,16 @@ def build_events(
             + f"<input type='hidden' name='snapshot_id' value='{_esc(x['snapshot_id'])}'>"
             + "<button type='submit' class='btn-plain'>Restore (review first)</button></form>"
         )
+        test_form = (
+            f"<form method='post' action='/history/snapshots/{_esc(x['snapshot_id'])}/test' class='hy-test'>"
+            + csrf_input
+            + "<button type='submit' class='btn-plain' data-busy-label='Testing…'>Test this version</button>"
+            "</form>"
+        )
+        tested = (
+            "<p>Test this version plays the deck as this snapshot recorded it. The test is filed under the "
+            f"deck; nothing changes on Archidekt.</p><div class='ui-actions'>{test_form}</div>"
+        )
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
             restore = (
@@ -246,7 +325,7 @@ def build_events(
                 "app": None,
                 "who": False,
                 "action": action,
-                "details": link + backup + restore,
+                "details": link + backup + restore + tested,
             }
         )
     for r in reports:
@@ -265,13 +344,18 @@ def build_events(
             bits.append(f"bracket {r['bracket_set']}")
         elif r.get("bracket_estimate"):
             bits.append(f"bracket about {r['bracket_estimate']}")
+        results = result_words(r)
         sim = (
             "the solo test is running"
             if r.get("research") == "running"
-            else "with a goldfish simulation"
+            else " · ".join(results)
+            if results
+            else "with a solo test"
             if r.get("has_goldfish")
             else "statistics only"
         )
+        if results:  # the result says more than the deck's make-up
+            bits = []
         client = r.get("created_by_client")
         app = (
             _app(actor_label(client, (client_names or {}).get(client) if client else None))
@@ -294,18 +378,21 @@ def build_events(
                 "client": client,
                 "who": True,
                 "action": open_report,
-                "details": f"<div class='ui-actions'>{open_report}</div>",
+                "href": href,  # its one home: the row opens the report, with no Details here
+                "details": "",
             }
         )
     events.sort(key=lambda e: e["ts"], reverse=True)
     return events
 
 
-# Type labels (status label shape): Snapshot grey, Restore green, Report blue; a report's status beside it
+# Type labels (status label shape): Change and Restore green, Snapshot grey, Test blue; a test's status
+# beside it
 KIND_LABELS = {
+    "change": ("Change", "green", "check"),
     "snapshot": ("Snapshot", "grey", "bookmark"),
     "restore": ("Restore", "green", "undo"),
-    "report": ("Report", "blue", "report"),
+    "report": ("Test", "blue", "report"),
 }
 REPORT_STATES = {
     "running": ("Running", "orange", "spinner"),
@@ -355,8 +442,8 @@ def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
     acts = e.get("action") or ""
     if e["kind"] != "report":
         acts += f"<a class='btn btn-plain' href='{_esc(details)}'>Details</a>"
-    chev_href = details
-    chev_text = "Details"
+    chev_href = e.get("href") or details
+    chev_text = "Open report" if e.get("href") else "Details"
     cls = "tr" + (" open" if query.get("open") == e["key"] else "")
     return (
         f"<div class='{cls}'><span class='md-hide'>{_type_html(e)}</span>"

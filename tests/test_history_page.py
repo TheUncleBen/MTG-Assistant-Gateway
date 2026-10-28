@@ -222,9 +222,10 @@ def _ids(body: str) -> set[str]:
 
 
 async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    """History lists snapshots, restores and reports (no edit proposals: those are on Proposals),
-    narrowed and paged in SQL, with chips, a deck name search, the deck, When and Group by
-    filters, day rows, Details and Restore (review first) on every snapshot."""
+    """History is the decks' timeline (owner decision C7): the changes applied to them (restores among
+    them), their snapshots and their tests; a change still waiting, rejected or failed is on
+    Proposals only. Narrowed and paged in SQL, with chips, a deck name search, the deck, When and
+    Group by filters, day rows, Details and Restore (review first) on every snapshot."""
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
@@ -249,18 +250,27 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         body = page.text.split("<main")[1]
         rows = _entries(body)
         assert len(rows) == 25
-        # no edit proposal is listed: a snapshot links the change it was taken before
-        assert "+1 Sol Ring" not in body and "Rejected" not in body
-        assert "<a class='ui-cap' href='/proposals/p00'>The change</a>" in body
-        assert "Older →" in body and "1–25 of 38" in body  # 15 + 20 snapshots, the restore, 2 reports
+        # an applied change is an event of its own; one waiting, rejected or failed is not listed
+        assert "Rejected" not in body and "/proposals/p02'" not in body and "/proposals/p06'" not in body
+        changes = [r for r in rows if "open=p-p08'" in r]
+        assert changes and ">Change</span>" in changes[0] and "+1 Sol Ring; -1 Card 8" in changes[0]
+        # 15 + 20 snapshots, 15 applied changes (the restore among them), 2 tests
+        assert "Older →" in body and "1–25 of 52" in body
         assert "<div class='tr daygroup'>Today · " in body and "<div class='tr daygroup'>Yesterday · " in body
-        snaps = [r for r in rows if "open=s-" in r]
+        snaps = [r for r in rows if "open=s-" in r and "open=p-" not in r]
         assert snaps and all("Restore (review first)" in r and ">Details</a>" in r for r in snaps)
-        # on a phone a row is one tap to its details, where Restore sits
+        # on a phone a row is one tap to its details, where Restore sits (a test's: its report page)
         assert all("class='sm-only chev'" in r for r in rows)
+        tests = [r for r in rows if "/history/reports/rep_a'" in r]
+        assert (
+            tests
+            and ">Test</span>" in tests[0]
+            and "class='sm-only chev' href='/history/reports/rep_a'" in tests[0]
+        )
         assert "title='Snapshots do not record who made them'>—" in snaps[0]
         # chips with counts, a deck name search and the three filters
-        assert "Everything <span class='n'>38</span>" in body and "Reports <span class='n'>2</span>" in body
+        assert "Everything <span class='n'>52</span>" in body and "Tests <span class='n'>2</span>" in body
+        assert "Changes <span class='n'>15</span>" in body and "Snapshots <span class='n'>35</span>" in body
         assert "placeholder='Deck name'" in body and body.count("<select") == 3
         assert "<option value='42' selected>Sample Commander Deck</option>" in body
         assert "Immortal Reckoning</option>" not in body
@@ -272,13 +282,19 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert "<option value='day' selected>Group by day</option>" in body
         # older page
         older = (await b.http.get("/history?deck_id=42&offset=25", headers=NAV)).text.split("<main")[1]
-        assert "← Newer" in older and "26–38 of 38" in older
-        assert not _ids(body) & _ids(older) and len(_ids(body) | _ids(older)) == 38
+        assert "← Newer" in older and "26–50 of 52" in older
+        last = (await b.http.get("/history?deck_id=42&offset=50", headers=NAV)).text.split("<main")[1]
+        assert not _ids(body) & _ids(older) and len(_ids(body) | _ids(older) | _ids(last)) == 52
         # chips and search
-        reps = (await b.http.get("/history?type=reports", headers=NAV)).text.split("<main")[1]
+        reps = (await b.http.get("/history?type=tests", headers=NAV)).text.split("<main")[1]
         assert _ids(reps) == {"rep_a", "rep_b"}
+        # the chips' names before C7 still work: reports are the tests, restores among the changes
+        assert _ids((await b.http.get("/history?type=reports", headers=NAV)).text.split("<main")[1]) == {
+            "rep_a",
+            "rep_b",
+        }
         restores = (await b.http.get("/history?type=restores", headers=NAV)).text.split("<main")[1]
-        assert _ids(restores) == {"p04"}
+        assert _ids(restores) == {f"p{i:02d}" for i in range(0, 60, 4)}
         found = (await b.http.get("/history?q=reap", headers=NAV)).text.split("<main")[1]
         assert "value='reap'" in found and "Nothing matches these filters" in found  # deck 43: none
         nothing = await b.http.get("/history?q=zzzz-nothing", headers=NAV)
@@ -397,16 +413,17 @@ async def test_history_grouped_by_deck(stack: Stack) -> None:
         heads = re.findall(
             r"<div class='tr group hy-group'><span><a href='/decks/(\d+)'>([^<]+)</a>", listing
         )
-        # deck 42's restore (p04, applied as the test began) is newer than deck 43's report
+        # deck 42's applied changes (applied as the test began) are newer than deck 43's report
         assert heads == [("42", "Immortal Reckoning"), ("43", "Reap the Tides")]
         assert "<a class='ui-cap' href='/history?deck_id=43&amp;group=deck'>Only this deck</a>" in listing
-        assert "open=p-p04'" in listing.split("<div class='tr'>")[1]  # the newest entry leads
-        assert len(_entries(body)) == 17 and "daygroup" not in listing
+        assert "open=p-p" in listing.split("<div class='tr'>")[1]  # the newest entry leads
+        # 15 changes, 15 snapshots and the report: a page of 25
+        assert len(_entries(body)) == 25 and "daygroup" not in listing
         sec42, sec43 = listing.split("<div class='tr group hy-group'>")[1:]
         assert "/history/reports/rep_a'" in sec43 and "open=s-" not in sec43
         s42 = list(dict.fromkeys(re.findall(r"open=s-(s\d\d)'", sec42)))  # newest first
-        assert s42 == sorted(s42) and len(s42) == 15
-        assert "Restore (review first)" in sec42
+        assert s42 == sorted(s42) and len(s42) == 9
+        assert "Restore (review first)" in sec42 and "open=p-p04'" in sec42
         own = (await b.http.get("/history?group=deck&deck_id=42&type=snapshots", headers=NAV)).text
         own_body = own.split("<main")[1]
         assert _table(own_body).count("hy-group") == 1 and "only this deck" not in own_body
