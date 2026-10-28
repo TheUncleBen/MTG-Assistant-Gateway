@@ -199,10 +199,12 @@ def test_the_add_box_tabs_the_filter_and_load_more(server: Server) -> None:
             )
         )
         page.locator("#col-q").fill("zzzz")
-        assert page.locator(".col-nomatch").is_visible()
+        # "No cards match" once Archidekt's own filter says so (test_binder_filter_browser)
+        page.locator(".col-nomatch").wait_for(state="visible", timeout=3000)
         page.locator("#col-q").fill("")
-        page.wait_for_timeout(100)
-        assert page.locator("#cards > li[data-id]:visible").count() == 24
+        page.wait_for_function(
+            "() => document.querySelectorAll('#cards > li[data-id]:not([hidden])').length === 24"
+        )
         # Load more appends the rest without leaving the page, then says every entry is shown
         more = page.locator(".loadmore [data-load-more]")
         assert more.inner_text().strip() == "Load more cards"
