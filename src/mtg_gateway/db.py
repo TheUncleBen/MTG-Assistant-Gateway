@@ -816,8 +816,8 @@ SNAPSHOT_HELD_RESTORE = (
     "or apply that restore first."
 )
 SNAPSHOT_HELD_BACKUP = (
-    "This snapshot holds the gateway's record of a backup copy on Archidekt, which the gateway may "
-    "still delete for you, so it can't be deleted."
+    "The gateway still needs this snapshot to tidy up its backup copy on Archidekt, so it can't be "
+    "deleted yet."
 )
 # job_runs rows recording each Archidekt folder the gateway put a member's backup copies in
 # (record_backup_folder), by member and folder id: a renamed backup folder stays known as one
