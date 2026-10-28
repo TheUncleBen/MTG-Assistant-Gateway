@@ -742,7 +742,7 @@ def watchlist_page_html(
     )
     return (
         "<div class='watch-page gb-dash'>"
-        + ui.page_head("Watchlist", intro)
+        + ui.binder_head("/watchlist", "Binder: Watchlist", intro)
         + notice
         + widgets_html(data, checked=checked or "daily")
         + add

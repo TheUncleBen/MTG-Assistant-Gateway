@@ -2399,9 +2399,11 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 
 # The site navigation (Ben, 2026-10-25): four places and More, the same on every screen. The top bar
 # on a computer, the bottom tab bar on a phone and the rail (an unfolded Fold, a tablet, the app from
-# 600 px) list these; the rail adds Alerts (the bell) before More. Assistant is the assistant's own
-# pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with the count of
-# proposals waiting for the member.
+# 600 px) list these; the rail adds Forum and Alerts (the bell) before More. Assistant is the
+# assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
+# the count of proposals waiting for the member. Binder is the member's cards, behind one switch too
+# (BINDER_PAGES): Cards (the Archidekt collection), Wants (the cards pinned on Archidekt) and
+# Watchlist (decision C8, 0.7.46).
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
@@ -2414,28 +2416,42 @@ ASSISTANT_PAGES = (
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
 )
-NAV_PLACE = {"/history": "/proposals", "/reports": "/proposals"}
-# More, in groups. Account, Guide, Forum and Admin live on the Account page your picture opens.
+# Binder's switch (Cards, Wants, Watchlist); Watchlist only while watchlists are on (binder_pages)
+BINDER_PAGES = (
+    ("/collection", "Cards", "collection"),
+    ("/collection/wants", "Wants", "bookmark"),
+    ("/watchlist", "Watchlist", "stats"),
+)
+NAV_PLACE = {
+    "/history": "/proposals",
+    "/reports": "/proposals",
+    "/collection/wants": "/collection",
+    "/watchlist": "/collection",
+}
+# The pages that light the picture (the Account place): the Account pages and the Archidekt lists
+# that live under Account (category templates, default categories, color tags, custom cards)
+ACCOUNT_PAGES = ("/account", "/account/details", "/lists")
+# The rail's extra places between the four and More (the phone bar keeps the bell in the top bar
+# and Forum under More): (href, label, icon, class)
+RAIL_EXTRA = (("/forum", "Forum", "comment", "railonly"),)
+# More, in groups. Account, Guide and Admin live on the Account page your picture opens; the
+# Archidekt lists live under Account; Watchlist lives in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
-    (
-        "Your cards",
-        [
-            ("/scan", "Scan", "scan"),
-            ("/watchlist", "Watchlist", "stats"),
-            ("/lists", "My lists", "list"),
-            ("/history/models", "My card models", "box"),
-        ],
-    ),
+    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "My card models", "box")]),
+    ("Community", [("/forum", "Forum", "comment")]),
 ]
 
 
+def binder_pages() -> list[tuple[str, str, str]]:
+    """Binder's switch, without Watchlist while watchlists are off."""
+    return [p for p in BINDER_PAGES if p[0] != "/watchlist" or WATCHLISTS]
+
+
 def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
-    """More's groups, without Watchlist while watchlists are off and without My card models while
-    descriptions are not kept (card_models.SWITCHED_ON)."""
-    off = {"/watchlist"} if not WATCHLISTS else set()
-    if not card_models.SWITCHED_ON:
-        off.add("/history/models")
+    """More's groups, without My card models while descriptions are not kept
+    (card_models.SWITCHED_ON)."""
+    off = set() if card_models.SWITCHED_ON else {"/history/models"}
     return [(head, [x for x in links if x[0] not in off]) for head, links in MORE_GROUPS]
 
 
@@ -2582,7 +2598,7 @@ def render(
         who = f" data-who='{hashlib.sha256(sub.encode()).hexdigest()[:16]}'" if sub else ""
         account_link = (
             f"<a class='icon-btn acct' href='/account' aria-label='Account' title='Account'{who}"
-            f"{' aria-current=page' if cur in ('/account', '/account/details') else ''}>"
+            f"{' aria-current=page' if cur in ACCOUNT_PAGES else ''}>"
             # The member's own picture (their provider's, else their initials: /account/avatar).
             "<img class='av' src='/account/avatar' alt='' width='28' height='28'></a>"
         )
@@ -2635,7 +2651,9 @@ def render(
                 tab(href, label, ic, extra=badge(waiting, "waiting") if href == "/proposals" else "")
                 for href, label, ic in NAV_LINKS
             )
-            # the bell as a rail place (railonly: the phone bar keeps it in the top bar)
+            # Forum, then the bell, as rail places (railonly: the phone bar keeps the bell in the
+            # top bar and Forum under More)
+            + "".join(tab(href, label, ic, cls) for href, label, ic, cls in RAIL_EXTRA)
             + tab(
                 "/notifications",
                 "Alerts",

@@ -1570,29 +1570,31 @@ def actor_html(label: str | None) -> str:
 
 
 def _lists_card(sub: str) -> str:
-    """Your Archidekt lists: the five account-wide lists with the counts known so far (each count
-    comes from that tab's last read, account_lists.counts), one press from My lists."""
+    """Your Archidekt lists: the account-wide lists that shape decks with the counts known so far
+    (each count comes from that tab's last read, account_lists.counts), one press from My lists;
+    the pinned cards are Binder's Wants (decision C8)."""
     from . import account_lists  # (imports archidekt first: not at the top)
-    from .lists_page import PAGE, TABS
+    from .lists_page import ACCOUNT_TABS, PAGE, WANTS
 
     counts = account_lists.counts(sub)
     words = {
         "templates": ("category template", "category templates"),
         "default_categories": ("card with default categories", "cards with default categories"),
         "color_tags": ("color tag", "color tags"),
-        "pins": ("pinned card", "pinned cards"),
         "custom_cards": ("custom card", "custom cards"),
     }
     parts = []
-    for t in TABS:
+    for t in ACCOUNT_TABS:
         n = counts.get(t.kind)
         one, many = words[t.kind]
         text = many if n is None else f"{n:,} {one if n == 1 else many}"
         parts.append(ui.cap_link(text, f"{PAGE}/{t.slug}"))
     return (
         "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
-        "<p>Lists that follow you into every deck, kept on Archidekt:</p>"
+        "<p>Lists that shape every deck, kept on Archidekt:</p>"
         f"<p class='ui-caps'>{''.join(parts)}</p>"
+        f"<p class='muted'>The cards you pin on Archidekt are your wants: "
+        f"{ui.cap_link('Binder › Wants', WANTS, icon_name='bookmark')}</p>"
         f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
     )
 

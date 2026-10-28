@@ -52,6 +52,7 @@ _PAGES = (
     (re.compile(r"^/forum(/[^/]+){0,3}$"), "Forum", ""),
     (re.compile(r"^/users/[^/]{1,80}$"), "Profile", ""),
     (re.compile(r"^/lists/[a-z_-]{1,20}$"), "My lists", ""),
+    (re.compile(r"^/collection/wants$"), "Wants", "/collection"),
     (re.compile(r"^/collection$"), "Binder", "/collection"),
 )
 LOADING_TEXT = "Reading this page from Archidekt…"

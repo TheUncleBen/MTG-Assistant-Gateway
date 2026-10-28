@@ -44,19 +44,19 @@ def _client(server: Server, *, admin: bool = False) -> httpx.Client:
 # -- the bars --------------------------------------------------------------------------------------
 
 
-def test_the_places_are_four_and_more_holds_two_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_places_are_four_and_more_holds_three_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", True)
     assert [label for _h, label, _i in theme.NAV_LINKS] == ["Home", "Decks", "Binder", "Assistant"]
     groups = theme.more_groups()
-    assert [g for g, _links in groups] == ["Find", "Your cards"]
+    assert [g for g, _links in groups] == ["Find", "Your cards", "Community"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
-    assert hrefs == ["/search", "/precons", "/scan", "/watchlist", "/lists", "/history/models"]
+    # Watchlist lives in Binder and My lists under Account (decision C8): neither is in More
+    assert hrefs == ["/search", "/precons", "/scan", "/history/models", "/forum"]
 
 
-def test_watchlist_leaves_more_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_watchlist_leaves_binder_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", False)
-    hrefs = [h for _g, links in theme.more_groups() for h, _l, _i in links]
-    assert "/watchlist" not in hrefs and "/lists" in hrefs
+    assert [h for h, _l, _i in theme.binder_pages()] == ["/collection", "/collection/wants"]
 
 
 def test_the_switch_marks_its_page_and_counts_on_its_first_part() -> None:

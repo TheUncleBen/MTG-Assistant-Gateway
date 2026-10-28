@@ -1,6 +1,6 @@
 """The top bar on a computer (navigation round 2, Ben 2026-10-25): the four places (Home, Decks,
-Binder, Assistant) at every width and text size, then "More ▾" with its two groups (Find: Search
-and Precons; Your cards: Scan, Watchlist, My lists and My card models). History and Reports mark
+Binder, Assistant) at every width and text size, then "More ▾" with its three groups (Find: Search
+and Precons; Your cards: Scan and My card models; Community: Forum). History and Reports mark
 Assistant; a page under More marks More. Phones and the touch rail have no More ▾ in the bar."""
 
 from __future__ import annotations
@@ -37,17 +37,20 @@ def test_the_bar_marks_the_place_and_a_page_under_more(server: Server) -> None:
     assert "<a href='/proposals' aria-current='page'>Assistant</a>" in nav
     assert "<details class='dd navmore'><summary>More<span aria-hidden='true'>▾</span>" in nav
     menu = nav.split("<div class='menu'>")[1]
-    assert [x.split("</div>")[0] for x in menu.split("<div class='head'>")[1:]] == ["Find", "Your cards"]
+    assert [x.split("</div>")[0] for x in menu.split("<div class='head'>")[1:]] == [
+        "Find",
+        "Your cards",
+        "Community",
+    ]
     assert [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]] == [
         "Search decks and cards",
         "Precons",
         "Scan",
-        "Watchlist",
-        "My lists",
         "My card models",
+        "Forum",
     ]
-    nav = h.get("/watchlist").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
-    assert "<summary class='on'>More" in nav and "<a href='/watchlist' aria-current=page>" in nav
+    nav = h.get("/scan").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
+    assert "<summary class='on'>More" in nav and "<a href='/scan' aria-current=page>" in nav
 
 
 def test_the_four_places_and_more_at_every_width_and_large_text(server: Server) -> None:
@@ -83,7 +86,7 @@ def test_the_four_places_and_more_at_every_width_and_large_text(server: Server) 
                 menu = page.locator(".navmore .menu")
                 box = menu.bounding_box()
                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= width
-                menu.locator("a", has_text="Watchlist").click()
-                page.wait_for_url("**/watchlist")
+                menu.locator("a", has_text="Forum").click()
+                page.wait_for_url("**/forum")
             ctx.close()
         browser.close()
