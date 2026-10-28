@@ -420,6 +420,8 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
         drawer = details.split("<aside class='ui-drawer'")[1]
         assert "← Back to History" in drawer and "Restore (review first)" in drawer and "<dd>—</dd>" in drawer
+        # the back link is a grey capsule, not bare blue text (style only: it stays where it was)
+        assert "<p class='page-only'><a class='ui-cap' href='/history'>← Back to History</a></p>" in drawer
     finally:
         await b.aclose()
 
