@@ -295,8 +295,11 @@ else your gateway serves. A few things are native:
   when you use **Sign out on all my devices** on the `/logout` page, within a
   minute after the owner removes you from the gateway's group (the gateway
   checks with the sign-in service as you use it), and once
-  after the owner upgrades the gateway to 0.6.1. If the sign-in service
-  can't be reached, pages say so and ask you to try again later.
+  after the owner upgrades the gateway to 0.6.1, and when the sign-in
+  service asks for a new sign-in on this phone (your other devices and AI
+  apps stay signed in). The page you land on says which of these it was,
+  with Sign in. If the sign-in service can't be reached, pages say so and
+  ask you to try again later.
 - **Downloads** (CSV export, the skill zip) land in your Downloads folder. If
   your sign-in has ended in the meantime, the app says so instead of saving a
   sign-in page; reload, sign in and download again.

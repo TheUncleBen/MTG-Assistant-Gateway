@@ -69,10 +69,8 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/skill", methods=["GET"], include_in_schema=False)
     async def skill(request: Request) -> Response:
-        """The skill's steps are the setup hub's skill section (setup_hub.py)."""
-        sub, _sid = signed_in(request)
-        if not sub:
-            return to_login("/skill")
+        """The skill's steps are the setup hub's skill section (setup_hub.py), which reads signed
+        out too; the download itself needs a sign-in."""
         return RedirectResponse("/install?for=skill", status_code=302)
 
     @server.custom_route("/skill/mtg-gateway.zip", methods=["GET"], include_in_schema=False)

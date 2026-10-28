@@ -172,7 +172,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             if target == admin_sub:
                 raise AdminError("invalid", "You cannot disable your own account.", code="self_disable")
             state.db.set_user_disabled(target, True)
-            out.update(state.db.revoke_all_for_user(target))
+            out.update(state.db.revoke_all_for_user(target, "disabled"))
             # A disabled account cannot sign in, so its Archidekt session is not kept either.
             state.decks.unlink(target)
         elif action == "enable":

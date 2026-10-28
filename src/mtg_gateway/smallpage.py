@@ -111,8 +111,12 @@ def signin_canceled(login_href: str = "/login") -> str:
 
 
 def signin_unavailable(login_href: str = "/login") -> str:
+    """Not Home: every member page needs a sign-in, so Home led straight back here. The guide
+    reads signed out."""
     return panel(
-        "Sign-in unavailable", p(UNAVAILABLE), button("Try again", login_href, primary=True) + home()
+        "Sign-in unavailable",
+        p(UNAVAILABLE),
+        button("Try again", login_href, primary=True) + button("Read the guide", "/guide"),
     )
 
 

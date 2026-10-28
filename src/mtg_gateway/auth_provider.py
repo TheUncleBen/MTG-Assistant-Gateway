@@ -52,7 +52,7 @@ from .cimd import (
 )
 from .config import Settings
 from .db import Database, hash_token
-from .membership import Membership, MembershipChecker
+from .membership import SIGN_IN_AGAIN, Membership, MembershipChecker, assistant_holder, login_holder
 from .oidc import Identity, IdPTokens, OIDCClient, OIDCError, pkce_pair
 
 logger = logging.getLogger(__name__)
@@ -641,12 +641,16 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
 
         if known and known.get("disabled_at"):
             self.db.audit("login_rejected_disabled", sub=identity.sub, client_id=session["client_id"])
-            self.db.delete_browser_sessions_for(identity.sub)
+            self.db.delete_browser_sessions_for(identity.sub, "disabled")
             raise LoginError(DISABLED_MESSAGE, 403, kind="refused")
 
         self._record_user(identity)
-        # The provider's own tokens, so later requests can ask it again (membership.py).
+        # The provider's own tokens, so later requests can ask it again (membership.py). They wait
+        # under this sign-in's own name until the caller hands them to the session or the AI apps
+        # it is for (session["grant_holder"]).
+        session["grant_holder"] = login_holder(state)
         self.membership.store(
+            session["grant_holder"],
             identity.sub,
             IdPTokens(
                 access_token=identity.idp_access_token,
@@ -675,6 +679,8 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 error_description="sign-in was canceled or denied",
                 state=params.state,
             )
+        # this sign-in's provider grant becomes the one the member's AI apps are checked with
+        self.membership.adopt(session["grant_holder"], assistant_holder(identity.sub))
         gw_code = secrets.token_urlsafe(32)
         expires_at = int(time.time()) + self.settings.auth_code_ttl
         auth_code = AuthorizationCode(
@@ -749,6 +755,11 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         outcome = await self.membership.check(sub)
         if outcome is Membership.UNAVAILABLE:
             raise TokenError("invalid_request", "the identity provider can't be reached; try again later")
+        if outcome is Membership.SIGN_IN:
+            # None of the member's sign-ins is honoured by the provider any more (its refresh
+            # token ran out, say): refused until they sign in on the website again, but not
+            # invalid_grant, so the app keeps its tokens and works again after that (membership.py).
+            raise TokenError("invalid_request", SIGN_IN_AGAIN.format(url=self.settings.public_url))
         if outcome is Membership.REVOKED:
             raise TokenError("invalid_grant", "sign in again to keep using this service")
 

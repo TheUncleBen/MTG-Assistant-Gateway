@@ -8,10 +8,10 @@ carry a value to copy (a box with a Copy button on the page, the value in backti
 a link (a button on the page, a Markdown link). What only the page can show (the Android app's
 version and fingerprints, the ChatGPT instructions box) is the page's own, never install text.
 
-``/install`` signs a browser in first; an AI agent fetching it gets the Markdown, as from
-``/install.md``, which needs no sign-in. ``/skill`` and ``/app`` lead to their section here (after
-the same sign-in as before); the downloads keep their addresses and rules (skill_page.py,
-app_page.py, plugin_page.py).
+``/install`` is a page for a browser, signed in or not (only the ChatGPT instructions box waits for
+a sign-in); an AI agent fetching it gets the Markdown, as from ``/install.md``. ``/skill`` and
+``/app`` lead to their section here; the downloads keep their addresses and rules, a sign-in first
+(skill_page.py, app_page.py, plugin_page.py).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from starlette.responses import PlainTextResponse, Response
 
 from . import ui
 from .app_page import APK_NAME, RELEASES_URL, android_facts
-from .pages import _csrf, browser_session, login_redirect
+from .pages import _csrf, browser_session
 from .plugin_page import (
     CONNECTOR_ICON_PATH,
     SERVER_DESCRIPTION,
@@ -132,6 +132,7 @@ class Context:
     gpt_text: str | None = None  # the ChatGPT project instructions (skill_page.chatgpt_text)
     app: dict[str, Any] | None = None  # app_page.android_facts, or None when no APK is shipped
     page: bool = True  # False for the public Markdown
+    signed_in: bool = True  # False for the page read signed out (no ChatGPT instructions box)
 
 
 _INLINE = re.compile(r"\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)")
@@ -555,6 +556,15 @@ def section(key: str, ctx: Context) -> Section:
                             )
                             if gpt or not ctx.page
                             else None,
+                            # read signed out: the box is shown once signed in, like the downloads
+                            link=Link(
+                                "Sign in to see them",
+                                "/login?next=/install?for=skill",
+                                primary=False,
+                                icon="login",
+                            )
+                            if ctx.page and not ctx.signed_in
+                            else None,
                         ),
                         Step(f"Chat inside that project with the {chatgpt_label(site)} connector on."),
                     ),
@@ -563,7 +573,7 @@ def section(key: str, ctx: Context) -> Section:
                         "added, the connector works in ChatGPT's apps too (tested in the Android app).",
                         *(
                             ("The ChatGPT instructions are not available on this gateway.",)
-                            if ctx.page and not gpt
+                            if ctx.page and ctx.signed_in and not gpt
                             else ()
                         ),
                     ),
@@ -838,17 +848,20 @@ def _picker(client: str | None, e) -> tuple[str, str]:
     return nav, drop
 
 
-def _context(state: AppState, *, page: bool) -> Context:
+def _context(state: AppState, *, page: bool, signed_in: bool = True) -> Context:
     """What the sections need from this gateway: the shipped app's facts, and for the signed-in
-    page the ChatGPT instructions (the public Markdown points at the page for them)."""
+    page the ChatGPT instructions (the public Markdown and the page read signed out point at the
+    signed-in page for them)."""
     s = state.settings
     gpt = None
-    if page:
+    if page and signed_in:
         from .skill_page import chatgpt_text, skill_dir
 
         base = skill_dir()
         gpt = chatgpt_text(base) if base is not None else None
-    return Context(s.public_url, s.server_name, gpt_text=gpt, app=android_facts(), page=page)
+    return Context(
+        s.public_url, s.server_name, gpt_text=gpt, app=android_facts(), page=page, signed_in=signed_in
+    )
 
 
 def add_setup_routes(server: MCPServer, state: AppState) -> None:
@@ -868,20 +881,19 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
     async def install(request: Request) -> Response:
         client = pick_client(request.query_params.get("for"))
         sub, sid = browser_session(state, request)
-        if sub is None:
-            # A person's browser signs in first. An AI agent handed this address ("install this
-            # plugin") gets the same public steps as /install.md: browsers mark page loads with
-            # Sec-Fetch-Mode: navigate, HTTP clients and agent fetchers don't.
-            if request.headers.get("sec-fetch-mode") == "navigate":
-                target = "/install" + (f"?for={client}" if client else "")
-                return login_redirect(target)
+        if sub is None and request.headers.get("sec-fetch-mode") != "navigate":
+            # An AI agent handed this address ("install this plugin") gets the same public steps as
+            # /install.md: browsers mark page loads with Sec-Fetch-Mode: navigate, HTTP clients and
+            # agent fetchers don't. A person's browser gets the page, signed in or not (owner
+            # decision, 0.7.46: it holds nothing of any member's; the downloads still need a
+            # sign-in).
             return PlainTextResponse(
                 install_markdown(s.public_url, s.server_name, client, ctx=_context(state, page=False)),
                 media_type=INSTALL_MD_TYPE,
                 headers={"Cache-Control": "no-store", "Vary": "Sec-Fetch-Mode, Cookie"},
             )
         e = html.escape
-        ctx = _context(state, page=True)
+        ctx = _context(state, page=True, signed_in=sub is not None)
         md_url = f"{s.public_url}/install.md" + (f"?for={client}" if client else "")
         # the address is a link that breaks only after the gateway's address, never mid-word
         md_shown = f"{e(s.public_url)}/<wbr>install.md" + (f"?for={client}" if client else "")
@@ -910,14 +922,14 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             f"<div class='inst'>{ui.page_head('Guided setup', PURPOSE)}"
             f"<div class='cols'><div>{drop}{nav}</div><div>{right}</div></div></div>"
         )
-        # Signed in, so the page gets the member's navigation (tab bar, rail, account menu).
-        user = state.db.get_user(sub) or {}
-        admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
+        # Signed in, the page gets the member's navigation (tab bar, rail, account menu).
+        user = (state.db.get_user(sub) or {}) if sub else {}
+        admin = bool(sub and s.admin_group and s.admin_group in (user.get("groups") or []))
         resp = render(
             "Guided setup",
             body,
             site=s.server_name,
-            signed_in=True,
+            signed_in=sub is not None,
             csrf=_csrf(s, sid),
             admin=admin,
             sub=sub,

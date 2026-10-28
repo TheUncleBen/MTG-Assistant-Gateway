@@ -37,6 +37,7 @@ from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
+from .db import SESSION_END_NOTICE
 from .decks import (
     REVIEW_PAGE,
     DeckError,
@@ -49,6 +50,7 @@ from .decks import (
     tag_change_text,
 )
 from .formatting import DOC_CSS, doc_html
+from .membership import session_holder
 from .proposals_view import PROPOSALS_CSS
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
@@ -156,7 +158,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     def login_failed(exc: LoginError, login_href: str) -> Response:
         """The page for a website sign-in that could not be finished, by the error's kind."""
         body = smallpage.login_error(exc.kind, str(exc), assistant=False, login_href=login_href)
-        return small(smallpage.login_error_title(exc.kind), body, status=exc.status)
+        # the panel's Try again is the way in: no second Sign in in the top bar beside it
+        return small(
+            smallpage.login_error_title(exc.kind),
+            body,
+            status=exc.status,
+            signin_link=exc.kind != "unavailable",
+        )
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
         return csrf_form_ok(s, sid, data)
@@ -205,6 +213,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub, _sid = current(request)
             if sub:
                 return RedirectResponse(nxt, status_code=302)
+            sid = request.cookies.get(session_cookie)
+            if sid and state.db.session_end_reason(sid):
+                # This browser's sign-in ended for a reason it should hear first (an unused or
+                # longest time, the sign-in service, an admin): the page says why, with Sign in.
+                return RedirectResponse(
+                    f"/signed-out?next={quote(nxt, safe='/?=&')}",
+                    status_code=303,
+                    headers={"Cache-Control": "no-store"},
+                )
             if in_app() and q.get("inapp") != "1":
                 # The fresh cookie stays until a sign-in completes (start_session), so backing out
                 # of the browser and coming back here still asks for credentials again.
@@ -339,15 +356,26 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return resp
 
     @server.custom_route("/signed-out", methods=["GET"], include_in_schema=False)
-    async def signed_out(_request: Request) -> Response:
-        return small(
+    async def signed_out(request: Request) -> Response:
+        """Says why this browser was signed out, when its (ended) session's cookie tells: the
+        cookie outlives its session for that (SESSION_END_NOTICE) and goes here."""
+        sid = request.cookies.get(session_cookie)
+        reason = state.db.session_end_reason(sid) if sid else None
+        nxt = _safe_next(request.query_params.get("next", "/"))
+        resp = small(
             "Signed out",
             smallpage.panel(
                 "Signed out",
-                smallpage.p("You are signed out of this gateway."),
-                smallpage.button("Sign in again", "/login?next=/", primary=True),
+                smallpage.p(signed_out_text(reason, state)),
+                smallpage.button("Sign in", f"/login?next={quote(nxt, safe='/?=&')}", primary=True),
             ),
+            signin_link=False,  # the page's own Sign in is the one way on
         )
+        resp.headers["Cache-Control"] = "no-store"
+        if reason is not None:
+            # told once: the next Sign in goes to the identity provider as usual
+            resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
 
     @server.custom_route("/data-deleted", methods=["GET"], include_in_schema=False)
     async def data_deleted(_request: Request) -> Response:
@@ -1071,7 +1099,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # Only after a sign-in made during the leg does the return page open the app by itself:
             # any app can start an https leg too, and a browser still signed in at the provider
             # passes it straight through, so the page then waits for the member's tap.
-            code = state.app_signins.issue(identity.sub, challenge, nxt, fresh=fresh_in)  # type: ignore[attr-defined]
+            code = state.app_signins.issue(  # type: ignore[attr-defined]
+                identity.sub, challenge, nxt, fresh=fresh_in, grant=session.get("grant_holder")
+            )
             return RedirectResponse(
                 # the retry's Auth Tab on the app's own scheme (no Digital Asset Links check); else
                 # the gateway's address: the verified https Auth Tab, or the page with the button
@@ -1079,7 +1109,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 status_code=303,
                 headers=headers,
             )
-        return start_session(identity.sub, nxt, via=None)
+        return start_session(identity.sub, nxt, via=None, grant=session.get("grant_holder"))
 
     @server.custom_route(app_signin.RETURN_PATH, methods=["GET"], include_in_schema=False)
     async def login_app_return(request: Request) -> Response:
@@ -1102,12 +1132,18 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
-    def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
+    def start_session(
+        sub: str, nxt: str, *, via: str | None, grant: str | None, status: int = 302
+    ) -> Response:
+        """Sign this browser in as ``sub``, with the provider grant its sign-in left at ``grant``
+        as the session's own (membership.py)."""
         sid = secrets.token_urlsafe(32)
         ttl = min(
             state.live.seconds("browser_session_ttl"), state.db.session_max_age()
         )  # the Settings page's
         state.db.create_browser_session(sid, sub, ttl)
+        if grant and state.membership is not None:
+            state.membership.adopt(grant, session_holder(sid))
         state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
         resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
         if via is not None:
@@ -1115,7 +1151,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.set_cookie(
             session_cookie,
             sid,
-            max_age=ttl,
+            max_age=ttl + SESSION_END_NOTICE,  # kept past the session's end to be told why it ended
             path="/",
             httponly=True,
             secure=secure,
@@ -1146,7 +1182,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
             resp.headers["Cache-Control"] = "no-store"
             return resp
-        return start_session(pending.sub, _safe_next(pending.next_path), via="android_app", status=303)
+        return start_session(
+            pending.sub, _safe_next(pending.next_path), via="android_app", grant=pending.grant, status=303
+        )
 
     state.finish_browser_login = finish_browser_login  # type: ignore[attr-defined]
 
@@ -1227,6 +1265,41 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     # set after sync.opened, so the deck sync's check started above does not take that turn
     page_turn.set(True)
     return sub, sid
+
+
+def _length(seconds: int) -> str:
+    """A sign-in setting's length in words: "7 days", "12 hours", "30 minutes"."""
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if (seconds >= size and seconds % size == 0) or unit == "minute":
+            return plural(max(1, round(seconds / size)), unit)
+    raise AssertionError  # the loop ends on minutes
+
+
+def signed_out_text(reason: str | None, state: Any) -> str:
+    """What the signed-out page says, by why the session ended (db.SESSION_END_REASONS)."""
+    if reason == "unused":
+        unused = _length(state.live.seconds("browser_session_ttl"))
+        return f"Your sign-in on this device ended because it wasn't used for {unused}."
+    if reason == "longest":
+        longest = _length(state.db.session_max_age())
+        return (
+            f"Your sign-in on this device reached the longest time a sign-in lasts ({longest}), so it ended."
+        )
+    if reason == "idp":
+        return "The sign-in service asked you to sign in again on this device. Your AI apps stay connected."
+    if reason == "removed":
+        return (
+            "Your account is no longer in the group that may use this gateway, so you were signed out "
+            "on every device and your AI apps were disconnected. If that's a mistake, ask the "
+            "gateway's admin."
+        )
+    if reason == "elsewhere":
+        return "You signed out on all your devices from another device."
+    if reason == "admin":
+        return "An admin of this gateway signed you out on every device."
+    if reason == "disabled":
+        return "An admin turned off your account on this gateway. Ask them to turn it back on."
+    return "You are signed out of this gateway."
 
 
 def login_redirect(next_path: str) -> Response:

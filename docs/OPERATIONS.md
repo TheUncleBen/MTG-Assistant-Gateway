@@ -364,21 +364,41 @@ secret.
    that carries a browser session or a gateway token, it asks Authentik's
    userinfo endpoint for the person's current groups (the answer is cached
    for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default). So that pages
-   don't wait for Authentik while someone is using the gateway, a request
-   within 60 seconds of Authentik last letting the person in is answered at
-   once and Authentik is asked in the background; after 60 seconds the
-   request waits for the answer. The worst case is therefore 60 seconds
-   after Authentik last let them in; `MTG_MEMBERSHIP_CHECK_TTL=0` makes
-   every request wait for Authentik's answer instead. Someone taken out of the group loses every gateway token, every
-   browser session (web pages and Android app), the Authentik tokens the
-   gateway kept, and their stored Archidekt session, all at once on that
-   next request (see the note on **Disable** below); the audit log gets
-   a `membership_revoked` row with the reason `not_in_group`. A deactivated
-   or deleted user shows up only as a refused token, so they lose every
-   token and session but keep their stored Archidekt session (an admin
-   removes it with **Disable**, **Unlink Archidekt** or **Delete data**); the audit log gets a `membership_unverifiable` row
-   with the reason (`idp_refused_refresh`, `idp_refused_userinfo` and so
-   on). A new sign-in then fails at Authentik.
+   don't wait for Authentik, a request within 60 seconds of Authentik last
+   letting that sign-in in is answered at once and Authentik is asked in
+   the background, and a page being read (a GET outside `/admin`) is
+   answered at once whenever Authentik let that sign-in in before, so the
+   first page after a pause never waits. Writes, admin pages and assistant
+   requests past those 60 seconds wait for the answer, and so does every
+   request once a background check found Authentik unreachable. So a
+   removed member can write or use admin pages for at most 60 seconds, and
+   can read their own pages for the moment the background check takes after
+   a pause; `MTG_MEMBERSHIP_CHECK_TTL=0` makes every request wait for
+   Authentik's answer instead. Someone taken out of the group loses every
+   gateway token, every browser session (web pages and Android app), the
+   Authentik tokens the gateway kept, and their stored Archidekt session,
+   all at once on that next request (see the note on **Disable** below);
+   the audit log gets a `membership_revoked` row with the reason
+   `not_in_group`.
+
+   The gateway keeps Authentik's tokens per sign-in: each browser and the
+   Android app has its own, and the member's AI apps share the ones from
+   their latest AI-app sign-in. When Authentik refuses one sign-in's tokens
+   (a refresh token that ran out, a session ended at Authentik, or a
+   deactivated or deleted user, which Authentik answers the same way), only
+   that sign-in ends: that browser is signed out and its next page says the
+   sign-in service asked for a new sign-in. The member's other devices,
+   their AI apps' tokens and their Archidekt link are kept. An AI app is
+   refused (403, `sign_in_again`) only while none of the member's sign-ins
+   is honoured, and works again with the same tokens once they sign in on
+   the website; a deactivated user can't, so their kept tokens give nothing
+   and end at their own times. The audit log gets a `membership_unverifiable`
+   row with the reason (`idp_refused_refresh`, `idp_refused_userinfo` and so
+   on) and which sign-in (`website` or `assistant`). To cut a deactivated
+   user's AI apps off at once, press **Revoke tokens and sessions** or
+   **Disable** too. While a member is active, the gateway also renews each of
+   their other sign-ins' Authentik tokens in the background once a day, so a
+   device left for a few days still finds its sign-in honoured.
 
    Taking someone out of `MTG_ADMIN_GROUP` works the same way: the admin
    page is gone on their next request.
@@ -415,9 +435,8 @@ secret.
    Authentik answers but has no refresh token on file for someone (the
    `offline_access` scope mapping is missing, see
    [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#4-create-the-oauth2openid-provider)),
-   that person's gateway tokens and sessions are revoked once Authentik's
-   access token runs out, and they sign in again (audit row
-   `membership_unverifiable`).
+   that person's sign-ins end once Authentik's access token runs out, and
+   they sign in again (audit row `membership_unverifiable`).
 
    You can also revoke someone's tokens and sessions yourself, without
    touching Authentik: the admin page's **Revoke tokens and sessions** or

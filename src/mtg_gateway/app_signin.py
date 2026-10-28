@@ -93,6 +93,7 @@ class _Pending:
     next_path: str
     expires: float
     fresh: bool = False  # signed in during the leg: the return page opens the app by itself
+    grant: str | None = None  # where the sign-in's provider grant waits for the app's session
 
 
 class AppSignins:
@@ -109,7 +110,9 @@ class AppSignins:
     def _key(code: str) -> str:
         return hashlib.sha256(code.encode("ascii")).hexdigest()
 
-    def issue(self, sub: str, challenge: str, next_path: str, *, fresh: bool = False) -> str:
+    def issue(
+        self, sub: str, challenge: str, next_path: str, *, fresh: bool = False, grant: str | None = None
+    ) -> str:
         code = secrets.token_urlsafe(32)
         now = self._clock()
         with self._lock:
@@ -117,7 +120,7 @@ class AppSignins:
                 del self._codes[k]
             while len(self._codes) >= MAX_PENDING:  # oldest first; dicts keep insertion order
                 del self._codes[next(iter(self._codes))]
-            self._codes[self._key(code)] = _Pending(sub, challenge, next_path, now + self._ttl, fresh)
+            self._codes[self._key(code)] = _Pending(sub, challenge, next_path, now + self._ttl, fresh, grant)
         return code
 
     def fresh(self, code: str) -> bool:

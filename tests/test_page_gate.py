@@ -24,9 +24,8 @@ async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch)
 async def test_anonymous_browser_is_sent_to_sign_in(harness: Harness) -> None:
     r = await harness.http.get("/", headers=NAVIGATE)
     assert r.status_code == 302 and r.headers["location"] == "/login?next=/"
-    r = await harness.http.get("/install?for=claude", headers=NAVIGATE)
-    assert r.status_code == 302 and r.headers["location"] == "/login?next=/install?for=claude"
-    for path in ("/account", "/proposals", "/scan", "/skill"):
+    # Guide and Install read signed out (C2): tests/test_signouts.py
+    for path in ("/account", "/proposals", "/scan", "/skill/mtg-gateway.zip"):
         r = await harness.http.get(path, headers=NAVIGATE)
         assert r.status_code == 302 and r.headers["location"].startswith("/login?next="), path
 
@@ -85,7 +84,7 @@ async def test_session_without_the_group_on_record_is_locked_out(harness: Harnes
         harness.db.upsert_user(
             "user-1", email="alice@example.test", name="Alice", preferred_username="alice", groups=[]
         )
-        for path in ("/", "/account", "/skill", "/scan"):
+        for path in ("/", "/account", "/skill/mtg-gateway.zip", "/scan"):
             r = await b.http.get(path, headers=NAVIGATE)
             assert r.status_code == 302 and r.headers["location"].startswith("/login?next="), path
         assert (await b.http.get("/scan/api/sessions")).status_code == 401

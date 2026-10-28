@@ -36,7 +36,9 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
     def login_error(exc: LoginError, *, assistant: bool = True) -> Response:
         # An assistant (Claude, ChatGPT, Codex) was connecting: the way forward is back in the app.
         body = smallpage.login_error(exc.kind, str(exc), assistant=assistant)
-        return small(smallpage.login_error_title(exc.kind), body, exc.status)
+        return small(
+            smallpage.login_error_title(exc.kind), body, exc.status, signin_link=exc.kind != "unavailable"
+        )
 
     @server.custom_route(CONSENT_PATH, methods=["GET"], include_in_schema=False)
     async def consent(request: Request) -> Response:

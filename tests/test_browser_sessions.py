@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.config import ConfigError, load_settings
-from mtg_gateway.db import BROWSER_SESSION_MAX_AGE
+from mtg_gateway.db import BROWSER_SESSION_MAX_AGE, SESSION_END_NOTICE
 
 from .conftest import FakeIdP, Harness, make_settings, running
 from .test_backup_and_config import _write_secrets
@@ -27,9 +27,12 @@ SUB = "user-1"
 
 
 def _max_age(set_cookie: str) -> int:
+    """The session time the cookie carries: the browser keeps the cookie SESSION_END_NOTICE longer
+    than its session, so a browser coming back after the end is told why (C2)."""
     m = re.search(r"mtg_session=[^;]+;.*?Max-Age=(\d+)", set_cookie, re.I)
     assert m, set_cookie
-    return int(m.group(1))
+    assert int(m.group(1)) > SESSION_END_NOTICE, set_cookie
+    return int(m.group(1)) - SESSION_END_NOTICE
 
 
 def _session_cookies(r) -> list[str]:  # noqa: ANN001

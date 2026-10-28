@@ -152,8 +152,10 @@ browser session or a gateway token, the gateway asks the identity
 provider's userinfo endpoint for the person's current groups (the answer is
 cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default; `0` asks every
 time). Someone taken
-out of the group, or deactivated or deleted at the provider, is cut off on
-their next request. Separately, every assistant has to sign in again after
+out of the group is cut off everywhere on their next request; a sign-in
+the provider no longer honours (an expired refresh token, a deactivated
+account) ends alone, and the member's AI apps keep their tokens but are
+refused until they sign in on the website again. Separately, every assistant has to sign in again after
 `MTG_REAUTH_INTERVAL` (a week by default).
 
 ## How deck edits work
@@ -200,15 +202,21 @@ For the exact devices and plans tested, see
 - **Membership is live.** Before any request with a browser session or a
   gateway token is served, and at every code exchange and refresh, the
   gateway asks the identity provider's userinfo endpoint for the person's
-  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old; for up to 60
-  seconds after the provider last let the person in, a page is answered at
-  once and the provider is asked in the background. Removing
-  someone from `MTG_REQUIRED_GROUP`, or deactivating or deleting them at the
-  provider, takes effect within those 60 seconds: every gateway token,
-  browser session and stored provider token is revoked, and a removal from
-  the group revokes their Archidekt link too (a deactivated or deleted
-  account, which the provider reports only as a refused token, keeps the
-  stored session until an admin presses Disable or Unlink, or it expires).
+  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. The provider's
+  tokens are kept per sign-in (`idp_grants.holder`: each browser session,
+  and the member's AI apps), so a session is checked with its own and a
+  bearer token with any of the member's. For up to 60 seconds after the
+  provider last let a sign-in in, a request is answered at once and the
+  provider is asked in the background; a page being read (GET outside
+  `/admin`) is answered that way whenever the provider let it in before.
+  Removing someone from `MTG_REQUIRED_GROUP` takes effect within those 60
+  seconds for writes and admin pages, and after one page read: every
+  gateway token, browser session and stored provider token is revoked, and
+  their Archidekt link too. A sign-in whose provider tokens are refused (a
+  deactivated or deleted account looks the same as a refresh token that ran
+  out) ends alone; the member's AI apps keep their tokens, refused with 403
+  `sign_in_again` while no sign-in of theirs is honoured, and the Archidekt
+  link stays until an admin presses Disable or Unlink, or it expires.
   With Authentik, an optional hourly clean-up (`src/mtg_gateway/idp_sweep.py`,
   an API token that may only view the gateway's groups and its own tokens) asks who is in the two groups now and
   deletes the stored session of every linked member who is in neither or is

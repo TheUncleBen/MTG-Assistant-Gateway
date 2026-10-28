@@ -149,10 +149,8 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/app", methods=["GET"], include_in_schema=False)
     async def app(request: Request) -> Response:
-        """The Android app's page is the setup hub's Android section (setup_hub.py)."""
-        sub, _sid = signed_in(request)
-        if not sub:
-            return to_login("/app")
+        """The Android app's page is the setup hub's Android section (setup_hub.py), which reads
+        signed out too; the download itself needs a sign-in."""
         return RedirectResponse("/install?for=android", status_code=302)
 
     @server.custom_route(LATEST_PATH, methods=["GET"], include_in_schema=False)

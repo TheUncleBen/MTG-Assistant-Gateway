@@ -399,7 +399,11 @@ async def test_revoke_drops_sessions_and_tokens(gw: Harness) -> None:
         assert r.status_code == 302 and r.headers["location"].startswith("/login")
         assert (await whoami(gw, tokens["access_token"])).status_code == 401
         assert gw.db.get_user("user-2")["disabled_at"] is None  # revoke is not disable
-        # A fresh sign-in works: the account is intact.
+        # The way back in says why first (C2), and a fresh sign-in works: the account is intact.
+        r = await member.http.get("/login", params={"next": "/account"})
+        assert r.status_code == 303 and r.headers["location"].startswith("/signed-out")
+        page = await member.http.get(r.headers["location"])
+        assert "An admin of this gateway signed you out on every device." in page.text
         gw.idp.user = {**gw.idp.user, "sub": "user-2", "groups": ["mtg-users"]}
         await member.login("/account")
     finally:
@@ -480,7 +484,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
 
     db = Database(path)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 16
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 17
         user = db.get_user("u1")
         assert user["disabled_at"] is None and user["last_seen_at"] == 200 and user["groups"] == ["g"]
         assert db.list_snapshots("u1")[0]["backup_url"] is None

@@ -23,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from . import modes, tool_labels
-from .pages import _csrf, browser_session, login_redirect
+from .pages import _csrf, browser_session
 from .theme import icon, render
 
 if TYPE_CHECKING:
@@ -751,7 +751,13 @@ def guide_body(
         "<li><strong>Unlink Archidekt</strong> removes the stored Archidekt session at once.</li>"
         "<li><strong>Delete my data</strong> removes everything this gateway keeps for your account "
         "(proposals, snapshots, reports, scan sessions, your Archidekt link, connected apps and your "
-        "sign-in); your decks on Archidekt are not touched.</li></ul>"
+        "sign-in); your decks on Archidekt are not touched.</li>"
+        "<li>When the gateway signs you out by itself, the page you land on says why: the device wasn't "
+        "used for a while, the sign-in reached the longest time one lasts, the sign-in service asked "
+        "you to sign in again, you signed out on all devices elsewhere, an admin signed you out, or "
+        "your account is no longer in the group that may use the gateway. Only that last one "
+        "disconnects your AI apps. If the sign-in service stops accepting every one of your "
+        "sign-ins, your AI apps wait, still connected, until you sign in on the website again.</li></ul>"
     )
 
     # -- Reference --------------------------------------------------------------------------------
@@ -1128,7 +1134,8 @@ def guide_body(
         "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "
         "this gateway is set otherwise) unless you sign in "
         "again.</li>"
-        "<li>Nothing here is public or indexed. Links to Archidekt and Scryfall carry no referrer.</li>"
+        "<li>Nothing of yours is public, and nothing here is indexed. Only this guide and the setup "
+        "steps can be read without signing in. Links to Archidekt and Scryfall carry no referrer.</li>"
         "<li><strong>Delete my data</strong> on the Account page removes everything above, your sign-in "
         "included; your decks on Archidekt are not touched.</li></ul>"
     )
@@ -1216,11 +1223,12 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/guide", methods=["GET"], include_in_schema=False)
     async def guide(request: Request) -> Response:
+        """Readable signed out too (owner decision, 0.7.46): the guide describes this gateway and
+        holds nothing of any member's, so someone invited can read what it is before signing in.
+        Signed in, it carries the member's navigation."""
         sub, sid = browser_session(state, request)
-        if sub is None:
-            return login_redirect("/guide")
-        user = state.db.get_user(sub) or {}
-        admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
+        user = (state.db.get_user(sub) or {}) if sub else {}
+        admin = bool(sub and s.admin_group and s.admin_group in (user.get("groups") or []))
         return render(
             "Guide",
             guide_body(
@@ -1234,7 +1242,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 watchlists=bool(s.watchlists_enabled),
             ),
             site=s.server_name,
-            signed_in=True,
+            signed_in=sub is not None,
             csrf=_csrf(s, sid),
             admin=admin,
             sub=sub,

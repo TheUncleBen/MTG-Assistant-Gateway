@@ -737,6 +737,12 @@ def add_stream_route(state: AppState, server: Any) -> None:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
                 return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again later.")
+            if outcome is Membership.SIGN_IN:
+                # none of the member's sign-ins is honoured: the key is kept, and the phone tries
+                # again later (any refusal but its three stop codes) until they sign in again
+                return _refuse(
+                    403, "sign_in_again", "Sign in to the gateway again to keep getting push notifications."
+                )
         if n.full():  # the app tries again later, like any refusal but these three
             return _refuse(503, "busy", "The gateway has too many phones connected. Try again later.")
         if not n.claim(key):
@@ -766,7 +772,8 @@ def add_stream_route(state: AppState, server: Any) -> None:
             if topic_owner(state.db, key) != (sub, True):
                 return False
             if state.membership is not None:
-                return await state.membership.check(sub) is not Membership.REVOKED
+                outcome = await state.membership.check(sub)
+                return outcome is Membership.ALLOWED or outcome is Membership.UNAVAILABLE
             return True
 
         return _Stream(

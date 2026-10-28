@@ -110,10 +110,13 @@ async def test_no_section_reads_like_research_notes(harness: Harness) -> None:
 
 
 async def test_old_addresses_keep_working(harness: Harness) -> None:
-    # signed out: the same sign-in as before
-    for path, back in (("/skill", "/skill"), ("/app", "/app"), ("/skill/mtg-gateway.zip", "/skill")):
+    # signed out: the downloads ask for the same sign-in as before; the pages read signed out (C2)
+    for path, back in (("/skill/mtg-gateway.zip", "/skill"), ("/app/mtg-assistant-gateway.apk", "/app")):
         r = await harness.http.get(path)
         assert r.status_code == 302 and r.headers["location"] == f"/login?next={back}", path
+    for path, section in (("/skill", "skill"), ("/app", "android")):
+        r = await harness.http.get(path)
+        assert r.status_code == 302 and r.headers["location"] == f"/install?for={section}", path
     assert (await harness.http.get("/install.md")).status_code == 200
     assert (await harness.http.get("/plugin/mtg-gateway.zip")).status_code == 200
     b = Browser(harness)

@@ -77,7 +77,7 @@ from .collection import add_collection
 from .companion import add_companion_routes
 from .compress import PageGzip
 from .config import LiveSettings, Settings, with_stored
-from .db import Database
+from .db import SESSION_END_NOTICE, Database
 from .decks import (
     FULL_SCOPE,
     DeckError,
@@ -90,7 +90,7 @@ from .guide import add_guide_routes
 from .home import add_home_routes
 from .idp_sweep import AuthentikSweep
 from .latepage import LatePageMiddleware, LateStore, add_late_routes
-from .membership import Membership, MembershipChecker
+from .membership import SIGN_IN_AGAIN, Membership, MembershipChecker, session_holder
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
 from .notify import Notifier, add_stream_route, replace_old_topics
@@ -600,24 +600,25 @@ class MembershipMiddleware:
         self.app = app
         self.state = state
 
-    def _subjects(self, scope: Scope) -> set[str]:
-        """Everyone this request could act as: the bearer token's person and the session
-        cookie's person. Both are checked, so a removed member can't ride on someone else's
-        token while the route reads their own cookie (or the other way round)."""
+    def _subjects(self, scope: Scope) -> list[tuple[str, str | None]]:
+        """Everyone this request could act as, each with the sign-in it uses: the bearer token's
+        person (any sign-in of theirs answers, None) and the session cookie's person (that
+        session's own). Both are checked, so a removed member can't ride on someone else's token
+        while the route reads their own cookie (or the other way round)."""
         headers = Headers(scope=scope)
         db = self.state.db
-        subs: set[str] = set()
+        out: list[tuple[str, str | None]] = []
         auth = headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             row = db.get_token(auth[7:].strip(), "access")
             if row is not None and row["expires_at"] >= int(time.time()):
-                subs.add(row["sub"])
+                out.append((row["sub"], None))
         sid = Request(scope).cookies.get(cookie_name(SESSION_COOKIE, self.state.settings))
         if sid:
             sub = db.get_browser_session(sid)
             if sub:
-                subs.add(sub)
-        return subs
+                out.append((sub, session_holder(sid)))
+        return out
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         checker = self.state.membership
@@ -625,7 +626,21 @@ class MembershipMiddleware:
         if checker is None or scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
             await self.app(scope, receive, send)
             return
-        outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
+        # A page being read never waits for the provider when it let this sign-in in before
+        # (membership.py); a write, an admin page and an assistant's request do.
+        reading = scope.get("method") in ("GET", "HEAD") and not path.startswith("/admin")
+        outcomes: list[Membership] = []
+        for sub, holder in self._subjects(scope):
+            outcome = await checker.check(sub, holder, page=reading and holder is not None)
+            outcomes.append(outcome)
+            if outcome is Membership.SIGN_IN and holder is None:
+                # A bearer token while none of the member's sign-ins is honoured: refused, and
+                # kept (membership.py). A session that signs in again ended in the check itself,
+                # so its route answers as for anyone signed out.
+                message = SIGN_IN_AGAIN.format(url=self.state.settings.public_url)
+                resp = JSONResponse({"ok": False, "error": "sign_in_again", "message": message}, 403)
+                await resp(scope, receive, send)
+                return
         if Membership.UNAVAILABLE in outcomes:
             request = Request(scope)
             message = smallpage.IDP_UNREACHABLE
@@ -685,7 +700,7 @@ class SessionRenewalMiddleware:
         holder.set_cookie(
             name,
             sid or "",
-            max_age=left,
+            max_age=left + SESSION_END_NOTICE,  # kept past the end to be told why (pages.signed_out)
             path="/",
             httponly=True,
             secure=settings.public_url.startswith("https://"),

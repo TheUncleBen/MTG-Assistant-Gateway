@@ -42,9 +42,12 @@ provider's userinfo endpoint for the person's current groups, using the
 provider's own access token from their sign-in (renewed with the refresh
 token when it runs out). The answer is cached for
 `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default, 0 to ask on every
-request). So a removal from the group, or deactivating or deleting the
-account at the provider, takes effect on the person's next request: their
-gateway tokens, browser sessions and stored provider tokens are revoked.
+request). So a removal from the group takes effect on the person's next
+request: their gateway tokens, browser sessions and stored provider tokens
+are revoked. Deactivating or deleting the account at the provider shows only
+as refused tokens, which look the same as a refresh token that ran out: each
+of the person's sign-ins ends when it is next used, and their AI apps keep
+their gateway tokens but are refused until they sign in again.
 A removal from the group revokes their Archidekt link too, at that next
 request (an admin's **Disable** deletes it at once); a deactivated or
 deleted account (which the provider reports only as a refused token) keeps

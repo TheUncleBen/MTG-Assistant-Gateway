@@ -25,6 +25,21 @@ async def whoami(h: Harness, token: str):
     return await h.mcp(token, "tools/call", {"name": "whoami", "arguments": {}}, rid=3)
 
 
+def grants(h: Harness, sub: str = SUB) -> list[dict]:
+    """The member's provider grants that stand for a sign-in in use (sessions', AI apps')."""
+    return h.db.idp_grants_for(sub)
+
+
+def live_tokens(h: Harness, sub: str = SUB) -> int:
+    with h.db.tx() as c:
+        return c.execute("SELECT COUNT(*) FROM tokens WHERE sub = ? AND revoked = 0", (sub,)).fetchone()[0]
+
+
+def asked_to_sign_in_again(r) -> bool:
+    """An AI app's request while none of the member's sign-ins is honoured: refused, tokens kept."""
+    return r.status_code == 403 and r.json()["error"] == "sign_in_again"
+
+
 async def test_group_removal_cuts_off_mcp_api_pages_and_refresh_at_once(tmp_path: Path, idp: FakeIdP) -> None:
     async with running(Harness(live(tmp_path), idp)) as h:
         b = Browser(h)
@@ -75,11 +90,15 @@ async def test_admin_demotion_closes_the_admin_pages_on_the_next_request(
 async def test_deactivated_at_the_provider_is_cut_off_when_its_tokens_are_refused(
     tmp_path: Path, idp: FakeIdP
 ) -> None:
+    """The provider refusing its tokens can't be told from a refresh token that ran out (C2): the
+    AI app is refused, its tokens are kept but give nothing until the member signs in again."""
     async with running(Harness(live(tmp_path), idp)) as h:
         token = await mcp_token(h)
         idp.disabled.add(SUB)
-        assert (await whoami(h, token)).status_code == 401
-        assert h.db.get_idp_grant(SUB) is None
+        assert asked_to_sign_in_again(await whoami(h, token))
+        assert grants(h) == []
+        assert live_tokens(h) > 0
+        assert asked_to_sign_in_again(await whoami(h, token))  # still refused: nothing to ask with
 
 
 async def test_expired_provider_access_token_is_renewed_with_the_refresh_token(
@@ -119,8 +138,9 @@ async def test_provider_down_refuses_the_request_without_revoking(tmp_path: Path
 
 
 async def test_sessions_from_before_the_check_must_sign_in_again(tmp_path: Path, idp: FakeIdP) -> None:
-    """A grant from an older release (no provider tokens on file) can't be verified: it is
-    revoked, the Archidekt link is kept, and a fresh sign-in works."""
+    """With no provider tokens on file, nothing can be checked: the browser signs in again, the
+    AI app waits with its tokens and the Archidekt link kept, and a fresh website sign-in brings
+    both back."""
     async with running(Harness(live(tmp_path), idp)) as h:
         b = Browser(h)
         await b.login()
@@ -128,11 +148,17 @@ async def test_sessions_from_before_the_check_must_sign_in_again(tmp_path: Path,
         token = await mcp_token(h)
         with h.db.tx() as c:
             c.execute("DELETE FROM idp_grants")
-        assert (await whoami(h, token)).status_code == 401
+        assert asked_to_sign_in_again(await whoami(h, token))
         assert (await b.http.get("/account/details")).status_code == 302
         assert h.db.get_link(SUB) is not None
+        # the way back in says why first
+        r = await b.http.get("/login", params={"next": "/account"})
+        assert r.status_code == 303 and r.headers["location"].startswith("/signed-out")
+        page = await b.http.get(r.headers["location"])
+        assert "The sign-in service asked you to sign in again" in page.text
         await b.login()
         assert (await b.http.get("/account/details")).status_code == 200
+        assert (await whoami(h, token)).status_code == 200  # the same token, no reconnect
         await b.aclose()
 
 
@@ -143,11 +169,11 @@ async def test_without_offline_access_the_member_signs_in_again_when_the_provide
     settings = live(tmp_path, oidc_scopes="openid profile email")
     async with running(Harness(settings, idp)) as h:
         token = await mcp_token(h)
-        grant = h.db.get_idp_grant(SUB)
+        (grant,) = grants(h)
         assert grant["refresh_enc"] == ""
         assert (await whoami(h, token)).status_code == 200
         idp.access_tokens.clear()  # the provider access token runs out; there is no refresh token
-        assert (await whoami(h, token)).status_code == 401
+        assert asked_to_sign_in_again(await whoami(h, token))
         with h.db.tx() as c:
             assert c.execute("SELECT 1 FROM audit_log WHERE event = 'membership_unverifiable'").fetchone()
 
@@ -168,7 +194,7 @@ async def test_checks_are_cached_for_the_configured_seconds(tmp_path: Path, idp:
 async def test_stored_provider_tokens_are_encrypted(tmp_path: Path, idp: FakeIdP) -> None:
     async with running(Harness(live(tmp_path), idp)) as h:
         await mcp_token(h)
-        grant = h.db.get_idp_grant(SUB)
+        (grant,) = grants(h)
         raw = (tmp_path / "data").glob("*")
         assert "idp-refresh-" not in grant["refresh_enc"] and "idp-access-" not in grant["access_enc"]
         for f in raw:
@@ -264,7 +290,8 @@ async def test_no_groups_claim_anywhere_fails_closed(tmp_path: Path, idp: FakeId
             code_verifier=verifier,
             redirect_uri="https://client.test/cb",
         )
-        assert r.status_code == 400 and r.json()["error"] == "invalid_grant", r.text
+        # refused, but not as a dead grant: nothing is revoked on an answer that decides nothing
+        assert r.status_code == 400 and r.json()["error"] == "invalid_request", r.text
         with h.db.tx() as c:
             assert c.execute("SELECT 1 FROM audit_log WHERE event = 'membership_unverifiable'").fetchone()
 
@@ -336,7 +363,7 @@ async def test_any_idp_user_without_a_groups_claim_stays_signed_in(tmp_path: Pat
             assert (await whoami(h, token)).status_code == 200
         idp.disabled.add(SUB)
         idp.access_tokens.clear()
-        assert (await whoami(h, token)).status_code == 401
+        assert asked_to_sign_in_again(await whoami(h, token))
 
 
 async def test_huge_access_token_is_checked_in_a_post_body(tmp_path: Path, idp: FakeIdP) -> None:
@@ -414,7 +441,7 @@ async def test_a_dropped_connection_to_userinfo_is_tried_once_more(tmp_path: Pat
         drops[:] = [1, 1]  # still down on the retry: refused, nothing revoked
         page = await b.http.get("/account/details")
         assert page.status_code == 503 and not drops
-        assert h.db.get_idp_grant(SUB) is not None
+        assert grants(h)
         await b.aclose()
 
 
@@ -493,14 +520,16 @@ async def test_a_background_renewal_never_brings_back_a_removed_grant(
         before = _refreshes(idp)
         await asyncio.sleep(2.5)
         assert _refreshes(idp) == before + 1
-        assert h.db.get_idp_grant(SUB) is None
+        assert grants(h) == []
 
 
 # -- the check off a page's critical path (0.7.46) -----------------------------------------------
 def _age_last_check(h: Harness, seconds: float) -> None:
-    """Make the last check that let SUB in ``seconds`` older than it is."""
+    """Make the last check that let each of SUB's sign-ins in ``seconds`` older than it is."""
     checker = h.app.state.gateway.membership
-    checker._checked[SUB] -= seconds
+    for holder, owner in checker._owners.items():
+        if owner == SUB:
+            checker._checked[holder] -= seconds
 
 
 async def _background_checks(h: Harness) -> None:
@@ -512,7 +541,8 @@ async def test_a_member_checked_recently_is_not_kept_waiting_for_the_provider(
     tmp_path: Path, idp: FakeIdP
 ) -> None:
     """Within GRACE seconds of the provider last letting the member in, a request is answered at
-    once and the provider is asked in the background."""
+    once and the provider is asked in the background. Past it, a page being read still is (C2:
+    the first page after a pause never waits); a write waits for the answer."""
     from mtg_gateway.membership import GRACE
 
     async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
@@ -528,10 +558,16 @@ async def test_a_member_checked_recently_is_not_kept_waiting_for_the_provider(
         assert loop.time() - t0 < 0.5  # not the provider's second
         await _background_checks(h)
         assert idp.userinfo_calls == calls + 1  # asked once, in the background
-        # Past the grace, the request waits for the provider's answer.
+        # Past the grace, a page being read is still answered at once ...
         _age_last_check(h, GRACE + 1)
         t0 = loop.time()
         assert (await b.http.get("/account/details")).status_code == 200
+        assert loop.time() - t0 < 0.5
+        await _background_checks(h)
+        # ... and a write waits for the provider's answer.
+        _age_last_check(h, GRACE + 1)
+        t0 = loop.time()
+        await b.http.post("/theme", data={"theme": "dark"})
         assert loop.time() - t0 >= 1.0
         await b.aclose()
 
@@ -552,14 +588,18 @@ async def test_a_removal_takes_effect_within_the_grace(tmp_path: Path, idp: Fake
         assert page.status_code == 302 and page.headers["location"].startswith("/login")
         await b.aclose()
 
-        # Past the grace, the very first request is refused: it waited for the provider.
+        # Past the grace, the very first write is refused: it waited for the provider.
         b = Browser(h)
         idp.set_groups(SUB, ["mtg-users"])
         await b.login()
+        csrf = await b.csrf("/logout")
         _age_last_check(h, GRACE + 1)
         idp.set_groups(SUB, ["someone-else"])
-        page = await b.http.get("/account/details")
-        assert page.status_code == 302 and page.headers["location"].startswith("/login")
+        await b.http.post("/theme", data={"csrf": csrf, "theme": "dark"})
+        assert not h.app.state.gateway.membership._background  # it waited, nothing runs after
+        with h.db.tx() as c:
+            assert c.execute("SELECT COUNT(*) FROM browser_sessions WHERE sub = ?", (SUB,)).fetchone()[0] == 0
+        assert "mtg_theme" not in b.http.cookies  # the write was refused
         await b.aclose()
 
 
