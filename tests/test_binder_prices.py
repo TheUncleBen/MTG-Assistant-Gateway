@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 import re
 
@@ -483,7 +484,7 @@ async def test_a_watch_by_name_follows_the_cheapest_printing(stack: Stack, monke
 async def test_pin_card_from_a_card_menu_pins_it_on_archidekt(stack: Stack) -> None:
     b = await linked(stack)
     try:
-        csrf = await b.csrf("/lists/pins")
+        csrf = await b.csrf("/collection/wants")  # Binder › Wants (C8); its forms post to /lists/pins
         r = await b.http.post(
             "/lists/pins",
             data={"csrf": csrf, "action": "pin", "card": "Sol Ring"},
@@ -493,7 +494,8 @@ async def test_pin_card_from_a_card_menu_pins_it_on_archidekt(stack: Stack) -> N
         assert r.json()["ok"] is True and "Pinned" in r.json()["notice"]
         pins = stack.ark.account.pins.get("alice") or []
         assert [p["card"]["oracleCard"]["name"] for p in pins] == ["Sol Ring"]
-        page = (await b.http.get("/lists/pins")).text
+        # the purpose line under Binder's switch is escaped text now (ui.binder_head)
+        page = html.unescape((await b.http.get("/collection/wants")).text)
         assert "Pin one from any card's menu" in page or "Pin card" in page
     finally:
         await b.aclose()
