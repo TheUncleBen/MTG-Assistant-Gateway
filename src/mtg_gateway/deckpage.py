@@ -601,11 +601,8 @@ def delete_box_html(
     did = esc(deck.id)
     title = deck_title(deck)
     n = sum(c.quantity for c in deck.cards if deck.in_deck(c))
-    undo = (
-        "A snapshot of the deck is kept under History"
-        + (", and a private copy is made in your backup folder on Archidekt first" if backups else "")
-        + ". Archidekt itself has no undo for a deleted deck."
-    )
+    # no backup copy on Archidekt for a delete (decks.DELETE_KEEPS_NO_COPY), whatever ``backups`` is
+    undo = "A snapshot of the deck is kept under History. Archidekt itself has no undo for a deleted deck."
     body = (
         (ui.notice(error, "error", role="alert") if error else "")
         + f"<form id='delf' method='post' action='/decks/{did}/delete' class='deleteform'>"

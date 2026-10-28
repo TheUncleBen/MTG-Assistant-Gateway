@@ -226,8 +226,7 @@ SETTINGS_OK_MESSAGES = {
 LIST_OK_MESSAGES = {
     "saved": "Deck renamed on Archidekt.",
     "moved": "Deck moved on Archidekt.",
-    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History; when backups are on, a copy "
-    "is in your backup folder.",
+    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History.",
     "folder_created": "Folder created on Archidekt.",
     "folder_renamed": "Folder renamed on Archidekt.",
     "folder_moved": "Folder moved on Archidekt.",

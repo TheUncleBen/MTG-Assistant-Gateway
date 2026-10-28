@@ -208,8 +208,11 @@ BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and descripti
 # making another when the deck is unchanged since that copy, or the copy is under this many
 # seconds old. Every edit still takes its own snapshot.
 BACKUP_SHARE_SECONDS = 15 * 60
-# A delete pressed this soon after its box opened uses the deck and backup folder the box read
-# (Decks.prepare_delete): the backup copy itself is Archidekt's own copy of the deck as it is then.
+# A delete pressed this soon after its box opened uses the deck the box read (Decks.prepare_delete).
+# A delete (of a deck, or of a folder with its decks) keeps the gateway's snapshot of each deck and
+# makes no backup copy on Archidekt: a copy made for a delete was a new deck left behind, and a delete
+# of that copy made another (assistant tool review, 2026-10-28).
+DELETE_KEEPS_NO_COPY = True
 DELETE_PREP_SECONDS = 60
 DELETE_PREP_REMEMBERED = 256
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
@@ -6830,6 +6833,9 @@ class DeckService:
             return {}
         if row.get("archidekt_backup") is False:
             return {"archidekt_backup": "skipped"}  # the member's own choice at save time
+        if self.is_backup_copy(sub, deck):
+            # a backup copy is never backed up itself: the gateway's snapshot is kept, no copy of a copy
+            return {"archidekt_backup": "skipped_backup_copy"}
         shared = (batch.shared_snapshots.get() or {}).get(str(deck.id))
         if shared is not None and shared.get("backup"):
             # The selection's first change on this deck made the copy; the later ones share it
@@ -6952,6 +6958,14 @@ class DeckService:
             if str(c["backup_deck_id"]) == str(backup_id):
                 return counted > keep
         return False
+
+    def is_backup_copy(self, sub: str, deck: Deck) -> bool:
+        """Whether ``deck`` is one of the backup copies the gateway made (recorded on a snapshot or
+        as made), or sits in the member's backup folder."""
+        did = str(deck.id)
+        if did in self.db.backup_copies(sub) or self.db.backup_made(did) is not None:
+            return True
+        return deck.parent_folder is not None and deck.parent_folder in self.db.backup_folder_ids(sub)
 
     async def _backup_copy(
         self, sub: str, deck: Deck, snapshot_id: str, *, reason: str, folder: dict[str, str] | None = None
@@ -8757,21 +8771,6 @@ class DeckService:
         self._delete_prep[key] = entry
         while len(self._delete_prep) > DELETE_PREP_REMEMBERED:
             self._delete_prep.pop(next(iter(self._delete_prep)))
-        if self.live.get("archidekt_backups"):
-            name = self.backup_folder
-
-            async def find() -> None:
-                try:
-                    entry["folder"] = await self._call(
-                        sub, lambda token, *_: self.client.find_folder(token, name=name)
-                    )
-                    entry["folder_name"] = name
-                except DeckError:
-                    pass  # the delete looks it up again
-
-            task = asyncio.create_task(find(), context=contextvars.Context())
-            self._prep_tasks.add(task)
-            task.add_done_callback(self._prep_tasks.discard)
         return deck
 
     def _prepared(self, sub: str, deck_id: str) -> dict[str, Any] | None:
@@ -8799,20 +8798,15 @@ class DeckService:
         proposal_id: str | None = None,
     ) -> dict[str, Any]:
         """Delete one of the member's own decks after they typed its exact name. A snapshot is kept
-        in the gateway and, when backups are on, a copy in the backup folder on Archidekt; the
-        deletion is verified by reading the deck back (it must be gone). ``progress``: a
-        delete-deck action's apply, which records the snapshot and the copy in it as every apply
-        does, so an apply that stops before the deck is deleted deletes the unused
-        copy or queues its delete instead of leaving it unrecorded. ``proposal_id``: that action's
+        in the gateway; no backup copy is made on Archidekt (DELETE_KEEPS_NO_COPY); the deletion is
+        verified by reading the deck back (it must be gone). ``progress``: a delete-deck action's
+        apply, which records the snapshot in it as every apply does. ``proposal_id``: that action's
         proposal, which the snapshot names so the snapshot list says what it was taken for."""
         self._writes_switch()
         # the member's own press right after their delete box (never an assistant's proposal,
         # which has no box): the deck and the backup folder the box read moments ago
         prepared = self._prepared(sub, _clean_deck_id(deck_id)) if progress is None else None
         deck = prepared["deck"] if prepared else await self.get_own_deck(sub, deck_id)
-        folder = None
-        if prepared and prepared.get("folder") and prepared.get("folder_name") == self.backup_folder:
-            folder = prepared["folder"]
         # a deck with no name shows as "Unnamed deck", so that is what the member types
         expected = clean_text(deck.name) or "Unnamed deck"
         if clean_text(typed_name).casefold() != expected.casefold():
@@ -8822,23 +8816,6 @@ class DeckService:
         snapshot_id = self._hand_snapshot(sub, deck, proposal_id)
         if progress is not None:
             progress["snapshot_id"] = snapshot_id
-        backup: dict[str, Any] = {}
-        if self.live.get("archidekt_backups"):
-            try:
-                backup = await self._backup_copy(
-                    sub, deck, snapshot_id, reason="before it was deleted", folder=folder
-                )
-                if progress is not None:
-                    progress.update(backup)
-            except DeckError as exc:
-                self._audit(
-                    "backup_failed", sub=sub, detail={"deck_id": deck.id, "error": exc.kind, "hand": "delete"}
-                )
-                raise DeckError(
-                    "backup_failed",
-                    f"The backup copy of '{deck.name}' could not be made on Archidekt ({exc}). The deck was "
-                    "not deleted.",
-                ) from exc
         await self._call(sub, self.client.delete_deck, deck.id)
         gone = False
         try:
@@ -8848,14 +8825,14 @@ class DeckService:
         self._audit(
             "deck_deleted",
             sub=sub,
-            detail={"deck_id": deck.id, "snapshot_id": snapshot_id, "verified": gone, **backup},
+            detail={"deck_id": deck.id, "snapshot_id": snapshot_id, "verified": gone},
         )
         if not gone:
             raise DeckError(
                 "verify_mismatch",
                 f"Archidekt accepted the request but '{deck.name}' can still be read. Check it on Archidekt.",
             )
-        return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id, **backup}
+        return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id}
 
     async def set_package(
         self, sub: str, deck_id: str, plan: dict[str, Any], *, progress: dict[str, Any] | None = None
@@ -9329,11 +9306,11 @@ class DeckService:
         """Delete one of the member's folders with everything inside it, after they typed its name
         (case ignored) in a box that showed the counts in ``shown`` ({decks, packages, folders}).
         Everything inside is listed again first and must still match those counts. Every deck
-        gets a snapshot, and a backup copy when backups are on, before anything is deleted; the
-        first failure stops the delete. Then one Archidekt call deletes the folder with all it
-        holds (it can't be stopped or partly undone), and the folder and its decks are read back
-        to check they are gone. Card packages get no snapshot or copy. ``progress`` (the job's)
-        gets ``step``, ``done`` and ``total`` as it goes."""
+        gets a snapshot in the gateway (no backup copy on Archidekt: DELETE_KEEPS_NO_COPY)
+        before anything is deleted; the first failure stops the delete. Then one Archidekt call
+        deletes the folder with all it holds (it can't be stopped or partly undone), and the
+        folder and its decks are read back to check they are gone. Card packages get no snapshot.
+        ``progress`` (the job's) gets ``step``, ``done`` and ``total`` as it goes."""
         self._writes_switch()
         state = progress if progress is not None else {}
         state.update(step="Reading what is inside the folder", done=0, total=0)
@@ -9367,28 +9344,14 @@ class DeckService:
         folder = inside["folder"]
         snapshots: list[dict[str, Any]] = []
         state.update(total=len(inside["decks"]))
-        backups = bool(self.live.get("archidekt_backups"))
         for n, item in enumerate(inside["decks"], 1):
-            state["step"] = (
-                f"Snapshot and backup copy {n} of {len(inside['decks'])}"
-                if backups
-                else f"Snapshot {n} of {len(inside['decks'])}"
-            )
+            state["step"] = f"Snapshot {n} of {len(inside['decks'])}"
             try:
                 deck = await self._waiting_out_limits(
                     state, lambda deck_id=item["id"]: self.get_own_deck(sub, deck_id)
                 )
                 snapshot_id = self._hand_snapshot(sub, deck)
                 made: dict[str, Any] = {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id}
-                if backups:
-                    made.update(
-                        await self._waiting_out_limits(
-                            state,
-                            lambda deck=deck, snapshot_id=snapshot_id: self._backup_copy(
-                                sub, deck, snapshot_id, reason="before its folder was deleted"
-                            ),
-                        )
-                    )
             except DeckError as exc:
                 self._audit(
                     "folder_delete_stopped",
@@ -9402,7 +9365,7 @@ class DeckService:
                 )
                 which = f"The deck “{item['name']}”" if item["name"] else "An unnamed deck"
                 why = str(exc).rstrip(".") or "Archidekt did not answer"
-                kept = "; the snapshots and backup copies already made are kept." if snapshots else "."
+                kept = "; the snapshots already made are kept." if snapshots else "."
                 raise DeckError(
                     "backup_failed", f"{which} could not be saved first ({why}). Nothing was deleted{kept}"
                 ) from exc
@@ -9419,7 +9382,7 @@ class DeckService:
             raise DeckError(
                 "changed",
                 "What is inside the folder changed while the decks were being saved. Nothing was "
-                "deleted; the snapshots and backup copies already made are kept. Check the new counts "
+                "deleted; the snapshots already made are kept. Check the new counts "
                 "and confirm again.",
                 counts={k: len(again[k]) for k in ("decks", "packages", "folders")},
             )
@@ -11183,7 +11146,7 @@ def applied_text(
             return "Your vote on the comment is taken back on Archidekt."
         return "Your vote on the comment is saved on Archidekt."
     if action == "delete_deck":
-        # delete_deck keeps a snapshot first, and a backup copy when backups are on
+        # delete_deck keeps a snapshot first (a delete applied before 0.7.46 made a backup copy too)
         if r.get("backup_deck_id") and not backup_gone:
             return (
                 "The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "

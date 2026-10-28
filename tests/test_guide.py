@@ -169,20 +169,21 @@ def test_the_backup_texts_follow_the_backup_settings() -> None:
     ticked = _page(live=_Live(archidekt_backup_box_default=True))
     assert "ticked by default on this gateway: untick it to skip that extra copy for that one save." in ticked
     assert "unticked by default" not in ticked and copy_step in ticked
-    assert "keeps both the snapshot and the backup copy first." in ticked
+    # a delete keeps the snapshot only, backups on or off (assistant tool review, 2026-10-28)
+    assert "keeps a snapshot (no backup copy on Archidekt) first." in ticked
     unticked = _page(live=_Live(archidekt_backup_box_default=False))
     assert (
         "unticked by default on this gateway: tick it to also keep that extra copy for that one save."
         in unticked
     )
-    assert copy_step in unticked and "keeps both the snapshot and the backup copy first." in unticked
+    assert copy_step in unticked and "keeps a snapshot (no backup copy on Archidekt) first." in unticked
     off = _page(
         archidekt_backups=False, live=_Live(archidekt_backups=False, archidekt_backup_box_default=True)
     )
     assert "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered." in off
     assert "by default on this gateway" not in off and copy_step not in off and "backup copy first" not in off
     assert "checks it still fits the deck, saves a snapshot, then reads the deck back to confirm." in off
-    assert "keeps the snapshot first." in off
+    assert "keeps a snapshot (no backup copy on Archidekt) first." in off
 
 
 # -- 2026-10-21 overhaul (Ben's answers of 18:11Z): plain asks, the one closed tool-names fold ----

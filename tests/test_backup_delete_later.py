@@ -619,16 +619,15 @@ async def test_an_unexpected_error_is_retried_on_the_backoff_then_given_up(stack
     _kept(h, pid, snap_id, copy, ark, "internal")
 
 
-# -- the backup copy made before a deck delete is recorded like any apply's ------------------------
+# -- a deck delete makes no backup copy on Archidekt ---------------------------------------------
 @pytest.mark.usefixtures("quick_waits")
-async def test_a_deck_delete_stopped_on_a_long_429_records_its_copy_and_never_leaves_one_behind(
+async def test_a_deck_delete_stopped_on_a_long_429_makes_no_copy_and_leaves_none_behind(
     stack: Stack,
 ) -> None:
-    """The backup copy made before a delete-deck action is kept in the
-    apply's progress, as every other apply's is. A stop on Archidekt's waits before the deck was
-    deleted is still back to pending with the approved sentence, and the copy's delete is queued.
-    A second approval makes one new copy and deletes the deck; the first copy is deleted later,
-    never left behind unrecorded."""
+    """A delete-deck action keeps only the gateway's snapshot: no backup copy is made on
+    Archidekt. A stop on Archidekt's waits before the deck was deleted is back to pending with
+    the approved sentence and nothing queued; a second approval deletes the deck, and no new
+    deck is left behind on Archidekt."""
     from .test_account_actions import _browser_apply
 
     h, ark = stack.h, stack.ark
@@ -647,38 +646,27 @@ async def test_a_deck_delete_stopped_on_a_long_429_records_its_copy_and_never_le
         return orig(req)
 
     ark.transport.handler = handler
+    before = set(ark.decks)
     await _browser_apply(h, pid)
     row = await _finished(h, pid)
     result = row["result"]
-    assert row["state"] == "pending" and 42 in ark.decks and seen["copies"] == 1, row
-    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {LATER}", result
-    first, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
-    assert result["backup_url"] == f"https://archidekt.com/decks/{first}"
-    assert result["backup_note"] == decks_mod.BACKUP_LATER and first in ark.decks
-    [job] = h.db.queued_backup_deletes()
-    assert job["backup_deck_id"] == str(first) and job["snapshot_id"] == snap_id and job["proposal_id"] == pid
-    # the second approval: one new copy, the deck deleted, the first copy still queued
+    assert row["state"] == "pending" and 42 in ark.decks and seen["copies"] == 0, row
+    detail = result["detail"]
+    assert detail.startswith(ark_mod.PATIENCE_SPENT) and "backup copy" not in detail, result
+    assert "backup_deck_id" not in result and h.db.queued_backup_deletes() == []
     seen["busy"] = False
     svc.client.pacer._retry_until = 0
     await _browser_apply(h, pid)
     row = await _finished(h, pid)
-    assert row["state"] == "applied" and 42 not in ark.decks and seen["copies"] == 2, row
-    second = int(row["result"]["backup_deck_id"])
-    assert second != first and second in ark.decks
-    assert [j["backup_deck_id"] for j in h.db.queued_backup_deletes()] == [str(first)]
-    _due_now(h)
-    assert await svc.delete_one_queued_backup() == {"deleted": snap_id}
-    assert first not in ark.decks and second in ark.decks and h.db.queued_backup_deletes() == []
+    assert row["state"] == "applied" and 42 not in ark.decks and seen["copies"] == 0, row
+    assert row["result"]["snapshot_id"] and "backup_deck_id" not in row["result"]
+    assert set(ark.decks) == before - {42} and h.db.queued_backup_deletes() == []
 
 
 @pytest.mark.usefixtures("quick_waits")
-async def test_a_deck_delete_whose_copy_post_timed_out_stays_pending_and_deletes_nothing(
-    stack: Stack,
-) -> None:
-    """A backup POST that timed out may still have made the copy, but no id came back,
-    so there is nothing to record or delete. As for every apply (the existing backup_failed path),
-    the deck is not deleted and the proposal is pending again; such a copy, if it was made, stays
-    in the backup folder, and the gateway deletes nothing it cannot name."""
+async def test_a_deck_delete_never_waits_on_the_copy_route(stack: Stack) -> None:
+    """The copy route is never asked during a deck delete, so a copy POST that would time out
+    cannot hold the delete up or leave an unnamed copy behind."""
     from .test_account_actions import _browser_apply
 
     h, ark = stack.h, stack.ark
@@ -689,7 +677,7 @@ async def test_a_deck_delete_whose_copy_post_timed_out_stays_pending_and_deletes
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path.endswith("/decks/copy/"):
-            orig(req)  # the copy is made, but the answer never arrives
+            orig(req)
             raise httpx.ReadTimeout("timed out", request=req)
         return orig(req)
 
@@ -697,9 +685,8 @@ async def test_a_deck_delete_whose_copy_post_timed_out_stays_pending_and_deletes
     before = set(ark.decks)
     await _browser_apply(h, pid)
     row = await _finished(h, pid)
-    assert row["state"] == "pending" and row["result"]["error"] == "backup_failed", row
-    assert 42 in ark.decks and ark.deleted == [] and h.db.queued_backup_deletes() == []
-    assert len(set(ark.decks) - before) == 1  # the unnamed copy stays in the backup folder
+    assert row["state"] == "applied", row
+    assert set(ark.decks) == before - {42} and h.db.queued_backup_deletes() == []
 
 
 # -- the copy's own clock -----------------------------------------------------------------------

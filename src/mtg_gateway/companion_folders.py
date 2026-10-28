@@ -3,8 +3,8 @@ delete, and a deck's rename, move, delete and export. Each is the member's own p
 page (a session cookie and the page's X-CSRF-Token), with the same checks as the pages that did
 these before; none of them is an assistant's tool.
 
-Deleting a folder runs as a job, since it saves every deck inside first (a snapshot and, with
-backups on, a backup copy) at the gateway's Archidekt pace: the box starts it and reads its
+Deleting a folder runs as a job, since it saves every deck inside first (a gateway snapshot; no
+backup copy on Archidekt) at the gateway's Archidekt pace: the box starts it and reads its
 progress until it ends."""
 
 from __future__ import annotations
