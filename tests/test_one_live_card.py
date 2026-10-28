@@ -375,13 +375,15 @@ async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_ver
     new_code = again["_meta"][APPROVAL_META_KEY]
     assert new_code != old_code
     # the older card's read: no code; the newest card's read: its code; a read naming no card
-    # (a card from before card numbers) is answered as before
+    # (a card from before card numbers) is an older card too once this app has drawn a numbered
+    # one: no code, and the newest card's number, so it steps aside
     older = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": 1})
     assert structured(older)["card_seq"] == 2 and APPROVAL_META_KEY not in (older.get("_meta") or {})
     newest = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": 2})
     assert newest["_meta"][APPROVAL_META_KEY] == new_code
-    plain = await call(h, token, "get_proposal", {"proposal_id": pid})
-    assert plain["_meta"][APPROVAL_META_KEY] == new_code
+    for unnumbered in ({"proposal_id": pid}, {"proposal_id": pid, "card_seq": 0}):
+        plain = await call(h, token, "get_proposal", unnumbered)
+        assert structured(plain)["card_seq"] == 2 and APPROVAL_META_KEY not in (plain.get("_meta") or {})
     before = len(ark.patches)
     stale = structured(
         await call(
@@ -394,6 +396,31 @@ async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_ver
     done = structured(
         await call(
             h, token, "confirm_proposal", {"proposal_id": pid, "approval": new_code, "decision": "approve"}
+        )
+    )
+    assert done["ok"] and done["state"] == "applied", done
+
+
+async def test_a_card_from_before_card_numbers_still_gets_its_code_when_no_card_has_one(
+    stack: Stack,
+) -> None:
+    """A proposal made before 0.7.46 has no card numbers: its card (which names none) is the only
+    card, so its read still carries the code."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    res = await call(
+        h, token, "propose_deck_changes", {"deck_id": "42", "changes": [{"action": "add", "name": "Opt"}]}
+    )
+    pid = structured(res)["proposal_id"]
+    with h.db.tx() as c:
+        c.execute("UPDATE proposals SET card_seqs = NULL WHERE id = ?", (pid,))
+    plain = await call(h, token, "get_proposal", {"proposal_id": pid})
+    assert "card_seq" not in structured(plain)
+    code = plain["_meta"][APPROVAL_META_KEY]
+    done = structured(
+        await call(
+            h, token, "confirm_proposal", {"proposal_id": pid, "approval": code, "decision": "approve"}
         )
     )
     assert done["ok"] and done["state"] == "applied", done

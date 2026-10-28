@@ -13,7 +13,7 @@ from .conftest import Stack
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
 from .test_round4_data import _app_token
-from .track_a_helpers import card_code, press_approve
+from .track_a_helpers import card_code, card_read, press_approve
 
 SUB = "user-1"
 FOREST = [{"action": "set_quantity", "card_name": "Forest", "quantity": 14}]
@@ -263,7 +263,7 @@ async def test_the_card_draws_buttons_only_in_the_app_that_made_the_note(stack: 
     claude, _ = await _app_token(h, "Claude")
     big = [{"action": "add", "card_name": f"Card {i}"} for i in range(21)]  # waits even in auto
     p = structured(await call(h, chatgpt, "propose_deck_changes", {"deck_id": "42", "changes": big}))
-    mine = await call(h, chatgpt, "get_proposal", {"proposal_id": p["proposal_id"]})
+    mine = await card_read(h, chatgpt, p["proposal_id"])
     assert (mine.get("_meta") or {}).get(APPROVAL_META_KEY) and not structured(mine).get("card_other_app")
     theirs = await call(h, claude, "get_proposal", {"proposal_id": p["proposal_id"]})
     assert not (theirs.get("_meta") or {}).get(APPROVAL_META_KEY)

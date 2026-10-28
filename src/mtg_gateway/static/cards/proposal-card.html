@@ -414,6 +414,8 @@ button.danger:disabled{color:var(--red)}
   }
   var sc0 = {}; // the proposal as this card was first drawn (for its version)
   // The card's own read names the card's number, so an older card is handed no approval code.
+  // A card drawn before card numbers names none, and the gateway counts it as 0: older than any
+  // card that has a number.
   function readArgs(pid, rows) {
     var args = { proposal_id: pid };
     if (rows) args.rows_limit = rows;
@@ -515,7 +517,7 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError) || !sc.state) { retryLater(); return; }
         failures = 0;
         if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
-        if (mySeq && Number(sc.card_seq || 0) > mySeq && (sc.state === "pending" || sc.state === "applying")) {
+        if (Number(sc.card_seq || 0) > mySeq && (sc.state === "pending" || sc.state === "applying")) {
           stepAside(sc);
           return;
         }

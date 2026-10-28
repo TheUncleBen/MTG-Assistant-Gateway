@@ -132,8 +132,11 @@ async def test_approval_code_travels_only_in_meta(stack: Stack) -> None:
         assert f"\n{key}: " in text, key
     assert "assistant_may_apply: false" in text and "\nChanges:\n  1 -> 2 Sol Ring" in text, text
     assert "approval" not in res["structuredContent"]
-    # get_proposal shows the card again with the same code while the proposal is pending.
-    again = await call(h, token, "get_proposal", {"proposal_id": structured(res)["proposal_id"]})
+    # get_proposal shows the card again with the same code while the proposal is pending (the
+    # card's read names its own number).
+    again = await call(
+        h, token, "get_proposal", {"proposal_id": sc["proposal_id"], "card_seq": sc["card_seq"]}
+    )
     assert again["_meta"][APPROVAL_META_KEY] == code
     # An error result carries no code (there is nothing to approve).
     bad = await call(h, token, "get_proposal", {"proposal_id": "nope"})
@@ -427,10 +430,11 @@ async def test_a_read_only_token_of_the_same_app_gets_no_approval_codes(stack: S
         return r.json()["access_token"]
 
     full = await token_for("mtg")
-    pids = [structured(await _propose(h, full, card))["proposal_id"] for card in ("Sol Ring", "Opt")]
+    drawn = [structured(await _propose(h, full, card)) for card in ("Sol Ring", "Opt")]
+    pids = [p["proposal_id"] for p in drawn]
     reader = await token_for("mtg.read")
     for token, codes in ((full, True), (reader, False)):
-        got = await call(h, token, "get_proposal", {"proposal_id": pids[0]})
+        got = await call(h, token, "get_proposal", {"proposal_id": pids[0], "card_seq": drawn[0]["card_seq"]})
         assert structured(got)["ok"] and (approve.APPROVAL_META_KEY in got.get("_meta", {})) is codes
         board = await call(h, token, "show_waiting_changes", {"deck_id": "42"})
         assert structured(board)["own_count"] == 2

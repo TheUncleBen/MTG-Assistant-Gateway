@@ -990,7 +990,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 {"ok": True, **_closed_at(state.decks.describe(_sub(), proposal_id))},
                 read=True,
                 rows_limit=rows_limit,
-                reader_seq=card_seq or None,
+                # a card that names no number was drawn before card numbers: it is an older card
+                # once this app has drawn a numbered one (0 is below every card's number)
+                reader_seq=card_seq or 0,
             )
         except DeckError as exc:
             return _proposal(_tool_error(exc), read=True)
