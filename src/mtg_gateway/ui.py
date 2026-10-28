@@ -220,6 +220,47 @@ def client_brand(client_id: str | None, info: Mapping[str, object] | None = None
     return brands.pop() if len(brands) == 1 and None not in brands else None
 
 
+_BRAND_NAMES = {"claude": "Claude’s", "openai": "OpenAI’s"}
+
+
+def _host_of(url: object) -> str:
+    try:
+        return (urlsplit(url).hostname or "").casefold() if isinstance(url, str) else ""
+    except ValueError:
+        return ""
+
+
+def client_brand_note(client_id: str | None) -> str:
+    """Why an app's chip shows its logo or the neutral icon, for the admin's member panel: the
+    hosts it sends members back to (never a path or a query), read as ``client_brand`` reads them."""
+    if not client_id:
+        return "No logo: no app is recorded."
+    brand = client_brand(client_id)
+    if client_id.startswith("https://"):
+        where = _host_of(client_id) or "no host"
+        return f"{_BRAND_NAMES.get(brand or '', 'No')} logo: its address is on {esc(where)}."
+    try:
+        info = _client_info(client_id)
+    except Exception:  # a note never breaks a page
+        info = None
+    if not isinstance(info, Mapping):
+        return "No logo: no registration is kept for it."
+    uris = info.get("redirect_uris")
+    hosts = (
+        sorted({_host_of(u) or "an address that is not a web address" for u in uris or []})
+        if isinstance(uris, list)
+        else []
+    )
+    if not hosts:
+        return "No logo: its registration names no address to send members back to."
+    listed = " and ".join(hosts) if len(hosts) < 3 else ", ".join(hosts[:-1]) + " and " + hosts[-1]
+    if brand:
+        return f"{_BRAND_NAMES[brand]} logo: it sends members back only to {esc(listed)}."
+    if any(not str(u).startswith("https://") for u in uris):
+        return f"No logo: it sends members back to {esc(listed)}, and not every address is https."
+    return f"No logo: it sends members back to {esc(listed)}, not only to one company’s addresses."
+
+
 def app_logo(brand: str | None) -> str:
     """The logo markup for a verified app (``client_brand``): its own mark (``<img>`` with an empty
     alt, so the name beside it is read once), or the neutral "connected app" icon otherwise."""

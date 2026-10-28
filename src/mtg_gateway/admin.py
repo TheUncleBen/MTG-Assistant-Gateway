@@ -1528,7 +1528,8 @@ def _user_panel(
     apps = (
         "".join(
             f"<div>{ui.app_chip(c['name'], unnamed=True, client_id=c['client_id'])} "
-            f"<code>{html.escape(c['client_id'])}</code></div>"
+            f"<code>{html.escape(c['client_id'])}</code>"
+            f"<div class='muted small'>{ui.client_brand_note(c['client_id'])}</div></div>"
             for c in u["clients"]
         )
         or "none"

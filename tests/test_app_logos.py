@@ -327,7 +327,10 @@ def test_the_openai_mark_follows_the_sites_theme_and_every_mark_reads_at_344_px(
     for x in logos:
         assert x["alt"] == "" and x["loaded"], x
         if x["shown"]:
-            assert 16 <= x["w"] <= 18 and 16 <= x["h"] <= 18, x
+            # OpenAI's picture is twice the slot (its clear space overhangs it, see
+            # test_every_mark_is_drawn_at_the_chips_size); the marks themselves are 16 px
+            side = 32 if x["src"].startswith("openai") else 16
+            assert side <= x["w"] <= side + 2 and side <= x["h"] <= side + 2, x
     # the names beside the marks keep the label contrast
     names = [c for t, c in texts if t.startswith("ui-app")]
     assert names and min(names) >= 4.5, texts
@@ -358,3 +361,48 @@ def test_proposed_by_takes_the_mark_from_the_stored_client_id_not_the_label(
         p = {**base, "created_by": f"app: N ({cid})", "created_by_client": cid}
         html = pages._proposal_body(p, "t", "x")
         assert ("/static/logos/claude.svg" in html) is logo, cid
+
+
+@pytest.mark.parametrize("want", ["light", "dark"])
+def test_every_mark_is_drawn_at_the_chips_size(chip_server: ChipServer, want: str) -> None:
+    """T-201: OpenAI's press-kit file keeps its clear space inside the picture (the blossom fills
+    the middle half of it), so drawn in a 16 px box the mark was an 8 px grey dot beside "ChatGPT".
+    Every mark, Claude's and OpenAI's, now covers about 16 px on screen, measured on the pixels."""
+    import io
+
+    from PIL import Image
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = chip_server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 344, "height": 882}, color_scheme=want)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": chip_server.base}])
+        page = ctx.new_page()
+        page.goto(f"{chip_server.base}/app-chips", wait_until="networkidle")
+        boxes = page.evaluate(
+            """() => [...document.querySelectorAll('.ui-app')].filter(c => c.querySelector('img.logo'))
+                .map(c => { const n = c.querySelector('.nm').getBoundingClientRect();
+                  return { name: c.querySelector('.nm').textContent, x: n.left, y: n.top, h: n.height }; })"""
+        )
+        sizes = {}
+        for b in boxes:
+            # the 30 px left of the name hold the mark and the gap; nothing else is drawn there
+            clip = {"x": b["x"] - 30, "y": b["y"] + b["h"] / 2 - 15, "width": 30, "height": 30}
+            img = Image.open(io.BytesIO(page.screenshot(clip=clip))).convert("RGB")
+            bg = img.getpixel((0, 0))
+            inked = [
+                (x, y)
+                for x in range(img.width)
+                for y in range(img.height)
+                if sum(abs(a - c) for a, c in zip(img.getpixel((x, y)), bg, strict=True)) > 60
+            ]
+            xs, ys = [x for x, _ in inked], [y for _, y in inked]
+            sizes[b["name"]] = (max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+        browser.close()
+    assert set(sizes) == {"Claude", "Claude Code", "ChatGPT", "Codex"}, sizes
+    for name, (w, h) in sizes.items():
+        assert 13 <= w <= 18 and 13 <= h <= 18, (name, w, h)
