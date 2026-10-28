@@ -44,7 +44,7 @@ async def test_signed_out_and_data_deleted_share_the_panel(gw: Harness) -> None:
     out = await gw.http.get("/signed-out", headers=NAV)
     body = panel(out.text, "Signed out")
     assert "<p>You are signed out of this gateway.</p>" in body
-    assert has_button(body, "Sign in again", "/login?next=/", primary=True) and orange(body) == 1
+    assert has_button(body, "Sign in", "/login?next=/", primary=True) and orange(body) == 1
     assert "<style>" in out.text and ".sio{" in out.text and "/static/pages.js" in out.text
 
     gone = await gw.http.get("/data-deleted", headers=NAV)
@@ -378,7 +378,7 @@ async def test_404_500_and_503_pages_are_panels_with_a_way_forward(
             # 503: the sign-in service cannot confirm the member; Try again loads the same page
             checker = h.app.state.gateway.membership
 
-            async def unavailable(_sub: str) -> str:
+            async def unavailable(_sub: str, *_holder: object, **_page: object) -> str:
                 return Membership.UNAVAILABLE
 
             assert checker is not None

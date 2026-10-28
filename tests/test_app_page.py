@@ -37,10 +37,12 @@ async def harness(tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch)
 
 
 async def test_app_pages_need_a_browser_login(harness: Harness) -> None:
-    for path in ("/app", "/app/mtg-assistant-gateway.apk"):
-        r = await harness.http.get(path)
-        assert r.status_code == 302
-        assert r.headers["location"] == "/login?next=/app"
+    r = await harness.http.get("/app/mtg-assistant-gateway.apk")
+    assert r.status_code == 302
+    assert r.headers["location"] == "/login?next=/app"
+    # the app's page is the setup hub's Android section, which reads signed out (C2)
+    r = await harness.http.get("/app")
+    assert r.status_code == 302 and r.headers["location"] == "/install?for=android"
 
 
 async def test_signed_in_user_gets_page_and_apk(harness: Harness) -> None:

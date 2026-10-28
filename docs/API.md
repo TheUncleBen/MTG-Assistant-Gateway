@@ -30,7 +30,10 @@ A missing or invalid credential answers `401` with `{"ok": false, "error": "unau
 "login": "/login"}`. Someone no longer in `MTG_REQUIRED_GROUP` gets the same `401`: before a request is served the gateway
 asks the identity provider whether the caller is still a member (cached for `MTG_MEMBERSHIP_CHECK_TTL`
 seconds) and revokes a removed member's tokens and browser sessions. When the identity provider can't be
-reached, the request gets `503` with `"error": "idp_unavailable"` instead, and nothing is revoked.
+reached, the request gets `503` with `"error": "idp_unavailable"` instead, and nothing is revoked. When
+the identity provider no longer honours any of the member's sign-ins (its refresh token ran out, say), a
+bearer request gets `403` with `"error": "sign_in_again"`: the token is kept and works again once the
+member signs in on the website.
 
 Responses are JSON objects with `"ok": true` on success. Failures carry `ok: false`, an `error`
 code and a human `message`:

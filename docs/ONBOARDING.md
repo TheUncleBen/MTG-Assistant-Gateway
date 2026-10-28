@@ -289,6 +289,11 @@ Good to know:
   service's tokens for your account (encrypted) and asks it, every few
   seconds while you use the gateway, whether you're still in the group. If
   the owner removes you, you're signed out everywhere on your next click.
+  If the sign-in service only asks for a new sign-in on one device (its
+  sign-in there ran out, say), only that device signs in again; your AI
+  apps stay connected. Whenever you're signed out, the page says why.
+- The guide and the setup steps (`/guide`, `/install`) can be read without
+  signing in, so you can look before you join. Nothing of yours is on them.
 - Your profile picture (the one the sign-in service shows: Gravatar, or a
   picture you uploaded there) is copied to the owner's server for the
   account icon. The server fetches it, so your browser never contacts

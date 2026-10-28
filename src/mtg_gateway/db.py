@@ -148,6 +148,26 @@ UNUSED_CLIENT_TTL = 7 * 86400
 # used (renew_browser_session); the Settings page's "Longest website sign-in" changes it
 # (Database.session_max_age), and "Website sign-in when unused" is how long it lasts unused.
 BROWSER_SESSION_MAX_AGE = 30 * 86400
+# Why a browser session ended, as the page its browser sees next says (pages.py, /signed-out):
+# it went unused too long, it reached the longest sign-in time, the identity provider no longer
+# honours its sign-in, the member is no longer in the group, they signed out on all devices from
+# another one, an admin signed them out, or an admin turned their account off.
+SESSION_END_REASONS = ("unused", "longest", "idp", "removed", "elsewhere", "admin", "disabled")
+# How long that is remembered, and how long a session cookie outlives its session so the browser
+# still brings it back to be told (the cookie is worth nothing once its session has ended).
+SESSION_END_NOTICE = 30 * 86400
+# The provider grant of a browser session is held by "s:" and the session's id hash (membership.py).
+SESSION_HOLDER = "s:"
+# A sign-in's grant waits under "login:" until its session is made; one never handed over goes then.
+LOGIN_GRANT_TTL = 86400
+
+
+def _expiry_reason(created: int, expires: int, longest: int) -> str:
+    """Why a session whose end time has passed ended: it ran into the longest sign-in time (its end
+    was capped there, give or take a minute), or else it went unused."""
+    return "longest" if expires >= created + longest - 60 else "unused"
+
+
 # Retention and size caps applied by purge_expired. Registration and /authorize are open to
 # anyone, so rows nobody has signed in for are capped as well as aged out.
 AUDIT_RETENTION_SECONDS = 365 * 86400
@@ -766,6 +786,48 @@ def _step_16(conn: sqlite3.Connection) -> None:
     _add_column(conn, "proposals", "card_seqs", "TEXT")
 
 
+def _step_17(conn: sqlite3.Connection) -> None:
+    """0.7.46, sign-outs: the identity provider's tokens are kept per sign-in, not one set per
+    member. ``holder`` names whose they are: ``s:`` and a browser session's id hash (a browser or
+    the Android app), ``ai:`` and the member (their latest AI-app sign-in), ``login:`` and a login
+    id's hash (a sign-in not yet handed to its session). A grant the provider stops honouring then
+    ends only the sign-in that holds it. ``checked_at`` is when the provider last let that holder
+    in, so the first page after a restart is not kept waiting either. The one grant per member kept
+    until now becomes their ``ai:`` grant, which their sessions from before this step use (they
+    have none of their own) until they end.
+
+    ``session_ends`` records why a browser session ended (``reason``), by its id hash only, so the
+    page a returning browser sees can say why it was signed out (pages.py, /signed-out)."""
+    if "holder" not in _columns(conn, "idp_grants"):
+        conn.execute("ALTER TABLE idp_grants RENAME TO idp_grants_old")
+        conn.execute(
+            """CREATE TABLE idp_grants (
+                holder TEXT PRIMARY KEY,
+                sub TEXT NOT NULL,
+                refresh_enc TEXT NOT NULL DEFAULT '',
+                access_enc TEXT NOT NULL DEFAULT '',
+                access_expires_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                checked_at INTEGER
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO idp_grants (holder, sub, refresh_enc, access_enc, access_expires_at, updated_at)
+               SELECT 'ai:' || sub, sub, refresh_enc, access_enc, access_expires_at, updated_at
+               FROM idp_grants_old"""
+        )
+        conn.execute("DROP TABLE idp_grants_old")
+    conn.execute("CREATE INDEX IF NOT EXISTS idp_grants_sub ON idp_grants(sub)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS session_ends (
+            id_hash TEXT PRIMARY KEY,
+            reason TEXT NOT NULL,
+            ended_at INTEGER NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS session_ends_at ON session_ends(ended_at)")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -784,6 +846,7 @@ MIGRATIONS = [
     _step_14,
     _step_15,
     _step_16,
+    _step_17,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -1239,11 +1302,12 @@ class Database:
                 )
             return cur.rowcount
 
-    def revoke_all_for_user(self, sub: str) -> dict[str, int]:
-        """Revoke every token of ``sub`` and delete their browser sessions and pending codes."""
+    def revoke_all_for_user(self, sub: str, reason: str = "admin") -> dict[str, int]:
+        """Revoke every token of ``sub`` and delete their browser sessions and pending codes.
+        ``reason`` is what a browser signed out this way is told (SESSION_END_REASONS)."""
         with self.tx() as c:
             tokens = c.execute("UPDATE tokens SET revoked = 1 WHERE sub = ? AND revoked = 0", (sub,)).rowcount
-            sessions = c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+            sessions = self._end_sessions(c, "sub = ?", (sub,), reason)
             # The provider tokens go too: with no sessions left there is nothing to re-check, and a
             # fresh sign-in stores new ones.
             c.execute("DELETE FROM idp_grants WHERE sub = ?", (sub,))
@@ -1560,7 +1624,29 @@ class Database:
         n += self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
         n += self._delete_batched("auth_codes", "expires_at < ?", (now,))
         n += self._delete_batched("login_sessions", "expires_at < ?", (now,))
+        with self.tx() as c:
+            # each expired session leaves a note of why it ended for its browser's next visit
+            longest = self.session_max_age()
+            for key, created, expires in c.execute(
+                "SELECT id_hash, created_at, expires_at FROM browser_sessions WHERE expires_at < ?", (now,)
+            ).fetchall():
+                c.execute(
+                    "INSERT OR IGNORE INTO session_ends (id_hash, reason, ended_at) VALUES (?, ?, ?)",
+                    (key, _expiry_reason(int(created), int(expires), longest), int(expires)),
+                )
         n += self._delete_batched("browser_sessions", "expires_at < ?", (now,))
+        n += self._delete_batched("session_ends", "ended_at < ?", (now - SESSION_END_NOTICE,))
+        with self.tx() as c:
+            # provider grants of sessions that ended (expired, or ended by a path that kept no
+            # grant in step), and sign-ins never handed to a session
+            n += c.execute(
+                """DELETE FROM idp_grants WHERE holder LIKE 's:%'
+                   AND substr(holder, 3) NOT IN (SELECT id_hash FROM browser_sessions)"""
+            ).rowcount
+            n += c.execute(
+                "DELETE FROM idp_grants WHERE holder LIKE 'login:%' AND updated_at < ?",
+                (now - LOGIN_GRANT_TTL,),
+            ).rowcount
         with self.tx() as c:
             n += self._purge_cimd_clients(c, now)
         # Registration is open, so every client that registered and never finished a login,
@@ -1946,12 +2032,57 @@ class Database:
         return until - now if done else None
 
     def delete_browser_session(self, session_id: str) -> None:
+        """The member signed out on this device: the session and its provider grant go, with no
+        record of why (the browser's cookie goes in the same answer)."""
+        key = hash_token(session_id)
         with self.tx() as c:
-            c.execute("DELETE FROM browser_sessions WHERE id_hash = ?", (hash_token(session_id),))
+            c.execute("DELETE FROM browser_sessions WHERE id_hash = ?", (key,))
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (SESSION_HOLDER + key,))
 
-    def delete_browser_sessions_for(self, sub: str) -> int:
+    def delete_browser_sessions_for(self, sub: str, reason: str = "elsewhere") -> int:
+        """End every browser session of ``sub``; each browser is told ``reason`` when it comes back."""
         with self.tx() as c:
-            return c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+            return self._end_sessions(c, "sub = ?", (sub,), reason)
+
+    def end_browser_session(self, id_hash: str, reason: str) -> bool:
+        """End one browser session by its id hash (the identity provider no longer honours its
+        sign-in); the browser is told ``reason`` when it comes back. False: it had ended already."""
+        with self.tx() as c:
+            return self._end_sessions(c, "id_hash = ?", (id_hash,), reason) > 0
+
+    @staticmethod
+    def _end_sessions(c: sqlite3.Connection, where: str, args: tuple[Any, ...], reason: str) -> int:
+        """Delete the browser sessions ``where`` matches, with their provider grants, and record
+        why they ended (session_ends) for the page their browser sees next."""
+        assert reason in SESSION_END_REASONS, reason
+        now = int(time.time())
+        rows = [r[0] for r in c.execute(f"SELECT id_hash FROM browser_sessions WHERE {where}", args)]
+        for key in rows:
+            c.execute(
+                "INSERT OR REPLACE INTO session_ends (id_hash, reason, ended_at) VALUES (?, ?, ?)",
+                (key, reason, now),
+            )
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (SESSION_HOLDER + key,))
+        c.execute(f"DELETE FROM browser_sessions WHERE {where}", args)
+        return len(rows)
+
+    def session_end_reason(self, session_id: str) -> str | None:
+        """Why the browser session ``session_id`` is no longer live (one of SESSION_END_REASONS),
+        or None when it is live or nothing is known of it. Only the browser holding the session's
+        cookie can ask, so the answer tells nobody else anything."""
+        now = int(time.time())
+        key = hash_token(session_id)
+        row = self._one("SELECT created_at, expires_at FROM browser_sessions WHERE id_hash = ?", (key,))
+        longest = self.session_max_age()
+        if row is not None:
+            created, expires = int(row["created_at"]), int(row["expires_at"])
+            if created <= now - longest:
+                return "longest"
+            if expires < now:
+                return _expiry_reason(created, expires, longest)
+            return None
+        row = self._one("SELECT reason FROM session_ends WHERE id_hash = ?", (key,))
+        return str(row["reason"]) if row is not None else None
 
     MEMBER_TABLES = MEMBER_TABLES
 
@@ -1978,7 +2109,7 @@ class Database:
             c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
         self.flush_wal()
         self.scrub_upgrade_copies(sub, "account")
-        return sum(self.revoke_all_for_user(sub).values())
+        return sum(self.revoke_all_for_user(sub, "removed").values())
 
     def set_user_issuer(self, sub: str, issuer: str) -> None:
         with self.tx() as c:
@@ -1990,33 +2121,80 @@ class Database:
             c.execute("UPDATE users SET groups_json = ? WHERE sub = ?", (json.dumps(groups), sub))
 
     # identity-provider grants ------------------------------------------------
-    def save_idp_grant(self, sub: str, *, refresh_enc: str, access_enc: str, access_expires_at: int) -> None:
+    # One per sign-in, named by its holder (membership.py): "s:" and a browser session's id hash,
+    # "ai:" and the member (their latest AI-app sign-in), "login:" and a login's id hash (a sign-in
+    # on its way to its session).
+    def save_idp_grant(
+        self,
+        holder: str,
+        sub: str,
+        *,
+        refresh_enc: str,
+        access_enc: str,
+        access_expires_at: int,
+        signed_in: bool = False,
+    ) -> None:
+        """Keep a grant. ``signed_in``: from a sign-in the provider just let through, so it counts
+        as the provider's last yes (checked_at); a renewal leaves that as it was."""
+        now = int(time.time())
         with self.tx() as c:
             c.execute(
-                """INSERT INTO idp_grants (sub, refresh_enc, access_enc, access_expires_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(sub) DO UPDATE SET refresh_enc=excluded.refresh_enc,
+                """INSERT INTO idp_grants
+                     (holder, sub, refresh_enc, access_enc, access_expires_at, updated_at, checked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(holder) DO UPDATE SET sub=excluded.sub, refresh_enc=excluded.refresh_enc,
                      access_enc=excluded.access_enc, access_expires_at=excluded.access_expires_at,
-                     updated_at=excluded.updated_at""",
-                (sub, refresh_enc, access_enc, access_expires_at, int(time.time())),
+                     updated_at=excluded.updated_at,
+                     checked_at=COALESCE(excluded.checked_at, idp_grants.checked_at)""",
+                (holder, sub, refresh_enc, access_enc, access_expires_at, now, now if signed_in else None),
             )
 
     def replace_idp_grant(
-        self, sub: str, *, old_refresh_enc: str, refresh_enc: str, access_enc: str, access_expires_at: int
+        self, holder: str, *, old_refresh_enc: str, refresh_enc: str, access_enc: str, access_expires_at: int
     ) -> bool:
-        """save_idp_grant for a renewal ahead of time (membership.py): only over the grant it
+        """save_idp_grant for a renewal in the background (membership.py): only over the grant it
         renewed, never bringing back one revoked or deleted meanwhile. False: nothing written."""
         with self.tx() as c:
             cur = c.execute(
                 """UPDATE idp_grants SET refresh_enc=?, access_enc=?, access_expires_at=?, updated_at=?
-                   WHERE sub = ? AND refresh_enc = ?""",
-                (refresh_enc, access_enc, access_expires_at, int(time.time()), sub, old_refresh_enc),
+                   WHERE holder = ? AND refresh_enc = ?""",
+                (refresh_enc, access_enc, access_expires_at, int(time.time()), holder, old_refresh_enc),
             )
             return cur.rowcount == 1
 
-    def get_idp_grant(self, sub: str) -> dict[str, Any] | None:
-        row = self._one("SELECT * FROM idp_grants WHERE sub = ?", (sub,))
+    def get_idp_grant(self, holder: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM idp_grants WHERE holder = ?", (holder,))
         return dict(row) if row else None
+
+    def idp_grants_for(self, sub: str) -> list[dict[str, Any]]:
+        """The member's grants that stand for a sign-in in use (their sessions' and their AI apps'),
+        the one the provider let in last first."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM idp_grants WHERE sub = ? AND (holder LIKE 's:%' OR holder LIKE 'ai:%')
+                   ORDER BY COALESCE(checked_at, 0) DESC, updated_at DESC""",
+                (sub,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def move_idp_grant(self, old: str, new: str) -> bool:
+        """Hand a sign-in's grant to the holder it was made for (its new session, the member's AI
+        apps), replacing what that holder had. False: there was no such grant (nothing moved)."""
+        with self.tx() as c:
+            if c.execute("SELECT 1 FROM idp_grants WHERE holder = ?", (old,)).fetchone() is None:
+                return False
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (new,))
+            c.execute("UPDATE idp_grants SET holder = ? WHERE holder = ?", (new, old))
+            return True
+
+    def delete_idp_grant(self, holder: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM idp_grants WHERE holder = ?", (holder,))
+
+    def mark_idp_grant_checked(self, holder: str) -> None:
+        """The provider let this holder in just now."""
+        with self.tx() as c:
+            c.execute("UPDATE idp_grants SET checked_at = ? WHERE holder = ?", (int(time.time()), holder))
 
     # archidekt links -------------------------------------------------------
     def save_link(

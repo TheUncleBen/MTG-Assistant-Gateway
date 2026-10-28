@@ -121,7 +121,7 @@ async def test_deck_toolbar_selects_sit_inside_their_own_form(stack: Stack) -> N
 # -- search and user pages --------------------------------------------------------------------
 async def test_search_and_user_pages_are_gated_and_list_public_decks(stack: Stack) -> None:
     anon = stack.h.http
-    for path in ("/search", "/users/alice", "/collection", "/guide"):
+    for path in ("/search", "/users/alice", "/collection"):  # the guide reads signed out (C2)
         r = await anon.get(path, headers=NAV)
         assert r.status_code == 302 and r.headers["location"].startswith("/login?next="), path
     b = Browser(stack.h)

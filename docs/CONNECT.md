@@ -25,7 +25,7 @@ either fails on mobile data but works on your home Wi‑Fi, the owner has a
 checklist in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-site-doesnt-load)
 (the "couldn't reach this address" row).
 
-The gateway's setup hub, `https://mtg.example.com/install` (signed in), has
+The gateway's setup hub, `https://mtg.example.com/install` (readable before signing in; the downloads and the ChatGPT instructions ask for a sign-in), has
 every way in on one page, with numbered steps and Copy buttons, and can show
 just one section: `?for=claude`, `?for=claude-code`, `?for=chatgpt`,
 `?for=codex`, the assistant skill (`https://mtg.example.com/install?for=skill`)

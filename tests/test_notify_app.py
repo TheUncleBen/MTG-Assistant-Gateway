@@ -196,7 +196,7 @@ async def test_the_stream_refuses_removed_members_too_many_connections_and_a_sil
 ) -> None:
     b, key = await _member(stack)
     try:
-        checks = iter([Membership.REVOKED, Membership.UNAVAILABLE])
+        checks = iter([Membership.REVOKED, Membership.UNAVAILABLE, Membership.SIGN_IN])
 
         async def check(sub: str) -> Membership:
             return next(checks, Membership.ALLOWED)
@@ -204,6 +204,10 @@ async def test_the_stream_refuses_removed_members_too_many_connections_and_a_sil
         monkeypatch.setattr(stack.gw.membership, "check", check)
         assert (await _refusal(stack, key))[0] == 401
         assert (await _refusal(stack, key))[1]["error"] == "unavailable"
+        # none of the member's sign-ins honoured: refused, but not a stop code (Push.kt), so the
+        # phone keeps its key and tries again until they sign in again (C2)
+        status, body = await _refusal(stack, key)
+        assert (status, body["error"]) == (403, "sign_in_again")
         stack.gw.notifier._streams[key] = notify.STREAM_MAX_PER_KEY
         status, body = await _refusal(stack, key)
         assert (status, body["error"]) == (429, "too_many")
@@ -336,6 +340,12 @@ async def test_a_member_removed_at_the_identity_provider_is_cut_off_at_the_next_
         outcome = Membership.UNAVAILABLE  # the identity provider not answering cuts nobody off
         await asyncio.sleep(0.3)
         assert stack.gw.notifier.streams(key) == 1
+        outcome = Membership.SIGN_IN  # no sign-in of theirs honoured any more: it ends too (C2)
+        assert await s.ended()
+        assert stack.gw.notifier.streams(key) == 0
+        outcome = Membership.ALLOWED
+        s = await Stream(stack, key).start()
+        assert s.status == 200
         outcome = Membership.REVOKED
         assert await s.ended()
         assert stack.gw.notifier.streams(key) == 0
