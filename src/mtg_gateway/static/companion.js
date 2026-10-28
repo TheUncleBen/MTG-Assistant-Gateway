@@ -768,6 +768,31 @@
     askToLeave(function () { if (form.requestSubmit) form.requestSubmit(by); else form.submit(); });
   }, true);
 
+  // On a phone the save bar sits fixed over the tab bar with Save, Undo and Redo only (and the
+  // status on its own line): the card size and the backup tick move out to a row of their own
+  // under the bar, with room for 44 px controls (0.7.46 audit D-10). They move back on a wider
+  // window; their listeners go with them.
+  (function () {
+    var bar = root.querySelector(".editbar");
+    if (!bar) return;
+    var opts = document.createElement("div");
+    opts.className = "editopts";
+    var narrow = window.matchMedia("(max-width: 599.98px)");
+    function place() {
+      var parts = [root.querySelector(".editbar .backup, .editopts .backup"), root.querySelector(".editbar .cardsize, .editopts .cardsize")];
+      if (narrow.matches) {
+        parts.forEach(function (e) { if (e) opts.appendChild(e); });
+        if (opts.childNodes.length && !opts.parentNode) bar.parentNode.insertBefore(opts, bar.nextSibling);
+      } else {
+        var status = bar.querySelector(".status");
+        parts.forEach(function (e) { if (e) bar.insertBefore(e, status); });
+        if (opts.parentNode) opts.remove();
+      }
+    }
+    place();
+    if (narrow.addEventListener) narrow.addEventListener("change", place); else narrow.addListener(place);
+  })();
+
   // save: one proposal, applied at once (apply:true); a big removal asks first. The tick box says
   // whether Archidekt also gets a backup copy (the gateway's snapshot is kept either way).
   var backupBox = root.querySelector("input[name=archidekt_backup]");

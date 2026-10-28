@@ -205,10 +205,8 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         with page.expect_request(EDIT_URL) as req:
             menu.locator(".qtyrow .step").nth(1).click()
         body = json.loads(req.value.post_data)
-        assert body == {
-            "changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}],
-            "confirmed": False,
-        }
+        assert body["changes"] == [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]
+        assert body["confirmed"] is False and body["view"] == view  # the page's own view, for a drawn row
         assert req.value.headers.get("x-csrf-token")
         # until the save answers the toast says "Saving…" (a slow CI runner took longer than 200 ms)
         page.wait_for_function(

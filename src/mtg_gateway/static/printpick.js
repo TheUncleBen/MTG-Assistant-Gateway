@@ -283,7 +283,9 @@
      {set, number} | null (a pick not saved yet, marked Picked), finish: the card's finish
      ("normal" / "foil" / "etched", or Archidekt's Normal...), pickLabel, onPick(printing, info),
      onWatch(printing, finish) returning a promise (browse mode; onPick may then be left out)}
-     info: {finish: "normal" | "foil" | "etched", changed: bool, from: the finish it had} */
+     info: {finish: "normal" | "foil" | "etched", changed: bool, from: the finish it had, chosen:
+     the finish was picked by hand in the detail, onlyFinish: the card's own printing, so only
+     its finish changes} */
   function open(opts) {
     if (!opts || !opts.name || (typeof opts.onPick !== "function" && typeof opts.onWatch !== "function")) return;
     ensure();
@@ -753,19 +755,49 @@
     });
     info.appendChild(prices);
     var same = samePrint(p, o.pending || o.current);
+    var chosen = fit.finish;  // the finish the card will be in: the fitting one, or one picked below
+    var note = null;
     if (fit.changed && !same) {
-      info.appendChild(el("p", "ppnote", "Not made in a " + FINISH_NAMES[st.finish].toLowerCase() + " finish: the card becomes " +
-        FINISH_NAMES[fit.finish].toLowerCase() + " with this printing."));
+      note = el("p", "ppnote", "Not made in a " + FINISH_NAMES[st.finish].toLowerCase() + " finish: the card becomes " +
+        FINISH_NAMES[fit.finish].toLowerCase() + " with this printing.");
+      info.appendChild(note);
     }
     var acts = el("div", "ppacts");
     if (typeof o.onPick === "function") {
-      var use = el("button", "btn-primary ppuse", same ? (samePrint(p, o.pending) ? "Already picked" : "Already in the deck") : (o.pickLabel || "Use this printing"));
+      var use = el("button", "btn-primary ppuse", "");
       use.type = "button";
-      use.disabled = same;
+      // Use this printing: off only for the printing the card has, in the finish it has
+      var word = function () {
+        var had = same && chosen === st.finish;
+        use.disabled = had;
+        use.textContent = had ? (samePrint(p, o.pending) ? "Already picked" : "Already in the deck") : (o.pickLabel || "Use this printing");
+        if (note) note.hidden = chosen !== fit.finish;
+      };
+      // the finishes this printing is made in (owner decision C4): one to pick, the fitting one first
+      var made = p.finishes && p.finishes.length ? p.finishes : ["nonfoil"];
+      if (made.length > 1) {
+        var fs = el("fieldset", "ppfinish");
+        fs.appendChild(el("legend", "", "Finish"));
+        made.forEach(function (f) {
+          var lab = el("label", "ppfin", "");
+          var r = el("input", "");
+          r.type = "radio"; r.name = "ppfinish"; r.value = f; r.checked = f === chosen;
+          r.addEventListener("change", function () { if (r.checked) { chosen = f; word(); } });
+          lab.appendChild(r);
+          lab.appendChild(document.createTextNode(FINISH_NAMES[f] || f));
+          fs.appendChild(lab);
+        });
+        info.appendChild(fs);
+      }
+      word();
       use.addEventListener("click", function () {
-        var opts = st.opts, from = deckFinish(st.finish);
-        close();
-        opts.onPick(p, { finish: deckFinish(fit.finish), changed: fit.changed, from: from });
+        var opts = st.opts, had = st.finish, from = deckFinish(had);
+        close();  // (st is gone after this)
+        opts.onPick(p, {
+          finish: deckFinish(chosen), changed: chosen !== had, from: from,
+          chosen: chosen !== fit.finish,  // picked by hand, not forced by the printing
+          onlyFinish: same && chosen !== had  // the card's own printing in another finish
+        });
       });
       acts.appendChild(use);
     }

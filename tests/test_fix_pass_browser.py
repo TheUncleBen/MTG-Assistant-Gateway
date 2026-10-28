@@ -424,11 +424,8 @@ DECK_TARGETS = """() => {
   const mv = [...document.querySelectorAll('.curveaxis .mv')].filter(shown).map(size);
   const gap = axis ? parseFloat(getComputedStyle(axis).columnGap) || 0 : 0;
   const room = axis ? (R(axis).width - gap * (mv.length - 1)) / mv.length : 0;
-  const grip = [...document.querySelectorAll('button.stackgrip')].filter(shown).map(b => {
-    const reach = -parseFloat(getComputedStyle(b, '::before').top) || 0;
-    return {w: R(b).width + 2 * reach, h: R(b).height + 2 * reach}; });
   const de = document.documentElement;
-  return {stat, mv, room, grip, sideways: de.scrollWidth - de.clientWidth};
+  return {stat, mv, room, sideways: de.scrollWidth - de.clientWidth};
 }"""
 
 
@@ -445,7 +442,6 @@ def test_deck_page_targets_are_44_px_on_touch(server: Server, width: int, app: b
         assert got["stat"] and all(h >= 44 for h in got["stat"]), got
         # the axis buttons: 44 px high, and 44 px wide or as wide as the box lets eight be
         assert got["mv"] and all(m["w"] >= min(44, got["room"]) - 1 and m["h"] >= 44 for m in got["mv"]), got
-        assert got["grip"] and all(g["w"] >= 44 and g["h"] >= 44 for g in got["grip"]), got
         assert errors == [], errors
         browser.close()
 

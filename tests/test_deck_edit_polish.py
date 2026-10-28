@@ -62,7 +62,7 @@ async def test_a_name_that_is_no_card_is_refused_in_plain_words(stack: Stack) ->
     """0.7.46 audit D-09: the refusal said "No Magic card is called 'Rampant'. Check the spelling;
     nothing was proposed." (straight quotes, the word proposed). Quick add sends the name to the
     deck page's own save, which answers in the page's words."""
-    stack.h.app.state.gateway.scan.names.set_names(["Rampant Growth", "Cultivate"])
+    stack.h.app.state.gateway.scan.names.set_names(["Arcane Signet", "Cultivate"])
     b = await linked(stack)
     try:
         r = await api(
@@ -297,5 +297,61 @@ async def test_category_switches_save_at_once_and_ask_first_when_they_must(stack
         # a stale page (the panel no longer matches the deck) is refused in words
         r = await b.http.post("/decks/42/categories", data={**data, f"was_premier_{ramp}": "0"})
         assert r.status_code == 400 and r.json()["fresh"] is True and "Not saved" in r.json()["message"]
+    finally:
+        await b.aclose()
+
+
+# -- Quick add adds one copy in place (owner decision C4) ----------------------------------------
+
+
+async def test_the_page_save_draws_a_new_card_for_the_view_it_names(stack: Stack) -> None:
+    """A quick add's answer carries the new row drawn for the page's view (its markup) and the
+    stack it belongs in, so the page puts it in place without a reload; a save that names no
+    view gets the plain rows as before."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")
+        stack.ark.calls.clear()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {
+                "changes": [{"action": "add", "card_name": "Arcane Signet", "quantity": 1}],
+                "view": "text",
+                "group": "category",
+                "sort": "name",
+            },
+            csrf=csrf,
+        )
+        assert r.status_code == 201 and r.json()["applied"] is True, r.text
+        (row,) = r.json()["rows"]
+        assert row["name"] == "Arcane Signet" and row["qty"] == 1
+        assert row["html"].startswith("<li class='row'") and "data-card='Arcane Signet'" in row["html"]
+        assert isinstance(row["stack"], str) and row["stack"]
+        deck_calls = [(m, p) for m, p in stack.ark.calls if p.startswith("/api/decks/42/")]
+        assert [m for m, _p in deck_calls] == ["GET", "GET", "PATCH", "GET"], deck_calls
+        # a picture view: the card tile
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {
+                "changes": [{"action": "set_quantity", "card_name": "Arcane Signet", "quantity": 2}],
+                "view": "stacks",
+            },
+            csrf=csrf,
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["rows"][0]["html"].startswith("<div class='c'")
+        # no view named: rows as before, nothing drawn
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Arcane Signet", "quantity": 3}]},
+            csrf=csrf,
+        )
+        assert r.status_code == 201 and "html" not in r.json()["rows"][0], r.text
     finally:
         await b.aclose()

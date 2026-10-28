@@ -5,6 +5,8 @@ state, under its own heading. Skipped without Chromium."""
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -357,5 +359,64 @@ def test_leaving_deck_settings_while_a_save_runs_asks_first(server: Server) -> N
         held[0].continue_()
         page.locator(".toast .msg", has_text="Saved to Archidekt").wait_for(timeout=8000)
         assert page.evaluate(asks) is False
+        assert errors == []
+        browser.close()
+
+
+# -- Quick add adds one copy in place (owner decision C4) ----------------------------------------
+SHOTS = Path(os.environ.get("MTG_SHOTS") or tempfile.gettempdir()) / "wp-deck-shots"
+SHOTS.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), [(390, 844, "dark"), (1280, 800, "light")])
+def test_quick_add_puts_one_copy_in_place_with_undo(
+    server: Server, width: int, height: int, scheme: str
+) -> None:
+    """Quick add's button says Add; Enter in the box adds one copy, saved at once and drawn in
+    its stack with Added and Undo, the page never leaving; Undo takes it out again. A name that
+    is no card is refused in the red note, on the same page."""
+    from playwright.sync_api import sync_playwright
+
+    server.app.state.gateway.scan.names.set_names(["Arcane Signet", "Cultivate"])
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        url = page.url
+        add = page.locator("form.quick button[type=submit]")
+        assert add.get_attribute("aria-label") == "Add"
+        assert page.locator(".deckview .row[data-card='Arcane Signet']").count() == 0
+        box = page.locator("#quick")
+        box.fill("Arcane Signet")
+        box.press("Enter")
+        page.locator(".deck-toast .msg", has_text="Added Arcane Signet").wait_for(timeout=8000)
+        assert page.url == url
+        row = page.locator(".deckview .row[data-card='Arcane Signet']")
+        assert row.count() == 1 and row.get_attribute("data-qty") == "1"
+        assert row.locator("xpath=ancestor::section[@class='stack']").count() == 1
+        # first in its stack: the alphabet is the sort
+        assert row.locator("xpath=preceding-sibling::li[contains(@class,'row')]").count() == 0
+        assert server.quantity("Arcane Signet") == 1
+        assert box.input_value() == ""
+        page.screenshot(path=str(SHOTS / f"quick-add-{width}-{scheme}.png"))
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert page.locator(".deckview .row[data-card='Arcane Signet']").count() == 0
+        assert server.quantity("Arcane Signet") == 0
+        # a copy more of a card the deck has: its row counts it
+        n = server.quantity("Cultivate")
+        box.fill("Cultivate")
+        box.press("Enter")
+        page.locator(".deck-toast .msg", has_text="Added Cultivate").wait_for(timeout=8000)
+        cult = page.locator(".deckview .row[data-card='Cultivate']").first
+        assert cult.get_attribute("data-qty") == str(n + 1)
+        assert server.quantity("Cultivate") == n + 1
+        # no such card (and no suggestion for it): the red note, the page stays (the words are
+        # the gateway's refusal; here, with no Scryfall to ask, Archidekt's own "not found")
+        box.fill("Zzyzx")
+        box.press("Enter")
+        text = _error(page)
+        assert text.startswith("Add not saved:") and "Zzyzx" in text, text
+        assert page.locator(".deck-toast.error button", has_text="Try again").count() == 1
+        assert page.url == url and box.input_value() == "Zzyzx"
         assert errors == []
         browser.close()
