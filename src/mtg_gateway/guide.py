@@ -352,7 +352,7 @@ def guide_body(
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
     backup_assistant = "Applies made by your assistant always make the copy. " if archidekt_backups else ""
-    backup_delete = "both the snapshot and the backup copy" if archidekt_backups else "the snapshot"
+    backup_delete = "a snapshot (no backup copy on Archidekt)"
     # -- Tutorials --------------------------------------------------------------------------------
     tut_start = (
         f"<p>{_esc(site)} is a private companion to <strong>Archidekt</strong>. Everything you can do on "

@@ -360,33 +360,27 @@ async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
     assert html.escape("Done. The folder is created on Archidekt.") in page
     assert "matches this proposal" not in page
     gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
-    assert gone["result"]["backup_deck_id"] and gone["next_step"] == (
-        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
-        "your backup folder."
+    # a delete makes no backup copy on Archidekt (assistant tool review, 2026-10-28): the snapshot only
+    assert not gone["result"].get("backup_deck_id") and gone["next_step"] == (
+        "Done. The deck is deleted on Archidekt. A snapshot of it was kept."
     )
 
 
-async def test_a_deletion_never_says_its_backup_copy_is_there_once_it_is_gone(stack: Stack) -> None:
-    """A deck deletion's text is rebuilt on every view: once the member's deck list read after it
-    no longer holds the backup copy (deleted on Archidekt), it doesn't say the copy is there."""
+async def test_a_deletion_leaves_no_backup_deck_behind(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28), confirmed live: each delete made a new backup deck on
+    Archidekt, and deleting that backup made a backup of the backup. A delete keeps the gateway's
+    snapshot only, with backups on, and says so."""
     h, ark = stack.h, stack.ark
+    assert h.app.state.gateway.decks.live.get("archidekt_backups")
     token = await linked_user(stack)
+    before = set(ark.decks)
     gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
-    copy = int(gone["result"]["backup_deck_id"])
-    pid = gone["proposal_id"]
-    with_copy = (
-        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
-        "your backup folder."
-    )
-    await call(h, token, "list_my_decks")  # a list read with the copy in it
-    assert structured(await call(h, token, "get_proposal", {"proposal_id": pid}))["next_step"] == with_copy
-    ark.decks.pop(copy)  # the member deletes the copy on archidekt.com
-    for user in ark.users.values():
-        if copy in user.get("decks", []):
-            user["decks"].remove(copy)
-    h.app.state.gateway.decks.deck_lists.drop("user-1")
-    await call(h, token, "list_my_decks")  # the next read of the list
-    p = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert gone["state"] == "applied" and ark.deleted == [42], gone
+    assert set(ark.decks) == before - {42}  # no new deck on Archidekt
+    assert not gone["result"].get("backup_deck_id"), gone
+    snaps = [x for x in h.app.state.gateway.db.list_snapshots("user-1") if x["deck_id"] == "42"]
+    assert snaps and not snaps[0]["backup_deck_id"]
+    p = structured(await call(h, token, "get_proposal", {"proposal_id": gone["proposal_id"]}))
     assert p["next_step"] == "Done. The deck is deleted on Archidekt. A snapshot of it was kept.", p
 
 
@@ -552,17 +546,16 @@ async def test_delete_refuses_a_deck_that_changed_after_the_proposal(stack: Stac
     assert ark.deleted == []
 
 
-async def test_delete_whose_backup_fails_goes_back_to_pending(stack: Stack) -> None:
+async def test_a_delete_does_not_wait_on_a_backup_copy(stack: Stack) -> None:
+    """A delete makes no backup copy, so a backup route that fails does not hold it back."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     ark.fail_backup = True
     res = await call(h, token, "propose_delete_deck", {"deck_id": "42"})
     p = structured(res)
     out = await _browser_apply(h, p["proposal_id"])
-    assert out["ok"] is False and out["error"] == "backup_failed", out
-    assert ark.deleted == []
-    again = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
-    assert again["state"] == "pending" and again["result"]["error"] == "backup_failed"
+    assert out["ok"] is not False and out["state"] == "applied", out
+    assert ark.deleted == [42]
 
 
 async def test_no_vote_proposal_for_an_archived_comment(stack: Stack) -> None:

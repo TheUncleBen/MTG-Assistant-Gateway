@@ -401,3 +401,28 @@ async def test_get_deck_marks_empty_categories(stack: Stack) -> None:
     assert "Optional Artwork" in found["categories"] and found["empty_categories"] == ["Optional Artwork"], (
         found
     )
+
+
+async def test_a_backup_copy_is_never_backed_up_itself(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28), confirmed live: a change to a backup copy made a backup
+    of the backup. The gateway's snapshot is still kept."""
+    from .test_account_actions import _browser_apply
+
+    gw = stack.h.app.state.gateway
+    assert gw.decks.live.get("archidekt_backups")
+    token = await linked_user(stack)
+    gw.db.record_backup_made("42", {"sub": "user-1", "deck_id": "41"})  # deck 42 is a copy the gateway made
+    before = set(stack.ark.decks)
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "name": "Opt"}]},
+        )
+    )
+    out = await _browser_apply(stack.h, p["proposal_id"])
+    assert out["state"] == "applied", out
+    assert set(stack.ark.decks) == before, "a new deck was made on Archidekt"
+    assert out["result"].get("archidekt_backup") == "skipped_backup_copy", out["result"]
+    assert out["snapshot_id"]
