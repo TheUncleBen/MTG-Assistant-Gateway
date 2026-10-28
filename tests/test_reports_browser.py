@@ -771,7 +771,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         page.locator("#forge-more button").click()
         page.wait_for_load_state("networkidle")
         assert page.url.endswith("/history/reports/rep_more")
-        assert len(fake.started) == 1 and fake.started[0]["games"] == 4
+        assert len(fake.started) == 1 and fake.started[0]["games"] == 5  # the games-per-report default
         assert [d.get("precon") for d in fake.started[0]["decks"][1:]] == seats[1:]
         assert page.locator("#forge-more button").count() == 0  # none while the games play
         # a refusal, shown from its code
