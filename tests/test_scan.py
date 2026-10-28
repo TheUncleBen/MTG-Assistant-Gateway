@@ -1186,7 +1186,9 @@ async def test_card_printings_lists_released_paper_first_and_clear_counts(stack:
         ("mdd", True, False),
     ]
     assert out["matching_total"] == 3 and "matching" not in out and out["returned_count"] == 2
-    assert out["truncated"] is True and out["has_more"] is False and out["total_cards"] == 3
+    assert out["truncated"] is True and out["total_cards"] == 3
+    # more printings than the rows returned: has_more says so whatever cut them (the limit here)
+    assert out["has_more"] is True and out["scryfall_more_pages"] is False
     # the limit caps the set list too; the count says how many there are
     assert len(out["sets"]) == 2 and out["sets_total"] == 3 and out["sets_truncated"] is True
     assert "not narrowed" in out["sets_scope"]

@@ -57,3 +57,9 @@ def test_a_saved_session_lists_only_cards_it_found() -> None:
     assert "Xyzzy Plugh" not in out["decklist_text"], out["decklist_text"]
     assert "Sol Ring" in out["decklist_text"]
     assert out["unresolved"] == 1
+
+
+def test_the_printings_note_is_true_without_a_card() -> None:
+    from mtg_gateway.scan.tools import PRINTINGS_NOTE
+
+    assert PRINTINGS_NOTE.startswith("In an app that shows cards,")
