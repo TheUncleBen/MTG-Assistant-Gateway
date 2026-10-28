@@ -249,3 +249,19 @@ async def test_a_category_change_and_a_card_moved_through_it_overlap(stack: Stac
     assert renamed["overlaps"] == [
         f"“Draw”: this request renames it to “Cards”; #{no} moves Compulsive Research in or out of it."
     ], renamed
+
+
+async def test_the_assistants_own_apply_says_so_and_a_clone_names_its_new_deck(stack: Stack) -> None:
+    from .test_approval_modes import _set_mode
+
+    token = await linked_user(stack)
+    await _set_mode(stack.h, "semi")
+    p = structured(await call(stack.h, token, "propose_clone_deck", {"deck_id": "42", "name": "Copy"}))
+    assert p["ok"] and p["assistant_may_apply"], p
+    out = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] and out["state"] == "applied", out
+    assert out["applied_via"] == "assistant", out
+    new = str(out["result"]["deck_id"])
+    assert new != "42"
+    assert out["new_deck_id"] == new and out["new_deck_url"].endswith(f"/decks/{new}"), out
+    assert out["deck_id"] == "42"  # the source, as before

@@ -882,6 +882,14 @@ OVERLAP_STEP = (
 )
 
 
+def _new_deck_fields(kind: str, result: Any) -> dict[str, Any]:
+    """``new_deck_id`` and ``new_deck_url`` of a clone that made its copy."""
+    new = result.get("deck_id") if kind == "clone" and isinstance(result, dict) else None
+    if new is None or not str(new).isdigit():
+        return {}
+    return {"new_deck_id": str(new), "new_deck_url": f"https://archidekt.com/decks/{new}"}
+
+
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
@@ -4992,6 +5000,8 @@ class DeckService:
             # Where an applied proposal was applied (assistant, card, review_page, browser or api),
             # from the audit log, which keeps a year; None when the log no longer has it.
             **({"applied_via": self._applied_via(sub, row["id"])} if state == "applied" else {}),
+            # a clone's copy is a deck of its own: deck_id above stays the deck it was copied from
+            **_new_deck_fields(kind, row.get("result")),
             # When and by whom a closed proposal was closed (closed_by: assistant, card,
             # review_page, browser, api or disconnected; recorded since 0.7.22).
             **({"closed_at": row["applied_at"]} if state in ("rejected", "failed") else {}),
@@ -6015,6 +6025,9 @@ class DeckService:
             "proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": logged_via or via}
         )
         board.settle(self, sub, proposal_id, "applied")  # lifts the holds it caused
+        if isinstance(result, dict) and "applied_via" in result:
+            # the result was described before the audit row above existed
+            result["applied_via"] = self._applied_via(sub, proposal_id)
         return result
 
     async def _apply_claimed(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
