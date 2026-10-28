@@ -718,8 +718,38 @@
   }
   function openCardLinkMenu(b, x, y) {
     var name = b.getAttribute("data-card");
-    Card.open(cardMenuBase(name, { onOpen: function () { b.click(); }, focus: b }), x, y);
+    // once the menu has closed (its Back step would close a viewer opened before)
+    var open = function () { Menu.whenClosed(function () { b.click(); }); };
+    Card.open(cardMenuBase(name, { onOpen: open, focus: b }), x, y);
   }
+  // A card name drawn as a button opens the card when clicked (Ben, 2026-10-28: the report's names
+  // did nothing): in the card viewer when the page has it (static/cardview.js), its text and
+  // picture read by name, else on Card search. A page with its own use for the click (the
+  // Compare page, My card models' link to Card search) handles it first.
+  function openCardLink(b) {
+    var name = b.getAttribute("data-card") || "";
+    var View = window.MtgCardView;
+    if (!View || !View.open) { Menu.whenClosed(function () { location.href = "/cards?q=" + enc(name); }); return; }
+    var search = el("a", "btn", "Search cards");
+    search.href = "/cards?q=" + enc(name);
+    var base = View.fromElement(b);
+    base.loading = !!View.text;
+    View.open(base, [search]);
+    if (View.text) View.text(name).then(function (t) {
+      var card = {};
+      Object.keys(base).forEach(function (k) { card[k] = base[k]; });
+      if (t) Object.keys(t).forEach(function (k) { if (t[k] || k === "faces") card[k] = t[k]; });
+      delete card.loading;
+      View.update(card, [search]);
+    });
+  }
+  window.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button) return;
+    var b = e.target && e.target.closest ? e.target.closest("button.cardlink[data-card]") : null;
+    if (!b || b.hasAttribute("data-href") || b.closest(".ctxmenu, .cardview")) return;
+    e.preventDefault();
+    openCardLink(b);
+  });
 
   // -- the list pages' rows: Proposals, History, Reports ------------------------------------------
   function proposalRowOf(node) {
