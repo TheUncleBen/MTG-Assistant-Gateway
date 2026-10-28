@@ -282,3 +282,28 @@ async def test_a_collection_add_in_a_finish_its_printing_lacks_is_warned(stack: 
         "Sol Ring (FRC 21) is not made in foil; Scryfall lists nonfoil. Amend the finish, or the collection "
         "will hold a printing that does not exist."
     ], p
+
+
+async def test_a_contest_that_does_not_exist_is_refused_when_proposed(stack: Stack) -> None:
+    token = await linked_user(stack)
+    out = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_contest_entry",
+            {"deck_id": "42", "contest": "999999999", "summary": "Sea monsters"},
+        )
+    )
+    assert out["ok"] is False and out["error"] == "not_found", out
+    assert "no forum thread 999999999" in out["message"], out
+    stack.ark.forum_threads[881] = {"title": "Contest", "section": "Contests", "type": 7, "owner": "amy"}
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_contest_entry",
+            {"deck_id": "42", "contest": "881", "summary": "Sea monsters"},
+        )
+    )
+    assert p["ok"], p
+    assert "Enter your deck “" in p["diff"] and " by " not in p["diff"].splitlines()[0], p["diff"]

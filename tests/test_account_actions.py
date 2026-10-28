@@ -925,7 +925,10 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
 
 
 def _contest_ready(ark: FakeArchidekt) -> None:
-    """alice's deck 42 entered in contest 880 (to withdraw); contest 881 has no entry yet."""
+    """alice's deck 42 entered in contest 880 (to withdraw); contest 881 has no entry yet. Both are
+    contest threads on the forum."""
+    for tid in (880, 881):
+        ark.forum_threads[tid] = {"title": f"Contest {tid}", "section": "Contests", "type": 7, "owner": "amy"}
     ark.account.entries[880] = [
         {"id": 9100, "deck": {"id": 42, "name": "x"}, "owner": {"id": 77, "username": "alice"}}
     ]
