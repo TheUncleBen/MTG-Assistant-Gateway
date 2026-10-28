@@ -52,6 +52,13 @@ ARCHIVED = "This thread is archived on Archidekt, so it takes no new replies."
 REPLY_PUBLIC = "Public under “{name}”. An assistant's reply always waits for your press."
 REPLY_PUBLIC_UNNAMED = "Public under your Archidekt name. An assistant's reply always waits for your press."
 WRITES_OFF = "Archidekt writes are switched off on this gateway, so replies can be read here but not posted."
+# a member without a linked Archidekt account reads the forum (decision C8) and is offered the link
+LINK_TO_REPLY = "Link Archidekt to reply"
+LINK_WHY = "You are reading Archidekt's forum without a linked account. Link yours to reply here."
+LINK_FAILED = (
+    "Archidekt shows this part of the forum to signed-in readers only. Link your Archidekt account "
+    "to read and reply here, or read it on Archidekt."
+)
 # the contest strip (the mockup's r2-contest screen)
 CONTEST_INTRO = (
     "Enter one of your decks with a short summary. Archidekt replaces that deck's description with "
@@ -80,6 +87,11 @@ ORDERS = (("recent", "Most recent"), ("points", "Points"))
 CSS = """
 .fm .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;
   color:var(--text-muted);font-size:.9rem}
+/* the Link Archidekt strip (a member without a link): the words, then the one orange button */
+.fm .fm-link{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 1rem;
+  padding:.75rem 1rem;border-radius:var(--radius);background:var(--orange-tint)}
+.fm .fm-link p{flex:1 1 16rem;margin:0}
+.fm .fm-link .btn{margin:0;flex:none}
 .fm .fm-why{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .75rem;margin:0 0 .75rem}
 .fm .fm-why .btn{margin:0;flex:none}
 .fm .fm-why span{flex:1 1 14rem;color:var(--text-muted);font-size:.9rem}
@@ -203,6 +215,18 @@ def _plural(n: int, word: str) -> str:
         return f"{n:,} {word}"
     many = word[:-1] + "ies" if word.endswith("y") else word + "s"  # reply -> replies
     return f"{n:,} {many}"
+
+
+def link_strip_html(*, failed: bool = False) -> str:
+    """For a member without a linked Archidekt account: the one line why there is no reply box,
+    with the Link Archidekt button (the page's one orange button). ``failed``: the forum could
+    not be read either, so the strip is the page's body."""
+    words = LINK_FAILED if failed else LINK_WHY
+    return (
+        f"<div class='fm-link'><p>{esc(words)}</p>"
+        f"<a class='btn btn-primary' href='/account/details#archidekt'>{icon('link')}{esc(LINK_TO_REPLY)}</a>"
+        "</div>"
+    )
 
 
 def new_thread_html(section: str = "") -> str:
@@ -343,9 +367,10 @@ def load_more_words(got: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def threads_html(got: dict[str, Any]) -> str:
+def threads_html(got: dict[str, Any], *, strip: str = "") -> str:
     """One section's page: crumbs, the head, the New thread button, the toolbar, the table and
-    Load more (a button; without scripts, the next page's address)."""
+    Load more (a button; without scripts, the next page's address). ``strip``: the Link
+    Archidekt strip for a member without a link."""
     group, section = got["group"], got["section"]
     order, q, page = got["order"], got["search"], got["page"]
     head = ui.page_head(section, f"{group} · {_plural(got['count'], 'thread')}")
@@ -387,6 +412,7 @@ def threads_html(got: dict[str, Any]) -> str:
     return (
         crumbs_html((group, f"{PAGE}#{group_anchor(group)}"), (section, section_href(group, section)))
         + head
+        + strip
         + new_thread_html(section)
         + tools
         + table
@@ -617,6 +643,7 @@ def thread_html(
     me: int | None,
     me_name: str = "",
     writes_enabled: bool,
+    linked: bool = True,
     entries: list[dict[str, Any]] | None = None,
     open_box: str = "",
     box_error: str = "",
@@ -626,11 +653,13 @@ def thread_html(
     contest strip, the replies in the deck page's comment panel and the reply box with its text
     style buttons. The thread's replies go to the script as JSON, in the shape the comment route
     answers, so the panel draws them without reading the thread again. ``entries``: a contest
-    thread's entries (None when they could not be read)."""
+    thread's entries (None when they could not be read). ``linked``: False for a member without
+    a linked Archidekt account, who reads the thread and is offered the link where the reply box
+    would be."""
     tid = t["id"]
     target = forum.target(tid)
     closed = t["locked"] or t["archived"]
-    can_write = writes_enabled and not closed
+    can_write = writes_enabled and not closed and linked
     contest = t.get("type") == "contest"
     # the title, its line (who started it, the replies), then Open on Archidekt on a line of its
     # own: the order the section page keeps (its heading, its line, New thread on Archidekt)
@@ -670,6 +699,8 @@ def thread_html(
         form = reply_form_html(csrf, me_name)
     elif closed:
         form = ""
+    elif not linked:
+        form = link_strip_html()
     else:
         form = f"<p class='muted small'>{esc(WRITES_OFF)}</p>"
     replies = "".join(_comment_html(c) for c in t["replies"]) or "<p class='muted'>No replies yet.</p>"
@@ -758,6 +789,17 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if exc.kind == "unavailable" and str(exc) == forum.FORUM_CHANGED:
             body = ui.page_head(TITLE, SUB) + changed_html(str(exc))
             return respond(body, sub, sid)
+        if exc.kind == "not_linked" or (exc.kind == "auth" and not forum.linked(decks, sub)):
+            # a member without a link, where Archidekt wants a signed-in reader: never the
+            # assistant's sentence with a raw address, but plain words, the Link button and the
+            # way to Archidekt's own forum
+            body = (
+                ui.page_head(TITLE, SUB)
+                + link_strip_html(failed=True)
+                + f"<p class='fm-links'><a class='btn btn-plain' href='{ARCHIDEKT_FORUM}' target='_blank' "
+                f"rel='noreferrer noopener'>{icon('external')}Archidekt's forum</a></p>" + open_form_html()
+            )
+            return respond(body, sub, sid)
         if exc.kind == "not_found":
             status = 404
         body = ui.page_head(TITLE, SUB) + ui.notice(str(exc), "error", role="alert") + open_form_html()
@@ -772,7 +814,8 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             got = await forum.sections(decks, sub)
         except DeckError as exc:
             return problem(exc, sub, sid)
-        body = ui.page_head(TITLE, SUB) + new_thread_html() + sections_html(got)
+        strip = "" if forum.linked(decks, sub) else link_strip_html()
+        body = ui.page_head(TITLE, SUB) + strip + new_thread_html() + sections_html(got)
         return respond(body, sub, sid)
 
     @server.custom_route(PAGE + "/thread", methods=["GET"], include_in_schema=False)
@@ -838,6 +881,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return problem(exc, sub, sid)
         link = state.db.get_link(sub) or {}
+        linked = bool(link)
         raw_me = str(link.get("archidekt_user_id") or "")
         me = int(raw_me) if raw_me.isdigit() else None
         me_name = str(link.get("archidekt_username") or "")
@@ -856,6 +900,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             me=me,
             me_name=me_name,
             writes_enabled=bool(s.writes_enabled),
+            linked=linked,
             entries=entries,
             open_box=open_box,
             box_error=box_error,
@@ -999,4 +1044,5 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 },
                 headers={"Cache-Control": "no-store"},
             )
-        return respond(threads_html(got), sub, sid, title=f"{section}: {TITLE}")
+        strip = "" if forum.linked(decks, sub) else link_strip_html()
+        return respond(threads_html(got, strip=strip), sub, sid, title=f"{section}: {TITLE}")
