@@ -270,7 +270,7 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
                 h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "same_opponents_as": first_id}
             )
         )
-        assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
+        assert listed["ok"] is False and "pasted list can't be paired for Forge" in listed["message"]
         # The higher of the two decks' set brackets picks them, whichever page it ran
         # from (the runs wait behind the member's first one, so each keeps the bracket it waits with)
         from mtg_gateway.forge import PAIR_LEAD, bracket_parts, shared_opponents
@@ -595,8 +595,8 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             await call(h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "compare_with": "43"})
         )
         assert listed["ok"] is False and listed["message"] == (
-            "A pasted list gets no Forge games, so compare_with works only when deck_ref is a deck id, URL "
-            "or snapshot id."
+            "A pasted list can't be paired for Forge, so compare_with works only when deck_ref is a deck "
+            "id, URL or snapshot id."
         )
         # the REST route's compare_with
         auth = {"Authorization": f"Bearer {await mcp_token(h)}"}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from types import SimpleNamespace
@@ -20,7 +21,7 @@ from .decks import (
     deck_to_text,
 )
 from .report_view import MORE_DID_NOT_START
-from .reports import PAIR_UNREAD, _sentence, sim_mode
+from .reports import PAIR_UNREAD, SOURCE_COMPARE, SOURCE_LIST, _sentence, list_deck, sim_mode
 from .schemas import (
     AbOptions,
     RunOptions,
@@ -175,10 +176,12 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
-            "confidence intervals and significance; two Commander decks or two 60-card decks), not "
-            "stored. Does not touch Archidekt beyond reading the decks. This is the one tool for deck "
+            "confidence intervals and significance; two Commander decks or two 60-card decks). Does "
+            "not touch Archidekt beyond reading the decks. This is the one tool for deck "
             "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
-            "comparison of two decks. Forge seats each deck against precons of its own bracket, so two "
+            "comparison of two decks. A simulated comparison is stored as one of the user's reports "
+            "(source Comparison, on their Reports page; report_id in the result), filed under deck a "
+            "when it is a deck. Forge seats each deck against precons of its own bracket, so two "
             "decks' Forge win rates (one run_deck_report each) are each against their own bracket's table, "
             "even with the same options.seed; for the same table, run deck a's report with compare_with "
             "set to deck b (opponents for the higher of the two decks' brackets, so the order doesn't "
@@ -268,12 +271,46 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "message": "the research service is not configured on this gateway",
             }
             failed = _simulation_failure(out["goldfish_ab"])
+            if not failed:
+                try:
+                    kept = await _store_comparison(deck_a, text_a, deck_b, out["goldfish_ab"])
+                except DeckError as exc:
+                    return _tool_error(exc)
+                out.update(report_id=kept["report_id"], stored=True)
             if failed:
                 # the A/B was asked for and did not run: the result says so at the top
                 message = f"The A/B did not run: {failed}. {_KEPT}"
                 logger.warning("compare_decks: the A/B did not run: %s", failed)
                 out.update(ok=False, error="simulation_failed", message=message)
         return out
+
+    def _side_name(deck: Any) -> str:
+        return SOURCE_LIST if isinstance(deck, dict) else str(deck.name or f"Deck {deck.id}")
+
+    async def _store_comparison(deck_a: Any, text_a: str, deck_b: Any, ab: dict[str, Any]) -> dict[str, Any]:
+        """A simulated comparison as one of the member's reports (source "Comparison"): deck a's
+        statistics with the A/B as its simulation, filed under deck a when it is a deck."""
+        if isinstance(deck_a, dict):
+            cards = parse_decklist(text_a)
+            deck, stats = list_deck(cards, SOURCE_LIST), deck_stats.compute_from_text(cards)
+        else:
+            deck, stats = deck_a, deck_stats.compute(deck_a)
+        source = {
+            "kind": "compare",
+            "label": SOURCE_COMPARE,
+            "a": _side_name(deck_a),
+            "b": _side_name(deck_b),
+            **({"b_deck_id": str(deck_b.id)} if not isinstance(deck_b, dict) and deck_b.id else {}),
+        }
+        return await state.reports.run_source(
+            _sub(),
+            dataclasses.replace(deck, name=f"{source['a']} vs {source['b']}"),
+            source=source,
+            stats=stats,
+            simulate=False,
+            forge=False,
+            goldfish=ab,
+        )
 
     @server.tool(
         name="run_deck_report",
@@ -287,9 +324,14 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "London mulligan with no free one, 20 life, on the play, sideboard left out. deck_ref is an "
             "Archidekt id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the "
             "commander "
-            "marked [Commander] or *CMDR*). A deck's report is stored for the user (see "
-            "list_deck_reports and the gateway's History page) so results can be compared over time; a "
-            "pasted list is simulated the same way but returned with stored=false and not kept. "
+            "marked [Commander] or *CMDR*). Every report is stored for the user (see list_deck_reports "
+            "and the gateway's Reports and History pages): a deck's reports are compared over time; a "
+            "pasted list's report has source Pasted list and is filed under no deck. proposal_id "
+            "(one of the user's waiting proposals, a deck edit or a new deck) simulates the deck as it "
+            "would be once that proposal is applied (the deck as it is now plus its changes; it applies "
+            "nothing): the report has source 'Proposal #N for DECK', is filed under that deck and is "
+            "linked from the proposal's page; give it instead of deck_ref. Reports of a list, a proposal "
+            "or a comparison never count in a deck's trend. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan); "
@@ -318,7 +360,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "games_requested stopped early). Forge plays only decks with a "
             "commander: a 60-card deck's report, or one with no commander marked, "
             "never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
-            "for a quick solo-test-only report (default: as simulate). A report without Forge games is "
+            "for a quick solo-test-only report (default: as simulate). A pasted list and a proposal's "
+            "resulting deck get Forge games by the same rules (Forge plays the list's text: no "
+            "Archidekt deck is needed). A report without Forge games is "
             "labelled engine_label 'Preflight only (no rules engine)'. With Forge, a simulated report also "
             "gets forge_solo: the deck alone on Forge by the full rules against opponents who do nothing "
             "(the solo test's full-rules check), started after the games against precons, one unfinished per "
@@ -349,9 +393,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             str,
             Field(
                 description="Archidekt deck id or URL, one of your snapshot ids (list_snapshots), or "
-                "pasted decklist text."
+                "pasted decklist text. Leave it empty with proposal_id."
             ),
-        ],
+        ] = "",
         games: Annotated[int, Field(description="Games to simulate (10 to 2000).")] = 300,
         simulate: Annotated[bool, Field(description="Run the goldfish simulation.")] = True,
         options: Annotated[RunOptions | None, Field(description="Simulator options.")] = None,
@@ -374,19 +418,39 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "first report, then same_opponents_as on the second."
             ),
         ] = None,
+        proposal_id: Annotated[
+            str | None,
+            Field(
+                description="One of your waiting proposals (a deck edit or a new deck): simulate the deck "
+                "as it would be once it is applied. Give it instead of deck_ref."
+            ),
+        ] = None,
     ) -> dict[str, object]:
         options = dumped(options)
         try:
-            if _looks_like_list(deck_ref):
-                if same_opponents_as is not None or compare_with is not None:
-                    which = "same_opponents_as" if same_opponents_as is not None else "compare_with"
+            pairing = "same_opponents_as" if same_opponents_as is not None else "compare_with"
+            paired = same_opponents_as is not None or compare_with is not None
+            if proposal_id:
+                if str(deck_ref or "").strip():
+                    raise DeckError("invalid", "Give deck_ref or proposal_id, not both.")
+                if paired:
                     raise DeckError(
                         "invalid",
-                        f"A pasted list gets no Forge games, so {which} works only when deck_ref is a deck "
-                        "id, URL or snapshot id.",
+                        f"A proposal's deck can't be paired for Forge, so {pairing} works only when "
+                        "deck_ref is a deck id, URL or snapshot id.",
+                    )
+                report = await state.reports.run_proposal(
+                    _sub(), proposal_id, simulate=simulate, games=games, options=options, forge=forge
+                )
+            elif _looks_like_list(deck_ref):
+                if paired:
+                    raise DeckError(
+                        "invalid",
+                        f"A pasted list can't be paired for Forge, so {pairing} works only when deck_ref "
+                        "is a deck id, URL or snapshot id.",
                     )
                 report = await state.reports.run_text(
-                    _sub(), deck_ref, simulate=simulate, games=games, options=options
+                    _sub(), deck_ref, simulate=simulate, games=games, options=options, forge=forge
                 )
             else:
                 # A snapshot id is one of the member's own snapshots (as compare_decks reads it),

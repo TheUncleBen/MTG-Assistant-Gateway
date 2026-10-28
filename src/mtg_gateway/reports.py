@@ -11,6 +11,7 @@ page and the assistant read back.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import re
@@ -21,9 +22,9 @@ from typing import Any
 
 from . import card_models, deck_stats
 from . import forge as forge_module
-from .archidekt import Deck
+from .archidekt import Deck, DeckCard
 from .db import Database, _like
-from .decklist import DecklistError, front_faces, parse_decklist, to_text
+from .decklist import DecklistError, ListCard, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .forge import (
     FINAL_STATES,
@@ -60,6 +61,13 @@ CREATE INDEX IF NOT EXISTS reports_deck ON reports(owner_sub, deck_id, taken_at)
 """
 
 MAX_REPORTS_PER_USER = 200
+# Reports of something other than a stored deck as it is (a pasted list, a waiting proposal's
+# resulting deck, a comparison) keep where they came from in their run settings (``source``): they
+# are listed like any report and filed under the deck they relate to, but never reused for a later
+# run of that deck, nor counted in its trend or as its newest Forge solo test.
+_OWN_DECK = "json_extract(stats_json, '$._run.source') IS NULL"
+SOURCE_LIST = "Pasted list"
+SOURCE_COMPARE = "Comparison"
 MAX_GAMES = 2000
 DEFAULT_GAMES = 300
 # Numbers the history page trends over time. Each is a path into the stats dict.
@@ -303,48 +311,130 @@ class ReportService:
         simulate: bool = True,
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
+        forge: bool | None = None,
     ) -> dict[str, Any]:
-        """The same validation and simulation for a pasted or hypothetical list. Returned, never
-        stored: reports are filed under an Archidekt deck, and a list has none to compare over
-        time (clone or create the deck to keep its reports)."""
+        """The same validation and simulation for a pasted or hypothetical list, stored as one of
+        the member's reports with the source "Pasted list" (filed under no deck, so no deck's trend
+        counts it). Its Forge games come as for a stored deck."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
-        options = sim_options(options)
         try:
             cards = parse_decklist(text)
         except DecklistError as exc:
             raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
         stats = deck_stats.compute_from_text(cards)
-        main = to_text(cards)
         commander = (stats.get("commanders") or [None])[0]
-        mode = sim_mode(stats)
-        goldfish: dict[str, Any] | None = None
-        validation: dict[str, Any] | None = None
-        if self.mf is not None:
-            # The research service reads names through Scryfall's collection lookup, which
-            # knows double-faced cards by their front face only.
-            sim_text, sim_commander = front_faces(main), _front_face(commander)
-            if mode != "constructed":  # a Commander check: see _run
-                validation = await self._mf(
-                    sub, "validate_decklist", {"decklist": sim_text, "commander": sim_commander}
-                )
-            if simulate and mode not in SIM_MODES:
-                goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
-            elif simulate:
-                names = [c.name for c in cards if c.zone == "main"]
-                # a pasted list's names are the member's own spelling: its models are never kept
-                goldfish = await self._solo_test(sub, sim_text, games, options, mode, names, keep=False)
-                _commander_aside(goldfish, sim_commander)
-                _keep_quantities(goldfish, sim_text)
-        return {
-            "stored": False,
-            "deck": {"id": None, "name": "Unnamed deck", "card_count": stats["card_count"]},
-            "stats": stats,
-            "goldfish": goldfish,
-            "validation": validation,
-            "has_goldfish": bool(goldfish and goldfish.get("ok")),
-            "decklist_text": main,
+        name = f"{SOURCE_LIST} ({_front_face(commander)})" if commander else SOURCE_LIST
+        out = await self.run_source(
+            sub,
+            list_deck(cards, name),
+            stats=stats,
+            source={"kind": "list", "label": SOURCE_LIST},
+            simulate=simulate,
+            games=games,
+            options=options,
+            forge=forge,
+        )
+        out["decklist_text"] = to_text(cards)
+        return out
+
+    async def run_source(
+        self,
+        sub: str,
+        deck: Deck,
+        *,
+        source: dict[str, Any],
+        stats: dict[str, Any] | None = None,
+        simulate: bool = True,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
+        forge: bool | None = None,
+        goldfish: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """A report of a deck that is not a stored deck as it is: a pasted list (``list_deck``), a
+        waiting proposal's resulting deck (``proposal_deck``) or a comparison's A/B (``goldfish``:
+        the A/B already run, kept as the report's simulation). Stored and kept like any report, with
+        ``source`` (its kind, label and what it relates to) in its settings; never a reused one."""
+        if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        out = await self._run(
+            sub,
+            deck.id,
+            simulate=simulate,
+            games=games,
+            options=sim_options(options),
+            forge=simulate if forge is None else bool(forge),
+            deck=deck,
+            stats=stats,
+            source=source,
+            goldfish=goldfish,
+        )
+        out["stored"] = True
+        return out
+
+    async def run_proposal(
+        self,
+        sub: str,
+        proposal_id: str,
+        *,
+        simulate: bool = True,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
+        forge: bool | None = None,
+    ) -> dict[str, Any]:
+        """A report of the deck as it would be once the member's waiting proposal is applied: the
+        deck as it is now plus the proposal's changes (a deck edit), or the new deck it makes. Filed
+        under that deck and linked from the proposal's page. Changes nothing on Archidekt."""
+        row = self.db.get_proposal(str(proposal_id or "").strip(), sub)
+        if row is None:
+            raise DeckError("not_found", "No such proposal for your account.")
+        if row.get("state") != "pending" or (row.get("expires_at") or 0) < time.time():
+            raise DeckError("invalid", PROPOSAL_NOT_WAITING)
+        deck, stats = await self.proposal_deck(sub, row)
+        no = row.get("board_no")
+        label = (f"Proposal #{no}" if no else "Proposal") + f" for “{row.get('deck_name') or deck.name}”"
+        source = {
+            "kind": "proposal",
+            "label": label,
+            "proposal_id": row["id"],
+            **({"board_no": no} if no else {}),
         }
+        return await self.run_source(
+            sub,
+            deck,
+            source=source,
+            stats=stats,
+            simulate=simulate,
+            games=games,
+            options=options,
+            forge=forge,
+        )
+
+    async def proposal_deck(self, sub: str, row: dict[str, Any]) -> tuple[Deck, dict[str, Any] | None]:
+        """The deck a waiting proposal would leave, and its statistics when Archidekt's card data
+        can't give them (None: computed from the deck): a deck edit on the deck as it is now
+        (``deck_after``), or a new deck's list."""
+        kind = row.get("kind") or "edit"
+        if kind == "edit":
+            from .decks import parse_changes
+
+            deck = await self.decks.get_any_deck(sub, str(row["deck_id"]))
+            return deck_after(deck, parse_changes(row["changes"], row_flags=True)), None
+        if kind == "create_deck":
+            changes = row.get("changes") if isinstance(row.get("changes"), dict) else {}
+            cards = [
+                ListCard(
+                    quantity=int(e.get("quantity") or 1),
+                    name=str(e.get("name") or ""),
+                    categories=[str(c) for c in e.get("categories") or []],
+                    zone="main" if e.get("in_deck", True) else "side",
+                )
+                for e in changes.get("cards") or []
+                if isinstance(e, dict) and e.get("name")
+            ]
+            name = str(changes.get("name") or row.get("deck_name") or "New deck")
+            return list_deck(cards, name), deck_stats.compute_from_text(cards)
+        raise DeckError("invalid", PROPOSAL_NOT_A_LIST)
 
     async def _run(
         self,
@@ -360,10 +450,13 @@ class ReportService:
         shared: dict[str, Any] | None = None,
         pair_with: str | Deck | None = None,
         pair_hold: PairHold | None = None,
+        stats: dict[str, Any] | None = None,
+        source: dict[str, Any] | None = None,
+        goldfish: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
-        latest = self._latest(sub, deck.id)
+        latest = self._latest(sub, deck.id) if source is None else None
         now = int(time.time())
         if (
             not options
@@ -389,7 +482,7 @@ class ReportService:
             out = self.get(sub, latest["id"])
             out["reused"] = True
             return out
-        stats = deck_stats.compute(deck)
+        stats = deck_stats.compute(deck) if stats is None else stats
         mode = sim_mode(stats)
         plays_forge = self.forge is not None and forge and mode == "commander"
         if pair_with is not None and not plays_forge:
@@ -398,10 +491,12 @@ class ReportService:
         # The other deck of a comparison is read now, before anything is stored and outside the
         # Forge start lock: a deck that can't be read stops the run with no report kept.
         other = await self.pair_deck(sub, pair_with) if pair_with is not None else None
-        goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
-        if self.mf is not None:
-            # Front faces only: see run_text.
+        if goldfish is not None:  # a comparison's A/B, already run: no second simulation
+            simulate = False
+        if self.mf is not None and goldfish is None:
+            # Front faces only: the research service reads names through Scryfall's collection
+            # lookup, which knows double-faced cards by their front face only.
             text = front_faces(deck_to_text(deck))
             commander = _front_face((stats.get("commanders") or [None])[0])
             # validate_decklist checks a Commander deck (100 cards, the commander's colors): a
@@ -414,7 +509,8 @@ class ReportService:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
                 names = [c.name for c in deck.cards if deck.in_deck(c)]
-                goldfish = await self._solo_test(sub, text, games, options, mode, names, keep=True)
+                # a list's or a proposal's names are the member's own spelling: no model is kept
+                goldfish = await self._solo_test(sub, text, games, options, mode, names, keep=source is None)
                 _commander_aside(goldfish, commander)
                 _keep_quantities(goldfish, text)
                 _stored_note(goldfish)
@@ -435,6 +531,7 @@ class ReportService:
                 "until_turn": options.get("until_turn"),
                 **({"snapshot_id": snapshot_id} if snapshot_id else {}),
                 **({"compare_of": compare_of} if compare_of else {}),
+                **({"source": source} if source else {}),
             },
         }
         # the Forge solo test is marked as coming from the start, so the report is not finished
@@ -485,7 +582,11 @@ class ReportService:
             c.execute(f"DELETE FROM reports WHERE {keep}", limit)
         for section in pruned_forge:  # an unfinished run goes with its report, as in delete()
             self._cancel_forge(section)
-        self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
+        self.db.audit(
+            "report_created",
+            sub=sub,
+            detail={"report_id": rid, "deck_id": deck.id, **({"source": source["kind"]} if source else {})},
+        )
         # Shielded: a request cancelled now (its client gone) still saves both Forge parts, so no
         # engine job is left that nobody would cancel. The task is held until it ends.
         task = asyncio.get_running_loop().create_task(
@@ -1555,7 +1656,7 @@ class ReportService:
     ) -> dict[str, Any] | None:
         """A paired goldfish A/B of two decklists (game for game under the same seeds, with the
         deltas' confidence intervals and significance), as the research service reports it.
-        Not stored: it is a comparison, not a report of one deck. None without the service.
+        Kept by compare_decks as a "Comparison" report (run_source). None without the service.
         ``modes`` is each list's ``sim_mode``: the A/B is refused when one is not simulated, or
         when a Commander deck is compared with a 60-card one."""
         if self.mf is None:
@@ -1671,7 +1772,7 @@ class ReportService:
             row = self.db._conn.execute(
                 "SELECT id, fingerprint, taken_at, goldfish_json, validation_json, forge_json, "
                 f"forge_solo_state, json_extract(stats_json, '$.{RUN_KEY}.mode') AS run_mode FROM reports "
-                "WHERE owner_sub = ? AND deck_id = ? "
+                f"WHERE owner_sub = ? AND deck_id = ? AND {_OWN_DECK} "
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, deck_id),
             ).fetchone()
@@ -1720,6 +1821,9 @@ class ReportService:
         out = self._summary(d)
         out["stats"] = {k: v for k, v in json.loads(d["stats_json"]).items() if k != RUN_KEY}
         out["goldfish"] = _compact(json.loads(d["goldfish_json"])) if d.get("goldfish_json") else None
+        if (out.get("source") or {}).get("kind") == "compare":
+            # the comparison's paired A/B, not one deck's solo test
+            out["comparison"], out["goldfish"] = out["goldfish"], None
         out["validation"] = _compact(json.loads(d["validation_json"])) if d.get("validation_json") else None
         forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
         out["forge"] = self._forge_view(sub, d["id"], forge) if isinstance(forge, dict) else None
@@ -1738,7 +1842,7 @@ class ReportService:
         with self.db._lock:
             row = self.db._conn.execute(
                 "SELECT id, forge_solo_json FROM reports WHERE owner_sub = ? AND deck_id = ? AND "
-                "forge_solo_state = 'done' ORDER BY taken_at DESC, rowid DESC LIMIT 1",
+                f"forge_solo_state = 'done' AND {_OWN_DECK} ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, str(deck_id)),
             ).fetchone()
         if row is None:
@@ -1766,6 +1870,21 @@ class ReportService:
             for rid, name, section in self._member_runs(sub)
         ]
 
+    def for_proposal(self, sub: str, proposal_id: str) -> list[dict[str, Any]]:
+        """The member's reports of one proposal's resulting deck (run_proposal), newest first: id,
+        when and overall status, for the proposal's page."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT * FROM reports WHERE owner_sub = ? AND "
+                f"json_extract(stats_json, '$.{RUN_KEY}.source.proposal_id') = ? "
+                "ORDER BY taken_at DESC, rowid DESC LIMIT 20",
+                (sub, str(proposal_id)),
+            ).fetchall()
+        return [
+            {k: s[k] for k in ("report_id", "taken_at", "status")}
+            for s in (self._summary(dict(r)) for r in rows)
+        ]
+
     def forge_only(self, sub: str, report_id: str) -> dict[str, Any]:
         """A report's Forge progress alone (get_deck_report view "forge"), for polling."""
         full = self.get(sub, report_id)
@@ -1785,7 +1904,10 @@ class ReportService:
         """The decks the member has reports for: id -> last known name."""
         with self.db._lock:
             rows = self.db._conn.execute(
-                "SELECT deck_id, deck_name FROM reports WHERE owner_sub = ? ORDER BY taken_at", (sub,)
+                # a deck's name from its own reports wins over a proposal's or a comparison's
+                "SELECT deck_id, deck_name FROM reports WHERE owner_sub = ? AND deck_id != '' "
+                f"ORDER BY {_OWN_DECK}, taken_at",
+                (sub,),
             ).fetchall()
         return {str(r["deck_id"]): str(r["deck_name"] or "") for r in rows}
 
@@ -1799,7 +1921,8 @@ class ReportService:
                 "json_extract(forge_solo_json, '$.result.games') AS solo_games, "
                 "goldfish_json IS NOT NULL AS g_has, json_extract(goldfish_json, '$.ok') AS g_ok, "
                 "validation_json IS NOT NULL AS v_has, json_extract(validation_json, '$.ok') AS v_ok, "
-                "json_extract(stats_json, '$.commanders') AS commanders FROM reports WHERE owner_sub = ? "
+                "json_extract(stats_json, '$.commanders') AS commanders, "
+                "json_extract(stats_json, '$._run.source.label') AS source FROM reports WHERE owner_sub = ? "
                 "ORDER BY taken_at DESC, rowid DESC",
                 (sub,),
             ).fetchall()
@@ -1831,6 +1954,7 @@ class ReportService:
                     ),
                     "forge_played": bool(forge and _forge_played(forge)),
                     "forge_state": (forge or {}).get("state"),
+                    "source_label": r["source"] or "",
                 }
             )
         return out
@@ -1879,7 +2003,8 @@ class ReportService:
         with self.db._lock:
             rows = self.db._conn.execute(
                 "SELECT id, taken_at, stats_json, goldfish_json, forge_json FROM reports "
-                "WHERE owner_sub = ? AND deck_id = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?",
+                f"WHERE owner_sub = ? AND deck_id = ? AND {_OWN_DECK} "
+                "ORDER BY taken_at DESC, rowid DESC LIMIT ?",
                 (sub, str(deck_id), limit),
             ).fetchall()
         out = []
@@ -1978,11 +2103,17 @@ class ReportService:
         solo = solo if isinstance(solo, dict) else None
         # No rules-engine games came or will come: not run, skipped, or the Forge run ended without games.
         preflight = forge is None or not _forge_played(forge)
+        run = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
+        source = run.get("source") if isinstance(run.get("source"), dict) else None
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
             "deck_name": d["deck_name"],
-            "deck_url": f"https://archidekt.com/decks/{d['deck_id']}",
+            # a pasted list (or a new deck's proposal) is no Archidekt deck: no link
+            "deck_url": f"https://archidekt.com/decks/{d['deck_id']}"
+            if str(d["deck_id"]).isdigit()
+            else None,
+            "source": source,
             "taken_at": d["taken_at"],
             "fingerprint": d["fingerprint"],
             "metrics": metrics,
@@ -1996,6 +2127,111 @@ class ReportService:
             "engine_label": PREFLIGHT_ONLY if preflight else "Forge rules engine",
             "settings": run_settings(stats, goldfish, forge),
         }
+
+
+PROPOSAL_NOT_WAITING = (
+    "That proposal is no longer waiting, so its resulting deck can't be simulated. Run the report on "
+    "the deck itself."
+)
+PROPOSAL_NOT_A_LIST = (
+    "Only a proposal that changes a deck's cards, or makes a new deck, can be simulated. Run the "
+    "report on the deck itself."
+)
+
+
+def list_deck(cards: list[ListCard], name: str) -> Deck:
+    """A pasted list (or a new deck's list) as a deck with no Archidekt id, for a report: each line
+    a row with its categories, a sideboard or maybeboard line in a category the deck leaves out."""
+    rows: list[DeckCard] = []
+    outside = {"Maybeboard", "Sideboard"}
+    for c in cards:
+        if not c.name:
+            continue
+        cats = list(c.categories) if c.zone == "main" else [c.board or "Sideboard", *c.categories]
+        if c.zone != "main":
+            outside.add(cats[0])
+        rows.append(
+            DeckCard(
+                relation_id=None,
+                card_id=None,
+                name=c.name,
+                quantity=c.quantity,
+                categories=cats,
+                modifier=c.finish,
+                set_code=c.set_code,
+                collector_number=c.collector_number,
+            )
+        )
+    return Deck(
+        id="",
+        name=name,
+        owner="",
+        updated_at="",
+        cards=rows,
+        categories=[{"name": n, "includedInDeck": False} for n in sorted(outside)],
+        raw={},
+    )
+
+
+def deck_after(deck: Deck, changes: list[Any]) -> Deck:
+    """The deck as it would be once a proposal's card changes are applied: each card's copies as
+    the review counts them after (decks.plan_zones), each row's new categories (a move in or out of
+    the deck, a commander change) and the added cards as new rows. A copy of ``deck``; an added card
+    has no card data from Archidekt yet, so the statistics count it by name only."""
+    from .decks import _all_categories, category_plan_rows, plan_zones, side_category_for
+
+    _before, after, _rows, _before_side, after_side = plan_zones(deck, changes)
+    cats_want, _lines = category_plan_rows(deck, changes)
+    out: list[DeckCard] = []
+    for zone, want in (("main", after), ("side", after_side)):
+        by_name: dict[str, list[DeckCard]] = {}
+        for c in deck.cards_in(zone):
+            by_name.setdefault(c.name, []).append(c)
+        for name, rows in by_name.items():
+            left = want.get(name, sum(r.quantity for r in rows))
+            for r in rows:
+                q = left if r is rows[-1] else min(r.quantity, left)
+                left -= q
+                if q > 0:
+                    cats = (
+                        cats_want.get(r.relation_id, r.categories)
+                        if r.relation_id is not None
+                        else r.categories
+                    )
+                    out.append(dataclasses.replace(r, quantity=q, categories=list(cats)))
+        have = {n.casefold() for n in by_name}
+        for name, q in want.items():
+            if q <= 0 or name.casefold() in have:
+                continue
+            ch = next(
+                (c for c in changes if c.action == "add" and c.card_name.casefold() == name.casefold()), None
+            )
+            if ch is None:
+                new_cats: list[str] = []
+            elif zone == "side":
+                new_cats = [side_category_for(deck, ch)]
+            else:
+                new_cats = list(_all_categories([ch]))
+            out.append(
+                DeckCard(
+                    relation_id=None,
+                    card_id=None,
+                    name=name,
+                    quantity=q,
+                    categories=new_cats,
+                    modifier=(ch.finish or "") if ch else "",
+                    set_code=(ch.set_code or "") if ch else "",
+                    collector_number=(ch.collector_number or "") if ch else "",
+                )
+            )
+    return dataclasses.replace(deck, cards=out)
+
+
+def source_label(r: dict[str, Any]) -> str:
+    """What a report was run on when it is not a stored deck as it is: "Pasted list", "Proposal
+    #N for “DECK”" or "Comparison"; "" for a deck's own report."""
+    src = r.get("source")
+    return str(src.get("label") or "") if isinstance(src, dict) else str(r.get("source_label") or "")
 
 
 PAIR_SETTING_UP = (

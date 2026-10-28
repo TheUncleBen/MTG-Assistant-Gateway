@@ -544,6 +544,8 @@ def add_deck_tool_routes(
         # the newest three decks tested: the lethal turn of each one's newest report and the one before
         two: dict[str, list[dict[str, Any]]] = {}
         for r in index:
+            if r.get("source_label"):  # a list's, a proposal's or a comparison's report: no deck trend
+                continue
             if r["deck_id"] in two or len(two) < 3:
                 two.setdefault(r["deck_id"], [])
                 if len(two[r["deck_id"]]) < 2:

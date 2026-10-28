@@ -157,8 +157,9 @@ async def test_only_a_stored_report_points_at_its_stored_copy(stack: Stack) -> N
             {"deck_ref": "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n99 Island", "games": 20},
         )
     )
-    assert pasted["stored"] is False and FULL_REPORT in pasted["goldfish"]["text"], pasted["goldfish"]
-    assert "History" not in json.dumps(pasted["goldfish"]), pasted["goldfish"]
+    # since 0.7.46 a pasted list's run is a stored report too, so it points at its copy as well
+    assert pasted["stored"] is True, pasted
+    assert f"{FULL_REPORT} {STORED_NOTE}" in pasted["goldfish"]["text"], pasted["goldfish"]
     assert "History" not in rewrite_text('Full report: goldfish_report("x")')
 
 

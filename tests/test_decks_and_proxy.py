@@ -1764,7 +1764,7 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(
     # Pasted lists: 60 cards plays, 40 is refused, a Commander list keeps its commander game.
     sixty = "4 Lightning Bolt\n20 Mountain\n36 Goblin Guide\nSideboard\n2 Smash to Smithereens\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": sixty, "games": 20}))
-    assert rep["ok"] and rep["stored"] is False, rep
+    assert rep["ok"] and rep["stored"] is True and rep["source"]["label"] == "Pasted list", rep
     assert SIM_CALLS[-1][1]["constructed"] is True and "Smash" not in str(SIM_CALLS[-1][1]["deck"])
     assert rep["validation"] is None, rep["validation"]
     short = "4 Lightning Bolt\n20 Mountain\n16 Goblin Guide\n"
@@ -1815,18 +1815,23 @@ async def test_another_users_decks_are_the_public_listing_only(stack: Stack) -> 
     assert set(ark.list_auth_schemes) == {""}
 
 
-async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
+async def test_pasted_lists_are_reported_and_kept_as_pasted_lists(stack: Stack) -> None:
     """run_deck_report and deck_stats take a pasted list as well as a deck: the list gets the same
-    validation and goldfish run and comes back with stored=false, and History stays as it was
-    (0.7.1's goldfish_run could simulate a pasted list; its owner keeps that)."""
+    validation and goldfish run (0.7.1's goldfish_run could simulate a pasted list; its owner keeps
+    that), and since 0.7.46 the run is kept as one of the member's reports, labelled "Pasted
+    list" and filed under no deck (owner feedback F1: every simulation is a report)."""
     h = stack.h
     token = await linked_user(stack)
     before = structured(await call(h, token, "list_deck_reports", {}))["reports"]
     text = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
-    assert rep["ok"] and rep["stored"] is False and rep["deck"]["id"] is None, rep
-    # A pasted list has no name: it reads "Unnamed deck", like any deck without one.
-    assert rep["deck"]["name"] == "Unnamed deck", rep["deck"]
+    assert rep["ok"] and rep["stored"] is True and rep["report_id"], rep
+    assert rep["deck_id"] == "" and rep["deck_url"] is None, rep
+    assert rep["source"] == {"kind": "list", "label": "Pasted list"}, rep["source"]
+    # A pasted list has no name: it reads as the pasted list of its commander.
+    assert rep["deck_name"] == "Pasted list (Aesi, Tyrant of Gyre Strait)", rep["deck_name"]
+    kept = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
+    assert kept["ok"] and kept["goldfish"]["ok"] and kept["source"]["label"] == "Pasted list", kept
     assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
     assert rep["validation"]["ok"] is True, rep["validation"]
     assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
@@ -1842,7 +1847,7 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     assert gf["ok"] and "Commander: 1 Enduring Angel [Commander] |" in gf["text"], gf
     assert "Enduring Angel // Angelic Enforcer" in rep["decklist_text"]  # the member's own list keeps both
     after = structured(await call(h, token, "list_deck_reports", {}))["reports"]
-    assert len(after) == len(before)
+    assert len(after) == len(before) + 2 and {r["source"]["kind"] for r in after[:2]} == {"list"}
     # No commander and under 60 cards: the structural checks still come back, the simulation is
     # refused as such (60 or more is a 60-card game, see test_sixty_card_decks_...).
     plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n26 Grizzly Bears\n"}))
