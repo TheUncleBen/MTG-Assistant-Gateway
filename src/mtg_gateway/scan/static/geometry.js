@@ -43,7 +43,10 @@
     return dir === 'h' ? g[(y + 1) * w + x] - g[(y - 1) * w + x] : g[y * w + x + 1] - g[y * w + x - 1];
   }
 
-  /* Fit v = a*u + b to points, dropping outliers twice. Returns null when too few points agree. */
+  /* Fit v = a*u + b to points, dropping outliers twice. Returns null when too few points agree.
+     Points further than LINE_TOL grey pixels (about 0.6% of the 480 px copy) from the line are
+     never counted as agreeing: a card's edge is straight to within a pixel or two at that size. */
+  const LINE_TOL = 3;
   function fitLine(pts, minKeep) {
     let keep = pts;
     let a = 0, b = 0;
@@ -55,7 +58,9 @@
       a = (n * suv - su * sv) / den; b = (sv - a * su) / n;
       const res = keep.map((p) => Math.abs(p.v - (a * p.u + b))).sort((x, y) => x - y);
       const mad = res[Math.floor(res.length / 2)] || 0;
-      const tol = Math.max(1.5, 2.5 * mad);
+      // Capped: on texture (wood grain, a playmat) the first steps lie anywhere in the band, their
+      // spread is wide, and an uncapped tolerance would call that scatter a straight edge.
+      const tol = Math.min(LINE_TOL, Math.max(1.5, 2.5 * mad));
       const next = keep.filter((p) => Math.abs(p.v - (a * p.u + b)) <= tol);
       if (next.length === keep.length) break;
       keep = next;
@@ -179,27 +184,17 @@
     return { w: source.videoWidth || source.naturalWidth || source.width, h: source.videoHeight || source.naturalHeight || source.height };
   }
 
-  /* rect: where the card is expected in source pixels (the guide box), or null to search the
-     whole picture. Returns the flattened card (CARD_W x CARD_H) with its corners in source pixels. */
-  function flattenCard(source, rect, opts) {
-    opts = opts || {};
-    const { w: sw, h: sh } = sizeOf(source);
-    if (!sw || !sh) return null;
-    const img = grey(source, sw, sh, opts.maxWidth || 480);
-    const s = img.scale;
-    const r = rect
-      ? { x: rect.x * s, y: rect.y * s, w: rect.w * s, h: rect.h * s }
-      : { x: img.w * 0.05, y: img.h * 0.05, w: img.w * 0.9, h: img.h * 0.9 };
-    const bandFrac = rect ? (opts.band || 0.2) : 0.3;
-    const minStep = opts.minStep || 18;
-    const top = findEdge(img, 'top', r, r.h * bandFrac, minStep);
-    const bottom = findEdge(img, 'bottom', r, r.h * bandFrac, minStep);
-    const left = findEdge(img, 'left', r, r.w * bandFrac, minStep);
-    const right = findEdge(img, 'right', r, r.w * bandFrac, minStep);
-    if (!top || !bottom || !left || !right) return null;
+  /* The card's outline inside r (grey pixels), each edge searched in a band of bandFrac of r's size
+     around r's side: four straight edges meeting in a convex quad about the shape of a card, its
+     area within 0.3 to 1.6 times expectedArea. Returns { corners, score, area } in grey pixels or null. */
+  function quadIn(img, r, bandFrac, minStep, expectedArea) {
+    const top = findEdge(img, 'top', r, r.h * bandFrac, minStep); if (!top) return null;
+    const bottom = findEdge(img, 'bottom', r, r.h * bandFrac, minStep); if (!bottom) return null;
+    const left = findEdge(img, 'left', r, r.w * bandFrac, minStep); if (!left) return null;
+    const right = findEdge(img, 'right', r, r.w * bandFrac, minStep); if (!right) return null;
     const tl = cross(top, left), tr = cross(top, right), br = cross(bottom, right), bl = cross(bottom, left);
     if (!tl || !tr || !br || !bl) return null;
-    const corners = [tl, tr, br, bl].map((p) => ({ x: p.x / s, y: p.y / s }));
+    const corners = [tl, tr, br, bl];
     // Sanity: a convex quad about the shape of a card, not a sliver or the whole frame.
     const wTop = dist(corners[0], corners[1]), wBot = dist(corners[3], corners[2]);
     const hL = dist(corners[0], corners[3]), hR = dist(corners[1], corners[2]);
@@ -207,9 +202,54 @@
     if (!(aspect > 0.55 && aspect < 0.95)) return null;
     if (Math.min(wTop, wBot) / Math.max(wTop, wBot) < 0.7 || Math.min(hL, hR) / Math.max(hL, hR) < 0.7) return null;
     if (!convex(corners)) return null;
-    const expectedArea = rect ? rect.w * rect.h : sw * sh * 0.81;
     const area = polyArea(corners);
     if (area < expectedArea * 0.3 || area > expectedArea * 1.6) return null;
+    return { corners, area, score: Math.min(top.coverage, bottom.coverage, left.coverage, right.coverage) };
+  }
+
+  /* A card anywhere in the picture, at any size from about a quarter of the picture's width up:
+     the outline test above, run over card-shaped windows of falling size laid over the picture
+     in steps of a fifth of the window, so some window has each edge of the card inside its band.
+     The largest outline found wins (a window inside the card can only find the card's inner
+     frame, which is smaller than the card). */
+  const SEARCH_SIZES = [0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.31, 0.26];
+  function searchCard(img, minStep) {
+    const fitW = Math.min(img.w, img.h * 63 / 88);
+    let best = null;
+    for (const f of SEARCH_SIZES) {
+      const cw = fitW * f, ch = cw * 88 / 63;
+      const nx = Math.max(1, Math.ceil((img.w - cw) / (cw * 0.2))), ny = Math.max(1, Math.ceil((img.h - ch) / (ch * 0.2)));
+      for (let j = 0; j <= ny; j++) {
+        for (let i = 0; i <= nx; i++) {
+          const r = { x: (img.w - cw) * i / nx, y: (img.h - ch) * j / ny, w: cw, h: ch };
+          const q = quadIn(img, r, 0.2, minStep, cw * ch);
+          if (q && (!best || q.area > best.area * 1.02 || (q.area >= best.area * 0.98 && q.score > best.score))) best = q;
+        }
+      }
+    }
+    return best;
+  }
+
+  /* rect: where the card is expected in source pixels (the guide box), or null to search the
+     whole picture: first for a card filling most of it, then for a smaller one anywhere in it.
+     Returns the flattened card (CARD_W x CARD_H) with its corners in source pixels. */
+  function flattenCard(source, rect, opts) {
+    opts = opts || {};
+    const { w: sw, h: sh } = sizeOf(source);
+    if (!sw || !sh) return null;
+    const img = grey(source, sw, sh, opts.maxWidth || 480);
+    const s = img.scale;
+    const minStep = opts.minStep || 18;
+    let q;
+    if (rect) {
+      q = quadIn(img, { x: rect.x * s, y: rect.y * s, w: rect.w * s, h: rect.h * s }, opts.band || 0.2, minStep,
+        rect.w * rect.h * s * s);
+    } else {
+      q = quadIn(img, { x: img.w * 0.05, y: img.h * 0.05, w: img.w * 0.9, h: img.h * 0.9 }, 0.3, minStep, img.w * img.h * 0.81);
+      if (!q) q = searchCard(img, minStep);
+    }
+    if (!q) return null;
+    const corners = q.corners.map((p) => ({ x: p.x / s, y: p.y / s }));
     const H = homography(corners, CARD_W, CARD_H);
     if (!H) return null;
     const xs = corners.map((c) => c.x), ys = corners.map((c) => c.y);
@@ -217,8 +257,7 @@
     const pad = 0.02 * Math.max(bx1 - bx0, by1 - by0);
     const box = { x: bx0 - pad, y: by0 - pad, w: bx1 - bx0 + 2 * pad, h: by1 - by0 + 2 * pad };
     const warped = warp(source, sw, sh, H, CARD_W, CARD_H, box);
-    const score = Math.min(top.coverage, bottom.coverage, left.coverage, right.coverage);
-    return { canvas: warped.canvas, corners, score, width: CARD_W, height: CARD_H, sampled: warped.sampled };
+    return { canvas: warped.canvas, corners, score: q.score, width: CARD_W, height: CARD_H, sampled: warped.sampled };
   }
 
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }

@@ -694,10 +694,12 @@
   function flatTitleRegion(w, h) { return { x: w * 0.045, y: h * 0.035, w: w * 0.86, h: h * 0.085 }; }
 
   /* Find the card's edges and flatten it; null when no convincing outline is found, in which
-     case the caller reads the guide-box regions of the raw frame as before. */
+     case the caller reads the guide-box regions of the raw frame as before. With a guide box the
+     card is looked for around the box first, then anywhere in the picture: a card held further
+     back than the box (a phone whose lens cannot focus that close) is smaller than the box. */
   function flattenCard(source, rect) {
     if (!G || window.__scanNoFlatten) return null;
-    try { return G.flattenCard(source, rect); } catch (e) { return null; }
+    try { return G.flattenCard(source, rect) || (rect ? G.flattenCard(source, null) : null); } catch (e) { return null; }
   }
   function flatRegions(flat) {
     return { title: flatTitleRegion(flat.width, flat.height), info: infoRegionOf(0, 0, flat.width, flat.height) };
