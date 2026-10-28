@@ -86,6 +86,8 @@ button.danger:disabled{color:var(--red)}
 .card.stub .sum,.card.stub ul.changes,.card.stub .note,.card.stub .foot,.card.stub .also,.card.stub .why,
 .card.stub .notsent{display:none}
 .card.stub .status{margin-top:6px}
+/* Open in the app or browser: a grey capsule (_base.css a.cap) under the status line, on a one-line card too */
+.open-row{margin-top:10px}
 .card.stub .head h1{font-size:1rem}
 </style>
 </head>
@@ -108,6 +110,7 @@ button.danger:disabled{color:var(--red)}
     <div class="actions"><button type="button" class="danger" id="reject-go">Reject this proposal</button><button type="button" id="reject-cancel">Keep it open</button></div>
   </div>
   <div class="status hidden" id="status" role="status" aria-live="polite" tabindex="-1"></div>
+  <div class="open-row hidden" id="open-row"></div>
   <ul class="notsent hidden" id="not-sent" aria-label="Not sent"></ul>
 </div>
 <script>
@@ -664,7 +667,7 @@ button.danger:disabled{color:var(--red)}
   function renderRows(list, rows, limit, total, summary) {
     total = Math.max(rows.length, Number(total) || 0);
     // a card that holds only the first rows counts each group from the whole proposal's summary
-    var kinds = rows.length < total && summary && summary.groups && typeof summary.groups === "object" ? summary.groups : null;
+    var kinds = rows.length < total && summary && summary.groups || null;
     // Grouped by kind (GROUPS order, stable within a group); only the first ``limit`` rows are
     // drawn, then one "Show all" button draws the rest. Thumbnails only for drawn rows.
     var sorted = rows.map(function (r, i) { return [groupOf(r.kind), i, r]; }).sort(function (a, b) {
@@ -675,7 +678,7 @@ button.danger:disabled{color:var(--red)}
     for (var k = 0; k < sorted.length && shown < limit; k++) {
       var r = sorted[k][2], g = sorted[k][0];
       if (rows.length > 1 && g !== lastGroup) {
-        var count = kinds ? Object.keys(kinds).reduce(function (n, kd) { return groupOf(kd) === g ? n + (Number(kinds[kd]) || 0) : n; }, 0)
+        var count = kinds ? Object.keys(kinds).reduce(function (n, k) { return groupOf(k) === g ? n + (+kinds[k] || 0) : n; }, 0)
           : sorted.filter(function (x) { return x[0] === g; }).length;
         list.appendChild(el("li", "group", (g < GROUPS.length ? GROUPS[g][1] : "Other") + " (" + count + ")"));
         lastGroup = g;
@@ -759,11 +762,13 @@ button.danger:disabled{color:var(--red)}
       undo.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
       a.appendChild(undo);
     }
+    var openRow = $("open-row"); openRow.replaceChildren();
     if (p.review_url) {
-      var rv = el("a", "link", "Open in the app or browser"); rv.href = "#";
+      var rv = el("a", "cap", "Open in the app or browser"); rv.href = "#";
       rv.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
-      a.appendChild(rv);
+      openRow.appendChild(rv);
     }
+    openRow.className = "open-row" + (p.review_url ? "" : " hidden");
     reportSize();
   }
 
