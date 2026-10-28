@@ -47,6 +47,9 @@ MAX_PREFIX_LOOKUPS = 5
 MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
+# The printing picker's lookups wait this long for one of the account's places before "busy" (a
+# deck page opens several at once)
+LOOKUP_WAIT_SECONDS = 4.0
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
 MIN_PREFIX = 4
@@ -484,6 +487,15 @@ class ScanService:
                 self._lookups[owner] = left
             else:
                 self._lookups.pop(owner, None)
+
+    async def _free_slot(self, owner: str | None) -> None:
+        """Wait up to LOOKUP_WAIT_SECONDS for one of ``owner``'s lookup places (``_lookup_slot``
+        then takes it, with nothing awaited in between); after that, ``_lookup_slot`` says busy."""
+        if owner is None:
+            return
+        end = time.monotonic() + LOOKUP_WAIT_SECONDS
+        while self._lookups.get(owner, 0) >= MAX_LOOKUPS_PER_USER and time.monotonic() < end:
+            await asyncio.sleep(0.05)
 
     async def _resolve(self, inputs: list[CardInput]) -> list[Resolution]:
         # The wall-clock budget runs from the start of the call, batched pass included.
@@ -941,6 +953,7 @@ class ScanService:
             if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)) or num != "1":
                 raise ScanError("invalid", "set and number must name one printing, on page 1")
             picks.update(set_code=code, number=cn)
+        await self._free_slot(owner)
         try:
             with self._lookup_slot(owner):
                 out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
@@ -951,6 +964,31 @@ class ScanService:
             if exc.kind in ("unavailable", "rate_limited", "not_found"):
                 raise ScanError(exc.kind, str(exc)) from exc
             raise ScanError("unavailable", str(exc)) from exc
+
+    async def printing(self, set_code: str, number: str, *, owner: str | None = None) -> dict[str, Any]:
+        """One printing by set code and collector number, as a card summary: how the printing
+        picker finds a deck row's own card (a token named "Goblin" is that token, never a card
+        whose name starts the same). ``not_found`` when Scryfall has no such printing."""
+        code = str(set_code or "").strip().lower()
+        cn = str(number or "").strip()
+        if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)):
+            raise ScanError("invalid", "set and number must name one printing")
+        key = f"print:{code}:{cn.lower()}"
+        if (hit := self.scryfall.cards.get(key)) is not None:
+            return hit
+        await self._free_slot(owner)
+        try:
+            with self._lookup_slot(owner):
+                found, _ = await self.scryfall.collection([{"set": code, "collector_number": cn}])
+        except ScryfallError as exc:
+            if exc.kind in ("unavailable", "rate_limited"):
+                raise ScanError(exc.kind, str(exc)) from exc
+            raise ScanError("unavailable", str(exc)) from exc
+        if not found:
+            raise ScanError("not_found", f"Scryfall has no printing {code.upper()} {cn}")
+        summary = summarize(found[0])
+        self.scryfall.cards.put(key, summary)
+        return summary
 
     async def named_raw(self, name: str, *, owner: str | None = None) -> dict[str, Any]:
         """The whole Scryfall object of one card by exact name (rules text included), through the

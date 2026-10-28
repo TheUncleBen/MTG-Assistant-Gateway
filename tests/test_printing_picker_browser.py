@@ -1160,3 +1160,56 @@ def test_a_resting_pointer_never_takes_the_keyboards_place_in_the_preview(server
         assert "Limited Edition Alpha" in page.locator(".pppreview h3").inner_text()
         assert errors == []
         browser.close()
+
+
+def test_the_picker_finds_the_rows_own_printing_and_waits_out_a_busy_answer(server: Server) -> None:
+    """The deck row's own printing (CMR 472) names its card: no lookup by name. A busy answer
+    (the account's other lookups) is asked again after a moment instead of failing, and an
+    answer that keeps failing says why in plain words, with a Retry button that loads the list."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    busy = json.dumps({"ok": False, "error": "busy", "message": "other card lookups are still running"})
+    down = json.dumps({"ok": False, "error": "unavailable", "message": "Scryfall did not answer"})
+    prints = re.compile(r"/scan/api/prints\?")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        asked: list[str] = []
+        page.on("request", lambda r: asked.append(r.url) if "/scan/api/" in r.url else None)
+        left = {"busy": 1}
+
+        def once_busy(route) -> None:
+            if left["busy"]:
+                left["busy"] -= 1
+                route.fulfill(status=429, content_type="application/json", body=busy)
+            else:
+                route.continue_()
+
+        page.route(prints, once_busy)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_picker(page, card)
+        assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
+        assert page.locator(".printpick .ppstatus.error").count() == 0
+        assert any("/scan/api/printing?set=cmr&number=472" in u for u in asked), asked
+        assert not any("/scan/api/peek" in u for u in asked), asked
+        assert sum("/scan/api/prints?" in u for u in asked) >= 2, asked
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        # Scryfall down (a fresh page: the picker keeps the lists it read): the reason in plain
+        # words, and Retry loads the list once it answers
+        page.unroute(prints)
+        page.route(prints, lambda r: r.fulfill(status=503, content_type="application/json", body=down))
+        page.reload(wait_until="networkidle")
+        _open_menu(page, card)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        status = page.locator(".printpick .ppstatus.error")
+        status.wait_for(timeout=5000)
+        assert "Printings could not be loaded. Scryfall is not answering right now." in status.inner_text()
+        page.unroute(prints)
+        status.get_by_role("button", name="Retry").click()
+        page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+        assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
+        assert errors == []
+        browser.close()
