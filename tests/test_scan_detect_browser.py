@@ -4,7 +4,8 @@ A phone photo seldom has the card filling the frame: a 12 MP picture (4000 x 300
 a table usually shows the card at a third to a half of the picture's width, off centre, slightly
 turned. These tests draw such pictures, put them through the Photo button and the scan hooks the
 Android app uses, and check that the card's outline is found where it really is and that the strip
-handed to text recognition is the card's title, not the table. Text
+handed to text recognition is the card's title, not the table. A picture the browser cannot open
+(HEIC, the iPhone and Samsung "high efficiency" format) says so instead of a bare failure. Text
 recognition is stood in for, so no OCR assets are needed. Skipped without a Chromium build."""
 
 from __future__ import annotations
@@ -196,5 +197,65 @@ def test_a_shot_with_the_card_smaller_than_the_dashed_box_still_finds_it(server,
         tol = 0.02 * gw * 0.5
         for (ex, ey), c in zip(corners, got["corners"], strict=True):
             assert abs(ex - c["x"]) < tol and abs(ey - c["y"]) < tol, (corners, got)
+        assert errors == []
+        browser.close()
+
+
+def test_a_picture_the_browser_cannot_open_says_why(server) -> None:  # noqa: F811
+    """A HEIC photo (no browser engine on Android decodes it) gets a plain reason and a way out."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    sid = server.sign_in()
+    heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + bytes(64)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, exe, server, sid)
+        page.wait_for_function("() => /camera/i.test(document.querySelector('#cam-status').textContent)")
+        page.evaluate("() => { document.querySelector('#cam-status').textContent = ''; }")
+        page.set_input_files(
+            "#photo-file", files=[{"name": "IMG_0001.HEIC", "mimeType": "image/heic", "buffer": heic}]
+        )
+        status = page.locator("#cam-status")
+        page.wait_for_function(
+            "() => /photo|picture/i.test(document.querySelector('#cam-status').textContent)"
+        )
+        text = status.text_content() or ""
+        assert "HEIC" in text and "JPEG" in text, text
+        assert errors == []
+        browser.close()
+
+
+def test_a_failed_read_says_which_step_failed(server, tmp_path: Path) -> None:  # noqa: F811
+    """No outline at all and an outline whose name will not read are different problems, and the
+    status line says which one it was, instead of one "could not read a name" for both."""
+    from PIL import Image
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    card = tmp_path / "card.jpg"
+    card_photo(card, "Sol Ring")
+    photo = tmp_path / "card-on-table.jpg"
+    scene(card, photo, (3000, 4000), card_corners(1500, 2000, 1200, 0.02))
+    table = tmp_path / "table.jpg"
+    Image.new("RGB", (3000, 4000), WOOD).save(table, "JPEG", quality=85)
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, exe, server, sid)
+        page.wait_for_function("() => /camera/i.test(document.querySelector('#cam-status').textContent)")
+        # Text recognition reads nothing at all.
+        page.evaluate(
+            "() => { window.__scanOcrOverride = async () => ({text: '', confidence: 0, words: []}); }"
+        )
+        said = []
+        for pic in (table, photo):
+            page.evaluate("() => { document.querySelector('#cam-status').textContent = ''; }")
+            page.set_input_files("#photo-file", str(pic))
+            page.wait_for_function(
+                "() => /^(Could not|Found)/.test(document.querySelector('#cam-status').textContent)"
+            )
+            said.append(page.locator("#cam-status").text_content() or "")
+        assert said[0].startswith("Could not find the card’s edges"), said
+        assert "plain background" in said[0], said
+        assert said[1].startswith("Found the card but could not read its name"), said
         assert errors == []
         browser.close()
