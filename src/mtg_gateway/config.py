@@ -223,9 +223,10 @@ class Settings:
     archidekt_user_agent: str = (
         "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
     )
-    # Gentle on Archidekt (docs/DEPLOY.md "Archidekt request limits"): every request, whoever
-    # asks, waits at least archidekt_min_interval after the previous one, and no more than
-    # archidekt_max_per_minute go out in any 60 seconds.
+    # Gentle on Archidekt: every request, whoever asks, starts at least archidekt_min_interval
+    # after the previous one started, at most two are out at once, and no more than
+    # archidekt_max_per_minute start in any 60 seconds, a sixth of them kept for members' pages
+    # (archidekt.Pacer).
     archidekt_min_interval: float = 1.0
     archidekt_max_per_minute: int = 30
     # GETs that time out or get a 5xx are retried this many times, after a random wait of up to

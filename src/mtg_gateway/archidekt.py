@@ -934,66 +934,146 @@ class TurnLock:
         self._held = False
 
 
+# At most this many calls are out at Archidekt at once, and background work (the deck sync,
+# assistants, applies) has at most MAX_IN_FLIGHT - 1 of them, so a member's page always has a slot
+# and never waits behind a slow background answer.
+MAX_IN_FLIGHT = 2
+# A sixth of the per-minute cap is kept for the reads of a member's own pages: background work may
+# use the rest, so a long apply or sync never leaves a page waiting for the next minute.
+PAGE_SHARE = 6
+
+
 class Pacer:
-    """Global request pacing shared by every user: one call at a time, a minimum
-    gap between calls, at most ``max_per_minute`` calls in any 60 seconds (0: no
-    such cap), Retry-After respected, and a breaker that opens for a minute after
-    five consecutive failures. A call past the per-minute cap waits for a slot
-    rather than failing, so a long apply slows down instead of stopping halfway.
-    A call made for a member's page (``page_turn``) goes before the waiting calls that are not."""
+    """Global request pacing shared by every user: the starts of calls at least ``min_interval``
+    apart, at most MAX_IN_FLIGHT calls out at once (background work one fewer), at most
+    ``max_per_minute`` calls started in any 60 seconds (0: no such cap) with a share of them kept
+    for pages, Retry-After respected, and a breaker that opens for a minute after five consecutive
+    failures. A call past the per-minute cap waits for a slot rather than failing, so a long apply
+    slows down instead of stopping halfway. A call made for a member's page (``page_turn``) goes
+    before the waiting calls that are not.
+
+    The pacer's turn is held only while a call waits for its start, never while Archidekt answers:
+    a slow answer to one call does not hold up the start of the next."""
 
     MAX_RETRY_AFTER = 120.0  # a larger (or garbled) Retry-After must not stall every user for longer
     WINDOW = 60.0
 
-    def __init__(self, min_interval: float, max_per_minute: int = 0):
+    def __init__(self, min_interval: float, max_per_minute: int = 0, max_in_flight: int = MAX_IN_FLIGHT):
         self.min_interval = min_interval
         self.max_per_minute = max(0, int(max_per_minute))
+        self.max_in_flight = max(1, int(max_in_flight))
+        # the calls of the per-minute cap only a page's read may use
+        self.page_reserve = self.max_per_minute // PAGE_SHARE
         self._sent: deque[float] = deque()  # start times of the calls in the last WINDOW seconds
         self._lock = TurnLock()
         self._next_allowed = 0.0
         self._failures = 0
         self._open_until = 0.0
         self._retry_until = 0.0  # set by a 429's Retry-After: calls are refused until then
+        self._in_flight = 0
+        self._background_in_flight = 0
+        self._waiting = 0  # background calls waiting outside the turn for a slot or the cap
+        self._freed: asyncio.Future[None] | None = None  # resolved when a call ends
+
+    def turn(self, *, first: bool, page: bool) -> _PacerTurn:
+        """One call's turn: ``first`` puts it in the pages' line, ``page`` lets it use the slot and
+        the share of the per-minute cap kept for a member's page reads."""
+        return _PacerTurn(self, first=first, page=page)
 
     async def __aenter__(self) -> None:
-        await self._lock.acquire(first=page_turn.get())
-        try:
-            now = time.monotonic()
-            if now < self._open_until:
-                raise ArchidektError(
-                    "unavailable",
-                    "Archidekt requests are paused after repeated failures; try later",
-                    sent=False,
-                )
-            if now < self._retry_until:
-                wait = int(self._retry_until - now) + 1
-                raise ArchidektError(
-                    "rate_limited",
-                    f"Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for "
-                    f"{wait} second{'' if wait == 1 else 's'}. Try again after that.",
-                    sent=False,
-                    retry_after=self._retry_until - now,
-                )
-            if now < self._next_allowed:
-                await asyncio.sleep(self._next_allowed - now)
-            if self.max_per_minute:
-                now = time.monotonic()
-                while self._sent and now - self._sent[0] >= self.WINDOW:
-                    self._sent.popleft()
-                if len(self._sent) >= self.max_per_minute:
-                    await asyncio.sleep(self._sent[0] + self.WINDOW - now)
-                    self._sent.popleft()
-                self._sent.append(time.monotonic())
-        except BaseException:
-            # a cancelled or failed wait must never leave the shared lock held
-            self._lock.release()
-            raise
+        on_page = page_turn.get()
+        await self.enter(first=on_page, page=on_page)
 
     async def __aexit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: Any
     ) -> None:
-        self._next_allowed = time.monotonic() + self.min_interval
-        self._lock.release()
+        self.leave(page=page_turn.get())
+
+    def _refusal(self, now: float) -> ArchidektError | None:
+        if now < self._open_until:
+            return ArchidektError(
+                "unavailable",
+                "Archidekt requests are paused after repeated failures; try later",
+                sent=False,
+            )
+        if now < self._retry_until:
+            wait = int(self._retry_until - now) + 1
+            return ArchidektError(
+                "rate_limited",
+                f"Archidekt asked the gateway to slow down, so it is pausing its Archidekt requests for "
+                f"{wait} second{'' if wait == 1 else 's'}. Try again after that.",
+                sent=False,
+                retry_after=self._retry_until - now,
+            )
+        return None
+
+    def _cap_wait(self, now: float, page: bool) -> float:
+        """Seconds until the per-minute cap lets this call start (0: now)."""
+        if not self.max_per_minute:
+            return 0.0
+        while self._sent and now - self._sent[0] >= self.WINDOW:
+            self._sent.popleft()
+        limit = self.max_per_minute - (0 if page else self.page_reserve)
+        if len(self._sent) < limit:
+            return 0.0
+        return max(0.001, self._sent[len(self._sent) - limit] + self.WINDOW - now)
+
+    def _slot_free(self, page: bool) -> bool:
+        if self._in_flight >= self.max_in_flight:
+            return False
+        return page or self.max_in_flight == 1 or self._background_in_flight < self.max_in_flight - 1
+
+    async def _until_freed(self, timeout: float | None) -> None:
+        if self._freed is None or self._freed.done():
+            self._freed = asyncio.get_running_loop().create_future()
+        await asyncio.wait({self._freed}, timeout=timeout)
+
+    async def enter(self, *, first: bool, page: bool) -> None:
+        while True:
+            await self._lock.acquire(first=first)
+            try:
+                refused = self._refusal(time.monotonic())
+                if refused is not None:
+                    raise refused
+                wait = self._cap_wait(time.monotonic(), page)
+                if page:
+                    # a page waits in its turn: nothing but other pages goes before it meanwhile
+                    while not self._slot_free(page):
+                        await self._until_freed(None)
+                    if wait:
+                        await asyncio.sleep(wait)
+                elif wait or not self._slot_free(page):
+                    # background work waits outside the turn, so a page arriving meanwhile starts
+                    self._lock.release()
+                    self._waiting += 1
+                    try:
+                        await self._until_freed(wait or None)
+                    finally:
+                        self._waiting -= 1
+                    continue
+                now = time.monotonic()
+                if now < self._next_allowed:
+                    await asyncio.sleep(self._next_allowed - now)
+                now = time.monotonic()
+                if self.max_per_minute:
+                    self._sent.append(now)
+                self._next_allowed = now + self.min_interval
+                self._in_flight += 1
+                if not page:
+                    self._background_in_flight += 1
+            except BaseException:
+                # a cancelled or failed wait must never leave the shared turn held
+                self._lock.release()
+                raise
+            self._lock.release()
+            return
+
+    def leave(self, *, page: bool) -> None:
+        self._in_flight = max(0, self._in_flight - 1)
+        if not page:
+            self._background_in_flight = max(0, self._background_in_flight - 1)
+        if self._freed is not None and not self._freed.done():
+            self._freed.set_result(None)
 
     def retry_wait(self) -> float:
         """Seconds left of the pause a 429's Retry-After set (0 when none is running)."""
@@ -1002,7 +1082,7 @@ class Pacer:
     def busy(self) -> bool:
         """Whether a call is being sent or waiting its turn right now (the deck sync, sync.py,
         steps aside while one is)."""
-        return self._lock.locked()
+        return self._lock.locked() or self._in_flight > 0 or self._waiting > 0
 
     def paused(self) -> bool:
         """Whether calls are being refused right now (the breaker is open or a Retry-After is
@@ -1030,6 +1110,19 @@ class Pacer:
         if self._failures >= 5:
             self._open_until = time.monotonic() + 60
             self._failures = 0
+
+
+class _PacerTurn:
+    """``async with pacer.turn(...)``: one call's start and end in the shared Pacer."""
+
+    def __init__(self, pacer: Pacer, *, first: bool, page: bool):
+        self.pacer, self.first, self.page = pacer, first, page
+
+    async def __aenter__(self) -> None:
+        await self.pacer.enter(first=self.first, page=self.page)
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.pacer.leave(page=self.page)
 
 
 # Read caching. Anonymous reads of public decks and deck searches are cached for everyone.
@@ -1373,7 +1466,11 @@ class ArchidektClient(AccountRequests):
         params: dict[str, Any] | None,
         upload: tuple[bytes, str] | None = None,
     ) -> Any:
-        async with self.pacer:
+        # A member's page reading is the one kind of call the pacer keeps a slot and a share of the
+        # per-minute cap for; a write, or anything an apply sends, is background work.
+        on_page = page_turn.get()
+        reading = on_page and method == "GET" and patient.get() is None
+        async with self.pacer.turn(first=on_page, page=reading):
             self.stats["requests"] += 1
             try:
                 if upload is not None:
@@ -2129,7 +2226,8 @@ class ArchidektClient(AccountRequests):
         headers = {"Accept": "text/html", "User-Agent": self.user_agent}
         body = bytearray()
         too_big = False
-        async with self.pacer:
+        on_page = page_turn.get()
+        async with self.pacer.turn(first=on_page, page=on_page):
             self.stats["requests"] += 1
             try:
                 # read as it comes, so the size limit also bounds memory (security review F-04)
