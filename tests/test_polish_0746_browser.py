@@ -102,3 +102,35 @@ def test_account_rows_keep_label_and_value_apart_at_200_percent(chromium, server
         assert [r["label"] for r in rows] == ["Theme", "Layout"]
         assert all(not r["overlap"] and r["fits"] and r["inside"] for r in rows), rows
         assert page.evaluate(SCROLLS) == 0
+
+
+# -- the review page's facts at large text on the Fold's cover screen --------------------------------
+
+
+def _pending(server: Server) -> str:
+    import time
+
+    from .test_history_page import seed_history
+
+    seed_history(server.db, "user-1", now=int(time.time()))
+    return next(p["id"] for p in server.db.list_proposals("user-1", limit=100) if p["state"] == "pending")
+
+
+FACTS = """
+() => { const dl = document.querySelector('.ui-meta');
+  return [...dl.querySelectorAll('dd')].map((d) => d.getBoundingClientRect().right <= dl.getBoundingClientRect().right + 0.5); }
+"""
+
+
+@pytest.mark.parametrize("zoom", ["root", "text"])
+def test_the_review_facts_stay_inside_the_page_at_344_px_and_200_percent(chromium, server, zoom) -> None:
+    """The facts list (Deck, Asked by, …): its value column shrank no further than the app's name
+    on one line, so the whole page (and the tab bar with it) scrolled sideways by a few pixels."""
+    sid = _link(server)
+    pid = _pending(server)
+    with _page(chromium, server, sid, 344) as page:
+        page.goto(f"{server.base}/proposals/{pid}", wait_until="networkidle")
+        page.evaluate(ZOOMS[zoom])
+        page.wait_for_timeout(30)
+        assert page.evaluate(SCROLLS) == 0
+        assert all(page.evaluate(FACTS))
