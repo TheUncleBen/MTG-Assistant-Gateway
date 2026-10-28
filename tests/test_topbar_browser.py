@@ -214,7 +214,8 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     if where.startswith("fold"):  # the rail: Home above Decks, the places, Alerts, then More
         assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
         assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
-        assert got["tabs"] == ["/", "/decks", "/collection", "/proposals", "/notifications"], got
+        # Forum sits on the rail before Alerts (decision C8)
+        assert got["tabs"] == ["/", "/decks", "/collection", "/proposals", "/forum", "/notifications"], got
         assert got["moreShown"], got
         assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
     else:  # a row: Home left of Decks
@@ -223,7 +224,8 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     if where.startswith("phone"):  # the bar: the four places and More
         assert got["tabs"] == ["/", "/decks", "/collection", "/proposals"], got
     if where != "desktop":
-        more = ["/search", "/precons", "/scan", "/watchlist", "/lists", "/history/models"]
+        # Watchlist is in Binder and My lists under Account; Forum is in More's Community group (C8)
+        more = ["/search", "/precons", "/scan", "/history/models", "/forum"]
         assert got["moreShown"] and got["moreItems"] == more, got
 
 
