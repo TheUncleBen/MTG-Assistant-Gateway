@@ -6,6 +6,8 @@ still being made an edit to it is refused with how far the apply got, instead of
 from __future__ import annotations
 
 import asyncio
+import html
+import re
 from collections import Counter
 
 import httpx
@@ -168,7 +170,22 @@ async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
     try:
         csrf = await b.csrf(f"/decks/{deck_id}")
         page = await b.http.get(f"/decks/{deck_id}")
-        assert "This deck is still being made: 50 of 125 cards in." in page.text
+        text = html.unescape(page.text)
+        assert (
+            "This deck is still being made: 50 of 125 cards added so far. "
+            "Changes wait until it is done." in " ".join(re.sub(r"<[^>]+>", " ", text).split())
+        )
+        notice = text.split("class='notice making'", 1)[1].split("</p>", 1)[0]
+        assert "<span class='ui-spin' aria-hidden='true'></span>" in notice
+        assert f"data-made-poll='/decks/{deck_id}/made'" in notice
+        # the edit controls are off meanwhile: Edit deck, Quick add, Add a package, the rows' edits
+        assert f"href='/decks/{deck_id}/edit'" not in text
+        assert re.search(r"<button[^>]*disabled[^>]*>[^<]*<svg[^>]*>.*?</svg> Edit deck</button>", text)
+        assert re.search(r"<input id='quick'[^>]* disabled", text)
+        assert "class='btn addpkg' aria-disabled='true'" in text
+        assert "data-own='1'" not in text.split("class='deckview", 1)[1].split(">", 1)[0]
+        made = await b.http.get(f"/decks/{deck_id}/made")
+        assert made.status_code == 200 and made.json() == {"made": False}
         r = await b.http.post(
             f"/api/v1/decks/{deck_id}/edit",
             json={"changes": [{"action": "set_quantity", "card_name": "Test Card 50", "quantity": 2}]},
@@ -176,13 +193,15 @@ async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
         )
         assert r.status_code == 409, r.text
         assert r.json()["message"] == (
-            "This deck is still being made: 50 of 125 cards in. Try again once it is done."
+            "This deck is still being made: 50 of 125 cards added so far. Try again once it is done."
         )
         # nothing was left waiting in Proposals by the refused edit
         assert [x["id"] for x in h.db.pending_board("user-1", deck_id)] == []
         release.set()
         out = await applying
         assert out["state"] == "applied", out
+        made = await b.http.get(f"/decks/{deck_id}/made")
+        assert made.json() == {"made": True}
         # once it is made, the same edit goes through
         r = await b.http.post(
             f"/api/v1/decks/{deck_id}/edit",

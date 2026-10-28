@@ -25,6 +25,19 @@
     if (text !== undefined) e.textContent = text;
     return e;
   }
+  // A new deck whose cards are still going in: ask every few seconds whether it is done, and
+  // reload once it is (the page then comes back with its edits on).
+  var making = $("p.notice.making[data-made-poll]");
+  if (making) {
+    (function ask() {
+      setTimeout(function () {
+        fetch(making.getAttribute("data-made-poll"), { credentials: "same-origin", headers: { Accept: "application/json" } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) { if (d && d.made) location.reload(); else ask(); })
+          .catch(ask);
+      }, 3000);
+    })();
+  }
   // While something is dragged: how far to scroll the page this frame when the pointer or finger
   // rests near the window's top or bottom edge (faster the closer it is), so a far stack is reachable;
   // never past the ends of `box` (the cards), where there is nothing left to drop on. Null when the
