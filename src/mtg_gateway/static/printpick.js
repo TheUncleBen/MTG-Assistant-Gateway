@@ -288,10 +288,13 @@
     searchRow.appendChild(filtBtn);
     // card size S / M / L (0.7.29): the same switch as next to "View as"; static/prefs.js applies
     // and saves it
+    // and keeps its own size (card.size.printings): a change here leaves the page's as it is
     var sizes = el("span", "sizeseg");
     sizes.setAttribute("role", "group");
     sizes.setAttribute("aria-label", "Card size");
-    var now = document.documentElement.getAttribute("data-card-size") || "m";
+    sizes.setAttribute("data-card-size-page", "printings");
+    var now = document.documentElement.getAttribute("data-card-size-printings") || "m";
+    dlg.setAttribute("data-card-size", now);
     [["s", "Small"], ["m", "Medium"], ["l", "Large"]].forEach(function (pair) {
       var b = el("button", "", pair[0].toUpperCase());
       b.type = "button";

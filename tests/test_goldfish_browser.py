@@ -405,7 +405,7 @@ def test_goldfish_cards_follow_the_card_size(server: Server, width: int, scheme:
             assert seen[size]["size"] == size, seen
             assert page.get_attribute(f".gf-size [data-card-size-set={size}]", "aria-pressed") == "true"
         assert seen["s"]["card"] < seen["m"]["card"] < seen["l"]["card"], seen
-        assert server.db.get_pref("user-1", "card.size") == "l"
+        assert server.db.get_pref("user-1", "card.size.goldfish") == "l"
         # the account keeps it: the next visit draws the cards large
         page.reload(wait_until="networkidle")
         assert page.evaluate(SIZE_STATE)["size"] == "l"

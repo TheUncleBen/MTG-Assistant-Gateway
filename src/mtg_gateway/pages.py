@@ -58,6 +58,7 @@ from .theme import (
     THEME_COOKIE,
     VIEW_COOKIE,
     VIEW_KINDS,
+    card_size_page,
     icon,
     in_app,
     layout_from_cookie,
@@ -1163,7 +1164,8 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
-    set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
+    page = card_size_page(request.url.path)  # each page keeps its own card size
+    set_card_size(prefs.card_sizes(state.db, sub, page), page)  # drawn on <html> (theme.render)
     # this request is the member's own page: its Archidekt reads go first (archidekt.page_turn);
     # set after sync.opened, so the deck sync's check started above does not take that turn
     page_turn.set(True)

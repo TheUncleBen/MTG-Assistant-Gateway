@@ -264,17 +264,22 @@ def test_the_card_size_control_stays_in_list_views_and_sizes_their_thumbnails() 
 
 def test_the_card_size_control_helper_is_shared_and_takes_the_toolbars_class() -> None:
     assert ui.card_size_control is theme.card_size_control
-    theme.set_card_size("l")
+    theme.set_card_size("l", "search")
     out = ui.card_size_control(cls="g size cardsize")
     assert out.startswith(
-        "<div class='g size cardsize'><span class='lbl' aria-hidden='true'>Card size</span>"
+        "<div class='g size cardsize' data-card-size-page='search'>"
+        "<span class='lbl' aria-hidden='true'>Card size</span>"
     )
     assert "<span class='sizeseg' role='group' aria-label='Card size'>" in out
     assert (
         "data-card-size-set='l' aria-pressed='true'" in out
         and "data-card-size-set='m' aria-pressed='false'" in out
     )
-    assert theme.card_size_control().startswith("<div class='field cardsize'>")
+    assert theme.card_size_control().startswith("<div class='field cardsize' data-card-size-page=")
+    # each page its own: the search page's L leaves the deck page at M
+    theme.set_card_size({"card.size.search": "l"}, "deck")
+    assert "data-card-size-set='m' aria-pressed='true'" in theme.card_size_control()
+    assert theme.current_card_size("search") == "l"
     theme.set_card_size("m")
 
 

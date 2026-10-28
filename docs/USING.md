@@ -57,7 +57,8 @@ assistant** at the end holds the connector URL and the guided setup.
 **My decks** lists the decks of your linked Archidekt account with their cover
 art (the image you chose on Archidekt, else the commander), folder by folder.
 Filter by name, colors or format, sort by last updated, created, name or
-format in either direction, and show a grid or a list in three card sizes.
+format in either direction, and show a grid or a list in three card sizes
+(each page, and the printings dialog, keeps its own size).
 **New deck** creates one from a name, a pasted list, a CSV export, the
 gateway's own .json export, a file you choose (.txt, .csv or .json) or a scan.
 **New folder** makes an Archidekt folder.
