@@ -265,3 +265,20 @@ async def test_the_assistants_own_apply_says_so_and_a_clone_names_its_new_deck(s
     assert new != "42"
     assert out["new_deck_id"] == new and out["new_deck_url"].endswith(f"/decks/{new}"), out
     assert out["deck_id"] == "42"  # the source, as before
+
+
+async def test_a_collection_add_in_a_finish_its_printing_lacks_is_warned(stack: Stack) -> None:
+    token = await linked_user(stack)
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_collection_changes",
+            {"text": "1 Sol Ring (FRC) 21 *F*\n1 Sol Ring (C21) 263 *F*"},
+        )
+    )
+    assert p["ok"], p
+    assert p["warnings"] == [
+        "Sol Ring (FRC 21) is not made in foil; Scryfall lists nonfoil. Amend the finish, or the collection "
+        "will hold a printing that does not exist."
+    ], p
