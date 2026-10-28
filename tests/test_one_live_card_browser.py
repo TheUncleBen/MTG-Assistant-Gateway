@@ -373,7 +373,10 @@ def test_a_change_the_assistant_may_apply_has_apply_now_and_follows_its_state() 
             card.locator("#approve:enabled").wait_for(timeout=5_000)
             assert card.locator("#approve").inner_text() == "Apply now"
             assert card.locator("#reject").inner_text() == "Reject"
-            assert "apply it here with Apply now" in card.locator("#note").inner_text()
+            note = card.locator("#note").inner_text()
+            assert (
+                "Low risk (1 row): your assistant may apply this without asking, or press Apply now." in note
+            ), note
             # the member switched to Manual: the same card now asks for an Approve
             page.evaluate(
                 "(r) => { window.getReply = r; }",
