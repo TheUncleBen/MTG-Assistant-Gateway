@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_extras, deck_stats, prefs, ui
 from .archidekt import format_label
-from .busy import busy_response
+from .busy import busy_plan, busy_response, same_url
 from .companion import (
     DECK_CSP,
     DECK_ERR_MESSAGES,
@@ -29,7 +29,9 @@ from .deckpage import (
     VIEWS,
     covers_for,
     deck_boxes_html,
+    deck_check_html,
     deck_count_text,
+    deck_held_html,
     deck_list_controls_html,
     deck_list_held_html,
     deck_page_html,
@@ -770,11 +772,24 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
         reload = re.search(r"max-age=0|no-cache", request.headers.get("cache-control", "")) is not None
         try:
-            deck = await decks.page_deck(sub, deck_id, fresh=reload)
+            deck, how = await decks.page_deck_view(sub, deck_id, fresh=reload)
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         link = state.db.get_link(sub)
         own = bool(link) and owns_deck(deck, link) is True
+        held_at = how.get("held_at")
+        if held_at is not None:  # Archidekt can't be asked: the last read, read-only and dated
+            plan = busy_plan(how["refused"])
+            held = deck_held_html(
+                held_at, plan.title if plan else "Archidekt can't be asked", same_url(request)
+            )
+            own, box = False, ""
+        else:
+            held = (
+                deck_check_html(deck.id, how.get("read_at"), reload=bool(how.get("reload")))
+                if how.get("checking")
+                else ""
+            )
         if box == "delete" and not own:
             box, box_error = "", ""
         stats = deck_stats.compute(deck)
@@ -791,6 +806,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        notice = held + notice
         if deck.link_notice:  # the member's link was dropped while reading this deck
             notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
         being_made = decks.being_made(deck.id)  # a new deck whose cards are still going in
@@ -814,7 +830,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             stats,
             own=own,
             csrf=csrf,
-            writes_enabled=s.writes_enabled,
+            writes_enabled=s.writes_enabled and held_at is None,
             forge_on=bool(s.forge_url),
             owned=owned or None,
             view=view,
@@ -897,6 +913,18 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect(f"/decks/{deck_id}")
         return await deck_page_response(request, sub, sid, deck_id)
+
+    @server.custom_route("/decks/{deck_id}/check", methods=["GET"], include_in_schema=False)
+    async def deck_check(request: Request) -> Response:
+        """What the read made behind a deck page shown as last read found (decks.page_check):
+        ``changed`` (load the page again to see it), ``failed`` (Archidekt could not be asked)."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"signed_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
+        found = await decks.page_check(sub, request.path_params["deck_id"], wait=25.0)
+        return JSONResponse(
+            found or {"changed": False, "failed": False}, headers={"Cache-Control": "no-store"}
+        )
 
     @server.custom_route("/decks/{deck_id}/made", methods=["GET"], include_in_schema=False)
     async def deck_made(request: Request) -> Response:

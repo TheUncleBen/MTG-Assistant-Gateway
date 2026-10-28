@@ -89,6 +89,7 @@ from .forge import ForgeClient
 from .guide import add_guide_routes
 from .home import add_home_routes
 from .idp_sweep import AuthentikSweep
+from .latepage import LatePageMiddleware, LateStore, add_late_routes
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
@@ -143,6 +144,7 @@ class AppState:
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
     sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
     folder_jobs: Any = None  # folder deletes from My decks (companion_folders.py)
+    late_pages: LateStore = field(default_factory=LateStore)  # pages drawn before Archidekt answered
 
     @property
     def live(self) -> LiveSettings:
@@ -952,6 +954,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_package_tools(state, h)
 
     add_browser_routes(server, state)
+    add_late_routes(server, state)  # /late/{key}: a page drawn before Archidekt answered (latepage.py)
     add_skill_routes(server, state)
     add_app_routes(server, state)
     add_plugin_routes(server, state)
@@ -1133,6 +1136,8 @@ def create_app(
     )
     _refuse_mcp_get(app)
     _friendly_errors(app, state)
+    # inside the theme's context and the membership check: a slow page is drawn at once
+    app.add_middleware(LatePageMiddleware, state=state)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
     # Restore points kept per deck follow the admin Settings page at once (0.7.29).

@@ -16,6 +16,7 @@ source reading and is not verified against Archidekt (see ``build_payload``).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import dataclasses
 import datetime
@@ -266,6 +267,12 @@ PAGE_DECK_SECONDS = 20.0
 # reads it again in the background, so a page change never waits for Archidekt for a deck the
 # member saw recently; the next view shows what that read found. A write to the deck drops it.
 PAGE_DECK_STALE = 6 * 3600.0
+# The browser's Reload (and the app's pull to refresh) reads the deck again only when the copy on
+# show is older than this (owner decision, 0.7.46): a Reload right after a read shows it at once.
+PAGE_DECK_RELOAD = 30.0
+# When Archidekt can't be asked (busy, paused, unreachable), the deck page shows the member's last
+# read of the deck, read-only and dated, for up to this long after that read (0.7.46).
+PAGE_DECK_LAST = 24 * 3600.0
 _DECK_WRITE_PATH = re.compile(r"^/decks/(\d+)/")
 # While Archidekt cannot be asked (a 429 pause, the breaker, the member's Archidekt work still
 # running), My decks and Home show the member's deck list as last read, for up to this long, with a
@@ -3017,6 +3024,11 @@ class DeckService:
         # deck id -> when a write to it last dropped its kept pages: a read under way then keeps nothing
         self._page_decks_dropped: dict[str, float] = {}
         self._page_refreshing: dict[tuple[str, str], asyncio.Task[Any]] = {}  # background re-reads
+        # what the last background re-read of a kept deck page found: {"changed", "failed"}
+        self._page_checked: dict[tuple[str, str], dict[str, bool]] = {}
+        # (member, deck id) -> (wall time read, the deck): the member's last good read of a deck page,
+        # kept through writes, shown read-only and dated while Archidekt can't be asked
+        self._page_last: dict[tuple[str, str], tuple[float, bytes]] = {}
         self.page_deck_seconds = min(PAGE_DECK_SECONDS, float(settings.archidekt_cache_seconds))
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
@@ -3058,6 +3070,8 @@ class DeckService:
         self.deck_lists.forget(sub)
         self.folder_trees.forget(sub)
         self._forget_page_decks()
+        for key in [k for k in self._page_last if k[0] == sub]:
+            del self._page_last[key]
         for key in [k for k in self._delete_prep if k[0] == sub]:
             del self._delete_prep[key]
         # the Account page's profile, the bell and My lists' counts are the old account's too
@@ -4032,7 +4046,12 @@ class DeckService:
         if key not in self._page_decks and len(self._page_decks) >= PAGE_DECKS_MAX:
             oldest = min(self._page_decks, key=lambda k: self._page_decks[k][0])
             self._page_decks.pop(oldest, None)
-        self._page_decks[key] = (time.monotonic(), pickle.dumps(deck))
+        kept = pickle.dumps(deck)
+        self._page_decks[key] = (time.monotonic(), kept)
+        if key not in self._page_last and len(self._page_last) >= PAGE_DECKS_MAX:
+            oldest = min(self._page_last, key=lambda k: self._page_last[k][0])
+            self._page_last.pop(oldest, None)
+        self._page_last[key] = (time.time(), kept)
 
     async def _read_page_deck(self, sub: str, deck_ref: str, key: tuple[str, str], *, fresh: bool) -> Deck:
         gen, started = self._page_decks_gen, time.monotonic()
@@ -4046,20 +4065,33 @@ class DeckService:
         self._keep_page_deck(key, deck, gen, started)
         return deck
 
-    def _refresh_page_deck(self, sub: str, deck_ref: str, key: tuple[str, str]) -> None:
+    def _refresh_page_deck(
+        self, sub: str, deck_ref: str, key: tuple[str, str], *, fresh: bool = False
+    ) -> None:
         """Read a kept deck page again after it was shown: one such read per deck page at a time,
-        in its own context (nobody's request, so no request's Archidekt slot or timing)."""
+        in its own context (nobody's request, so no request's Archidekt slot or timing). What it
+        found waits in ``_page_checked`` for the page (``page_check``)."""
         running = self._page_refreshing.get(key)
         if running is not None and not running.done():
             return
+        shown = self._page_decks.get(key)
+        self._page_checked.pop(key, None)
 
         async def run() -> None:
             try:
-                await self._read_page_deck(sub, deck_ref, key, fresh=False)
+                deck = await self._read_page_deck(sub, deck_ref, key, fresh=fresh)
             except DeckError as exc:
-                # gone, made private, or Archidekt can't be asked: the next view reads it itself
-                self._page_decks.pop(key, None)
+                if exc.kind not in ("unavailable", "rate_limited"):
+                    # gone, made private, or the link changed: the next view reads it itself
+                    self._page_decks.pop(key, None)
+                # Archidekt can't be asked: the copy on show stays (the page says how old it is)
+                self._page_checked[key] = {"changed": False, "failed": True}
                 logger.info("background re-read of a deck page failed: %s", exc.kind)
+                return
+            changed = shown is None or pickle.dumps(deck) != shown[1]  # anything the page shows
+            if len(self._page_checked) >= PAGE_DECKS_MAX:
+                self._page_checked.clear()
+            self._page_checked[key] = {"changed": changed, "failed": False}
 
         task = asyncio.get_running_loop().create_task(run(), context=contextvars.Context())
         self._page_refreshing[key] = task
@@ -4068,25 +4100,53 @@ class DeckService:
         )
 
     async def page_deck(self, sub: str, deck_ref: str, *, fresh: bool = False) -> Deck:
-        """``get_any_deck`` for showing a deck page. Switching between the deck's views, or coming
-        back to it, within PAGE_DECK_SECONDS shows the deck as last read instead of asking Archidekt
-        again (each ask waits its turn in the pacer shared by every member); up to PAGE_DECK_STALE
-        it shows the deck as last read at once and reads it again in the background, for the next
-        view. A write the gateway sends to the deck forgets every such read of it (any other write
-        forgets them all), and ``fresh`` (the browser's Reload) always asks, so a change made on
-        archidekt.com shows at once on a reload. Only for showing a deck: proposals and applies
-        read it themselves."""
+        """The deck of ``page_deck_view``, for a page that shows no notice about it."""
+        deck, _how = await self.page_deck_view(sub, deck_ref, fresh=fresh)
+        return deck
+
+    async def page_deck_view(
+        self, sub: str, deck_ref: str, *, fresh: bool = False
+    ) -> tuple[Deck, dict[str, Any]]:
+        """``get_any_deck`` for showing a deck page, and how it was got. Switching between the
+        deck's views, or coming back to it, within PAGE_DECK_SECONDS shows the deck as last read
+        instead of asking Archidekt again (each ask waits its turn in the pacer shared by every
+        member); up to PAGE_DECK_STALE it shows the deck as last read at once and reads it again in
+        the background (``{"checking": True}``; ``page_check`` says what that read found). A write
+        the gateway sends to the deck forgets every such read of it (any other write forgets them
+        all). ``fresh`` (the browser's Reload, the app's pull) shows a read younger than
+        PAGE_DECK_RELOAD as it is, and an older one at once while it is read again
+        (``{"checking": True, "reload": True}``), skipping the client's shared read cache.
+        When the deck has to be read and Archidekt can't be asked (busy, paused, unreachable), the
+        member's last good read of it within PAGE_DECK_LAST comes back with ``{"held_at": wall
+        time of that read, "refused": the error}``, for a read-only page that says how old it is.
+        Only for showing a deck: proposals and applies read it themselves."""
         ttl = self.page_deck_seconds
         key = (sub, _clean_deck_id(deck_ref))
         hit = self._page_decks.get(key)
-        if hit is not None and not fresh and ttl > 0:
+        if hit is not None and ttl > 0:
             age = time.monotonic() - hit[0]
-            if age < ttl:
-                return pickle.loads(hit[1])  # a copy of its own: the page may change it
+            if age < (max(ttl, PAGE_DECK_RELOAD) if fresh else ttl):
+                return pickle.loads(hit[1]), {}  # a copy of its own: the page may change it
             if age < PAGE_DECK_STALE:
-                self._refresh_page_deck(sub, deck_ref, key)
-                return pickle.loads(hit[1])
-        return await self._read_page_deck(sub, deck_ref, key, fresh=fresh)
+                self._refresh_page_deck(sub, deck_ref, key, fresh=fresh)
+                return pickle.loads(hit[1]), {"checking": True, "reload": fresh, "read_at": time.time() - age}
+        try:
+            return await self._read_page_deck(sub, deck_ref, key, fresh=fresh), {}
+        except DeckError as exc:
+            last = self._page_last.get(key) if exc.kind in ("unavailable", "rate_limited") else None
+            if last is None or time.time() - last[0] > PAGE_DECK_LAST:
+                raise
+            return pickle.loads(last[1]), {"held_at": last[0], "refused": exc}
+
+    async def page_check(self, sub: str, deck_ref: str, *, wait: float) -> dict[str, bool] | None:
+        """What the background re-read of a deck page found (``{"changed", "failed"}``), waiting
+        up to ``wait`` seconds for it; None when none ran for this member's view of the deck."""
+        key = (sub, _clean_deck_id(deck_ref))
+        running = self._page_refreshing.get(key)
+        if running is not None and not running.done():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(running), wait)
+        return self._page_checked.pop(key, None)
 
     async def research_deck_text(self, sub: str, deck_ref: str) -> str:
         """The decklist text a research tool (goldfish_annotate) is given in place of a deck id or

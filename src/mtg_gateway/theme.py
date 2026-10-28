@@ -998,6 +998,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home .recent.skeleton>span{aspect-ratio:16/9}
 ul.decklist.skeleton>li{height:230px;list-style:none}
 @keyframes skeleton{50%{opacity:.55}}
+.late-skel>span{height:3.5rem;margin:.5rem 0}
+.late-skel>span:first-child{height:6rem}
 @media (prefers-reduced-motion:reduce){ .skeleton>*{animation:none} }
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
    bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 1279px) on a touch screen, such as

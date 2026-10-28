@@ -23,7 +23,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import deque
 from contextvars import ContextVar
+from dataclasses import dataclass
+from typing import Any
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -31,6 +34,10 @@ log = logging.getLogger("mtg_gateway.requests")
 
 archidekt_time: ContextVar[float] = ContextVar("archidekt_time", default=0.0)
 idp_time: ContextVar[float] = ContextVar("idp_time", default=0.0)
+# Of archidekt_time: the time spent waiting for a turn in the shared Pacer (archidekt.Pacer.enter),
+# and the Archidekt calls that failed (an error answer, a timeout, a pause that refused it).
+pacer_time: ContextVar[float] = ContextVar("pacer_time", default=0.0)
+archidekt_failures: ContextVar[float] = ContextVar("archidekt_failures", default=0.0)
 
 # A request that takes longer than this is logged again at WARNING with its time split, so a slow
 # page stands out in a log kept at WARNING.
@@ -63,6 +70,99 @@ def add_time(var: ContextVar[float], seconds: float) -> None:
     var.set(var.get() + seconds)
 
 
+# -- Admin's "Speed, last 24 h" card (owner decision, 0.7.46) -------------------------------------
+SPEED_WINDOW = 24 * 3600.0
+SPEED_MAX = 20000  # page views kept at most, the oldest go first
+# Requests that are not a page a member waits for: files, the JSON and programs' paths, the
+# late page's own wait (latepage.py), and the small counts every page asks for.
+_NOT_PAGES = (
+    "/static/",
+    "/scan/static/",
+    "/healthz",
+    "/api/",
+    "/mcp",
+    "/oauth",
+    "/.well-known",
+    "/late/",
+    "/notifications/count",
+    "/watchlist/api/",
+    "/sw.js",
+    "/favicon",
+)
+
+
+@dataclass
+class PageTime:
+    """One page view's time, without the member, the query or any id (the route template)."""
+
+    at: float  # wall clock, for the 24 h window
+    route: str
+    seconds: float  # until the page's content was there (a late page: its fill)
+    archidekt: float  # awaiting Archidekt in all, pacer waits included
+    pacer: float  # of it, waiting for a turn in the shared pacer
+    failures: int  # Archidekt calls that failed
+    status: int
+
+
+class SpeedLog:
+    """The page views of the last SPEED_WINDOW, in memory (a restart starts it again)."""
+
+    def __init__(self) -> None:
+        self._rows: deque[PageTime] = deque(maxlen=SPEED_MAX)
+        self.started = time.time()
+
+    def add(self, row: PageTime) -> None:
+        self._rows.append(row)
+
+    def rows(self, now: float | None = None) -> list[PageTime]:
+        cut = (time.time() if now is None else now) - SPEED_WINDOW
+        while self._rows and self._rows[0].at < cut:
+            self._rows.popleft()
+        return list(self._rows)
+
+    def summary(self, now: float | None = None, *, slow: float = SLOW_REQUEST_SECONDS) -> dict[str, Any]:
+        """Totals and the slowest routes by their 95th percentile, with why they were slow."""
+        rows = self.rows(now)
+        by_route: dict[str, list[PageTime]] = {}
+        for r in rows:
+            by_route.setdefault(r.route, []).append(r)
+        routes = []
+        for route, rs in by_route.items():
+            times = sorted(r.seconds for r in rs)
+            p95 = times[min(len(times) - 1, int(round(0.95 * (len(times) - 1))))]
+            routes.append(
+                {
+                    "route": route,
+                    "views": len(rs),
+                    "slow": sum(1 for r in rs if r.seconds > slow),
+                    "p95": p95,
+                    "max": times[-1],
+                    "pacer": sum(r.pacer for r in rs) / len(rs),
+                    "archidekt": sum(max(0.0, r.archidekt - r.pacer) for r in rs) / len(rs),
+                    "failures": sum(r.failures for r in rs),
+                }
+            )
+        routes.sort(key=lambda r: r["p95"], reverse=True)
+        return {
+            "views": len(rows),
+            "slow": sum(1 for r in rows if r.seconds > slow),
+            "pacer": sum(r.pacer for r in rows),
+            "archidekt": sum(max(0.0, r.archidekt - r.pacer) for r in rows),
+            "failures": sum(r.failures for r in rows),
+            "routes": routes,
+            "since": max(self.started, (time.time() if now is None else now) - SPEED_WINDOW),
+        }
+
+
+speed_log = SpeedLog()
+
+
+def is_page(scope: Scope) -> bool:
+    """Whether a request is a page view a member waits for (a GET of HTML, not a file or an API)."""
+    raw = str(scope.get("path", ""))
+    return scope.get("method") == "GET" and not raw.startswith(_NOT_PAGES)
+
+
 class TimingMiddleware:
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -74,6 +174,8 @@ class TimingMiddleware:
         started = time.perf_counter()
         archidekt_time.set(0.0)
         idp_time.set(0.0)
+        pacer_time.set(0.0)
+        archidekt_failures.set(0.0)
         status = {"code": 0}
 
         async def send_wrapper(message: Message) -> None:
@@ -93,6 +195,19 @@ class TimingMiddleware:
             await self.app(scope, receive, send_wrapper)
         finally:
             raw = str(scope.get("path", ""))
+            # a late page (latepage.py) is counted once its content is there, by the page's fill
+            if is_page(scope) and status["code"] and not scope.get("mtg_late"):
+                speed_log.add(
+                    PageTime(
+                        time.time(),
+                        logged_path(scope),
+                        time.perf_counter() - started,
+                        archidekt_time.get(),
+                        pacer_time.get(),
+                        int(archidekt_failures.get()),
+                        status["code"],
+                    )
+                )
             if not raw.startswith(_QUIET_PREFIXES):
                 path = logged_path(scope)
                 total = time.perf_counter() - started
