@@ -467,8 +467,9 @@ def test_my_lists_tabs_count_and_the_current_tab_stays_in_view(server: Server) -
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
-        # a first visit: every tab has its count, not the open one alone
-        assert page.locator(".lp-tabs a .n").count() == 5
+        # a first visit: every tab has its count, not the open one alone (four lists: Pinned cards
+        # is Binder › Wants now)
+        assert page.locator(".lp-tabs a .n").count() == 4
         # larger text after the load: the current tab is brought back into view
         page.evaluate(TEXT_200)
         page.wait_for_timeout(400)
