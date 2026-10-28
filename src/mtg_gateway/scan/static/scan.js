@@ -623,7 +623,8 @@
       });
       await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: OCR_WHITELIST, preserve_interword_spaces: '1' });
       state.ocr = worker; state.ocrState = 'ready'; state.ocrProgress = 1;
-      setStatus('Ready. Hold the card flat and tap Scan.');
+      // In the app the hint under the viewfinder already says to tap the shutter.
+      setStatus(phoneCamera() ? '' : 'Ready. Hold the card flat and tap Scan.');
       emit('ocr', { state: 'ready', progress: 1 });
     } catch (err) {
       state.ocrState = 'failed';
