@@ -92,7 +92,7 @@
     var id = item.getAttribute("data-id");
     var name = nameOf(item);
     $$("button", item).forEach(function (b) { b.disabled = true; });
-    return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id)).then(function (d) {
+    return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id) + "?name=" + encodeURIComponent(name)).then(function (d) {
       if (!d.ok) { strip(failText(d, name), "error"); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
       gone(item);
       return false;
@@ -122,11 +122,11 @@
       var action = btn.value;
       e.preventDefault();
       if (action === "remove" || (action === "dec" && current <= 1)) { askRemove(item, $("form.qty button[value=dec]", item) || $(".kebab", item)); return; }
-      var next = action === "inc" ? current + 1 : Math.max(0, current - 1);
       if (action !== "inc" && action !== "dec") { form.submit(); return; }
       var name = nameOf(item);
       $$("form.qty button", item).forEach(function (b) { b.disabled = true; });
-      request("POST", "/collection/api/rows/" + encodeURIComponent(id), { quantity: next }).then(function (d) {
+      /* one more or one fewer than Archidekt holds now: another tab's presses add up, not overwrite */
+      request("POST", "/collection/api/rows/" + encodeURIComponent(id), { delta: action === "inc" ? 1 : -1, name: name }).then(function (d) {
         $$("form.qty button", item).forEach(function (b) { b.disabled = false; });
         if (!d.ok) { strip(failText(d, name), "error"); return; }
         if (!d.row || d.row.quantity === 0) { gone(item); return; }
@@ -240,6 +240,7 @@
       if (sub && sub.value === "remove") { e.preventDefault(); return; }
       e.preventDefault();
       var body = {
+        name: nameOf(item),
         finish: form.elements.finish.value,
         condition: form.elements.condition.value,
         language: form.elements.language.value,
