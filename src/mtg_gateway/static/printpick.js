@@ -315,13 +315,18 @@
     var search = el("input");
     search.type = "search";
     search.id = "pp-q";
-    search.placeholder = "Search set name or code";
-    search.setAttribute("aria-label", "Search set name or code");
+    // it narrows this card's printings by set (name or code); a card's name finds nothing here,
+    // so the box says what it filters and the empty list offers the card search instead
+    search.placeholder = "Filter these printings by set";
+    search.setAttribute("aria-label", "Filter these printings by set");
     search.autocomplete = "off";
     search.setAttribute("enterkeyhint", "search");
     search.addEventListener("input", function () { st.q = search.value.trim().toLowerCase(); draw(); });
     var searchRow = el("div", "ppsearch");
-    searchRow.appendChild(search);
+    var qbox = el("span", "ppq");
+    qbox.innerHTML = "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'><path d='M3 5h18l-7 8v6l-4-2v-4z'/></svg>";
+    qbox.appendChild(search);
+    searchRow.appendChild(qbox);
     var filtBtn = el("button", "ppfiltbtn", "Filters");
     filtBtn.type = "button";
     filtBtn.setAttribute("aria-expanded", "false");
@@ -624,6 +629,13 @@
       clear.type = "button";
       clear.addEventListener("click", clearFilters);
       st.empty.appendChild(clear);
+      // typed text that is no set code (a card's name, most likely): the card search finds it
+      var typed = st.search.value.trim();
+      if (st.q && !/^[a-z0-9]{2,6}$/.test(st.q)) {
+        var all = el("a", "btn", "Search all cards for \u201c" + typed + "\u201d");
+        all.href = "/cards?q=" + encodeURIComponent(typed);
+        st.empty.appendChild(all);
+      }
     }
     st.moreRow.hidden = !st.hasMore;
     st.more.disabled = false;
