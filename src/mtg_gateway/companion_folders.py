@@ -412,6 +412,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
     async def deck_export(request: Request) -> Response:
         """The Export box: the texts and files of the deck's Export page."""
         from .decks import deck_to_archidekt_text, deck_to_text
+        from .export_formats import to_plain
 
         sub, refused = await member(request, write=False)
         if refused:
@@ -433,7 +434,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         return ok(
             name=deck.name or "Unnamed deck",
             archidekt=deck_to_archidekt_text(deck),
-            plain=deck_to_text(deck),
+            plain=to_plain(deck),
             side=deck_to_text(deck, zone="side"),
             files=[{"label": label, "href": base + ext} for label, ext in files],
         )

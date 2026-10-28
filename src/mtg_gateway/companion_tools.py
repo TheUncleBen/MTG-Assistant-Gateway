@@ -26,7 +26,7 @@ from .deckpage import (
     goldfish_page_html,
     precon_by_label,
 )
-from .decks import DeckError, current_client, is_outside_category
+from .decks import DeckError, current_client, is_outside_category, split_label
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -314,16 +314,11 @@ def add_deck_tool_routes(
 
     @server.custom_route("/decks/{deck_id}/export.txt", methods=["GET"], include_in_schema=False)
     async def export_txt(request: Request) -> Response:
-        from .decks import deck_to_text
+        """The plain list (export_formats.to_plain): names under Commander, Deck and Sideboard,
+        no Archidekt marks. The Archidekt .txt is the one that keeps printings and categories."""
+        from .export_formats import to_plain
 
-        def make(deck: Deck) -> str:
-            text = deck_to_text(deck)
-            side = deck_to_text(deck, zone="side")
-            if side:
-                text += "\n\n// Sideboard\n" + side
-            return text + "\n"
-
-        return await _download(request, ".txt", make, TEXT_PLAIN)
+        return await _download(request, ".txt", to_plain, TEXT_PLAIN)
 
     async def _download(request: Request, ext: str, make: Any, media_type: str) -> Response:
         """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
@@ -479,7 +474,9 @@ def add_deck_tool_routes(
                         c.collector_number,
                         cell(c.categories[0]) if c.categories else "",
                         cell(",".join(cell(x) for x in c.categories[1:])),
-                        cell(c.label),
+                        # the tag's name only, as Archidekt's own export writes it ("Have", not
+                        # "Have,#37d67a"); an untagged row (",#656565") is blank
+                        cell(split_label(c.label)[0]),
                         "" if c.cmc is None else (int(c.cmc) if float(c.cmc).is_integer() else c.cmc),
                         cell(c.mana_cost),
                         cell(" ".join(c.supertypes + c.types)),
