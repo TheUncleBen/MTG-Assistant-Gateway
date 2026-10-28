@@ -2336,48 +2336,41 @@ def compare_picker_html(
     folded: bool,
 ) -> str:
     """The member's other decks and this deck's snapshots, each a chip that compares with it
-    (audit D-31). Folded once a comparison shows. Nothing when there is nothing to pick."""
+    (audit D-31). Folded once a comparison shows. ``mine`` None: the deck list is still being read
+    (a cold start) or Archidekt could not be asked, so My decks is drawn as a loading box that
+    compare.js fills from /api/decks/mine?shape=pick, with the same chips. Nothing when there is
+    nothing to pick."""
     did = esc(deck.id)
-
-    def chip(ref: str, text: str, sub: str = "") -> str:
-        cur = " aria-current='true'" if ref == other_ref else ""
-        small = f" <span class='s'>{esc(sub)}</span>" if sub else ""
-        href = f"/decks/{did}/compare?with={esc(ref)}"
-        return f"<a class='ui-chip cmp-pick' href='{href}'{cur}>{esc(text)}{small}</a>"
-
-    decks_ = [d for d in mine or [] if str(d.get("id")) != str(deck.id) and d.get("id")]
-    decks_.sort(key=lambda d: str(d.get("updated_at") or ""), reverse=True)
     snaps = [x for x in snapshots or [] if x.get("snapshot_id")]
-    if not decks_ and not snaps:
+    decks_html = (
+        compare_mine_html(str(deck.id), mine, other_ref=other_ref)
+        if mine is not None
+        else (
+            "<div class='cmp-chips skeleton' aria-busy='true' aria-label='Reading your decks' "
+            f"data-pick-src='/api/decks/mine?shape=pick&amp;deck={did}&amp;with={esc(other_ref)}'>"
+            "<span></span><span></span><span></span></div>"
+        )
+    )
+    if not decks_html and not snaps:
         return ""
     parts = []
     if snaps:
         parts.append(
             "<h3 class='cmp-sub'>Snapshots of this deck</h3><div class='cmp-chips'>"
             + "".join(
-                chip(
+                _compare_chip(
+                    did,
                     f"snap_{x['snapshot_id']}",
                     ui.when_text(x.get("taken_at")),
                     plural(int(x["card_count"]), "card") if x.get("card_count") else "",
+                    other_ref=other_ref,
                 )
                 for x in snaps
             )
             + "</div>"
         )
-    if decks_:
-
-        def named(d: dict[str, Any]) -> str:
-            return chip(str(d["id"]), str(d.get("name") or f"Deck {d['id']}"))
-
-        first = "".join(named(d) for d in decks_[:PICK_MOST])
-        rest = decks_[PICK_MOST:]
-        more = (
-            f"<details class='fold'><summary class='fold-btn'>Show {len(rest)} more</summary>"
-            "<div class='cmp-chips'>" + "".join(named(d) for d in rest) + "</div></details>"
-            if rest
-            else ""
-        )
-        parts.append(f"<h3 class='cmp-sub'>My decks</h3><div class='cmp-chips'>{first}</div>{more}")
+    if decks_html:
+        parts.append(f"<h3 class='cmp-sub' data-pick-head>My decks</h3>{decks_html}")
     inner = "".join(parts)
     if folded:
         return (
@@ -2385,6 +2378,36 @@ def compare_picker_html(
             f"{inner}</details>"
         )
     return f"<section class='cmp-mine' aria-label='Your decks and snapshots'>{inner}</section>"
+
+
+def _compare_chip(did: str, ref: str, text: str, sub: str = "", *, other_ref: str) -> str:
+    cur = " aria-current='true'" if ref == other_ref else ""
+    small = f" <span class='s'>{esc(sub)}</span>" if sub else ""
+    href = f"/decks/{did}/compare?with={esc(ref)}"
+    return f"<a class='ui-chip cmp-pick' href='{href}'{cur}>{esc(text)}{small}</a>"
+
+
+def compare_mine_html(deck_id: str, mine: list[dict[str, Any]], *, other_ref: str) -> str:
+    """The member's other decks as chips, newest first, the rest after PICK_MOST folded; the one
+    renderer for the page and for /api/decks/mine?shape=pick. Empty when there is no other deck."""
+    did = esc(deck_id)
+    decks_ = [d for d in mine if str(d.get("id")) != str(deck_id) and d.get("id")]
+    decks_.sort(key=lambda d: str(d.get("updated_at") or ""), reverse=True)
+    if not decks_:
+        return ""
+
+    def named(d: dict[str, Any]) -> str:
+        return _compare_chip(did, str(d["id"]), str(d.get("name") or f"Deck {d['id']}"), other_ref=other_ref)
+
+    first = "".join(named(d) for d in decks_[:PICK_MOST])
+    rest = decks_[PICK_MOST:]
+    more = (
+        f"<details class='fold'><summary class='fold-btn'>Show {len(rest)} more</summary>"
+        "<div class='cmp-chips'>" + "".join(named(d) for d in rest) + "</div></details>"
+        if rest
+        else ""
+    )
+    return f"<div class='cmp-chips'>{first}</div>{more}"
 
 
 COMPARE_AB_LINE = (
@@ -2473,7 +2496,11 @@ COMPARE_CSS = """
 .cmp-mine{margin:0 0 1rem}
 .cmp-mine .cmp-sub:first-child{margin-top:0}
 .cmp-chips{display:flex;flex-wrap:wrap;gap:.4rem}
-.cmp-pick{min-height:44px;display:inline-flex;align-items:center;gap:.35rem;max-width:100%;overflow-wrap:anywhere}
+/* a deck's name wraps inside its chip (the quick-filter chips keep theirs on one line) */
+.cmp-pick{min-height:44px;display:inline-flex;align-items:center;gap:.35rem;max-width:100%;overflow-wrap:anywhere;
+  white-space:normal}
+/* My decks while the list is read: three chip-shaped blanks (the site's skeleton) */
+.cmp-chips.skeleton>span{width:9rem;height:44px;border-radius:999px}
 .cmp-pick .s{color:var(--text-muted);font-weight:400}
 .cmp-pick[aria-current]{outline:2px solid var(--accent);outline-offset:1px}
 @media (max-width:599.98px){ .cmp-form .row{flex-direction:column;align-items:stretch}
