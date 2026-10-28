@@ -56,7 +56,14 @@ def test_card_viewer_watches_a_card_and_shows_its_price(server: Server) -> None:
         page.get_by_role("button", name="Watch this card").click()
         page.wait_for_selector("#cardview-prices table", timeout=5000)
         text = page.locator("#cardview-prices").inner_text()
-        assert "$" in text and "nonfoil" in text, text
+        assert "$" in text and "Nonfoil" in text and "nonfoil" not in text, text
+        # the way to the watchlist is a capsule button, not a plain blue link, and opens the card's row
+        link = page.locator("#cardview-prices a", has_text="Open the watchlist")
+        assert "btn" in (link.get_attribute("class") or "").split()
+        wid = server.app.state.gateway.prices.watched_cards("user-1")[0]["id"]
+        assert link.get_attribute("href") == f"/watchlist?open={wid}#wr-{wid}"
+        box = link.bounding_box()  # a standard control: 39 px with a mouse, 44 px on touch
+        assert box is not None and box["height"] >= 39, box
         overflow = page.evaluate(
             "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
