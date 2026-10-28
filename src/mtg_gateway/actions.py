@@ -106,6 +106,23 @@ def contest_thread(value: Any) -> int:
     return int(m.group(1))
 
 
+CONTEST_MISSING = (
+    "Archidekt has no forum thread {thread}, so there is no contest to enter. Check the contest's id "
+    "or page address (get_forum lists the forum's threads). Nothing was proposed."
+)
+
+
+async def _contest_exists(decks: DeckService, sub: str, thread_id: int) -> None:
+    """Refuse an entry into a contest thread Archidekt does not have, when it is proposed rather
+    than when it is applied."""
+    try:
+        await decks._call_unslotted(sub, lambda token, *_: decks.client.comment_thread(token, thread_id))
+    except Exception as exc:
+        if getattr(exc, "kind", None) == "not_found":
+            raise DeckError("not_found", CONTEST_MISSING.format(thread=thread_id)) from None
+        raise
+
+
 async def contest_entry(decks: DeckService, sub: str, thread_id: int, deck_id: str) -> dict[str, Any] | None:
     """The member's entry of this deck in the contest, as Archidekt lists the entries now."""
     from . import profile
@@ -520,7 +537,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             changes.update(help_action=what, goals=goals, issues=issues)
             if current is not None:  # a delisted or expired one is opened again
                 changes["help_id"] = current["id"]
-            row["text"] = f"Ask for help with your deck publicly on Archidekt's deck help board {where}"
+            row["text"] = f"Ask for help with your deck “{deck.name}” publicly on Archidekt's deck help board"
             row["after_text"] = f"Goals: {goals}\n\nIssues: {issues}"
             row["note"] = "Listed for 7 days, under your name."
         else:
@@ -531,14 +548,14 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                     _help_text(params.get("goals"), "goals"),
                     _help_text(params.get("issues"), "issues"),
                 )
-                row["text"] = f"Change your public help request for your deck {where}"
+                row["text"] = f"Change your public help request for your deck “{deck.name}”"
                 row["before_text"] = f"Goals: {current['goals']}\n\nIssues: {current['issues']}"
                 row["after_text"] = f"Goals: {goals}\n\nIssues: {issues}"
             else:
                 if not current["active"]:
                     raise DeckError("invalid", "This deck's help request is not listed.")
                 goals, issues = current["goals"], current["issues"]
-                row["text"] = f"Take down your help request for your deck {where}"
+                row["text"] = f"Take down your help request for your deck “{deck.name}”"
             changes.update(help_action=what, help_id=current["id"], goals=goals, issues=issues)
     elif action == "report":
         kind = str(params.get("report_kind") or "")
@@ -599,6 +616,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
 
         thread = contest_thread(params.get("contest"))
         async with decks.archidekt_slot(sub):
+            if action == "contest_enter":
+                await _contest_exists(decks, sub, thread)
             entry = await contest_entry(decks, sub, thread, deck.id)
         changes["thread_id"] = thread
         if action == "contest_enter":
@@ -606,7 +625,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
                 raise DeckError("invalid", "This deck is entered in that contest already.")
             summary = summary_text(params.get("summary"))
             changes["summary"] = summary
-            row["text"] = f"Enter your deck {where} in the contest (thread {thread}) on Archidekt, publicly"
+            row["text"] = (
+                f"Enter your deck “{deck.name}” in the contest (thread {thread}) on Archidekt, publicly"
+            )
             row["before_text"] = rich_text(deck.description) or "(empty)"
             row["after_text"] = summary
             if formatting.is_formatted(deck.description):
@@ -622,7 +643,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             if entry is None:
                 raise DeckError("not_found", "This deck has no entry in that contest.")
             changes["entry_id"] = int(entry["id"])
-            row["text"] = f"Withdraw your deck {where} from the contest (thread {thread}) on Archidekt"
+            row["text"] = f"Withdraw your deck “{deck.name}” from the contest (thread {thread}) on Archidekt"
             row["note"] = "Archidekt says you can enter again after withdrawing."
     elif action == "profile":
         from . import profile
