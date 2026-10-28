@@ -147,7 +147,8 @@ def test_an_older_card_draws_the_amended_version_and_approves_it_with_its_code()
     def test(page) -> None:
         card = _open(page, [V2], [{**V2, "state": "rejected"}])
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
-        assert "Changed by Claude. Last change: now +1 Ponder." in card.locator("#note").inner_text()
+        # the app that made it changed it itself: "Updated: …", not "Changed by" (0.7.46, A20)
+        assert "Updated: now +1 Ponder." in card.locator("#note").inner_text()
         assert card.locator("#status").inner_text() == REDRAWN
         card.locator("#reject:enabled").wait_for(timeout=5_000)
         card.locator("#reject").click()

@@ -198,6 +198,26 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
     )
 
 
+def assistant_note(
+    mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DEFAULT_BIG_EDIT_ROWS
+) -> str:
+    """What ``mode`` means for the assistant, in two sentences (account_status, A7). The full list
+    is mode_help's, on the account page; each proposal's assistant_may_apply settles it per change."""
+    if mode == "manual":
+        first = "Every change waits for the user's press on the card or the review page."
+    elif mode == "semi":
+        first = (
+            f"You may apply a small low-risk edit (at most {_rows(max_rows)}) or a private copy of a "
+            "deck yourself; everything else waits for the user's press."
+        )
+    else:
+        first = (
+            f"You may apply most changes you propose yourself; bigger edits (more than {_rows(big_rows)}), "
+            "new decks, restores and account actions wait for the user's press."
+        )
+    return first + " Each proposal's assistant_may_apply says which, so never guess."
+
+
 _STILL_WAITS = (
     "a held change, a change waiting for another change first, one another app had a hand in, one "
     "that replaces another app's change, or one that another app's waiting change would replace"
@@ -462,6 +482,13 @@ def risk_of(
     broken = [str(b) for r in rows for b in r.get("breaks") or []]
     if broken:  # decks.DeckService._judge_rules: a legal deck made illegal is never low risk
         return "high", BREAKS_RULES_REASON.format(rules="; ".join(dict.fromkeys(broken)))
+    # decks.DeckService._check_names: a card Archidekt lacks, or a name nothing could check
+    missing = [str(r.get("name")) for r in rows if r.get("missing")]
+    if missing:
+        return "high", "adds a card Archidekt doesn't have: " + ", ".join(missing)
+    unchecked = [str(r.get("name")) for r in rows if r.get("unchecked")]
+    if unchecked:
+        return "high", "adds a card name that couldn't be checked: " + ", ".join(unchecked)
     if any(r.get("companion_card") for r in rows):
         return "high", COMPANION_REASON
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):

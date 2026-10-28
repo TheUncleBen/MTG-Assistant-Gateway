@@ -17,7 +17,10 @@ SUB = "user-1"
 
 async def _propose(h, token: str, name: str) -> dict:
     res = await call(
-        h, token, "propose_deck_changes", {"deck_id": "42", "changes": [{"action": "add", "card_name": name}]}
+        h,
+        token,
+        "propose_deck_changes",
+        {"deck_id": "42", "changes": [{"action": "add", "card_name": name}], "separate": True},
     )
     return res
 

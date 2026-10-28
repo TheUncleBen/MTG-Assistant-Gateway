@@ -25,7 +25,10 @@ async def test_list_my_proposals_pages_through_all_of_them_and_takes_the_collect
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "manual")
-    made = [structured(await call(h, token, "propose_deck_changes", _add(f"Card {i}"))) for i in range(25)]
+    made = [
+        structured(await call(h, token, "propose_deck_changes", {**_add(f"Card {i}"), "separate": True}))
+        for i in range(25)
+    ]
     assert all(p["ok"] for p in made)
     first = structured(await call(h, token, "list_my_proposals"))
     assert len(first["proposals"]) == 20 and first["has_more"] is True and first["next_offset"] == 20

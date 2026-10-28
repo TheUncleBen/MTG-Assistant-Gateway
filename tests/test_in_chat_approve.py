@@ -59,7 +59,7 @@ async def _propose(h, token: str, card: str = "Sol Ring") -> dict:
         h,
         token,
         "propose_deck_changes",
-        {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]},
+        {"deck_id": "42", "changes": [{"action": "add", "card_name": card}], "separate": True},
     )
 
 
@@ -156,12 +156,8 @@ async def test_card_approve_applies_and_the_code_is_spent(stack: Stack) -> None:
     own = structured(own_res)
     assert own["ok"] is False and own["error"] == "browser_required"
     assert _writes(stack.ark) == 0
-    # ...and answers with the card again (since 0.7.46 only the newest card's code applies)
-    first = structured(
-        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
-    )
-    assert first["ok"] is False and first["error"] == "not_newest_card", first
-    code = own_res["_meta"][APPROVAL_META_KEY]
+    # ...as a plain answer that draws no second card (0.7.46): the card drawn with the proposal
+    assert APPROVAL_META_KEY not in (own_res.get("_meta") or {}) and own_res.get("isError") is False
     # ...the card's Approve applies at once.
     done = await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     got = structured(done)
@@ -274,10 +270,11 @@ async def test_card_cannot_apply_what_the_browser_already_rejected(stack: Stack)
     assert _writes(stack.ark) == 0
 
 
-async def test_a_failed_approve_says_the_proposal_is_now_failed(stack: Stack) -> None:
-    """An Approve whose apply fails answers with the proposal's state (failed), so the
-    card shows that and drops its buttons instead of showing Pending with buttons that would only
-    be refused. A refusal that leaves the proposal pending says pending."""
+async def test_a_failed_approve_says_whether_the_proposal_waits_again_or_failed(stack: Stack) -> None:
+    """An Approve whose apply fails answers with the proposal's state, so the card shows it
+    instead of buttons that would only be refused. Since 0.7.46 an apply Archidekt didn't answer,
+    with nothing changed there, waits again with Try again (owner decision C3); an apply that
+    can't work (the deck is gone) fails. A refusal that leaves the proposal pending says pending."""
     h = stack.h
     token = await linked_user(stack)
     res = await _propose(h, token)
@@ -290,12 +287,28 @@ async def test_a_failed_approve_says_the_proposal_is_now_failed(stack: Stack) ->
     got = structured(
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     )
-    assert got["ok"] is False and got["state"] == "failed", got
-    print("B6 failed-apply message:", got["message"])
+    assert got["ok"] is False and got["state"] == "pending" and got["try_again"] is True, got
+    assert "Nothing was changed on Archidekt" in got["message"] and "Try again" in got["message"], got
+    now = structured(await call(h, token, "proposal_status", {"proposal_id": p["proposal_id"]}))
     assert (
-        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
-        == "failed"
+        now["state"] == "pending"
+        and now["try_again"] is True
+        and "Don't retry it yourself" in now["next_step"]
     )
+    # Archidekt answers again: the same card's code applies it (its Try again)
+    stack.ark.fail_card_writes = False
+    done = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert done["ok"] and done["state"] == "applied", done
+    # a deck that is gone can't be retried: failed
+    res = await _propose(h, token, "Arcane Signet")
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    stack.ark.decks.pop(42)
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["state"] == "failed", got
 
 
 @pytest.mark.usefixtures("quick_waits")
@@ -344,9 +357,26 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     assert again["ok"] is True and again["state"] == "applied", again
 
     stack.ark.transport.handler = orig  # the 429s are over
-    stack.ark.fail_card_writes = True
-    res = await _propose(h, token)
+    stack.ark.fail_card_writes = True  # Archidekt doesn't answer: nothing changed, Try again
+    res = await _propose(h, token, "Arcane Signet")
     p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["state"] == "pending" and got["try_again"], got
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
+    assert "could not be applied" not in page and "new proposal" not in page
+    assert (
+        "<div class='notice error'>Archidekt didn&#x27;t answer, so nothing was changed. The change is "
+        "waiting again: press Try again.</div>"
+    ) in page
+    assert ">Try again</button>" in page or ">Try again<" in page
+    assert page.count("class='notice") == 1
+    stack.ark.fail_card_writes = False
+    # a failure that no retry fixes (the deck is gone) keeps the general box, once
+    res = await _propose(h, token, "Opt")
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    stack.ark.decks.pop(42)
     got = structured(
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     )

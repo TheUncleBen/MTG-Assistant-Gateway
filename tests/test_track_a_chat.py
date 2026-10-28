@@ -35,7 +35,9 @@ def _add(name: str) -> list[dict]:
 
 
 async def _propose(h, token: str, name: str) -> dict:
-    res = await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": _add(name)})
+    res = await call(
+        h, token, "propose_deck_changes", {"deck_id": "42", "changes": _add(name), "separate": True}
+    )
     assert structured(res)["ok"], structured(res)
     return res
 

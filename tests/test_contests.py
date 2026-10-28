@@ -12,6 +12,7 @@ from mtg_gateway.archidekt import rich_text
 from .conftest import Stack
 from .test_account_actions import _browser_apply, _contest_ready
 from .test_decks_and_proxy import call, linked_user, structured
+from .track_a_helpers import account_call
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +25,7 @@ def _contests_on_the_forum(stack: Stack) -> None:
 
 
 async def _propose(stack: Stack, token: str, **args: object) -> dict:
-    return structured(await call(stack.h, token, "propose_contest_entry", {"deck_id": "42", **args}))
+    return structured(await account_call(stack.h, token, "propose_contest_entry", {"deck_id": "42", **args}))
 
 
 async def test_entering_rewrites_the_description_after_a_snapshot_and_withdrawing_removes_it(
@@ -67,7 +68,7 @@ async def test_an_entry_needs_a_summary_a_contest_and_the_members_own_deck(stack
     assert "needs a summary" in (await _propose(stack, token, contest="880"))["message"]
     assert "contest's id" in (await _propose(stack, token, contest="soon", summary="x"))["message"]
     other = structured(
-        await call(
+        await account_call(
             stack.h, token, "propose_contest_entry", {"deck_id": "43", "contest": "880", "summary": "x"}
         )
     )
@@ -88,7 +89,7 @@ async def test_an_entry_that_wipes_a_formatted_description_is_approved_on_the_re
         {"ops": [{"insert": "Primer", "attributes": {"link": "https://example.com/p"}}, {"insert": "\n"}]}
     )
     token = await linked_user(stack)
-    res = await call(
+    res = await account_call(
         stack.h, token, "propose_contest_entry", {"deck_id": "42", "contest": "881", "summary": "x"}
     )
     p = structured(res)
@@ -98,7 +99,7 @@ async def test_an_entry_that_wipes_a_formatted_description_is_approved_on_the_re
     assert row.get("formatting_lost") is True
     # a plain description keeps the card
     stack.ark.decks[42]["description"] = "plain words"
-    res = await call(
+    res = await account_call(
         stack.h, token, "propose_contest_entry", {"deck_id": "42", "contest": "882", "summary": "y"}
     )
     assert (res.get("_meta") or {}).get(APPROVAL_META_KEY)

@@ -1214,7 +1214,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         """Add or remove a collaborator of the member's own deck: one press, then a confirmation,
         then it is sent to Archidekt (0.7.24; before, the form made a proposal to apply on its
         review page). The member's own click with their session and CSRF token, like the delete and
-        new-folder forms; an assistant's propose_collaborator still needs the review page."""
+        new-folder forms; an assistant's collaborator change (propose_account_action) still
+        needs the member's press."""
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:

@@ -56,7 +56,36 @@ async def mcp_token(h: Harness) -> str:
     return (await h.tokens_for(client))["access_token"]
 
 
+# The tools that apply a new proposal in the same call when the member's approval mode lets the
+# assistant apply it (apply_if_allowed, default true). Tests written for the two-step flow (propose,
+# then apply_proposal or the card) keep their proposal waiting by passing false here; a test of the
+# one-call apply passes apply_if_allowed itself (test_assistant_flow.py).
+APPLIES_IN_ONE_CALL = frozenset(
+    {
+        "propose_new_deck",
+        "propose_deck_changes",
+        "amend_proposal",
+        "combine_proposals",
+        "propose_restore_snapshot",
+        "propose_deck_categories",
+        "propose_custom_card_changes",
+        "propose_deck_details",
+        "propose_clone_deck",
+        "propose_list_change",
+        "propose_add_package",
+        "propose_collection_changes",
+    }
+)
+
+
 async def call(h: Harness, token: str, name: str, args: dict | None = None) -> dict:
+    if name in APPLIES_IN_ONE_CALL and isinstance(args, dict):
+        args = {"apply_if_allowed": False, **args}
+    return await call_as_sent(h, token, name, args)
+
+
+async def call_as_sent(h: Harness, token: str, name: str, args: dict | None = None) -> dict:
+    """A tool call with exactly these arguments, as an assistant would send it."""
     r = await h.mcp(token, "tools/call", {"name": name, "arguments": args or {}}, rid=7)
     assert r.status_code == 200, r.text
     return sse_json(r)["result"]
@@ -1127,7 +1156,7 @@ async def test_resolve_card_prefers_named_printing() -> None:
     assert (await client.resolve_card("t", "sol ring", set_code="CMR"))["id"] == 2
     assert (await client.resolve_card("t", "Sol Ring", set_code="xxx", collector_number="490"))["id"] == 2
     assert seen[0]["exact"] == "true" and seen[0]["name"] == "Sol Ring"
-    with pytest.raises(Exception, match="no Archidekt printing"):
+    with pytest.raises(Exception, match="Archidekt doesn't have"):
         (await client.resolve_card("t", "Nonexistent Card"))["id"]
     assert seen[-1].get("exact") is None  # the fallback substring search was tried
 
@@ -1423,7 +1452,7 @@ async def test_pinned_printing_that_is_missing_or_another_card_refuses_the_edit(
         ),
         (
             {"action": "add", "card_name": "Swamp", "set_code": "m21", "collector_number": "9999"},
-            "Archidekt has no printing M21 #9999 of 'Swamp'; nothing was added",
+            "Archidekt doesn't have “Swamp” in that printing (M21 #9999), so nothing was added.",
         ),
     ]:
         p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
@@ -1488,7 +1517,7 @@ async def test_a_card_no_magic_card_is_called_is_refused_when_proposed(stack: St
                 h,
                 token,
                 "propose_deck_changes",
-                {"deck_id": "42", "changes": [{"action": "add", "card_name": name}]},
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": name}], "separate": True},
             )
         )
         assert r["ok"] is ok, (name, r)
