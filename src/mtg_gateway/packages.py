@@ -16,6 +16,7 @@ from .archidekt import FORMAT_IDS, FORMAT_NAMES, Deck, format_label
 from .deck_stats import _SINGLETON_FORMATS, colour_letter
 
 KEYWORDS_MAX = 200
+PAGE_ROWS = 50  # Archidekt's Packages listing: rows a page
 BUDGETS = {None: "any", 1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}
 FIELDS = ("keywords", "budget", "intended_formats")
 # Add package: where the package's cards go (the site's choices: keep the package's own
