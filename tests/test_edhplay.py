@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway.archidekt import parse_deck
+from mtg_gateway.decks import PAGE_DECK_RELOAD
 from mtg_gateway.export_formats import EDHPLAY_SIDEBOARD_MAX, EDHPLAY_URL, to_edhplay
 
 from .fake_archidekt import FakeArchidekt
@@ -539,6 +540,13 @@ def _deck_reads(server: Server) -> int:
     return sum(1 for method, path in server.ark.calls if method == "GET" and "/decks/42/" in path)
 
 
+def _age(server: Server, seconds: float) -> None:
+    """The deck page's kept reads made ``seconds`` earlier: since 0.7.46 (owner decision C1) a
+    Reload within decks.PAGE_DECK_RELOAD of the last read shows that read as it is."""
+    decks = server.app.state.gateway.decks
+    decks._page_decks = {k: (t - seconds, d) for k, (t, d) in decks._page_decks.items()}
+
+
 def test_the_list_comes_from_its_own_address_with_the_deck_pages_access(server: Server) -> None:
     """GET /decks/{id}/edhplay.json: signed in, the deck as the deck page reads it (the read the
     page just made, so no new Archidekt request), never stored by the browser; signed out, 401;
@@ -565,7 +573,11 @@ def test_the_list_comes_from_its_own_address_with_the_deck_pages_access(server: 
     }
     assert _deck_reads(server) == reads  # the page's own read, kept a short while
     server.ark.add_side_row(42, "Cultivate", quantity=17, category="Sideboard")
-    h.get("/decks/42", headers={"Cache-Control": "max-age=0"})  # the browser's Reload reads again
+    # the browser's Reload half a minute on: the copy on show, read again behind the page
+    _age(server, PAGE_DECK_RELOAD + 1)
+    again = h.get("/decks/42", headers={"Cache-Control": "max-age=0"})
+    assert "data-check='/decks/42/check'" in again.text and "data-reload='1'" in again.text
+    assert h.get("/decks/42/check").json() == {"changed": True, "failed": False}
     d = h.get("/decks/42/edhplay.json").json()
     assert d["left_count"] == 2 and d["left_out"] == "2 Cultivate" and "15 Cultivate" in d["list"]
     assert d["companion"] is False and d["no_commander"] is False
@@ -680,8 +692,13 @@ def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme:
             row["categories"] = cats or ["Uncategorized"]
         server.ark.add_side_row(42, "Yavimaya Elder", quantity=1, category="Sideboard")
         server.ark.decks[42]["cards"][-1]["companion"] = True
-        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        # a Reload half a minute on shows the copy on show, reads the deck behind it and, as it
+        # changed, loads the page again (static/feedback.js)
+        _age(server, PAGE_DECK_RELOAD + 1)
         page.reload(wait_until="networkidle")
+        page.locator("[data-card='Yavimaya Elder']").first.wait_for(state="attached")
+        page.wait_for_load_state("networkidle")
+        assert page.locator("[data-check]").count() == 0
         dialog = _open_dialog(page)
         page.wait_for_function("() => !document.querySelector('.edhplay-dialog .acts a[aria-busy]')")
         assert dialog.locator(lines).all_inner_texts() == [
