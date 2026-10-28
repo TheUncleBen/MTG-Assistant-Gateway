@@ -378,6 +378,11 @@ class RateBudget:
             }
         return True
 
+    def room(self, key: str) -> float:
+        """The calls ``key`` could spend now, spending none (a collection import keeps some back)."""
+        tokens, at = self._buckets.get(key, (float(self.per_window), time.monotonic()))
+        return min(float(self.per_window), tokens + (time.monotonic() - at) * self.per_window / self.window)
+
     def retry_after(self, key: str) -> int:
         """Whole seconds until ``key`` may spend a call again (at least 1): what a refusal's
         Retry-After header says."""

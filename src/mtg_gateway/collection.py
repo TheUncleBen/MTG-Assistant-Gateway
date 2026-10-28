@@ -13,13 +13,16 @@ the card's Scryfall id, as the deck pages do.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
+import logging
 import re
 import secrets
 import time
 from collections.abc import Awaitable, Callable, Iterable
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field
@@ -95,6 +98,9 @@ COLLECTION_CSP = (
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
+log = logging.getLogger(__name__)
+# set while an add sends its own write (CollectionService._own_write)
+_own_write: ContextVar[bool] = ContextVar("collection_own_write", default=False)
 _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
@@ -171,6 +177,10 @@ def normalise_items(items: Any) -> list[dict[str, Any]]:
 
 MAX_IMPORT_ROWS = MAX_ITEMS_PER_CALL  # one import is one add call; Archidekt is written a card at a time
 IMPORT_RESULT_TTL = 300.0  # seconds an import's result waits for the page the redirect lands on
+# An import runs in the background (``import_job``): while the member's Archidekt budget is below
+# a quarter of it (kept for the member's own changes) it pauses, looking again this often.
+IMPORT_PAUSE_POLL = 5.0
+IMPORT_JOBS_MAX = 2_000
 IMPORT_RESULTS_MAX = 2_000
 QUOTED_CELL_CHARS = 20  # a cell quoted in a refusal is cut to this
 REFUSAL_CHARS = 300  # and a kept refusal to this, whatever made it (none is longer today)
@@ -405,6 +415,7 @@ class _Found:
         self.names: set[str] = set()  # front faces already read by the cardName filter
         self.tried_whole = False
         self.whole = False  # one read held the whole binder
+        self.stamp: int | None = None  # the member's collection writes when these were read
 
     def take(self, results: Any) -> None:
         for rec in results if isinstance(results, list) else []:
@@ -432,11 +443,16 @@ class CollectionService:
         # write the gateway sends for the member drops it (decks.write_hooks).
         self._first_pages: dict[str, dict[str, tuple[float, dict[str, Any]]]] = {}
         self.first_page_ttl = FIRST_PAGE_TTL
+        self._writes: dict[str, int] = {}  # collection writes sent per member (_on_write)
         decks.write_hooks.append(self._on_write)
 
     def _on_write(self, sub: str, path: str) -> None:
         if not path or path.startswith("/collection"):
             self._first_pages.pop(sub, None)
+            # counted, so records an add read before another write are read again (_records_for);
+            # the add's own writes keep what it read current, so they are not
+            if not _own_write.get():
+                self._writes[sub] = self._writes.get(sub, 0) + 1
 
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
@@ -556,6 +572,7 @@ class CollectionService:
         result: dict[str, Any] | None = None,
         on_item: Callable[[int], None] | None = None,
         retry: Callable[[CollectionError], Awaitable[bool]] | None = None,
+        before_item: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
@@ -569,7 +586,8 @@ class CollectionService:
         apply, which counts each record written (``_run``). ``result``: the dict the rows go
         into as they are written (an import keeps what was added when it stops part way);
         ``on_item(n)`` is told after each card; ``retry(exc)`` decides, after a refusal of the
-        member's Archidekt budget, whether to try that card again (an import waits for room)."""
+        member's Archidekt budget, whether to try that card again (an import waits for room);
+        ``before_item()`` is awaited before each card (an import's pause while the budget is low)."""
         self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition", "language")})
@@ -581,6 +599,8 @@ class CollectionService:
         out.update(added=[], skipped=[], merged=[])
         for index, (spec, opts) in enumerate(wanted):
             while True:
+                if before_item is not None:
+                    await before_item()
                 try:
                     await self._add_one(sub, index, spec, opts, found, out, progress)
                     break
@@ -608,6 +628,12 @@ class CollectionService:
         it is small, else Archidekt's ``cardName`` filter for that name (a front face matches both
         faces' names). Never pages through the whole binder, so no record is out of reach."""
         uid = self._user_id(sub)
+        if found.stamp is not None and found.stamp != self._writes.get(sub, 0):
+            # another write (another tab, the member's own + while an import runs) came after these
+            # were read: read again rather than write copies counted from an old quantity
+            found.__init__()
+        if found.stamp is None:
+            found.stamp = self._writes.get(sub, 0)
         if found.whole:
             return
         if not found.tried_whole:
@@ -633,6 +659,14 @@ class CollectionService:
             found.take(body["results"])
             if not body.get("next"):
                 break
+
+    async def _own_write(self, sub: str, fn: Any, progress: dict[str, Any] | None) -> dict[str, Any]:
+        """An add's write, not counted as another write (the add updates ``found`` itself)."""
+        mark = _own_write.set(True)
+        try:
+            return await self._run(sub, fn, progress=progress)
+        finally:
+            _own_write.reset(mark)
 
     async def _add_one(
         self,
@@ -683,14 +717,14 @@ class CollectionService:
                     }
                 )
             qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
-            written = await self._run(
+            written = await self._own_write(
                 sub,
                 lambda token: self.client.collection_set(token, have, quantity=qty),
-                progress=progress,
+                progress,
             )
             rec = {**have, **written, "card": have.get("card")}
         else:
-            written = await self._run(
+            written = await self._own_write(
                 sub,
                 lambda token: self.client.collection_add(
                     token,
@@ -702,7 +736,7 @@ class CollectionService:
                     condition=opts["condition"] or "NM",
                     language=opts["language"],
                 ),
-                progress=progress,
+                progress,
             )
             rec = {**written, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, written)}
             found.lang_of[key] = opts["language"]
@@ -1043,7 +1077,17 @@ def import_result_html(result: dict[str, Any]) -> str:
         )
     if result.get("missing"):
         notes.append(f"Not found, so not imported: {rows(result['missing'])}.")
-    if result.get("added"):
+    if result.get("stopped"):
+        # an import that stopped part way: what went in, why it stopped, and what to do
+        n = int(result.get("cards") or 0)
+        lead = (
+            f"Imported {n} {'card' if n == 1 else 'cards'}, then the import stopped at line "
+            f"{int(result.get('stopped_at') or 0)} of {int(result.get('of') or 0)}: "
+            f"{str(result['stopped']).rstrip('.')}. Nothing after that line was added; import the rest "
+            "of the list again."
+        )
+        cls = "error"
+    elif result.get("added"):
         n = int(result.get("cards") or 0)
         lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Collection on Archidekt.", "ok"
     else:
@@ -1844,6 +1888,97 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         results.pop(token or "", None)
         return hit[2] if time.monotonic() - hit[1] <= IMPORT_RESULT_TTL else None
 
+    # -- an import, in the background -------------------------------------------------------------
+    # One import per member at a time, kept in memory by a random id (a restart forgets it; the
+    # cards it added stay on Archidekt). The page polls /collection/api/import/{id} for its strip.
+    imports: dict[str, dict[str, Any]] = {}
+    tasks: set[asyncio.Task[Any]] = set()
+
+    def import_text(job: dict[str, Any]) -> str:
+        done, of = job["done"], job["of"]
+        if job["state"] == "paused":
+            return (
+                f"Paused at {done} of {of} lines: your account has used most of its Archidekt actions "
+                "for now. The import goes on by itself when there is room, and keeps some back for "
+                "your own changes."
+            )
+        if job["state"] in ("done", "failed"):
+            return f"The import has ended: {done} of {of} lines done."
+        return (
+            f"Importing your list into your Collection on Archidekt: {done} of {of} lines done. "
+            "You can leave this page; the import goes on."
+        )
+
+    def import_strip(job: dict[str, Any]) -> str:
+        jid = _esc(job["id"])
+        return (
+            f"<div class='notice ok importing' role='status' data-import='{jid}'>"
+            f"<span class='ui-spin' aria-hidden='true'></span><span class='itext'>{_esc(import_text(job))}"
+            f"</span> {ui.button_link('Refresh', f'/collection?import={jid}', icon_name='refresh')}</div>"
+        )
+
+    def start_import(sub: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+        running = imports.get(sub)
+        if running is not None and running["state"] in ("running", "paused"):
+            return running
+        if len(imports) >= IMPORT_JOBS_MAX:
+            for k in [k for k, j in imports.items() if j["state"] in ("done", "failed")]:
+                imports.pop(k, None)
+        job = {"id": secrets.token_urlsafe(9), "state": "running", "done": 0, "of": len(items), "next": ""}
+        imports[sub] = job
+        task = asyncio.create_task(import_job(sub, items, job))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return job
+
+    async def import_job(sub: str, items: list[dict[str, Any]], job: dict[str, Any]) -> None:
+        """Add ``items`` a card at a time (service.add), counting lines done. While the member's
+        Archidekt budget is below a quarter of it the job waits (paused), so the member's own
+        changes still go through; a budget refusal that slips past is waited out the same way
+        (nothing was sent). Ends with the page's import notice, or what went in before a stop."""
+
+        def low() -> bool:
+            budget = service.decks.archidekt_budget
+            return budget.room(sub) < budget.per_window // 4 + 4  # a card costs up to three calls
+
+        async def room() -> None:
+            while low():
+                job["state"] = "paused"
+                await asyncio.sleep(IMPORT_PAUSE_POLL)
+            job["state"] = "running"
+
+        async def wait(_exc: CollectionError) -> bool:
+            job["state"] = "paused"
+            await asyncio.sleep(IMPORT_PAUSE_POLL)
+            await room()
+            return True
+
+        def counted(n: int) -> None:
+            job["done"] = n
+
+        out: dict[str, Any] = {}
+        try:
+            await service.add(
+                sub, items, source="manual", result=out, on_item=counted, retry=wait, before_item=room
+            )
+        except Exception as exc:  # anything: the strip must end, and say what went in
+            if not isinstance(exc, CollectionError):
+                log.exception("collection import failed")
+            reason = (
+                str(exc)
+                if isinstance(exc, CollectionError)
+                and exc.kind not in ("unavailable", "rate_limited", "busy")
+                else "Archidekt is not answering right now"
+            )
+            result = import_result(items[: job["done"]], out)
+            result.update(stopped=reason, stopped_at=job["done"] + 1, of=job["of"])
+            job["next"] = "/collection?err=imported&r=" + keep_result(sub, result)
+            job["state"] = "failed"
+            return
+        code = "ok=imported" if out.get("added") else "err=nothingimported"
+        job["next"] = f"/collection?{code}&r=" + keep_result(sub, import_result(items, out))
+        job["state"] = "done"
+
     def strip(text: str, kind: str, *, html: bool = False) -> str:
         """A notice strip at the top of the page, with a × to close (the page's script hides it)."""
         x = (
@@ -1992,6 +2127,20 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "unreadable",
         )
         notes = notice(result, sub=sub, token=qp.get("r"))
+        if qp.get("import"):
+            job = imports.get(sub)
+            if job is not None and job["id"] == qp.get("import"):
+                if job["state"] in ("done", "failed") and job["next"]:
+                    return RedirectResponse(job["next"], status_code=303)
+                notes = import_strip(job) + notes
+            else:
+                notes = (
+                    strip(
+                        "That import is no longer running. The cards it added are in your binder.",
+                        "ok",
+                    )
+                    + notes
+                )
         try:
             got = await listing(sub, lq)
             whole = got["out"] if not lq["q"] and lq["sort"] == "added" else await service.page(sub)
@@ -2161,9 +2310,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     code = "err=toomany" if "at most" in str(exc) else "err=unreadable"
                     code += "&r=" + keep_result(sub, {"refused": str(exc)[:REFUSAL_CHARS]})
                     return RedirectResponse(f"{back}{'&' if '?' in back else '?'}{code}", status_code=303)
-                out = await service.add(sub, items, source="manual")
-                code = "ok=imported" if out["added"] else "err=nothingimported"
-                code += "&r=" + keep_result(sub, import_result(items, out))
+                # in the background: the page shows its progress (a hundred lines are minutes of
+                # paced Archidekt calls, too long for one request)
+                service._user_id(sub)  # not linked: said at once
+                service._writes_on()
+                job = start_import(sub, items)
+                return RedirectResponse(f"/collection?import={job['id']}", status_code=303)
             elif action == "details":
                 rid = _rid(data.get("id"))
                 await service.update(
@@ -2283,6 +2435,27 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         except CollectionError as exc:
             return _fail(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/collection/api/import/{jid}", methods=["GET"], include_in_schema=False)
+    async def api_import(request: Request) -> Response:
+        """An import's progress, for its strip on the page (static/collection.js polls it)."""
+        who = api_user(request, write=False)
+        if isinstance(who, Response):
+            return who
+        job = imports.get(who[0])
+        if job is None or job["id"] != request.path_params["jid"]:
+            return JSONResponse({"ok": False, "error": "not_found", "message": "no such import"}, 404)
+        return JSONResponse(
+            {
+                "ok": True,
+                "state": job["state"],
+                "done": job["done"],
+                "of": job["of"],
+                "text": import_text(job),
+                "next": job["next"],
+            },
+            headers=NO_STORE,
+        )
 
     @server.custom_route("/collection/api/summary", methods=["GET"], include_in_schema=False)
     async def api_summary(request: Request) -> Response:
