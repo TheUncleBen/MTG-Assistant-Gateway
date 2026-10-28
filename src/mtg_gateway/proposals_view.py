@@ -417,7 +417,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         0,
         big_html=big,
         detail_html=det5,
-        actions=[ui.button_link("Connected apps", "/apps")],
+        actions=[ui.button_link("Connected apps", "/account/details#apps")],
         wide_sm=True,
     )
     return ui.widgets([w1, w2, w3, w4, w5])
