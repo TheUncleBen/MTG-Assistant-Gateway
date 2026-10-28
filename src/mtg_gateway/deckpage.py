@@ -4150,7 +4150,7 @@ html.printpick-open{overflow:hidden}
   .editopts{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem 1rem;margin:0 0 1rem}
   .editopts .backup{display:inline-flex;align-items:center;gap:.5rem;margin:0;min-height:44px;font-size:.9rem}
   .editopts .backup input{margin:0;width:22px;height:22px;accent-color:var(--orange)}
-  .editopts .cardsize{display:flex;align-items:center;gap:.5rem;margin:0}
+  .editopts .cardsize{display:flex;flex-direction:row;align-items:center;gap:.5rem;margin:0}
   .editopts .cardsize .lbl{color:var(--text-muted)}
   .editopts .cardsize .sizeseg button{min-height:44px;min-width:44px}
   .addbox form.addcard .go .foil{min-height:var(--ctl)}

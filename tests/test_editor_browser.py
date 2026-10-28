@@ -6,6 +6,7 @@ fold cleanly on a phone, and the printing picker opens as a dialog. Skipped with
 from __future__ import annotations
 
 import base64
+import os
 import re
 from pathlib import Path
 
@@ -472,7 +473,10 @@ def test_save_anyway_sends_the_backup_box(server: Server) -> None:
         browser.close()
 
 
-def test_the_phone_save_bar_keeps_its_controls_tall_and_the_status_on_its_own_line(server: Server) -> None:
+@pytest.mark.parametrize("scheme", ["dark", "light"])
+def test_the_phone_save_bar_keeps_its_controls_tall_and_the_status_on_its_own_line(
+    server: Server, scheme: str
+) -> None:
     """0.7.46 audit D-10: on a phone the fixed save bar holds Save, Undo and Redo (44 px each)
     with the status on its own line above them; the card size and the backup tick sit in a row
     of their own under the bar, 44 px tall, and the Foil tick is a real target. On a wide window
@@ -485,7 +489,7 @@ def test_the_phone_save_bar_keeps_its_controls_tall_and_the_status_on_its_own_li
     sid = _link(server)
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        ctx = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme=scheme)
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         ctx.route(
             re.compile(r"https://cards\.scryfall\.io/.*"),
@@ -495,6 +499,8 @@ def test_the_phone_save_bar_keeps_its_controls_tall_and_the_status_on_its_own_li
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        if os.environ.get("MTG_SHOTS"):
+            page.screenshot(path=os.path.join(os.environ["MTG_SHOTS"], f"editor-bar-390-{scheme}.png"))
         bar = page.locator(".editbar")
         assert bar.locator(".cardsize, .backup").count() == 0
         opts = page.locator(".editopts")
