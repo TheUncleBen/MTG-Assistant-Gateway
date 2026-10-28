@@ -6826,25 +6826,32 @@ class DeckService:
                 mismatches.append(f"category “{f['name']}” (its switches)")
         if want_folder is not None and verified.parent_folder != want_folder:
             mismatches.append("the folder")
+        saved_otherwise: list[str] = []  # a package's settings as Archidekt saved them
         if spec.get("package"):
             from . import packages
 
-            if not packages.same(packages.block_of(verified), spec["package"]):
-                mismatches.append("the package's keywords, budget or formats")
+            block = packages.block_of(verified)
+            if block is None:  # not in the first read of a package just made: read it once more
+                block = packages.block_of(await self.get_deck(sub, created.id))
+            saved_otherwise = packages.differences(block, spec["package"])
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
             "printing_notes": printing_notes,
             "sent_entries": len(entries),
-            "verified": not mismatches,
-            "mismatched_cards": mismatches,
+            "verified": not (mismatches or saved_otherwise),
+            "mismatched_cards": mismatches + saved_otherwise,
         }
-        if mismatches:
+        if mismatches or saved_otherwise:
             progress.update(result)  # apply() records it with the error
+            differently = f"Archidekt saved it differently: {'; '.join(saved_otherwise)}."
             raise DeckError(
                 "verify_mismatch",
-                f"The deck was created (id {created.id}) but these cards do not match the proposal: "
-                + ", ".join(mismatches),
+                f"Made, but {differently}"
+                if not mismatches
+                else f"The deck was created (id {created.id}) but these cards do not match the proposal: "
+                + ", ".join(mismatches)
+                + (f". {differently}" if saved_otherwise else ""),
             )
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
@@ -8270,11 +8277,10 @@ class DeckService:
             progress, self._call(sub, lambda token, *_: self.client.update_package(token, pid, want))
         )
         verified = await self.get_deck(sub, deck.id)
-        if not packages.same(packages.block_of(verified), want):
+        differ = packages.differences(packages.block_of(verified), want)
+        if differ:
             raise DeckError(
-                "verify_mismatch",
-                "Archidekt accepted the request but the package's keywords, budget or formats did not "
-                "change as asked.",
+                "verify_mismatch", f"Sent, but Archidekt saved it differently: {'; '.join(differ)}."
             )
 
     async def set_cover(

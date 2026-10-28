@@ -5,6 +5,7 @@ the package block's own id). Nothing here was recorded from archidekt.com."""
 # ruff: noqa: F811 - the stack fixture is imported and then named as a parameter
 from __future__ import annotations
 
+import html
 import json
 
 import pytest
@@ -13,7 +14,7 @@ from mtg_gateway import packages
 
 from .conftest import Stack
 from .test_account_actions import _browser_apply
-from .test_decks_and_proxy import call, linked_user, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 
 def test_settings_are_checked_and_sent_in_archidekts_names() -> None:
@@ -65,6 +66,64 @@ async def test_a_new_package_is_made_with_the_new_package_request(stack: Stack) 
     assert made["cardPackage"]["keywords"] == "fetchlands" and made["cardPackage"]["intendedFormats"] == [3]
     assert made["deckFormat"] is None and made["private"] is True
     assert out["result"]["verified"] is True
+
+
+def test_a_package_block_saved_in_other_words_is_the_same() -> None:
+    want = packages.parse(
+        {"keywords": "fetchlands, shocklands", "budget": 2, "intended_formats": ["commander", "modern"]}
+    )
+    for saved in (
+        {"keywords": "Fetchlands ,Shocklands ", "budget": 2, "intendedFormats": [2, 3]},
+        {"keywords": "fetchlands, shocklands", "budget": "$$", "intendedFormats": ["3", "2"]},
+        {"keywords": "fetchlands,  shocklands", "budget": "2", "intendedFormats": [3, 2], "id": 9},
+    ):
+        assert packages.same(saved, want), saved
+    plain = packages.parse({"keywords": "x"})
+    assert packages.same({"keywords": "x", "budget": 0, "intendedFormats": None}, plain)
+    assert packages.differences({"keywords": "y", "budget": 3, "intendedFormats": [2]}, want) == [
+        "keywords “y” (asked for “fetchlands, shocklands”)",
+        "budget $$$ (asked for $$)",
+        "formats Modern (asked for Commander, Modern)",
+    ]
+    assert packages.differences(None, want) == ["no package settings on the deck"]
+
+
+async def test_a_new_package_saved_in_other_words_or_read_late_is_applied(stack: Stack) -> None:
+    """Archidekt's answer for a new package (not recorded live): keywords in other case and
+    spacing, the formats in another order and, on the first read, no block at all. The package is
+    made as asked, so the apply is done."""
+    stack.ark.account.package_saves = lambda b: {
+        **b,
+        "keywords": b["keywords"].upper() + " ",
+        "intendedFormats": list(reversed(b["intendedFormats"])),
+    }
+    stack.ark.account.package_late = True
+    token = await linked_user(stack)
+    p = await _new_package(
+        stack, token, package={"keywords": "fetchlands", "intended_formats": ["commander", "modern"]}
+    )
+    out = await _browser_apply(stack.h, p["proposal_id"])
+    assert out.get("state") == "applied", out
+    assert out["result"]["verified"] is True
+
+
+async def test_a_new_package_saved_differently_says_what_differed(stack: Stack) -> None:
+    stack.ark.account.package_saves = lambda b: {**b, "budget": 1}
+    token = await linked_user(stack)
+    p = await _new_package(stack, token)
+    assert (await _browser_apply(stack.h, p["proposal_id"])) == {"ok": False, "error": "verify_mismatch"}
+    said = "Made, but Archidekt saved it differently: budget $ (asked for $$$)."
+    b = Browser(stack.h)
+    await b.login()
+    try:
+        out = (await b.http.get(f"/api/v1/proposals/{p['proposal_id']}")).json()
+        assert out["state"] == "failed" and out["result"]["detail"] == said, out
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+        assert "<title>New card package: Fetches" in page
+        assert html.escape(said) in page and "refused" not in page
+        assert "Check the new card package on Archidekt" in page
+    finally:
+        await b.aclose()
 
 
 async def test_a_package_with_cards_gets_them_after_it_is_made(stack: Stack) -> None:

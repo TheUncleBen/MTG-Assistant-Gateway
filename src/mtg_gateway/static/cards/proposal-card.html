@@ -213,7 +213,7 @@ button.danger:disabled{color:var(--red)}
   }
   function titleFor(p) {
     var name = p.deck_name || p.deck_id || "";
-    if (p.kind === "create_deck") return "New deck: " + name;
+    if (p.kind === "create_deck") return ((p.rows || []).some(function (r) { return r && r.kind === "new_deck" && r.package; }) ? "New card package: " : "New deck: ") + name;
     if (p.kind === "clone") return "Copy of " + name;
     if (p.kind === "restore") return "Restore " + name;
     if (p.kind === "details") return "Settings of " + name;

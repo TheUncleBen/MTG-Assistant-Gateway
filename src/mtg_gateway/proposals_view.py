@@ -60,7 +60,7 @@ NO_APP_NAME = "An assistant"  # an app with no registered name: never its client
 # gateway's own refusals of what it was about to send); anything else (the gateway restarted, a
 # network error or a timeout, the backup copy) is "could not be applied", not a refusal.
 ARCHIDEKT_REFUSALS = frozenset(
-    {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit", "verify_mismatch"}
+    {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit"}
 )
 NOT_APPLIED = "Could not be applied"
 # a reason typed on the card's Reject, as much of it as the list's line shows
@@ -577,8 +577,14 @@ def _closing_html(
             esc(f"Withdrawn by {it['app']}") if it["app"] and it["app"] not in (FROM_YOU, FROM_ADMIN) else ""
         )
     if st == "failed":
+        error = (it["result"] or {}).get("error")
+        # the check after the write found something other than asked: Archidekt took it
         said = (
-            "Archidekt refused it" if (it["result"] or {}).get("error") in ARCHIDEKT_REFUSALS else NOT_APPLIED
+            "Archidekt saved it differently"
+            if error == "verify_mismatch"
+            else "Archidekt refused it"
+            if error in ARCHIDEKT_REFUSALS
+            else NOT_APPLIED
         )
         return f"{said} · " + ui.cap_link("Why", f"/proposals/{it['id']}")
     return ""

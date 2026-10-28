@@ -9,6 +9,7 @@ it read, with only the asked-for fields changed, as the site does)."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, Deck, format_label
@@ -100,11 +101,54 @@ def changed(block: dict[str, Any], wanted: dict[str, Any]) -> dict[str, Any] | N
     return new
 
 
+def _keywords(v: Any) -> str:
+    """Keywords as compared: spacing (around commas too) and letter case left out."""
+    return re.sub(r"\s*,\s*", ",", " ".join(str(v or "").split())).casefold()
+
+
+def _budget(v: Any) -> Any:
+    """A budget as compared: none (None, 0 or empty), a number, or "$$" written as its count."""
+    if v is None or isinstance(v, bool):
+        return v
+    s = str(v).strip()
+    if s in ("", "0"):
+        return None
+    if set(s) == {"$"}:
+        return len(s)
+    return int(s) if s.isdigit() else s
+
+
+def _formats(v: Any) -> set[Any]:
+    """Format ids as compared: in any order, a number written as text the same number."""
+    return {int(f) if str(f).isdigit() else f for f in (v if isinstance(v, list) else [])}
+
+
+def _format_names(ids: set[Any]) -> str:
+    names = sorted(format_label(FORMAT_NAMES.get(f)) if f in FORMAT_NAMES else str(f) for f in ids)
+    return ", ".join(names) or "any format"
+
+
+def differences(block: dict[str, Any] | None, want: dict[str, Any]) -> list[str]:
+    """What a re-read block has other than the settings sent, in plain words ("budget $$
+    (asked for $$$)"); empty when it matches. Spacing and letter case of the keywords, the order
+    of the formats and how the budget is written do not count."""
+    if block is None:
+        return ["no package settings on the deck"]
+    out = []
+    if _keywords(block.get("keywords")) != _keywords(want.get("keywords")):
+        out.append(f"keywords “{block.get('keywords') or ''}” (asked for “{want.get('keywords') or ''}”)")
+    got_b, want_b = _budget(block.get("budget")), _budget(want.get("budget"))
+    if got_b != want_b:
+        out.append(f"budget {BUDGETS.get(got_b, got_b)} (asked for {BUDGETS.get(want_b, want_b)})")
+    got_f, want_f = _formats(block.get("intendedFormats")), _formats(want.get("intendedFormats"))
+    if got_f != want_f:
+        out.append(f"formats {_format_names(got_f)} (asked for {_format_names(want_f)})")
+    return out
+
+
 def same(block: dict[str, Any] | None, want: dict[str, Any]) -> bool:
-    """Whether a re-read block has the settings sent."""
-    return block is not None and all(
-        block.get(k) == want.get(k) for k in ("keywords", "budget", "intendedFormats")
-    )
+    """Whether a re-read block has the settings sent (see ``differences``)."""
+    return not differences(block, want)
 
 
 def adds(

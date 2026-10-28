@@ -385,9 +385,11 @@ def test_a_failed_row_says_refused_only_when_archidekt_refused() -> None:
         }
         return _closing_html(it, csrf=None, replaced_by=None, now=0.0)
 
-    for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract", "verify_mismatch"):
-        why = "<a class='ui-cap' href='/proposals/f1'>Why</a>"
+    why = "<a class='ui-cap' href='/proposals/f1'>Why</a>"
+    for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract"):
         assert line(refused) == f"Archidekt refused it · {why}", refused
+    # taken, but the check after it found something else than asked
+    assert line("verify_mismatch") == f"Archidekt saved it differently · {why}"
     for other in ("interrupted", "unavailable", "internal", "backup_failed", None):
         assert line(other) == f"Could not be applied · {why}", other
 
