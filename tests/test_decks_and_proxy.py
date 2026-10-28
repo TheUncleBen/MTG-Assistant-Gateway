@@ -1594,7 +1594,7 @@ async def test_new_deck_says_when_a_listed_printing_was_not_found(stack: Stack) 
     assert p["ok"], p
     a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"], a
-    sent = {e["cardid"] for e in (pt["cards"][0] for pt in ark.patches)}
+    sent = {e["cardid"] for pt in ark.patches for e in pt["cards"]}
     assert {91043, 9008, 9004} <= sent  # CMR 472 pinned; Swamp and Forest by name
     assert a["result"]["printing_notes"] == [
         "Swamp: XYZ 9 not found on Archidekt, added its default printing instead"

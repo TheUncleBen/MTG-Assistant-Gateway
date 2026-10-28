@@ -2003,6 +2003,14 @@ class ArchidektClient(AccountRequests):
             raise ArchidektError("contract", "unexpected card search shape")
         return [c for c in results if isinstance(c, dict)]
 
+    async def modify_cards(self, token: str, deck_id: str, entries: list[dict[str, Any]]) -> Any:
+        """PATCH /decks/{id}/modifyCards/v2/ with several entries in one ``{"cards": [...]}``, as
+        archidekt.com's own editor sends a pasted list (not tried live: the apply's read-back
+        checks every card, and a list Archidekt refuses goes one card at a time)."""
+        return await self._request(
+            "PATCH", f"/decks/{deck_id}/modifyCards/v2/", token=token, json_body={"cards": list(entries)}
+        )
+
     async def modify_card(self, token: str, deck_id: str, entry: dict[str, Any]) -> Any:
         """PATCH /decks/{id}/modifyCards/v2/ with {"cards": [entry]}, one card per call, as the
         nccurry reference does (reported shape, unverified against Archidekt)."""

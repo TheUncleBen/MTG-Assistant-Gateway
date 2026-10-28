@@ -1,0 +1,147 @@
+"""A big new deck (Ben, 27 Oct 2026: a 125-card new-deck proposal took many minutes, and his own
+edits to the new deck meanwhile did not save): the cards go to Archidekt in a few batched requests
+instead of one request per card, each printing is looked up once per apply, and while the deck is
+still being made an edit to it is refused with how far the apply got, instead of racing it."""
+
+from __future__ import annotations
+
+import asyncio
+from collections import Counter
+
+import httpx
+import pytest
+
+from mtg_gateway import decks as decks_mod
+
+from . import fake_archidekt as FA
+from .conftest import Stack
+from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import press_approve
+
+CARDS = 120  # different cards; five more rows repeat some of them in another category
+
+
+@pytest.fixture
+def big_list(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 30)
+    for n in range(CARDS):
+        monkeypatch.setitem(
+            FA.CARD_DB, f"test card {n}", {"id": 80000 + n, "oracleCard": {"name": f"Test Card {n}"}}
+        )
+    rows = [{"name": f"Test Card {n}", "quantity": 1, "categories": ["Main"]} for n in range(CARDS)]
+    rows += [{"name": f"Test Card {n}", "quantity": 1, "categories": ["Maybeboard"]} for n in range(5)]
+    return rows
+
+
+def _calls(stack: Stack, since: int) -> Counter:
+    out: Counter = Counter()
+    for method, path in stack.ark.calls[since:]:
+        if path.startswith("/api/cards/v2/"):
+            out["card lookups"] += 1
+        elif path.endswith("/modifyCards/v2/"):
+            out["card writes"] += 1
+        else:
+            out[f"{method} other"] += 1
+    return out
+
+
+async def test_a_125_card_new_deck_takes_a_few_writes_not_one_per_card(stack: Stack, big_list) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": big_list}))
+    assert p["ok"], p
+    since = len(stack.ark.calls)
+    out = await press_approve(h, token, p["proposal_id"])
+    assert out["ok"] and out["state"] == "applied", out
+    calls = _calls(stack, since)
+    print("125-card new deck, Archidekt requests:", dict(calls), "total", sum(calls.values()))
+    # one lookup per different card, not one per row; 125 rows in batches of at most 50
+    assert calls["card lookups"] == CARDS
+    assert calls["card writes"] == 3
+    assert all(len(b["cards"]) <= decks_mod.CARD_WRITE_BATCH for b in stack.ark.patches)
+    made = stack.ark.decks[int(out["result"]["deck_id"])]
+    assert sum(c["quantity"] for c in made["cards"]) == 125
+    assert sum(calls.values()) <= CARDS + 10
+
+
+async def test_a_batch_archidekt_refuses_is_sent_one_card_at_a_time(stack: Stack, big_list) -> None:
+    """Archidekt's modifyCards takes a list (archidekt.com's own editor sends several cards in one
+    request); should it ever refuse a list (HTTP 400), the cards of that batch go one at a time."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": big_list[:60]}))
+    orig = ark.transport.handler
+
+    def no_lists(req: httpx.Request):  # noqa: ANN202
+        if req.url.path.endswith("/modifyCards/v2/") and req.method == "PATCH":
+            import json
+
+            if len(json.loads(req.content)["cards"]) > 1:
+                ark.calls.append((req.method, req.url.path))
+                return httpx.Response(400, json={"cards": ["Expected a single card."]})
+        return orig(req)
+
+    ark.transport.handler = no_lists
+    out = await press_approve(h, token, p["proposal_id"])
+    assert out["ok"] and out["state"] == "applied", out
+    made = ark.decks[int(out["result"]["deck_id"])]
+    assert sum(c["quantity"] for c in made["cards"]) == 60
+
+
+async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
+    stack: Stack, big_list
+) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    svc = h.app.state.gateway.decks
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": big_list}))
+    orig = ark.transport.handler
+    release = asyncio.Event()
+    writes = {"n": 0}
+
+    async def slow_second_batch(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/modifyCards/v2/") and req.method == "PATCH":
+            writes["n"] += 1
+            if writes["n"] == 2:
+                await release.wait()
+        return orig(req)
+
+    ark.transport.handler = slow_second_batch
+    applying = asyncio.ensure_future(press_approve(h, token, p["proposal_id"]))
+    async with asyncio.timeout(10):
+        while writes["n"] < 2:
+            await asyncio.sleep(0.01)
+    row = h.db.get_proposal(p["proposal_id"], "user-1")
+    deck_id = str(row["deck_id"])
+    assert deck_id.isdigit()
+    assert svc._deck_locks[f"user-1:{deck_id}"].locked()  # held under the new deck's own id
+    b = Browser(h)
+    await b.login(f"/decks/{deck_id}")
+    try:
+        csrf = await b.csrf(f"/decks/{deck_id}")
+        page = await b.http.get(f"/decks/{deck_id}")
+        assert "This deck is still being made: 50 of 125 cards in." in page.text
+        r = await b.http.post(
+            f"/api/v1/decks/{deck_id}/edit",
+            json={"changes": [{"action": "set_quantity", "card_name": "Test Card 50", "quantity": 2}]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["message"] == (
+            "This deck is still being made: 50 of 125 cards in. Try again once it is done."
+        )
+        # nothing was left waiting in Proposals by the refused edit
+        assert [x["id"] for x in h.db.pending_board("user-1", deck_id)] == []
+        release.set()
+        out = await applying
+        assert out["state"] == "applied", out
+        # once it is made, the same edit goes through
+        r = await b.http.post(
+            f"/api/v1/decks/{deck_id}/edit",
+            json={"changes": [{"action": "set_quantity", "card_name": "Test Card 50", "quantity": 2}]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert r.status_code in (200, 201) and r.json()["ok"] and r.json()["applied"], r.text
+    finally:
+        release.set()
+        await b.aclose()
