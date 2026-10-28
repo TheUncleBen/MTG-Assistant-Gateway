@@ -45,8 +45,10 @@ from .report_view import (
     PREFLIGHT_ONLY,
     RESEARCH_FAILED,
     compared_numbers,
+    coverage,
     forge_enough,
     goldfish_settings,
+    kept_models,
     parse_goldfish,
     speed_numbers,
 )
@@ -2046,6 +2048,8 @@ class ReportService:
         out = await self._mf(sub, "goldfish_ab", args)
         if not out.get("ok") and str(out.get("text") or "").startswith(AB_SIZE_REFUSAL):
             out["refused"] = True  # the two decks' sizes, not a failure
+        if modes[0] == "commander":
+            _ab_commanders_aside(out, (_list_commander(text_a), _list_commander(text_b)))
         if used:
             out["kept_models"] = used
             out["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
@@ -2194,6 +2198,8 @@ class ReportService:
         out = self._summary(d)
         out["stats"] = {k: v for k, v in json.loads(d["stats_json"]).items() if k != RUN_KEY}
         out["goldfish"] = _compact(json.loads(d["goldfish_json"])) if d.get("goldfish_json") else None
+        # ahead of the simulation's own text: how much of the deck its numbers stand for
+        out["coverage"] = solo_coverage(out["goldfish"], deck_size=_card_count(out["stats"]))
         if (out.get("source") or {}).get("kind") == "compare":
             # the comparison's paired A/B, not one deck's solo test
             out["comparison"], out["goldfish"] = out["goldfish"], None
@@ -3280,6 +3286,11 @@ def _keep_quantities(goldfish: dict[str, Any], text: str) -> None:
         goldfish["quantities"] = copies
 
 
+def _card_count(stats: dict[str, Any]) -> int | None:
+    n = stats.get("card_count")
+    return n if isinstance(n, int) and not isinstance(n, bool) else None
+
+
 def _front_face(name: str | None) -> str | None:
     return name.split(" // ", 1)[0] if isinstance(name, str) else name
 
@@ -3300,6 +3311,10 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
         return
     data = goldfish.get("data")
     metrics = data.get("metrics") if isinstance(data, dict) else None
+    # The research service answers in text only: its metrics are the JSON block in the text.
+    in_text = None if isinstance(metrics, dict) else _text_metrics(goldfish.get("text"))
+    if in_text is not None:
+        metrics = in_text[0].get("metrics")
     honesty = metrics.get("honesty") if isinstance(metrics, dict) else None
     if not isinstance(honesty, dict):
         return
@@ -3314,6 +3329,9 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
         f"{commander} is cast from the command zone (never drawn); its abilities beyond combat are "
         "not modeled"
     )
+    if in_text is not None:
+        payload, start, end = in_text
+        goldfish["text"] = goldfish["text"][:start] + json.dumps(payload) + goldfish["text"][end:]
     text = goldfish.get("text")
     if not isinstance(text, str):
         return
@@ -3340,6 +3358,105 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
             lines.insert(i + 2, f"Commander — {honesty['commander_note']}")
         break
     goldfish["text"] = "\n".join(lines)
+
+
+# The "## Metrics" JSON block of a simulation's text (Mystic Forge's goldfish_run renderer).
+_METRICS_BLOCK = re.compile(r"^## Metrics\n```(?:json)?\n(.*?)\n```", re.M | re.S)
+
+
+def _text_metrics(text: Any) -> tuple[dict[str, Any], int, int] | None:
+    """The metrics JSON a simulation's text holds, with where it stands in the text; None when the
+    text has no such block or it does not read as an object."""
+    if not isinstance(text, str):
+        return None
+    m = _METRICS_BLOCK.search(text)
+    if m is None:
+        return None
+    try:
+        payload = json.loads(m.group(1))
+    except ValueError:
+        return None
+    return (payload, m.start(1), m.end(1)) if isinstance(payload, dict) else None
+
+
+def solo_coverage(goldfish: Any, *, deck_size: int | None = None) -> dict[str, Any] | None:
+    """How much of the deck the solo test played with its effect, in numbers and one sentence
+    (``note``) a report leads with: kill and damage numbers mean little when much of the deck, or
+    the commander, did nothing. Names the saved card models the run played, which any of the
+    member's assistants may have saved. None without a finished simulation."""
+    if not isinstance(goldfish, dict) or not goldfish.get("ok"):
+        return None
+    g = parse_goldfish(goldfish, deck_size=deck_size)
+    cov = coverage(g) if g else None
+    if g is None or cov is None:
+        return None
+    size = cov["deck_size"]
+    blank = size - cov["known"]
+    honesty = (g.get("metrics") or {}).get("honesty")
+    commander_aside = isinstance(honesty, dict) and bool(honesty.get("commander_note"))
+    parts = [f"Played with their effect: {cov['modeled']} of {size} cards."]
+    if blank:
+        parts.append(
+            f"{blank} card{'' if blank == 1 else 's'} {'was' if blank == 1 else 'were'} played without "
+            "their effect"
+            + (", and the commander's abilities beyond combat are not modeled" if commander_aside else "")
+            + "."
+        )
+    elif commander_aside:
+        parts.append("The commander's abilities beyond combat are not modeled.")
+    models = [u["name"] for u in kept_models({"goldfish": goldfish})]
+    if models:
+        n = len(models)
+        parts.append(
+            f"This run used {n} saved card model{'' if n == 1 else 's'} ({', '.join(models)}), "
+            "saved by any of your assistants."
+        )
+    if blank or commander_aside:
+        parts.append("Read the kill and damage numbers as a floor, not a forecast.")
+    return {
+        "modeled": cov["modeled"],
+        "known": cov["known"],
+        "deck_size": size,
+        "pct": cov["pct"],
+        "played_without_effect": blank,
+        "commander_modeled": not commander_aside,
+        "saved_models": models,
+        "note": " ".join(parts),
+    }
+
+
+def _list_commander(text: str) -> str | None:
+    """A Commander list's commander, as the research service reads it: the first card of the main
+    zone (front face)."""
+    first = next((c for c in _cards_or_none(text) if c.zone == "main"), None)
+    return _front_face(first.name) if first is not None else None
+
+
+AB_COMMANDER_ENTRY = "{name} (commander, cast from the command zone; abilities beyond combat not modeled)"
+
+
+def _ab_commanders_aside(goldfish: dict[str, Any], commanders: tuple[str | None, str | None]) -> None:
+    """In an A/B's honesty reports, each deck's commander is said to be cast from the command zone,
+    not "drawn 0%" (it is never drawn), as a solo test's report says it (_commander_aside)."""
+    text = goldfish.get("text")
+    if not goldfish.get("ok") or not isinstance(text, str):
+        return
+    for side, commander in zip(("A", "B"), commanders, strict=True):
+        if not commander:
+            continue
+        heading = f"## Honesty report — Deck {side}"
+        start = text.find(heading)
+        if start < 0:
+            continue
+        end = text.find("\n## ", start + len(heading))
+        end = len(text) if end < 0 else end
+        section = re.sub(
+            rf"(?<![^\s,:]){re.escape(commander)} \(drawn \d+%\)",
+            lambda _m, name=commander: AB_COMMANDER_ENTRY.format(name=name),
+            text[start:end],
+        )
+        text = text[:start] + section + text[end:]
+    goldfish["text"] = text
 
 
 # What a successful simulation's text always contains (Mystic Forge's renderers).
