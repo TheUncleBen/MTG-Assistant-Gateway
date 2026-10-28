@@ -1031,6 +1031,7 @@ class Pacer:
     async def enter(self, *, first: bool, page: bool) -> None:
         while True:
             await self._lock.acquire(first=first)
+            held = True  # whether this call holds the turn, so it is released once at most
             try:
                 refused = self._refusal(time.monotonic())
                 if refused is not None:
@@ -1045,6 +1046,7 @@ class Pacer:
                 elif wait or not self._slot_free(page):
                     # background work waits outside the turn, so a page arriving meanwhile starts
                     self._lock.release()
+                    held = False
                     self._waiting += 1
                     try:
                         await self._until_freed(wait or None)
@@ -1062,8 +1064,10 @@ class Pacer:
                 if not page:
                     self._background_in_flight += 1
             except BaseException:
-                # a cancelled or failed wait must never leave the shared turn held
-                self._lock.release()
+                # a cancelled or failed wait must never leave the shared turn held, nor release
+                # it out from under another call once it has let it go
+                if held:
+                    self._lock.release()
                 raise
             self._lock.release()
             return
