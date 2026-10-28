@@ -690,8 +690,22 @@ def fill_commander_names(
 
 
 def row_cards(rows: list[dict[str, Any]] | None) -> list[str]:
-    """Every card the rows name, a commander row's too, sorted."""
-    return sorted({str(n) for r in rows or [] for n in [r.get("name"), *(r.get("names") or [])] if n})
+    """Every card the rows name, a commander row's too, sorted. A categories change's rows name
+    deck categories, not cards (row_categories)."""
+    return sorted(
+        {
+            str(n)
+            for r in rows or []
+            if r.get("kind") != "deck_category"
+            for n in [r.get("name"), *(r.get("names") or [])]
+            if n
+        }
+    )
+
+
+def row_categories(rows: list[dict[str, Any]] | None) -> list[str]:
+    """The deck categories a categories change's rows name, sorted."""
+    return sorted({str(r["name"]) for r in rows or [] if r.get("kind") == "deck_category" and r.get("name")})
 
 
 def _printing_label(item: dict[str, Any]) -> str | None:
@@ -7485,6 +7499,7 @@ class DeckService:
                     **(self._status_fields(sub, line) if line.get("status") else {"status": None}),
                     "summary": summary[:400],
                     "cards": row_cards(row.get("rows"))[:60],
+                    **({"categories": cats} if (cats := row_categories(row.get("rows"))[:60]) else {}),
                     "links": board.links_text(self.db, sub, line["id"]),
                     # the same link in the member's words, for the cards
                     "link_note": board.link_note(self.db, sub, line),
