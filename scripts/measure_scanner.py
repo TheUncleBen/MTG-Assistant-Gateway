@@ -707,11 +707,15 @@ def main() -> int:
     if not ocr_assets_present():
         print("Text recognition is not installed: run scripts/fetch_ocr_assets.py first.", file=sys.stderr)
         return 2
-    labels, skipped = read_labels(photos, args.labels or photos / "labels.csv")
+    labels_file = args.labels or photos / "labels.csv"
+    if not labels_file.is_file():
+        print(f"No {labels_file}: run with --template first, then fill it in.", file=sys.stderr)
+        return 2
+    labels, skipped = read_labels(photos, labels_file)
     for line in skipped:
         print("left out: " + line, file=sys.stderr)
     if not labels:
-        print("No labelled photos; run with --template and fill in labels.csv.", file=sys.stderr)
+        print(f"No photo in {labels_file} has a card name yet: fill in the name column.", file=sys.stderr)
         return 2
     extra = []
     if args.pool_extra:
