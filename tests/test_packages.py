@@ -527,3 +527,33 @@ async def test_a_plain_add_names_its_color_tag_on_the_review_line(stack: Stack) 
 
     html_rows, _counts, _net = _change_rows(p["rows"], p["diff"])
     assert "Opt, color tag Combo (#00ff00)" in html_rows  # the review page says it too
+
+
+async def test_card_packages_take_a_limit_and_say_how_many_were_left_out(stack: Stack) -> None:
+    """A page of everyone's packages is 50 rows (about 10 kB): limit (default 20) keeps the
+    answer short, and the answer says how many of the page's rows it left out."""
+    token = await linked_user(stack)
+    ark = stack.ark
+    for i in range(25):
+        did = 5000 + i
+        ark.decks[did] = {
+            "id": did,
+            "name": f"Pack {i}",
+            "owner": {"username": "amy"},
+            "updatedAt": "2026-10-03T00:00:00Z",
+            "deckFormat": None,
+            "private": False,
+            "categories": [],
+            "cards": [],
+            "cardPackage": {"id": did + 1000, "importCount": 100 - i, "keywords": "", "budget": 2},
+        }
+    first = structured(await call(stack.h, token, "list_card_packages", {"whose": "all"}))
+    assert first["ok"] is True and len(first["packages"]) == 20, first
+    assert first["left_out"] == 5, first
+    assert [p["name"] for p in first["packages"]][:2] == ["Pack 0", "Pack 1"]  # most imported first
+    few = structured(await call(stack.h, token, "list_card_packages", {"whose": "all", "limit": 3}))
+    assert len(few["packages"]) == 3 and few["left_out"] == 22, few
+    whole = structured(await call(stack.h, token, "list_card_packages", {"whose": "all", "limit": 50}))
+    assert len(whole["packages"]) == 25 and "left_out" not in whole, whole
+    bad = structured(await call(stack.h, token, "list_card_packages", {"whose": "all", "limit": 0}))
+    assert bad["ok"] is False and "limit" in bad["message"], bad
