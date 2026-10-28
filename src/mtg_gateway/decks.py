@@ -30,6 +30,7 @@ import secrets
 import time
 import uuid
 import weakref
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -870,6 +871,7 @@ class DeckError(Exception):
         *,
         retry_after: int | None = None,
         sent: bool = True,
+        http_status: int | None = None,
         **extra: Any,
     ):
         super().__init__(message)
@@ -877,6 +879,9 @@ class DeckError(Exception):
         self.extra = extra
         self.retry_after = retry_after
         self.sent = sent
+        # ArchidektError.status, for a contract error from Archidekt (not ``status``: a waiting
+        # proposal's status, "needs_look" and the rest, travels in ``extra`` under that name)
+        self.http_status = http_status
 
 
 @dataclass(frozen=True)
@@ -3442,7 +3447,9 @@ class DeckService:
             if exc.kind == "auth":
                 raise expire("rejected after refresh") from exc
             # the wait Archidekt asked for reaches the busy page's Retry-After header
-            raise DeckError(exc.kind, str(exc), sent=exc.sent, retry_after=archidekt_wait(exc)) from exc
+            raise DeckError(
+                exc.kind, str(exc), sent=exc.sent, retry_after=archidekt_wait(exc), http_status=exc.status
+            ) from exc
         finally:
             no_retry.reset(quiet)
             _acting_sub.reset(acting)
@@ -6009,23 +6016,59 @@ class DeckService:
         self, sub: str, deck_id: str, payload: list[dict[str, Any]], progress: dict[str, Any]
     ) -> None:
         """A new deck's add entries, CARD_WRITE_BATCH to a PATCH, counting in ``progress`` how many
-        went out. A batch Archidekt refuses as a request (HTTP 400) goes again one card at a time."""
+        went out. A batch Archidekt refuses as a request (HTTP 400) goes again one card at a time.
+        A batch Archidekt took but answered with a body that could not be read (a 2xx) may be in
+        the deck already: only its cards the deck does not have go again, one at a time, so none
+        is doubled."""
         progress["sent_entries"], progress["of_entries"] = 0, len(payload)
         for start in range(0, len(payload), CARD_WRITE_BATCH):
             batch = payload[start : start + CARD_WRITE_BATCH]
             try:
                 await _writing(progress, self._call(sub, self.client.modify_cards, deck_id, batch))
             except DeckError as exc:
-                if exc.kind != "contract" or len(batch) == 1:
-                    raise
-                logger.warning(
-                    "Archidekt refused %d cards in one request; sending them one at a time", len(batch)
+                taken = (
+                    exc.kind == "contract" and exc.http_status is not None and 200 <= exc.http_status < 300
                 )
-                for entry in batch:
+                if not taken and (exc.kind != "contract" or exc.http_status != 400 or len(batch) == 1):
+                    raise
+                if taken:
+                    logger.warning(
+                        "Archidekt's answer to %d cards could not be read; reading the deck", len(batch)
+                    )
+                    again = await self._entries_missing(sub, deck_id, payload[:start], batch)
+                else:
+                    logger.warning(
+                        "Archidekt refused %d cards in one request; sending them one at a time", len(batch)
+                    )
+                    again = batch
+                progress["sent_entries"] += len(batch) - len(again)
+                for entry in again:
                     await _writing(progress, self._call(sub, self.client.modify_card, deck_id, entry))
                     progress["sent_entries"] += 1
                 continue
             progress["sent_entries"] += len(batch)
+
+    async def _entries_missing(
+        self, sub: str, deck_id: str, before: list[dict[str, Any]], batch: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """The add entries of ``batch`` the new deck has no row for, by printing and first
+        category, once the rows of the entries sent ``before`` it are counted out."""
+
+        def key(card_id: Any, categories: Any) -> tuple[Any, str]:
+            return card_id, str((list(categories or []) or [""])[0]).casefold()
+
+        deck = await self.get_deck(sub, deck_id)
+        have = Counter(key(c.card_id, c.categories) for c in deck.cards)
+        for entry in before:
+            have[key(entry.get("cardid"), entry.get("categories"))] -= 1
+        missing = []
+        for entry in batch:
+            k = key(entry.get("cardid"), entry.get("categories"))
+            if have[k] > 0:
+                have[k] -= 1
+            else:
+                missing.append(entry)
+        return missing
 
     async def _send(
         self, sub: str, deck_id: str, payload: list[dict[str, Any]], progress: dict[str, Any]

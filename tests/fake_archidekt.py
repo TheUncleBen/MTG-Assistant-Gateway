@@ -126,6 +126,8 @@ class FakeArchidekt:
         self.patches: list[dict[str, Any]] = []
         self.fail_patch_silently = False
         self.fail_card_writes = False  # PATCH modifyCards answers 503
+        # this many PATCH modifyCards are saved but answered 200 with a body that is not JSON
+        self.garble_card_writes = 0
         # set to an unset threading.Event: PATCH modifyCards waits for it (a slow save, held open)
         self.hold_card_writes: Any = None
         # the same for a folder delete (deleteItems), waited for without holding up the gateway's
@@ -1317,6 +1319,9 @@ class FakeArchidekt:
                 if not self.fail_patch_silently:
                     self.apply_custom_patch(deck, customs, who)
                     self.apply_patch(deck, plain)
+                if self.garble_card_writes > 0:
+                    self.garble_card_writes -= 1
+                    return httpx.Response(200, text="<html>Saved</html>")
                 return httpx.Response(200, json={"ok": True})
         return httpx.Response(404, json={"detail": "Not found."})
 

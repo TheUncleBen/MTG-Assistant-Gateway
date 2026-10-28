@@ -88,6 +88,54 @@ async def test_a_batch_archidekt_refuses_is_sent_one_card_at_a_time(stack: Stack
     assert sum(c["quantity"] for c in made["cards"]) == 60
 
 
+async def test_a_batch_saved_with_an_answer_that_is_not_json_is_not_sent_again(
+    stack: Stack, big_list
+) -> None:
+    """Archidekt saved a batch but its answer could not be read (a 200 that is not JSON): the
+    cards may be in, so they are not sent again one at a time, which would double them. The
+    other batches still go, and the read-back after says whether every card is there."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": big_list[:60]}))
+    ark.garble_card_writes = 1
+    out = await press_approve(h, token, p["proposal_id"])
+    assert out["ok"] and out["state"] == "applied", out
+    made = ark.decks[int(out["result"]["deck_id"])]
+    assert sum(c["quantity"] for c in made["cards"]) == 60
+    assert [len(b["cards"]) for b in ark.patches] == [
+        decks_mod.CARD_WRITE_BATCH,
+        60 - decks_mod.CARD_WRITE_BATCH,
+    ]
+
+
+async def test_a_batch_whose_answer_is_unreadable_and_did_not_land_goes_again_once(
+    stack: Stack, big_list
+) -> None:
+    """The same unreadable answer for a batch Archidekt did not save: the deck is read, and the
+    cards it does not have go once more, one at a time."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": big_list[:60]}))
+    orig = ark.transport.handler
+    seen = {"n": 0}
+
+    def first_lost(req: httpx.Request):  # noqa: ANN202
+        if req.url.path.endswith("/modifyCards/v2/") and req.method == "PATCH":
+            seen["n"] += 1
+            if seen["n"] == 1:
+                ark.calls.append((req.method, req.url.path))
+                return httpx.Response(200, text="<html>Saved</html>")
+        return orig(req)
+
+    ark.transport.handler = first_lost
+    out = await press_approve(h, token, p["proposal_id"])
+    assert out["ok"] and out["state"] == "applied", out
+    made = ark.decks[int(out["result"]["deck_id"])]
+    assert sum(c["quantity"] for c in made["cards"]) == 60
+    # the lost batch, then the second batch, then the lost batch's cards one at a time
+    assert seen["n"] == 2 + decks_mod.CARD_WRITE_BATCH
+
+
 async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
     stack: Stack, big_list
 ) -> None:
