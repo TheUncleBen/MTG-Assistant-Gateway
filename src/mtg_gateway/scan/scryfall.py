@@ -143,6 +143,9 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
         "image_art": image_uris.get("art_crop"),
         "scryfall_uri": card.get("scryfall_uri"),
         "finishes": [f for f in (card.get("finishes") or []) if isinstance(f, str)],
+        # the printing's prices as Scryfall listed them when it was read (its daily prices): the
+        # Scan page's running value and the printing picker; the tools leave them out
+        "prices": _prices(card),
     }
     legal = card.get("legalities") or {}
     if legal:
@@ -155,6 +158,17 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _prices(card: dict[str, Any]) -> dict[str, str]:
+    """The prices Scryfall gives, only those it has (a string each): usd, usd_foil, usd_etched,
+    eur, eur_foil, tix."""
+    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
+    return {
+        k: str(prices[k])
+        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
+        if isinstance(prices.get(k), str) and prices[k]
+    }
+
+
 def _cn(number: str) -> str:
     """A collector number for Scryfall's ``cn:``: as it is when it is plain letters and digits,
     else in double quotes (numbers such as ``1★``)."""
@@ -164,15 +178,9 @@ def _cn(number: str) -> str:
 def browse_row(card: dict[str, Any]) -> dict[str, Any]:
     """A summary plus what the card search's list view and the printing picker show: prices,
     power, toughness and loyalty, and the printing's frame, border and treatments."""
-    out = summarize(card)
+    out = summarize(card)  # with the printing's prices
     faces = [f for f in card.get("card_faces") or [] if isinstance(f, dict)]
     front = faces[0] if faces else {}
-    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
-    out["prices"] = {
-        k: str(prices[k])
-        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
-        if isinstance(prices.get(k), str) and prices[k]
-    }
     for key in ("power", "toughness", "loyalty"):
         value = card.get(key, front.get(key))
         if isinstance(value, str) and value:
@@ -233,6 +241,8 @@ def slim(card: dict[str, Any]) -> dict[str, Any]:
     legal = card.get("legalities")
     if isinstance(legal, dict) and "commander" in legal:
         out["legalities"] = {"commander": legal["commander"]}
+    # the printing's prices (six short strings at most) for the Scan page's running value
+    out["prices"] = _prices(card)
     return out
 
 

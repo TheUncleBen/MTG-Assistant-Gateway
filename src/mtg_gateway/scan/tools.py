@@ -48,9 +48,10 @@ def _err(exc: ScanError) -> dict[str, Any]:
     return {"ok": False, "error": exc.kind, "message": str(exc)}
 
 
-# Card fields the Scan page draws with (image links, the Scryfall page) and the assistant has no
-# use for: left out of what the tools return, which keeps a card's printings list small.
-_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri")
+# Card fields the Scan page draws with (image links, the Scryfall page, the prices behind its
+# running value) and the assistant has no use for: left out of what the tools return, which keeps
+# a card's printings list small.
+_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri", "prices")
 
 
 def _slim(card: Any) -> Any:
