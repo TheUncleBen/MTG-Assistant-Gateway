@@ -487,3 +487,21 @@ def test_the_instructions_say_reading_and_testing_never_wait_for_approval() -> N
         "run_deck_report) never need the user's approval, in any approval mode: keep using them "
         "while a proposal waits." in told
     )
+
+
+# -- a new commander deck with no commander is said so --------------------------------------------
+async def test_a_new_commander_deck_without_a_commander_is_warned(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    plain = [{"name": "Krenko, Mob Boss", "quantity": 1}, {"name": "Sol Ring", "quantity": 1}]
+    led = [{"name": "Krenko, Mob Boss", "quantity": 1, "category": "Commander"}, plain[1]]
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Goblins", "cards": plain}))
+    assert any("no commander" in w for w in p["warnings"]), p["warnings"]
+    checked = structured(await call(h, token, "check_new_deck", {"name": "Goblins 2", "cards": plain}))
+    assert any("no commander" in w for w in checked["warnings"]), checked
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Goblins 3", "cards": led}))
+    assert not any("no commander" in w for w in p["warnings"]), p["warnings"]
+    p = structured(
+        await call(h, token, "propose_new_deck", {"name": "Bolts", "deck_format": "modern", "cards": plain})
+    )
+    assert not any("no commander" in w for w in p["warnings"]), p["warnings"]

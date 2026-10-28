@@ -172,7 +172,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Compare two decks",
         description=(
             "Cards added, removed and changed from deck a to deck b (names matched by front face, case "
-            "aside), a summary with cut and added percentages and the basic-land changes apart, and, when "
+            "aside), a summary (cut, added and kept count cards, not names, with basic lands left out; "
+            "cut and added percentages; the basic-land changes apart) and, when "
             "both sides are Archidekt decks or snapshots, stats_delta (the difference in their "
             "statistics; a pasted list has no card data for it). Give each side once: a or b is an "
             "Archidekt deck id or URL, or a snapshot id from list_snapshots; a_list or b_list is pasted "
