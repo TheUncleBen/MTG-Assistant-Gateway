@@ -152,6 +152,14 @@ LIST_PARTLY_UNREADABLE = (
 MAX_SNAPSHOTS_PAGE = 100
 
 
+# propose_new_deck and check_new_deck, for a commander-format deck with no commander marked
+NO_COMMANDER_WARNING = (
+    "The deck has no commander: no card is in its Commander category. Put the commander's line "
+    "under a Commander heading (or give it category Commander), or the deck has no colour identity "
+    "and can't be tested."
+)
+
+
 def _page(
     key: str, fetch: Callable[[int, int], list[Any]], limit: int, offset: int, most: int
 ) -> dict[str, object]:
@@ -389,6 +397,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         )
         return deck_stats.size_problem(str(deck_format).lower(), size)
 
+    def _commander_warning(deck_format: str, changes: dict[str, Any]) -> str | None:
+        """A deck in a commander format with no card in its Commander category: Archidekt makes it,
+        but the deck has no commander (no colour identity, no command zone in the tests)."""
+        fmt = str(deck_format).lower()
+        if changes.get("package") or fmt not in deck_stats._COMMANDER_FORMATS:
+            return None
+        for card in changes.get("cards") or []:
+            if any(str(c).strip().casefold() == "commander" for c in card.get("categories") or []):
+                return None
+        return NO_COMMANDER_WARNING
+
     @server.tool(
         name="propose_new_deck",
         title="Propose a new Archidekt deck (write, two-step)",
@@ -474,6 +493,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             problem = _size_warning(deck_format, made.get("rows") or [])
             if problem:
                 warnings.append(problem)
+            if lead := _commander_warning(deck_format, made.get("changes") or {}):
+                warnings.append(lead)
             return _proposal({"ok": True, **made, "warnings": warnings})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
@@ -557,6 +578,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             problem = _size_warning(deck_format, plan["rows"])
             if problem:
                 warnings.append(problem)
+            if lead := _commander_warning(deck_format, plan["changes"]):
+                warnings.append(lead)
             out["card_count"] = plan["cards"]
             out["sideboard_count"] = plan["side_cards"]
             same = state.decks.waiting_new_deck_named(
