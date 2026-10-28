@@ -418,8 +418,8 @@ def banner_html(
             f"<form method='post' action='/decks/{did}/report' id='fullf'>{csrf_in}"
             "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
             "opponents), a legality check and the deck statistics, plus Forge games against precons when "
-            "Forge is on and the deck has a commander; saved under History. The solo test takes up to a "
-            f"minute; the result page opens when the solo test is done.'>{icon('stats')} Run full test"
+            "Forge is on and the deck has a commander; saved under History. The report opens at once and "
+            f"fills in as each part finishes.'>{icon('stats')} Run full test"
             "</button></form>"
         )
     if csrf and forge_on:

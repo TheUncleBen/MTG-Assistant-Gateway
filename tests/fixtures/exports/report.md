@@ -70,11 +70,11 @@ The simulator plays against opponents who do nothing, so removal, board wipes, c
 - Removal and other interaction: Avatar of Woe, Banishing Light, Dawnbringer Cleric, Divine Verdict, Doom Blade, Grim Bounty, Keening Apparition, Murder, Ob Nixilis Reignited, Portable Hole, Trapped in the Screen
 - Other effects the simulator does not model: Aetherflux Reservoir, Ascend from Avernus, Minimus Containment, Norn's Annex, Shrine of Loyal Legions, Torment of Hailfire
 
-**Played with their effect but never mattered: 25 of 98 cards (26% of the deck).**
+**Played with their effect but never mattered: 23 of 98 cards (23% of the deck).**
 
 These cards were understood, drawn and played, and nothing they do changed a solo test game. A solo test game has no opponent and no interaction, so this says nothing about how the card does at a real table.
 
-Black Dragon Gate, Charcoal Diamond, Daggerdrome Imp, Dungeon Map, Evolving Wilds, Leather Armor, Leechridden Swamp, Lightning Greaves, Lotus Field, Marble Diamond, Markov Patrician, Mask of Avacyn, Nephalia Academy, Opaline Unicorn, Orzhov Guildgate, Orzhov Keyrune, Plains, Plate Armor, Seraph of Dawn, Swamp, The Soul Stone, Transguild Promenade, Typhoid Rats, Vampire Nighthawk, Vault of the Archangel
+Black Dragon Gate, Charcoal Diamond, Daggerdrome Imp, Dungeon Map, Evolving Wilds, Leather Armor, Leechridden Swamp, Lightning Greaves, Lotus Field, Marble Diamond, Markov Patrician, Mask of Avacyn, Nephalia Academy, Opaline Unicorn, Orzhov Guildgate, Orzhov Keyrune, Plate Armor, Seraph of Dawn, The Soul Stone, Transguild Promenade, Typhoid Rats, Vampire Nighthawk, Vault of the Archangel
 
 **Shortcuts the model takes: 6.**
 

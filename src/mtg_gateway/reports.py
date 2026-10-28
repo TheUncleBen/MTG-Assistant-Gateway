@@ -39,7 +39,7 @@ from .forge import (
     summarise,
 )
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
-from .report_view import PREFLIGHT_ONLY, goldfish_settings, parse_goldfish, speed_numbers
+from .report_view import PREFLIGHT_ONLY, RESEARCH_FAILED, goldfish_settings, parse_goldfish, speed_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,15 @@ SOLO_OTHERS_WAITING = (
 FORGE_BUSY_GAVE_UP = (
     "Forge stayed busy with other runs for four hours, so this run was given up. Run the report again later."
 )
+# A report is stored as soon as its deck is read, before the research service's validation and solo
+# test come back (research_state "running"), so Reports, History and the deck page list it while it
+# runs and the website opens its page at once. What a page says when that part did not come back:
+# a gateway restart in the middle, a failure the gateway caught, or one the research service answered
+# with an error (whose own words, kept for the assistant, may name tools a member never sees).
+RESEARCH_STOPPED = (
+    "The gateway restarted while the solo test ran, so this report has none. Run the test again."
+)
+REPORT_GONE = "This report was deleted while it ran, so nothing was kept."
 
 
 class _Flight:
@@ -157,6 +166,8 @@ class _Flight:
         self.users = 0
         self.finished = 0
         self.report_id: str | None = None
+        # the run holding the lock: its report's id once stored (None when it ended without one)
+        self.stored: asyncio.Future[str | None] | None = None
 
 
 class PairHold:
@@ -230,6 +241,21 @@ class ReportService:
                 "CREATE INDEX IF NOT EXISTS reports_forge_solo ON reports(forge_solo_state) "
                 "WHERE forge_solo_state IS NOT NULL"
             )
+            # "running" while the report's validation and solo test are being asked for (it is
+            # stored before them); NULL once they came back.
+            if "research_state" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
+                c.execute("ALTER TABLE reports ADD COLUMN research_state TEXT")
+            # One gateway process: a report still asking at start-up was cut off by a restart.
+            stopped = json.dumps(
+                {"tool": "goldfish_run", "ok": False, "error": True, "note": RESEARCH_STOPPED}
+            )
+            c.execute(
+                "UPDATE reports SET goldfish_json = COALESCE(goldfish_json, ?), research_state = NULL "
+                "WHERE research_state = 'running'",
+                (stopped,),
+            )
+        # the website's runs (start), held until they end
+        self._background: set[asyncio.Task[Any]] = set()
 
     # -- running --------------------------------------------------------------
     async def run(
@@ -246,11 +272,15 @@ class ReportService:
         same_opponents_as: str | None = None,
         pair_with: str | Deck | None = None,
         pair_hold: PairHold | None = None,
+        on_stored: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
-        the result and return it. Refuses a second report of an unchanged deck within
-        ``min_interval`` seconds (returns the existing one instead) unless ``options`` (the
-        simulator's knobs, see ``sim_options``) are given, since they change the simulation.
+        the result and return it. ``on_stored`` is called with the report's id once its row is
+        stored, before the research service is asked (``start``); a request with it that arrives
+        while a run of the same deck is going gets that run's report, as soon as it is stored.
+        Refuses a second report of an unchanged deck within ``min_interval`` seconds (returns the
+        existing one instead) unless ``options`` (the simulator's knobs, see ``sim_options``) are
+        given, since they change the simulation.
         ``forge`` asks for Forge games apart from the goldfish ones (None: as ``simulate``).
         ``deck`` is a deck already read (one of the member's snapshots, ``snapshot_id``), filed
         under its Archidekt deck like any other report. ``same_opponents_as`` is another of the
@@ -271,6 +301,21 @@ class ReportService:
         flight.users += 1
         seen = flight.finished
         try:
+            going = flight.stored
+            if (
+                on_stored is not None
+                and going is not None
+                and not options
+                and shared is None
+                and pair_with is None
+            ):
+                # The website's press while this deck runs: that run's report, once it is stored,
+                # instead of a wait for the whole run.
+                rid = await asyncio.shield(going)
+                if rid is not None:
+                    out = self.get(sub, rid)
+                    out["reused"] = True
+                    return out
             async with flight.lock:
                 if flight.finished > seen and flight.report_id and shared is None and pair_with is None:
                     # A run for this deck finished while this request waited: reuse its report
@@ -282,19 +327,36 @@ class ReportService:
                     ):
                         out["reused"] = True
                         return out
-                out = await self._run(
-                    sub,
-                    deck_ref,
-                    simulate=simulate,
-                    games=games,
-                    options=options,
-                    forge=simulate if forge is None else bool(forge),
-                    deck=deck,
-                    snapshot_id=snapshot_id,
-                    shared=shared,
-                    pair_with=pair_with,
-                    pair_hold=pair_hold,
-                )
+                stored: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
+                flight.stored = stored
+
+                def mark(rid: str) -> None:
+                    if not stored.done():
+                        stored.set_result(rid)
+                    if on_stored is not None:
+                        on_stored(rid)
+
+                try:
+                    out = await self._run(
+                        sub,
+                        deck_ref,
+                        simulate=simulate,
+                        games=games,
+                        options=options,
+                        forge=simulate if forge is None else bool(forge),
+                        deck=deck,
+                        snapshot_id=snapshot_id,
+                        shared=shared,
+                        pair_with=pair_with,
+                        pair_hold=pair_hold,
+                        on_stored=mark,
+                        background=on_stored is not None,
+                    )
+                finally:
+                    if not stored.done():
+                        stored.set_result(None)
+                    if flight.stored is stored:
+                        flight.stored = None
                 flight.report_id = out["report_id"]
                 flight.finished += 1
                 return out
@@ -453,7 +515,12 @@ class ReportService:
         stats: dict[str, Any] | None = None,
         source: dict[str, Any] | None = None,
         goldfish: dict[str, Any] | None = None,
+        on_stored: Callable[[str], None] | None = None,
+        background: bool = False,
     ) -> dict[str, Any]:
+        """``on_stored``: called with the report's id once it is stored. ``background``: nobody
+        waits for this run's answer (the website's, ``start``), so a refusal by the research
+        service is kept on the report rather than raised."""
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
         latest = self._latest(sub, deck.id) if source is None else None
@@ -466,6 +533,8 @@ class ReportService:
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
             and _succeeded(latest)
+            # a report still asking the research service is no result yet
+            and latest.get("research_state") is None
             # a run that asks to simulate never reuses one made without a simulation
             and not (simulate and self.mf is not None and latest.get("goldfish_json") is None)
             # nor does one that asks for Forge reuse one whose Forge games were not asked for
@@ -494,26 +563,7 @@ class ReportService:
         validation: dict[str, Any] | None = None
         if goldfish is not None:  # a comparison's A/B, already run: no second simulation
             simulate = False
-        if self.mf is not None and goldfish is None:
-            # Front faces only: the research service reads names through Scryfall's collection
-            # lookup, which knows double-faced cards by their front face only.
-            text = front_faces(deck_to_text(deck))
-            commander = _front_face((stats.get("commanders") or [None])[0])
-            # validate_decklist checks a Commander deck (100 cards, the commander's colors): a
-            # 60-card deck would only be told it is short, so it is not sent there.
-            if mode != "constructed":
-                validation = await self._mf(
-                    sub, "validate_decklist", {"decklist": text, "commander": commander}
-                )
-            if simulate and mode not in SIM_MODES:
-                goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
-            elif simulate:
-                names = [c.name for c in deck.cards if deck.in_deck(c)]
-                # a list's or a proposal's names are the member's own spelling: no model is kept
-                goldfish = await self._solo_test(sub, text, games, options, mode, names, keep=source is None)
-                _commander_aside(goldfish, commander)
-                _keep_quantities(goldfish, text)
-                _stored_note(goldfish)
+        researching = self.mf is not None and goldfish is None
         rid = "rep_" + secrets.token_urlsafe(9)
         # a comparison's second report: recorded as the first's partner now (Play more games)
         compare_of = self._compare_claim(sub, shared) if forge and mode == "commander" else None
@@ -534,17 +584,14 @@ class ReportService:
                 **({"source": source} if source else {}),
             },
         }
-        # the Forge solo test is marked as coming from the start, so the report is not finished
-        # (nor its member notified) until it has played too
-        plays_solo = self.forge is not None and forge and simulate and mode in SIM_MODES
-        solo_mark = {"state": "queued", "started_at": now} if plays_solo else None
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
-            # their data is dropped, not written back for the deleted account.
+            # their data is dropped, not written back for the deleted account. Stored before the
+            # research service is asked, so the run shows (as running) while it asks.
             stored = c.execute(
                 "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
-                "goldfish_json, validation_json, created_by_client, forge_solo_json, forge_solo_state) "
-                "SELECT ?,?,?,?,?,?,?,?,?,?,?,? "
+                "goldfish_json, validation_json, created_by_client, research_state) "
+                "SELECT ?,?,?,?,?,?,?,?,?,?,? "
                 "WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)",
                 (
                     rid,
@@ -555,10 +602,9 @@ class ReportService:
                     now,
                     json.dumps(stored_stats),
                     json.dumps(goldfish) if goldfish is not None else None,
-                    json.dumps(validation) if validation is not None else None,
+                    None,
                     current_client.get(),
-                    json.dumps(solo_mark) if solo_mark is not None else None,
-                    "queued" if solo_mark is not None else None,
+                    "running" if researching else None,
                     sub,
                 ),
             ).rowcount
@@ -586,11 +632,39 @@ class ReportService:
             c.execute(f"DELETE FROM reports WHERE {keep}", limit)
         for section in pruned_forge:  # an unfinished run goes with its report, as in delete()
             self._cancel_forge(section)
-        self.db.audit(
-            "report_created",
-            sub=sub,
-            detail={"report_id": rid, "deck_id": deck.id, **({"source": source["kind"]} if source else {})},
-        )
+        if on_stored is not None:
+            on_stored(rid)
+        if researching:
+            try:
+                validation, goldfish = await self._research(
+                    sub, deck, stats, mode, simulate, games, options, keep=source is None
+                )
+            except BaseException as exc:
+                if not background:
+                    # An assistant's run (or a cancelled one) answers with the refusal and keeps
+                    # nothing, as before the report was stored first.
+                    self._drop(sub, rid)
+                    raise
+                if not isinstance(exc, Exception):
+                    raise  # the gateway stopping: the next start says the report was cut off
+                # The website's run: its page is open already, so the report stays and says why.
+                if not isinstance(exc, DeckError):
+                    logger.exception("The research part of report %s failed", rid)
+                note = str(exc) if isinstance(exc, DeckError) else RESEARCH_FAILED
+                failed = {"tool": "goldfish_run" if simulate else "validate_decklist", "ok": False}
+                failed.update({"error": True, "note": note})
+                self._research_done(
+                    sub, rid, failed if simulate else None, None if simulate else failed, None
+                )
+                self._created(sub, rid, deck, source)
+                return self.get(sub, rid)
+        # the Forge solo test is marked as coming from the start, so the report is not finished
+        # (nor its member notified) until it has played too
+        plays_solo = self.forge is not None and forge and simulate and mode in SIM_MODES
+        solo_mark = {"state": "queued", "started_at": int(time.time())} if plays_solo else None
+        if researching or solo_mark is not None:
+            self._research_done(sub, rid, goldfish, validation, solo_mark)
+        self._created(sub, rid, deck, source)
         # Shielded: a request cancelled now (its client gone) still saves both Forge parts, so no
         # engine job is left that nobody would cancel. The task is held until it ends.
         task = asyncio.get_running_loop().create_task(
@@ -602,6 +676,124 @@ class ReportService:
         task.add_done_callback(self._forge_cancels.discard)
         await asyncio.shield(task)
         return self.get(sub, rid)
+
+    async def _research(
+        self,
+        sub: str,
+        deck: Deck,
+        stats: dict[str, Any],
+        mode: str,
+        simulate: bool,
+        games: int,
+        options: dict[str, Any],
+        *,
+        keep: bool,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The research service's part of a report: its validation and its solo test (each None
+        when not asked for)."""
+        validation: dict[str, Any] | None = None
+        goldfish: dict[str, Any] | None = None
+        # Front faces only: the research service reads names through Scryfall's collection
+        # lookup, which knows double-faced cards by their front face only.
+        text = front_faces(deck_to_text(deck))
+        commander = _front_face((stats.get("commanders") or [None])[0])
+        # validate_decklist checks a Commander deck (100 cards, the commander's colors): a
+        # 60-card deck would only be told it is short, so it is not sent there.
+        if mode != "constructed":
+            validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
+        if simulate and mode not in SIM_MODES:
+            goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
+        elif simulate:
+            played = [c for c in deck.cards if deck.in_deck(c)]
+            names = [c.name for c in played]
+            # a list's or a proposal's names are the member's own spelling: no model is kept
+            goldfish = await self._solo_test(sub, text, games, options, mode, names, keep=keep)
+            _commander_aside(goldfish, commander)
+            _keep_quantities(goldfish, text)
+            _stored_note(goldfish)
+            # Lands and mana makers: their effect is the mana the solo test counts, so the report
+            # never lists them as cards that "never mattered".
+            mana = sorted(
+                {_front_face(c.name) or c.name for c in played if deck_stats.is_land(c) or c.mana_production}
+            )
+            if mana:
+                goldfish["mana_cards"] = mana
+        return validation, goldfish
+
+    def _research_done(
+        self,
+        sub: str,
+        rid: str,
+        goldfish: dict[str, Any] | None,
+        validation: dict[str, Any] | None,
+        solo_mark: dict[str, Any] | None,
+    ) -> None:
+        """Store what the research service answered (and the Forge solo test's mark) on report rid.
+        A report deleted while it asked (by the member, or with their data) stays deleted."""
+        with self.db.tx() as c:
+            found = c.execute(
+                "UPDATE reports SET goldfish_json = COALESCE(?, goldfish_json), validation_json = ?, "
+                "forge_solo_json = ?, forge_solo_state = ?, research_state = NULL "
+                "WHERE id = ? AND owner_sub = ?",
+                (
+                    json.dumps(goldfish) if goldfish is not None else None,
+                    json.dumps(validation) if validation is not None else None,
+                    json.dumps(solo_mark) if solo_mark is not None else None,
+                    "queued" if solo_mark is not None else None,
+                    rid,
+                    sub,
+                ),
+            ).rowcount
+        if not found:
+            raise DeckError("not_found", REPORT_GONE)
+
+    def _drop(self, sub: str, rid: str) -> None:
+        """Take back a report stored before its run was refused: nothing is kept."""
+        with self.db.tx() as c:
+            c.execute("DELETE FROM reports WHERE id = ? AND owner_sub = ?", (rid, sub))
+
+    def _created(self, sub: str, rid: str, deck: Deck, source: dict[str, Any] | None) -> None:
+        self.db.audit(
+            "report_created",
+            sub=sub,
+            client_id=current_client.get(),
+            detail={"report_id": rid, "deck_id": deck.id, **({"source": source["kind"]} if source else {})},
+        )
+
+    async def start(self, sub: str, deck_ref: str, *, forge: bool | None = None) -> dict[str, Any]:
+        """The website's Run full test: ``run`` going on by itself, answered as soon as its report is
+        stored (``report_id``, ``running`` True), so the member's page opens while the research
+        service and Forge play. When the run ends first (a reused report, a deck that can't be read)
+        its own answer or refusal comes back instead."""
+        loop = asyncio.get_running_loop()
+        stored: asyncio.Future[str] = loop.create_future()
+
+        def mark(rid: str) -> None:
+            if not stored.done():
+                stored.set_result(rid)
+
+        task = loop.create_task(self.run(sub, deck_ref, forge=forge, on_stored=mark))
+        self._background.add(task)
+        task.add_done_callback(self._ended)
+        await asyncio.wait({task, stored}, return_when=asyncio.FIRST_COMPLETED)
+        if task.done():
+            return task.result()
+        return {"report_id": stored.result(), "running": True}
+
+    def _ended(self, task: asyncio.Task[Any]) -> None:
+        self._background.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if isinstance(exc, DeckError):
+            logger.info("A website report run ended early: %s", exc)
+        elif exc is not None:
+            logger.error("A website report run failed", exc_info=exc)
+
+    async def settle(self) -> None:
+        """Wait for the website's runs going now (tests, and a clean shutdown)."""
+        while self._background:
+            await asyncio.gather(*list(self._background), return_exceptions=True)
 
     async def _start_forge_parts(
         self,
@@ -1747,6 +1939,8 @@ class ReportService:
                 retry_after=busy_retry_after(result),
             )
         out: dict[str, Any] = {"tool": tool, "ok": not result.is_error}
+        if result.is_error:
+            out["error"] = True  # the service's own error words: kept for the assistant, never shown
         texts = [c.text for c in result.content if getattr(c, "type", "") == "text"]
         if result.structured_content and result.structured_content != {"result": "\n".join(texts)}:
             # (a tool that returns text sends it again as {"result": text}: kept once, as text)
@@ -1775,7 +1969,8 @@ class ReportService:
         with self.db._lock:
             row = self.db._conn.execute(
                 "SELECT id, fingerprint, taken_at, goldfish_json, validation_json, forge_json, "
-                f"forge_solo_state, json_extract(stats_json, '$.{RUN_KEY}.mode') AS run_mode FROM reports "
+                "research_state, forge_solo_state, "
+                f"json_extract(stats_json, '$.{RUN_KEY}.mode') AS run_mode FROM reports "
                 f"WHERE owner_sub = ? AND deck_id = ? AND {_OWN_DECK} "
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, deck_id),
@@ -1922,6 +2117,7 @@ class ReportService:
         with self.db._lock:
             rows = self.db._conn.execute(
                 "SELECT id, deck_id, deck_name, taken_at, created_by_client, forge_json, forge_solo_state, "
+                "research_state, "
                 "json_extract(forge_solo_json, '$.result.games') AS solo_games, "
                 "goldfish_json IS NOT NULL AS g_has, json_extract(goldfish_json, '$.ok') AS g_ok, "
                 "validation_json IS NOT NULL AS v_has, json_extract(validation_json, '$.ok') AS v_ok, "
@@ -1955,6 +2151,7 @@ class ReportService:
                         {"state": r["forge_solo_state"], "result": {"games": r["solo_games"]}}
                         if r["forge_solo_state"]
                         else None,
+                        testing=r["research_state"] == "running",
                     ),
                     "forge_played": bool(forge and _forge_played(forge)),
                     "forge_state": (forge or {}).get("state"),
@@ -2084,11 +2281,20 @@ class ReportService:
             sql += " AND created_by_client = ?"
             args += (client_id,)
         with self.db.tx() as c:
-            row = c.execute(sql.replace("DELETE", "SELECT forge_json, forge_solo_json", 1), args).fetchone()
+            row = c.execute(
+                sql.replace("DELETE", "SELECT forge_json, forge_solo_json, deck_id, deck_name", 1), args
+            ).fetchone()
             cur = c.execute(sql, args)
         if cur.rowcount == 0:
             raise DeckError("not_found", "No such report for your account.")
-        self.db.audit("report_deleted", sub=sub, detail={"report_id": str(report_id)})
+        # the deck it was of, for Activity (the report itself is gone, so nothing links to it)
+        deck = {"deck_id": str(row["deck_id"]), "deck_name": str(row["deck_name"] or "")} if row else {}
+        self.db.audit(
+            "report_deleted",
+            sub=sub,
+            client_id=client_id if client_id is not None else current_client.get(),
+            detail={"report_id": str(report_id), **(deck if deck.get("deck_id") else {})},
+        )
         # An unfinished Forge run goes with its report: otherwise it keeps the engine busy, and the
         # one-unfinished-run-per-member check (which reads only stored reports) would let a member
         # queue another run by deleting this one.
@@ -2110,6 +2316,7 @@ class ReportService:
         preflight = forge is None or not _forge_played(forge)
         run = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
         source = run.get("source") if isinstance(run.get("source"), dict) else None
+        testing = d.get("research_state") == "running"
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
@@ -2127,7 +2334,10 @@ class ReportService:
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
             "bracket_set": stats.get("archidekt_bracket"),
             "created_by_client": d.get("created_by_client"),
-            "status": report_status(goldfish, validation, forge, solo),
+            "status": report_status(goldfish, validation, forge, solo, testing=testing),
+            # the research service's part (validation and quick solo test): "running" while asked,
+            # "failed" when a part asked for did not come back, else None
+            "research": "running" if testing else ("failed" if not _succeeded(d) else None),
             "engine": "preflight_only" if preflight else "forge",
             "engine_label": PREFLIGHT_ONLY if preflight else "Forge rules engine",
             "settings": run_settings(stats, goldfish, forge),
@@ -2383,12 +2593,17 @@ def settings_changes(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def report_status(goldfish: Any, validation: Any, forge: Any, solo: Any = None) -> str:
-    """One word for where a report stands: "queued" or "running" while its Forge games or its
+def report_status(
+    goldfish: Any, validation: Any, forge: Any, solo: Any = None, *, testing: bool = False
+) -> str:
+    """One word for where a report stands: "running" while the research service is asked for its
+    validation and solo test (``testing``), "queued" or "running" while its Forge games or its
     Forge solo test wait or play, else "complete" when every part asked for came back, "partial"
     when some did not (a failed simulation or validation, Forge games that failed or found no
     place), "failed" when none did. Forge not run on purpose (not asked for, or a 60-card deck)
     is not a failure, nor is a Forge solo test skipped (Forge busy or too old)."""
+    if testing:
+        return "running"
     going = [
         x.get("state") for x in (forge, solo) if isinstance(x, dict) and x.get("state") not in FINAL_STATES
     ]

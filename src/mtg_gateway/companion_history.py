@@ -7,7 +7,7 @@ import calendar
 import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
@@ -254,10 +254,11 @@ def add_history_routes(
             # Delete…: the shared confirm box, open when the address asks (a row menu's Delete…)
             oid = opened["key"][2:]
             held = state.db.snapshot_held(oid, sub) or "" if opened["kind"] == "snapshot" else ""
+            back = "/history" + query_string(query, open="")
             opener, box = delete_box_html(
                 opened["kind"],
                 f"/history/{opened['kind']}s/{oid}/delete",
-                csrf_in,
+                csrf_in + f"<input type='hidden' name='back' value='{_esc(back)}'>",
                 box_id="hy-del",
                 held=held,
                 open=request.query_params.get("box") == "delete",
@@ -338,7 +339,7 @@ def add_history_routes(
             "clone",
             n_copies,
             unit="on Archidekt",
-            detail=f'In the folder "{decks.backup_folder}"',
+            detail=f"In the folder “{decks.backup_folder}”",
             # to the table, which is on the unfiltered page
             actions=[
                 ui.button_link("See them", "/history" + query_string({"deck_id": deck_id or ""}) + "#backups")
@@ -363,11 +364,35 @@ def add_history_routes(
                 status=403,
             )
         current_client.set(BROWSER_CLIENT_ID)
+        snapshot_id = str(data.get("snapshot_id", ""))
         try:
-            p = await decks.propose_restore(sub, data.get("snapshot_id", ""))
+            p = await decks.propose_restore(sub, snapshot_id)
         except DeckError as exc:
-            return page("History", f"<p class='notice error'>{_esc(exc)}</p>", sub=sub, sid=sid, status=400)
+            # a way on from the refusal: the snapshot's own Details, or History
+            details = "/history" + query_string({"open": f"s-{snapshot_id}"}) if snapshot_id else ""
+            buttons = (
+                f"<a class='btn btn-primary' href='{_esc(details)}'>Back to the snapshot</a>"
+                if details
+                else ""
+            ) + "<a class='btn' href='/history'>Back to History</a>"
+            return page(
+                "Restore not started",
+                f"<div class='card'><p class='notice error'>{_esc(exc)}</p>"
+                f"<div class='actions'>{buttons}</div></div>",
+                sub=sub,
+                sid=sid,
+                status=400,
+            )
         return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
+
+    def _after_delete(back: Any) -> str:
+        """Where a deleted report's member goes: back to the Reports or History page they came from
+        (the form's ``back``, a path of this site only), saying it was deleted; else History."""
+        parts = urlsplit(str(back or ""))
+        if parts.scheme or parts.netloc or parts.path not in ("/reports", "/history"):
+            return "/history?deleted=report"
+        keep = [(k, v) for k, v in parse_qsl(parts.query) if k not in ("deleted", "box", "open")]
+        return parts.path + "?" + urlencode([*keep, ("deleted", "report")])
 
     def _expired(sub: str, sid: str | None) -> Response:
         return page(
@@ -388,11 +413,12 @@ def add_history_routes(
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
+        current_client.set(BROWSER_CLIENT_ID)
         try:
             reports.delete(sub, request.path_params["rid"])
         except DeckError:
             return _not_found(sub, sid)
-        return RedirectResponse("/history?deleted=report", status_code=303)
+        return RedirectResponse(_after_delete(data.get("back")), status_code=303)
 
     @server.custom_route("/history/snapshots/{snap}/delete", methods=["POST"], include_in_schema=False)
     async def snapshot_delete(request: Request) -> Response:
@@ -493,10 +519,20 @@ def add_history_routes(
             "</textarea>"
         )
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid) or '')}'>"
+        # after a delete, back to the list the member came from (Reports or History), else the deck's
+        # history (or all of History for a report of no deck)
+        came = urlsplit(request.headers.get("referer") or "")
+        back = came.path + (f"?{came.query}" if came.query else "")
+        if came.path not in ("/reports", "/history"):
+            back = (
+                f"/history?deck_id={quote(str(r['deck_id']))}"
+                if str(r.get("deck_id") or "").isdigit()
+                else "/history"
+            )
         opener, delete_box = delete_box_html(
             "report",
             f"/history/reports/{safe}/delete",
-            csrf_in,
+            csrf_in + f"<input type='hidden' name='back' value='{_esc(back)}'>",
             box_id="rep-del",
             open=request.query_params.get("box") == "delete",
             close_href=f"/history/reports/{safe}",
@@ -673,6 +709,7 @@ def add_history_routes(
                 sid=sid,
                 status=403,
             )
+        current_client.set(BROWSER_CLIENT_ID)
         try:
             await reports.play_more(sub, rid)
         except DeckError as exc:

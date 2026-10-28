@@ -772,7 +772,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     assert ">Queued</span>" in live and "data-forge-live" in live
     assert "Waiting for your earlier Forge run to finish." in live
     assert "Waiting: number 1 in line, behind your report of Liesa. It starts by itself" in live
-    assert "Expected to finish in about 79 minutes (at the measured 235.6 seconds a game)." in live
+    assert "minute" not in live  # counts and the place in line, never a time
     assert "href='/history/reports/rep_ahead'" in live
     assert "href=" not in forge_html(queued)  # an export links nowhere
     md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": queued})

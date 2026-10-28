@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from . import card_models, ui
+from .deck_stats import is_basic_land
 from .theme import ICON_DATA_URL, icon, time_html, time_text
 from .theme import esc as _esc
 from .tool_labels import TOOLS
@@ -287,6 +288,28 @@ def _quantities(value: Any) -> dict[str, int]:
     }
 
 
+# What a page says for a research part that failed as an error (the service down, a timeout, a crash on
+# its side): its own words name tools and are kept for the assistant only. A gateway note (a restart
+# in the middle, a refusal it caught) is said as it is.
+RESEARCH_FAILED = "The solo test could not run: the research service did not answer."
+CHECK_FAILED = "The legality check could not run: the research service did not answer."
+_TOOL_ERROR = re.compile(r"\s*Error executing tool\b", re.IGNORECASE)
+
+
+def research_failure(block: Any, fallback: str) -> str | None:
+    """The page's sentence for a stored research block that failed as an error (``fallback``), or
+    with a gateway note (the note); None for any other block, whose text is the story."""
+    if not isinstance(block, dict) or block.get("ok"):
+        return None
+    note = block.get("note")
+    if isinstance(note, str) and note.strip():
+        return note.strip()
+    text = block.get("text") if isinstance(block.get("text"), str) else ""
+    if block.get("error") or _TOOL_ERROR.match(text):
+        return fallback
+    return None
+
+
 def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any] | None:
     """The simulation block of a stored report (``{"tool","ok","data"?,"text"?}``) as plain
     data. None for no block; never raises. ``deck_size`` (the deck's card count from the
@@ -374,12 +397,21 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
     if out["quantities"]:
         for card in [*honesty["unrecognized"], *(c for grp in honesty["out_of_scope"] for c in grp["cards"])]:
             card["copies"] = out["quantities"].get(front_face(card["name"]).casefold())
+    # Lands and mana makers (reports._research "mana_cards", and the basic lands of a report made
+    # before it) are left out of "never mattered": their effect is the mana the test counts.
+    mana = {front_face(n).casefold() for n in block.get("mana_cards") or [] if isinstance(n, str)}
+    honesty["low_impact"] = [
+        n for n in honesty["low_impact"] if front_face(n).casefold() not in mana and not is_basic_land(n)
+    ]
     out["honesty"] = honesty
     if not out["metrics"] and not out["summary"]:
         # A refusal or an outage: the simulator's sentence is the whole story.
         out["message"] = plain_words(preamble or text)[:600] or (
             "The solo test did not run for this report." if not ok else ""
         )
+    failure = research_failure(block, RESEARCH_FAILED)
+    if failure:
+        out["message"], out["raw"] = failure, ""
     return out
 
 
@@ -388,6 +420,9 @@ def parse_validation(block: Any) -> dict[str, Any] | None:
     gives none), a headline and the lines under it. None for no block; never raises."""
     if not isinstance(block, dict):
         return None
+    failure = research_failure(block, CHECK_FAILED)
+    if failure:
+        return {"verdict": "failed", "headline": failure, "lines": [], "groups": [], "raw": ""}
     text = block.get("text")
     if not isinstance(text, str) or not text.strip():
         data = block.get("data")
@@ -1458,11 +1493,6 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
     elif f.get("state") == "running" and f.get("games_requested") and not (res.get("games") and not results):
         # the page's results show "Games played" as a tile once a game has finished
         out.append(f"Games finished so far: {res.get('games') or 0} of {f['games_requested']}.")
-    if f.get("state") in ("queued", "running") and f.get("expected_seconds"):
-        minutes = max(1, round(f["expected_seconds"] / 60))
-        per = f.get("average_game_seconds_measured")
-        basis = f" (at the measured {per} seconds a game)" if per else ""
-        out.append(f"Expected to finish in about {minutes} minute{'s' if minutes != 1 else ''}{basis}.")
     seats = res.get("seats") or []
     if res.get("games") and results:
         asked = res.get("games_requested") or f.get("games_requested")
@@ -1799,17 +1829,17 @@ def _live_forge_html(r: dict[str, Any]) -> str:
     return forge_section_html(r.get("forge"), live=True, report_id=r.get("report_id"))
 
 
-def _live_status_html(status: Any) -> str:
+def _live_status_html(status: Any, research: Any = None) -> str:
     from .report_page import status_label_html
 
-    return status_label_html(status)
+    return status_label_html(status, research)
 
 
 def forge_status(r: dict[str, Any]) -> dict[str, Any]:
     """What the report page's live view needs while the Forge games play: the run's state
     and section, the report's overall status, and the Forge card and the status as the page draws
     them, so forge-live.js swaps them in without fetching the whole page again."""
-    from .report_page import forge_solo_pending, forge_solo_section_html
+    from .report_page import forge_solo_pending, forge_solo_section_html, testing_section_html
 
     f = r.get("forge") if isinstance(r.get("forge"), dict) else None
     state = str((f or {}).get("state") or "") or None
@@ -1818,11 +1848,15 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
         "report_id": r.get("report_id"),
         "status": r.get("status"),
         "state": state,
-        # the page polls while either run is unfinished: the Forge games or the solo test by Forge
-        "live": state in ("queued", "running") or forge_solo_pending(fs),
+        # the page polls while any part is unfinished: the research service's solo test, the Forge
+        # games or the solo test by Forge
+        "live": state in ("queued", "running") or forge_solo_pending(fs) or r.get("research") == "running",
         "forge": f,
         "forge_html": _live_forge_html(r),
-        "status_html": _live_status_html(r.get("status")),
+        "status_html": _live_status_html(r.get("status"), r.get("research")),
+        # the quick solo test's section while it runs; once it is done the page is read again whole
+        "research": r.get("research"),
+        "research_html": testing_section_html(r, live=r.get("research") == "running"),
     }
     if fs:
         out["forge_solo"] = fs

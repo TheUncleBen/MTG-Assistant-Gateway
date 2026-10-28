@@ -506,7 +506,7 @@ def forge_solo_label(fs: dict[str, Any]) -> str:
     if state == "done":
         if games:
             return ui.label(f"{games} of {asked} played", "green", "check")
-        return ui.label("Done", "green", "check")
+        return ui.label("No result", "orange", "triangle")
     if state == "queued":
         return ui.label("Queued", "orange", "clock")
     if state == "running":
@@ -645,6 +645,17 @@ def forge_solo_section_html(
     games = _int(res.get("games")) or 0
     turns = _int(res.get("until_turn")) or 10
     parts = [f"<p class='ui-sub'>{_esc(SOLO_FORGE_SUB.format(turns=turns))}</p>"]
+    if state == "done" and not games:
+        # finished, but no game counted: say so, never a bare "Done" over nothing
+        stopped = _int(res.get("unfinished")) or 0
+        why = (
+            f" {stopped} {'game was' if stopped == 1 else 'games were'} stopped by the time limit."
+            if stopped
+            else ""
+        )
+        parts.append(
+            f"<p class='notice warn'>{_esc('No game reached a result, so there are no numbers.' + why)}</p>"
+        )
     if state != "done":
         msg = str(fs.get("error") or "") or SOLO_FORGE_STATE_TEXT.get(state, "")
         if games and state not in ("queued", "running"):
@@ -827,6 +838,9 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
             )
             if x
         )
+        if not price or stats.get("priced_cards") == 0:
+            price = None  # no card had a price: "No price", never a $0 deck
+            det = " · ".join(x for x in (det, "No price") if x)
         out.append(
             ui.widget(
                 "Deck",
@@ -854,6 +868,45 @@ def _coverage_bar(modeled: int, aside: int, blanks: int, size: int, *, cls: str 
 
 
 # -- the sections ------------------------------------------------------------------------
+TESTING_TEXT = (
+    "The solo test is running on the research service. This page fills in by itself when it is done; "
+    "you can leave it and come back from Reports."
+)
+
+
+def testing_section_html(r: dict[str, Any], *, live: bool = True) -> str:
+    """The solo test's section while the research service is asked (the report is stored first):
+    ``live`` marks it for forge-live.js, which reloads the page once the answer is in."""
+    rid = str(r.get("report_id") or "")
+    attrs = (
+        f" data-forge-live data-research aria-live='polite' data-report-id='{_esc(rid)}'"
+        if live and rid
+        else ""
+    )
+    return _sec(
+        "rv-solo",
+        solo_heading(None),
+        f"<p class='notice'>{_esc(TESTING_TEXT)}</p>",
+        label=ui.label("Running", "orange", "spinner"),
+        attrs=attrs,
+        flat=True,
+    )
+
+
+def run_again_html(r: dict[str, Any], csrf: str) -> str:
+    """Run again, for a report of one of the member's decks as it is (not a list, a proposal or a
+    comparison, which an assistant runs): the same full test as the deck page's button."""
+    deck_id = str(r.get("deck_id") or "")
+    if not csrf or not deck_id.isdigit() or r.get("source"):
+        return ""
+    return (
+        f"<form method='post' action='/decks/{_esc(deck_id)}/report' class='rv-again'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        f"<button type='submit' class='btn-primary' data-busy-label='Starting…'>{icon('stats')} Run again"
+        "</button></form>"
+    )
+
+
 def solo_section_html(
     r: dict[str, Any],
     s: dict[str, Any],
@@ -866,6 +919,8 @@ def solo_section_html(
     ``models_opener``: the My card models button, placed where saved descriptions are mentioned
     (under the ones this run played, and beside the request for cards played without effect)."""
     g, v = s["goldfish"], s["validation"]
+    if r.get("research") == "running":
+        return testing_section_html(r), ""
     if g is None and v is None and not s["constructed"]:
         body = (
             "<p class='ui-sub'>The research service was not configured when this report ran, so there is no "
@@ -880,7 +935,7 @@ def solo_section_html(
             flat=True,
         ), ""
     if g.get("message") and not g.get("metrics"):
-        body = f"<p class='notice warn'>{_esc(g['message'])}</p>"
+        body = f"<p class='notice warn'>{_esc(g['message'])}</p>" + run_again_html(r, csrf)
         return _sec(
             "rv-solo", solo_heading(g), body, label=ui.label("Not run", "red", "alert"), flat=True
         ), ""
@@ -1145,9 +1200,11 @@ def comparison_section_html(r: dict[str, Any]) -> str:
     return _sec("rv-compare", "Comparison: paired solo test", who + body)
 
 
-def status_label_html(status: Any) -> str:
+def status_label_html(status: Any, research: Any = None) -> str:
     """The report's overall status as its status label (the same words as the Reports list)."""
-    return status_label(status) if isinstance(status, str) and status in STATUS_LABEL else ""
+    if not (isinstance(status, str) and status in STATUS_LABEL):
+        return ""
+    return status_label(status, research=research)
 
 
 def report_page_html(
@@ -1183,7 +1240,7 @@ def report_page_html(
         )
         + "<a href='/reports'>All reports</a></nav>"
     )
-    meta = [f"<span id='rep-status'>{status_label_html(r.get('status'))}</span>"]
+    meta = [f"<span id='rep-status'>{status_label_html(r.get('status'), r.get('research'))}</span>"]
     src = r.get("source") if isinstance(r.get("source"), dict) else {}
     if src.get("kind") == "proposal" and src.get("proposal_id"):
         meta.append(
@@ -1222,6 +1279,10 @@ def report_page_html(
     solo_forge = forge_solo_section_html(
         r.get("forge_solo"), live=True, report_id=r.get("report_id"), types=card_types
     )
+    if r.get("research") == "running":
+        # Forge's parts start once the solo test is in: nothing to say about them yet (not "Forge was
+        # not set up"); the page is read again then
+        forge = solo_forge = ""
     solo, model = solo_section_html(
         r, s, removable=removable, csrf=csrf, models_opener=card_models_view.opener() if my_models else ""
     )
@@ -1424,6 +1485,8 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-more form{margin:0}
 .rv-page .rv-more button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
 .rv-page .rv-more .ui-hint{flex:1 1 18rem;margin:0}
+.rv-page .rv-again{margin:.5rem 0 0}
+.rv-page .rv-again button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
 .rv-page .rv-link{margin:.25rem 0}
 .rv-page .rv-link a{display:inline-flex;align-items:center;min-height:32px}
 /* the solo test's seven numbers: a compact grid, rules between rows only */

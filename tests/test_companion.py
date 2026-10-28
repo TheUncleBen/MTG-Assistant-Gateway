@@ -210,8 +210,10 @@ async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> Non
         await h.http.post("/api/v1/reports", json={"deck_id": "42"}, headers=auth)
         csrf = await b.csrf("/account/details")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         assert ran.status_code == 303
         await b.http.post("/decks/42/report", data={"csrf": csrf})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         assert seen == [False, None, False, None]
     finally:
         reports.run = real_run
@@ -339,6 +341,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
     try:
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
         db.execute("DELETE FROM reports")
         reports.forge = FakeForge(brackets=BRACKETED).client()
@@ -408,6 +411,7 @@ async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack)
     try:
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
         db.execute("DELETE FROM reports")
         reports.forge = FakeForge(brackets=BRACKETED).client()
@@ -673,6 +677,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         assert "Nothing plays or waits now." in empty.text
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         listed = await b.http.get("/reports", headers=NAV)
         assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
         assert "Sample Commander Deck" in listed.text and "Deck trend and history" not in listed.text
@@ -786,6 +791,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert js.status_code == 200 and js.json()["id"] == "42"
         csrf = await b.csrf("/account/details")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
         assert shown.status_code == 200 and "Quick solo test (" in shown.text and "## Metrics" in shown.text

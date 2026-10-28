@@ -426,8 +426,8 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                             assert run.get_attribute("title") == (
                                 "The solo test (300 games, no opponents), a legality check and the deck "
                                 "statistics, plus Forge games against precons when Forge is on and the deck "
-                                "has a commander; saved under History. The solo test takes up to a minute; "
-                                "the result page opens when the solo test is done."
+                                "has a commander; saved under History. The report opens at once and fills in "
+                                "as each part finishes."
                             ), where
                             form_btn = page.locator("#solof button")
                             assert form_btn.get_attribute("data-busy-label") == "Testing…", where

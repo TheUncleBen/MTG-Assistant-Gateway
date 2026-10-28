@@ -727,7 +727,8 @@ def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
         href = f"/proposals/{quote(str(pid), safe='')}"
         text = "Open the proposal to see why" if event == "proposal_failed" else "Open the proposal"
         bits.append(ui.cap_link(text, href))
-    if event in REPORT_EVENTS and d.get("report_id"):
+    # a deleted report has no page to open (its deck, when recorded, is named above)
+    if event in REPORT_EVENTS and event != "report_deleted" and d.get("report_id"):
         bits.append(ui.cap_link("Open the report", f"/history/reports/{quote(str(d['report_id']), safe='')}"))
     if d.get("via") in VIA_WORDS and d.get("via") not in ("mcp", "app"):  # those: the By column
         bits.append(VIA_WORDS[d["via"]])

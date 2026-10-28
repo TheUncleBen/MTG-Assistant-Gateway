@@ -1132,8 +1132,8 @@ def test_the_full_test_button_has_the_approved_texts() -> None:
     assert (
         "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no opponents), "
         "a legality check and the deck statistics, plus Forge games against precons when Forge is on and "
-        "the deck has a commander; saved under History. The solo test takes up to a minute; the result "
-        "page opens when the solo test is done.'>" in html
+        "the deck has a commander; saved under History. The report opens at once and fills in as each "
+        "part finishes.'>" in html
     )
     assert " Run full test</button>" in html
     assert "Run simulation" not in html and "Simulating" not in html and "goldfish games" not in html

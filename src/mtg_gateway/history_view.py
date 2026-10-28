@@ -258,14 +258,20 @@ def build_events(
             bits.append(f"{m['land_count']} lands")
         if m.get("average_mana_value") is not None:
             bits.append(f"average mana value {float(m['average_mana_value']):.1f}")
-        if m.get("price_total") is not None:
+        if m.get("price_total"):  # 0: no card had a price, not a free deck
             bits.append(f"${float(m['price_total']):,.0f}")
         # the bracket set on the deck is THE bracket; the estimate only when none is set
         if r.get("bracket_set"):
             bits.append(f"bracket {r['bracket_set']}")
         elif r.get("bracket_estimate"):
             bits.append(f"bracket about {r['bracket_estimate']}")
-        sim = "with a goldfish simulation" if r.get("has_goldfish") else "statistics only"
+        sim = (
+            "the solo test is running"
+            if r.get("research") == "running"
+            else "with a goldfish simulation"
+            if r.get("has_goldfish")
+            else "statistics only"
+        )
         client = r.get("created_by_client")
         app = (
             _app(actor_label(client, (client_names or {}).get(client) if client else None))
