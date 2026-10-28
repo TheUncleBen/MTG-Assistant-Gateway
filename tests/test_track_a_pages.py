@@ -253,7 +253,9 @@ async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stac
         box = page.split("id='proposals'")[1]
         assert "<span>All 2 waiting</span>" in box and "name='back' value='/decks/42'" in box
         home = (await b.http.get("/")).text
-        assert "2<small>waiting</small>" in home and "2 on 1 deck · oldest 1 min · next expires in" in home
+        # Home's Needs you row (0.7.46: in place of the old Proposals tile)
+        assert "<b>2 proposals</b> waiting for you" in home
+        assert "2 on 1 deck · oldest 1 min · next expires in" in home
     finally:
         await b.aclose()
 

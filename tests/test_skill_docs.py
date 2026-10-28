@@ -168,4 +168,8 @@ def test_removal_from_the_group_is_told_without_a_time_promise() -> None:
     for name in ("CHANGELOG.md", "docs/IDP-AUTHENTIK.md"):
         text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
         assert "loses access within a minute" not in text and "within a minute it revokes" not in text, name
-        assert "asked again in the background, at most 60 seconds after it last let them in" in text, name
+        assert "asked again in the background" in text, name
+    # owner decision C2: a page being read never waits for the provider; writes and admin pages do,
+    # once 60 seconds have passed since it last let them in
+    text = " ".join((ROOT / "docs/IDP-AUTHENTIK.md").read_text(encoding="utf-8").split())
+    assert "(writes and admin pages wait once 60 seconds have passed since it last let them in)" in text
