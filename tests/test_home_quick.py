@@ -42,7 +42,7 @@ def test_reports_and_watchlist_widgets() -> None:
         "win": {"rate": 0.4},
     }
     out = home.reports_widget([latest], latest, 1, now=NOW)
-    assert "<a class='lab' href='/reports'>" in out and "1<small>Forge going</small>" in out
+    assert "<a class='lab' href='/reports'>" in out and "1<small>Forge running</small>" in out
     assert "Latest: Atraxa Superfriends, 2 h ago, 40% won against precons" in out
     assert ">Open latest</a>" in out and "href='/history/reports/r1'" in out and ">All reports</a>" in out
     empty = home.reports_widget([], None, 0, now=NOW)

@@ -1,6 +1,6 @@
 """One shared progress spinner (0.7.46): a CSS-only Material-style arc that grows and shrinks as it
 turns, and a gentle pulse instead under prefers-reduced-motion. Every run or load in progress draws
-it: the Running, Forge going and Applying labels, a busy button and a box that is loading. It is
+it: the Running, Forge running and Applying labels, a busy button and a box that is loading. It is
 drawn from the live status (the label is there only while the run is), never from a timer, and a
 button that starts a run locks itself and says "Starting…"."""
 
@@ -26,7 +26,7 @@ def test_the_running_labels_draw_the_shared_spinner() -> None:
     for out in (
         ui.label("Running", "orange", "spinner"),
         ui.status_label("applying"),
-        ui.label("Forge going", "orange", "spinner"),
+        ui.label("Forge running", "orange", "spinner"),
     ):
         assert SPIN in out and "<svg" not in out, out
     assert theme.SPINNER == SPIN and theme.icon("spinner").startswith("<svg")

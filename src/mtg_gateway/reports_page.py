@@ -25,11 +25,11 @@ PAGE = ui.PER_PAGE
 BROWSER_CLIENT = "__browser__"  # decks.BROWSER_CLIENT: the member's own browser
 YOU = "You"
 
-# A report's overall status (reports.report_status) as its status label: Complete green, Forge going or
+# A report's overall status (reports.report_status) as its status label: Complete green, Forge running or
 # waiting orange (running), Partial orange (partly done), Failed red.
 STATUS_LABEL = {
     "complete": ("Complete", "green", "check"),
-    "running": ("Forge going", "orange", "spinner"),
+    "running": ("Forge running", "orange", "spinner"),
     "queued": ("Forge waiting", "orange", "clock"),
     "partial": ("Partial", "orange", "triangle"),
     "failed": ("Failed", "red", "alert"),
@@ -38,7 +38,7 @@ STATUS_LABEL = {
 CHIPS = (
     ("", "All"),
     ("complete", "Complete"),
-    ("going", "Forge going or waiting"),
+    ("going", "Forge running or waiting"),
     ("problem", "Partial or failed"),
     ("forge", "With Forge games"),
 )
