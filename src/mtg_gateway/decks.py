@@ -1971,6 +1971,44 @@ def mark_breaks(rows: list[dict[str, Any]], problems: list[dict[str, Any]]) -> l
     return out
 
 
+def _change_family(action: str) -> str:
+    if action in COUNT_ACTIONS:
+        return "count"
+    return "category" if action in CATEGORY_ACTIONS else "row"
+
+
+def _change_key(c: dict[str, Any]) -> str:
+    """A stored change's card, zone and row, as parse_changes tells one card's changes apart."""
+    row = f" #{c['relation_id']}" if c.get("relation_id") else ""
+    side = "" if (c.get("zone") or "main") == "main" else " (side)"
+    return front_face(str(c.get("card_name") or "")).lower() + side + row
+
+
+def merge_changes(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, list[str]]:
+    """A draft's stored changes with ``new`` added, one change per card: the new changes of a card
+    take the place of the draft's changes of the same kind for that card (in the same zone and row),
+    where they stood; the others are added after. (None, the card names) when a new change is of
+    another kind than the draft's change for the same card (a move and a count, say)."""
+
+    def mark(c: dict[str, Any]) -> tuple[str, str]:
+        return _change_key(c), _change_family(str(c.get("action")))
+
+    keys = {mark(c) for c in new}
+    clash = sorted({str(c.get("card_name")) for c in old if any(k == mark(c)[0] and f != mark(c)[1] for k, f in keys)})
+    if clash:
+        return None, clash
+    out: list[dict[str, Any]] = []
+    placed: set[tuple[str, str]] = set()
+    for c in old:
+        k = mark(c)
+        if k not in keys:
+            out.append(c)
+        elif k not in placed:  # the card's new changes stand where its old ones stood
+            placed.add(k)
+            out += [n for n in new if mark(n) == k]
+    return out + [n for n in new if mark(n) not in placed], []
+
+
 def unchanged_changes(changes: list[Change], rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     """The finish, printing, tag, mana value and switch changes that would leave their card as it
     is (printing_plan_rows gives them no row), so the result says so instead of dropping them."""
@@ -4430,16 +4468,19 @@ class DeckService:
         *,
         row_flags: bool = False,
         source_row: dict[str, Any] | None = None,
+        read: Deck | None = None,
     ) -> dict[str, Any]:
         """``row_flags`` only for the deck page's own save (parse_changes). ``source_row``: a line
-        put first that says where the changes come from (a card package's, propose_package)."""
+        put first that says where the changes come from (a card package's, propose_package).
+        ``read``: the deck as this request already read it (its waiting changes re-checked)."""
         deck_id = _clean_deck_id(deck_id)
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
-        deck = await self.get_own_deck(sub, deck_id)
+        deck = read if read is not None and read.id == deck_id else await self.get_own_deck(sub, deck_id)
         if (kept := one_click.get()) is not None:  # for the apply that follows at once (D-01)
             kept["read"] = (time.monotonic(), deck.id, pickle.dumps(deck))
-        self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
+        if read is None:
+            self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         await self._refuse_unknown_cards(deck, changes)
         rows, legality = await self._judge_rules(deck, changes, rows)
@@ -7603,6 +7644,14 @@ class DeckService:
             )
         deck = await self.get_own_deck(sub, row["deck_id"])
         self.recheck_waiting(sub, deck)
+        return await self._amend_on(sub, row, deck, raw_changes, version=version)
+
+    async def _amend_on(
+        self, sub: str, row: dict[str, Any], deck: Deck, raw_changes: Any, *, version: int
+    ) -> dict[str, Any]:
+        """``amend`` of a deck edit or details change, worked out on ``deck`` as just read."""
+        proposal_id = row["id"]
+        kind = row.get("kind") or "edit"
         note: dict[str, Any] = {}
         if kind == "edit":
             changes = parse_changes(raw_changes)
@@ -7798,11 +7847,20 @@ class DeckService:
         return out
 
     async def propose_linked(
-        self, sub: str, deck_id: str, raw_changes: Any, *, replaces: Any = None, depends_on: Any = None
+        self,
+        sub: str,
+        deck_id: str,
+        raw_changes: Any,
+        *,
+        replaces: Any = None,
+        depends_on: Any = None,
+        separate: bool = False,
     ) -> dict[str, Any]:
         """``propose`` with the board's links: the waiting notes it replaces (kept,
         marked replaced, back if this one is rejected) and the ones it depends on.
-        Both are checked before anything is saved."""
+        Both are checked before anything is saved. Without links, and unless ``separate``, an
+        app's later request for a deck is added to that app's waiting draft for it (``_add_to_draft``)
+        instead of making a second proposal (owner decision 0.7.46: one draft per deck per app)."""
         deck = _clean_deck_id(deck_id)
         old = self.check_replaceable(sub, deck, replaces) if replaces else []
         if depends_on and (not isinstance(depends_on, list) or len(depends_on) > MAX_CHANGES):
@@ -7810,7 +7868,15 @@ class DeckService:
         for other in depends_on or []:
             if self.db.get_proposal(str(other), sub) is None:
                 raise DeckError("invalid", f"{other} is not a proposal of this user")
-        out = await self.propose(sub, deck, raw_changes)
+        read: Deck | None = None
+        aside = ""
+        if not (separate or replaces or depends_on):
+            added, read, aside = await self._add_to_draft(sub, deck, raw_changes)
+            if added is not None:
+                return added
+        out = await self.propose(sub, deck, raw_changes, read=read)
+        if aside and not out.get("duplicate_of"):
+            out = {**out, "note": " ".join(x for x in (aside, out.get("note")) if x)}
         if out.get("duplicate_of"):
             return out
         pid = out["proposal_id"]
@@ -7819,6 +7885,13 @@ class DeckService:
         if not depends_on and not done and not later:
             return out
         fresh = self.describe(sub, pid)
+        if done:
+            # the deck's other waiting notes and the overlaps, worked out again now that the ones it
+            # replaces no longer wait (A12): the replaced ones are not "waiting" beside it
+            board_keys = ("waiting_on_deck", "overlaps", "hint")
+            base = {k: v for k, v in {**out, **fresh}.items() if k not in board_keys}
+            fresh = self._board_note(sub, base, deck, fresh.get("rows"), pid)
+            out = {k: v for k, v in out.items() if k not in board_keys}
         return {
             **out,
             **fresh,
@@ -7826,6 +7899,84 @@ class DeckService:
             # another app's changes: closed only once the member's press applies this one
             **({"replaces_when_applied": later} if later else {}),
         }
+
+    def drafts_of(self, sub: str, deck_id: str, client: str | None) -> list[dict[str, Any]]:
+        """This app's waiting drafts for a deck, newest first: its own pending card edits that no
+        other app changed, that are not held, out of date, linked to another change or being
+        applied. A later request of the same app for the deck is added to the first one."""
+        if client in (None, BROWSER_CLIENT, ADMIN_CLIENT):
+            return []
+        out = []
+        for line in reversed(self.db.pending_board(sub, deck_id)):
+            if line.get("kind") != "edit" or line.get("created_by_client") != client:
+                continue
+            if line.get("status") in ("held", "needs_look") or line["id"] in self._running:
+                continue
+            row = self.db.get_proposal(line["id"], sub)
+            if row is None or self.rewritten_by_another_app(sub, row):
+                continue
+            if self.db.proposal_links(sub, [row["id"]]):
+                continue  # a replace or a first step: the member reads it as linked, not a draft
+            if any(r.get("kind") == "package" for r in row.get("rows") or []):
+                continue  # a card package's import line belongs to that package's own proposal
+            out.append(row)
+        return out
+
+    async def _add_to_draft(
+        self, sub: str, deck_id: str, raw_changes: Any
+    ) -> tuple[dict[str, Any] | None, Deck | None, str]:
+        """Add a request to this app's waiting draft for the deck: (the amended draft, None, "")
+        once added; otherwise (None, the deck if it was read, why a draft was not used) for the
+        caller to propose it on its own. One change per card: a change of the same kind for a card
+        the draft already changes takes the draft's place for that card; a different kind for the
+        same card, a draft that would pass MAX_CHANGES or keep too many versions makes its own
+        proposal. A request the draft already holds changes nothing (``duplicate_of``)."""
+        client = current_client.get()
+        if not self.drafts_of(sub, deck_id, client):
+            return None, None, ""
+        new = [c.as_dict() for c in parse_changes(raw_changes)]
+        deck = await self.get_own_deck(sub, deck_id)
+        self.recheck_waiting(sub, deck)  # a draft the deck no longer fits is out of date: not used
+        drafts = self.drafts_of(sub, deck_id, client)
+        if not drafts:
+            return None, deck, ""
+        draft = drafts[0]
+        no = f"#{draft['board_no']}" if draft.get("board_no") else "your waiting change"
+        merged, clash = merge_changes(list(draft["changes"] or []), new)
+        if merged is None:
+            return None, deck, (
+                f"Made as its own proposal: {no} already makes another kind of change to "
+                + ", ".join(f"“{n}”" for n in clash)
+                + ", and a card takes one kind of change per proposal."
+            )
+        if merged == list(draft["changes"] or []):
+            out = self.describe(sub, draft["id"])
+            out["duplicate_of"] = draft["id"]
+            out["note"] = f"Already in {no}: it holds these changes, so nothing was added."
+            return out, None, ""
+        if len(merged) > MAX_CHANGES:
+            return None, deck, (
+                f"Made as its own proposal: {no} would pass {MAX_CHANGES} changes with these added."
+            )
+        try:
+            out = await self._amend_on(sub, draft, deck, merged, version=int(draft.get("version") or 1))
+        except DeckError as exc:
+            if exc.kind in ("versions_full", "changed", "not_pending"):
+                return None, deck, f"Made as its own proposal: {no} couldn't take more changes."
+            # the draft as it stands can't be worked out any more: the request goes on its own,
+            # and a problem of the request's own is said there
+            logger.info("adding to a draft failed (%s); proposing apart", exc.kind)
+            return None, deck, ""
+        out["added_to"] = draft["id"]
+        out["note"] = " ".join(
+            x
+            for x in (
+                f"Added to {no}, this app's waiting change for this deck (version {out.get('version')}).",
+                out.get("note"),
+            )
+            if x
+        )
+        return out, None, ""
 
     async def combine(self, sub: str, proposal_ids: Any) -> dict[str, Any]:
         """One note of several waiting card edits on one deck, their changes oldest first; the old
@@ -7951,28 +8102,35 @@ class DeckService:
             else None
         )
         names = {c.card_name.casefold() for c in changes}
+        # the app's waiting draft for this deck, which a propose adds this plan to (propose_linked)
+        drafts = self.drafts_of(sub, deck, client)
+        draft = drafts[0] if drafts and drafts[0]["id"] != dup else None
         waiting, overlaps, others_share = [], [], False
-        amend: tuple[dict[str, Any], bool] | None = None
         for line in self.board_lines(sub, deck):
             shared = [n for n in line.get("cards") or [] if str(n).casefold() in names]
-            mine = bool(line.get("own")) and line.get("kind") == "edit" and line.get("status") != "held"
             waiting.append(
                 {k: line.get(k) for k in ("proposal_id", "board_no", "version", "own", "status", "summary")}
                 | {"shares_cards": shared}
             )
             label = f"#{line.get('board_no')}" if line.get("board_no") else "a waiting change"
-            overlaps += [f"{n}: {label} changes it too." for n in shared]
-            others_share = others_share or bool(shared and not mine)
-            # the app's own waiting edit, the one sharing cards first: amend it instead
-            if mine and line["proposal_id"] != dup and (amend is None or (shared and not amend[1])):
-                amend = (line, bool(shared))
-        # a new proposal needs room; an amend or an exact repeat does not
+            if draft is None or line["proposal_id"] != draft["id"]:
+                overlaps += [f"{n}: {label} changes it too." for n in shared]
+                others_share = others_share or bool(shared)
+        # a new proposal needs room; adding to the draft or an exact repeat does not
         full: DeckError | None = None
         try:
             self._room_for_proposal(sub)
         except DeckError as exc:
             full = exc
-        if full is not None and dup is None and amend is None:
+        merged, clash = (
+            merge_changes(list(draft["changes"] or []), [c.as_dict() for c in changes])
+            if draft is not None and changes
+            else (None, [])
+        )
+        if draft is not None and merged == list(draft["changes"] or []):
+            dup = draft["id"]  # the draft holds all of it already
+        joins = merged is not None and len(merged) <= MAX_CHANGES
+        if full is not None and dup is None and not joins:
             problems.append({"error": full.kind, "message": str(full)})
         out: dict[str, Any] = {
             "deck_id": deck,
@@ -7995,29 +8153,31 @@ class DeckService:
                 if no
                 else "This exact change already waits. Don't propose it again."
             )
-        elif amend is not None:
-            line, shares = amend
-            row = self.db.get_proposal(line["proposal_id"], sub) or {}
+        elif draft is not None:
+            no = f"#{draft['board_no']}" if draft.get("board_no") else "your waiting change"
             out |= {
-                "suggest": "amend",
-                # its whole stored list: an amend replaces it, so it goes in again with the plan
-                "amend": {
-                    "proposal_id": line["proposal_id"],
-                    "version": line["version"],
-                    "changes": row.get("changes") or [],
+                "suggest": "propose",
+                "adds_to": {
+                    "proposal_id": draft["id"],
+                    "board_no": draft.get("board_no"),
+                    "version": int(draft.get("version") or 1),
                 },
             }
-            no = line.get("board_no")
-            out["next_step"] = (
-                (f"Your #{no}" if no else "Your waiting change")
-                + " already waits on this deck"
-                + (" and changes some of the same cards" if shares else "")
-                + ". If this belongs to the same request, call amend_proposal on it once with "
-                "amend.changes and this plan merged into one list, one change per card (an amend "
-                "replaces the whole list). If it replaces it, propose with replaces. Only a separate "
-                "request gets its own proposal."
-                + (" The waiting limit is reached, so only an amend is possible now." if full else "")
-            )
+            if merged is None:
+                out["next_step"] = (
+                    f"Propose it in one call. It becomes a proposal of its own: {no} already makes "
+                    "another kind of change to " + ", ".join(f"“{n}”" for n in clash) + "."
+                )
+            elif not joins:
+                out["next_step"] = (
+                    f"Propose it in one call. It becomes a proposal of its own: {no} would pass "
+                    f"{MAX_CHANGES} changes with it."
+                )
+            else:
+                out["next_step"] = (
+                    f"Propose it in one call: it is added to {no}, your waiting change for this deck "
+                    "(a change here to a card it already changes takes that change's place)."
+                )
         else:
             out["suggest"] = "propose"
             out["next_step"] = (

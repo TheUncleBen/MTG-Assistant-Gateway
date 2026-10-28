@@ -103,6 +103,7 @@ from .prices import DailyJobs, PriceService
 from .reports import ReportService
 from .scan import add_scan
 from .schemas import (
+    changes_for_assistant,
     compact_schema,
     inline_refs,
 )
@@ -939,6 +940,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         new card (every other call of a card tool does, where the app shows cards);
         ``reader_seq``: that card's number, so an older card gets no approval code."""
         in_chat = s.apply_in_chat and token_may_write()
+        if isinstance(data.get("changes"), list):  # in the spelling the tools take (name)
+            data = {**data, "changes": changes_for_assistant(data["changes"])}
         return proposal_tool_result(
             data,
             decks=state.decks,

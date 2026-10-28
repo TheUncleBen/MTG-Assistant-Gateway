@@ -418,9 +418,19 @@ def change_for_assistant(change: Any) -> Any:
     foil = out.pop("foil", None)
     if isinstance(foil, bool) and "finish" not in out:
         out["finish"] = "foil" if foil else "nonfoil"
-    if out.get("finish") == "normal":
-        out["finish"] = "nonfoil"
+    if isinstance(out.get("finish"), str):
+        # stored as Archidekt spells it (Normal, Foil, Etched)
+        out["finish"] = {"normal": "nonfoil"}.get(out["finish"].lower(), out["finish"].lower())
     return out
+
+
+def changes_for_assistant(changes: Any) -> Any:
+    """A proposal's stored change list in the spelling every tool input takes (``name``, never
+    ``card_name``), so an assistant can pass it straight back to amend_proposal. Anything that is
+    not a list of changes (a details or new-deck object) is left as it is."""
+    if not isinstance(changes, list):
+        return changes
+    return [change_for_assistant(c) for c in changes]
 
 
 def new_deck_card_for_service(card: Any) -> Any:

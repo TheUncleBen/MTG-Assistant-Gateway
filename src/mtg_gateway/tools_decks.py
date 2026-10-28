@@ -44,6 +44,7 @@ from .schemas import (
     NewDeckFields,
     PackageSettings,
     change_for_assistant,
+    changes_for_assistant,
     deck_change_for_service,
     new_deck_card_for_service,
 )
@@ -193,6 +194,27 @@ def _shown_map(shown: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
             "status_at": at if isinstance(at, int) and not isinstance(at, bool) else None,
         }
     return out
+
+
+# what a reject or withdraw answers: the proposal closed, not its change again
+CLOSED_KEYS = (
+    "proposal_id",
+    "kind",
+    "deck_id",
+    "deck_name",
+    "state",
+    "board_no",
+    "closed_at",
+    "closed_by",
+    "reject_reason",
+    "review_url",
+)
+
+
+def closed_short(p: dict[str, Any]) -> dict[str, Any]:
+    """A reject's or withdraw's answer: which proposal, now closed, and that nothing was sent."""
+    out = {k: p[k] for k in CLOSED_KEYS if p.get(k) not in (None, "")}
+    return {"ok": True, **out, "message": "Closed. Nothing was sent to Archidekt."}
 
 
 def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
@@ -637,7 +659,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "two-faced card show its back face by default. set_category and "
             "set_commander move every copy of a card (set_category creates the category if the deck "
             "has none of that name). "
-            "One card takes one kind of change per proposal. Put one request of the user in one proposal. "
+            "One card takes one kind of change per proposal. A later propose for a deck where your app "
+            "already has a waiting change adds to it (added_to: the same proposal, a new version, one "
+            "card in the chat); separate true makes a proposal of its own. "
             "In an app that shows cards, each call puts a card in the chat, a refused one too: plan the "
             "whole request and check it with check_deck_changes first. "
             "The result lists the deck's other waiting proposals (waiting_on_deck) and, card by card, "
@@ -671,6 +695,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         depends_on: Annotated[
             list[str] | None, Field(description="Waiting proposals this one needs applied first.")
         ] = None,
+        separate: Annotated[
+            bool, Field(description="Make a proposal of its own instead of adding to your waiting one.")
+        ] = False,
     ) -> CallToolResult:
         warnings: list[str] = []
         try:
@@ -681,7 +708,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 raw += [deck_change_for_service(c) for c in session["changes"]]
                 warnings += _scan_warnings(session)
             made = await state.decks.propose_linked(
-                sub, deck_id, raw or None, replaces=replaces, depends_on=depends_on
+                sub, deck_id, raw or None, replaces=replaces, depends_on=depends_on, separate=separate
             )
             return _proposal({"ok": True, **made, **({"warnings": warnings} if warnings else {})})
         except DeckError as exc:
@@ -848,7 +875,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         reason: Annotated[str, Field(description="Why it is withdrawn, in a few words.")],
     ) -> dict[str, object]:
         try:
-            return {"ok": True, **_closed_at(state.decks.withdraw(_sub(), proposal_id, reason))}
+            return closed_short(_closed_at(state.decks.withdraw(_sub(), proposal_id, reason)))
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -985,6 +1012,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _tool_error(exc)
         out.pop("card_seq", None)
+        out["changes"] = changes_for_assistant(out.get("changes"))
         return out if full else bounded(out, CARD_ROWS)
 
     @server.tool(
@@ -1308,7 +1336,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def reject_proposal(proposal_id: str) -> dict[str, object]:
         try:
-            return {"ok": True, **_closed_at(state.decks.reject(_sub(), proposal_id, via="mcp"))}
+            return closed_short(_closed_at(state.decks.reject(_sub(), proposal_id, via="mcp")))
         except DeckError as exc:
             return _tool_error(exc)
 
