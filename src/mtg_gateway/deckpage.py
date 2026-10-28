@@ -957,10 +957,12 @@ def toolbar_html(
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         "<input id='quick' type='text' name='add' placeholder='Quick add (name)' data-suggest='cards' "
+        "data-suggest-submit "
         "autocomplete='off'>"
-        # on a phone the label is hidden and only the icon shows: the name stays the same
-        f"<button type='submit' aria-label='Card search'>{icon('search')} "
-        "<span>Card search</span></button>"
+        # on a phone the label is hidden and only the icon shows: the name stays the same. The
+        # page adds one copy in place (deck.js); without scripts the form opens the editor.
+        f"<button type='submit' aria-label='Add'>{icon('plus')} "
+        "<span>Add</span></button>"
         # Add a package, where cards are added (Ben, 2026-10-25: packages easy to find): the
         # package box (deck_extras.py); its old address opens this page with the box open
         f"<a class='btn addpkg' href='/decks/{{did}}/package' {ui.box_open_attr('package')}>"
@@ -1450,6 +1452,7 @@ def cards_html(
                 "copy",
                 "plus",
                 "collection",
+                "layers",
             )
         )
         + "</template>"
@@ -2039,8 +2042,8 @@ def _toolbar_making(html: str, did: str) -> str:
     return (
         html.replace("autocomplete='off'>", "autocomplete='off' disabled>", 1)
         .replace(
-            "<button type='submit' aria-label='Card search'>",
-            "<button type='submit' aria-label='Card search' disabled>",
+            "<button type='submit' aria-label='Add'>",
+            "<button type='submit' aria-label='Add' disabled>",
             1,
         )
         .replace(
@@ -3364,36 +3367,16 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 @media (max-width:600px){ ul.rows .row{grid-template-columns:1.6rem minmax(0,1fr) auto}
   ul.rows .set,ul.rows .price{display:none} }
 
-/* stack order handles (deck.js): drag, or arrow keys while focused */
-/* button.stackgrip, so the 28 px drawn size wins over the theme's icon-only width (the control height,
-   44 px on touch); the ::before halo below is the finger target */
-button.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;
-  margin:0 .25rem 0 0;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;
-  -webkit-touch-callout:none;color:var(--text-muted);font-size:1rem;line-height:1;flex:none}
-/* a 44 px target for a finger without making the header taller */
-.stackgrip::before{content:'';position:absolute;inset:-8px}
-/* no press-down nudge (theme buttons move 1 px): in the columns that lays every column out again */
-.stackgrip:active:not(:disabled){cursor:grabbing;transform:none;filter:none}
 /* no opacity here or on a dragged row: in the text and Brewer views' columns a change of opacity
    lays every column out again, which takes as long as moving the stack itself */
-.stack.moving{outline:2px dashed var(--orange);outline-offset:4px;background:var(--surface-2)}
-/* while a stack is dragged a bar shows where it lands and its name follows the pointer; both, and
-   a card slid by a finger, move by transform only */
-/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile, nor while a
-   card is dragged (deck.js): the fan would cover the top of the stack directly below */
-.deckview.sorting ul.rows .row:hover .hover,.deckview.carddrag ul.rows .row:hover .hover{display:none}
-.deckview.sorting.stacks .c:hover ~ .c{transform:none}
+/* a card slid by a finger moves by transform only; no row's hover picture or stack fan opens
+   under the pointer meanwhile (deck.js): the fan would cover the top of the stack directly below */
+.deckview.carddrag ul.rows .row:hover .hover{display:none}
 /* at once, not after the fan's 0.3 s slide: a quick drag reaches the lower stack before that */
 .deckview.carddrag.stacks .c:hover ~ .c{transform:none;transition:none}
-.stackdrop,.stacktag,.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0}
-.stackdrop{z-index:70;width:1px;height:1px;opacity:0;transform-origin:0 0;background:var(--orange)}
-.stacktag{z-index:71;max-width:60vw;padding:.3rem .6rem;border-radius:var(--radius);background:var(--surface);
-  color:var(--text);border:1px solid var(--orange);box-shadow:var(--shadow);font-size:.9rem;font-weight:700;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dragghost{z-index:70;opacity:.92;box-shadow:var(--shadow);background:var(--surface);border-radius:4.5%}
+.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0;z-index:70;
+  opacity:.92;box-shadow:var(--shadow);background:var(--surface);border-radius:4.5%}
 .dragghost .row{border-top:0;padding:0 .25rem}
-.stack-reset{margin:.25rem 0 1rem}
-.stackhead .stackgrip ~ .title{flex:1;min-width:0}
 /* select several cards (own deck): the bar above the cards, and the chosen cards ringed */
 .bulkbar{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:0 0 .75rem}
 .bulkbar .bulktools{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
@@ -3585,19 +3568,21 @@ html.cardview-open{overflow:hidden}
   font-weight:700;line-height:1}
 .ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
 .ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
-.ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
-.ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
-.ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
+.ctxmenu .more .chev,.ctxmenu .finbtn .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;
+  line-height:1}
+.ctxmenu .more[aria-expanded=true] .chev,.ctxmenu .finbtn[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ctxmenu .sub,.ctxmenu .finsub{display:flex;flex-direction:column;background:var(--surface);
+  border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
-.ctxmenu .sub[hidden]{display:none}
-.ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
-.ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu .sub[hidden],.ctxmenu .finsub[hidden]{display:none}
+.ctxmenu .sub button,.ctxmenu .finsub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
+.ctxmenu .sub .on:disabled,.ctxmenu .finsub .on:disabled{color:var(--toolbar-active);font-weight:700}
 .ctxmenu .off[aria-disabled=true]{color:var(--text-muted);cursor:default}
 /* finger-sized on touch screens: every row, the − and + steps and the Move to list's rows */
 @media (pointer:coarse){
   .ctxmenu .qtyrow{min-height:44px}
   .ctxmenu .qtyrow .step{width:44px;min-width:44px;height:44px;min-height:44px}
-  .ctxmenu .sub button{min-height:44px}
+  .ctxmenu .sub button,.ctxmenu .finsub button{min-height:44px}
   .ctxmenu .mvform input,.ctxmenu .mvform .acts .btn{min-height:44px}
   /* the viewer's × and its − / + steppers: finger-sized (set after their own rules, so this wins) */
   .cardview .close{width:44px;height:44px;min-height:44px}
@@ -4090,6 +4075,12 @@ html.printpick-open{overflow:hidden}
 .pppreview .ppprices dd{margin:0}
 .pppreview .ppnote{margin:.25rem 0 0;padding:.5rem .65rem;border-left:3px solid var(--orange);
   background:var(--surface-2);font-size:.9rem;color:var(--text)}
+.pppreview .ppfinish{display:flex;flex-wrap:wrap;gap:.25rem .9rem;margin:.25rem 0 0;padding:0;border:0;
+  min-width:0}
+.pppreview .ppfinish legend{padding:0;font-weight:700;color:var(--text-muted);font-size:.9rem;float:left;
+  margin-right:.9rem;line-height:var(--ctl)}
+.pppreview .ppfin{display:inline-flex;align-items:center;gap:.4rem;min-height:var(--ctl);cursor:pointer}
+.pppreview .ppfin input{margin:0;width:1.1rem;height:1.1rem;accent-color:var(--orange)}
 .pppreview .ppacts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem}
 .pppreview .ppacts button{margin:0;flex:1 1 auto}
 .pppreview .ppback{display:none}
@@ -4140,7 +4131,10 @@ html.printpick-open{overflow:hidden}
 @media (max-width:599.98px){
   .editbar{top:auto;bottom:calc(56px + env(safe-area-inset-bottom));margin:0;position:fixed;left:0;right:0;
     padding:.35rem max(.75rem,env(safe-area-inset-right)) .35rem max(.75rem,env(safe-area-inset-left));
-    gap:.4rem;flex-wrap:nowrap}
+    gap:.4rem;flex-wrap:wrap}
+  .editbar button{min-height:44px}
+  /* the status (a message, a refusal) on its own line above the buttons, never squeezed beside them */
+  .editbar .status{order:-1;flex-basis:100%;margin:0 0 .15rem}
   .editbar .count{display:none}
   /* Undo and Redo keep their names for screen readers; on a phone the arrows alone show */
   .editbar .undo .bl,.editbar .redo .bl{position:absolute;width:1px;height:1px;overflow:hidden;
@@ -4151,11 +4145,16 @@ html.printpick-open{overflow:hidden}
   .editor{padding-bottom:6rem}
   body:has(#editor) footer.site{padding-bottom:calc(11rem + env(safe-area-inset-bottom))}
   .editbar .review{flex:1}
-  /* the card size keeps to the one slim row: no label, narrow S M L */
-  .editbar .cardsize{flex:0 1 auto;min-width:0;margin:0}
-  .editbar .cardsize .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-  .editbar .cardsize .sizeseg{display:flex;max-width:100%}
-  .editbar .cardsize .sizeseg button{min-width:0;flex:1 1 2rem;padding:0 .4rem}
+  /* the card size and the backup tick sit in their own row under the bar (companion.js moves
+     them there), each control 44 px tall */
+  .editopts{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem 1rem;margin:0 0 1rem}
+  .editopts .backup{display:inline-flex;align-items:center;gap:.5rem;margin:0;min-height:44px;font-size:.9rem}
+  .editopts .backup input{margin:0;width:22px;height:22px;accent-color:var(--orange)}
+  .editopts .cardsize{display:flex;align-items:center;gap:.5rem;margin:0}
+  .editopts .cardsize .lbl{color:var(--text-muted)}
+  .editopts .cardsize .sizeseg button{min-height:44px;min-width:44px}
+  .addbox form.addcard .go .foil{min-height:var(--ctl)}
+  .addbox form.addcard .go .foil input{width:22px;height:22px;margin:0;accent-color:var(--orange)}
   .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}
   .addbox form.addcard .go{grid-column:1;grid-row:2} .addbox form.addcard .go button{width:100%}

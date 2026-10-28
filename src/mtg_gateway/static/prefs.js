@@ -1,4 +1,4 @@
-/* Choices that follow the account (0.7.29, prefs.py): views, card size, stack orders, the deck
+/* Choices that follow the account (0.7.29, prefs.py): views, card size, the deck
    stats toggles and the dismissed tips are kept on the member's account, so every device shows
    the same. The page hands over the ones its scripts need in <script id="mtg-prefs">, so nothing
    waits for a request; a change is saved with POST /api/v1/prefs.
@@ -125,11 +125,9 @@
   try {
     for (var i = 0; i < store.length; i++) {
       var key = store.key(i);
-      if (key && key.indexOf("mtg-stack-order:") === 0) {
-        var order = JSON.parse(store.getItem(key) || "null");
-        if (Array.isArray(order) && order.length) take(key, "stack:" + key.slice(16), order);
-        else keys.push(key);
-      }
+      // a stack order a device kept before 0.7.29: stacks follow Archidekt's category order
+      // now (0.7.46, owner decision C4), so it is dropped, not copied
+      if (key && key.indexOf("mtg-stack-order:") === 0) keys.push(key);
     }
     if (store.getItem("mtg.edhplay.steps") === "1") take("mtg.edhplay.steps", "edhplay.steps", true);
     if (store.getItem("mtg-scan-intro-seen") === "1") take("mtg-scan-intro-seen", "scan.intro", true);

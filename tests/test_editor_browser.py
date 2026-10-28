@@ -470,3 +470,60 @@ def test_save_anyway_sends_the_backup_box(server: Server) -> None:
             assert sent[-1] == {"version": 3, "archidekt_backup": ticked}, sent
         assert errors == []
         browser.close()
+
+
+def test_the_phone_save_bar_keeps_its_controls_tall_and_the_status_on_its_own_line(server: Server) -> None:
+    """0.7.46 audit D-10: on a phone the fixed save bar holds Save, Undo and Redo (44 px each)
+    with the status on its own line above them; the card size and the backup tick sit in a row
+    of their own under the bar, 44 px tall, and the Foil tick is a real target. On a wide window
+    they are back in the bar."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        bar = page.locator(".editbar")
+        assert bar.locator(".cardsize, .backup").count() == 0
+        opts = page.locator(".editopts")
+        assert opts.locator(".cardsize").count() == 1 and opts.locator(".backup").count() == 1
+        assert opts.evaluate("e => e.previousElementSibling.className") == "editbar"
+        heights = page.evaluate(
+            "() => [...document.querySelectorAll("
+            "'.editbar button, .editopts .sizeseg button, .editopts .backup')]"
+            ".map(e => Math.round(e.getBoundingClientRect().height))"
+        )
+        assert heights and all(h >= 44 for h in heights), heights
+        tick = page.locator(".editopts .backup input").bounding_box()
+        assert tick["width"] >= 20 and tick["height"] >= 20, tick
+        foil = page.locator("form.addcard .foil input").bounding_box()
+        assert foil["width"] >= 20 and foil["height"] >= 20, foil
+        # a message: on its own line above the buttons, the buttons still 44 px and not wrapped
+        page.evaluate(
+            "() => { document.querySelector('.editbar .status').textContent = 'Nothing to save.'; }"
+        )
+        status = page.locator(".editbar .status").bounding_box()
+        save = page.locator(".editbar button.review").bounding_box()
+        undo = page.locator(".editbar button.undo").bounding_box()
+        assert status["y"] + status["height"] <= save["y"] + 1, (status, save)
+        assert abs(save["y"] - undo["y"]) < 1 and save["height"] >= 44, (save, undo)
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= 390
+        # wide: back in the bar
+        page.set_viewport_size({"width": 1366, "height": 900})
+        page.wait_for_timeout(200)
+        assert bar.locator(".cardsize").count() == 1 and bar.locator(".backup").count() == 1
+        assert page.locator(".editopts").count() == 0
+        assert not errors, errors
+        browser.close()

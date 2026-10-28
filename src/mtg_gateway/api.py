@@ -279,8 +279,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
         from .deckpage import (
+            GROUPS,
+            ROW_VIEWS,
+            SORTS,
+            VIEWS,
             card_image,
+            card_row,
             checks_panel_html,
+            group_cards,
+            image_card,
             legal_problems,
             legality_chip_html,
             legality_panel_html,
@@ -295,15 +302,33 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+        # the page's view, grouping and sort (a quick add draws its new card in place: each
+        # touched row then carries its markup and the stack it belongs in)
+        draw = data.get("view") if data.get("view") in VIEWS else None
+        grouping = data.get("group") if data.get("group") in GROUPS else "category"
+        sorting = data.get("sort") if data.get("sort") in SORTS else "name"
 
         def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
             """The rows of the touched cards and the page fragments, from one read of the deck."""
             stats = deck_stats.compute(deck)
             checks = stats.get("checks") or {}
+            shown = [c for c in deck.cards if front_face(c.name).casefold() in touched]
+            drawn: dict[int, dict[str, Any]] = {}
+            if draw and shown:
+                owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} or None
+                where = {id(c): name for name, group in group_cards(deck, grouping, sorting) for c in group}
+                for c in shown:
+                    html = (
+                        card_row(c, deck=deck, view=draw, owned=owned)
+                        if draw in ROW_VIEWS
+                        else image_card(c, deck=deck, owned=owned)
+                    )
+                    drawn[id(c)] = {"html": html, "stack": where.get(id(c))}
             return {
                 "stale": stale,
                 "rows": [
                     {
+                        **drawn.get(id(c), {}),
                         "name": c.name,
                         "qty": c.quantity,
                         "zone": "main" if deck.in_deck(c) else "side",
@@ -319,8 +344,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "image": card_image(c),
                         "price": c.price,
                     }
-                    for c in deck.cards
-                    if front_face(c.name).casefold() in touched
+                    for c in shown
                 ],
                 "stats": {
                     # the banner's verdict: every format rule met, the deck size included

@@ -583,8 +583,8 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
 
 
 def test_card_search_keeps_its_name_and_no_mana_data_is_readable(tmp_path: Path) -> None:
-    """On a phone the Quick add row's Card search button shows only its icon: screen readers still
-    hear "Card search", as on wider screens. "No mana data" reads at 4.5:1 or better in both themes
+    """On a phone the Quick add row's Add button shows only its icon: screen readers still
+    hear "Add", as on wider screens. "No mana data" reads at 4.5:1 or better in both themes
     (it used to be dimmed with opacity to 2.77:1 light and 3.24:1 dark)."""
     from playwright.sync_api import sync_playwright
 
@@ -606,7 +606,7 @@ def test_card_search_keeps_its_name_and_no_mana_data_is_readable(tmp_path: Path)
                         page.goto(f"{s.base}/decks/42", wait_until="networkidle")
                         search = page.locator("form.quick button[type=submit]")
                         assert search.is_visible(), where
-                        assert page.get_by_role("button", name="Card search", exact=True).count() == 1, where
+                        assert page.get_by_role("button", name="Add", exact=True).count() == 1, where
                         label = search.locator("span")
                         assert label.is_visible() == (not phone), where
                         empty = page.locator(".cbar.empty span", has_text="No mana data").first

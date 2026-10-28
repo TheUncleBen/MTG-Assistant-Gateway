@@ -320,7 +320,13 @@
       if (whole) reveal();
       if (rich && names.length) peek(names);
       announce();
-      if (pendingEnter) { pendingEnter = false; if (names.length) pick(0); }
+      // Enter pressed over an older list: the first row of this answer; with no row, the form
+      // goes as typed (the gateway says when the name is no card)
+      if (pendingEnter) {
+        pendingEnter = false;
+        if (names.length) pick(0);
+        else if (input.hasAttribute("data-suggest-submit") && input.form) { close(); submit(input.form); }
+      }
     }
     /* A list under a box low on a phone's screen would open under the keyboard: once it shows,
        bring the box to the top of what can be seen (scroll-padding keeps it below the top bar). */

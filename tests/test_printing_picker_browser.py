@@ -450,18 +450,18 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert page.evaluate("() => document.activeElement.innerText") == "Use this printing"
         with page.expect_request(EDIT_URL) as req:
             page.locator(".pppreview .ppuse").click()
-        assert json.loads(req.value.post_data) == {
-            "changes": [
-                {
-                    "action": "set_printing",
-                    "card_name": "Sol Ring",
-                    "set_code": "sld",
-                    "collector_number": "1074",
-                    "finish": "etched",
-                }
-            ],
-            "confirmed": False,
-        }
+        sent = json.loads(req.value.post_data)
+        assert sent["changes"] == [
+            {
+                "action": "set_printing",
+                "card_name": "Sol Ring",
+                "set_code": "sld",
+                "collector_number": "1074",
+                "finish": "etched",
+            }
+        ]
+        assert sent["confirmed"] is False
+        assert (sent["view"], sent["group"], sent["sort"]) == ("text", "category", "name")  # the page's own
         assert page.locator(".printpick.open").count() == 0
         # shown at once, then Saved: the message says the finish changed
         assert card.get_attribute("data-set") == "SLD 1074" and card.get_attribute("data-finish") == "Etched"
@@ -1312,3 +1312,113 @@ def test_the_filter_box_says_it_filters_by_set_and_offers_a_card_search(server: 
             page.wait_for_url(re.compile(r"/cards\?q=Lightning"), timeout=5000)
             assert errors == []
             browser.close()
+
+
+# -- Finish: Normal, Foil or Etched from the card menu and in the printing detail (owner C4) ------
+
+
+def test_the_card_menu_sets_the_finish_with_undo(server: Server) -> None:
+    """The card menu has a Finish list (Normal, Foil, Etched; the card's own marked and off);
+    picking one changes the badge at once and saves set_finish; Undo puts it back. A maybeboard
+    row has no Finish list (the gateway refinishes cards in the deck itself)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        side = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='side']")
+        _open_menu(page, side)
+        assert page.locator(".ctxmenu [role=menuitem]", has_text="Finish").count() == 0
+        page.keyboard.press("Escape")
+        _open_menu(page, card)
+        fin = page.locator(".ctxmenu [role=menuitem]", has_text="Finish")
+        assert fin.get_attribute("aria-haspopup") == "true"
+        fin.click()
+        sub = page.locator(".ctxmenu .finsub[aria-label='Finishes']")
+        assert sub.locator("[role=menuitem]").all_inner_texts() == ["Normal", "Foil", "Etched"]
+        assert sub.locator("[role=menuitem]", has_text="Normal").is_disabled()
+        with page.expect_request(EDIT_URL) as req:
+            sub.locator("[role=menuitem]", has_text="Foil").click()
+        assert json.loads(req.value.post_data)["changes"] == [
+            {"action": "set_finish", "card_name": "Sol Ring", "finish": "foil"}
+        ]
+        assert page.locator(".ctxmenu").count() == 0
+        assert card.get_attribute("data-finish") == "Foil" and card.locator(".finish").inner_text() == "F"
+        toast = page.locator(".deck-toast .msg", has_text="Saved")
+        toast.wait_for(timeout=8000)
+        assert toast.inner_text() == "Saved. Sol Ring is foil now. Snapshot kept under History."
+        assert server.sol_ring() == [("cmr", "472", "Foil")]
+        with page.expect_request(EDIT_URL) as req2:
+            page.locator(".deck-toast button", has_text="Undo").click()
+        assert json.loads(req2.value.post_data)["changes"] == [
+            {"action": "set_finish", "card_name": "Sol Ring", "finish": "normal"}
+        ]
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert card.get_attribute("data-finish") == "Normal" and card.locator(".finish").count() == 0
+        assert server.sol_ring() == [("cmr", "472", "Normal")]
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_printing_detail_offers_the_finishes_it_is_made_in(server: Server) -> None:
+    """A printing made in several finishes: the detail has a Finish choice, the fitting finish
+    first; a picked finish goes with the printing, and the Saved note names it. The card's own
+    printing in another finish: Use this printing is on and changes the finish alone."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_picker(page, card)
+        page.mouse.move(640, 4)
+        pv = page.locator(".pppreview")
+        # the card's own printing (one finish): no choice, Use this printing off
+        assert pv.locator(".ppfinish").count() == 0 and pv.locator(".ppuse").is_disabled()
+        sld = page.locator(".printpick .pptile", has_text="SLD #1075")
+        sld.click()
+        assert "SLD #1075" in pv.locator(".ppline").inner_text()
+        choice = pv.locator(".ppfinish")
+        assert choice.locator("label").all_inner_texts() == ["Normal", "Foil", "Etched"]
+        assert choice.locator("input:checked").get_attribute("value") == "nonfoil"
+        choice.locator("label", has_text="Foil").click()
+        with page.expect_request(EDIT_URL) as req:
+            pv.locator(".ppuse").click()
+        assert json.loads(req.value.post_data)["changes"] == [
+            {
+                "action": "set_printing",
+                "card_name": "Sol Ring",
+                "set_code": "sld",
+                "collector_number": "1075",
+                "finish": "foil",
+            }
+        ]
+        toast = page.locator(".deck-toast .msg", has_text="Saved")
+        toast.wait_for(timeout=8000)
+        assert toast.inner_text() == "Saved. Sol Ring is now SLD #1075, foil. Snapshot kept under History."
+        assert server.sol_ring() == [("sld", "1075", "Foil")]
+        assert card.get_attribute("data-finish") == "Foil"
+        page.locator(".deck-toast .close").click()
+        # the printing it has now, in another finish: the finish alone changes
+        _open_picker(page, card)
+        page.mouse.move(640, 4)
+        page.locator(".printpick .pptile.current", has_text="SLD #1075").click()
+        choice = pv.locator(".ppfinish")
+        assert choice.locator("input:checked").get_attribute("value") == "foil"
+        assert pv.locator(".ppuse").is_disabled()
+        choice.locator("label", has_text="Etched").click()
+        assert pv.locator(".ppuse").is_enabled()
+        with page.expect_request(EDIT_URL) as req2:
+            pv.locator(".ppuse").click()
+        assert json.loads(req2.value.post_data)["changes"] == [
+            {"action": "set_finish", "card_name": "Sol Ring", "finish": "etched"}
+        ]
+        page.locator(".deck-toast .msg", has_text="Sol Ring is etched now").wait_for(timeout=8000)
+        assert server.sol_ring() == [("sld", "1075", "Etched")]
+        assert not errors, errors
+        browser.close()
