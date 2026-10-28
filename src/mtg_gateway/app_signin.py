@@ -24,7 +24,7 @@ and autofill work, and the browser hands the result back to the app.
 4. The app posts the code with its verifier to ``/login/app`` from its WebView; only then is the
    browser session created, with its cookie set in the WebView.
 
-Only when the browser reports that it could not verify the app for that address (Digital Asset
+Only when the browser reports that it could not confirm the app for that address (Digital Asset
 Links failed or timed out), or the gateway's address can't take an https Auth Tab return (a port,
 say), does the app try again with an Auth Tab on its own scheme (``app_return=scheme``): the
 callback then sends the browser to ``mtgassistant-signin://signin?code=...``. An Auth Tab returns

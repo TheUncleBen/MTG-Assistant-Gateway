@@ -94,6 +94,8 @@ def test_chatgpt_block_fits_custom_instructions() -> None:
     text = CHATGPT.read_text(encoding="utf-8")
     block = text.split("```text\n", 1)[1].split("```", 1)[0]
     assert len(block) <= 4000  # paid-plan custom instructions take 5,000 characters (reported)
+    # plain words: what to tell the member about the check after an apply
+    assert "Report whether the check matched" in block and "Report verified" not in block
 
 
 def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
@@ -152,3 +154,8 @@ def test_no_doc_still_names_the_cards_0_7_33_took_away() -> None:
     files = [*(ROOT / "docs").glob("*.md"), *(ROOT / "plugin").rglob("*.md"), ROOT / "README.md"]
     found = [f"{p.relative_to(ROOT)}: {m.group(0)}" for p in files for m in stale.finditer(p.read_text())]
     assert not found, found
+
+
+def test_the_android_guide_says_confirm_for_the_browsers_app_check() -> None:
+    text = " ".join((ROOT / "docs" / "ANDROID.md").read_text(encoding="utf-8").split())
+    assert "could not confirm the app" in text and "could not verify the app" not in text

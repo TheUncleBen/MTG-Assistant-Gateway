@@ -724,7 +724,7 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   address: the browser hands it back, and closes, only to the app the
   gateway's `/.well-known/assetlinks.json` names (Digital Asset Links), so no
   other app gets the code. Only if the browser reports that it could not
-  verify the app (or the gateway's address has a port, which an Auth Tab can't
+  confirm the app (or the gateway's address has a port, which an Auth Tab can't
   return on) does the app try again with an Auth Tab on its own scheme, which
   gets `mtgassistant-signin://signin?code=...` back with no such check. Any
   app could open that kind of Auth Tab at the gateway's `/login` with a secret
