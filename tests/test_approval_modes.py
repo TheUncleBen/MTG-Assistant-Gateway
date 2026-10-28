@@ -267,7 +267,7 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     p = structured(low)
     assert p["approval_mode"] == "semi" and p["risk"] == "low" and p["assistant_may_apply"] is True
     assert "call apply_proposal now" in p["next_step"]
-    assert APPROVAL_META_KEY not in (low.get("_meta") or {})  # nothing for a person to press
+    assert low["_meta"][APPROVAL_META_KEY]  # the card offers Apply now too, should the assistant not (0.7.46)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     sent = len(ark.patches)
     assert a["ok"] and a["state"] == "applied" and a["snapshot_id"] and sent >= 1

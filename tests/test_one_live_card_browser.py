@@ -321,3 +321,54 @@ def test_the_gateway_refusing_an_older_cards_approve_makes_it_step_aside() -> No
             assert all(m["params"]["arguments"].get("card_seq") == 1 for m in _reads(page))
         finally:
             browser.close()
+
+
+def _show_again(page) -> None:
+    page.frames[1].evaluate(
+        "() => { Object.defineProperty(document, 'visibilityState', {value: 'visible', configurable: true});"
+        " document.dispatchEvent(new Event('visibilitychange')); }"
+    )
+
+
+def test_a_change_the_assistant_may_apply_has_apply_now_and_follows_its_state() -> None:
+    """Semi or Full auto: the card offers Apply now and Reject (the assistant may still apply it),
+    changes its button when the approval mode changes, and shows the change applied when the
+    assistant applies it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    auto = {
+        **PROPOSAL,
+        "assistant_may_apply": True,
+        "approval_mode": "semi",
+        "risk": "low",
+        "risk_reason": "1 row",
+    }
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        try:
+            page = browser.new_page()
+            card = _open(
+                page, {"structuredContent": auto, "_meta": {APPROVAL_META_KEY: "c1"}}, get_reply=auto
+            )
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            assert card.locator("#approve").inner_text() == "Apply now"
+            assert card.locator("#reject").inner_text() == "Reject"
+            assert "apply it here with Apply now" in card.locator("#note").inner_text()
+            # the member switched to Manual: the same card now asks for an Approve
+            page.evaluate(
+                "(r) => { window.getReply = r; }",
+                {**auto, "assistant_may_apply": False, "approval_mode": "manual"},
+            )
+            _show_again(page)
+            card.locator("#approve", has_text="Approve: apply to Archidekt").wait_for(timeout=5_000)
+            # the assistant applied it: the card shows that, with nothing left to press
+            page.evaluate(
+                "(r) => { window.getReply = r; }",
+                {**auto, "state": "applied", "applied_at": int(time.time())},
+            )
+            _show_again(page)
+            card.locator("#state", has_text="Applied").wait_for(timeout=5_000)
+            assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
+        finally:
+            browser.close()
