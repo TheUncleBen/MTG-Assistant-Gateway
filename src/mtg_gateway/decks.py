@@ -8355,6 +8355,7 @@ class DeckService:
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
         self.recheck_waiting(sub, deck)
+        boards: list[str] = []  # Archidekt's default boards among the unused ones deleted
         if delete_unused:
             named = {w.get("id") for w in wanted} | {w["category"].casefold() for w in wanted}
             unused = [
@@ -8366,7 +8367,9 @@ class DeckService:
                 raise DeckError("invalid", "The deck has no unused categories; nothing would change.")
             # one proposal deletes the first ones up to the cap; the rest are left for the next
             room = MAX_CATEGORY_CHANGES - len(wanted)
-            wanted += unused[:room] if room > 0 else unused
+            taken = unused[:room] if room > 0 else unused
+            boards = [u["category"] for u in taken if u["category"].casefold() in SIZE_CATEGORY_NAMES]
+            wanted += taken
             if len(wanted) > MAX_CATEGORY_CHANGES:
                 raise DeckError("invalid", f"at most {MAX_CATEGORY_CHANGES} categories can change at once")
         plan, rows = category_change_rows(deck, wanted)
@@ -8391,7 +8394,16 @@ class DeckService:
             detail={"proposal_id": pid, "deck_id": deck.id, "kind": "categories", "count": len(plan)},
         )
         # a card edit waiting on the deck may move cards into or out of these categories
-        return self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
+        out = self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
+        if boards:
+            names = " and ".join(f"“{b}”" for b in boards)
+            out["warnings"] = [
+                f"{names} {'is' if len(boards) == 1 else 'are'} Archidekt's default "
+                f"{'board' if len(boards) == 1 else 'boards'}, deleted here because "
+                f"{'it is' if len(boards) == 1 else 'they are'} empty. Tell the user, or leave "
+                f"{'it' if len(boards) == 1 else 'them'} out by naming the categories to delete instead."
+            ]
+        return out
 
     async def _categories_unchanged(self, sub: str, deck: Deck) -> Deck:
         """Re-read the deck just before category writes and refuse (needs a look, nothing sent)

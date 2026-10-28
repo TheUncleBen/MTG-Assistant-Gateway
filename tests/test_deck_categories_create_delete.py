@@ -415,6 +415,11 @@ async def test_the_assistant_creates_deletes_and_deletes_unused_with_the_same_to
     p = structured(await call(h, token, "propose_deck_categories", {"deck_id": "42", "delete_unused": True}))
     assert p["ok"] and p["assistant_may_apply"] is False, p
     assert "Delete category “Spare”" in p["diff"] and "Delete category “Maybeboard”" in p["diff"]
+    # the default board is named in a warning (assistant tool review, 2026-10-28)
+    assert p["warnings"] == [
+        "“Maybeboard” is Archidekt's default board, deleted here because it is empty. Tell the user, "
+        "or leave it out by naming the categories to delete instead."
+    ], p
     # a delete of a category with cards and nowhere to move them is refused, in the backend's words
     p = structured(
         await call(
