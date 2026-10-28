@@ -354,9 +354,11 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     When every copy of a name is one agreed printing (status ``printing``: title and collector
     line agreed, or the printing was chosen by hand) in one finish, the addition also carries
     ``set_code``, ``collector_number`` and ``foil`` so the deck tools can keep that printing.
-    Copies matched by name alone, or spread over several printings, are added by name alone.
+    Copies matched by name alone, or spread over several printings, are added by name alone; the
+    copies of those asked for in foil are a separate addition that carries ``foil``.
     """
     counts: dict[str, int] = {}
+    foils: dict[str, int] = {}
     prints: dict[str, set[tuple[str, str, bool | None]]] = {}
     by_name_only: set[str] = set()
     for it in items:
@@ -365,6 +367,8 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         name = card["name"]
         counts[name] = counts.get(name, 0) + int(it.get("quantity", 1))
+        if it.get("foil") is True:
+            foils[name] = foils.get(name, 0) + int(it.get("quantity", 1))
         if it.get("status") == "printing" and card.get("set") and card.get("collector_number"):
             foil = it.get("foil")
             prints.setdefault(name, set()).add(
@@ -375,17 +379,33 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for name, qty in counts.items():
         change: dict[str, Any] = {"action": "add", "card_name": name}
+        piles: list[tuple[dict[str, Any], int]] = []
         if name not in by_name_only and len(prints.get(name, ())) == 1:
             set_code, number, foil = next(iter(prints[name]))
             change.update({"set_code": set_code, "collector_number": number})
             if foil is not None:  # an unknown finish is not a claim of "not foil"
                 change["foil"] = foil
-        # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
-        while qty > 99:
-            out.append({**change, "quantity": 99})
-            qty -= 99
-        out.append({**change, "quantity": qty})
+            piles.append((change, qty))
+        else:
+            # a finish asked for is kept even when the printing is not: foil copies first
+            foil_qty = foils.get(name, 0)
+            if foil_qty:
+                piles.append(({**change, "foil": True}, foil_qty))
+            if qty - foil_qty:
+                piles.append((change, qty - foil_qty))
+        for pile, n in piles:
+            # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
+            while n > 99:
+                out.append({**pile, "quantity": 99})
+                n -= 99
+            out.append({**pile, "quantity": n})
     return out
+
+
+def ready_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Items ready to use: a card was found, and it is not a conflict waiting for someone to pick
+    the card. Only these go into decklist_text and changes."""
+    return [it for it in items if it.get("card") and it.get("status") != "conflict"]
 
 
 def change_fields(resolved: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1185,7 +1205,7 @@ class ScanService:
             counts[r.status] = counts.get(r.status, 0) + 1
         # A conflict keeps the card its name matched, for review, but is not ready to use: it stays
         # out of the counts, the decklist and the changes until someone picks the card.
-        resolved = [it for it in items if it["card"] and it["status"] != "conflict"]
+        resolved = ready_items(items)
         deferred = counts.get("deferred", 0)
         conflicts = counts.get("conflict", 0)
         out = {
@@ -1205,7 +1225,7 @@ class ScanService:
         if conflicts:
             out["conflicts"] = conflicts
             out["conflicts_note"] = (
-                f"{conflicts} of {len(results)} cards name a printing that is a different card. They are "
+                f"{conflicts} of {len(results)} lines name a printing that is a different card. They are "
                 "left out of decklist_text and changes until the user says which card they mean."
             )
         if deferred:
@@ -1332,7 +1352,8 @@ class ScanService:
     @staticmethod
     def describe_session(row: dict[str, Any]) -> dict[str, Any]:
         items = row["items"]
-        resolved = [it for it in items if it.get("card")]
+        found = [it for it in items if it.get("card")]
+        resolved = ready_items(items)
         return {
             "id": row["id"],
             "name": row["name"],
@@ -1342,9 +1363,9 @@ class ScanService:
             "updated_at": row["updated_at"],
             "item_count": len(items),
             "card_count": sum(int(it.get("quantity", 1)) for it in items),
-            "unresolved": len(items) - len(resolved),
+            "unresolved": len(items) - len(found),
             "items": items,
-            "decklist_text": decklist_text(items),
+            "decklist_text": decklist_text(resolved),
             **change_fields(resolved),
         }
 
