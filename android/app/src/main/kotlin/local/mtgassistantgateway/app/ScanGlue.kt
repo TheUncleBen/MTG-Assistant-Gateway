@@ -113,7 +113,9 @@ object ScanGlue {
     var flat = s.flattenCard(c, guide ? g : null);
     if (flat) {
       s.state.noCardFrames = 0;
-      await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), s.infoRegionOf(0, 0, flat.width, flat.height), flat);
+      // flatInfoRegion (pages from 0.7.46) keeps the info line's second row whole; older pages lack it.
+      var info = s.flatInfoRegion ? s.flatInfoRegion(flat.width, flat.height) : s.infoRegionOf(0, 0, flat.width, flat.height);
+      await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), info, flat);
     } else if (s.state.continuous) {
       // Continuous mode reads nothing without an outline (the page does the same): count the
       // frame so a card that has left comes back as new, and say so.
