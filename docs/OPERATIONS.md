@@ -949,6 +949,9 @@ whether a change applies at once or after a restart.
   greyed out with its value and naming the variable. When your stack sets any
   of them, a box at the top lists them, each with a link to its row. Empty
   the line again to manage it on the page.
+- **The Gateway name can be set in your stack too.** `MTG_SERVER_NAME` is
+  commented out in the example files, so the page manages the name. A name
+  set there locks the **Gateway name** row in the same way.
 - **Pacing only gets gentler.** The Archidekt and Scryfall pacing can only be
   set to ask less often than the gateway's defaults.
 - **Some settings stay in the stack only**: sign-in, secrets, token and session
