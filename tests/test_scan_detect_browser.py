@@ -29,6 +29,22 @@ def card_corners(cx: float, cy: float, cw: float, turn: float = 0.0) -> list[tup
     return [(x0 + d, y0), (x0 + cw + d, y0 + d), (x0 + cw - d, y0 + ch), (x0 - d, y0 + ch - d)]
 
 
+def sideways_corners(
+    cx: float, cy: float, cw: float, left: bool, tilt: float = 0.03
+) -> list[tuple[float, float]]:
+    """A 63:88 card lying sideways, centred at (cx, cy), its short side cw tall, turned a quarter to
+    the left (its top edge on the picture's left) or to the right, and ``tilt`` radians more. The
+    card's own corners in its order (top left, top right, bottom right, bottom left)."""
+    import math
+
+    ch = cw * 88 / 63
+    x0, y0 = cx - ch / 2, cy - cw / 2
+    tl, tr, br, bl = (x0, y0), (x0 + ch, y0), (x0 + ch, y0 + cw), (x0, y0 + cw)  # the picture's
+    own = [bl, tl, tr, br] if left else [tr, br, bl, tl]
+    c, s = math.cos(tilt), math.sin(tilt)
+    return [(cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c) for x, y in own]
+
+
 def scene(card: Path, out: Path, size: tuple[int, int], corners: list[tuple[float, float]]) -> None:
     """The card (without its dark surround) laid on a plain table at ``corners``, saved as a JPEG."""
     from PIL import Image
@@ -161,6 +177,54 @@ def test_a_photo_with_the_card_in_part_of_the_picture_is_read_from_the_card(
         browser.close()
 
 
+# (picture size, card centre as fractions, the card's short side as a fraction of the picture's
+# height, turned to the left)
+SIDEWAYS = {
+    "portrait-turned-left": ((3000, 4000), (0.5, 0.5), 0.42, True),
+    "portrait-turned-right": ((3000, 4000), (0.48, 0.55), 0.38, False),
+    "landscape-turned-right": ((4000, 3000), (0.5, 0.5), 0.55, False),
+}
+
+
+@pytest.mark.parametrize("name", list(SIDEWAYS))
+def test_a_card_lying_sideways_gets_an_outline(server, tmp_path: Path, name: str) -> None:  # noqa: F811
+    """A card turned a quarter (lying on its side on the table, or a picture taken that way) has
+    its outline found and is flattened upright; before, only an upright card's shape counted."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    (w, h), (fx, fy), fh, left = SIDEWAYS[name]
+    card = tmp_path / "card.jpg"
+    card_photo(card, "Sol Ring")
+    photo = tmp_path / f"{name}.jpg"
+    corners = sideways_corners(w * fx, h * fy, h * fh, left)
+    scene(card, photo, (w, h), corners)
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, exe, server, sid)
+        got = page.evaluate(
+            FLATTEN.replace(
+                "return {k, corners: flat ? flat.corners : null};",
+                "return {k, corners: flat ? flat.corners : null, sideways: flat && flat.sideways,"
+                " size: flat && [flat.canvas.width, flat.canvas.height]};",
+            ),
+            [base64.b64encode(photo.read_bytes()).decode(), None],
+        )
+        assert got["corners"], "no card outline found in " + name
+        assert got["sideways"] is True and got["size"] == [1008, 1408], got
+        # Each of the card's corners has a found corner within 2% of the card's short side.
+        tol = 0.02 * h * fh * got["k"]
+        for ex, ey in corners:
+            near = min(abs(ex * got["k"] - c["x"]) + abs(ey * got["k"] - c["y"]) for c in got["corners"])
+            assert near < 2 * tol, (corners, got)
+        # Through the Photo button: flattened, and read (the stand-in reads both ways up).
+        page.set_input_files("#photo-file", str(photo))
+        page.wait_for_function("() => window.__scan.state.pending", timeout=60_000)
+        assert page.evaluate("() => window.__scan.state.pending.ocr.flattened") is True
+        assert errors == []
+        browser.close()
+
+
 def test_no_outline_where_there_is_no_card(server, tmp_path: Path) -> None:  # noqa: F811
     """A bare table, plain or grainy, gives no outline: the search does not make a card up."""
     from PIL import Image, ImageFilter
@@ -264,6 +328,8 @@ def test_a_failed_read_says_which_step_failed(server, tmp_path: Path) -> None:  
             said.append(page.locator("#cam-status").text_content() or "")
         assert said[0].startswith("Could not find the card’s edges"), said
         assert "plain background" in said[0], said
+        # A black-bordered card on a dark table has no edge to find: the hint names the way out.
+        assert "a light one for a black-bordered card" in said[0], said
         assert said[1].startswith("Found the card but could not read its name"), said
         assert errors == []
         browser.close()
