@@ -548,7 +548,7 @@ def _closing_html(
         return esc(_version_line(it, now))
     if st == "applied":
         at = it["applied_at"] or it["status_at"] or it["created_at"]
-        undo = " · " + _undo_form(it, csrf, "Undo", "linkbtn inline") if _undoable(it, csrf) else ""
+        undo = " · " + _undo_form(it, csrf, "Undo", "ui-cap") if _undoable(it, csrf) else ""
         return f"Applied {ui.when(at, now=now)}{undo}"
     if st == "rejected":
         by = (it["result"] or {}).get("rejected_by")
@@ -561,7 +561,7 @@ def _closing_html(
     if st == "replaced":
         if replaced_by is not None:
             no = f"#{replaced_by['board_no']}" if replaced_by.get("board_no") else "a newer change"
-            return f"Replaced by <a href='/proposals/{esc(replaced_by['id'])}'>{esc(no)}</a>"
+            return "Replaced by " + ui.cap_link(no, f"/proposals/{replaced_by['id']}")
         return ""
     if st == "withdrawn":
         return (
@@ -571,7 +571,7 @@ def _closing_html(
         said = (
             "Archidekt refused it" if (it["result"] or {}).get("error") in ARCHIDEKT_REFUSALS else NOT_APPLIED
         )
-        return f"{said} · <a href='/proposals/{esc(it['id'])}'>Why</a>"
+        return f"{said} · " + ui.cap_link("Why", f"/proposals/{it['id']}")
     return ""
 
 
@@ -701,7 +701,7 @@ def _waiting_table(
     def group(key: str, title_html: str, aria: str, lines: list[dict[str, Any]], open_deck: str) -> None:
         oldest = _span(now - min(x["created_at"] for x in lines))
         meta = f"{len(lines)} waiting · oldest {oldest}" + (
-            f" · <a href='{open_deck}'>Open deck</a>" if open_deck else ""
+            " · " + ui.cap_link("Open deck", open_deck) if open_deck else ""
         )
         box = (
             f"<label class='chk'><input type='checkbox' class='all' data-all='{esc(key)}' "
@@ -849,15 +849,15 @@ def list_html(
     elif query["group"] == "deck":
         side = (
             "Grouped by deck · "
-            f"<a href='/proposals{esc(query_string(query, group='', offset=0))}'>Show newest first</a>"
+            + ui.cap_link("Show newest first", "/proposals" + query_string(query, group="", offset=0))
             if query["order"] != "old"
             else "Grouped by deck · "
-            f"<a href='/proposals{esc(query_string(query, group='', offset=0))}'>Show oldest first</a>"
+            + ui.cap_link("Show oldest first", "/proposals" + query_string(query, group="", offset=0))
         )
     else:
         first = "Oldest first" if query["order"] == "old" else "Newest first"
-        grouped = esc(query_string(query, group="deck", offset=0))
-        side = f"{first} · <a href='/proposals{grouped}'>Group by deck</a>"
+        grouped = query_string(query, group="deck", offset=0)
+        side = f"{first} · " + ui.cap_link("Group by deck", "/proposals" + grouped)
     head = (
         f"<div class='list-head'><h2>All proposals <span class='ui-sub'>{counts['all']:,}</span></h2>"
         f"<span class='ui-sub'>{side if not waiting_view else esc(side)}</span></div>"
@@ -885,7 +885,8 @@ def list_html(
         waiting_href = "/proposals" + query_string(query, show="waiting", offset=0)
         parts.append(
             "<p class='ui-note'>To apply or reject several at once, open "
-            f"<a href='{esc(waiting_href)}'>Waiting</a>.</p>"
+            + ui.cap_link("Waiting", waiting_href)
+            + ".</p>"
         )
         if query["order"] == "old":
             rows = list(reversed(rows))
@@ -956,9 +957,6 @@ PROPOSALS_CSS = """
 .ui-drawer details[open]>summary:not(.fold-btn)::before{transform:rotate(90deg)}
 .ui-drawer form.reject{margin:.75rem 0 .25rem}
 .pr-undo{display:inline;margin:0}
-.pr-undo .linkbtn{background:none;border:0;padding:0;margin:0;color:var(--link);text-decoration:underline;
-  font:inherit;font-weight:400;line-height:inherit;min-height:0;width:auto}
-@media (pointer:coarse){.pr-undo .linkbtn{min-height:44px;min-width:44px;text-align:left}}
 .ui-bar .rejectask,.ui-drawer .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
   flex:1 1 100%}
 .ui-bar .rejectask span,.ui-drawer .rejectask span{flex:1 1 10rem;font-weight:700}

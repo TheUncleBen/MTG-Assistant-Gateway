@@ -902,8 +902,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             + (
                 ""
                 if full
-                else f"<p class='ui-hint panel-only'><a href='/proposals/{quote(pid, safe='')}?full=1'>"
-                "Open as a full page</a></p>"
+                else "<p class='ui-hint panel-only'>"
+                + ui.cap_link("Open as a full page", f"/proposals/{quote(pid, safe='')}?full=1")
+                + "</p>"
             ),
             label=f"Proposal {no}for {where}",
             close_href=close,

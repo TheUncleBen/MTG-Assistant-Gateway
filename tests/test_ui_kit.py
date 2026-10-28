@@ -284,7 +284,7 @@ def test_table_pieces() -> None:
     )
     assert ui.day_row("Today") == "<div class='tr daygroup'>Today</div>"
     link = ui.open_link("/proposals/1", "Review")
-    assert "class='act linkbtn'" in link and "aria-label='Review'" in link and "sm-only chev" in link
+    assert "class='act ui-cap'" in link and "aria-label='Review'" in link and "sm-only chev" in link
 
 
 def test_pager_says_where_you_are_and_never_caps_silently() -> None:

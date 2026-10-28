@@ -251,7 +251,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert len(rows) == 25
         # no edit proposal is listed: a snapshot links the change it was taken before
         assert "+1 Sol Ring" not in body and "Rejected" not in body
-        assert "<a href='/proposals/p00'>the change</a>" in body
+        assert "<a class='ui-cap' href='/proposals/p00'>The change</a>" in body
         assert "Older →" in body and "1–25 of 38" in body  # 15 + 20 snapshots, the restore, 2 reports
         assert "<div class='tr daygroup'>Today · " in body and "<div class='tr daygroup'>Yesterday · " in body
         snaps = [r for r in rows if "open=s-" in r]
@@ -399,7 +399,7 @@ async def test_history_grouped_by_deck(stack: Stack) -> None:
         )
         # deck 42's restore (p04, applied as the test began) is newer than deck 43's report
         assert heads == [("42", "Immortal Reckoning"), ("43", "Reap the Tides")]
-        assert "href='/history?deck_id=43&amp;group=deck'>only this deck</a>" in listing
+        assert "<a class='ui-cap' href='/history?deck_id=43&amp;group=deck'>Only this deck</a>" in listing
         assert "open=p-p04'" in listing.split("<div class='tr'>")[1]  # the newest entry leads
         assert len(_entries(body)) == 17 and "daygroup" not in listing
         sec42, sec43 = listing.split("<div class='tr group hy-group'>")[1:]

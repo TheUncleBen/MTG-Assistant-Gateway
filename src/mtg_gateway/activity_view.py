@@ -685,7 +685,7 @@ def _deck_html(names: Names, sub: str | None, deck_id: Any, *, link: bool, own: 
     if name:
         return f"<a href='{href}'>{esc(name)}</a>" if link else esc(name)
     # the admin page: the deck's id stays in the opened row's details, never in the cell
-    return f"<a href='{href}'>Open the deck</a>" if link else f"<span class='gone'>{GONE_DECK}</span>"
+    return ui.cap_link("Open the deck", href) if link else f"<span class='gone'>{GONE_DECK}</span>"
 
 
 def _member_chip(log: Any, client_id: str | None) -> str:
@@ -726,9 +726,9 @@ def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
     if pid:
         href = f"/proposals/{quote(str(pid), safe='')}"
         text = "Open the proposal to see why" if event == "proposal_failed" else "Open the proposal"
-        bits.append(f"<a href='{href}'>{text}</a>")
+        bits.append(ui.cap_link(text, href))
     if event in REPORT_EVENTS and d.get("report_id"):
-        bits.append(f"<a href='/history/reports/{quote(str(d['report_id']), safe='')}'>Open the report</a>")
+        bits.append(ui.cap_link("Open the report", f"/history/reports/{quote(str(d['report_id']), safe='')}"))
     if d.get("via") in VIA_WORDS and d.get("via") not in ("mcp", "app"):  # those: the By column
         bits.append(VIA_WORDS[d["via"]])
     if d.get("by") == "deck sync":
@@ -875,7 +875,8 @@ def _empty(path: str, query: Query, nothing_at_all: str) -> str:
         return f"<div class='ui-card'><p>{nothing_at_all}</p></div>"
     return (
         "<div class='ui-card'><p>Nothing matches these filters. "
-        f"<a href='{path}'>Show all activity</a></p></div>"
+        + ui.cap_link("Show all activity", path)
+        + "</p></div>"
     )
 
 
