@@ -31,26 +31,38 @@ you the exact change first.
    research, simulate or edit for you. Every edit still comes back to you
    as a proposal.
 
-On a phone the tabs at the bottom are Home, Decks, Binder (your
-collection), Assistant and More. Assistant opens Proposals, with a switch at
-the top to History and Reports, and shows how many proposals are waiting.
-More opens Search, Precons, Scan, Watchlist (when watchlists are on) and My
-lists; Search is also the magnifier in the top bar. On a wider touch screen,
-such as an unfolded foldable or a tablet, and in the Android app from 600 px,
-the same places are on a rail down the left edge, with Alerts. A desktop
-browser shows them in the top bar, with More as a drop-down and a search box
-that fills the free space. The layout follows the window as you fold, rotate
-or split the screen. Your profile picture (or your initials) at the top right
-opens the Account page: Account details, My activity, Forum, Theme and
-Layout, the Guide, the assistant skill and the apps, and Sign out. Large text works too: the
+<!-- nav:start -->
+
+On a phone the tabs at the bottom are Home, Decks, Binder and Assistant, then
+More. Binder holds Cards, Wants and Watchlist, switched at its top; Assistant
+holds Proposals, History and Reports the same way, and shows how many
+proposals are waiting. More opens Search decks and cards, Precons, Scan, My
+card models and Forum; the magnifier at the top opens the search box for cards
+and decks. On a wider touch screen, such as an unfolded foldable or a tablet,
+and in the Android app from 600 px, the same places are on a rail down the
+left edge, with Forum and Alerts. A computer's browser shows them in the top
+bar, with More as a drop-down and a search box beside them. Your picture at
+the top right opens the Account page: Account details, My lists, My activity,
+the look, the Guide, the assistant skill and the apps, and Sign out.
+
+<!-- nav:end -->
+
+Large text works too: the
 pages follow the phone's font size (the Android app included) and a
 browser's text zoom up to 200%, wrapping rather than running off the screen.
 
 ## Home
 
-Your newest decks with their cover art, a deck search box, and one tile per
-section: Decks, Search, Precons, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
-assistant** at the end holds the connector URL and the guided setup.
+What needs you, then your newest decks. **Needs you** has one row for each
+thing waiting, and only while there is one: proposals waiting for your press
+(Review them), Forge tests running, new alerts on Archidekt, and watched
+cards past one of your alert lines. Under it, **My decks** shows your newest
+decks with their cover art (a row to swipe on a phone) and All decks. The
+search box at the top suggests your own decks first, then cards and public
+decks. **Connect an AI assistant**, with the connector URL and the guided
+setup, shows until an assistant is connected; after that it is on Account
+details under Connected apps. The navigation is not repeated on the page: the
+tabs, More and your picture are the same here as everywhere.
 
 ## Your decks
 
@@ -424,7 +436,7 @@ assistant applies what that mode allows, with a snapshot first for a change to o
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
-- **Reports** (under More) list your stored deck reports, newest first (the
+- **Reports** (Assistant › Reports) list your stored deck reports, newest first (the
   gateway keeps the newest 200), with what Forge has going for you now. Each holds
   the deck's statistics, a legality check, and the solo test, the Forge games
   or both, so you can follow how a deck develops. **Test a pasted list**
@@ -444,8 +456,8 @@ Watchlists are on unless the operator turns them off; then the page, the
 card viewer's price buttons and your assistant's watchlist abilities are not
 there.
 
-The **Watchlist** page (under More)
-keeps the price of cards and decks you choose, once a day:
+The **Watchlist** page (Binder › Watchlist; Binder's switch holds Cards, Wants
+and Watchlist) keeps the price of cards and decks you choose, once a day:
 
 - **Watch a card** by name, or one printing by its set code and number, in
   non-foil, foil or etched, and optionally an alert. A name alone follows the

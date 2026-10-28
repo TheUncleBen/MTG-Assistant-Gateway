@@ -8,23 +8,27 @@ other page and reads a few facts from the gateway (its name, whether deck writes
 low-risk row limit, whether the backup copy on Archidekt is offered) so it describes this
 gateway and not a generic one.
 
-The page is one long document with a nested contents rail: ``static/guide.js`` adds the search
-box, keeps the rail's current entry in step with the reader's position and shows the
-"Back to top" button; without script the whole guide is simply visible and every link works.
+The guide is one page a topic (``/guide/<topic>``) with a contents page (``/guide``) and a
+search (``/guide/search``, and ``/guide/search.json`` for the live list ``static/guide.js``
+draws under the box); an old link to ``/guide#<topic>`` lands on the topic's page. The
+navigation is described once, from the navigation itself (``nav_description``), so the words
+can't drift from the bars (0.7.46 audit SH-25).
 """
 
 from __future__ import annotations
 
 import html
+import json
 import re
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import modes, tool_labels
+from . import modes, tool_labels, ui
 from .pages import _csrf, browser_session
-from .theme import icon, render
+from .theme import ASSISTANT_PAGES, NAV_LINKS, RAIL_EXTRA, binder_pages, icon, more_groups, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -33,6 +37,9 @@ if TYPE_CHECKING:
     from .config import LiveSettings
 
 _esc = html.escape
+PAGE = "/guide"
+TITLE = "Guide"
+LEAD = "What you can do here, with or without an assistant."
 
 GUIDE_CSS = """
 .guide{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}
@@ -40,10 +47,34 @@ GUIDE_CSS = """
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
-.gsearch input[type=search]{width:100%}
+.gsearch .gsrow{display:flex;gap:.5rem;align-items:stretch}
+.gsearch .gsrow input[type=search]{flex:1 1 auto;min-width:0;margin:0}
+.gsearch .gsrow .btn{margin:0;flex:none}
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
-.guide .gresults{list-style:none;margin:.35rem 0 0;padding:0}
-.guide .gresults li{margin:0 0 .25rem}
+.gsearch .status:empty{display:none}
+/* the contents page: a card a part, its topics as rows */
+.gcontents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem;
+  margin-top:1rem}
+.gcontents .gpart{margin:0}
+.gtoc{list-style:none;margin:0;padding:0}
+.gtoc li{margin:0}
+.gtoc a{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:.4rem .5rem;
+  border-radius:var(--radius);color:var(--text);text-decoration:none;font-weight:700}
+.gtoc a svg{color:var(--orange);width:18px;height:18px;flex:none}
+.gtoc a:hover,.gtoc a:focus-visible{background:var(--surface-2)}
+/* a topic page: the way back, the topic, the topics before and after */
+.gcrumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
+.gmain .ui-head h1{display:flex;align-items:center;gap:.5rem}
+.gmain .ui-head h1 svg{color:var(--orange);width:28px;height:28px;flex:none}
+.gturn{display:flex;justify-content:space-between;gap:.75rem;margin:1.5rem 0 0;padding-top:1rem;
+  border-top:1px solid var(--border-soft)}
+.gturn .btn{margin:0;max-width:48%;display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
+.gturn .btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gturn a[rel=prev] svg{transform:rotate(90deg)}
+.gturn a[rel=next] svg{transform:rotate(-90deg)}
+.gresults .where{display:block;color:var(--orange-text);font-size:.8rem;font-weight:700}
+ul.gresults{list-style:none;margin:.35rem 0 0;padding:0}
+.gresults li{margin:0 0 .25rem}
 .gresults a{display:block;padding:.4rem .6rem;border-radius:var(--radius);color:var(--text);
   text-decoration:none;border:1px solid var(--border-soft)}
 .gresults a:hover,.gresults a:focus-visible{background:var(--surface-2);color:var(--text)}
@@ -60,13 +91,12 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .gnav a{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border-radius:var(--radius);
   color:var(--text);text-decoration:none;min-height:2.2rem}
 @media (pointer:coarse){.gnav a{min-height:44px}}
-.gnav a.part{font-weight:800}
-.gnav a.part svg{color:var(--orange)}
+.gnav .part{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;font-weight:800}
+.gnav .part svg{color:var(--orange)}
 .gnav li ul a{font-size:.95rem;color:var(--text-muted)}
 .gnav a:hover{background:var(--surface-2);color:var(--text)}
-.gnav a[aria-current=true]{background:var(--orange-tint);color:var(--text);font-weight:700;
+.gnav a[aria-current=page]{background:var(--orange-tint);color:var(--text);font-weight:700;
   box-shadow:inset 3px 0 0 var(--orange)}
-.gnav a.part.in{color:var(--orange-text)}
 .gmain{min-width:0}
 /* a link inside the guide's sentences (Open Account details, take your first edit): the text's
    colour, bold and underlined in orange, never blue */
@@ -119,7 +149,6 @@ details.gnav > summary::-webkit-details-marker{display:none}
   padding:.05rem .3rem}
 .guide kbd{border:1px solid var(--border);font-weight:700;white-space:nowrap}
 .guide .nomatch{margin:1rem 0}
-.guide .gadv{margin:1.5rem 0 0;border-top:1px solid var(--border-soft);padding-top:1rem}
 .guide .gadv > p{color:var(--text-muted)}
 .guide .gadv code{white-space:nowrap}
 .gtop{position:fixed;right:1rem;bottom:1.5rem;z-index:7;display:inline-flex;align-items:center;gap:.4rem;
@@ -130,14 +159,16 @@ details.gnav > summary::-webkit-details-marker{display:none}
 @media (min-width:900px){
   .guide{grid-template-columns:16rem minmax(0,1fr);gap:1.5rem}
   .guide .gside{position:sticky;top:4rem;max-height:calc(100vh - 5rem);overflow:auto;padding-right:.25rem}
+  .gside .gsrow{flex-wrap:wrap}
+  .gside .gsrow input[type=search],.gside .gsrow .btn{flex:1 1 100%}
   details.gnav > summary{display:none}
-  details.gnav:not([open]) > nav{display:block}
 }
 """
 
 # The four parts: id, icon, title and lead, then the sections (id, icon, label) in reading order.
 # A section whose id ends up without a body (the collection on a gateway without one) is dropped
 # from the rail and the page together, so the two never disagree.
+ADVANCED_TITLE = "Advanced: tool names"
 PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
     (
         "tutorials",
@@ -186,6 +217,7 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("ref-keys", "menu", "Keyboard shortcuts"),
             ("ref-syntax", "edit", "The editor's search bar and list syntax"),
             ("ref-formats", "download", "Export formats"),
+            ("ref-tools", "list", ADVANCED_TITLE),
         ],
     ),
     (
@@ -205,7 +237,6 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
 
 
 # The closed fold at the end of the guide (Ben, 18:11Z 21 Oct): the one place member text shows a tool name.
-ADVANCED_TITLE = "Advanced: tool names"
 ADVANCED_INTRO = "Your assistant picks these for you. They are listed here in case you need the exact name."
 WATCH_TOOLS = frozenset({"watch_card", "watch_deck", "unwatch", "list_watchlist", "card_price_history"})
 # What each ask does, for the abilities table: a proposal you approve, your own press, applying, a
@@ -304,18 +335,62 @@ def _stackable(page: str) -> str:
     return re.sub(r"<table><thead>(.*?)</thead><tbody>(.*?)</tbody></table>", one, page, flags=re.S)
 
 
-def _nav(parts: list[tuple[str, str, str, str, list[tuple[str, str, str]]]]) -> str:
-    items = []
-    for pid, ic, title, _lead, sections in parts:
-        subs = "".join(f"<li><a href='#{sid}'>{_esc(label)}</a></li>" for sid, _i, label in sections)
-        items.append(f"<li><a class='part' href='#{pid}'>{icon(ic)}{_esc(title)}</a><ul>{subs}</ul></li>")
-    return (
-        f"<details class='gnav' open><summary class='btn'>{icon('menu')} Contents</summary>"
-        f"<nav aria-label='Guide contents'><ul>{''.join(items)}</ul></nav></details>"
+@dataclass(frozen=True)
+class Guide:
+    """The guide as built for this gateway: the parts with their topics (id, icon, label), the
+    topics' bodies, and where each inner anchor lives (its topic)."""
+
+    parts: list[tuple[str, str, str, str, list[tuple[str, str, str]]]]
+    bodies: dict[str, str]
+
+    @property
+    def topics(self) -> list[tuple[str, str, str, str]]:
+        """(topic id, icon, label, part id) in reading order."""
+        return [(sid, ic, label, pid) for pid, _i, _t, _l, secs in self.parts for sid, ic, label in secs]
+
+    def part_of(self, sid: str) -> tuple[str, str, str, str, list[tuple[str, str, str]]] | None:
+        return next((p for p in self.parts if any(x[0] == sid for x in p[4])), None)
+
+    def owner_of(self, anchor: str) -> str | None:
+        """The topic a link target lives in: the topic itself, or the topic whose body holds the
+        heading with that id."""
+        if anchor in self.bodies:
+            return anchor
+        return next((sid for sid, body in self.bodies.items() if f"id='{anchor}'" in body), None)
+
+
+def _plain(label: str) -> str:
+    return f"<strong>{_esc(label)}</strong>"
+
+
+def nav_description(*, html_out: bool = True) -> str:
+    """The navigation in one paragraph, built from the navigation itself (theme.NAV_LINKS,
+    ASSISTANT_PAGES, binder_pages, more_groups, RAIL_EXTRA), so the guide and the bars never
+    disagree. ``html_out`` False gives the plain text docs carry."""
+    b = _plain if html_out else (lambda t: t)
+    places = [label for _h, label, _i in NAV_LINKS]
+    assistant = [label for _h, label, _i in ASSISTANT_PAGES]
+    binder = [label for _h, label, _i in binder_pages()]
+    more = [label for _g, links in more_groups() for _h, label, _i in links]
+    rail = [label for _h, label, _i, _c in RAIL_EXTRA]
+    text = (
+        f"On a phone the tabs at the bottom are {', '.join(b(x) for x in places[:-1])} and "
+        f"{b(places[-1])}, then {b('More')}. {b(places[2])} holds {', '.join(binder[:-1])} and {binder[-1]}, "
+        f"switched at its top; {b(places[3])} holds {', '.join(assistant[:-1])} and {assistant[-1]} the same "
+        f"way, and shows how many proposals are waiting. {b('More')} opens {', '.join(more[:-1])} and "
+        f"{more[-1]}; the magnifier at the top opens the search box for cards and decks. On a wider touch "
+        "screen, such as an unfolded foldable or a tablet, and in the Android app from 600 px, the same "
+        f"places are on a rail down the left edge, with {' and '.join(rail + ['Alerts'])}. A computer's "
+        "browser shows them in the top bar, with More as a drop-down and a search box beside them. Your "
+        "picture at the top right opens the Account page: Account details, My lists, My activity, "
+        "the look, the Guide, the assistant skill and the apps, and Sign out."
     )
+    if html_out:
+        text = text.replace("the Account page", "the <a href='/account'>Account</a> page")
+    return text
 
 
-def guide_body(
+def build(
     *,
     site: str,
     writes_enabled: bool,
@@ -326,7 +401,7 @@ def guide_body(
     backup_folder: str = "MTG Gateway Backups",
     watchlists: bool = False,
     live: LiveSettings | None = None,
-) -> str:
+) -> Guide:
     if live is not None:  # the approval rows as set now (live settings), over the start-up values
         max_rows = int(live.get("auto_apply_max_rows"))
         big_rows = int(live.get("auto_big_edit_rows"))
@@ -372,12 +447,7 @@ def guide_body(
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
         "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant and More; "
-        "the magnifier at the top opens the search box for cards and decks. Assistant holds Proposals, "
-        "History and Reports, switched at its top; More opens Search, Precons, Scan, Watchlist, My lists "
-        "and My card models. Unfolded or on a tablet the same tabs move to a rail down the left edge, "
-        "with Alerts. "
-        "Your picture at the top right opens the <a href='/account'>Account</a> page.</p>"
+        f"<p class='tip'>{nav_description()}</p>"
     )
     tut_link = (
         "<p>Linking gives this site your Archidekt decks, your collection and the right to save for you. "
@@ -816,21 +886,20 @@ def guide_body(
         "comparison of two are both paths: Run full test and Compare on the deck page for people, "
         "“Run a test report” and “Compare two decks” for the assistant, same engine and settings.</p>"
     )
-    advanced = (
-        "<details class='gadv' id='adv-tools'><summary class='fold-btn'>"
-        f"{_esc(ADVANCED_TITLE)}</summary>"
-        f"<p>{_esc(ADVANCED_INTRO)}</p>"
+    ref_tools = (
+        f"<div class='gadv' id='adv-tools'><p>{_esc(ADVANCED_INTRO)}</p>"
         "<div class='tbl'><table><thead><tr><th>Ask</th><th>Tool name</th></tr></thead><tbody>"
         + "".join(
             f"<tr><td>“{_esc(ask)}”</td><td><code>{_esc(raw)}</code></td></tr>" for raw, ask, _d in asks
         )
-        + "</tbody></table></div></details>"
+        + "</tbody></table></div></div>"
     )
     page_rows = [
         (
             "Home",
             "<code>/</code>",
-            "newest decks with covers, search, tiles to every section, Connect an AI assistant",
+            "what needs you (proposals waiting, tests running, alerts, watched cards), your newest "
+            "decks with covers, Connect an AI assistant until one is",
         ),
         (
             "Decks",
@@ -935,12 +1004,7 @@ def guide_body(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
-        "<p>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant (Proposals, History and "
-        "Reports) and More (Search, Precons, Scan, Watchlist when it is on, My lists and My card "
-        "models); Search is also "
-        "the magnifier at the top, and your picture opens Account (Guide, and Admin for admins, are "
-        "there). From 600 px on a touch screen the same tabs are on a rail down the left edge, with "
-        "Alerts; a wider browser has them in the top bar, Home first.</p>"
+        f"<p>{nav_description()}</p>"
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
@@ -1200,6 +1264,7 @@ def guide_body(
         "ref-keys": ref_keys,
         "ref-syntax": ref_syntax,
         "ref-formats": ref_formats,
+        "ref-tools": ref_tools,
         "exp-approvals": exp_approvals,
         "exp-fresh": exp_fresh,
         "exp-assistant": exp_assistant,
@@ -1207,46 +1272,235 @@ def guide_body(
         "exp-playtest": exp_playtest,
     }
     parts = [
-        (pid, ic, title, lead, [s for s in sections if bodies.get(s[0])])
+        (pid, ic, title, lead, [sec for sec in sections if bodies.get(sec[0])])
         for pid, ic, title, lead, sections in PARTS
     ]
+    return Guide(parts, {k: _stackable(v) for k, v in bodies.items() if v})
 
-    def section(sid: str, ic: str, label: str) -> str:
-        return (
-            f"<section class='panel gsec' id='{sid}' aria-labelledby='{sid}-h' data-title='{_esc(label)}'>"
-            f"<h3 id='{sid}-h'>{icon(ic)}{_esc(label)}{_anchor(sid, label)}</h3>{bodies[sid]}</section>"
-        )
 
-    main = _stackable(
-        "".join(
-            f"<section class='gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
-            f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}{_anchor(pid, title)}</h2><p>{_esc(lead)}</p></header>"
-            + "".join(section(*s) for s in sections)
-            + "</section>"
-            for pid, ic, title, lead, sections in parts
-        )
+def guide_body(**facts: Any) -> str:
+    """The whole guide as one text, topic after topic (what the tests read; the pages serve one
+    topic each)."""
+    g = build(**facts)
+    return "".join(
+        f"<section class='gsec' id='{sid}'><h3>{_esc(label)}</h3>{g.bodies[sid]}</section>"
+        for sid, _ic, label, _pid in g.topics
     )
-    search = (
-        "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
-        "<input id='guide-q' type='search' placeholder='Search the guide' "
-        "autocomplete='off' spellcheck='false' aria-describedby='guide-status'>"
+
+
+def topic_href(sid: str) -> str:
+    return f"{PAGE}/{sid}"
+
+
+_INNER_LINK = re.compile(r"href='#([a-z0-9-]+)'")
+
+
+def relink(g: Guide, body: str, sid: str) -> str:
+    """The links inside a topic's sentences, written for the one-page guide as ``#target``: a
+    topic's goes to its page; a heading inside another topic goes to that page at the heading;
+    one inside this topic stays an anchor."""
+
+    def one(m: re.Match[str]) -> str:
+        target = m.group(1)
+        if target == "top":
+            return m.group(0)
+        owner = g.owner_of(target)
+        if owner is None or owner == sid:
+            return m.group(0)
+        return f"href='{topic_href(owner)}'" if owner == target else f"href='{topic_href(owner)}#{target}'"
+
+    return _INNER_LINK.sub(one, body)
+
+
+def search_form_html(q: str = "") -> str:
+    """The search box: a plain form to /guide/search; with scripts the list fills under it as
+    you type (static/guide.js asks /guide/search.json)."""
+    return (
+        f"<form class='gsearch' method='get' action='{PAGE}/search' role='search'>"
+        "<label for='guide-q'>Search the guide</label>"
+        "<div class='gsrow'>"
+        f"<input id='guide-q' type='search' name='q' value='{_esc(q)}' placeholder='Search the guide' "
+        "maxlength='100' autocomplete='off' spellcheck='false' aria-describedby='guide-status' "
+        f"data-search='{PAGE}/search.json'>"
+        f"<button type='submit' class='btn btn-plain'>{icon('search')} Search</button></div>"
         "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
-        "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul></div>"
+        "<ul id='guide-results' class='gresults' aria-label='Matching topics' hidden></ul></form>"
+    )
+
+
+def contents_nav(g: Guide, current: str = "") -> str:
+    """The contents: every part with its topics, the current topic marked. Open beside the text on
+    a wide screen; on a phone static/guide.js folds it under its button, so the topic comes first
+    (a closed details element cannot be opened by a style sheet, so the page starts open)."""
+    items = []
+    for _pid, ic, title, _lead, sections in g.parts:
+        subs = "".join(
+            f"<li><a href='{topic_href(sid)}'{' aria-current=page' if sid == current else ''}>"
+            f"{_esc(label)}</a></li>"
+            for sid, _i, label in sections
+        )
+        items.append(f"<li><span class='part'>{icon(ic)}{_esc(title)}</span><ul>{subs}</ul></li>")
+    return (
+        f"<details class='gnav' open><summary class='btn'>{icon('menu')} Contents</summary>"
+        f"<nav aria-label='Guide contents'><ul>{''.join(items)}</ul></nav></details>"
+    )
+
+
+def contents_body(g: Guide, *, anchors_json: str) -> str:
+    """The contents page: the search, then a card a part listing its topics."""
+    cards = []
+    for pid, ic, title, lead, sections in g.parts:
+        links = "".join(
+            f"<li><a href='{topic_href(sid)}'>{icon(i)}{_esc(label)}</a></li>" for sid, i, label in sections
+        )
+        cards.append(
+            f"<section class='panel gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
+            f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}</h2><p>{_esc(lead)}</p></header>"
+            f"<ul class='gtoc'>{links}</ul></section>"
+        )
+    return (
+        ui.page_head(TITLE, LEAD)
+        + search_form_html()
+        # the old one-page addresses (/guide#topic): the script sends them to the topic's page
+        + f"<script type='application/json' id='guide-anchors'>{anchors_json}</script>"
+        + f"<div class='gcontents'>{''.join(cards)}</div>"
+    )
+
+
+def topic_body(g: Guide, sid: str) -> str:
+    """One topic's page: the way back (Guide › part), the heading, the text, then the topics
+    before and after it; the contents beside it on a wide screen, as a drawer on a phone."""
+    part = g.part_of(sid)
+    assert part is not None
+    pid, _pic, ptitle, _lead, _secs = part
+    topics = g.topics
+    at = next(i for i, t in enumerate(topics) if t[0] == sid)
+    _sid, ic, label, _p = topics[at]
+    crumbs = (
+        f"<nav class='crumbs gcrumbs' aria-label='You are in'>{ui.cap_link('Guide', PAGE)}"
+        f"<span aria-hidden='true'>›</span>{ui.cap_link(ptitle, f'{PAGE}#{pid}')}</nav>"
+    )
+    prev_t = topics[at - 1] if at > 0 else None
+    next_t = topics[at + 1] if at + 1 < len(topics) else None
+    turn = (
+        "<nav class='gturn' aria-label='Nearby topics'>"
+        + (
+            f"<a class='btn' href='{topic_href(prev_t[0])}' rel='prev'>{icon('chev')}<span>{_esc(prev_t[2])}"
+            "</span></a>"
+            if prev_t
+            else "<span></span>"
+        )
+        + (
+            f"<a class='btn' href='{topic_href(next_t[0])}' rel='next'><span>{_esc(next_t[2])}</span>"
+            f"{icon('chev')}</a>"
+            if next_t
+            else "<span></span>"
+        )
+        + "</nav>"
+    )
+    main = (
+        f"<article class='gsec' id='{sid}' aria-labelledby='{sid}-h' data-title='{_esc(label)}'>"
+        f"<div class='ui-head'><h1 id='{sid}-h'>{icon(ic)}{_esc(label)}</h1></div>"
+        f"{relink(g, g.bodies[sid], sid)}</article>"
     )
     return (
-        f"<div class='guide' id='top'><div class='gside'>{search}{_nav(parts)}</div>"
-        f"<div class='gmain'>{main}{_stackable(advanced)}"
-        "<p class='nomatch muted' hidden>Nothing in the guide matches that. Clear the search to see "
-        "everything again.</p></div></div>"
+        f"<div class='guide' id='top'><div class='gside'>{search_form_html()}{contents_nav(g, sid)}</div>"
+        f"<div class='gmain'>{crumbs}{main}{turn}</div></div>"
         f"<a class='btn gtop hide' href='#top'>{icon('chev')} Back to top</a>"
+    )
+
+
+_TAGS = re.compile(r"<[^>]+>")
+
+
+def _text_of(body: str) -> str:
+    return " ".join(html.unescape(_TAGS.sub(" ", body)).split())
+
+
+def search(g: Guide, q: str, *, limit: int = 20) -> list[dict[str, str]]:
+    """The topics whose title or text holds every word of ``q``: title matches first, each with
+    a snippet around the first match (the match marked as the script draws it)."""
+    words = [w for w in q.casefold().split() if w]
+    if not words:
+        return []
+    hits = []
+    for sid, _ic, label, pid in g.topics:
+        text = _text_of(g.bodies[sid])
+        hay = f"{label} {text}".casefold()
+        if not all(w in hay for w in words):
+            continue
+        in_title = all(w in label.casefold() for w in words)
+        at = text.casefold().find(words[0])
+        # a topic that brings the word up early is about it: those come first after title matches
+        early = at / max(1, len(text)) if at >= 0 else 1.0
+        if at < 0:
+            snippet = text[:140]
+        else:
+            start = max(0, at - 60)
+            snippet = ("…" if start else "") + text[start : at + 100] + ("…" if at + 100 < len(text) else "")
+        part = next(p[2] for p in g.parts if p[0] == pid)
+        hits.append(
+            {
+                "id": sid,
+                "href": topic_href(sid),
+                "title": label,
+                "part": part,
+                "snippet": snippet,
+                "word": words[0],
+                "_rank": (not in_title, early),
+            }
+        )
+    hits.sort(key=lambda h: h["_rank"])
+    return [{k: v for k, v in h.items() if k != "_rank"} for h in hits[:limit]]
+
+
+def _marked(snippet: str, word: str) -> str:
+    """The snippet escaped, the first match wrapped in <mark>."""
+    at = snippet.casefold().find(word)
+    if at < 0:
+        return _esc(snippet)
+    end = at + len(word)
+    return f"{_esc(snippet[:at])}<mark>{_esc(snippet[at:end])}</mark>{_esc(snippet[end:])}"
+
+
+def results_html(hits: list[dict[str, str]], q: str) -> str:
+    if not hits:
+        return f"<p class='nomatch muted'>Nothing in the guide matches “{_esc(q)}”.</p>"
+    rows = "".join(
+        f"<li><a href='{h['href']}'><span class='t'>{_esc(h['title'])}</span>"
+        f"<span class='where'>{_esc(h['part'])}</span>"
+        f"<span class='snip'>{_marked(h['snippet'], h['word'])}</span></a></li>"
+        for h in hits
+    )
+    n = len(hits)
+    return (
+        f"<div class='gstatic'><p class='muted'>{n} topic{'' if n == 1 else 's'} match.</p>"
+        f"<ul class='gresults' aria-label='Matching topics'>{rows}</ul></div>"
+    )
+
+
+def search_body(g: Guide, q: str) -> str:
+    return (
+        ui.page_head("Search the guide") + search_form_html(q) + (results_html(search(g, q), q) if q else "")
     )
 
 
 def add_guide_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
-    @server.custom_route("/guide", methods=["GET"], include_in_schema=False)
-    async def guide(request: Request) -> Response:
+    def guide_for() -> Guide:
+        return build(
+            site=s.server_name,
+            live=state.decks.live,
+            writes_enabled=bool(s.writes_enabled),
+            has_collection=getattr(state, "collection", None) is not None,
+            max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
+            archidekt_backups=bool(state.live.get("archidekt_backups")),
+            backup_folder=state.decks.backup_folder,
+            watchlists=bool(s.watchlists_enabled),
+        )
+
+    def page(request: Request, title: str, body: str, *, current: str = PAGE) -> Response:
         """Readable signed out too (owner decision, 0.7.46): the guide describes this gateway and
         holds nothing of any member's, so someone invited can read what it is before signing in.
         Signed in, it carries the member's navigation."""
@@ -1254,23 +1508,46 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
         user = (state.db.get_user(sub) or {}) if sub else {}
         admin = bool(sub and s.admin_group and s.admin_group in (user.get("groups") or []))
         return render(
-            "Guide",
-            guide_body(
-                site=s.server_name,
-                live=state.decks.live,
-                writes_enabled=bool(s.writes_enabled),
-                has_collection=getattr(state, "collection", None) is not None,
-                max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
-                archidekt_backups=bool(state.live.get("archidekt_backups")),
-                backup_folder=state.decks.backup_folder,
-                watchlists=bool(s.watchlists_enabled),
-            ),
+            title,
+            body,
             site=s.server_name,
             signed_in=sub is not None,
             csrf=_csrf(s, sid),
             admin=admin,
             sub=sub,
             wide=True,
-            current="/guide",
+            current=current,
+            heading=False,
             head_extra=f"<style>{GUIDE_CSS}</style><script src='/static/guide.js' defer></script>",
         )
+
+    @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
+    async def contents(request: Request) -> Response:
+        g = guide_for()
+        # where each topic and each heading inside one lives, for the old /guide#… addresses
+        anchors = {sid: sid for sid in g.bodies} | {
+            m: g.owner_of(m) for body in g.bodies.values() for m in re.findall(r"id='([a-z0-9-]+)'", body)
+        }
+        return page(
+            request, TITLE, contents_body(g, anchors_json=json.dumps(anchors).replace("<", "\\u003c"))
+        )
+
+    @server.custom_route(PAGE + "/search", methods=["GET"], include_in_schema=False)
+    async def search_page(request: Request) -> Response:
+        q = (request.query_params.get("q") or "").strip()[:100]
+        return page(request, "Search the guide", search_body(guide_for(), q))
+
+    @server.custom_route(PAGE + "/search.json", methods=["GET"], include_in_schema=False)
+    async def search_json(request: Request) -> Response:
+        q = (request.query_params.get("q") or "").strip()[:100]
+        hits = search(guide_for(), q)
+        return JSONResponse({"ok": True, "q": q, "hits": hits}, headers={"Cache-Control": "no-store"})
+
+    @server.custom_route(PAGE + "/{topic}", methods=["GET"], include_in_schema=False)
+    async def topic(request: Request) -> Response:
+        sid = str(request.path_params["topic"])[:40]
+        g = guide_for()
+        if sid not in g.bodies:
+            return RedirectResponse(PAGE, status_code=302)
+        label = next(t[2] for t in g.topics if t[0] == sid)
+        return page(request, f"{label}: {TITLE}", topic_body(g, sid))

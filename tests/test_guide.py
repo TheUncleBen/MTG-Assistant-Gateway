@@ -1,6 +1,7 @@
-"""The Guide page's structure (guide.py): four Diátaxis parts, every section under exactly one of
-them, a contents rail whose every link lands on an id that exists, stable heading ids with anchor
-links, a labelled search box with a status line, no inline script, and the facts that went stale
+"""The Guide (guide.py), one page a topic since decision C8: four Diátaxis parts, every topic
+under exactly one of them, a contents page and a contents rail whose every link lands on a
+topic page, the links inside the sentences re-pointed to the pages they name, a search over
+the topics, the navigation described from the navigation itself, and the facts that went stale
 in earlier versions (Playtest in a new tab, two sign-out buttons, the backup tick box, the card
 menu keys, the search bar syntax, the 90-second list cache)."""
 
@@ -9,7 +10,9 @@ from __future__ import annotations
 import html
 import re
 
-from mtg_gateway import guide
+import pytest
+
+from mtg_gateway import guide, theme
 
 PART_IDS = ("tutorials", "howto", "reference", "explanation")
 
@@ -20,70 +23,124 @@ def _page(**kw) -> str:
     return guide.guide_body(**args)
 
 
+def _guide(**kw) -> guide.Guide:
+    args = {"site": "Gateway", "writes_enabled": True, "has_collection": True}
+    args.update(kw)
+    return guide.build(**args)
+
+
 def _ids(page: str) -> list[str]:
     return re.findall(r" id='([^']+)'", page)
 
 
-def test_every_link_in_the_rail_and_every_anchor_lands_on_an_id() -> None:
-    page = _page()
-    ids = _ids(page)
-    assert len(ids) == len(set(ids)), [i for i in ids if ids.count(i) > 1]
-    nav = page[page.index("<nav aria-label='Guide contents'>") : page.index("</nav>")]
-    targets = re.findall(r"href='#([^']+)'", nav)
-    assert targets, "the rail has no links"
-    missing = [t for t in targets if t not in ids]
-    assert not missing, missing
-    anchors = re.findall(r"<a class='anchor' href='#([^']+)'", page)
-    assert anchors and all(a in ids for a in anchors)
-    # every heading in the body carries an id and its own anchor link
-    for level in ("h2", "h3", "h4"):
-        for m in re.finditer(rf"<{level}\b([^>]*)>(.*?)</{level}>", page):
-            assert "id='" in m.group(1), m.group(0)[:80]
-            assert "class='anchor'" in m.group(2), m.group(0)[:80]
-
-
-def test_every_section_sits_under_exactly_one_of_the_four_parts() -> None:
-    page = _page()
-    parts = list(re.finditer(r"<section class='gpart' id='([a-z]+)'", page))
-    assert [m.group(1) for m in parts] == list(PART_IDS)
-    bounds = [
-        (m.start(), parts[i + 1].start() if i + 1 < len(parts) else len(page)) for i, m in enumerate(parts)
-    ]
-    sections = list(re.finditer(r"<section class='panel gsec' id='([a-z0-9-]+)'", page))
-    assert len(sections) >= 25
-    for m in sections:
-        owners = [pid for (lo, hi), pid in zip(bounds, PART_IDS, strict=True) if lo <= m.start() < hi]
-        assert len(owners) == 1, (m.group(1), owners)
-    # the rail nests the same sections under the same parts, in the same order
-    nav = page[page.index("<nav aria-label='Guide contents'>") : page.index("</nav>")]
-    for pid, _ic, _title, _lead, listed in guide.PARTS:
-        li = nav[nav.index(f"href='#{pid}'") :]
-        li = li[: li.index("</ul></li>")]
-        expected = [sid for sid, _i, _l in listed]
-        assert re.findall(r"<li><a href='#([^']+)'", li) == expected, pid
+def test_every_topic_sits_under_exactly_one_part_and_every_inner_link_lands() -> None:
+    g = _guide()
+    assert [p[0] for p in g.parts] == list(PART_IDS)
+    topics = g.topics
+    assert len(topics) >= 25 and len({t[0] for t in topics}) == len(topics)
     declared = [sid for _p, _i, _t, _l, secs in guide.PARTS for sid, _ic, _lb in secs]
-    assert [m.group(1) for m in sections] == declared
+    assert [t[0] for t in topics] == declared
+    ids = _ids(_page())
+    assert len(ids) == len(set(ids)), [i for i in ids if ids.count(i) > 1]
+    for sid, _ic, _label, _pid in topics:
+        body = guide.topic_body(g, sid)
+        # every link inside the sentences is a topic page, a heading on one, or this page's own
+        for target in re.findall(r"href='#([a-z0-9-]+)'", body):
+            assert target == "top" or f"id='{target}'" in body, (sid, target)
+        for href in re.findall(r"href='/guide/([a-z0-9-]+)(?:#([a-z0-9-]+))?'", body):
+            assert href[0] in g.bodies, (sid, href)
+            if href[1]:
+                assert f"id='{href[1]}'" in g.bodies[href[0]], (sid, href)
+        assert "<nav class='gturn'" in body and "gcrumbs" in body
+    # the rail nests every topic under its part, the current one marked
+    nav = guide.contents_nav(g, "how-restore")
+    assert re.findall(r"href='/guide/([a-z0-9-]+)'", nav) == declared
+    assert "<a href='/guide/how-restore' aria-current=page>Restore a snapshot</a>" in nav
 
 
-def test_search_box_status_line_and_no_inline_script() -> None:
+def test_the_contents_page_lists_every_topic_once_and_keeps_the_old_anchors() -> None:
+    g = _guide()
+    body = guide.contents_body(g, anchors_json="{}")
+    assert "<h1>Guide</h1>" in body and "<form class='gsearch' method='get' action='/guide/search'" in body
+    assert (
+        re.findall(r"<ul class='gtoc'>", body)
+        and len(re.findall(r"<section class='panel gpart' id='", body)) == 4
+    )
+    listed = re.findall(r"<li><a href='/guide/([a-z0-9-]+)'>", body)
+    assert listed == [t[0] for t in g.topics]
+    assert "id='guide-anchors'" in body
+    # a heading inside a topic is found from the old one-page address
+    assert g.owner_of("how-export-deck") == "how-export" and g.owner_of("ref-keys") == "ref-keys"
+    assert g.owner_of("nothing-here") is None
+    # the first and the last topic have one neighbour each
+    first = guide.topic_body(g, g.topics[0][0])
+    assert "rel='prev'" not in first and "rel='next'" in first
+    last = guide.topic_body(g, g.topics[-1][0])
+    assert "rel='next'" not in last and "rel='prev'" in last
+
+
+def test_the_search_finds_topics_and_marks_the_match() -> None:
+    g = _guide()
+    hits = guide.search(g, "F10")
+    assert hits and hits[0]["title"] == "Keyboard shortcuts" and hits[0]["href"] == "/guide/ref-keys"
+    assert "F10" in hits[0]["snippet"] and hits[0]["part"] == "Reference"
+    assert guide.search(g, "") == [] and guide.search(g, "zzzz-nothing") == []
+    assert guide.search(g, "restore")[0]["title"] == "Restore a snapshot"  # the title match first
+    out = guide.results_html(hits, "F10")
+    assert "<mark>F10</mark>" in out and "class='where'>Reference</span>" in out
+    assert "Nothing in the guide matches" in guide.results_html([], "zzz")
+
+
+def test_the_navigation_is_described_from_the_navigation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(theme, "WATCHLISTS", True)
+    text = guide.nav_description(html_out=False)
+    for label in ("Home", "Decks", "Binder", "Assistant", "More", "Cards", "Wants", "Watchlist", "Proposals"):
+        assert label in text, label
+    for _g, links in theme.more_groups():
+        for _h, label, _i in links:
+            assert label in text, label
+    assert "Forum and Alerts" in text  # the rail's extra places
+    # a change to More changes the words: nothing is written by hand
+    monkeypatch.setattr(theme, "MORE_GROUPS", [("Find", [("/zzz", "Zebra crossings", "search")])])
+    assert "Zebra crossings" in guide.nav_description(html_out=False)
+    assert "Precons" not in guide.nav_description(html_out=False)
     page = _page()
-    assert "<label for='guide-q'>Search the guide</label>" in page
+    assert page.count("<p class='tip'>On a phone the tabs at the bottom are") == 1
+    assert "Watchlist" not in guide.nav_description(html_out=False) if not theme.WATCHLISTS else True
+
+
+def test_docs_describe_the_navigation_in_the_same_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docs/USING.md carries the generated paragraph between its markers: when the navigation
+    changes, this says so, and the paragraph is the one to paste."""
+    from pathlib import Path
+
+    monkeypatch.setattr(theme, "WATCHLISTS", True)  # the docs describe a gateway with watchlists on
+    doc = Path(__file__).resolve().parents[1] / "docs" / "USING.md"
+    text = doc.read_text()
+    block = text.split("<!-- nav:start -->")[1].split("<!-- nav:end -->")[0]
+    want = guide.nav_description(html_out=False)
+    assert " ".join(block.split()) == want, f"docs/USING.md's navigation paragraph should read:\n{want}"
+
+
+def test_a_topic_page_names_no_search_markup_twice_and_no_inline_script() -> None:
+    g = _guide()
+    page = guide.topic_body(g, "ref-keys")
+    assert page.count("<label for='guide-q'>Search the guide</label>") == 1
     assert re.search(r"<input id='guide-q' type='search'[^>]*aria-describedby='guide-status'", page)
     assert "<p id='guide-status' class='status muted small' role='status' aria-live='polite'>" in page
     assert "<script" not in page and not re.search(r"\son[a-z]+='", page)
     assert "<details class='gnav' open>" in page and "aria-label='Guide contents'" in page
     assert "class='btn gtop hide' href='#top'" in page and "id='top'" in page
-    # without script the search box is hidden and every section is simply on the page
-    assert "<div class='gsearch' hidden>" in page
-    assert "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul>" in page
-    assert "hidden" not in re.search(r"<section class='panel gsec'[^>]*>", page).group(0)
 
 
 def test_collection_sections_follow_the_gateway() -> None:
-    with_it = _page(has_collection=True)
-    without = _page(has_collection=False)
-    assert "id='how-collection'" in with_it and "href='#how-collection'" in with_it
-    assert "id='how-collection'" not in without and "href='#how-collection'" not in without
+    with_it, without = _guide(has_collection=True), _guide(has_collection=False)
+    assert "how-collection" in with_it.bodies and "href='/guide/how-collection'" in guide.contents_nav(
+        with_it
+    )
+    assert "how-collection" not in without.bodies
+    assert "href='/guide/how-collection'" not in guide.contents_nav(without)
+    assert "id='how-collection'" not in guide.guide_body(site="G", writes_enabled=True, has_collection=False)
 
 
 def test_facts_match_the_current_pages() -> None:
@@ -196,7 +253,7 @@ def test_member_text_names_no_tool_the_abilities_are_plain_asks() -> None:
     named = [raw for raw in tool_labels.TOOLS if f"<code>{raw}</code>" in before or f">{raw}<" in before]
     assert not named, named
     assert "by tool" not in page
-    assert "<h3 id='ref-assistant-h'>" in page and "What the assistant can do" in page
+    assert "<h3>What the assistant can do</h3>" in page
     table = page[page.index("id='ref-assistant'") : fold_at]
     assert "<th role='columnheader'>Ask your assistant</th><th role='columnheader'>What happens</th>" in table
     for ask in ("Read my deck", "Compare two decks", "Run a test report", "Watch this card's price"):
@@ -207,37 +264,22 @@ def test_member_text_names_no_tool_the_abilities_are_plain_asks() -> None:
     assert tool_labels.tool_ask("get_deck") == "Read my deck"
 
 
-def test_the_advanced_fold_is_last_closed_and_lists_each_ask_beside_its_tool_name() -> None:
+def test_the_tool_names_are_the_last_reference_topic_with_each_ask_beside_its_name() -> None:
     from mtg_gateway import tool_labels
 
-    page = _page(watchlists=True)
-    fold = re.search(r"<details class='gadv' id='adv-tools'>(.*?)</details>", page, re.S)
-    assert fold, "no fold"
-    assert " open" not in fold.group(0)[: fold.group(0).index(">")]  # closed by default
-    assert "<summary class='fold-btn'>" in fold.group(0) and "Advanced: tool names</summary>" in fold.group(0)
+    g = _guide(watchlists=True)
+    ref = next(p for p in g.parts if p[0] == "reference")
+    assert ref[4][-1] == ("ref-tools", "list", "Advanced: tool names")
+    body = g.bodies["ref-tools"]
     assert (
         "<p>Your assistant picks these for you. They are listed here in case you need the exact name.</p>"
-        in fold.group(0)
+        in body
     )
-    # after the last part (Explanation), before the no-match line: the end of the guide
-    assert page.index("id='explanation'") < fold.start() < page.index("class='nomatch muted'")
     for raw, words in tool_labels.TOOLS.items():
-        assert f"<td role='cell' data-label='Ask'>“{html.escape(words.ask)}”</td>" in fold.group(1), raw
-        assert f"<td role='cell' data-label='Tool name'><code>{raw}</code></td>" in fold.group(1), raw
-    # the watch asks go with watchlists off, in the table and in the fold
+        assert f"<td role='cell' data-label='Ask'>“{html.escape(words.ask)}”</td>" in body, raw
+        assert f"<td role='cell' data-label='Tool name'><code>{raw}</code></td>" in body, raw
+    # the watch asks go with watchlists off, in the table and in the topic
     off = _page()
     assert "watch_card" not in off and "Watch this card's price" not in off
-    # no heading inside the fold: the rail and the search index only the four parts
-    assert not re.search(r"<h[2-4]", fold.group(1))
-
-
-def test_guide_smaller_fixes_touch_targets_placeholder_and_collection_words() -> None:
-    page = _page()
-    assert "placeholder='Search the guide'" in page and "A word or two" not in page
-    assert "@media (pointer:coarse){.gnav a{min-height:44px}}" in guide.GUIDE_CSS
-    assert (
-        "Filter by name, show it as a grid or a list, sort it, and press Load more for the rest. Plus "
-        "and minus change the count. The ⋮ button opens the card's menu: Details… there changes finish, "
-        "condition, language and price paid." in page
-    )
-    assert "page through it" not in page and "the dots open its details" not in page
+    # no heading inside the topic: the search and the rail index the topics only
+    assert not re.search(r"<h[2-4]", body)
