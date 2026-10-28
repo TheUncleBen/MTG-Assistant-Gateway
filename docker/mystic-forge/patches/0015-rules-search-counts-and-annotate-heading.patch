@@ -1,0 +1,130 @@
+Subject: Rules search counts and annotate heading said more than they meant
+
+Found in the assistant tool review of the live gateway (2026-10-28):
+
+- rules_search said "283 CR entries mention these terms" for "commander
+  damage", but an entry counts when it has any one of the terms. With two
+  or more terms it now says "mention at least one of these terms" (one term:
+  "mention this term").
+- goldfish_annotate's Out of scope section said "Not cast in the sim (their
+  whole effect is one of these)", while each card's own line (and
+  goldfish_run's honesty report) says permanents are cast for the rest of
+  their text: a commander listed there read as never cast. The heading now
+  says spells among them are not cast and permanents are.
+
+tests/test_research_wording_2.py; tests/test_rules_tools.py asserts the new
+single-term wording.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has none of these. Needs
+patches 0001-0014 applied first.
+
+diff --git a/mystic_forge/rulebook.py b/mystic_forge/rulebook.py
+index 7daf50d..1088a7a 100644
+--- a/mystic_forge/rulebook.py
++++ b/mystic_forge/rulebook.py
+@@ -62,6 +62,12 @@ def _tokenize(s: str) -> list[str]:
+     return _TOKEN_RE.findall(s.lower().replace("’", "'"))
+ 
+ 
++def significant_terms(query: str) -> list[str]:
++    """The query's terms search() matches on: stop words dropped, unless that leaves none."""
++    raw = _tokenize(query)
++    return [t for t in raw if t not in _STOPWORDS] or raw
++
++
+ class RulesIndex:
+     def __init__(self) -> None:
+         self.rules: dict[str, Rule] = {}
+@@ -105,10 +111,9 @@ class RulesIndex:
+         would leave nothing to search on. total = documents matching at
+         least one significant query term.
+         """
+-        raw = _tokenize(query)
+-        if not raw:
++        q = significant_terms(query)
++        if not q:
+             return [], 0
+-        q = [t for t in raw if t not in _STOPWORDS] or raw
+         phrase = " ".join(q)
+         hits: list[SearchHit] = []
+         for ref, kind, text in self._documents():
+diff --git a/server.py b/server.py
+index 20b0a02..5f249e3 100644
+--- a/server.py
++++ b/server.py
+@@ -3644,8 +3644,11 @@ async def rules_search(params: RulesSearchInput) -> str:
+         lines.append(line)
+         used += len(line) + 2
+     noun = "CR entry mentions" if total == 1 else "CR entries mention"
++    # an entry counts when it has any one of the terms (rulebook.search), not all of them
++    terms = rulebook.significant_terms(params.query)
++    what = "this term" if len(terms) < 2 else "at least one of these terms"
+     parts = [_rules_header(idx),
+-             f"{total} {noun} these terms; showing the {len(lines)} most relevant:", ""]
++             f"{total} {noun} {what}; showing the {len(lines)} most relevant:", ""]
+     for line in lines:
+         parts.append(line)
+         parts.append("")
+@@ -4426,8 +4429,9 @@ async def goldfish_annotate(params: GoldfishAnnotateInput) -> str:
+     parts.append("")
+     parts.append(f"## Out of scope ({_goldfish_n_cards(out_total)})")
+     if out_total:
+-        parts.append("Not cast in the sim (their whole effect is one of these); counted by "
+-                     "class in the honesty report.")
++        parts.append("Their effect has nothing to act on in a goldfish game (one of the classes "
++                     "below): spells among them are not cast, permanents are cast for the rest "
++                     "of their text. Counted by class in the honesty report.")
+         for cls in sorted(out_by_class):
+             parts.append(f"**{cls}** — {_GOLDFISH_D9_NOTES.get(cls, cls)}")
+             parts.extend(f"- {n}" for n in out_by_class[cls])
+diff --git a/tests/test_research_wording_2.py b/tests/test_research_wording_2.py
+new file mode 100644
+index 0000000..0138ce4
+--- /dev/null
++++ b/tests/test_research_wording_2.py
+@@ -0,0 +1,23 @@
++"""Wording an assistant read wrongly (assistant tool review, 2026-10-28): a rules search's count
++of entries that have any one of the terms, and the annotate heading that said permanents are not
++cast."""
++import server
++
++from tests.test_rules_tools import _install_index
++
++
++async def test_a_search_of_several_terms_counts_entries_with_any_of_them(monkeypatch):
++    _install_index(monkeypatch)
++    out = await server.rules_search(server.RulesSearchInput(query="deathtouch damage"))
++    assert "mention at least one of these terms" in out
++    assert "mention these terms" not in out
++
++
++async def test_the_out_of_scope_heading_says_permanents_are_cast(monkeypatch):
++    from tests.goldfish import test_server_tools as t
++
++    monkeypatch.setattr(server, "_goldfish_fetch_cards", t._fake_fetch_for([t.PLAINS, t.SWORDS]))
++    out = await server.goldfish_annotate(server.GoldfishAnnotateInput(deck="1 Plains\n1 Swords to Plowshares"))
++    section = out.split("## Out of scope", 1)[1].split("## Needs annotation", 1)[0]
++    assert "Not cast in the sim" not in section
++    assert "permanents are cast for the rest of their text" in section
+diff --git a/tests/test_rules_tools.py b/tests/test_rules_tools.py
+index 4e0427f..b5903fa 100644
+--- a/tests/test_rules_tools.py
++++ b/tests/test_rules_tools.py
+@@ -347,7 +347,7 @@ async def test_search_tool_lists_rule_and_glossary_hits(monkeypatch):
+     assert "effective August 7, 2026" in out
+     assert "702.2" in out
+     assert "Glossary: Deathtouch" in out
+-    assert "mention these terms" in out
++    assert "CR entries mention this term" in out
+ 
+ 
+ async def test_search_tool_respects_limit(monkeypatch):
+@@ -372,7 +372,7 @@ async def test_search_tool_unavailable(monkeypatch):
+ async def test_search_tool_singular_grammar(monkeypatch):
+     _install_index(monkeypatch)
+     out = await server.rules_search(server.RulesSearchInput(query="interchangeably"))
+-    assert "1 CR entry mentions these terms" in out
++    assert "1 CR entry mentions this term" in out
+ 
+ 
+ async def test_search_output_stays_bounded_real_cr(monkeypatch):
