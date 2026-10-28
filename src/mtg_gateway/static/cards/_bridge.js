@@ -155,25 +155,6 @@ var Bridge = (function () {
   function tellModel(text) {
     return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] }).catch(function () {});
   }
-  // After the person approves a change on a card: a short message in the chat, as if they had typed
-  // it, so the assistant carries on at once instead of waiting for their next message. Sent only
-  // where the host says a card may post messages (MCP Apps ui/message), or through ChatGPT's own
-  // follow-up call; anywhere else nothing is sent, and the assistant hears of the press with the
-  // person's next message, as before. Call it after tellModel has settled: the host hands the
-  // assistant that context along with the message. One rule on every card: it is sent once, as
-  // soon as the change is applied or under way (a large change still applying), never on Reject.
-  var NUDGE = "Approved, go on";
-  function nudge() {
-    if (hostCaps.message) {
-      return request("ui/message", { role: "user", content: [{ type: "text", text: NUDGE }] }).catch(function () {});
-    }
-    var oa = window.openai;
-    if (oa && typeof oa.sendFollowUpMessage === "function") {
-      try { return Promise.resolve(oa.sendFollowUpMessage({ prompt: NUDGE })).catch(function () {}); }
-      catch (e) { return Promise.resolve(); }
-    }
-    return Promise.resolve();
-  }
   // A data value (a card or set name, a user's own words) quoted for the text sent to the model: one
   // line, at most 200 characters, in quotes, so it reads as data and not as part of the sentence.
   function quote(v) {
@@ -216,7 +197,7 @@ var Bridge = (function () {
 
   return {
     start: start, request: request, notify: notify, el: el, $: $, icon: icon, label: label, picture: picture, scryfallImage: scryfallImage,
-    openLink: openLink, tellModel: tellModel, nudge: nudge, quote: quote, reportSize: reportSize, setStatus: setStatus,
+    openLink: openLink, tellModel: tellModel, quote: quote, reportSize: reportSize, setStatus: setStatus,
     displayModes: displayModes, requestDisplayMode: requestDisplayMode, context: function () { return hostCtx; }
   };
 })();

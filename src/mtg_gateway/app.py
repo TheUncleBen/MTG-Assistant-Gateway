@@ -556,10 +556,9 @@ def server_instructions(public_url: str) -> str:
         "follow its suggest, and a new deck with check_new_deck; then propose once. Never propose again "
         "to change a waiting proposal (amend it; a new deck with amend_proposal's new_deck) or to see "
         "where it stands (proposal_status, which draws no card). "
-        "When the user presses Approve on a proposal card or Apply all, you are "
-        'told the outcome, and where the app allows it the card then posts "Approved, go on" as the user\'s '
-        "message: carry on from that outcome, and call proposal_status only when it is unclear (still "
-        "applying). "
+        "When the user presses Approve on a proposal card or Apply all, the card tells you the outcome "
+        "with their next message; nothing is posted in their name. Carry on from that outcome, and call "
+        "proposal_status only when it is unclear (still applying). "
         "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
         "the simulation tools. deck_stats answers "

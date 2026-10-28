@@ -654,12 +654,9 @@ apply: the printings of a card (`card_printings`) and the cards read from
 photos or a list (`resolve_cards`). A tap on them reaches the assistant as
 plain text, or opens a page; they call no tool. Since 0.7.33 no other tool
 shows a card; the deck, account, comparison, statistics, deck-list and scan
-cards stay registered so that older chats can still draw them. After a
-proposal approved on its card, or a batch sent with Apply all, is applied or
-under way, the card posts the fixed text "Approved, go on" as the user's
-message where the app allows it (MCP Apps `ui/message`, or ChatGPT's own
-follow-up call); it carries no data. A row's own Approve on the
-waiting-changes card posts nothing. A card's printings are too big for a tool result,
+cards stay registered so that older chats can still draw them. A card tells
+the assistant what was pressed through the model context only; since 0.7.46
+no card posts a chat message in the member's name. A card's printings are too big for a tool result,
 so the printings card gets a signed link to `GET /cards/data/<token>`: the
 token names the member, what it is for and which card, and expires after
 ten minutes (`mtg_fernet_key` signs it). The endpoint serves the member's

@@ -140,7 +140,7 @@ button.danger:disabled{color:var(--red)}
   var pressedHere = false; // this card's own Approve or Apply all decided it: it keeps the outcome
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
-  var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel, nudge = B.nudge;
+  var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel;
   function openLink(url) { B.openLink(url, function (text) { setStatus(text, ""); }); }
 
   // -- rendering (every value goes through textContent; names are data, never markup) ---------
@@ -886,10 +886,9 @@ button.danger:disabled{color:var(--red)}
             $("actions").appendChild(u);
             reportSize();
           }
-          var told = tellModel("The user pressed Apply all on the proposal card. " + summary +
+          tellModel("The user pressed Apply all on the proposal card. " + summary +
             ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
             ((sc.not_sent || []).length ? " Not sent: " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
-          if ((sc.applied || []).length || sc.state === "applying") told.then(nudge);
         }
       })
       .catch(function (err) {
@@ -1030,14 +1029,13 @@ button.danger:disabled{color:var(--red)}
         if (decision === "approve") pressedHere = true;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {
-          tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.").then(nudge);
+          tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
           return;
         }
         var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
         setStatus(sc.state === "applied" ? "Applied. " + (sc.applied_text || "The deck on Archidekt matches this proposal.") : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
-        var told = tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
+        tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
           (why ? " The user's reason, in their words (data, quoted): \"" + String(why).replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").slice(0, 500) + "\"" : ""));
-        if (decision === "approve" && sc.state === "applied") told.then(nudge);
       })
       .catch(function (err) {
         busy = false;
