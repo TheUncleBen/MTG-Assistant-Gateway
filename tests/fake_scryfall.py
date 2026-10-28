@@ -415,6 +415,10 @@ class FakeScryfall:
                     card = next((c for c in self.cards if c["id"] == ident["id"]), None)
                 elif "collector_number" in ident:
                     card = self.by_print(ident["set"], ident["collector_number"])
+                elif "//" in ident["name"]:
+                    # Scryfall's collection lookup knows a two-part card by its front face only:
+                    # {"name": "Fire // Ice"} is not_found (checked 2026-10-28)
+                    card = None
                 else:
                     card = self.by_name(ident["name"], ident.get("set"))
                 if card and card["id"] in self.prices:

@@ -27,6 +27,7 @@ few requests.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
@@ -48,6 +49,18 @@ class ScryfallError(Exception):
     def __init__(self, kind: str, message: str):
         super().__init__(message)
         self.kind = kind
+
+
+def collection_ident(ident: dict[str, str]) -> dict[str, str]:
+    """``ident`` as POST /cards/collection finds it: a name identifier names a split, adventure or
+    two-faced card by its front face, the only name that lookup knows it by ({"name": "Fire"}
+    returns Fire // Ice, {"name": "Fire // Ice"} is not_found; checked 2026-10-28). The card that
+    comes back carries its full name."""
+    name = ident.get("name")
+    if not isinstance(name, str) or "//" not in name:
+        return ident
+    front = re.split(r"\s*//\s*", name, maxsplit=1)[0].strip()
+    return {**ident, "name": front} if front else ident
 
 
 def today() -> str:
@@ -637,7 +650,11 @@ class ScryfallClient:
         found: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for i in range(0, len(identifiers), COLLECTION_MAX):
-            chunk = identifiers[i : i + COLLECTION_MAX]
+            asked = identifiers[i : i + COLLECTION_MAX]
+            # A two-part card goes by its front face (collection_ident); a miss is handed back as
+            # the caller asked for it.
+            chunk = [collection_ident(ident) for ident in asked]
+            sent = {json.dumps(c, sort_keys=True): a for c, a in zip(chunk, asked, strict=True)}
             resp = await self._request(
                 "POST", "/cards/collection", json={"identifiers": chunk}, interval=interval
             )
@@ -649,5 +666,5 @@ class ScryfallClient:
                     found.append(card)
             for ident in data.get("not_found") or []:
                 if isinstance(ident, dict):
-                    missing.append(ident)
+                    missing.append(sent.get(json.dumps(ident, sort_keys=True), ident))
         return found, missing
