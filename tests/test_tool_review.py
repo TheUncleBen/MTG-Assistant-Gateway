@@ -389,3 +389,15 @@ async def test_the_board_lists_a_category_change_under_categories(stack: Stack) 
     board = structured(await call(stack.h, token, "list_my_proposals", {"pending_only": True}))
     line = next(x for x in board["proposals"] if x["proposal_id"] == p["proposal_id"])
     assert line["cards"] == [] and line["categories"] == ["Draw"], line
+
+
+async def test_get_deck_marks_empty_categories(stack: Stack) -> None:
+    stack.ark.decks[42]["categories"].append(
+        {"id": 78, "name": "Optional Artwork", "isPremier": False, "includedInDeck": True}
+    )
+    token = await linked_user(stack)
+    deck = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
+    found = deck
+    assert "Optional Artwork" in found["categories"] and found["empty_categories"] == ["Optional Artwork"], (
+        found
+    )

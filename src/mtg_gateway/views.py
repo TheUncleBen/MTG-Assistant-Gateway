@@ -96,6 +96,12 @@ def deck_out(
         "side_count": sum(c.quantity for c in deck.side_cards),
         "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],
+        # the deck's categories with no card filed under them (Archidekt keeps them until deleted)
+        "empty_categories": [
+            c["name"]
+            for c in deck.categories
+            if isinstance(c.get("name"), str) and not any(c["name"] in card.categories for card in deck.cards)
+        ],
         # the member's custom cards in the deck (Archidekt's customCards, not in cards or the counts);
         # id is the custom card's id, as propose_custom_card_changes takes it
         "custom_cards": [
