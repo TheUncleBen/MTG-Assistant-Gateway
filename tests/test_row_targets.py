@@ -12,7 +12,8 @@ from mtg_gateway.decks import DeckError, parse_changes
 
 from .conftest import Stack
 from .test_account_actions import _browser_apply
-from .test_decks_and_proxy import linked_user
+from .test_approval_modes import AESI, _commanders, _second_commander_row_first, _set_mode
+from .test_decks_and_proxy import call, linked_user, structured
 
 
 def _rows(stack: Stack) -> list[tuple[str, int, str, str]]:
@@ -149,3 +150,31 @@ async def test_a_side_printing_change_without_a_row_needs_the_card_to_have_one_s
     stack.ark.add_side_row(42, "Sol Ring", 2, category="Sideboard")
     with pytest.raises(DeckError, match="more than one maybeboard or sideboard row"):
         await stack.gw.decks.propose(sub, "42", [{**one, "collector_number": "1074", "zone": "side"}])
+
+
+@pytest.mark.parametrize("second_row", [False, True], ids=["one row", "two rows"])
+@pytest.mark.parametrize("mode", ["auto", "semi"])
+async def test_a_remove_of_the_commander_row_by_its_relation_id_waits(
+    stack: Stack, mode: str, second_row: bool
+) -> None:
+    """A row change by relation id goes through the same commander check as any other: removing
+    the commander's own row waits for the member's press in Full auto and Semi-auto, whether the
+    commander has that row only or another row in the deck as well."""
+    h, ark = stack.h, stack.ark
+    if second_row:
+        _second_commander_row_first(ark)
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    rel = next(
+        c["id"]
+        for c in ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] == AESI and "Commander" in (c["categories"] or [])
+    )
+    change = {"action": "remove", "card_name": AESI, "relation_id": rel}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"] and p["state"] == "pending", p
+    assert "commander" in [r.get("kind") for r in p["rows"]], p["rows"]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is False
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "browser_required"
+    assert ark.patches == [] and _commanders(ark) == [AESI]
