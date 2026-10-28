@@ -19,7 +19,7 @@ import json
 import re
 import secrets
 import time
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field
@@ -70,6 +70,10 @@ if TYPE_CHECKING:
 MAX_ITEMS_PER_CALL = 100  # each card costs one or two Archidekt calls, paced about a second apart
 MAX_QUANTITY = 9_999
 MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
+# Finding records: one unfiltered read of this many covers a binder that small; a bigger one is read
+# by Archidekt's ``cardName`` filter, a name at a time, up to FILTERED_PAGES pages of it.
+WHOLE_READ_SIZE = 200
+FILTERED_PAGES = 5
 PAGE_SIZE = COLLECTION_PAGE_SIZE
 FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
 FINISHES = ("nonfoil", "foil", "etched")
@@ -122,7 +126,10 @@ def _wrap(exc: Exception) -> CollectionError:
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
         # whole seconds, at least 1: a raw ArchidektError carries a float, which the busy page would
         # otherwise drop for its 60 s default
-        return CollectionError(kind, str(exc), retry_after=archidekt_wait(exc))
+        err = CollectionError(kind, str(exc), retry_after=archidekt_wait(exc))
+        # a refusal of the member's own Archidekt budget: nothing was sent (an import waits on it)
+        err.busy_cause = getattr(exc, "busy_cause", None)
+        return err
     raise exc
 
 
@@ -379,6 +386,39 @@ def row_out(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def front_name(name: str) -> str:
+    """A card's front face ("Delver of Secrets" for "Delver of Secrets // Insectile Aberration"):
+    a ``cardName`` filter by it matches the record whichever way Archidekt names it."""
+    return str(name or "").split(" // ")[0].strip()
+
+
+class _Found:
+    """The records an add or a record lookup has read so far, by (printing id, finish)."""
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+        self._ids: set[Any] = set()
+        self.existing: dict[tuple[Any, str], dict[str, Any]] = {}
+        # the language of each record ``existing`` holds, as the gateway's code (a record written
+        # here keeps Archidekt's own shape, so its language is kept apart)
+        self.lang_of: dict[tuple[Any, str], str] = {}
+        self.names: set[str] = set()  # front faces already read by the cardName filter
+        self.tried_whole = False
+        self.whole = False  # one read held the whole binder
+
+    def take(self, results: Any) -> None:
+        for rec in results if isinstance(results, list) else []:
+            if not isinstance(rec, dict) or rec.get("id") in self._ids:
+                continue
+            self._ids.add(rec.get("id"))
+            self.records.append(rec)
+            card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
+            key = (card.get("id"), _finish_of(rec.get("modifier")))
+            # newest first: the oldest record of a printing and finish is the one copies go to
+            self.existing[key] = rec
+            self.lang_of[key] = language_code(rec.get("language")) or "EN"
+
+
 class CollectionService:
     """The member's Archidekt Collection. Every method runs under the member's own Archidekt
     session through ``DeckService._call`` (token refresh, one call at a time per member)."""
@@ -507,7 +547,15 @@ class CollectionService:
 
     # -- writes ----------------------------------------------------------------------------------
     async def add(
-        self, sub: str, items: Any, *, source: str, progress: dict[str, Any] | None = None
+        self,
+        sub: str,
+        items: Any,
+        *,
+        source: str,
+        progress: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        on_item: Callable[[int], None] | None = None,
+        retry: Callable[[CollectionError], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
@@ -518,99 +566,156 @@ class CollectionService:
         names each such item whose language differs from the record's, with ``index`` its
         position in ``items``, ``language`` and ``existing_language``); otherwise a record is
         created. ``skipped`` items carry ``index`` too. ``progress``: a collection proposal's
-        apply, which counts each record written (``_run``)."""
+        apply, which counts each record written (``_run``). ``result``: the dict the rows go
+        into as they are written (an import keeps what was added when it stops part way);
+        ``on_item(n)`` is told after each card; ``retry(exc)`` decides, after a refusal of the
+        member's Archidekt budget, whether to try that card again (an import waits for room)."""
         self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition", "language")})
             for it in normalise_items(items)
         ]
         self._user_id(sub)  # fail early when no account is linked
-        existing: dict[tuple[Any, str], dict[str, Any]] = {}
-        # the language of each record ``existing`` holds, as the gateway's code (a record written
-        # here keeps Archidekt's own shape, so its language is kept apart)
-        lang_of: dict[tuple[Any, str], str] = {}
-        for rec in await self._raw_rows(sub, max_pages=10):
-            card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
-            key = (card.get("id"), _finish_of(rec.get("modifier")))
-            existing[key] = rec
-            lang_of[key] = language_code(rec.get("language")) or "EN"
-        added: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
-        merged: list[dict[str, Any]] = []
+        found = _Found()
+        out = result if result is not None else {}
+        out.update(added=[], skipped=[], merged=[])
         for index, (spec, opts) in enumerate(wanted):
-            try:
-                printing = await self._run(
-                    sub,
-                    lambda token, spec=spec: self.client.resolve_card(
-                        token,
-                        spec["name"],
-                        set_code=spec["set"] or None,
-                        collector_number=spec["collector_number"] or None,
-                        scryfall_id=spec["scryfall_id"] or None,
-                    ),
-                )
-            except CollectionError as exc:
-                if exc.kind in ("not_found", "contract", "invalid", "unavailable"):
-                    skipped.append({"input": spec, "status": "not_found", "note": str(exc), "index": index})
-                    continue
-                raise
-            finish = opts["finish"]
-            options = printing.get("options") or []
-            if options and MODIFIERS[finish] not in options and len(options) == 1:
-                finish = _finish_of(options[0])  # a printing sold in one finish is that finish
-            key = (printing["id"], finish)
-            have = existing.get(key)
-            before = int(have.get("quantity") or 0) if have is not None else 0
-            if have is not None:
-                if lang_of.get(key, "EN") != opts["language"]:
-                    merged.append(
-                        {
-                            "input": spec,
-                            "index": index,
-                            "language": opts["language"],
-                            "existing_language": lang_of.get(key, "EN"),
-                        }
-                    )
-                qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
-                out = await self._run(
-                    sub,
-                    lambda token, have=have, qty=qty: self.client.collection_set(token, have, quantity=qty),
-                    progress=progress,
-                )
-                rec = {**have, **out, "card": have.get("card")}
-            else:
-                out = await self._run(
-                    sub,
-                    lambda token, printing=printing, finish=finish, opts=opts: self.client.collection_add(
-                        token,
-                        printing["id"],
-                        opts["quantity"],
-                        modifier=MODIFIERS[finish],
-                        # with none picked, English and Near Mint, as archidekt.com's own new
-                        # record (its site code)
-                        condition=opts["condition"] or "NM",
-                        language=opts["language"],
-                    ),
-                    progress=progress,
-                )
-                rec = {**out, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, out)}
-                lang_of[key] = opts["language"]
-            existing[key] = rec
-            row = row_out(rec)
-            # the row's quantity is what the record holds now; these say what this add changed
-            row["previous_quantity"] = before
-            row["added_quantity"] = int(row["quantity"]) - before
-            if spec["scryfall_id"] and not row.get("scryfall_id"):
-                row["scryfall_id"] = spec["scryfall_id"]
-                row["image_small"] = image_url(spec["scryfall_id"], "small")
-                row["image"] = image_url(spec["scryfall_id"], "normal")
-            added.append(row)
+            while True:
+                try:
+                    await self._add_one(sub, index, spec, opts, found, out, progress)
+                    break
+                except CollectionError as exc:
+                    # ``retry``: an import waits out a refusal of the member's budget (nothing sent)
+                    if (
+                        retry is not None
+                        and getattr(exc, "busy_cause", None) == "budget"
+                        and await retry(exc)
+                    ):
+                        continue
+                    raise
+            if on_item is not None:
+                on_item(index + 1)
+        added = out["added"]
         self.decks.db.audit(
             "collection_added",
             sub=sub,
             detail={"rows": len(added), "cards": sum(int(r["quantity"]) for r in added), "source": source},
         )
-        return {"added": added, "skipped": skipped, "merged": merged}
+        return out
+
+    async def _records_for(self, sub: str, name: str, found: _Found) -> None:
+        """Make ``found`` hold every record that could be ``name``: the whole binder in one read when
+        it is small, else Archidekt's ``cardName`` filter for that name (a front face matches both
+        faces' names). Never pages through the whole binder, so no record is out of reach."""
+        uid = self._user_id(sub)
+        if found.whole:
+            return
+        if not found.tried_whole:
+            found.tried_whole = True
+            body = await self._run(
+                sub, lambda token: self.client.collection_page(token, uid, page=1, page_size=WHOLE_READ_SIZE)
+            )
+            found.take(body["results"])
+            if not body.get("next"):
+                found.whole = True
+                return
+        key = front_name(name).casefold()
+        if not key or key in found.names:
+            return
+        found.names.add(key)
+        for page in range(1, FILTERED_PAGES + 1):
+            body = await self._run(
+                sub,
+                lambda token, page=page: self.client.collection_page(
+                    token, uid, page=page, page_size=WHOLE_READ_SIZE, card_name=front_name(name)[:80]
+                ),
+            )
+            found.take(body["results"])
+            if not body.get("next"):
+                break
+
+    async def _add_one(
+        self,
+        sub: str,
+        index: int,
+        spec: dict[str, Any],
+        opts: dict[str, Any],
+        found: _Found,
+        out: dict[str, Any],
+        progress: dict[str, Any] | None,
+    ) -> None:
+        """One card of ``add``: resolve its printing, find a record of it in that finish (found),
+        and add the copies there or create one. Its row lands in ``out``."""
+        try:
+            printing = await self._run(
+                sub,
+                lambda token: self.client.resolve_card(
+                    token,
+                    spec["name"],
+                    set_code=spec["set"] or None,
+                    collector_number=spec["collector_number"] or None,
+                    scryfall_id=spec["scryfall_id"] or None,
+                ),
+            )
+        except CollectionError as exc:
+            if exc.kind in ("not_found", "contract", "invalid", "unavailable"):
+                out["skipped"].append(
+                    {"input": spec, "status": "not_found", "note": str(exc), "index": index}
+                )
+                return
+            raise
+        finish = opts["finish"]
+        options = printing.get("options") or []
+        if options and MODIFIERS[finish] not in options and len(options) == 1:
+            finish = _finish_of(options[0])  # a printing sold in one finish is that finish
+        await self._records_for(sub, str(printing.get("name") or spec["name"]), found)
+        key = (printing["id"], finish)
+        have = found.existing.get(key)
+        before = int(have.get("quantity") or 0) if have is not None else 0
+        if have is not None:
+            if found.lang_of.get(key, "EN") != opts["language"]:
+                out["merged"].append(
+                    {
+                        "input": spec,
+                        "index": index,
+                        "language": opts["language"],
+                        "existing_language": found.lang_of.get(key, "EN"),
+                    }
+                )
+            qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
+            written = await self._run(
+                sub,
+                lambda token: self.client.collection_set(token, have, quantity=qty),
+                progress=progress,
+            )
+            rec = {**have, **written, "card": have.get("card")}
+        else:
+            written = await self._run(
+                sub,
+                lambda token: self.client.collection_add(
+                    token,
+                    printing["id"],
+                    opts["quantity"],
+                    modifier=MODIFIERS[finish],
+                    # with none picked, English and Near Mint, as archidekt.com's own new
+                    # record (its site code)
+                    condition=opts["condition"] or "NM",
+                    language=opts["language"],
+                ),
+                progress=progress,
+            )
+            rec = {**written, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, written)}
+            found.lang_of[key] = opts["language"]
+        found.existing[key] = rec
+        row = row_out(rec)
+        # the row's quantity is what the record holds now; these say what this add changed
+        row["previous_quantity"] = before
+        row["added_quantity"] = int(row["quantity"]) - before
+        if spec["scryfall_id"] and not row.get("scryfall_id"):
+            row["scryfall_id"] = spec["scryfall_id"]
+            row["image_small"] = image_url(spec["scryfall_id"], "small")
+            row["image"] = image_url(spec["scryfall_id"], "normal")
+        out["added"].append(row)
 
     @staticmethod
     def _card_stub(printing: dict[str, Any], spec: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any]:
@@ -626,10 +731,19 @@ class CollectionService:
             "oracleCard": card.get("oracleCard") or {"name": printing.get("name") or spec["name"]},
         }
 
-    async def _record(self, sub: str, rid: int) -> dict[str, Any]:
-        """The raw record for an id, found by paging the collection (Archidekt's v2 list has no
-        single-record read). Up to ten pages."""
+    async def _record(self, sub: str, rid: int, name: str = "") -> dict[str, Any]:
+        """The raw record for an id (Archidekt's v2 list has no single-record read). With the
+        card's ``name`` (the page sends it) one read by Archidekt's ``cardName`` filter finds it
+        wherever it sits in the binder; without one, the newest ten pages are looked through."""
         uid = self._user_id(sub)
+        if name.strip():
+            found = _Found()
+            found.tried_whole = True
+            await self._records_for(sub, name, found)
+            for rec in found.records:
+                if rec.get("id") == rid:
+                    return rec
+            raise CollectionError("not_found", "no such card in your collection")
         page = 1
         while page <= 10:
             body = await self._run(
@@ -643,9 +757,15 @@ class CollectionService:
             page += 1
         raise CollectionError("not_found", "no such card in your collection")
 
-    async def set_quantity(self, sub: str, rid: int, quantity: int) -> dict[str, Any]:
+    async def set_quantity(
+        self, sub: str, rid: int, quantity: int | None = None, *, delta: int = 0, name: str = ""
+    ) -> dict[str, Any]:
+        """Set a record's copies, or (``delta``) add to or take from what Archidekt holds now, so
+        two tabs or devices that each press + add two copies, never one. 0 or less removes it."""
         self._writes_on()
-        rec = await self._record(sub, rid)
+        rec = await self._record(sub, rid, name)
+        if quantity is None:
+            quantity = min(MAX_QUANTITY, int(rec.get("quantity") or 0) + delta)
         if quantity <= 0:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
             self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid})
@@ -653,11 +773,11 @@ class CollectionService:
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, quantity=quantity))
         return {"row": row_out({**rec, **out, "card": rec.get("card")})}
 
-    async def update(self, sub: str, rid: int, data: dict[str, Any]) -> dict[str, Any]:
+    async def update(self, sub: str, rid: int, data: dict[str, Any], *, name: str = "") -> dict[str, Any]:
         """Change a record's details: finish, condition, language and price paid (the fields
         Archidekt's own row editor offers; tags are read-only here)."""
         self._writes_on()
-        rec = await self._record(sub, rid)
+        rec = await self._record(sub, rid, name)
         opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
         changes: dict[str, Any] = {}
         if "finish" in data or "foil" in data:
@@ -691,10 +811,16 @@ class CollectionService:
         return {"row": row}
 
     async def remove(
-        self, sub: str, rid: int, quantity: int | None = None, *, progress: dict[str, Any] | None = None
+        self,
+        sub: str,
+        rid: int,
+        quantity: int | None = None,
+        *,
+        progress: dict[str, Any] | None = None,
+        name: str = "",
     ) -> dict[str, Any]:
         self._writes_on()
-        rec = await self._record(sub, rid)
+        rec = await self._record(sub, rid, name)
         have = int(rec.get("quantity") or 0)
         if quantity is None or quantity >= have:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]), progress=progress)
@@ -1119,8 +1245,10 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
     finish = _finish_label(r["finish"])
     cond = (r.get("condition") or "").upper()
     lang = (r.get("lang") or "EN").upper()
+    # the card's name goes with its id: the record is found by Archidekt's name filter (_record)
     csrf_in = (
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'><input type='hidden' name='id' value='{rid}'>"
+        f"<input type='hidden' name='name' value='{name}'>"
     )
     stepper = _stepper(r, csrf_in, rid)
     shims = _shims(r, csrf_in)
@@ -1229,6 +1357,7 @@ def details_box_html(r: dict[str, Any] | None, csrf: str, *, open: bool = False)
     body = (
         f"<form method='post' action='/collection' id='col-detailsform' class='detailsform' data-id='{rid}'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'><input type='hidden' name='id' value='{rid}'>"
+        f"<input type='hidden' name='name' value='{_esc(r.get('name', ''))}'>"
         f"<p class='muted small dsub'>{sub}</p><div class='fl'>"
         f"<label class='field'><span>Finish</span><select name='finish'>{_opts(FINISHES, finish, MODIFIERS)}"
         "</select></label>"
@@ -2046,17 +2175,17 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                         "language": data.get("language", "EN"),
                         "purchase_price": data.get("purchase_price", ""),
                     },
+                    name=_clean(data.get("name"), 200),
                 )
                 code = "ok=updated"
             elif action in ("inc", "dec", "remove"):
                 rid = _rid(data.get("id"))
+                name = _clean(data.get("name"), 200)
                 if action == "remove":
-                    await service.remove(sub, rid)
+                    await service.remove(sub, rid, name=name)
                     code = "ok=removed"
                 else:
-                    rec = await service._record(sub, rid)
-                    delta = 1 if action == "inc" else -1
-                    await service.set_quantity(sub, rid, int(rec.get("quantity") or 0) + delta)
+                    await service.set_quantity(sub, rid, delta=1 if action == "inc" else -1, name=name)
                     code = ""
             else:
                 code = "err=invalid"
@@ -2123,13 +2252,22 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return data
         try:
             rid = _rid(request.path_params["rid"])
-            if "quantity" in data:
+            name = _clean(data.get("name"), 200)  # the card's name: one filtered read finds the record
+            if "delta" in data:
+                # the stepper: one more or one fewer than Archidekt holds now (two tabs add up)
+                delta = data.get("delta")
+                if not isinstance(delta, int) or isinstance(delta, bool) or abs(delta) > MAX_QUANTITY:
+                    raise CollectionError("invalid", "delta must be a whole number")
+                out = await service.set_quantity(who[0], rid, delta=delta, name=name)
+            elif "quantity" in data:
                 qty = data.get("quantity")
                 if not isinstance(qty, int) or isinstance(qty, bool) or qty < 0 or qty > MAX_QUANTITY:
                     raise CollectionError("invalid", "quantity must be a whole number")
-                out = await service.set_quantity(who[0], rid, qty)
+                out = await service.set_quantity(who[0], rid, qty, name=name)
             else:
-                out = await service.update(who[0], rid, data)
+                out = await service.update(
+                    who[0], rid, {k: v for k, v in data.items() if k != "name"}, name=name
+                )
         except CollectionError as exc:
             return _fail(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -2140,7 +2278,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if isinstance(who, Response):
             return who
         try:
-            out = await service.remove(who[0], _rid(request.path_params["rid"]))
+            name = _clean(request.query_params.get("name"), 200)
+            out = await service.remove(who[0], _rid(request.path_params["rid"]), name=name)
         except CollectionError as exc:
             return _fail(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -2217,7 +2356,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             if qty is not None and (not isinstance(qty, int) or isinstance(qty, bool) or qty < 1):
                 raise CollectionError("invalid", "quantity must be a whole number of 1 or more")
             if entry.get("id") is not None and str(entry["id"]).strip():
-                rec = row_out(await service._record(sub, _rid(entry["id"])))
+                rec = row_out(await service._record(sub, _rid(entry["id"]), _clean(entry.get("name"), 200)))
                 rows = [rec]
             elif entry.get("name"):
                 rows = await service.find_by_name(sub, str(entry["name"]))
@@ -2267,7 +2406,9 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 if session_id and service.scan is not None and not out["skipped"]:
                     service.scan.store.delete(str(session_id), sub)
             for r in changes.get("remove") or []:
-                gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]), progress=progress)
+                gone = await service.remove(
+                    sub, _rid(r["id"]), int(r["quantity"]), progress=progress, name=str(r.get("name") or "")
+                )
                 left = int(gone["row"]["quantity"]) if gone.get("row") else None
                 before = int(gone["removed"]["quantity"])
                 # as an added row: quantity is what the record holds now (0 once it is gone),
