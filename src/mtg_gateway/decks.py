@@ -3161,6 +3161,8 @@ class DeckService:
         # the card-name catalog the gateway keeps in memory (Scryfall asked only for a few names it
         # lacks), so the check costs no Archidekt call
         self.known_cards: Callable[[list[str]], Awaitable[dict[str, bool | None]]] | None = None
+        # names that are no card -> the card Scryfall's fuzzy match takes each for (scan/__init__.py)
+        self.suggest_cards: Callable[[list[str]], Awaitable[dict[str, str]]] | None = None
         # identifiers -> (Scryfall cards, not found); set when scanning is on. A proposal's added
         # cards are looked up once, to judge what the change does to the deck's legality.
         self.card_collection: Callable[[list[dict[str, str]]], Awaitable[tuple[list, list]]] | None = None
@@ -7847,12 +7849,23 @@ class DeckService:
             self._token(sub)
         except DeckError as exc:
             problems.append({"error": exc.kind, "message": str(exc)})
+        # Every problem at once: a list refused as a whole is still read change by change, so its
+        # card names are checked too and each change's own problem is listed.
+        names_of: list[Change] = []
         try:
             changes = parse_changes(raw_changes)
+            names_of = changes
         except DeckError as exc:
             problems.append({"error": exc.kind, "message": str(exc)})
+            for i, item in enumerate(raw_changes if isinstance(raw_changes, list) else []):
+                try:
+                    names_of += parse_changes([item])
+                except DeckError as one:
+                    message = str(one).replace("change 0:", f"change {i}:", 1)
+                    if message != str(exc):
+                        problems.append({"error": one.kind, "message": message})
         unknown: list[str] = []
-        adds = list(dict.fromkeys(c.card_name for c in changes if c.action == "add"))
+        adds = list(dict.fromkeys(c.card_name for c in names_of if c.action == "add"))
         if adds and self.known_cards is not None:
             try:
                 found = await self.known_cards(adds)
@@ -7860,17 +7873,26 @@ class DeckService:
             except Exception:
                 logger.exception("card-name check failed")
         if unknown:
+            meant: dict[str, str] = {}
+            if self.suggest_cards is not None:
+                try:
+                    meant = await self.suggest_cards(unknown)
+                except Exception:
+                    logger.warning("card-name suggestions failed", exc_info=True)
             problems.append(
                 {
                     "error": "unknown_cards",
                     "message": "No Magic card is called "
-                    + ", ".join(f"'{n}'" for n in unknown)
+                    + ", ".join(
+                        f"'{n}'" + (f" (did you mean '{meant[n]}'?)" if meant.get(n) else "") for n in unknown
+                    )
                     + (
                         " (unless the deck already has it)."
                         if len(unknown) == 1
                         else " (unless the deck already has them)."
                     ),
                     "unknown_cards": unknown,
+                    **({"did_you_mean": meant} if meant else {}),
                 }
             )
         client = current_client.get()

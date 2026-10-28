@@ -1336,6 +1336,20 @@ class ScanService:
             out[name] = found
         return out
 
+    async def did_you_mean(self, names: list[str]) -> dict[str, str]:
+        """For names that are no card, the card Scryfall's fuzzy match takes each for: one paced
+        lookup per name, at most ``MAX_CARD_CHECK_LOOKUPS``; a name with no match is left out."""
+        out: dict[str, str] = {}
+        for name in names[:MAX_CARD_CHECK_LOOKUPS]:
+            try:
+                card = await self.scryfall.named(name, fuzzy=True)
+            except ScryfallError:
+                continue
+            found = str(card.get("name") or "")
+            if found and found.casefold() != name.casefold():
+                out[name] = found
+        return out
+
     def guessed_names(self, sub: str) -> dict[str, str]:
         """Card names this member's scans matched from a misread name: matched name (lower case)
         -> what was read. A proposal adding one of these cards says the name was guessed."""
