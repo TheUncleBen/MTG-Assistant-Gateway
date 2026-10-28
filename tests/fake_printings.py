@@ -58,6 +58,33 @@ def _card(
     }
 
 
+GOBLIN_TOKEN_ORACLE = "0e3a9b5c-6c8a-4a5e-9f2d-1b7c2d4e5f60"  # invented
+GOBLIN_GUIDE_ORACLE = "1f4b0c6d-7d9b-4b6f-8a3e-2c8d3e5f6a71"  # invented
+
+
+def goblin_cards() -> list[dict[str, Any]]:
+    """Two printings of a Goblin token (layout token, which Scryfall's search leaves out unless
+    asked to include extras) and a Goblin creature card with a name that starts the same."""
+    out = []
+    for n, (code, name, number, released) in enumerate(
+        (
+            ("tm19", "Core Set 2019 Tokens", "9", "2018-07-13"),
+            ("tdmu", "Dominaria United Tokens", "7", "2022-09-09"),
+        ),
+        start=201,
+    ):
+        token = _card(n, code, name, number, released)
+        token.update(
+            oracle_id=GOBLIN_TOKEN_ORACLE, name="Goblin", layout="token", type_line="Token Creature — Goblin",
+            mana_cost="", cmc=0.0, set_type="token", rarity="common",
+        )  # fmt: skip
+        out.append(token)
+    guide = _card(210, "zen", "Zendikar", "126", "2009-10-02")
+    guide.update(oracle_id=GOBLIN_GUIDE_ORACLE, name="Goblin Guide", type_line="Creature — Goblin Scout")
+    out.append(guide)
+    return out
+
+
 def sol_ring_printings(fillers: int = 0) -> list[dict[str, Any]]:
     out = [
         _card(1, "cmr", "Commander Legends", "472", "2020-11-20", prices={"usd": "1.46"}),

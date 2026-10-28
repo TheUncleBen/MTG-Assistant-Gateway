@@ -7,9 +7,12 @@ not made in the card's finish moving the finish with it."""
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import parse_qs, urlparse
 
-from .fake_printings import SOL_RING_ORACLE, sol_ring_printings
+import pytest
+
+from .fake_printings import GOBLIN_TOKEN_ORACLE, SOL_RING_ORACLE, goblin_cards, sol_ring_printings
 from .test_browse_collection import Stack, api, linked, stack_options  # noqa: F401 - fixture
 
 
@@ -123,6 +126,62 @@ async def test_one_printing_by_set_and_number(stack: Stack) -> None:
         none = (await b.http.get(base + "&set=lea&number=999")).json()
         assert none["cards"] == [] and none["has_more"] is False
     finally:
+        await b.aclose()
+
+
+async def test_a_token_is_found_by_its_own_printing_and_lists_its_printings(stack: Stack) -> None:
+    """Ben, 2026-10-28: "Goblin token" listed two Goblin creature cards and no token. The picker
+    finds a row's card by its own set and number (GET /scan/api/printing), and the list asks
+    Scryfall to include extras (tokens, emblems), which its search leaves out otherwise."""
+    stack.sf.extra_cards = goblin_cards()
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/scan/api/printing?set=TM19&number=9")
+        assert r.status_code == 200, r.text
+        card = r.json()["card"]
+        assert card["oracle_id"] == GOBLIN_TOKEN_ORACLE and card["name"] == "Goblin"
+        assert card["layout"] == "token"
+        listed = (await b.http.get(f"/scan/api/prints?oracle_id={GOBLIN_TOKEN_ORACLE}")).json()
+        assert sorted(c["set"] for c in listed["cards"]) == ["tdmu", "tm19"]
+        assert all(c["name"] == "Goblin" for c in listed["cards"])
+        assert stack.sf.print_searches[-1]["include_extras"] == "true"
+        # a printing Scryfall doesn't have, and values that name none
+        missing = await b.http.get("/scan/api/printing?set=tm19&number=999")
+        assert missing.status_code == 404 and missing.json()["error"] == "not_found"
+        for bad in ("set=tm19", "number=9", "set=t%20m&number=9", "set=tm19&number=" + "9" * 30):
+            r = await b.http.get("/scan/api/printing?" + bad)
+            assert r.status_code == 400 and r.json()["error"] == "invalid", bad
+    finally:
+        await b.aclose()
+
+
+async def test_printings_wait_a_moment_for_the_accounts_other_lookups(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Many cards said Scryfall couldn't be reached: past four lookups at once an account's next
+    one was refused at once. It now waits a moment for a free place, and only then says busy."""
+    from mtg_gateway.scan import service as scan_service
+
+    stack.sf.extra_cards = sol_ring_printings()
+    scan = stack.h.app.state.gateway.scan
+    scan._lookups["user-1"] = scan_service.MAX_LOOKUPS_PER_USER  # four of the account's own running
+
+    async def done_soon() -> None:
+        await asyncio.sleep(0.3)
+        scan._lookups["user-1"] = scan_service.MAX_LOOKUPS_PER_USER - 1
+
+    b = await linked(stack)
+    try:
+        freed = asyncio.create_task(done_soon())
+        r = await b.http.get(f"/scan/api/prints?oracle_id={SOL_RING_ORACLE}")
+        await freed
+        assert r.status_code == 200 and r.json()["cards"], r.text
+        monkeypatch.setattr(scan_service, "LOOKUP_WAIT_SECONDS", 0.2)
+        scan._lookups["user-1"] = scan_service.MAX_LOOKUPS_PER_USER
+        r = await b.http.get(f"/scan/api/prints?oracle_id={SOL_RING_ORACLE}&finish=foil")
+        assert r.status_code == 429 and r.json()["error"] == "busy"
+    finally:
+        scan._lookups.pop("user-1", None)
         await b.aclose()
 
 

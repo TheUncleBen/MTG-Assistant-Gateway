@@ -296,6 +296,25 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
         )
 
+    @server.custom_route("/scan/api/printing", methods=["GET"], include_in_schema=False)
+    async def printing(request: Request) -> Response:
+        """One printing by ``set`` and ``number``: the printing picker finds a deck row's card by
+        its own printing before it lists the card's printings."""
+        who = api_user(request, write=False)
+        if isinstance(who, Response):
+            return who
+        qp = request.query_params
+        try:
+            card = await service.printing(qp.get("set", ""), qp.get("number", ""), owner=who[0])
+        except ScanError as exc:
+            return fail(exc)
+        keys = ("name", "oracle_id", "set", "collector_number", "layout", "type_line")
+        slim = {k: card.get(k) for k in keys}
+        return JSONResponse(
+            {"ok": True, "card": slim},
+            headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+        )
+
     @server.custom_route("/scan/api/prints", methods=["GET"], include_in_schema=False)
     async def prints(request: Request) -> Response:
         who = api_user(request, write=False)

@@ -488,6 +488,9 @@ class ScryfallClient:
             "dir": direction,
             "q": f"oracleid:{oracle_id}" + (f" {terms}" if terms else ""),
             "unique": "prints",
+            # a token's or an emblem's printings: Scryfall's search leaves these extras out
+            # otherwise (one card's oracle id only ever matches that card's own printings)
+            "include_extras": "true",
         }
         if page > 1:
             params["page"] = page

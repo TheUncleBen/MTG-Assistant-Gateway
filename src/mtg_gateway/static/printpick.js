@@ -28,14 +28,33 @@
     return e;
   }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  // a failed answer carries its HTTP status and the gateway's error kind (busy, rate_limited,
+  // not_found...) so the picker can wait and ask again, or say plainly what went wrong
   function getJSON(url) {
     return fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (d) {
-          if (!r.ok || !d || d.ok === false) throw new Error((d && d.message) || (r.status === 401 ? "you are signed out" : "the gateway did not answer"));
+          if (!r.ok || !d || d.ok === false) {
+            var err = new Error((d && d.message) || (r.status === 401 ? "you are signed out" : "the gateway did not answer"));
+            err.status = r.status;
+            err.kind = (d && d.error) || "";
+            err.wait = parseInt(r.headers.get("Retry-After") || "", 10) || 0;
+            throw err;
+          }
           return d;
         });
       });
+  }
+  // the account's other lookups (a deck page starts several) or Scryfall's own limit: wait a
+  // little and ask again, a few times, before saying so
+  function busy(err) { return !!err && (err.status === 429 || err.kind === "busy" || err.kind === "rate_limited"); }
+  function getPatient(url, tries) {
+    tries = tries || 0;
+    return getJSON(url).catch(function (err) {
+      if (!busy(err) || tries >= 3) throw err;
+      var ms = Math.min(5000, err.wait ? err.wait * 1000 : 800 * (tries + 1));
+      return new Promise(function (ok) { setTimeout(ok, ms); }).then(function () { return getPatient(url, tries + 1); });
+    });
   }
 
   // -- finishes: the deck's words (Normal, Foil, Etched) and Scryfall's (nonfoil, foil, etched) --
@@ -70,19 +89,41 @@
   function english(p) { return !p.lang || p.lang === "en"; }
   function flagText(p) { return preview(p) ? "Preview" : digital(p) ? "Digital only" : ""; }
 
-  // -- the data: a card's oracle id by name (once), and its printings a page at a time ----------
+  // -- the data: a card's oracle id (once), and its printings a page at a time -----------------
+  /* The row's own printing (set and number) names its card exactly: a token named "Goblin" is
+     that token, never a card whose name starts the same. Without one (or when Scryfall has no
+     such printing) the name must match exactly, a card's front face at least. */
   var oracleIds = Object.create(null);
   var pages = Object.create(null);
-  function oracleFor(name) {
+  function oracleFor(name, ref) {
+    if (ref && ref.set && ref.number) {
+      var pk = "print:" + String(ref.set).toLowerCase() + "#" + ref.number;
+      if (!oracleIds[pk]) {
+        oracleIds[pk] = getPatient("/scan/api/printing?set=" + encodeURIComponent(ref.set) + "&number=" + encodeURIComponent(ref.number))
+          .then(function (d) {
+            if (!d.card || !d.card.oracle_id) throw new Error("Scryfall does not know " + name);
+            return d.card.oracle_id;
+          });
+        oracleIds[pk].catch(function () { delete oracleIds[pk]; });
+      }
+      return oracleIds[pk].catch(function (err) {
+        if (err && (err.kind === "not_found" || err.kind === "invalid")) return oracleFor(name, null);
+        throw err;
+      });
+    }
     var key = name.toLowerCase();
     if (!oracleIds[key]) {
-      oracleIds[key] = getJSON("/scan/api/peek?names=" + encodeURIComponent(name)).then(function (d) {
+      oracleIds[key] = getPatient("/scan/api/peek?names=" + encodeURIComponent(name)).then(function (d) {
         var face = key.split(" // ")[0];
         var hit = (d.cards || []).filter(function (c) {
           var n = String(c.name || "").toLowerCase();
           return n === key || n.split(" // ")[0] === face;
-        })[0] || (d.cards || [])[0];
-        if (!hit || !hit.oracle_id) throw new Error("Scryfall does not know " + name);
+        })[0];
+        if (!hit || !hit.oracle_id) {
+          var err = new Error("Scryfall does not know a card named \u201c" + name + "\u201d");
+          err.kind = "not_found";
+          throw err;
+        }
         return hit.oracle_id;
       });
       oracleIds[key].catch(function () { delete oracleIds[key]; });
@@ -95,7 +136,7 @@
       if (params && params[k] && !(k === "order" && params[k] === "newest")) q += "&" + k + "=" + encodeURIComponent(params[k]);
     });
     if (!pages[q]) {
-      pages[q] = getJSON("/scan/api/prints?" + q);
+      pages[q] = getPatient("/scan/api/prints?" + q);
       pages[q].catch(function () { delete pages[q]; });
     }
     return pages[q];
@@ -105,7 +146,7 @@
   function oneFor(oid, ref) {
     var q = "oracle_id=" + encodeURIComponent(oid) + "&set=" + encodeURIComponent(ref.set) + "&number=" + encodeURIComponent(ref.number);
     if (!pages[q]) {
-      pages[q] = getJSON("/scan/api/prints?" + q);
+      pages[q] = getPatient("/scan/api/prints?" + q);
       pages[q].catch(function () { delete pages[q]; });
     }
     return pages[q];
@@ -371,7 +412,7 @@
     status.textContent = "Looking up printings…";
     var seq = ++st.seq;
     var mine = st;
-    (opts.oracleId ? Promise.resolve(opts.oracleId) : oracleFor(opts.name)).then(function (oid) {
+    (opts.oracleId ? Promise.resolve(opts.oracleId) : oracleFor(opts.name, opts.current)).then(function (oid) {
       if (st !== mine || seq !== st.seq) return;
       st.oid = oid;
       load(true);
@@ -420,11 +461,21 @@
       failed(err);
     });
   }
+  // what went wrong, in plain words
+  function why(err) {
+    if (!err) return "The gateway did not answer.";
+    if (err.status === 401) return "You are signed out. Sign in again, then retry.";
+    if (busy(err)) return "Scryfall is busy with other lookups right now. Wait a moment, then retry.";
+    if (err.kind === "not_found") return (err.message || "Scryfall does not know this card") + ".";
+    if (err.kind === "unavailable") return "Scryfall is not answering right now.";
+    if (!err.status) return "The gateway did not answer. Check the connection, then retry.";
+    return (err.message || "The gateway did not answer") + ".";
+  }
   function failed(err) {
     st.status.textContent = "";
     st.status.className = "ppstatus notice error";
-    st.status.appendChild(document.createTextNode("Printings could not be loaded: " + ((err && err.message) || "no connection") + ". "));
-    var again = el("button", "btn small", "Try again");
+    st.status.appendChild(document.createTextNode("Printings could not be loaded. " + why(err) + " "));
+    var again = el("button", "btn small", "Retry");
     again.type = "button";
     again.addEventListener("click", function () {
       st.status.className = "ppstatus";

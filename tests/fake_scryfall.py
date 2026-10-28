@@ -87,6 +87,10 @@ def _archidekt_cards() -> dict[str, dict[str, Any]]:
     return out
 
 
+# Layouts Scryfall's search counts as extras (left out unless include_extras=true).
+EXTRA_LAYOUTS = ("token", "double_faced_token", "emblem", "art_series", "planar", "scheme", "vanguard")
+
+
 class FakeScryfall:
     def __init__(self) -> None:
         self.cards: list[dict[str, Any]] = []
@@ -183,7 +187,7 @@ class FakeScryfall:
         return None
 
     def by_print(self, set_code: str, number: str) -> dict[str, Any] | None:
-        for c in self.cards:
+        for c in self.cards + self.extra_cards:
             if c["set"] == set_code.lower() and c["collector_number"].lower() == number.lower():
                 return c
         return None
@@ -269,6 +273,8 @@ class FakeScryfall:
         if not m2:
             return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
         found = [c for c in self.cards + self.extra_cards if _oracle(c) == m2.group(1)]
+        if q.get("include_extras") != "true":  # Scryfall leaves tokens, emblems and the like out
+            found = [c for c in found if c.get("layout") not in EXTRA_LAYOUTS]
         for t in terms[1:]:
             key, _, value = t.partition(":")
             if key == "is" and value in ("nonfoil", "foil", "etched"):
