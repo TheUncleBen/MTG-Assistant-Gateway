@@ -1795,6 +1795,14 @@ REPORT_PAGE_CSS = (
   border-bottom:1px solid var(--border-soft);margin:0 0 .5rem}
 .rv-page .rv-sec .ui-table .th{background:transparent;border-bottom:1px solid var(--border-soft)}
 .rv-page .rv-seats .tr.mine{background:var(--orange-tint)}
+/* the table narrower than 20rem (a phone at large text, the smallest phones): the win rate goes
+   under the deck's name with a longer meter, instead of squeezing the name to a letter a line */
+.rv-page .rv-seats{container-type:inline-size}
+@container (max-width:20rem){
+  .rv-page .rv-seats .tr{grid-template-columns:minmax(0,1fr)}
+  .rv-page .rv-seats .th{display:none}
+  .rv-page .rv-seats .rate{margin-top:.3rem}
+  .rv-page .rv-seats .meter{max-width:10rem} }
 .rv-page .rv-seats .rate{display:flex;align-items:center;gap:.5rem;font-variant-numeric:tabular-nums}
 .rv-page .rv-seats .meter{flex:1;max-width:5rem;height:8px;border-radius:4px;background:var(--surface-2);
   overflow:hidden}
