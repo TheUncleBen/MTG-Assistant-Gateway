@@ -1922,7 +1922,9 @@ async def test_a_busy_research_refusal_says_when_to_retry() -> None:
     until the member's oldest running call is stopped at the latest (the call deadline)."""
     from mtg_gateway.mf_proxy import busy_retry_after, is_busy
 
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
+    proxy = MysticForgeProxy(
+        "http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()), queue_wait=0.2
+    )
     proxy._listed = True
     proxy._in_flight["u1"] = 2
     proxy._started["u1"] = [time.monotonic() - 20, time.monotonic() - 5]
@@ -1930,11 +1932,45 @@ async def test_a_busy_research_refusal_says_when_to_retry() -> None:
     assert is_busy(out) and out.structured_content["error"] == "busy"
     assert 99 <= busy_retry_after(out) <= 100  # 120 s deadline, 20 s gone
     assert out.structured_content["message"].startswith("2 research calls")
+    assert "still running after a short wait" in out.structured_content["message"]
     # a call that ran and ended frees its slot and its start time
     proxy._in_flight.clear()
     proxy._started.clear()
     ok = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
     assert not ok.is_error and proxy._started == {} and proxy._in_flight == {}
+
+
+async def test_a_research_call_past_the_members_share_waits_its_turn_and_says_so() -> None:
+    """AT-38: Claude sends tool calls in parallel, and a third research call was refused at once
+    (2 per member). It now waits, briefly and bounded (queue_wait), for one of the member's calls
+    to finish, runs, and its answer says it waited. The share itself is unchanged."""
+    import anyio
+
+    proxy = MysticForgeProxy(
+        "http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()), queue_wait=5.0
+    )
+    proxy._listed = True
+    proxy._in_flight["u1"] = 2
+    proxy._started["u1"] = [time.monotonic(), time.monotonic()]
+    seen: list[int] = []
+
+    async def finish_one() -> None:
+        await anyio.sleep(1.2)
+        seen.append(proxy._in_flight["u1"])
+        proxy._in_flight["u1"] = 1
+        proxy._started["u1"].pop()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(finish_one)
+        out = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
+    assert seen == [2] and not out.is_error, out  # it ran only once a slot was free
+    text = out.content[0].text
+    assert text.startswith("(This call waited 1 s for your other research calls to finish.)"), text
+    assert proxy._in_flight == {"u1": 1}  # its own slot is given back
+    assert proxy.max_calls_per_user == 2  # never raised
+    # no wait, no note
+    plain = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u2")
+    assert "waited" not in json.dumps(plain.model_dump(mode="json"))
 
 
 class _ListingDown:

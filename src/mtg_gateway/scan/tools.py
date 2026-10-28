@@ -45,7 +45,7 @@ def _sub() -> str:
 
 
 def _err(exc: ScanError) -> dict[str, Any]:
-    return {"ok": False, "error": exc.kind, "message": str(exc)}
+    return {"ok": False, "error": exc.kind, "message": str(exc), **getattr(exc, "extra", {})}
 
 
 # Card fields the Scan page draws with (image links, the Scryfall page, the prices behind its
@@ -137,8 +137,9 @@ def add_scan_tools(
             "out on paper; the newer ones passed over are listed in `newer_printings`. "
             "Returns a decklist and `changes` ready for propose_deck_changes, without conflicts. "
             "In an app that shows cards, the user sees the recognized cards with pictures, can drop some, "
-            "pick among suggestions and confirm; wait for that before proposing. "
-            "Does not touch Archidekt."
+            "pick among suggestions and confirm; wait for that before proposing. One lookup per account "
+            "runs at a time: another waits its turn briefly (waited_seconds), else is refused busy with "
+            "suggested_wait (seconds). Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PICKER_CARD_URI) if links is not None else None,
@@ -152,12 +153,15 @@ def add_scan_tools(
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
                 raise ScanError("invalid", "give `cards` or `text` with at least one card")
-            results = await service.resolve(inputs, owner=_sub())
+            waited: list[float] = []
+            results = await service.resolve(inputs, owner=_sub(), waited=waited)
             results = await _ask_about_ambiguous(ctx, results)
         except ScanError as exc:
             return with_card(_err(exc), None)
         described = service.describe(results)
         out = {"ok": True, **_for_assistant(described)}
+        if waited and waited[0] >= 1:  # it waited for the account's other card lookup (AT-38)
+            out["waited_seconds"] = round(waited[0])
         return with_card(out, {"rows": _picker_rows(described["cards"])} if links is not None else None)
 
     async def _ask_about_ambiguous(ctx: Context, results: list[Any]) -> list[Any]:

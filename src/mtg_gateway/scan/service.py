@@ -52,6 +52,12 @@ MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per acco
 LOOKUP_WAIT_SECONDS = 4.0
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
+# A second resolve call from one account waits this long for the first to finish (assistants send
+# calls in parallel, AT-38) before it is refused busy. The refusal suggests a wait (suggested_wait,
+# seconds) rather than a retry_after: the running call's end is not known (its budget bounds its
+# extra lookups, not each Scryfall answer).
+RESOLVE_WAIT_SECONDS = 15.0
+SUGGESTED_WAIT_SECONDS = 10
 MIN_PREFIX = 4
 # The card search's picker lists (sets, blocks, types): read again once they are a day old, and
 # a read that came back incomplete (Scryfall busy or down) is tried again after a minute.
@@ -128,9 +134,10 @@ _SKIP = re.compile(r"^\s*(//|#|$)|^\s*(deck|sideboard|commander|maybeboard|compa
 class ScanError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, unavailable, rate_limited, busy."""
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, extra: dict[str, Any] | None = None):
         super().__init__(message)
         self.kind = kind
+        self.extra = dict(extra or {})  # fields the refusal carries (suggested_wait for busy)
 
 
 @dataclass
@@ -460,6 +467,7 @@ class ScanService:
         self.art_matcher = art_matcher
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
+        self.queue_wait = RESOLVE_WAIT_SECONDS
         self._lookups: dict[str, int] = {}
         # the picker lists last read (search_options), when, and the read running now
         self._options: dict[str, Any] | None = None
@@ -469,17 +477,31 @@ class ScanService:
         self._options_task: asyncio.Task[None] | None = None
 
     # -- resolution -----------------------------------------------------------
-    async def resolve(self, inputs: list[CardInput], *, owner: str | None = None) -> list[Resolution]:
+    async def resolve(
+        self, inputs: list[CardInput], *, owner: str | None = None, waited: list[float] | None = None
+    ) -> list[Resolution]:
         """Resolve ``inputs``. With ``owner`` set, one call per account runs at a time; a second
-        concurrent call is rejected (kind ``busy``) rather than queued behind the shared pacer."""
+        concurrent call waits up to ``queue_wait`` seconds for its turn (the seconds it waited go
+        on ``waited`` when it waited at all), then is rejected (kind ``busy``, with
+        suggested_wait) rather than queued behind the shared pacer."""
         if not inputs:
             raise ScanError("invalid", "nothing to resolve")
         if len(inputs) > MAX_RESOLVE_CARDS:
             raise ScanError("invalid", f"at most {MAX_RESOLVE_CARDS} cards per call")
         if owner is None:
             return await self._resolve(inputs)
+        start = time.monotonic()
+        while owner in self._in_flight and time.monotonic() - start < self.queue_wait:
+            await asyncio.sleep(0.05)
         if owner in self._in_flight:
-            raise ScanError("busy", "another card lookup for your account is still running; wait for it")
+            raise ScanError(
+                "busy",
+                "another card lookup for your account is still running after a short wait; try again "
+                "when it has finished",
+                extra={"suggested_wait": SUGGESTED_WAIT_SECONDS},
+            )
+        if waited is not None and time.monotonic() - start >= 0.05:
+            waited.append(time.monotonic() - start)
         self._in_flight.add(owner)
         token = art_owner.set(owner)  # gallery builds this call starts count against this member
         try:
