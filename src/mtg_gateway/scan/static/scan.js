@@ -38,6 +38,8 @@
                           // has left the frame (no outline for a few frames)
     rejectedKey: null,    // an auto-add the user undid: not re-added until the card has left
     noCardFrames: 0,      // consecutive continuous frames with no card outline
+    lastGuideKey: null,   // the card last offered from a read of the dashed box without an outline;
+                          // not offered again until the box reads something else or nothing
     lastRead: null,       // {key, res}: the previous frame's read, reused when a frame reads the same
     stats: { frames: 0, lookups: 0, reused: 0, skipped: 0 },
     ocr: null,            // Tesseract worker
@@ -222,7 +224,37 @@
     if (id === 'list') b.append(' ', h('span', { class: 'badge', id: 'list-badge', text: String(totalCards()) }));
     return b;
   }
-  function renderBadge() { const b = $('#list-badge'); if (b) b.textContent = String(totalCards()); }
+  function renderBadge() { const b = $('#list-badge'); if (b) b.textContent = String(totalCards()); drawTally(); }
+
+  /* The running count over the viewfinder while scanning: "12 cards", and the scan's value after it
+     once the gateway prices scanned cards. A tap opens the list. Hidden while the list is empty. */
+  function renderTally() {
+    const b = h('button', { type: 'button', class: 'tally', id: 'scan-tally', hidden: true, onclick: () => showTab('list') });
+    queueMicrotask(drawTally);
+    return b;
+  }
+  function drawTally() {
+    const b = $('#scan-tally'); if (!b) return;
+    const n = totalCards();
+    b.hidden = n === 0;
+    const hook = (window.__scan && window.__scan.listValue) || listValue;
+    let value = null;
+    try { value = hook(state.items); } catch (e) { value = null; }
+    let money = '';
+    if (value && typeof value.amount === 'number' && isFinite(value.amount)) {
+      try { money = new Intl.NumberFormat(undefined, { style: 'currency', currency: value.currency || 'USD' }).format(value.amount); }
+      catch (e) { money = ''; }
+    }
+    b.textContent = plural(n, 'card') + (money ? ' · ' + money : '');
+    b.setAttribute('aria-label', plural(n, 'card') + (money ? ', worth ' + money + ',' : '') + ' in this scan. Open the list');
+  }
+  /* The scan's value for the running count. Decision C5 hook: the gateway does not price scanned
+     cards yet, so this answers null and only the count shows. When C5's daily prices reach the scan
+     results (a price per printing and finish on each line's card), return {amount, currency} here:
+     the sum of quantity times price over state.items, or null while any matched line has no price
+     (a part-priced total would mislead). The count then shows "12 cards · $34.50". The app's camera
+     panel shows the page's events (ScanGlue.kt), so the value would need adding to those too. */
+  function listValue() { return null; }
 
   function showTab(id) {
     if (state.tab === 'camera' && id !== 'camera') { state.continuous = false; stopCamera(); }
@@ -246,8 +278,8 @@
   const SET_CODE = /^[A-Z0-9]{2,6}$/;
 
   /* One row that never wraps: the Set box (its × inside; "Set code, blank for any" is its tooltip,
-     and the help line is read out, not shown), the Foil and Auto toggles and, inside the Android
-     app, the phone camera button at the end. */
+     and the help line is read out, not shown) and the Foil and Auto toggles. Inside the Android app
+     Auto opens the phone camera scanning on its own (see phoneCamera). */
   const SET_HELP = 'Set code, blank for any';
   function renderScanOptions() {
     const bar = h('div', { class: 'scan-opts', role: 'group', 'aria-label': 'Scan options' });
@@ -275,22 +307,33 @@
       onclick: () => { const on = sw.getAttribute('aria-checked') !== 'true'; sw.setAttribute('aria-checked', on ? 'true' : 'false'); scanOpts.setFoil(on); } },
       'Foil');
     const auto = h('button', { type: 'button', id: 'auto-switch', class: 'switch auto', role: 'switch', 'aria-checked': state.continuous ? 'true' : 'false',
-      onclick: () => { if (state.continuous) stopContinuous(); else if (!startContinuous()) setStatus('Open the camera first to scan continuously.'); } },
+      title: phoneCamera() ? 'Scan with the phone camera, adding cards as they are read' : null,
+      onclick: () => {
+        if (phoneCamera()) openPhoneCamera(true);
+        else if (state.continuous) stopContinuous();
+        else if (!startContinuous()) setStatus('Open the camera first to scan continuously.');
+      } },
       'Auto');
     document.addEventListener('scan:continuous', (e) => {
       auto.setAttribute('aria-checked', e.detail && e.detail.on ? 'true' : 'false');
       const sh = $('#shutter'); if (sh) sh.classList.toggle('live', !!(e.detail && e.detail.on));
     }, camSignal());
     bar.append(field, help, sw, auto);
-    // Inside the Android app, its own camera (torch brightness, zoom) is one tap away. The app
-    // provides window.MtgNative; a browser has no such object and sees no button.
-    const native = window.MtgNative;
-    if (native && typeof native.openCamera === 'function') {
-      bar.append(h('button', { type: 'button', id: 'phone-camera', 'aria-label': 'Phone camera', title: 'Phone camera',
-        onclick: () => native.openCamera() }, icon('camera')));
-    }
     applySet();
     return bar;
+  }
+
+  /* Inside the Android app (it provides window.MtgNative; a browser has none) the orange shutter,
+     the viewfinder and Auto open the phone's own camera, which has the torch strength, zoom and
+     exposure a page cannot reach, so the same button gives the best camera on each platform. The
+     page's own camera is not started there: the app's camera panel hands each photo to this page
+     (ScanGlue.kt). openCameraAuto (apps from 0.7.46) opens it with Auto on; an older app opens it
+     and Auto is switched on there. */
+  const phoneCamera = () => !!(window.MtgNative && typeof window.MtgNative.openCamera === 'function');
+  function openPhoneCamera(auto) {
+    const n = window.MtgNative;
+    if (!n) return;
+    if (auto && typeof n.openCameraAuto === 'function') n.openCameraAuto(); else n.openCamera();
   }
 
   /* Listeners the camera tab's controls put on document are tied to one render: re-rendering the tab
@@ -301,7 +344,12 @@
   function renderCamera(panel) {
     if (camListeners) camListeners.abort();
     camListeners = new AbortController();
-    const video = h('video', { playsinline: true, autoplay: true, muted: true });
+    const app = phoneCamera();
+    // In the app the viewfinder is one big button that opens the phone camera.
+    const video = app
+      ? h('button', { type: 'button', class: 'phone-cam', id: 'open-phone-camera', onclick: () => openPhoneCamera(false) },
+        h('span', { class: 'cap' }, cameraIcon(), 'Open the phone camera'))
+      : h('video', { playsinline: true, autoplay: true, muted: true });
     const torch = h('button', { type: 'button', class: 'torch', id: 'torch', hidden: true, 'aria-pressed': 'false',
       'aria-label': 'Torch', title: 'Torch',
       onclick: () => setTorch(!getTorch()).then(() => torch.setAttribute('aria-pressed', getTorch() ? 'true' : 'false')) },
@@ -310,20 +358,22 @@
     // whenever the status text carries the glare warning.
     const glare = h('span', { class: 'glare-hint', id: 'glare-hint', role: 'status', hidden: true },
       icon('alert'), 'Glare: tilt the card away from the light');
-    const cam = h('div', { class: 'camera', id: 'camera' }, video,
+    const cam = h('div', { class: 'camera' + (app ? ' app' : ''), id: 'camera' }, video,
       h('div', { class: 'guide' }, h('div', { class: 'title' })),
-      h('div', { class: 'flash', id: 'flash' }), torch, glare);
+      h('div', { class: 'flash', id: 'flash' }), renderTally(), torch, glare);
     // Under the viewfinder, not over it: at large text sizes it would cover the dashed name box.
-    const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: 'Fit the card in the frame, name in the dashed box.' });
+    const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app
+      ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
+      : 'Fit the card in the frame, name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
     // open the camera with one, the app's file chooser never does); the shutter is the camera.
     const file = h('input', { type: 'file', accept: 'image/*', id: 'photo-file', class: 'sr',
       onchange: (e) => e.target.files[0] && scanFile(e.target.files[0]) });
-    const shutter = h('button', { class: 'shutter', id: 'shutter', title: 'Scan card', 'aria-label': 'Scan card',
-      onclick: () => captureFrame(video) }, cameraIcon(), h('span', { class: 'sr', text: 'Scan' }));
-    // Photo, the capture button in the middle, Type: one row (the app's phone camera button sits
-    // in the options row, so nothing pushes Type onto a row of its own).
+    const shutterLabel = app ? 'Scan with the phone camera' : 'Scan card';
+    const shutter = h('button', { class: 'shutter', id: 'shutter', title: shutterLabel, 'aria-label': shutterLabel,
+      onclick: () => (app ? openPhoneCamera(false) : captureFrame(video)) }, cameraIcon(), h('span', { class: 'sr', text: 'Scan' }));
+    // Photo, the capture button in the middle, Type: one row.
     const controls = h('div', { class: 'controls' },
       h('label', { class: 'btn ctl', for: 'photo-file', title: 'Scan a photo from your pictures' }, icon('image'), h('span', { text: 'Photo' })), shutter,
       h('button', { class: 'ctl', title: 'Type the card name instead', onclick: () => showTab('type') }, icon('edit'), h('span', { text: 'Type' })));
@@ -337,7 +387,10 @@
     cam.after(camCtl);
     cam.append(renderToast());
     status.after(renderUnidentified());
-    startCamera(video).then(() => { if (cfg.ocr) ensureOcr(); });
+    // Text recognition starts loading with the camera (in the app, at once: the phone camera's
+    // first photo needs it, and the glue starts it again when that camera opens).
+    if (app) { if (cfg.ocr) ensureOcr(); }
+    else startCamera(video).then(() => { if (cfg.ocr) ensureOcr(); });
     if (state.pending) showResult(state.pending);
   }
 
@@ -598,11 +651,10 @@
     const gw = ew * 0.78, gh = gw * 88 / 63;
     return { scale, offX, offY, gw, gh, gx: (ew - gw) / 2, gy: (eh - gh) / 2 };
   }
-  function titleRegion(video, el) {
-    const g = guideGeometry(video, el);
-    const tx = g.gx + g.gw * 0.04, ty = g.gy + g.gh * 0.04, tw = g.gw * 0.92 * 0.80, th = g.gh * 0.085; // skip the mana cost on the right
-    return { x: (tx - g.offX) / g.scale, y: (ty - g.offY) / g.scale, w: tw / g.scale, h: th / g.scale };
-  }
+  /* The dashed name box and the info block inside a card-shaped box (the guide, in pixels of the
+     picture): the name box skips the mana cost on the right. */
+  function guideTitleRegion(g) { return { x: g.x + g.w * 0.04, y: g.y + g.h * 0.04, w: g.w * 0.92 * 0.80, h: g.h * 0.085 }; }
+  function titleRegion(video, el) { return guideTitleRegion(guideRegion(video, el)); }
 
   function preprocess(source, region, targetH) {
     targetH = targetH || 96;
@@ -668,11 +720,7 @@
   function infoRegionOf(gx, gy, gw, gh) {
     return { x: gx + gw * 0.03, y: gy + gh * 0.925, w: gw * 0.44, h: gh * 0.06 };
   }
-  function infoRegion(video, el) {
-    const g = guideGeometry(video, el);
-    const r = infoRegionOf(g.gx, g.gy, g.gw, g.gh);
-    return { x: (r.x - g.offX) / g.scale, y: (r.y - g.offY) / g.scale, w: r.w / g.scale, h: r.h / g.scale };
-  }
+  function infoRegion(video, el) { const g = guideRegion(video, el); return infoRegionOf(g.x, g.y, g.w, g.h); }
 
   /* "0472 R\nCMR • EN" -> {number: '472', rarity: 'R', set: 'cmr', lang: 'en', foil: true|false|null}.
      Collector numbers lose their leading zeros, which is how Scryfall keys them. */
@@ -760,7 +808,7 @@
       const plain = state.continuous ? null : { source: frame, region: titleRegion(video, cam), info: infoRegion(video, cam) };
       const r = flatRegions(flat); await scanRegion(flat.canvas, r.title, r.info, flat, plain); return;
     }
-    if (state.continuous) { noCardFrame(); return; } // no outline: nothing to read, and no lookup
+    if (state.continuous) { await noOutlineFrame(frame, guideRegion(video, cam)); return; }
     await scanRegion(frame, titleRegion(video, cam), infoRegion(video, cam), null);
   }
 
@@ -860,8 +908,10 @@
   /* source: the flattened card or the raw frame; region/info: title and info crops in its pixels;
      flat: the flattening result (corners, score, sideways) or null when the guide box was used as is.
      plain: { source, region, info } as read without an outline, for a sideways outline that reads
-     no name either way up: it may have been a box inside an upright card (its art), not a card. */
-  async function scanRegion(source, region, info, flat, plain) {
+     no name either way up: it may have been a box inside an upright card (its art), not a card.
+     opts.guide: Auto reading the dashed box because no outline was found (noOutlineFrame). */
+  async function scanRegion(source, region, info, flat, plain, opts) {
+    const guide = !!(opts && opts.guide);
     const cam = $('#camera'); const shutter = $('#shutter');
     cam && cam.classList.add('busy'); if (shutter) shutter.disabled = true;
     setStatus('Reading the card name…');
@@ -873,6 +923,9 @@
       const glareHint = glare >= T.glare_ratio ? ' Glare on the card: tilt it away from the light.' : '';
       const text = cleanOcr(ocr.text);
       if (text.length < 3 && flat && flat.sideways && plain) return await scanRegion(plain.source, plain.region, plain.info, null);
+      if (guide && (text.length < 3 || (ocr.confidence != null && ocr.confidence < T.min_ocr_confidence))) {
+        guideNothing(); return; // an empty box, or the table read as letters: nothing to look up
+      }
       if (text.length < 3) {
         // Say which step failed: no card outline at all is a background or framing problem, an
         // outline with no readable name is focus, light or glare.
@@ -911,7 +964,7 @@
       }
       res.ocr = { text, confidence: ocr.confidence, strip: strip.toDataURL('image/png'), info: infoRead,
         glare, flattened: !!flat, edges: flat ? flat.score : null, sampled: flat ? flat.sampled : null,
-        picture: state.lastPicture };
+        picture: state.lastPicture, guide };
       if (state.continuous) { await handleContinuous(res, glareHint); return; }
       state.pending = res; showResult(res);
       setStatus((res.card ? 'Matched. Tap Add, or pick another card.' : 'No match. Pick from the suggestions or type the name.') + glareHint);
@@ -982,10 +1035,17 @@
      (a title cut short by the strip could not have been that card), and the title was read cleanly
      (OCR confidence known and at or above auto_add_confidence, no glare). It is added without a
      tap. 'unsure': a card was found but something was shaky, so it waits for a tap. 'failed': no
-     card; the read goes to the unidentified list for later. */
+     card; the read goes to the unidentified list for later. Never certain: a read of the dashed box
+     without a card outline (it may not be a card), and a card from another set than the one asked
+     for. The set comes from the collector line or the set lock; a card outside it means the line
+     was misread (an info strip read "FERC" for FRC, say, which no set is called) or the lock does
+     not fit, and with the line its foil star is in doubt too, so the person checks. */
   async function tierOf(res) {
     if (!res || !res.card) return 'failed';
     const ocr = res.ocr || {};
+    if (ocr.guide) return 'unsure';
+    const asked = String((res.input && res.input.set) || '').toLowerCase();
+    if (asked && String(res.card.set || '').toLowerCase() !== asked) return 'unsure';
     const clean = ocr.confidence != null && ocr.confidence >= T.auto_add_confidence && !(ocr.glare >= T.glare_ratio);
     if (!clean || res.conflict || (res.art && res.art.status === 'mismatch')) return 'unsure';
     if (res.status === 'printing') return 'certain';
@@ -1013,17 +1073,35 @@
   const emit = (name, detail) => document.dispatchEvent(new CustomEvent('scan:' + name, { detail }));
 
   /* A continuous frame with no card outline: after a few in a row the card has left the frame,
-     so the same card may be added again and an undone card may come back. A long run of them
-     means the edges cannot be found (busy or same-colour background, geometry.js missing), so
-     say what to do, since continuous mode reads nothing without an outline. */
+     so the same card may be added again and an undone card may come back. */
   const NO_CARD_FRAMES = 3;
-  const NO_EDGES_HINT_FRAMES = 8;
   function noCardFrame() {
     state.noCardFrames++;
     if (state.noCardFrames >= NO_CARD_FRAMES) { state.lastAutoKey = null; state.rejectedKey = null; }
-    if (state.noCardFrames === NO_EDGES_HINT_FRAMES) {
-      setStatus('Can’t find the card’s edges: use a plain, contrasting background (a light one for a black-bordered card), or tap the shutter.');
-    }
+  }
+
+  /* Auto with no card outline in the frame. The outline is what makes a read safe to add on its
+     own, so the first frames without one read nothing (the card may still be on its way in). After
+     GUIDE_READ_FRAMES of them in a row, and every GUIDE_READ_FRAMES after that, the dashed box is
+     read as it is, as the shutter does: a dark mat, a black-bordered card or a busy table can hide
+     the edges of a card that is there. A card found that way is only ever offered for a tap, never
+     added on its own (tierOf), and not offered again until the box has read something else or
+     nothing; a read that places no card is let go, never kept in the unidentified list (the frame
+     may hold no card at all). guide: the dashed card frame in the source's pixels. Returns 'read'
+     when the box placed a card (offered, or the one already offered), else 'no-card'. The Android
+     app's glue (ScanGlue.kt) calls it for each photo without an outline. */
+  const GUIDE_READ_FRAMES = 4;
+  const NO_EDGES_HINT = 'Can’t find the card’s edges or a name in the dashed box. Lay the card on a plain background that contrasts with its border (a light one for a black-bordered card), or tap the shutter.';
+  let guideOutcome = null; // what the last read of the dashed box came to: 'offered', 'still' or null
+  function guideNothing() { state.lastGuideKey = null; guideOutcome = null; setStatus(NO_EDGES_HINT); }
+  async function noOutlineFrame(source, guide) {
+    noCardFrame();
+    const n = state.noCardFrames;
+    if (n < GUIDE_READ_FRAMES || n % GUIDE_READ_FRAMES !== 0) return 'no-card';
+    guideOutcome = null;
+    if (state.ocrState === 'missing' || state.ocrState === 'failed') { guideNothing(); return 'no-card'; }
+    await scanRegion(source, guideTitleRegion(guide), infoRegionOf(guide.x, guide.y, guide.w, guide.h), null, null, { guide: true });
+    return guideOutcome ? 'read' : 'no-card';
   }
 
   function keepUnidentified(res, glareHint) {
@@ -1040,7 +1118,9 @@
   }
 
   async function handleContinuous(res, glareHint) {
+    if (res.ocr && res.ocr.guide) { offerGuideRead(res, glareHint); return; }
     state.noCardFrames = 0; // a frame with a title read had a card in it
+    state.lastGuideKey = null;
     const tier = await tierOf(res);
     if (tier === 'certain') {
       const key = lineKey(res);
@@ -1066,6 +1146,22 @@
       return;
     }
     keepUnidentified(res, glareHint);
+  }
+
+  /* A card read from the dashed box without an outline: offered for a tap once (see noOutlineFrame). */
+  function offerGuideRead(res, glareHint) {
+    if (!res.card) { guideNothing(); return; }
+    const key = lineKey(res);
+    if (key === state.lastGuideKey) {
+      guideOutcome = 'still';
+      setStatus('Still ' + res.card.name + '. Show the next card.');
+      return;
+    }
+    state.lastGuideKey = key; guideOutcome = 'offered';
+    state.pending = res; showResult(res);
+    setStatus('Can’t find the card’s edges, so this was read from the dashed box. Check it: tap Add, or pick another card.' + (glareHint || ''));
+    buzz([20, 40, 20]);
+    emit('unsure', { name: res.card.name, status: res.status, guide: true });
   }
 
   /* Undo the last automatic add: one copy comes off that line (the line goes when it reaches 0),
@@ -1102,6 +1198,7 @@
     const video = root.querySelector('video');
     if (state.continuous || !video) return false;
     state.continuous = true; state.lastAutoKey = null; state.rejectedKey = null; state.noCardFrames = 0; state.lastRead = null;
+    state.lastGuideKey = null;
     emit('continuous', { on: true });
     setStatus('Scanning. Hold each card in the frame until it is added.');
     continuousLoop(video);
@@ -1142,6 +1239,7 @@
     meta.append(h('div', { class: 'status status-' + res.status, text: statusLabel(res) }));
     // A note the status label does not already carry, such as "unknown set code, matched by name".
     if (res.note && res.status !== 'fuzzy' && res.status !== 'not_found') meta.append(h('div', { class: 'note', text: res.note }));
+    if (res.ocr && res.ocr.guide) meta.append(h('div', { class: 'note', text: 'Read from the dashed box: the card’s edges were not found. Check the name, printing and foil before adding.' }));
     if (res.ocr) meta.append(h('div', { class: 'ocr', text: 'read: ' + res.ocr.text + (res.ocr.confidence != null ? ' (' + Math.round(res.ocr.confidence) + '%)' : '') }));
     if (res.art && res.art.note && res.status !== 'fuzzy') meta.append(h('div', { class: 'muted art-note', text: 'Artwork: ' + res.art.note }));
     if (res.suggestions && res.suggestions.length) {
@@ -1697,7 +1795,8 @@
   window.__scan = { state, cleanOcr, preprocess, addItem, scanRegion, showTab, api,
     parseInfoLine, cardRequest, infoRegionOf, setSetLock, getSetLock, setFoilDefault, getFoilDefault,
     flattenCard, flatTitleRegion, flatInfoRegion, glareOf, torchSupported, setTorch, getTorch, cameraRanges, setCamera,
-    tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, nameIsComplete, ensureOcr,
+    tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, noOutlineFrame, nameIsComplete, ensureOcr,
+    scanFile, guideTitleRegion, listValue,
     loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker };
 
   loadDraft();

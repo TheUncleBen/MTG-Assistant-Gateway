@@ -917,6 +917,12 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
         for frames in (1, 2, 3):
             evs = shoot("table.jpg")
             assert [e["type"] for e in evs] == ["no-card"] and evs[0]["frames"] == frames, evs
+        # The fourth reads the dashed box: a card found there waits on the page for a tap, never added.
+        evs = shoot("table.jpg")
+        assert [e["type"] for e in evs] == ["unsure", "done"], evs
+        assert evs[1]["pending"] is True and evs[1]["total"] == 0
+        assert page.evaluate("() => window.__scan.state.pending.ocr.guide") is True
+        page.evaluate("() => { window.__scan.state.pending = null; }")
         evs = shoot("sol-ring.jpg")
         assert [e["type"] for e in evs] == ["auto-added", "done"], evs
         # A shaky read (a name that begins another card's name) waits on the page.
@@ -928,9 +934,8 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
         # Closing the phone camera: the page goes back to its camera tab only because a read waits there.
         assert page.evaluate("() => window.__mtgNative.end()") == "pending"
         assert page.evaluate("() => window.__scan.state.tab") == "camera"
-        # Inside the app the camera tab offers the phone camera; a browser (no MtgNative) does not.
-        assert page.locator("#phone-camera").count() == 1
-        page.locator("#phone-camera").click()
+        # Inside the app the shutter is the phone camera (test_scan_direction_browser.py has the rest).
+        page.locator("#shutter").click()
         assert page.evaluate("() => window.__opened") == 1
         assert page.evaluate("() => window.__mtgNative.ready()") is True
         assert page.evaluate("() => window.__scan.state.continuous") is False

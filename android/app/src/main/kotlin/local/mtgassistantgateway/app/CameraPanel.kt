@@ -180,6 +180,11 @@ class CameraPanel(
         openCamera()
     }
 
+    /** Switches Auto on, as a tap on it would: shooting starts once the camera is up. */
+    fun startAuto() {
+        if (!closed && !autoToggle.isChecked) autoToggle.isChecked = true
+    }
+
     fun pause() {
         resumed = false
         ui.removeCallbacks(nextAuto)
