@@ -152,6 +152,29 @@ async def test_a_read_only_app_compares_but_keeps_no_report(stack: Stack) -> Non
     assert h.app.state.gateway.reports.list(sub, None) == []
 
 
+async def test_a_read_only_app_runs_no_report_of_a_list_or_a_proposal(stack: Stack) -> None:
+    """run_deck_report is one of the write tools: a read-only app (mtg.read) is refused it before
+    it runs, so neither a pasted list's report nor a proposal's is kept for it."""
+    from .test_round4_data import _app_token
+
+    h = stack.h
+    full = await linked_user(stack)
+    p = structured(
+        await call(
+            h,
+            full,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Opt"}]},
+        )
+    )
+    token, _cid = await _app_token(h, "reader", scope="mtg.read")
+    for args in ({"deck_ref": LIST, "games": 20}, {"proposal_id": p["proposal_id"], "games": 20}):
+        out = await call(h, token, "run_deck_report", args)
+        assert out.get("isError") or structured(out).get("ok") is False, out
+    sub = h.app.state.gateway.db._one("SELECT sub FROM users", ())["sub"]
+    assert h.app.state.gateway.reports.list(sub, None) == []
+
+
 async def test_forge_plays_a_pasted_list_as_it_plays_a_deck(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
@@ -176,3 +199,28 @@ async def test_forge_plays_a_pasted_list_as_it_plays_a_deck(tmp_path: Path) -> N
         assert exc.kind == "not_found"
     else:
         raise AssertionError("another member read the report")
+
+
+async def test_reports_of_lists_and_proposals_go_before_a_decks_own_reports(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """At the cap of reports kept per member, the oldest report of a pasted list, a proposal or a
+    comparison goes first, so they never crowd out a deck's own reports (its trend)."""
+    from mtg_gateway import reports as reports_mod
+
+    monkeypatch.setattr(reports_mod, "MAX_REPORTS_PER_USER", 3)
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    reports = ReportService(db, _Decks(), None)  # type: ignore[arg-type]
+    reports.min_interval = 0
+    first = (await reports.run("alice", "42", simulate=False))["report_id"]
+    lists = [(await reports.run_text("alice", LIST, simulate=False))["report_id"] for _ in range(2)]
+    second = (await reports.run("alice", "42", simulate=False, options={"seed": 7}))["report_id"]
+    kept = {r["report_id"] for r in reports.list("alice", None)}
+    assert kept == {first, lists[1], second}, kept
+    # a deck's own reports are pruned oldest first once no other report is left to go
+    more = [
+        (await reports.run("alice", "42", simulate=False, options={"seed": n}))["report_id"] for n in (8, 9)
+    ]
+    kept = {r["report_id"] for r in reports.list("alice", None)}
+    assert kept == {second, *more}, kept
