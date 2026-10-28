@@ -19,6 +19,7 @@ from typing import Any
 from . import card_models, ui
 from .theme import ICON_DATA_URL, icon, time_html, time_text
 from .theme import esc as _esc
+from .tool_labels import TOOLS
 
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
@@ -100,7 +101,15 @@ def plain_words(text: str) -> str:
     text = re.sub(r"\s*\(candidates for annotation; see goldfish_annotate\)", " (could be annotated)", text)
     text = re.sub(r"goldfish_report\((\"?)([^)\"]*)\1\)", r"run \2", text)
     text = UNDERPERFORMS.sub("", text)
-    return re.sub(r"\bgoldfish_([a-z_]+)", lambda m: m.group(1).replace("_", " "), text)
+    text = re.sub(r"\bgoldfish_([a-z_]+)", lambda m: m.group(1).replace("_", " "), text)
+    # the gateway's own tool names: a pointer for an assistant ("(get_deck_report)") is dropped,
+    # "deck_stats on the deck" points to the deck page's Deck stats, any other becomes its words
+    text = _TOOL_NOTE.sub("", text).replace("deck_stats on the deck", "Deck stats, on the deck's page")
+    return _TOOL_WORD.sub(lambda m: "“" + TOOLS[m.group(1)].name + "”", text)
+
+
+_TOOL_WORD = re.compile(r"\b(" + "|".join(map(re.escape, sorted(TOOLS, key=len, reverse=True))) + r")\b")
+_TOOL_NOTE = re.compile(r"\s*\(" + _TOOL_WORD.pattern + r"\)")
 
 
 # -- reading the simulator's text --------------------------------------------------
@@ -387,6 +396,9 @@ def parse_validation(block: Any) -> dict[str, Any] | None:
     verdict: str | None = None
     headline = ""
     rest: list[str] = []
+    # The same lines as the text's own sections (``groups``, for the exports): a heading ("" for
+    # the lines before the first one) and its items, each with the indented items under it.
+    groups: list[dict[str, Any]] = [{"heading": "", "items": []}]
     for ln in lines:
         s = ln.strip()
         if not s:
@@ -399,14 +411,25 @@ def parse_validation(block: Any) -> dict[str, Any] | None:
             elif "issue" in low or "fail" in low or "problem" in low:
                 verdict = "issues"
             continue
-        if s.startswith("#"):  # a later section ("## Gateway checks") reads as a plain line
+        heading = s.startswith("#")
+        if heading:  # a later section ("## Gateway checks") reads as a plain line
             s = s.lstrip("# ").strip()
         s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
-        if s.startswith(("- ", "* ")):
+        bullet = s.startswith(("- ", "* "))
+        if bullet:
             s = s[2:].strip()
         if re.fullmatch(r"[^:]+ // [^:]+", s):
             s = front_face(s)
         rest.append(s)
+        items = groups[-1]["items"]
+        if len(rest) > 200:  # as many as ``lines`` keeps
+            continue
+        if heading:
+            groups.append({"heading": plain_words(s), "items": []})
+        elif bullet and ln[:1].isspace() and items and items[-1]["text"].endswith(":"):
+            items[-1]["sub"].append(plain_words(s))
+        else:
+            items.append({"text": plain_words(s), "sub": []})
     if not headline and rest:
         headline, rest = rest[0], rest[1:]
     if not block.get("ok"):
@@ -415,6 +438,7 @@ def parse_validation(block: Any) -> dict[str, Any] | None:
         "verdict": verdict,
         "headline": plain_words(headline),
         "lines": [plain_words(x) for x in rest[:200]],
+        "groups": [grp for grp in groups if grp["items"]],
         "raw": plain_words(text[:MAX_RAW]),
     }
 
@@ -1852,11 +1876,13 @@ def report_body_html(
     standalone: bool = False,
     removable: frozenset[str] = frozenset(),
     csrf: str = "",
+    report_url: str = "",
 ) -> str:
     """The report's body. ``stats_html`` is the deck statistics strip (companion.stats_strip)
     and ``actions_html`` the export buttons row. The signed-in page is report_page.report_page_html;
-    ``standalone`` (the HTML export) draws the plain layout below, without anything that needs the
-    live site (links into it, the copy area)."""
+    ``standalone`` (the HTML export) draws the exports' outline (report_markdown's), without
+    anything that needs the live site: its only links are the deck on Archidekt and
+    ``report_url``, the report's own address."""
     if not standalone:
         from .report_page import report_page_html
 
@@ -1865,44 +1891,26 @@ def report_body_html(
         )
     s = report_sections(r)
     g, v = s["goldfish"], s["validation"]
-    name = _esc(r.get("deck_name") or r.get("deck_id"))
-    deck_href = f"/decks/{_esc(r.get('deck_id'))}"
-    meta = []
-    if s["commander"]:
-        meta.append(f"<dt>Commander</dt><dd>{_esc(front_face(s['commander']))}</dd>")
-    if g and g.get("games"):
-        turns = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
-        seed = f" (seed {g['seed']})" if g.get("seed") is not None else ""
-        meta.append(f"<dt>Games</dt><dd>{_esc(g['games'])}{_esc(turns)}{_esc(seed)}</dd>")
-    meta.append(f"<dt>Run</dt><dd>{_when(r.get('taken_at'))}</dd>")
-    meta.append(status_html(r.get("status")))
-    if standalone:
-        title = f"<h1>{name}</h1>"
-        back = ""
-    else:
-        title = f"<h1><a href='{deck_href}'>{name}</a></h1>"
-        back = (
-            f"<p class='crumbs'><a href='{deck_href}'>← Back to the deck</a> · "
-            f"<a href='/history?deck_id={_esc(r.get('deck_id'))}'>Deck history</a></p>"
-        )
-    notice = ""
-    if reused:
-        notice = (
-            "<p class='notice'>The deck had not changed since its last report a few minutes ago, so that "
-            "report is shown instead of running the simulation again.</p>"
-        )
+    meta = "".join(
+        f"<dt>{_esc(label)}</dt><dd>"
+        + (f"<a href='{_esc(href)}'>{_esc(text)}</a>" if href else _esc(text))
+        + "</dd>"
+        for label, text, href in export_meta(r, s, report_url)
+        if label != "Status"
+    ) + status_html(r.get("status"))
     head = (
         "<div class='card report-head'>"
-        + back
-        + title
-        + f"<dl class='meta'>{''.join(meta)}</dl>"
-        + notice
-        + actions_html
-        + "</div>"
+        f"<h1>{_esc(r.get('deck_name') or r.get('deck_id'))}</h1>"
+        f"<dl class='meta'>{meta}</dl></div>"
     )
-    body = head + engine_html(r, live=not standalone)
-    if not standalone:
-        body += more_games_html(r.get("forge"), csrf, str(r.get("report_id") or ""))
+    summary = export_summary(r, s)
+    body = head
+    if summary:
+        body += (
+            "<div class='card'><h2>Summary</h2><ul class='sumlines'>"
+            + "".join(f"<li>{_esc(ln)}</li>" for ln in summary)
+            + "</ul></div>"
+        )
     if g is None and v is None and not s["constructed"]:
         body += (
             f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>The research service "
@@ -1926,9 +1934,9 @@ def report_body_html(
             f"<div class='chart'><h3>{_esc(t)}</h3><p class='muted small'>{_esc(b)}</p>{svg}</div>"
             for t, b, svg in s["charts"]
         )
-        summary = ""
+        own = ""
         if g.get("summary"):
-            summary = (
+            own = (
                 "<details class='disclosure'><summary class='fold-btn'>The simulator's own summary</summary>"
                 "<ul class='sumlines'>"
                 + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
@@ -1944,25 +1952,54 @@ def report_body_html(
             + (f"<div class='charts'>{charts}</div>" if charts else "")
             + s["triggers"]
             + kept_models_html(
-                kept_models(r), removable=removable, csrf=csrf, report_id=str(r.get("report_id") or "")
+                kept_models(r), removable=frozenset(), csrf="", report_id=str(r.get("report_id") or "")
             )
-            + summary
+            + own
             + "</div>"
         )
-        ask = "" if standalone else ask_html(r, s["unmodeled"], (g or {}).get("honesty"))
-        honesty = s["honesty"] if standalone else honesty_html(g, ask, forge_full=forge_solo_done(r))
-        if honesty:
-            body += (
-                f"<div class='card honesty'><h2>{MODEL_HEADING}</h2>"
-                "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
-                "here, the less the solo test says about it.</p>" + honesty + "</div>"
-            )
+    body += engine_html(r)
+    solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
+    if solo and forge_solo_lines(solo):
+        body += (
+            f"<div class='card'><h2>{_esc(FORGE_SOLO_HEADING)}</h2><ul class='sumlines'>"
+            + "".join(f"<li>{_esc(ln)}</li>" for ln in forge_solo_lines(solo))
+            + "</ul></div>"
+        )
+    if g and s["honesty"]:
+        body += (
+            f"<div class='card honesty'><h2>{MODEL_HEADING}</h2>"
+            "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
+            "here, the less the solo test says about it.</p>" + s["honesty"] + "</div>"
+        )
     if s["constructed"]:
         body += (
             f"<div class='card'><h2>Validation</h2><p class='muted'>{_esc(CONSTRUCTED_VALIDATION)}</p></div>"
         )
-    elif g is not None or v is not None:
-        body += f"<div class='card'><h2>Validation {_validation_badge(v)}</h2>{validation_html(v)}</div>"
+    elif v is not None:
+        groups = "".join(
+            (f"<h3>{_esc(grp['heading'])}</h3>" if grp["heading"] else "")
+            + "<ul class='vlines'>"
+            + "".join(
+                f"<li>{_esc(item['text'])}"
+                + (
+                    "<ul>" + "".join(f"<li>{_esc(sub)}</li>" for sub in item["sub"]) + "</ul>"
+                    if item["sub"]
+                    else ""
+                )
+                + "</li>"
+                for item in grp["items"]
+            )
+            + "</ul>"
+            for grp in _validation_groups(v)
+        )
+        lead = f"<p class='b'>{_esc(_validation_lead(v))}</p>" if _validation_lead(v) else ""
+        body += (
+            f"<div class='card'><h2>Validation {_validation_badge(v)}</h2>"
+            + (lead + groups or "<p class='muted'>No details.</p>")
+            + "</div>"
+        )
+    elif g is not None:
+        body += f"<div class='card'><h2>Validation</h2>{validation_html(None)}</div>"
     if stats_html:
         body += f"<div class='card'><h2>Deck statistics</h2>{stats_html}</div>"
     raw = ""
@@ -1972,36 +2009,106 @@ def report_body_html(
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:
         body += (
-            "<details class='card raw disclosure'><summary class='fold-btn'>Raw output from the research "
+            f"<details class='card raw disclosure'><summary class='fold-btn'>{RAW_HEADING} from the research "
             "service</summary>" + raw + "</details>"
         )
     return f"<div class='report'>{body}</div>"
 
 
 # -- exports -----------------------------------------------------------------------
-def report_markdown(r: dict[str, Any]) -> str:
-    """The report as Markdown: the headline numbers and the plain-language panels first, then the
-    research service's own output."""
-    s = report_sections(r)
-    g, v = s["goldfish"], s["validation"]
-    stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
-    lines = [f"# Deck report: {r.get('deck_name') or r.get('deck_id')}", ""]
-    if s["commander"]:
-        lines.append(f"- Commander: {front_face(s['commander'])}")
+# Both downloads follow one outline: the title, what was tested (a table), Summary, the solo
+# test, Forge, what the test leaves out, Validation, Deck statistics, and the research service's
+# raw output last (a fold in the HTML file, a link to the report in the Markdown).
+RAW_HEADING = "Raw output"
+
+
+def export_meta(r: dict[str, Any], s: dict[str, Any], report_url: str = "") -> list[tuple[str, str, str]]:
+    """The table at the head of an export: ``(label, text, link)`` rows, link "" for none."""
+    g = s["goldfish"]
+    rows: list[tuple[str, str, str]] = []
+    name = str(r.get("deck_name") or r.get("deck_id") or "")
+    if str(r.get("deck_id") or "").isdigit():
+        rows.append(("Deck", name, f"https://archidekt.com/decks/{r.get('deck_id')}"))
     source = r.get("source") if isinstance(r.get("source"), dict) else None
     if source and source.get("label"):
         # a pasted list, a proposal or a comparison: named for what it is
-        lines.append(f"- Source: {source['label']}")
-    if str(r.get("deck_id") or "").isdigit():
-        lines.append(f"- Deck: https://archidekt.com/decks/{r.get('deck_id')}")
-    lines.append(f"- Run: {time_text(r.get('taken_at'))}")
+        rows.append(("Source", str(source["label"]), ""))
+    if s["commander"]:
+        rows.append(("Commander", front_face(s["commander"]), ""))
+    rows.append(("Run", time_text(r.get("taken_at")), ""))
     if r.get("status") in STATUS_TEXT:
         status = STATUS_TEXT[r["status"]]
-        lines.append(f"- Status: {status[:1].upper()}{status[1:]}")
+        rows.append(("Status", f"{status[:1].upper()}{status[1:]}", ""))
     if g and g.get("games"):
         extra = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
-        lines.append(f"- Games: {g['games']}{extra}")
+        rows.append(("Games", f"{g['games']}{extra}", ""))
+    if report_url:
+        rows.append(("Report", "Open the report", report_url))
+    return rows
+
+
+def export_summary(r: dict[str, Any], s: dict[str, Any]) -> list[str]:
+    """The Summary: one line for each part of the report that has a result."""
+    g, v = s["goldfish"], s["validation"]
+    out: list[str] = []
+    if s["tiles"]:
+        out.append(f"{SOLO_NAME} — " + "; ".join(f"{t['label']}: {t['value']}" for t in s["tiles"][:2]) + ".")
+    elif g and g.get("message"):
+        out.append(f"{SOLO_NAME}: not run.")
+    forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
+    seats = ((forge or {}).get("result") or {}).get("seats") or []
+    games = ((forge or {}).get("result") or {}).get("games")
+    if seats and games:
+        mine = seats[0]
+        wins = mine.get("wins", 0)
+        out.append(
+            f"Forge games: {front_face(mine.get('deck'))} won {wins} of {games} "
+            f"({_pct(_float(mine.get('win_rate')))})."
+        )
+    solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
+    res = (solo or {}).get("result") if isinstance((solo or {}).get("result"), dict) else {}
+    if res.get("games"):
+        out.append(
+            f"Forge solo test: won by turn {res.get('until_turn')} in {res.get('won', 0)} of "
+            f"{res['games']} games ({_pct(_float(res.get('won_rate')))})."
+        )
+    if s["constructed"]:
+        out.append("Validation: not checked (a constructed deck).")
+    elif v is not None:
+        word = {"passed": "passed", "issues": "issues found", "failed": "not run"}.get(v["verdict"] or "")
+        out.append(f"Validation: {word or 'checked'}.")
+    return out
+
+
+def _md_cell(text: str) -> str:
+    return " ".join(str(text).replace("|", "\\|").split())
+
+
+def _validation_groups(v: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validation's sections for the exports, without a lead line that only repeats the verdict
+    ("Validation: ISSUES FOUND")."""
+    return v.get("groups") or [{"heading": "", "items": [{"text": ln, "sub": []} for ln in v["lines"]]}]
+
+
+def _validation_lead(v: dict[str, Any]) -> str:
+    head = v.get("headline") or ""
+    return "" if head.casefold().startswith("validation") else head
+
+
+def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
+    """The report as Markdown, in the exports' outline (above). The research service's raw
+    output is not copied in: the last section links to the report, where it is kept."""
+    s = report_sections(r)
+    g, v = s["goldfish"], s["validation"]
+    stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
+    lines = [f"# Deck report: {r.get('deck_name') or r.get('deck_id')}", "", "| | |", "|---|---|"]
+    for label, text, href in export_meta(r, s, report_url):
+        cell = f"[{_md_cell(text)}]({href})" if href else _md_cell(text)
+        lines.append(f"| {label} | {cell} |")
     lines.append("")
+    summary = export_summary(r, s)
+    if summary:
+        lines += ["## Summary", "", *[f"- {ln}" for ln in summary], ""]
     if s["tiles"]:
         lines += [f"## {solo_heading(g)}", ""]
         for t in s["tiles"]:
@@ -2024,7 +2131,7 @@ def report_markdown(r: dict[str, Any]) -> str:
             if forge is None
             else " ".join(str(x) for x in (forge.get("note"), forge.get("error")) if x)
         )
-        lines += [f"## {PREFLIGHT_ONLY}", "", why, ""]
+        lines += [f"## {PREFLIGHT_ONLY}", "", why or "No Forge games for this report.", ""]
     elif forge:
         lines += [f"## {FORGE_HEADING}", ""]
         if forge.get("state") != "done":
@@ -2039,7 +2146,7 @@ def report_markdown(r: dict[str, Any]) -> str:
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
         lines.append("")
     solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
-    if solo:
+    if solo and forge_solo_lines(solo):  # a heading with nothing under it is left out
         lines += [f"## {FORGE_SOLO_HEADING}", ""]
         lines += [f"- {ln}" for ln in forge_solo_lines(solo)]
         lines.append("")
@@ -2080,32 +2187,42 @@ def report_markdown(r: dict[str, Any]) -> str:
             v["verdict"] or "", ""
         )
         lines += ["## Validation" + (f": {verdict}" if verdict else ""), ""]
-        if v.get("headline"):
-            lines += [v["headline"], ""]
-        lines += [f"- {ln}" for ln in v["lines"]]
-        lines.append("")
+        if _validation_lead(v):
+            lines += [_validation_lead(v), ""]
+        for grp in _validation_groups(v):
+            if grp["heading"]:
+                lines += [f"### {grp['heading']}", ""]
+            for item in grp["items"]:
+                lines.append(f"- {item['text']}")
+                lines += [f"  - {sub}" for sub in item["sub"]]
+            lines.append("")
     if stats:
         lines += ["## Deck statistics", ""]
         for key, label in (
             ("card_count", "Cards"),
             ("land_count", "Lands"),
             ("average_mana_value", "Average mana value"),
-            ("price_total", "Price (USD)"),
         ):
             if stats.get(key) is not None:
                 lines.append(f"- {label}: {stats[key]}")
+        price = _float(stats.get("price_total"))
+        if price:  # 0 is a deck with no prices read, not a free deck
+            lines.append(f"- Price: ${price:,.2f}")
         curve = stats.get("mana_curve")
         if isinstance(curve, dict) and curve:
             lines.append("- Mana curve: " + ", ".join(f"{k}: {val}" for k, val in curve.items()))
         lines.append("")
     ab = r.get("comparison") if isinstance(r.get("comparison"), dict) else None
     if ab and ab.get("text"):
-        lines += ["## Comparison", "", *_md_fenced(str(ab["text"])), ""]
-    # the research service's own output keeps its own headings, so it goes inside a fence
-    if g and g.get("raw"):
-        lines += ["## Simulation output", "", *_md_fenced(g["raw"]), ""]
-    if v and v.get("raw"):
-        lines += ["## Validation output", "", *_md_fenced(v["raw"]), ""]
+        lines += ["## Comparison", "", *_md_fenced(plain_words(str(ab["text"]))), ""]
+    if (g and g.get("raw")) or (v and v.get("raw")):
+        where = f": {report_url}" if report_url else " under History."
+        lines += [
+            f"## {RAW_HEADING}",
+            "",
+            f"The research service's own output is kept with the report{where}",
+            "",
+        ]
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -2185,19 +2302,38 @@ def export_css() -> str:
     return tokens + EXPORT_CSS + labels + "\n"
 
 
-def report_export_html(r: dict[str, Any], *, stats_html: str = "", theme_css: str = "") -> str:
-    """A self-contained HTML file of the report: inline CSS, inline SVG, no scripts, no links
-    back into the gateway. ``theme_css`` is the shared chart/tile CSS (theme.REPORT_SHARED_CSS)."""
-    body = report_body_html(r, stats_html=stats_html, standalone=True)
+def report_export_html(
+    r: dict[str, Any], *, stats_html: str = "", theme_css: str = "", report_url: str = ""
+) -> str:
+    """A self-contained HTML file of the report: inline CSS, inline SVG, no scripts, nothing
+    fetched. Its links are full addresses: the deck on Archidekt and ``report_url``, the report on
+    the gateway. ``theme_css`` is the shared chart/tile CSS (theme.REPORT_SHARED_CSS)."""
+    body = report_body_html(r, stats_html=stats_html, standalone=True, report_url=report_url)
     title = _esc(f"Deck report: {r.get('deck_name') or r.get('deck_id')}")
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta name='color-scheme' content='light dark'>"
         f"<link rel='icon' href='{ICON_DATA_URL}' type='image/svg+xml'>"
-        f"<title>{title}</title><style>{export_css()}{theme_css}{REPORT_CSS}{EXPORT_THEME_CSS}</style>"
+        f"<title>{title}</title><style>{export_css()}{theme_css}{REPORT_CSS}{EXPORT_THEME_CSS}"
+        f"{print_css()}</style>"
         "</head>"
         f"<body>{body}</body></html>"
+    )
+
+
+def print_css() -> str:
+    """Paper: the theme's light colours whatever the screen's setting, no panel fills, a panel
+    kept whole on a page where it fits, links spelled out, and the raw output's fold left out
+    (it is on the report's page)."""
+    from . import theme
+
+    return (
+        "@media print{:root{" + theme._LIGHT.strip() + "}"
+        "body{background:#fff;padding:0} .card{background:#fff;break-inside:avoid}"
+        ".report{max-width:none} details.raw{display:none}"
+        "a[href^='http']::after{content:' (' attr(href) ')';font-size:.86rem;color:var(--text-muted);"
+        "overflow-wrap:anywhere}}\n"
     )
 
 

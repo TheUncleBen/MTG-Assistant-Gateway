@@ -457,7 +457,9 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert md.headers["content-disposition"].startswith(
             'attachment; filename="Liesa_Test_Deck-report-'
         )
-        assert md.text.startswith("# Deck report: Liesa Test Deck") and "## Metrics" in md.text
+        assert md.text.startswith("# Deck report: Liesa Test Deck") and "## Metrics" not in md.text
+        # the raw output is left on the report's page, which the file links to
+        assert "https://mtg.test/history/reports/rep_real" in md.text
         # the file name carries the run's day, and Markdown carries plain times (no <time> markup)
         assert re.search(r'-report-\d{4}-\d{2}-\d{2}\.md"$', md.headers["content-disposition"])
         assert "<time" not in md.text
