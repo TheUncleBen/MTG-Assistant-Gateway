@@ -23,6 +23,9 @@ card everywhere.
   in. `MTG_BROWSER_SESSION_TTL` is now that unused time (default `604800`, at most `2592000`). If
   your variables still set `MTG_BROWSER_SESSION_TTL=7200` from an older example file, remove the
   line or set `604800`, or sign-ins still end after 2 hours unused.
+- **Sign-in times are on the Settings page** (a new Sign-in group). The example stack and
+  compose files now leave `MTG_BROWSER_SESSION_TTL`, `MTG_ACCESS_TOKEN_TTL` and
+  `MTG_REFRESH_TOKEN_TTL` empty; a value you set still wins and locks its row.
 - **`MTG_SERVER_NAME` is back.** Empty (the default) leaves the name to the Settings page's
   **Gateway name** row; a name there locks the row.
 - **Forge games per report now defaults to 5.** A value you set on the Settings page stays.
@@ -43,6 +46,9 @@ card everywhere.
   you the box to press.
 - A request that takes over 3 seconds is logged as a warning, with how much of it was Archidekt
   and how much the identity provider.
+- Settings → Sign-in: how long a website sign-in lasts unused (7 days) and at most (30 days), and
+  how long an assistant's access (1 hour) and refresh (30 days) last. Each applies to the next
+  sign-in or token, with no restart.
 
 ### Changed
 - **One live card per change in the chat.** Only the newest card for a change keeps Approve and
@@ -66,8 +72,9 @@ card everywhere.
 - Each page keeps its own card size (S, M or L), for your account and on each device.
 - The printings box says it filters these printings by set, and offers a search of all cards when
   nothing matches.
-- One moving progress ring wherever a run or a load is going (it pulses instead when you ask for
-  less motion); Play more games says “Starting…”.
+- One moving progress ring on the Running, Forge running and Applying labels, a busy button, a
+  box that is loading, the printing picker while it looks up printings and a deck still being
+  made (it pulses instead when you ask for less motion); Play more games says “Starting…”.
 - No more bare blue links on Proposals, Reports, History and My activity: small actions are grey
   pill buttons, and titles read in the text colour.
 - The report's HTML download matches the site's look in light and dark, and its Markdown download
