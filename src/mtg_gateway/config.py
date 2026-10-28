@@ -258,7 +258,9 @@ class Settings:
     scan_art_max_galleries: int = 500
     scan_art_gallery_idle_days: int = 180
     proposal_ttl: int = 24 * 3600
-    browser_session_ttl: int = 2 * 3600
+    # How long a browser or Android app sign-in lasts unused; use renews it, up to
+    # db.BROWSER_SESSION_MAX_AGE (30 days) after the sign-in (app.SessionRenewalMiddleware).
+    browser_session_ttl: int = 7 * 24 * 3600
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
     reauth_interval: int = 7 * 24 * 3600
@@ -438,7 +440,7 @@ def load_settings() -> Settings:
         ],
         apply_in_chat=_bool_env("MTG_APPLY_IN_CHAT", True),
         update_check=_bool_env("MTG_UPDATE_CHECK", True),
-        browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 2 * 3600, lo=300, hi=86400),
+        browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 7 * 24 * 3600, lo=300, hi=30 * 24 * 3600),
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", True),
         deck_sync_minutes=_sync_minutes_env("MTG_DECK_SYNC_MINUTES"),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
