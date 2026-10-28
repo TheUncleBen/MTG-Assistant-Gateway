@@ -202,7 +202,13 @@ class OIDCClient:
         return self._jwks
 
     async def authorization_url(
-        self, *, state: str, nonce: str, code_challenge: str, prompt: str | None = None
+        self,
+        *,
+        state: str,
+        nonce: str,
+        code_challenge: str,
+        prompt: str | None = None,
+        max_age: int | None = None,
     ) -> str:
         meta = await self.metadata()
         params = {
@@ -217,6 +223,8 @@ class OIDCClient:
         }
         if prompt:
             params["prompt"] = prompt
+        if max_age is not None:
+            params["max_age"] = str(int(max_age))
         return f"{meta['authorization_endpoint']}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, code_verifier: str, nonce: str) -> Identity:

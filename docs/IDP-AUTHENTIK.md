@@ -68,6 +68,11 @@ up.
   `-explicit-consent` one) and `default-provider-invalidation-flow`. A fresh
   Authentik creates them from its default blueprints within a minute of
   first start (**Flows and Stages → Flows**).
+- The gateway's and Authentik's clocks agree, 5 seconds apart at most (both
+  machines set their time over NTP). The Android app's sign-in in the phone's
+  browser checks when the person last signed in at Authentik against when that
+  sign-in started, allowing 5 seconds of difference: with clocks further
+  apart, that sign-in is refused and the app finishes it another way.
 
 ## 3. Create the access group
 

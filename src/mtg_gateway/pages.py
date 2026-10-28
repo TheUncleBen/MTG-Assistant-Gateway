@@ -98,10 +98,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         current: str | None = None,
         main_class: str = "",
         heading: bool = True,
+        signin_link: bool = True,
     ) -> Response:
         return render(
             title,
             body,
+            signin_link=signin_link,
             site=s.server_name,
             status=status,
             signed_in=sub is not None,
@@ -131,10 +133,26 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def small(
-        title: str, body: str, *, status: int = 200, sub: str | None = None, sid: str | None = None
+        title: str,
+        body: str,
+        *,
+        status: int = 200,
+        sub: str | None = None,
+        sid: str | None = None,
+        signin_link: bool = True,
     ) -> Response:
-        """One of the small pages (smallpage.py): the panel carries its own title."""
-        return page(title, body, status=status, sub=sub, sid=sid, heading=False, head_extra=smallpage.HEAD)
+        """One of the small pages (smallpage.py): the panel carries its own title. ``signin_link``
+        False leaves the top bar's Sign in out (the app sign-in's last page, which says Signed in)."""
+        return page(
+            title,
+            body,
+            status=status,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            head_extra=smallpage.HEAD,
+            signin_link=signin_link,
+        )
 
     def login_failed(exc: LoginError, login_href: str) -> Response:
         """The page for a website sign-in that could not be finished, by the error's kind."""
@@ -158,6 +176,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # app to its browser sign-in; it can only ever ask for more, never less.
         fresh = request.cookies.get(fresh_cookie) == "1" or q.get("fresh") == "1"
         params: dict[str, str] = {"next": nxt}
+        max_age: int | None = None
         challenge = q.get("app_challenge")
         if challenge is not None:
             # The Android app's sign-in, running in the phone's browser (app_signin.py). This
@@ -165,6 +184,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if not app_signin.CHALLENGE.fullmatch(challenge):
                 return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
             params["app_challenge"] = challenge
+            # when the leg started: a sign-in it asks for must be made after this (auth_time)
+            params["app_started"] = str(int(time.time()))
             back = q.get("app_return")
             if back is not None:
                 # The app's retry, when the verified https Auth Tab can't be used: an Auth Tab on the
@@ -175,8 +196,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 if back != app_signin.SCHEME_RETURN:
                     return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
                 params["app_return"] = back
-                params["app_started"] = str(int(time.time()))
                 fresh = True
+            if fresh:
+                # a sign-in of its own, with max_age=0 as well: only a leg that asked for one can
+                # show it was made during the leg (the return page then opens the app by itself)
+                params["app_fresh"] = "1"
+                max_age = 0
         else:
             sub, _sid = current(request)
             if sub:
@@ -188,7 +213,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 resp.headers["Cache-Control"] = "no-store"
                 return resp
         try:
-            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
+            url = await state.provider.start_idp_login(
+                BROWSER_CLIENT_ID, params, force_login=fresh, max_age=max_age
+            )
         except LoginError as exc:
             return login_failed(exc, f"/login?next={nxt}")
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
@@ -1012,9 +1039,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # handed over at the gateway's own address, where the app's Auth Tab closes by itself.
             headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
             scheme = session["params"].get("app_return") == app_signin.SCHEME_RETURN
-            if scheme and not app_signin.signed_in_since(
+            # a sign-in made during this leg, which the leg asked for (prompt=login, max_age=0)
+            fresh_in = session["params"].get("app_fresh") == "1" and app_signin.signed_in_since(
                 identity.raw_claims.get("auth_time"), session["params"].get("app_started")
-            ):
+            )
+            if scheme and not fresh_in:
                 # Any app can open this leg, and the scheme goes back to whichever did: without
                 # proof of a sign-in made during the leg, no code. The app finishes in a Custom Tab.
                 logger.warning(
@@ -1022,7 +1051,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     "has no auth_time" if "auth_time" not in identity.raw_claims else "shows no new sign-in",
                 )
                 return RedirectResponse(app_signin.SCHEME_REFUSED, status_code=303, headers=headers)
-            code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
+            # Only after a sign-in made during the leg does the return page open the app by itself:
+            # any app can start an https leg too, and a browser still signed in at the provider
+            # passes it straight through, so the page then waits for the member's tap.
+            code = state.app_signins.issue(identity.sub, challenge, nxt, fresh=fresh_in)  # type: ignore[attr-defined]
             return RedirectResponse(
                 # the retry's Auth Tab on the app's own scheme (no Digital Asset Links check); else
                 # the gateway's address: the verified https Auth Tab, or the page with the button
@@ -1041,7 +1073,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
         code = request.query_params.get("code", "")
         if app_signin.CODE.fullmatch(code):
-            resp = small("Signed in", app_signin.return_body(code, app_page.app_package()))
+            auto = state.app_signins.fresh(code)  # type: ignore[attr-defined]
+            resp = small(
+                "Signed in",
+                app_signin.return_body(code, app_page.app_package(), auto=auto),
+                signin_link=False,
+            )
         else:
             resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
         resp.headers["Cache-Control"] = "no-store"

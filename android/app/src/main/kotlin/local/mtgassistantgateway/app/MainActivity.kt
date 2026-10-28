@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -556,9 +557,19 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         val installed = packageManager.queryIntentServices(Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION), 0)
             .mapNotNull { it.serviceInfo?.packageName }
-        val browser = BrowserSignIn.pickAuthTabBrowser(default, installed) { CustomTabsClient.isAuthTabSupported(this, it) }
+        val browser = BrowserSignIn.pickAuthTabBrowser(default, installed, ::isSystemApp) {
+            CustomTabsClient.isAuthTabSupported(this, it)
+        }
         Log.i(TAG, "sign-in: default browser $default, Custom Tabs browsers $installed, Auth Tab in ${browser ?: "none"}")
         return browser
+    }
+
+    /** Whether [pkg] came with the phone (a system app, or an update of one). */
+    private fun isSystemApp(pkg: String): Boolean = try {
+        val flags = packageManager.getApplicationInfo(pkg, 0).flags
+        flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
     }
 
     private fun startBrowserSignIn(next: String?, fresh: Boolean, first: SignInLeg = SignInLeg.HTTPS_AUTH_TAB) {

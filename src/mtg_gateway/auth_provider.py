@@ -693,11 +693,13 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         return construct_redirect_uri(client_redirect, code=gw_code, state=params.state)
 
     async def start_idp_login(
-        self, client_id: str, params: dict[str, Any], *, force_login: bool = False
+        self, client_id: str, params: dict[str, Any], *, force_login: bool = False, max_age: int | None = None
     ) -> str:
         """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL.
         ``force_login`` asks the provider to make the person enter their credentials again
-        (``prompt=login``), used right after they signed out on this device."""
+        (``prompt=login``), used right after they signed out on this device. ``max_age`` (0 for the
+        app's legs that need proof of a new sign-in, app_signin.py) asks the same in the way more
+        providers enforce, and makes the ID token carry ``auth_time``."""
         try:
             source_hash = self._admit_login()
         except LoginThrottled as exc:
@@ -717,7 +719,11 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         )
         try:
             return await self.oidc.authorization_url(
-                state=login_id, nonce=nonce, code_challenge=challenge, prompt="login" if force_login else None
+                state=login_id,
+                nonce=nonce,
+                code_challenge=challenge,
+                prompt="login" if force_login else None,
+                max_age=max_age,
             )
         except OIDCError as exc:
             raise LoginError(smallpage.UNAVAILABLE, 502, kind="unavailable") from exc

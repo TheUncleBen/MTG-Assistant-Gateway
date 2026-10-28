@@ -2488,6 +2488,7 @@ def render(
     body_class: str = "",
     main_class: str = "",
     sub: str | None = None,
+    signin_link: bool = True,
 ) -> HTMLResponse:
     """Render a page. ``form_action`` adds exact origins a form on this page may submit or be
     redirected to (browsers apply form-action to the redirect that follows a POST too).
@@ -2495,7 +2496,8 @@ def render(
     forbidden). ``current`` names the nav link to mark as the current page (its path);
     ``heading=False`` leaves the <h1> to the body (deck banner). ``sub`` is the signed-in
     member, for the Assistant place's count of waiting proposals. ``main_class`` adds classes to
-    <main> (``ui-wide`` for the UI standard's 1200 px list pages)."""
+    <main> (``ui-wide`` for the UI standard's 1200 px list pages). ``signin_link`` False leaves
+    the signed-out top bar's Sign in out (a page that says the person is signed in elsewhere)."""
     theme = current_theme()
     app = in_app()
     # "Use desktop layout": a wide fixed viewport, as a browser's "Desktop site" switch
@@ -2611,6 +2613,8 @@ def render(
         right = (
             "<nav class='user' aria-label='Account'>"
             f"<a class='btn signin' href='/login'>{icon('login')} Sign in</a></nav>"
+            if signin_link
+            else ""
         )
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
