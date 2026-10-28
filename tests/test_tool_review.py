@@ -370,3 +370,22 @@ async def test_a_registration_sheet_for_an_illegal_deck_is_warned(stack: Stack) 
         "The deck breaks its format's rules: the deck has 103 cards, not 100.",
         "The deck breaks its format's rules: more than one copy in a singleton format: Yavimaya Elder.",
     ], out
+
+
+async def test_the_board_lists_a_category_change_under_categories(stack: Stack) -> None:
+    stack.ark.decks[42]["categories"].append(
+        {"id": 77, "name": "Draw", "isPremier": False, "includedInDeck": True}
+    )
+    token = await linked_user(stack)
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_deck_categories",
+            {"deck_id": "42", "changes": [{"category": "Draw", "rename_to": "Cards"}]},
+        )
+    )
+    assert p["ok"], p
+    board = structured(await call(stack.h, token, "list_my_proposals", {"pending_only": True}))
+    line = next(x for x in board["proposals"] if x["proposal_id"] == p["proposal_id"])
+    assert line["cards"] == [] and line["categories"] == ["Draw"], line
