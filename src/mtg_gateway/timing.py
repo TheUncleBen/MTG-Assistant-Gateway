@@ -32,6 +32,9 @@ log = logging.getLogger("mtg_gateway.requests")
 archidekt_time: ContextVar[float] = ContextVar("archidekt_time", default=0.0)
 idp_time: ContextVar[float] = ContextVar("idp_time", default=0.0)
 
+# A request that takes longer than this is logged again at WARNING with its time split, so a slow
+# page stands out in a log kept at WARNING.
+SLOW_REQUEST_SECONDS = 3.0
 # Noise the log line would add nothing to; the header is still set.
 _QUIET_PREFIXES = ("/static/", "/scan/static/", "/healthz")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -92,12 +95,23 @@ class TimingMiddleware:
             raw = str(scope.get("path", ""))
             if not raw.startswith(_QUIET_PREFIXES):
                 path = logged_path(scope)
+                total = time.perf_counter() - started
                 log.info(
                     "%s %s %d %.0fms archidekt=%.0fms idp=%.0fms",
                     scope.get("method", "-"),
                     path,
                     status["code"],
-                    (time.perf_counter() - started) * 1000,
+                    total * 1000,
                     archidekt_time.get() * 1000,
                     idp_time.get() * 1000,
                 )
+                if total > SLOW_REQUEST_SECONDS:
+                    log.warning(
+                        "slow request: %s %s %d total=%.0fms archidekt=%.0fms idp=%.0fms",
+                        scope.get("method", "-"),
+                        path,
+                        status["code"],
+                        total * 1000,
+                        archidekt_time.get() * 1000,
+                        idp_time.get() * 1000,
+                    )
