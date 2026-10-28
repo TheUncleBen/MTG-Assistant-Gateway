@@ -5,11 +5,22 @@ the entry. Both only on the member's own press."""
 # ruff: noqa: F811 - the stack fixture is imported and then named as a parameter
 from __future__ import annotations
 
+import pytest
+
 from mtg_gateway.archidekt import rich_text
 
 from .conftest import Stack
-from .test_account_actions import _browser_apply
+from .test_account_actions import _browser_apply, _contest_ready
 from .test_decks_and_proxy import call, linked_user, structured
+
+
+@pytest.fixture(autouse=True)
+def _contests_on_the_forum(stack: Stack) -> None:
+    """Contests 880 to 882 are threads on Archidekt's forum (an entry is refused for one that is
+    not); no deck is entered in them yet."""
+    _contest_ready(stack.ark)
+    stack.ark.forum_threads[882] = {**stack.ark.forum_threads[881], "title": "Contest 882"}
+    stack.ark.account.entries.clear()
 
 
 async def _propose(stack: Stack, token: str, **args: object) -> dict:
