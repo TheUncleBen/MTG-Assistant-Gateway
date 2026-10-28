@@ -481,7 +481,8 @@ def test_every_registered_setting_is_a_deployment_setting_with_sane_bounds() -> 
         assert key in fields, key
         assert spec.env == "" or spec.env.startswith("MTG_"), key
         # the code default is the page's default, so a value the page never stored reads the same
-        assert fields[key].default == spec.default, key
+        # (a sign-in time counts seconds in Settings and days or hours on the page: ``scale``)
+        assert fields[key].default == spec.default * spec.scale, key
         assert spec.parse(spec.default) == spec.default, key
         if spec.lo is not None:
             assert spec.lo <= spec.default <= spec.hi, key

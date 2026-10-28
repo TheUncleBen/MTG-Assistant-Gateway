@@ -272,8 +272,11 @@ class Settings:
     scan_art_gallery_idle_days: int = 180
     proposal_ttl: int = 24 * 3600
     # How long a browser or Android app sign-in lasts unused; use renews it, up to
-    # db.BROWSER_SESSION_MAX_AGE (30 days) after the sign-in (app.SessionRenewalMiddleware).
+    # browser_session_max_age (30 days by default) after the sign-in (app.SessionRenewalMiddleware).
+    # The four sign-in times are rows of the Settings page ("Sign-in"), read per sign-in and per
+    # token through LiveSettings.seconds; the longest time has no stack variable.
     browser_session_ttl: int = 7 * 24 * 3600
+    browser_session_max_age: int = 30 * 24 * 3600
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
     reauth_interval: int = 7 * 24 * 3600
@@ -515,6 +518,10 @@ class SettingSpec:
     labels: tuple[str, ...] = ()
     # True when the gateway reads it only when it starts (the page says it applies after a restart)
     restart: bool = False
+    # Seconds in one ``unit`` when the Settings field it sets counts seconds (the sign-in times):
+    # the page and LiveSettings.get count in the unit, the Settings field and LiveSettings.seconds
+    # in seconds. 1: the same number.
+    scale: int = 1
 
     def parse(self, raw: Any) -> Any:
         """The value ``raw`` (from a form: text; or already typed) as this setting's type, within
@@ -686,6 +693,34 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         ),
         _spec("update_check", "bool", True, "general", "B", restart=True, env="MTG_UPDATE_CHECK"),
         _spec("log_level", "choice", "INFO", "general", "B", choices=_LOG_LEVELS, restart=True),
+        # sign-in times (read per sign-in and per token: no restart). The stack ranges stay as they
+        # were (load_settings); the page's sit inside them, in days and hours.
+        _spec(
+            "browser_session_ttl",
+            "int",
+            7,
+            "signin",
+            "B",
+            lo=1,
+            hi=30,
+            scale=86400,
+            env="MTG_BROWSER_SESSION_TTL",
+        ),
+        _spec("browser_session_max_age", "int", 30, "signin", "B", lo=1, hi=365, scale=86400),
+        _spec(
+            "access_token_ttl", "int", 1, "signin", "B", lo=1, hi=24, scale=3600, env="MTG_ACCESS_TOKEN_TTL"
+        ),
+        _spec(
+            "refresh_token_ttl",
+            "int",
+            30,
+            "signin",
+            "B",
+            lo=1,
+            hi=365,
+            scale=86400,
+            env="MTG_REFRESH_TOKEN_TTL",
+        ),
         # Archidekt and Scryfall pacing
         _spec(
             "archidekt_calls_per_10_min",
@@ -910,6 +945,10 @@ _UNITS = {
     "backup_keep_days": "days",
     "price_history_days": "days",
     "scan_art_gallery_idle_days": "days",
+    "browser_session_ttl": "days",
+    "browser_session_max_age": "days",
+    "access_token_ttl": "hours",
+    "refresh_token_ttl": "days",
     "archidekt_min_interval": "seconds",
     "archidekt_backoff_base": "seconds",
     "archidekt_cache_seconds": "seconds",
@@ -922,6 +961,10 @@ MANAGED_SETTINGS = {k: replace(s, unit=_UNITS[k]) if k in _UNITS else s for k, s
 
 def _deployment_value(settings: Settings, spec: SettingSpec) -> Any:
     value = getattr(settings, spec.key)
+    if spec.scale != 1:
+        # a stack value counts seconds; the page counts in the unit (7200 seconds: 0.08 days)
+        days = value / spec.scale
+        return int(days) if float(days).is_integer() else round(days, 2)
     return value
 
 
@@ -943,7 +986,7 @@ def with_stored(settings: Settings, db: Any) -> Settings:
         except SettingError:
             logger.warning("stored setting %s is out of bounds; the default applies", key)
             continue
-        changes[key] = value
+        changes[key] = value * spec.scale
     return replace(settings, **changes) if changes else settings
 
 
@@ -1001,6 +1044,14 @@ class LiveSettings:
             # a stored value the current bounds refuse (bounds tightened in a later version)
             logger.warning("stored setting %s is out of bounds; the default applies", key)
             return None
+
+    def seconds(self, key: str) -> int:
+        """A sign-in time (a setting with a ``scale``) in seconds, as it is now: the stack's own
+        number of seconds when it set one."""
+        spec = self.spec(key)
+        if key in self.settings.env_set:
+            return int(getattr(self.settings, key))
+        return int(self.get(key) * spec.scale)
 
     def get(self, key: str) -> Any:
         spec = self.spec(key)

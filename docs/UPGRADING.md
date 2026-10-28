@@ -121,6 +121,11 @@ unreachable for a short while; signed-in assistants keep working.
 
 ## Going back to an older version
 
+**To 0.7.45 or older, from 0.7.46 or newer:** if your stack sets `MTG_BROWSER_SESSION_TTL`, set it
+to `86400` or less, or remove the line, before you go back: 0.7.45 and older refuse to start with
+more than `86400` (one day) there. The Settings page's **Sign-in** rows are 0.7.46's own; an older
+version doesn't use them, and its stack values (or its defaults) apply.
+
 **To 0.7.37 or newer:** change `MTG_TAG` to that version and update the stack with that
 version's stack file and example file (each version's files are on its branch,
 `release/X.Y.Z`, see [VERSIONS.md](VERSIONS.md)). If a newer version had upgraded the database,

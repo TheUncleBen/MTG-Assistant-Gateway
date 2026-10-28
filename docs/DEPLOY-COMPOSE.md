@@ -122,7 +122,11 @@ then turn each one on or off on the Settings page (`/admin/settings`), along
 with the approval modes, the gateway's name and every other setting. `false`
 (`0` for `MTG_DECK_SYNC_MINUTES`) turns a feature off in `.env` instead; the
 page then shows it greyed out, and you change it in `.env`
-([OPERATIONS.md](OPERATIONS.md#the-settings-page)). Approvals start safe: a
+([OPERATIONS.md](OPERATIONS.md#the-settings-page)). The three sign-in times in
+`.env` (`MTG_ACCESS_TOKEN_TTL`, `MTG_REFRESH_TOKEN_TTL`,
+`MTG_BROWSER_SESSION_TTL`) are left empty the same way: the Settings page's
+**Sign-in** rows set them, and the longest a website sign-in lasts is set only
+there. Approvals start safe: a
 person who hasn't chosen an approval mode has every change wait for their own
 press, on the card in the chat or the Apply button on the review page. Each
 person picks their own mode on their Account page.

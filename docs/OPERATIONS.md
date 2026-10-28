@@ -936,7 +936,7 @@ Archidekt**, the folder each member's backup copies go in, "MTG Gateway
 Backups" by default, up to 100 characters; a new name applies to the next
 copy, and copies already in an older folder are still recognised),
 simulation, watchlists and prices, the gateway's name and log detail,
-Archidekt and Scryfall pacing, and card scanning (folded away). Each one shows
+sign-in times, Archidekt and Scryfall pacing, and card scanning (folded away). Each one shows
 its allowed range and where its value comes from: the gateway's default, a
 change made here (who and when), or your stack. The row's own text says
 whether a change applies at once or after a restart.
@@ -952,10 +952,19 @@ whether a change applies at once or after a restart.
 - **The Gateway name can be set in your stack too.** `MTG_SERVER_NAME` is
   commented out in the example files, so the page manages the name. A name
   set there locks the **Gateway name** row in the same way.
+- **Sign-in times.** The **Sign-in** section has how long a website or
+  Android app sign-in lasts unused (7 days), the longest it lasts however
+  much it is used (30 days), and how long an assistant's access (1 hour) and
+  refresh (30 days) last. A change applies to the next sign-in or token, with
+  no restart. `MTG_BROWSER_SESSION_TTL`, `MTG_ACCESS_TOKEN_TTL` and
+  `MTG_REFRESH_TOKEN_TTL` (empty in the example files) lock their rows; the
+  longest time has no stack variable. The unused time can't be longer than
+  the longest time. How long a sign-in lasts at your identity provider is
+  still set there.
 - **Pacing only gets gentler.** The Archidekt and Scryfall pacing can only be
   set to ask less often than the gateway's defaults.
-- **Some settings stay in the stack only**: sign-in, secrets, token and session
-  lifetimes, the membership check, `MTG_WRITES_ENABLED` and the folders on
+- **Some settings stay in the stack only**: the identity provider, secrets,
+  the forced sign-in again (`MTG_REAUTH_INTERVAL`), the membership check, `MTG_WRITES_ENABLED` and the folders on
   disk ([DEPLOY.md](DEPLOY.md#environment-reference)).
 - Every change is in the activity log as "Gateway setting changed", with the
   setting's name and its old and new value, under the admin's account. Three

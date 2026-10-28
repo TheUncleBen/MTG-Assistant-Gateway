@@ -655,7 +655,7 @@ class MembershipMiddleware:
 class SessionRenewalMiddleware:
     """Sliding browser sessions: a request with a live session cookie, once more than half of
     MTG_BROWSER_SESSION_TTL has passed since the session was made or last renewed, moves its end to
-    a full window from now (never past db.BROWSER_SESSION_MAX_AGE after the sign-in) and sets the
+    a full window from now (never past the longest sign-in time after the sign-in) and sets the
     cookie again with the time left. Inside MembershipMiddleware, so a removed member's session is
     gone before it could be renewed; sign-in and sign-out set or clear the cookie themselves, and a
     response that sets it already is left alone."""
@@ -674,7 +674,8 @@ class SessionRenewalMiddleware:
         settings = self.state.settings
         name = cookie_name(SESSION_COOKIE, settings)
         sid = Request(scope).cookies.get(name)
-        left = self.state.db.renew_browser_session(sid, settings.browser_session_ttl) if sid else None
+        ttl = self.state.live.seconds("browser_session_ttl")  # the Settings page's, at once
+        left = self.state.db.renew_browser_session(sid, ttl) if sid else None
         if left is None:
             await self.app(scope, receive, send)
             return
@@ -1136,6 +1137,10 @@ def create_app(
     app.state.gateway = state
     # Restore points kept per deck follow the admin Settings page at once (0.7.29).
     db.snapshots_source = lambda: state.live.get("snapshots_per_deck")
+    # The sign-in times follow the Settings page at once too (0.7.46): the longest a sign-in lasts
+    # here, the others where a sign-in or a token is made.
+    db.session_max_age_source = lambda: state.live.seconds("browser_session_max_age")
+    provider.ttl_source = state.live.seconds
     _use_hashed_client_secrets(app, provider)
     if settings.cimd_enabled:
         _advertise_cimd(app, server)

@@ -18,6 +18,7 @@ import ipaddress
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -211,6 +212,8 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self.membership = membership if membership is not None else MembershipChecker(settings, db, oidc)
         self.cimd = cimd if cimd is not None else CimdFetcher(allowed_hosts=settings.cimd_allowed_hosts)
         self.login_limiter = LoginStartLimiter()
+        # the token times in seconds as the Settings page has them now (create_app: LiveSettings.seconds)
+        self.ttl_source: Callable[[str], int] | None = None
         self._source_browsers: dict[str, set[str]] = {}  # source -> browser keys seen (bounded)
         self._warned_sources: set[str] = set()
         self._trusted_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
@@ -219,6 +222,12 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 self._trusted_nets.append(ipaddress.ip_network(entry, strict=False))
             except ValueError:
                 pass  # "*" (trust everyone): no address is then a proxy of its own
+
+    def _ttl(self, key: str) -> int:
+        """access_token_ttl or refresh_token_ttl, in seconds, as it is now."""
+        if self.ttl_source is not None:
+            return int(self.ttl_source(key))
+        return int(getattr(self.settings, key))
 
     # -- clients ------------------------------------------------------------
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -884,6 +893,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
         resource = resource or self.settings.mcp_url
+        access_ttl = self._ttl("access_token_ttl")
         self.db.save_token(
             access,
             kind="access",
@@ -892,7 +902,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             scopes=scopes,
             resource=resource,
             family=family,
-            expires_at=now + self.settings.access_token_ttl,
+            expires_at=now + access_ttl,
             auth_time=auth_time,
         )
         self.db.save_token(
@@ -903,14 +913,14 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             scopes=scopes,
             resource=resource,
             family=family,
-            expires_at=now + self.settings.refresh_token_ttl,
+            expires_at=now + self._ttl("refresh_token_ttl"),
             auth_time=auth_time,
         )
         self.db.audit("tokens_issued", sub=sub, client_id=client_id)
         return OAuthToken(
             access_token=access,
             token_type="Bearer",
-            expires_in=self.settings.access_token_ttl,
+            expires_in=access_ttl,
             scope=" ".join(scopes) if scopes else None,
             refresh_token=refresh,
         )

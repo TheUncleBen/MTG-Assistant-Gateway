@@ -144,8 +144,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 
 UNUSED_CLIENT_TTL = 7 * 86400
-# A browser or Android app sign-in ends this long after it was made, however much it is used
-# (renew_browser_session); MTG_BROWSER_SESSION_TTL is how long it lasts unused.
+# By default, a browser or Android app sign-in ends this long after it was made, however much it is
+# used (renew_browser_session); the Settings page's "Longest website sign-in" changes it
+# (Database.session_max_age), and "Website sign-in when unused" is how long it lasts unused.
 BROWSER_SESSION_MAX_AGE = 30 * 86400
 # Retention and size caps applied by purge_expired. Registration and /authorize are open to
 # anyone, so rows nobody has signed in for are capped as well as aged out.
@@ -920,6 +921,8 @@ class Database:
         # setting in, snapshots_keep()).
         self.snapshots_per_deck: int | None = None
         self.snapshots_source: Callable[[], int] | None = None
+        # the longest a sign-in lasts, in seconds, from the Settings page (create_app); None: the default
+        self.session_max_age_source: Callable[[], int] | None = None
         # A closed proposal's risk tier from its stored row (get_proposal's shape), stored when it
         # closes (settle_risks); the app wires in DeckService.stored_risk. None stores nothing.
         self.risk_source: Callable[[dict[str, Any]], str] | None = None
@@ -1892,37 +1895,47 @@ class Database:
         }
 
     # browser sessions ------------------------------------------------------
+    def session_max_age(self) -> int:
+        """The longest a sign-in lasts after it was made, in seconds, as the Settings page has it."""
+        if self.session_max_age_source is not None:
+            try:
+                return int(self.session_max_age_source())
+            except Exception:
+                logger.exception("could not read the longest sign-in time; the default applies")
+        return BROWSER_SESSION_MAX_AGE
+
     def create_browser_session(self, session_id: str, sub: str, ttl: int) -> None:
         now = int(time.time())
         with self.tx() as c:
             c.execute(
                 "INSERT INTO browser_sessions (id_hash, sub, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                (hash_token(session_id), sub, now, now + min(ttl, BROWSER_SESSION_MAX_AGE)),
+                (hash_token(session_id), sub, now, now + min(ttl, self.session_max_age())),
             )
 
     def get_browser_session(self, session_id: str) -> str | None:
         now = int(time.time())
         row = self._one(
             "SELECT sub FROM browser_sessions WHERE id_hash = ? AND expires_at >= ? AND created_at > ?",
-            (hash_token(session_id), now, now - BROWSER_SESSION_MAX_AGE),
+            (hash_token(session_id), now, now - self.session_max_age()),
         )
         return row["sub"] if row else None
 
     def renew_browser_session(self, session_id: str, ttl: int) -> int | None:
         """Sliding renewal: once more than half of ``ttl`` has passed since the session was made or
-        last renewed, its end moves to ``ttl`` from now, never past BROWSER_SESSION_MAX_AGE after
-        the sign-in. The seconds the session now has left when it was renewed, else None (not due,
+        last renewed, its end moves to ``ttl`` from now, never past ``session_max_age`` after the
+        sign-in. The seconds the session now has left when it was renewed, else None (not due,
         or no such live session). Reads only, unless a renewal is due."""
         now = int(time.time())
         key = hash_token(session_id)
+        longest = self.session_max_age()
         row = self._one(
             "SELECT created_at, expires_at FROM browser_sessions WHERE id_hash = ? AND expires_at >= ? "
             "AND created_at > ?",
-            (key, now, now - BROWSER_SESSION_MAX_AGE),
+            (key, now, now - longest),
         )
         if row is None or int(row["expires_at"]) - now >= ttl / 2:
             return None
-        until = min(now + ttl, int(row["created_at"]) + BROWSER_SESSION_MAX_AGE)
+        until = min(now + ttl, int(row["created_at"]) + longest)
         if until <= int(row["expires_at"]):
             return None  # already as long as it may last
         with self.tx() as c:

@@ -114,7 +114,8 @@ def _switches() -> list[str]:
 
 def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
     """Ben, 2026-10-25: every feature is on by default; an env variable only turns one off. Ben,
-    2026-10-28: MTG_SERVER_NAME is back too, for the Gateway name."""
+    2026-10-28: MTG_SERVER_NAME is back too, for the Gateway name, and the three sign-in times
+    that had a stack variable keep it (their Settings page rows, 0.7.46)."""
     from mtg_gateway.config import MANAGED_SETTINGS, Settings
 
     assert MANAGED_SETTINGS["server_name"].env == NAME_VAR
@@ -126,8 +127,18 @@ def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
         "MTG_SCAN_ART_ENABLED",
         "MTG_UPDATE_CHECK",
         "MTG_DECK_SYNC_MINUTES",
+        "MTG_ACCESS_TOKEN_TTL",
+        "MTG_REFRESH_TOKEN_TTL",
+        "MTG_BROWSER_SESSION_TTL",
     }
-    assert all(v is True for k, v in on.items() if k != "MTG_DECK_SYNC_MINUTES")
+    times = {
+        "MTG_DECK_SYNC_MINUTES",
+        "MTG_ACCESS_TOKEN_TTL",
+        "MTG_REFRESH_TOKEN_TTL",
+        "MTG_BROWSER_SESSION_TTL",
+    }
+    assert all(v is True for k, v in on.items() if k not in times)
+    assert all(on[k] > 0 for k in times)
     assert on["MTG_DECK_SYNC_MINUTES"] > 0
     assert Settings.__dataclass_fields__["writes_enabled"].default is True
 
