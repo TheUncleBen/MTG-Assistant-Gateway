@@ -103,3 +103,87 @@ async def test_two_tabs_each_pressing_plus_add_two_copies(stack: Stack) -> None:
         assert bad.status_code == 400
     finally:
         await b.aclose()
+
+
+async def _poll(b, url: str, until: tuple[str, ...], *, tries: int = 400) -> dict:
+    import asyncio
+
+    for _ in range(tries):
+        d = (await b.http.get(url)).json()
+        if d.get("state") in until:
+            return d
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"never reached {until}: {d}")
+
+
+async def test_an_import_runs_in_the_background_and_waits_for_room(stack: Stack, monkeypatch) -> None:
+    """30 lines cost about 60 Archidekt calls; with 40 a window the import adds what it can, keeps a
+    quarter back for the member's own changes, says it is paused, then goes on when there is room."""
+    from mtg_gateway import collection
+    from mtg_gateway.decks import RateBudget
+
+    monkeypatch.setattr(collection, "IMPORT_PAUSE_POLL", 0.02)
+    _seed(stack, 3)
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        stack.gw.decks.archidekt_budget = RateBudget(40)
+        text = "Quantity,Name\n" + "\n".join("1,Acidic Slime" for _ in range(30))  # 30 rows, kept apart
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        assert r.status_code == 303, r.text
+        where = r.headers["location"]
+        assert where.startswith("/collection?import="), where  # back at once, with the job
+        jid = where.split("=", 1)[1]
+        page = (await b.http.get(where)).text
+        assert f"data-import='{jid}'" in page and "lines done" in page
+        paused = await _poll(b, f"/collection/api/import/{jid}", ("paused",))
+        assert "Paused" in paused["text"] and 0 < paused["done"] < 30, paused
+        assert "minute" not in paused["text"] and "second" not in paused["text"]
+        # the member still has room for their own changes while it waits
+        assert (
+            stack.gw.decks.archidekt_budget.room(next(iter(stack.gw.decks.archidekt_budget._buckets))) >= 10
+        )
+        r = await api(b, "POST", "/collection/api/rows/1", {"delta": 1, "name": "Acidic Slime"}, csrf=csrf)
+        assert r.status_code == 200, r.text
+        stack.gw.decks.archidekt_budget = RateBudget(1_000)  # room again
+        done = await _poll(b, f"/collection/api/import/{jid}", ("done", "failed"))
+        assert done["state"] == "done" and done["done"] == 30, done
+        assert _slime(stack) == {1: 33}  # 2, 30 imported and the member's own +1
+        landed = await b.http.get(done["next"])
+        assert "Imported 30 cards into your Collection on Archidekt." in landed.text
+    finally:
+        await b.aclose()
+
+
+async def test_an_import_that_stops_says_what_was_added(stack: Stack, monkeypatch) -> None:
+    from mtg_gateway import collection
+
+    monkeypatch.setattr(collection, "IMPORT_PAUSE_POLL", 0.02)
+    _seed(stack, 3)
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        writes = {"n": 0}
+        orig = stack.ark.transport.handler
+
+        def failing(req):
+            if req.method in ("PUT", "PATCH") and "/collection/" in req.url.path:
+                writes["n"] += 1
+                if writes["n"] > 4:
+                    import httpx
+
+                    return httpx.Response(500, json={"detail": "down"})
+            return orig(req)
+
+        stack.ark.transport.handler = failing
+        text = "Quantity,Name\n" + "\n".join("1,Acidic Slime" for _ in range(10))
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        jid = r.headers["location"].split("=", 1)[1]
+        done = await _poll(b, f"/collection/api/import/{jid}", ("done", "failed"))
+        assert done["state"] == "failed", done
+        landed = (await b.http.get(done["next"])).text
+        assert "Imported 4 cards" in landed and "stopped" in landed, landed[:2000]
+        assert "HTTP" not in done["text"] and "500" not in done["text"]
+    finally:
+        stack.ark.transport.handler = orig
+        await b.aclose()

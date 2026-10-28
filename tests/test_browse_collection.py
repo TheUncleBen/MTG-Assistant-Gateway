@@ -37,6 +37,22 @@ async def api(b: Browser, method: str, path: str, body: dict | None = None, *, c
     )
 
 
+async def import_list(b: Browser, data: dict):
+    """POST an import from the page and wait for it: an import runs in the background (0.7.46),
+    so the answer is the page's redirect to its result once it ends (or the refusal at once)."""
+    import asyncio
+
+    r = await b.http.post("/collection", data=data)
+    if not r.headers.get("location", "").startswith("/collection?import="):
+        return r
+    for _ in range(500):
+        done = await b.http.get(r.headers["location"])
+        if done.status_code == 303:
+            return done
+        await asyncio.sleep(0.02)
+    raise AssertionError("the import never ended")
+
+
 # -- home -------------------------------------------------------------------------------------
 async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) -> None:
     b = await linked(stack)
@@ -211,7 +227,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         page = await b.http.get("/collection", headers=NAV)
         assert "Import a list" in page.text and "importfile" in page.text and "filepick.js" in page.text
         plain = "2 Sol Ring (CMR) 436\n1 Opt *F*\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": plain})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": plain})
         assert r.status_code == 303, r.headers
         assert re.fullmatch(r"/collection\?ok=imported&r=[\w-]+", r.headers["location"]), r.headers
         rows = {
@@ -222,7 +238,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         exported = (await b.http.get("/collection/export.csv")).text
         assert exported.splitlines()[0].startswith("Quantity,Name,Finish,Condition")
         # the export imports back: the same printings in the same finishes get their copies topped up
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": exported})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": exported})
         assert r.status_code == 303 and "ok=imported" in r.headers["location"]
         rows = {
             (c["card"]["oracleCard"]["name"], c["modifier"]): c["quantity"]
@@ -231,7 +247,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         assert rows == {("Sol Ring", "Normal"): 4, ("Opt", "Foil"): 2}, rows
         # Archidekt's own column names, extra columns ignored, header order free
         arch = "Name,Set Code,Collector Number,Quantity,Foil,Condition,Price\nSol Ring,cmr,436,3,,NM,1.20\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": arch})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": arch})
         assert "ok=imported" in r.headers["location"]
         assert [
             c["quantity"]
@@ -240,11 +256,11 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         ] == [7]
         # refusals: too many rows, nothing readable
         many = "\n".join(f"1 Card {i}" for i in range(101))
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": many})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": many})
         assert r.headers["location"].startswith("/collection?err=toomany&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
         assert "Nothing was imported: that is 101 rows; an import adds at most 100 at a time" in shown.text
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "   "})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": "   "})
         assert r.headers["location"].startswith("/collection?err=unreadable&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
         assert "Nothing was imported: paste or choose a CSV or a card list first." in shown.text

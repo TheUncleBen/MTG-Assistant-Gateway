@@ -327,6 +327,25 @@
     $$("input[name=view]", listform).forEach(function (r) { r.addEventListener("change", submit); });
   }
 
+  /* -- an import in the background: its strip follows it, and the page shows the result -------- */
+  var importing = $("[data-import]");
+  if (importing) {
+    var itext = $(".itext", importing);
+    var failures = 0;
+    var poll = function () {
+      fetch("/collection/api/import/" + encodeURIComponent(importing.getAttribute("data-import")),
+        { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          failures = 0;
+          if (!d.ok) { location.replace("/collection"); return; }
+          if (itext && itext.textContent !== d.text) { itext.textContent = d.text; }
+          if ((d.state === "done" || d.state === "failed") && d.next) { location.replace(d.next); return; }
+          setTimeout(poll, 1500);
+        }).catch(function () { failures += 1; setTimeout(poll, Math.min(15000, 1500 * (failures + 1))); });
+    };
+    setTimeout(poll, 1000);
+  }
+
   /* -- Load more: the next rows, appended ---------------------------------------------------- */
   document.addEventListener("click", function (e) {
     var a = e.target.closest ? e.target.closest(".loadmore [data-load-more]") : null;

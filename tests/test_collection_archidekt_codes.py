@@ -14,7 +14,7 @@ from mtg_gateway.collection import (
     parse_collection_import,
 )
 
-from .test_browse_collection import NAV, Stack, linked, stack_options  # noqa: F401  (fixture)
+from .test_browse_collection import NAV, Stack, import_list, linked, stack_options  # noqa: F401  (fixture)
 
 
 def test_import_reads_language_in_either_code_set_and_defaults_to_english():
@@ -79,7 +79,7 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         assert "Importing the CSV on archidekt.com" in page.text and "Foil/Variant" in page.text
         csrf = await b.csrf("/collection")
         text = "Quantity,Name,Finish,Condition,Language\n2,Sol Ring,Normal,D,JP\n1,Opt,Foil,LP,CS\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
         assert r.headers["location"].startswith("/collection?ok=imported&r="), r.headers
         recs = {c["card"]["oracleCard"]["name"]: c for c in stack.ark.collections["alice"].values()}
         # Archidekt's numbers: JP = 6, CS = 10, D = 5, LP = 2
@@ -97,7 +97,7 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         assert "role='cell'>Damaged (DMG)</span>" in page.text
         # a language Archidekt's collection has no code for is imported as English, and named
         odd = "Name,Language\nForest,XX\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": odd})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": odd})
         assert r.headers["location"].startswith("/collection?ok=imported&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
         assert (

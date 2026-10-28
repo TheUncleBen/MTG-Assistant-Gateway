@@ -17,7 +17,7 @@ from mtg_gateway.collection import (
     parse_collection_import,
 )
 
-from .test_browse_collection import NAV, Stack, linked, stack_options  # noqa: F401  (fixture)
+from .test_browse_collection import NAV, Stack, import_list, linked, stack_options  # noqa: F401  (fixture)
 from .test_decks_and_proxy import Browser
 
 
@@ -126,13 +126,12 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
     b = await linked(stack)
     try:
         csrf = await b.csrf("/collection")
-        r = await b.http.post(
-            "/collection",
-            data={"csrf": csrf, "action": "import", "text": "Quantity,Name,Language\n1,Sol Ring,EN\n"},
+        r = await import_list(
+            b, {"csrf": csrf, "action": "import", "text": "Quantity,Name,Language\n1,Sol Ring,EN\n"}
         )
         assert re.fullmatch(r"/collection\?ok=imported&r=[\w-]{16}", r.headers["location"]), r.headers
         text = "Quantity,Name,Language\n2,Sol Ring,JP\n1,Opt,PH\n1,Foo Bar,EN\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
         where = r.headers["location"]
         assert where.startswith("/collection?ok=imported&r=") and "Foo" not in where
         recs = [
@@ -159,12 +158,12 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
         assert "Imported into your Collection on Archidekt." in again and "Foo Bar" not in again
         # a refusal names the line
         bad = "Quantity,Name\n1,Opt\nx,Sol Ring\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": bad})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": bad})
         assert r.headers["location"].startswith("/collection?err=unreadable&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert "Nothing was imported: line 3: quantity &#x27;x&#x27; is not a number." in page
         # nothing found: the plain notice, with the rows not found
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "1 Foo Bar\n"})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": "1 Foo Bar\n"})
         assert r.headers["location"].startswith("/collection?err=nothingimported&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert (
@@ -180,7 +179,7 @@ async def test_a_result_token_is_only_read_by_the_member_who_imported(stack: Sta
     try:
         csrf = await alice.csrf("/collection")
         text = "Quantity,Name,Language\n1,Opt,PH\n"
-        r = await alice.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(alice, {"csrf": csrf, "action": "import", "text": text})
         where = r.headers["location"]
     finally:
         await alice.aclose()
@@ -302,13 +301,13 @@ async def test_huge_cells_and_an_unknown_condition_through_the_page(stack: Stack
                 "line 2: quantity &#x27;yyyyyyyyyyyyyyyyyyyy…&#x27;",
             ),
         ]:
-            r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+            r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
             assert r.status_code == 303, r.status_code
             assert r.headers["location"].startswith("/collection?err=unreadable&r=")
             page = (await b.http.get(r.headers["location"], headers=NAV)).text
             assert f"Nothing was imported: {said}" in page and "y" * 21 not in page
         text = "Quantity,Name,Condition\n1,Sol Ring,EX\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
         assert r.headers["location"].startswith("/collection?ok=imported&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert (
