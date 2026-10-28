@@ -44,6 +44,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__, smallpage, theme, ui
 from .admin import add_admin_routes
+from .alerts_push import AlertWatch
 from .api import add_api_routes
 from .app_page import PROJECT_URL, add_app_routes
 from .app_signin import AppSignins
@@ -143,6 +144,7 @@ class AppState:
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
     sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
+    alerts: AlertWatch | None = None  # Archidekt alerts pushed to members' phones (alerts_push.py)
     folder_jobs: Any = None  # folder deletes from My decks (companion_folders.py)
     late_pages: LateStore = field(default_factory=LateStore)  # pages drawn before Archidekt answered
 
@@ -809,6 +811,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             )
         if state.sync is not None and state.sync.enabled:
             tasks.append(asyncio.create_task(state.sync.loop()))
+        if state.alerts is not None and state.alerts.enabled:
+            tasks.append(asyncio.create_task(state.alerts.loop(), context=contextvars.Context()))
         # unused backup copies whose delete Archidekt refused for a while, one at a time,
         # in a context of its own (never inside a member's apply or slot)
         tasks.append(asyncio.create_task(state.decks.backup_delete_loop(), context=contextvars.Context()))
@@ -1013,6 +1017,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             state.notifier,
         )
     state.summaries = Summaries(state.db, state.prices, state.notifier, s.public_url)
+    state.alerts = AlertWatch(state.decks, state.notifier)
     state.db.price_days = s.price_history_days
     _notify_events(state)
     add_watchlist_routes(server, state)

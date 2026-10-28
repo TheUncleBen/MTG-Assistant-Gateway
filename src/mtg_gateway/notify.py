@@ -11,8 +11,8 @@ host of their own, and ntfy's cache gives a phone that was offline what it misse
 
 What is sent: changes an assistant left waiting for the member's press, grouped per deck (one
 message per deck, replaced as the count changes and removed when nothing waits), a deck report
-that finished (Forge runs that waited in the queue included), a price alert they set, and their
-scheduled summary. Each message carries the least that is useful: a short title and line, and a
+that finished (Forge runs that waited in the queue included), a price alert they set, a new alert
+on Archidekt (alerts_push.py) and their scheduled summary. Each message carries the least that is useful: a short title and line, and a
 link to the gateway page. Deck contents are never sent. The token is sent only in the
 Authorization header and never logged; a failed publish is logged with the HTTP status alone.
 
@@ -53,7 +53,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-EVENTS = ("proposals", "reports", "prices")  # the kinds a member can switch off one by one
+EVENTS = ("proposals", "reports", "prices", "alerts")  # the kinds a member can switch off one by one
+# "New alerts on Archidekt" (alerts_push.py) is kept on the account (account_prefs), not in
+# notify_prefs, so it needed no database upgrade; on unless the member unticked it.
+ALERTS_PREF = "notify.alerts"
 SUMMARY_CHOICES = ("off", "daily", "weekly")
 # The Account page's notices for the Notifications card and its summary (pages.py shows them).
 ACCOUNT_OK = {
@@ -204,19 +207,33 @@ def prefs(db: Database, sub: str) -> dict[str, Any]:
             "on_proposals": True,
             "on_reports": True,
             "on_prices": True,
+            "on_alerts": db.get_pref(sub, ALERTS_PREF) is not False,
             "summary_every": "off",
             "summary_sent_day": None,
         }
     out = dict(row)
     for k in ("ntfy_on", "on_proposals", "on_reports", "on_prices"):
         out[k] = bool(out[k])
+    out["on_alerts"] = db.get_pref(sub, ALERTS_PREF) is not False
     return out
+
+
+def push_members(db: Database) -> list[tuple[str, str]]:
+    """(member, topic) of every member whose notifications are on."""
+    with db._lock:
+        rows = db._conn.execute(
+            "SELECT sub, ntfy_topic FROM notify_prefs WHERE ntfy_on = 1 AND ntfy_topic IS NOT NULL "
+            "ORDER BY sub"
+        ).fetchall()
+    return [(r["sub"], r["ntfy_topic"]) for r in rows]
 
 
 def save_prefs(db: Database, sub: str, **values: Any) -> None:
     """Store some of the member's choices; the others keep their value. A topic another member
     already has is refused (ValueError)."""
     allowed = {"ntfy_on", "ntfy_topic", "on_proposals", "on_reports", "on_prices", "summary_every"}
+    if "on_alerts" in values:
+        db.set_pref(sub, ALERTS_PREF, bool(values["on_alerts"]))
     values = {k: v for k, v in values.items() if k in allowed}
     if "summary_every" in values and values["summary_every"] not in SUMMARY_CHOICES:
         raise ValueError("summary_every must be off, daily or weekly")
@@ -276,6 +293,7 @@ TAGS = {
     "reports": "bar_chart",
     "prices": "chart_with_upwards_trend",
     "summary": "calendar",
+    "alerts": "bell",
 }
 
 
@@ -329,6 +347,7 @@ class Notifier:
         self._waiting: dict[tuple[str, str], int] = {}  # the count each deck's message last said
         self._cleared: set[tuple[str, str]] = set()  # decks whose message this process withdrew
         self._streams: dict[str, int] = {}  # open app connections per key
+        self._phone_seen: dict[str, float] = {}  # when each key's last connection opened or ended
         self._kicks: dict[str, asyncio.Event] = {}  # set to end a key's connections now
         self._closing: asyncio.Event | None = None  # set when the gateway stops
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -669,6 +688,7 @@ class Notifier:
         if self._streams.get(topic, 0) >= STREAM_MAX_PER_KEY:
             return False
         self._streams[topic] = self._streams.get(topic, 0) + 1
+        self._phone_seen[topic] = time.monotonic()
         return True
 
     def full(self) -> bool:
@@ -676,6 +696,10 @@ class Notifier:
         return sum(self._streams.values()) >= STREAM_MAX_TOTAL
 
     def release(self, topic: str) -> None:
+        self._phone_seen[topic] = time.monotonic()
+        if len(self._phone_seen) > 5000:  # keys gone for good: forget the oldest
+            for k in sorted(self._phone_seen, key=self._phone_seen.__getitem__)[:1000]:
+                self._phone_seen.pop(k, None)
         left = self._streams.get(topic, 1) - 1
         if left > 0:
             self._streams[topic] = left
@@ -693,6 +717,14 @@ class Notifier:
     def streams(self, topic: str) -> int:
         """App connections open with ``topic`` now."""
         return self._streams.get(topic, 0)
+
+    def phone_recent(self, topic: str, within: float) -> bool:
+        """Whether a phone is connected with ``topic`` now, or was in the last ``within`` seconds
+        (since this process started: phones reconnect at once after a restart)."""
+        if self._streams.get(topic, 0) > 0:
+            return True
+        seen = self._phone_seen.get(topic)
+        return seen is not None and time.monotonic() - seen <= within
 
 
 def _bearer(request: Request) -> str:
@@ -816,6 +848,8 @@ ACCOUNT_CSS = """<style>
 .nf-card .nf-when{margin:.35rem 0 0;padding:0 0 0 1.85rem;border:0;min-width:0}
 .nf-card .nf-when legend{padding:0;margin:0 0 .15rem;font-weight:700;color:var(--text-muted);font-size:.86rem;
   text-transform:uppercase;letter-spacing:.03em}
+/* a choice's hint, under its words (past the 20 px box and the label's gap) */
+.nf-card .nf-sub{margin:-.2rem 0 .25rem;padding-left:calc(20px + .6rem);font-size:.86rem;line-height:1.45}
 .nf-card .part{margin:1rem 0 0;padding:1rem 0 0;border-top:1px solid var(--border-soft)}
 .nf-card .part .ui-hint{font-size:.86rem;line-height:1.45;margin:.25rem 0 .5rem}
 .nf-card .part p{line-height:1.45}
@@ -974,13 +1008,15 @@ def account_card_html(
             "<div class='card' id='notifications'><h2>Notifications</h2><p class='muted'>This gateway has no "
             "notification server set up, so the Android app can't get notifications. The person who runs "
             "this gateway can turn them on. The app then tells you when an assistant leaves changes waiting "
-            f"for your press, a deck report finishes{watched} or your summary is ready.</p></div>"
+            f"for your press, a deck report finishes{watched}, something new arrives in your Archidekt "
+            "alerts or your summary is ready.</p></div>"
         )
     p = prefs(state.db, sub)
 
-    def box(name: str, label: str) -> str:
+    def box(name: str, label: str, hint: str = "") -> str:
+        described = f" aria-describedby='{hint}'" if hint else ""
         return (
-            f"<label><input type='checkbox' name='{name}' value='1'"
+            f"<label><input type='checkbox' name='{name}' value='1'{described}"
             f"{' checked' if p[name] else ''}><span>{_esc(label)}</span></label>"
         )
 
@@ -1005,6 +1041,17 @@ def account_card_html(
         if on
         else ""
     )
+    # Archidekt's own alerts (alerts_push.py): only a linked account has any to look at.
+    alerts_hint = (
+        "The gateway looks at Archidekt for you now and then while a phone is connected, so these come "
+        "a little after the site shows them."
+        if state.db.get_link(sub) is not None
+        else "Link your Archidekt account to get these."
+    )
+    alerts_box = (
+        f"{box('on_alerts', 'A new alert on Archidekt (a comment, a reply, a new follower)', 'n-alerts')}"
+        f"<p class='ui-hint nf-sub' id='n-alerts'>{alerts_hint}</p>"
+    )
     # With watchlists off there is no price alert to choose; a choice made earlier is kept as it was.
     prices_box = (
         box("on_prices", "A watched card crossed my price alert")
@@ -1027,7 +1074,7 @@ def account_card_html(
         "<fieldset class='nf-when'><legend>When</legend><div class='ui-checks'>"
         f"{box('on_proposals', 'An assistant left changes waiting for my press (one message per deck)')}"
         f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
-        f"{prices_box}</div></fieldset>"
+        f"{prices_box}{alerts_box}</div></fieldset>"
         "<div class='ui-actions'><button class='primary'>Save notifications</button></div></form>"
         f"{phones}</section>"
         f"{_summary_html(state, sub, p, csrf_in, on=on, notice=_card_notice(ok, err, SUMMARY_NOTICES))}"
@@ -1041,8 +1088,14 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
     Get notifications on this phone for the member (feedback.js)."""
     if action == "notify_save":
         on = data.get("ntfy_on") == "1"
+        alerts = data.get("on_alerts") == "1"
         before = prefs(state.db, sub)
         current = before["ntfy_topic"]
+        if on and alerts and not (before["ntfy_on"] and before["on_alerts"]):
+            # turned (back) on: Archidekt alerts are pushed from now, not what came meanwhile
+            from .alerts_push import forget
+
+            forget(state.db, sub)
         topic = (
             current if strong_topic(state.db, sub, current) else (new_topic(state.db, sub) if on else None)
         )
@@ -1053,6 +1106,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             on_proposals=data.get("on_proposals") == "1",
             on_reports=data.get("on_reports") == "1",
             on_prices=data.get("on_prices") == "1",
+            on_alerts=alerts,
             **({"ntfy_topic": topic} if topic else {}),
         )
         if not on:
