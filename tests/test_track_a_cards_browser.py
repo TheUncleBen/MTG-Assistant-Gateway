@@ -709,7 +709,7 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
             # said once: the Held line says why, the next line only what it means
             assert "It needs your press." in body and "This one would replace" not in body, body
             # no line the hold made untrue stays on the card
-            assert "still waits" not in body and "Low-risk change" not in body, body
+            assert "still waits" not in body and "Low risk (" not in body, body
             assert _tool_calls(page, "confirm_proposal") == [
                 {"proposal_id": "p2", "approval": "code-2", "decision": "approve", "shown_status": ""}
             ]
@@ -1089,7 +1089,7 @@ def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str)
 
 @pytest.mark.parametrize("width,theme", [(380, "light"), (380, "dark"), (700, "light"), (700, "dark")])
 def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) -> None:
-    """A private copy of a deck that Semi-auto may apply reads "Low-risk change (copies a deck …)":
+    """A private copy of a deck that Semi-auto may apply reads "Low risk (copies a deck …)":
     a copy edits nothing, so "edit" was wrong. The note stays inside the card."""
     from playwright.sync_api import sync_playwright
 
@@ -1114,8 +1114,8 @@ def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) 
             card.locator("#note:not(.hidden)").wait_for()
             note = card.locator("#note").inner_text()
             assert (
-                "Low-risk change (copies a deck and changes nothing that exists): your approval mode lets "
-                "your assistant apply it without asking." in note
+                "Low risk (copies a deck and changes nothing that exists): your assistant may apply this "
+                "without asking." in note
             ), note
             assert "Low-risk edit" not in note
             frame = page.frames[1]
