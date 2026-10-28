@@ -216,7 +216,7 @@ def test_markdown_and_html_exports() -> None:
     r = report()
     md = rv.report_markdown(r)
     assert md.startswith("# Deck report: Immortal Reckoning\n")
-    assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
+    assert "| Commander | Liesa, Forgotten Archangel |" in md and "| Games | 300, through turn 10 |" in md
     assert (
         "## Quick solo test (300 games, no opponents)" in md
         and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
@@ -225,7 +225,8 @@ def test_markdown_and_html_exports() -> None:
         "Played without their effect: 32 of 98 cards (33% of the deck)." in md
         and "## Validation: issues found" in md
     )
-    assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
+    # the research service's raw output stays on the report's page (test_report_export_outline)
+    assert "## Raw output" in md and "## Metrics" not in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
     assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme: light" in doc
@@ -327,7 +328,7 @@ def test_preflight_only_label_and_overall_status() -> None:
     assert "Preflight only" not in running and ">Forge games (against precons)</h2>" in running
     assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge running</span>" in running
     md = rv.report_markdown(report(forge=skipped, status="complete"))
-    assert "## Preflight only (no rules engine)" in md and "- Status: Complete" in md
+    assert "## Preflight only (no rules engine)" in md and "| Status | Complete |" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
     assert "## Forge games (against precons)" in rv.report_markdown(
         report(forge={"state": "running"}, status="running")

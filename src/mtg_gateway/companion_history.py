@@ -7,6 +7,7 @@ import calendar
 import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
@@ -481,7 +482,7 @@ def add_history_routes(
         if r is None:
             return _not_found(sub, sid)
         safe = _esc(rid)
-        md = report_markdown(r)
+        md = report_markdown(r, report_url=_report_url(r))
         # the export buttons as plain buttons at the header's end
         actions = (
             f"<a class='btn btn-plain' href='/history/reports/{safe}/export.md' download>{icon('download')} "
@@ -696,6 +697,10 @@ def add_history_routes(
             },
         )
 
+    def _report_url(r: dict[str, Any]) -> str:
+        """The report's page on this gateway, for the downloads' links."""
+        return f"{state.settings.public_url}/history/reports/{quote(str(r.get('report_id') or ''), safe='')}"
+
     @server.custom_route("/history/reports/{rid}/export.md", methods=["GET"], include_in_schema=False)
     async def report_export_md(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
@@ -704,7 +709,8 @@ def add_history_routes(
         r = _report_or_404(sub, request.path_params["rid"])
         if r is None:
             return _not_found(sub, _sid)
-        return _report_file(r, ".md", report_markdown(r), "text/markdown; charset=utf-8")
+        md = report_markdown(r, report_url=_report_url(r))
+        return _report_file(r, ".md", md, "text/markdown; charset=utf-8")
 
     @server.custom_route("/history/reports/{rid}/export.html", methods=["GET"], include_in_schema=False)
     async def report_export_html_file(request: Request) -> Response:
@@ -715,7 +721,9 @@ def add_history_routes(
         r = _report_or_404(sub, request.path_params["rid"])
         if r is None:
             return _not_found(sub, _sid)
-        html_doc = report_export_html(r, stats_html=stats_strip(r.get("stats")), theme_css=VIZ_CSS)
+        html_doc = report_export_html(
+            r, stats_html=stats_strip(r.get("stats")), theme_css=VIZ_CSS, report_url=_report_url(r)
+        )
         resp = _report_file(r, ".html", html_doc, "text/html; charset=utf-8")
         resp.headers["Content-Security-Policy"] = (
             "default-src 'none'; style-src 'unsafe-inline'; img-src data:"

@@ -73,12 +73,10 @@ def test_the_markdown_is_clean() -> None:
     r = report(validation=VALIDATION_PASSED, forge=json.loads(json.dumps(FORGE_DONE)), status="complete")
     md = rv.report_markdown(r)
     outside = _fences(md)
-    # one title; the research service's own headings (# Goldfish run, ## Summary, ## Metrics) are
-    # inside its fence
+    # one title; the research service's own output (# Goldfish run, ## Metrics) is not copied in:
+    # the file says where it is kept (test_report_export_outline)
     assert [ln for ln in outside if ln.startswith("# ")] == ["# Deck report: Immortal Reckoning"]
-    assert "## Summary" not in outside and "## Metrics" not in outside and "## Metrics" in md
-    assert "## Simulation output\n\n````text\n# Goldfish run" in md
-    assert "## Validation output\n\n````text\n" in md
+    assert "## Metrics" not in md and "# Goldfish run" not in md and "## Raw output" in outside
     # no HTML outside the fences
     assert not [ln for ln in outside if re.search(r"<[a-z/][^>]*>", ln)], outside
     # each group of cards is its own paragraph, its count in bold
@@ -92,16 +90,16 @@ def test_the_markdown_is_clean() -> None:
             assert lines[i - 1] == "" and lines[i + 1] == "", (i, ln)
     # one win is a win
     assert "Precon 2: 1 win, 10%" in md and "1 wins" not in md
-    assert "- Status: Complete" in md
+    assert "| Status | Complete |" in md
 
 
 def test_a_pasted_list_or_a_comparison_says_so_in_markdown() -> None:
     r = report(status="complete")
     r.update(deck_id="", deck_name="Pasted list (Liesa)", source={"kind": "list", "label": "Pasted list"})
     md = rv.report_markdown(r)
-    assert "archidekt.com/decks/" not in md and "- Source: Pasted list" in md
+    assert "archidekt.com/decks/" not in md and "| Source | Pasted list |" in md
     deck = report(status="complete")
-    assert "- Deck: https://archidekt.com/decks/42" in rv.report_markdown(deck)
+    assert "| Deck | [Immortal Reckoning](https://archidekt.com/decks/42) |" in rv.report_markdown(deck)
     cmp = report(status="complete")
     cmp.update(
         deck_name="Immortal Reckoning vs Pasted list",
@@ -109,7 +107,7 @@ def test_a_pasted_list_or_a_comparison_says_so_in_markdown() -> None:
         comparison={"tool": "goldfish_ab", "ok": True, "text": "# A/B\n\n## Deltas\n- kill turn -1"},
     )
     md = rv.report_markdown(cmp)
-    assert "- Source: Comparison" in md and "## Comparison\n\n````text\n# A/B\n\n## Deltas" in md
+    assert "| Source | Comparison |" in md and "## Comparison\n\n````text\n# A/B\n\n## Deltas" in md
     assert [ln for ln in _fences(md) if ln.startswith("# ")] == [
         "# Deck report: Immortal Reckoning vs Pasted list"
     ]
