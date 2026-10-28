@@ -701,8 +701,13 @@
     if (!G || window.__scanNoFlatten) return null;
     try { return G.flattenCard(source, rect) || (rect ? G.flattenCard(source, null) : null); } catch (e) { return null; }
   }
+  /* On a flattened card the info crop reaches 1% further down, to 0.5% above the card's bottom
+     edge: the second line ("FRC • EN") ends close to that edge, and an outline found a pixel or two
+     large on the 480 px working copy (about 0.5% of a card) would otherwise cut through it. Below
+     the line there is only the card's own border, never the table. */
+  function flatInfoRegion(w, h) { const r = infoRegionOf(0, 0, w, h); r.h += h * 0.01; return r; }
   function flatRegions(flat) {
-    return { title: flatTitleRegion(flat.width, flat.height), info: infoRegionOf(0, 0, flat.width, flat.height) };
+    return { title: flatTitleRegion(flat.width, flat.height), info: flatInfoRegion(flat.width, flat.height) };
   }
 
   async function captureFrame(video) {
@@ -1628,7 +1633,7 @@
   // Test and debugging hooks (read-only view of state plus the pure helpers).
   window.__scan = { state, cleanOcr, preprocess, addItem, scanRegion, showTab, api,
     parseInfoLine, cardRequest, infoRegionOf, setSetLock, getSetLock, setFoilDefault, getFoilDefault,
-    flattenCard, flatTitleRegion, glareOf, torchSupported, setTorch, getTorch, cameraRanges, setCamera,
+    flattenCard, flatTitleRegion, flatInfoRegion, glareOf, torchSupported, setTorch, getTorch, cameraRanges, setCamera,
     tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, nameIsComplete,
     loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker };
 

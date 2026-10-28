@@ -100,6 +100,14 @@ def _open(p, exe, srv, sid):
     return browser, page, errors
 
 
+def settle(page) -> None:
+    """Waits until the camera tab has said its piece: the camera attempt is over and text
+    recognition has loaded (or is not installed), so no late status replaces the one tested."""
+    page.wait_for_function(
+        "() => ['ready', 'missing', 'failed'].includes(window.__scan.state.ocrState)", timeout=60_000
+    )
+
+
 def _exe() -> str | None:
     exe = _chromium_path()
     if exe == "missing":
@@ -210,7 +218,7 @@ def test_a_picture_the_browser_cannot_open_says_why(server) -> None:  # noqa: F8
     heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + bytes(64)
     with sync_playwright() as p:
         browser, page, errors = _open(p, exe, server, sid)
-        page.wait_for_function("() => /camera/i.test(document.querySelector('#cam-status').textContent)")
+        settle(page)
         page.evaluate("() => { document.querySelector('#cam-status').textContent = ''; }")
         page.set_input_files(
             "#photo-file", files=[{"name": "IMG_0001.HEIC", "mimeType": "image/heic", "buffer": heic}]
@@ -241,7 +249,7 @@ def test_a_failed_read_says_which_step_failed(server, tmp_path: Path) -> None:  
     sid = server.sign_in()
     with sync_playwright() as p:
         browser, page, errors = _open(p, exe, server, sid)
-        page.wait_for_function("() => /camera/i.test(document.querySelector('#cam-status').textContent)")
+        settle(page)
         # Text recognition reads nothing at all.
         page.evaluate(
             "() => { window.__scanOcrOverride = async () => ({text: '', confidence: 0, words: []}); }"
@@ -257,5 +265,42 @@ def test_a_failed_read_says_which_step_failed(server, tmp_path: Path) -> None:  
         assert said[0].startswith("Could not find the card’s edges"), said
         assert "plain background" in said[0], said
         assert said[1].startswith("Found the card but could not read its name"), said
+        assert errors == []
+        browser.close()
+
+
+def test_the_info_strip_holds_both_lines_whole(server, tmp_path: Path) -> None:  # noqa: F811
+    """The bottom-left info block ("0021 U" over "FRC • EN") sits close to the card's bottom edge.
+    The strip read for it must hold the second line whole even when the found outline is a pixel
+    or two off: a strip cut through the letters read "FRC" as "FERC" and took the cut dot for a
+    foil star."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_scan_browser import skewed_photo
+
+    exe = _exe()
+    card = tmp_path / "card.jpg"
+    card_photo(card, "Sol Ring", ("0021 U", "FRC • EN"))
+    photo = tmp_path / "on-table.jpg"
+    skewed_photo(photo, card, [(300, 220), (1130, 300), (1060, 1620), (230, 1520)])
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, exe, server, sid)
+        page.set_input_files("#photo-file", str(photo))
+        page.wait_for_function("() => window.__scan.state.pending", timeout=60_000)
+        assert page.evaluate("() => window.__scan.state.pending.ocr.flattened") is True
+        info = page.evaluate("() => window.__strips.filter(([k]) => k === 'info').map(([, u]) => u)[0]")
+        # Ink (dark after preprocessing) in the strip's bottom 6% of rows means a line was cut.
+        cut = page.evaluate(
+            """(url) => new Promise((res) => { const i = new Image(); i.onload = () => {
+              const c = document.createElement('canvas'); c.width = i.width; c.height = i.height;
+              const x = c.getContext('2d'); x.drawImage(i, 0, 0);
+              const rows = Math.max(2, Math.round(i.height * 0.06));
+              const d = x.getImageData(0, i.height - rows, i.width, rows).data; let dark = 0;
+              for (let p = 0; p < d.length; p += 4) if (d[p] < 100) dark++;
+              res(dark); }; i.src = url; })""",
+            info,
+        )
+        assert cut == 0, f"{cut} ink pixels on the strip's bottom edge"
         assert errors == []
         browser.close()
