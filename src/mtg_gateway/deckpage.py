@@ -1435,6 +1435,7 @@ def cards_html(
             for n in (
                 "eye",
                 "bookmark",
+                "pin",
                 "swap",
                 "tag",
                 "eye-off",

@@ -397,7 +397,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             ),
         ]
         if state.prices is not None:
-            items.append(watchlist_widget(state.prices.overview(sub, days=31)))
+            items.append(watchlist_widget(state.prices.overview(sub, history=False)))
         if link["linked"]:
             # On Archidekt: the bell's count, read after the page has loaded (static/bell.js)
             from .profile_page import home_widget

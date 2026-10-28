@@ -39,6 +39,14 @@ DECKSTATS = "deckstats"
 EDHPLAY_STEPS = "edhplay.steps"
 SCAN_INTRO = "scan.intro"
 STACK = "stack:"  # + deck id + ":" + grouping
+# The Binder's Add box and the Watchlist's Watch form, as last used with "Use ... next time" ticked
+# (2026-10-28): {finish, condition, language} and {finish, alert_pct}. A card menu's "Add to
+# binder" or Watch, which asks nothing, uses them too.
+BINDER_ADD = "binder.add"
+WATCH_ADD = "watch.add"
+_FINISHES = ("nonfoil", "foil", "etched")
+_CONDITIONS = ("NM", "LP", "MP", "HP", "DMG")
+_LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
 MAX_STACK_ORDERS = 150  # the newest 150; saving one more forgets the oldest
 MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # Set by "Forget my view choices" and kept: from then on a device's pre-0.7.29 choices (a view
@@ -64,6 +72,25 @@ def valid(name: str, value: Any) -> bool:
         return value is True
     if name == SCAN_INTRO:  # "seen": shown once, folded from then on; True: dismissed with Got it
         return value is True or value == "seen"
+    if name == BINDER_ADD:
+        return (
+            isinstance(value, dict)
+            and set(value) <= {"finish", "condition", "language"}
+            and value.get("finish", "nonfoil") in _FINISHES
+            and value.get("condition", "NM") in _CONDITIONS
+            and value.get("language", "EN") in _LANGUAGES
+        )
+    if name == WATCH_ADD:
+        pct = value.get("alert_pct") if isinstance(value, dict) else None
+        return (
+            isinstance(value, dict)
+            and set(value) <= {"finish", "alert_pct"}
+            and value.get("finish", "nonfoil") in _FINISHES
+            and (
+                pct is None
+                or (isinstance(pct, int | float) and not isinstance(pct, bool) and 0 < pct <= 1000)
+            )
+        )
     if name == DECKSTATS:
         return (
             isinstance(value, dict)
@@ -100,7 +127,7 @@ def save(db: Database, sub: str, name: str, value: Any) -> bool:
 def valid_name(name: str) -> bool:
     return (
         (name.startswith(VIEW) and name[len(VIEW) :] in VIEW_KINDS)
-        or name in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO)
+        or name in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD)
         or bool(_STACK_NAME.match(name))
     )
 
@@ -115,6 +142,12 @@ def forget(db: Database, sub: str) -> int:
     )
     db.set_pref(sub, FORGOTTEN, True)
     return n
+
+
+def choices(db: Database, sub: str, name: str) -> dict[str, Any]:
+    """The remembered Add or Watch choices (BINDER_ADD, WATCH_ADD), or {}."""
+    value = db.get_pref(sub, name)
+    return value if isinstance(value, dict) and valid(name, value) else {}
 
 
 def copies_refused(db: Database, sub: str) -> bool:

@@ -82,6 +82,7 @@ NOTICES = {
     "tag_saved": "Color tag saved on Archidekt and read back.",
     "tag_deleted": "Deleted “{name}” on Archidekt.",
     "pin_saved": "Saved on Archidekt.",
+    "pinned": "Pinned “{name}” on Archidekt.",
     "pin_removed": "Pin removed on Archidekt.",
     "pins_removed": "All pins removed on Archidekt.",
     "card_created": "Custom card created on Archidekt and read back.",
@@ -1866,6 +1867,17 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 if data.get("finish"):
                     c["finish"] = data["finish"]
                 return c, "pin_saved", ""
+            if action == "pin":  # "Pin card" in a card menu (static/cardmenu.js, static/deck.js)
+                c = {"op": "pin", "card": (data.get("card") or "").strip()[:200]}
+                if data.get("set_code"):
+                    c["set_code"] = data["set_code"].strip()[:10]
+                    c["collector_number"] = (data.get("cn") or data.get("collector_number") or "").strip()[
+                        :20
+                    ]
+                fin = (data.get("finish") or "").strip().lower()
+                if fin in ("foil", "etched"):
+                    c["finish"] = fin.capitalize()
+                return c, "pinned", ""
             if action == "unpin":
                 return {"op": "unpin", "pin_id": pin_id}, "pin_removed", "pin-rm"
             if action == "remove_all":

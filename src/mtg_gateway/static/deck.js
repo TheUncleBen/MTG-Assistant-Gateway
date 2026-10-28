@@ -1781,6 +1781,7 @@
     // one copy into the collection, as the viewer's "I own this card" (the shared layer's call)
     var Shared = window.MtgMenu;
     if (Shared) m.appendChild(menuItem("Add to collection", "collection", function () { closeMenu(); Shared.collect(name); }));
+    if (Shared && Shared.pin) m.appendChild(menuItem("Pin card", "pin", function () { closeMenu(); Shared.pin(name); }));
     if (own && deckId) {
       var row = el("div", "item qtyrow");
       row.setAttribute("role", "none");

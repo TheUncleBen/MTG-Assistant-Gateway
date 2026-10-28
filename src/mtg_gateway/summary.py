@@ -52,8 +52,11 @@ class Summaries:
         since_ts = _start_ts(since)
         cards = []
         watched = self.prices is not None  # watchlists on (MTG_WATCHLISTS_ENABLED)
-        for w in self.prices.watched_cards(sub) if self.prices is not None else []:
-            view = self.prices.card_view(w, PERIODS[period] + 31)
+        views = self.prices.card_summaries(sub) if self.prices is not None else []
+        if views:  # every card's points in one query, whatever the watchlist's size
+            self.prices.card_histories(views, PERIODS[period] + 31)
+        for view in views:
+            w = view
             hist = [h for h in view["history"] if h["price"] is not None]
             if not hist:
                 continue

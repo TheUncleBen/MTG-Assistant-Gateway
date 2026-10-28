@@ -1040,21 +1040,33 @@ watchlists they leave prices out.
 
 Members watch cards and decks on the Watchlist page (or through their
 assistant). Once a day at **Daily price check hour (UTC)** (default 06:00 UTC) the
-gateway asks Scryfall for today's prices of the watched printings only, 75
+gateway asks Scryfall for today's prices of the watched printings, the
+printings in the Binders opened in the last 60 days and the printings of the
+members' own decks opened in that time, 75
 to a request through the same paced Scryfall client the card scan uses,
 spaced at **Time between Scryfall lookups**; a "slow down" answer stops the
 check and it is tried again at the next quarter hour. Each watched deck is
-read from Archidekt once a day through the usual pacer. While nobody watches
+read from Archidekt once a day through the usual pacer. A card watched by
+name alone follows its cheapest printing: every printing of it is read with
+Scryfall's search, twenty cards a request at the same pace. Each Binder in
+use is read whole once a day as its member (pages of 200 records, at most
+10,000), only while that member's Archidekt allowance keeps a quarter back for
+their own changes; a Binder not read keeps its last copy. The member's own
+**Work it out now** on the Binder does the first read at once. While nobody watches
 anything, the check makes no request. Which day it last ran is kept in the
 database (`job_runs`), so a restart neither repeats nor skips a day; the
 members' daily or weekly summaries go out right after it.
 
-Storage is small: one row per watched printing a day (shared by every member
-who watches it) and one per watched deck a day, deleted after
-**Days of prices kept** (default 365) by the hourly clean-up. Limits per
-member: **Cards one member may watch** (200) and **Decks one member may
-watch** (10). "Delete
-my data" removes a member's watches, deck values and notification choices.
+Storage is small: one row per priced printing a day (shared by every member
+who watches or owns it) and one per watched deck a day, deleted after
+**Days of prices kept** (default 365) by the hourly clean-up; each Binder in
+use is kept as one row per record (`binder_records`), and each own deck opened
+as its card list (`owned_decks`), both deleted 60 days after they were last
+opened. Limits per member: **Cards one member may watch** (5,000) and **Decks
+one member may watch** (100); the Watchlist page reads a fixed number of
+queries whatever the list's size and draws 25 rows at a time. "Delete
+my data" removes a member's watches, deck values, Binder copy and notification
+choices.
 
 Notifications go from the stack's own ntfy server to the members' Android
 app. Phones reach the server through the gateway's own address, so it needs

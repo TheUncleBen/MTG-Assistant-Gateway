@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import parse_qs
 
@@ -20,7 +21,7 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import prices
+from . import prefs, prices
 from .decks import DeckError
 from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
 from .theme import render
@@ -35,17 +36,35 @@ logger = logging.getLogger(__name__)
 
 NO_STORE = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
 MAX_FORM = 8192
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def watchlist_body(
     state: AppState, sub: str, csrf: str | None, query: Query | None = None, *, ok: str = "", err: str = ""
 ) -> str:
-    """The page's body (watchlist_page.py): the member's watches with a year of prices, so the
-    opened row can say how many days its full history holds."""
+    """The page's body (watchlist_page.py): every watch's latest price and changes (a fixed number
+    of queries, whatever the list's size), and 30 days of prices for the rows on screen only."""
     svc = state.prices
-    data = svc.overview(sub, days=365)
-    ids = {w["id"]: w.get("scryfall_id") for w in svc.watched_cards(sub)}
-    return watchlist_page_html(data, ids, csrf, query or Query(), ok=ok, err=err, now=prices.now())
+    cards = svc.card_summaries(sub)
+    data = {
+        "cards": cards,
+        "decks": svc.deck_summaries(sub),
+        "limits": svc.limits(),
+        "checked_daily_at_utc": f"{state.settings.price_hour_utc:02d}:00",
+    }
+    ids = {v["watch_id"]: v.get("scryfall_id") for v in cards}
+    return watchlist_page_html(
+        data,
+        ids,
+        csrf,
+        query or Query(),
+        ok=ok,
+        err=err,
+        now=prices.now(),
+        card_history=lambda views: svc.card_histories(views, 30),
+        deck_history=lambda views: svc.deck_histories(sub, views, 30),
+        defaults=prefs.choices(state.db, sub, prefs.WATCH_ADD),
+    )
 
 
 # -- routes --------------------------------------------------------------------------------------
@@ -83,6 +102,16 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         query = Query.parse(request.query_params)
         return page(watchlist_body(state, sub, _csrf(s, sid), query, ok=ok), sub=sub, sid=sid)
 
+    def remember_watch(sub: str, finish: str, pct: str) -> None:
+        """Keep the Watch form's finish and alert for next time (prefs.WATCH_ADD)."""
+        choice: dict[str, Any] = {"finish": finish if finish in ("nonfoil", "foil", "etched") else "nonfoil"}
+        try:
+            if pct and 0 < float(pct) <= 1000:
+                choice["alert_pct"] = round(float(pct), 2)
+        except ValueError:
+            pass
+        prefs.save(state.db, sub, prefs.WATCH_ADD, choice)
+
     @server.custom_route("/watchlist", methods=["POST"], include_in_schema=False)
     async def watchlist_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
@@ -102,13 +131,17 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         svc = state.prices
         try:
             if action == "add_card":
+                pct = (data.get("alert_pct") or "").strip()
                 out = await svc.watch_card(
                     sub,
                     data.get("name", ""),
                     set_code=data.get("set_code"),
                     collector_number=data.get("cn") or data.get("collector_number"),
                     finish=data.get("finish", "nonfoil"),
+                    alert_pct=pct or None,
                 )
+                if data.get("remember") == "1":
+                    remember_watch(sub, data.get("finish", "nonfoil"), pct)
                 done = "card_added" if out.get("created") else "card_updated"
             elif action == "alerts":
                 svc.set_alerts(
@@ -148,13 +181,33 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
     @server.custom_route("/watchlist/api/card", methods=["GET"], include_in_schema=False)
     async def card_api(request: Request) -> Response:
         """The card viewer's Price history: the member's watches of this card (by name) with their
-        daily prices. Nothing is fetched from Scryfall here."""
+        daily prices, and (``sid``, the printing on show; ``finish``) the history of that printing
+        when the member owns it (``owned``: in their Binder or a deck of theirs, else None).
+        Nothing is fetched from Scryfall here."""
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
-        name = (request.query_params.get("name") or "").strip()[:150]
+        qp = request.query_params
+        name = (qp.get("name") or "").strip()[:150]
         watches = [state.prices.card_view(w, 365) for w in state.prices.find(sub, name)] if name else []
-        return JSONResponse({"ok": True, "name": name, "watches": watches}, headers=NO_STORE)
+        sid = (qp.get("sid") or "").strip().lower()[:36]
+        owned = (
+            state.prices.owned_history(sub, sid, (qp.get("finish") or "nonfoil")[:10])
+            if _UUID.fullmatch(sid)
+            else None
+        )
+        return JSONResponse({"ok": True, "name": name, "watches": watches, "owned": owned}, headers=NO_STORE)
+
+    @server.custom_route("/watchlist/api/deck", methods=["GET"], include_in_schema=False)
+    async def deck_api(request: Request) -> Response:
+        """A watched deck's full history (a year at most), for its row's "Full history"."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        deck_id = (request.query_params.get("deck_id") or "").strip()[:20]
+        rows = state.prices.deck_series(sub, deck_id, 365) if deck_id.isdigit() else []
+        history = [{"day": r["day"], "price": r["usd"]} for r in rows if r["usd"] is not None]
+        return JSONResponse({"ok": True, "deck_id": deck_id, "history": history}, headers=NO_STORE)
 
     @server.custom_route("/watchlist/api/watch", methods=["POST"], include_in_schema=False)
     async def watch_api(request: Request) -> Response:
@@ -175,6 +228,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             return JSONResponse(
                 {"ok": False, "error": "invalid", "message": "Send JSON."}, 400, headers=NO_STORE
             )
+        kept = prefs.choices(state.db, sub, prefs.WATCH_ADD)
         try:
             # a printing from Card search's art picker comes with its set code and number
             out = await state.prices.watch_card(
@@ -182,9 +236,12 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                 str(body.get("name") or ""),
                 set_code=str(body.get("set_code") or "") or None,
                 collector_number=str(body.get("collector_number") or "") or None,
-                finish=str(body.get("finish") or "nonfoil"),
-                # a Watch button on a card already watched must not clear its alerts
+                # a Watch that names no finish (a card menu's) takes the remembered one
+                finish=str(body.get("finish") or kept.get("finish") or "nonfoil"),
+                # a Watch button on a card already watched must not clear its alerts; a new
+                # watch gets the remembered alert
                 keep_alerts=True,
+                default_pct=kept.get("alert_pct"),
             )
         except DeckError as exc:
             status = 404 if exc.kind == "not_found" else 429 if exc.kind == "rate_limited" else 400
@@ -357,9 +414,8 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def list_watchlist() -> dict[str, object]:
-        data = state.prices.overview(_sub(), days=31)
-        for item in (*data["cards"], *data["decks"]):
-            item.pop("history", None)  # card_price_history has the daily points
+        # no daily points: card_price_history has them
+        data = state.prices.overview(_sub(), history=False)
         return {"ok": True, **data, "watchlist_url": page}
 
     @server.tool(

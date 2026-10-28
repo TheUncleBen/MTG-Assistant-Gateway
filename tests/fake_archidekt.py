@@ -148,6 +148,7 @@ class FakeArchidekt:
         self.create_honours_folder = False
         self.last_create_body: dict[str, Any] = {}
         self.fail_deck_reads = False  # signed-in deck reads answer 503
+        self.fail_collection_reads = False  # collection listings answer 503
         # a fault the custom card apply must catch: an add of a custom card answers 200 and
         # leaves the deck as it was
         self.custom_adds_dropped = False
@@ -1013,6 +1014,8 @@ class FakeArchidekt:
                 return httpx.Response(400, json=["No public collection found."])
             rows = list(self.collections.get(who, {}).values())
             self.collection_queries.append(dict(request.url.params))
+            if self.fail_collection_reads:
+                return httpx.Response(503, text="unavailable")
             name = request.url.params.get("cardName", "").lower()
             if name:
                 rows = [r for r in rows if name in r["card"]["oracleCard"]["name"].lower()]

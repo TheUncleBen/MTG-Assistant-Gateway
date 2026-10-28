@@ -1,6 +1,7 @@
 """The Collection page's import says what it did: the parser's own reason when it refuses the
 whole import, the rows kept as English because Archidekt's collection has no code for their
-language, the rows added to a copy already held in another language, and the rows not found. The
+language, the rows added to an entry already held (same printing, finish, condition and language;
+0.7.46: never one in another language), and the rows not found. The
 details cross the redirect by a one-time token, never as text in the URL."""
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
         "Quantity,Name,Language\n"
         "2,Sol Ring,PH\n"  # line 2: kept as English
         "1,<b>Foo</b>,EN\n"  # line 3: not found
-        "3,Opt,JP\n"  # line 4: added to an English copy
+        "3,Opt,JP\n"  # line 4: added to the Japanese entry already there
         "1,Forest,PH\n"  # line 5: kept as English
         "1,Island,XYZ\n"  # line 6: kept as English, a value with no name
         "1,Mountain,PH\n"  # line 7: not found, so not named as kept
@@ -75,8 +76,8 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
     out = {
         "added": [{"id": 1}],
         "skipped": [{"index": 1}, {"index": 5}],
-        "merged": [{"index": 2, "language": "JA", "existing_language": "EN"}],
     }
+    out["added"] = [{"id": 1, "index": 0, "went_to": "new"}, {"id": 2, "index": 2, "went_to": "existing"}]
     result = import_result(items, out)
     assert result["cards"] == 7
     html = import_result_html(result)
@@ -87,30 +88,28 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
         "line 2 (Sol Ring), line 5 (Forest).</li>"
         "<li>Kept as English, because “XYZ” is not a language Archidekt stores "
         "for collection cards: line 6 (Island).</li>"
-        "<li>Added to a copy you already had in another language, so it counts as English: line 4 (Opt, "
-        "Japanese added to English).</li>"
+        "<li>Added to an entry you already had, with the same printing, finish, condition and language: "
+        "line 4 (Opt).</li>"
         "<li>Not found, so not imported: line 3 (&lt;b&gt;Foo&lt;/b&gt;), line 7 (Mountain).</li></ul></div>"
     )
 
 
-def test_one_card_two_existing_languages_and_nothing_added() -> None:
+def test_two_rows_into_entries_already_there_and_nothing_added() -> None:
     items = parse_collection_import("1 Opt\n1 Forest\n")
     one = import_result(
         items,
         {
-            "added": [{"id": 1}],
-            "skipped": [],
-            "merged": [
-                {"index": 0, "language": "EN", "existing_language": "ZHT"},
-                {"index": 1, "language": "EN", "existing_language": "KO"},
+            "added": [
+                {"id": 1, "index": 0, "went_to": "existing"},
+                {"id": 2, "index": 1, "went_to": "existing"},
             ],
+            "skipped": [],
         },
     )
     assert import_result_html(one) == (
         "<div class='notice ok importres' role='status'><p>Imported 2 cards into your Collection on "
-        "Archidekt.</p><ul><li>Added to a copy you already had in another language, so each counts in "
-        "that copy&#x27;s language: row 1 (Opt, English added to Chinese (Traditional)), row 2 (Forest, "
-        "English added to Korean).</li></ul></div>"
+        "Archidekt.</p><ul><li>Added to entries you already had, with the same printing, finish, "
+        "condition and language: row 1 (Opt), row 2 (Forest).</li></ul></div>"
     )
     single = import_result(parse_collection_import("1 Opt\n"), {"added": [{"id": 1}]})
     assert "<p>Imported 1 card into your Collection on Archidekt.</p></div>" in import_result_html(single)
@@ -139,17 +138,15 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
             for c in stack.ark.collections["alice"].values()
             if c["card"]["oracleCard"]["name"] == "Sol Ring"
         ]
-        assert [(c["quantity"], c["language"]) for c in recs] == [(3, 1)]  # topped up, still English
+        # Japanese is its own entry; never added to the English one (0.7.46)
+        assert sorted((c["quantity"], c["language"]) for c in recs) == [(1, 1), (2, 6)]
         page = (await b.http.get(where, headers=NAV)).text
         assert "Imported 3 cards into your Collection on Archidekt." in page
         assert (
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt)." in page
         )
-        assert (
-            "Added to a copy you already had in another language, so it counts as English: line 2 "
-            "(Sol Ring, Japanese added to English)." in page
-        )
+        assert "another language" not in page and "you already had" not in page
         assert "Not found, so not imported: line 4 (Foo Bar)." in page
         assert "aria-labelledby='col-add-title' data-open>" in page
         assert "data-coltab='import' aria-selected='true'" in page

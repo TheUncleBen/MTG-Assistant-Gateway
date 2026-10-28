@@ -110,6 +110,9 @@ PRINT_FRAMES = ("1993", "1997", "2003", "2015", "future")
 PRINT_BORDERS = ("black", "white", "borderless", "silver", "gold")
 PRINT_ORDERS = {"newest": ("released", "desc"), "oldest": ("released", "asc"), "cheapest": ("usd", "asc")}
 PRINT_PAGES = 20  # 3,500 printings, more than any card has (a basic land has about 1,000)
+PRINTINGS_PER_SEARCH = 20  # cards one search for every printing asks for (printings_of)
+PRINTINGS_PAGES = 60  # pages of it at most: 10,500 printings
+_ORACLE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def summarize(card: dict[str, Any]) -> dict[str, Any]:
@@ -528,6 +531,56 @@ class ScryfallClient:
             "page": page,
         }
         self.prints_cache.put(key, out)
+        return out
+
+    async def printings_of(
+        self, oracle_ids: list[str], *, interval: float | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Every printing of each card in ``oracle_ids`` with its prices, by oracle id: one search
+        for up to PRINTINGS_PER_SEARCH cards (``oracleid:a or oracleid:b ...``, every page of it, at
+        most PRINTINGS_PAGES). For the cheapest printing of a watch by name alone (prices.py), so
+        nothing is cached: today's prices are the point. A card Scryfall finds no printing of is
+        left out."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        ids = sorted({o.strip().lower() for o in oracle_ids if _ORACLE_RE.fullmatch(o.strip().lower())})
+        for i in range(0, len(ids), PRINTINGS_PER_SEARCH):
+            chunk = ids[i : i + PRINTINGS_PER_SEARCH]
+            params: dict[str, Any] = {
+                "q": " or ".join(f"oracleid:{o}" for o in chunk),
+                "unique": "prints",
+                "include_extras": "true",
+                "order": "released",
+                "dir": "desc",
+            }
+            for page in range(1, PRINTINGS_PAGES + 1):
+                if page > 1:
+                    params["page"] = page
+                resp = await self._request("GET", "/cards/search", params=params, interval=interval)
+                data = self._json(resp)
+                if resp.status_code == 404:
+                    break  # none of these cards (or a page past the end)
+                if data.get("object") != "list" or not isinstance(data.get("data"), list):
+                    raise ScryfallError("contract", str(data.get("details") or "unexpected search reply"))
+                for c in data["data"]:
+                    if not isinstance(c, dict) or c.get("object") != "card":
+                        continue
+                    faces = c.get("card_faces") if isinstance(c.get("card_faces"), list) else []
+                    oid = c.get("oracle_id") or (faces[0].get("oracle_id") if faces else None)
+                    if not isinstance(oid, str):
+                        continue
+                    out.setdefault(oid, []).append(
+                        {
+                            "id": c.get("id"),
+                            "oracle_id": oid,
+                            "name": c.get("name"),
+                            "set": c.get("set"),
+                            "collector_number": c.get("collector_number"),
+                            "finishes": [f for f in c.get("finishes") or [] if isinstance(f, str)],
+                            "prices": c.get("prices") if isinstance(c.get("prices"), dict) else {},
+                        }
+                    )
+                if not data.get("has_more"):
+                    break
         return out
 
     async def search(
