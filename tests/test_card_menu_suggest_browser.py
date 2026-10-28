@@ -1,5 +1,5 @@
 """The card menu and Watch on suggestions, in headless Chromium: the
-deck editor's add box has the same Watch button (icon, "Watching" for cards already watched) and
+deck editor's add box has the same Watch button (icon, "On your watchlist" for cards already watched) and
 card menu as Card search, without "Add to deck…" (its rows already add to this deck); the top
 bar's "Search cards and decks" suggestions get only the menu, no Watch button. With watchlists
 off neither has anything of the watch. Skipped without Chromium."""
@@ -102,7 +102,7 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             if width < 900:
                 assert b["height"] >= 44 - 0.5 and b["width"] >= 44 - 0.5
             assert page.evaluate("document.documentElement.scrollWidth") <= width
-            # Watch: the toast, the button turns to Watching, and nothing is added to the deck
+            # Watch: the toast, the button turns to On your watchlist, and nothing is added to the deck
             btn.click()
             toast = page.locator(".toast.cards-toast")
             toast.wait_for(timeout=5000)
@@ -110,6 +110,7 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Talisman"
             label = talisman.locator(".wbtn").get_attribute("aria-label")
             assert label == "Sol Talisman is on your watchlist"
+            assert talisman.locator(".wbtn").text_content().strip() == "On your watchlist"
             assert page.locator(".pendingbox .n").inner_text() == "0" and box.input_value() == "sol"
             assert sorted(w["name"] for w in prices.watched_cards("user-1")) == ["Sol Ring", "Sol Talisman"]
             toast.locator("button", has_text="Undo").click()
