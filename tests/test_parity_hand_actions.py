@@ -583,7 +583,8 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
             await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "options": {"nn": 5}})
         )
         assert bad["ok"] is False and bad["error"] == "invalid" and "options.nn" in bad["message"], bad
-        # compare_decks simulate=true is the paired A/B (goldfish_ab), with its own knobs, not stored
+        # compare_decks simulate=true is the paired A/B (goldfish_ab), with its own knobs, kept as a
+        # Comparison report (0.7.46)
         before = len(gw.reports.list("user-1"))
         ab = structured(
             await call(
@@ -602,7 +603,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
         )  # gateway rendering, commander first
         assert args["allow_different_commanders"] is True and args["annotations_b"] == [{"card": "Opt"}]
         assert "opponents" not in args
-        assert len(gw.reports.list("user-1")) == before  # an A/B is not a stored report
+        assert len(gw.reports.list("user-1")) == before + 1 and ab["stored"] is True
         bad = structured(
             await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Opt", "simulate": True,
                                                        "options": {"opponents": 2}})
