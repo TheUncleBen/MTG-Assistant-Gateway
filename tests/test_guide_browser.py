@@ -1,8 +1,9 @@
-"""The Guide page in headless Chromium (static/guide.js): the contents rail marks the section in
-view as the reader scrolls, the search box filters the sections and the rail, announces the
-count and lists links to the matching sections (Enter goes to the first), Escape clears it, the
-drawer folds on a phone, "Back to top" appears after scrolling, and nothing is wider than the
-window at 360 and 1366 px. Skipped without a Chromium build."""
+"""The Guide in headless Chromium (static/guide.js), one page a topic: the contents page leads to
+a topic, an old one-page address (/guide#topic) lands on the topic's page, the search box lists
+the matching topics as you type with the count announced and Escape clearing it, the contents
+drawer folds on a phone and sits open beside the text on a computer, "Back to top" appears after
+scrolling, and nothing is wider than the window at 360 and 1366 px. Skipped without a Chromium
+build."""
 
 from __future__ import annotations
 
@@ -98,206 +99,62 @@ def _overflow(page) -> int:
     return page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
 
 
-def _wait_current(page, target: str) -> None:
-    page.wait_for_function(f"() => document.querySelector(\".gnav a[href='{target}'][aria-current='true']\")")
-
-
-def _current(page) -> str | None:
-    return page.evaluate(
-        "() => { const a = document.querySelector(\".gnav a[aria-current='true']\");"
-        " return a ? a.getAttribute('href') : null; }"
-    )
-
-
-def test_rail_follows_the_reader_search_filters_and_escape_clears(server: Server) -> None:
+def test_contents_topic_old_anchor_search_and_drawer(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
     _chromium()
     sid = server.sign_in()
     with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 1366)
-        assert _overflow(page) == 0
-        # the rail is open on a wide screen and the first section is current before any scroll
-        assert page.locator("details.gnav[open]").count() == 1
-        assert page.locator("details.gnav > summary").is_visible() is False
-        assert _current(page) == "#tut-start"
-        assert page.locator(".gtop").is_visible() is False
-        # jump to a how-to section from the rail: its entry becomes current and its part lights up
-        page.locator(".gnav a[href='#how-restore']").click()
-        _wait_current(page, "#how-restore")
-        assert page.url.endswith("#how-restore")
-        # scrolling on by hand moves the mark to the section under the reader's eye
-        page.locator("#exp-fresh").evaluate("el => el.scrollIntoView({block: 'start'})")
-        _wait_current(page, "#exp-fresh")
-        assert page.locator(".gnav a.part.in").get_attribute("href") == "#explanation"
-        page.locator(".gnav a[href='#how-restore']").click()
-        _wait_current(page, "#how-restore")
-        assert page.locator(".gnav a.part.in").get_attribute("href") == "#howto"
-        assert page.locator(".gnav a[aria-current='true']").count() == 1
-        assert page.locator(".gtop").is_visible() is True
-        # the search box is there (the script unhid it) and filters sections, parts and the rail
-        box = page.locator("#guide-q")
-        assert box.is_visible() and page.locator("label[for='guide-q']").inner_text() == "Search the guide"
-        box.fill("F10")
-        page.wait_for_function("() => document.getElementById('guide-status').textContent.includes('match')")
-        status = page.locator("#guide-status").inner_text()
-        assert status.startswith(("2 of", "3 of")) and "F10" in status, status
-        assert page.locator("#ref-keys").is_visible() and page.locator("#how-add-cards").is_visible()
-        assert page.locator("#exp-playtest").is_hidden() and page.locator("#tutorials").is_hidden()
-        assert page.locator(".gnav a[href='#exp-playtest']").is_hidden()
-        assert page.locator(".gnav a[href='#tutorials']").is_hidden()
-        assert page.locator(".gnav a[href='#ref-keys']").is_visible()
-        assert page.locator("#guide-status").get_attribute("role") == "status"
-        # under the box, a link to each matching section with its title and the words around the
-        # first match, in the guide's order
-        results = page.locator("#guide-results")
-        assert results.is_visible()
-        # typing did not scroll the matches away to follow the rail's current entry
-        first_top = results.locator("a").first.evaluate("el => el.getBoundingClientRect().top")
-        assert 0 < first_top < 500, first_top
-        hrefs = results.locator("a").evaluate_all("els => els.map(a => a.getAttribute('href'))")
-        shown = page.locator(".gsec:visible").evaluate_all("els => els.map(s => '#' + s.id)")
-        assert hrefs == shown and "#ref-keys" in hrefs and "#how-add-cards" in hrefs, hrefs
-        keys = results.locator("a[href='#ref-keys']")
-        assert keys.locator(".t").inner_text() == "Keyboard shortcuts"
-        assert keys.locator("mark").first.inner_text() == "F10"
-        assert _overflow(page) == 0
-        # Down moves into the list; Enter in the box goes to the first match
-        box.press("ArrowDown")
-        assert page.evaluate("() => document.activeElement.getAttribute('href')") == hrefs[0]
-        box.focus()
-        box.press("Enter")
-        page.wait_for_function(f"() => location.hash === '{hrefs[0]}'")
-        _wait_current(page, hrefs[0])
-        # a click on another match lands on that section
-        page.evaluate("() => window.scrollTo(0, 0)")
-        keys.click()
-        page.wait_for_function("() => location.hash === '#ref-keys'")
-        _wait_current(page, "#ref-keys")
-        # (with only a few sections left the page may end before the heading reaches the top)
-        top = page.locator("#ref-keys").evaluate("el => el.getBoundingClientRect().top")
-        assert 0 <= top < 450, top
-        # nothing matches: the status says so and the empty-state line shows
-        box.fill("zzqxv")
-        page.wait_for_function("() => document.getElementById('guide-status').textContent.startsWith('No')")
-        assert page.locator(".nomatch").is_visible()
-        assert page.locator(".gsec:visible").count() == 0
-        assert page.locator("#guide-results").is_hidden()
-        assert page.locator("#guide-results li").count() == 0
-        # Escape clears: every section and rail entry is back, the status is empty
-        box.press("Escape")
-        page.wait_for_function("() => document.getElementById('guide-q').value === ''")
-        assert page.locator("#guide-status").inner_text() == ""
-        assert page.locator(".nomatch").is_hidden()
-        assert page.locator("#guide-results").is_hidden()
-        assert page.locator("#exp-playtest").is_visible()
-        assert page.locator(".gnav a[href='#tutorials']").is_visible()
-        total = page.locator(".gsec").count()
-        assert page.locator(".gsec:visible").count() == total >= 25
-        # Back to top
-        page.locator("#exp-privacy").evaluate("el => el.scrollIntoView({block: 'start'})")
-        page.wait_for_function("() => window.scrollY > 600")
-        page.locator(".gtop").click()
-        page.wait_for_function("() => window.scrollY < 120")  # #top sits under the page heading
-        assert page.url.endswith("#top")
-        assert _overflow(page) == 0
-        assert errors == []
-        browser.close()
-
-
-def test_phone_drawer_folds_and_nothing_overflows_at_360(server: Server) -> None:
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    sid = server.sign_in()
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 360)
-        assert _overflow(page) == 0
-        drawer = page.locator("details.gnav")
-        assert drawer.get_attribute("open") is None  # folded by the script on a phone
-        summary = page.locator("details.gnav > summary")
-        assert summary.is_visible() and "Contents" in summary.inner_text()
-        summary.click()
-        assert drawer.get_attribute("open") is not None
-        assert _overflow(page) == 0
-        page.locator(".gnav a[href='#how-scan']").click()
-        page.wait_for_function("() => !document.querySelector('details.gnav').open")
-        _wait_current(page, "#how-scan")
-        # the reference tables wrap inside their scroll box; the page itself never scrolls sideways
-        page.locator("#ref-assistant").evaluate("el => el.scrollIntoView({block: 'start'})")
-        page.wait_for_timeout(100)
-        assert _overflow(page) == 0
-        page.evaluate("() => window.scrollTo(0, 0)")
-        page.locator("#guide-q").fill("snapshot")
-        page.wait_for_function("() => document.getElementById('guide-status').textContent.includes('match')")
-        assert page.locator("#exp-approvals").is_visible() and page.locator("#how-layout").is_hidden()
-        assert _overflow(page) == 0
-        # with the contents drawer folded, the matches are still listed right under the box as
-        # links, each with a marked snippet; a tap goes to that section and leaves the drawer shut
-        assert drawer.get_attribute("open") is None
-        hit = page.locator("#guide-results a[href='#exp-approvals']")
-        assert hit.is_visible()
-        assert hit.locator("mark").first.inner_text().lower() == "snapshot"
-        assert _overflow(page) == 0
-        hit.click()
-        page.wait_for_function("() => location.hash === '#exp-approvals'")
-        _wait_current(page, "#exp-approvals")
-        top = page.locator("#exp-approvals").evaluate("el => el.getBoundingClientRect().top")
-        assert 0 <= top < 200, top
-        assert drawer.get_attribute("open") is None
-        # with the drawer open, a tap on a match folds it again
-        page.evaluate("() => window.scrollTo(0, 0)")
-        summary.click()
-        assert drawer.get_attribute("open") is not None
-        page.locator("#guide-results a").first.click()
-        page.wait_for_function("() => !document.querySelector('details.gnav').open")
-        assert errors == []
-        browser.close()
-
-
-@pytest.mark.parametrize("width", [390, 1366])
-def test_search_results_are_walked_with_the_arrow_keys(server: Server, width: int) -> None:
-    """Down from the box reaches the first match, Down and Up go on through the list (Up from
-    the first one goes back to the box), Home and End jump to its ends, and Escape goes back to the
-    box with the search kept. Enter on a match opens it, as a click does."""
-    from playwright.sync_api import sync_playwright
-
-    _chromium()
-    sid = server.sign_in()
-    with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, width)
-        if width < 900:
-            page.locator("details.gnav > summary").click()  # the phone drawer holds the search
-        box = page.locator("#guide-q")
-        box.fill("deck")
-        page.wait_for_function("() => document.querySelectorAll('#guide-results a').length >= 4")
-        hrefs = page.locator("#guide-results a").evaluate_all("els => els.map(a => a.getAttribute('href'))")
-        focus = "() => document.activeElement.getAttribute('href') || document.activeElement.id"
-        box.press("ArrowDown")
-        assert page.evaluate(focus) == hrefs[0]
-        page.keyboard.press("ArrowDown")
-        assert page.evaluate(focus) == hrefs[1]
-        page.keyboard.press("ArrowDown")
-        assert page.evaluate(focus) == hrefs[2]
-        page.keyboard.press("ArrowUp")
-        assert page.evaluate(focus) == hrefs[1]
-        page.keyboard.press("End")
-        assert page.evaluate(focus) == hrefs[-1]
-        page.keyboard.press("ArrowDown")  # the last one stays put
-        assert page.evaluate(focus) == hrefs[-1]
-        page.keyboard.press("Home")
-        assert page.evaluate(focus) == hrefs[0]
-        page.keyboard.press("ArrowUp")  # from the first, back to the box
-        assert page.evaluate(focus) == "guide-q"
-        box.press("ArrowDown")
-        page.keyboard.press("ArrowDown")
-        page.keyboard.press("Escape")
-        assert page.evaluate(focus) == "guide-q" and box.input_value() == "deck"
-        assert page.evaluate("() => window.scrollY") >= 0  # the arrows moved focus, not the page
-        box.press("ArrowDown")
-        page.keyboard.press("ArrowDown")
-        page.keyboard.press("Enter")
-        page.wait_for_function(f"() => location.hash === '{hrefs[1]}'")
-        assert _overflow(page) == 0
-        assert errors == []
-        browser.close()
+        for width in (360, 1366):
+            browser, page, errors = _page(p, server, sid, width)
+            page.goto(f"{server.base}/guide", wait_until="networkidle")
+            assert _overflow(page) == 0
+            assert page.locator(".gcontents .gpart").count() == 4
+            # a topic from the contents
+            page.locator(".gtoc a[href='/guide/how-restore']").click()
+            page.wait_for_url("**/guide/how-restore")
+            assert page.locator("h1", has_text="Restore a snapshot").is_visible()
+            assert _overflow(page) == 0
+            drawer = page.locator("details.gnav")
+            if width < 900:  # a phone: the contents fold under their button, the topic comes first
+                assert drawer.locator("summary").is_visible() and not drawer.get_attribute("open")
+                drawer.locator("summary").click()
+                assert drawer.locator("a[aria-current='page']").is_visible()
+            else:  # a computer: the contents sit open beside the text
+                assert not drawer.locator("summary").is_visible()
+                assert drawer.locator("a[aria-current='page']").is_visible()
+            # the topics before and after
+            page.locator(".gturn a[rel='next']").click()
+            page.wait_for_url("**/guide/how-compare")
+            # an old one-page address lands on the topic's page, a heading inside one at the heading
+            page.goto(f"{server.base}/guide#how-approve", wait_until="networkidle")
+            page.wait_for_url("**/guide/how-approve")
+            page.goto(f"{server.base}/guide#how-export-deck", wait_until="networkidle")
+            page.wait_for_url("**/guide/how-export#how-export-deck")
+            # the search: the list under the box as you type, the count announced, Escape clears
+            box = page.locator("#guide-q")
+            box.fill("F10")
+            results = page.locator("#guide-results")
+            results.wait_for(state="visible", timeout=4000)
+            status = page.locator("#guide-status").inner_text()
+            assert status.startswith(("1 topic", "2 topics", "3 topics")) and status.endswith("match"), status
+            first = results.locator("a").first
+            assert first.locator(".t").inner_text() == "Keyboard shortcuts"
+            assert first.locator("mark").first.inner_text() == "F10"
+            assert _overflow(page) == 0
+            box.press("Escape")
+            assert results.is_hidden() and page.locator("#guide-status").inner_text() == ""
+            # Enter on the box without scripts' list: the search page, with the same list
+            box.fill("F10")
+            box.press("Enter")
+            page.wait_for_url("**/guide/search?q=F10")
+            assert page.locator(".gresults a").first.locator(".t").inner_text() == "Keyboard shortcuts"
+            # Back to top on a long topic
+            page.goto(f"{server.base}/guide/ref-keys", wait_until="networkidle")
+            assert not page.locator(".gtop").is_visible()
+            page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(200)
+            tall = page.evaluate("() => document.body.scrollHeight > 2 * window.innerHeight")
+            assert page.locator(".gtop").is_visible() == tall
+            browser.close()
+            assert errors == []

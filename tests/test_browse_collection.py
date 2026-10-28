@@ -60,8 +60,9 @@ async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) ->
         r = await b.http.get("/", headers=NAV)
         assert r.status_code == 200
         nav = r.text[r.text.index("<nav class='site'") : r.text.index("</nav>")]
-        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/precons", "/lists"):
+        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/precons", "/forum"):
             assert f"href='{href}'" in nav, href
+        assert "href='/lists'" not in nav  # My lists lives under Account (decision C8)
         assert "class='tabbar'" in r.text and re.search(r"<body class='[^']*\bhome\b", r.text)
         assert "Sample Commander Deck" in r.text  # the newest decks with their covers
         assert "href='/guide'" in r.text
@@ -456,7 +457,10 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
             "Use the Android app",
         ):
             assert word in r.text, word
-        assert "<nav aria-label='Guide contents'>" in r.text and "src='/static/guide.js?v=" in r.text
+        # the contents page (one page a topic since decision C8), and a topic with the contents rail
+        assert "<div class='gcontents'>" in r.text and "src='/static/guide.js?v=" in r.text
+        topic = (await b.http.get("/guide/tut-link", headers=NAV)).text
+        assert "<nav aria-label='Guide contents'>" in topic and "<h1 id='tut-link-h'>" in topic
         js = await b.http.get("/static/guide.js")
         assert js.status_code == 200 and "guide-q" in js.text
         for banned in ("docker", "Docker", "MTG_", "Portainer", "compose"):

@@ -159,7 +159,8 @@ async def test_the_guide_says_what_full_auto_still_waits_for(stack: Stack) -> No
     b = Browser(h)
     try:
         await b.login()
-        page = (await b.http.get("/guide")).text
+        # the Approve a proposal topic (one page a topic since decision C8)
+        page = (await b.http.get("/guide/how-approve")).text
         assert (
             "a new deck, an edit of more than 25 rows, making a deck public or unlisted, and any edit of a "
             "description that has formatting, such as bold text, links or pictures" in page
