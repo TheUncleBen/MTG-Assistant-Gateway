@@ -169,7 +169,7 @@ async def test_new_deck_settings_and_clone_forms(stack: Stack) -> None:
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=saved#ds-main", r.text
         page = await b.http.get(r.headers["location"], headers=NAV)
         assert "Now with a primer." in page.text and "Saved to Archidekt" in page.text
         # recorded as an applied proposal, with its snapshot, so History can undo it
@@ -512,7 +512,7 @@ async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) 
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=saved#ds-main", r.text
         assert ark.decks[42]["deckFormat"] is None
         assert rich_text(ark.decks[42]["description"]) == "Only the description changes."
     finally:

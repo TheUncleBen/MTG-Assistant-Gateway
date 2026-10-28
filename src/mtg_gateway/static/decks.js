@@ -211,14 +211,18 @@
       });
     }
     var total = $("#decks-total"), head = list.querySelector("#fv-decks");
-    var empty = $("#pk-empty");
+    // the one empty state of the Packages tab, under the Packages heading (where the decks
+    // would be, after the folders); the deck list's own ("This folder is empty.") is off meanwhile
+    var empty = $("#pk-empty"), none = list.querySelector("#fv-decks ~ p.empty");
     if (mode === "packages" && !shownPk && !empty) {
-      empty = el("p", "muted", "No packages here yet. New package makes one.");
+      empty = el("p", "empty", "No packages here yet. New package makes one.");
       empty.id = "pk-empty";
       empty.setAttribute("role", "status");
-      list.parentNode.insertBefore(empty, list);
+      if (head) head.parentNode.insertBefore(empty, head.nextSibling);
+      else list.parentNode.insertBefore(empty, list);
     }
     if (empty) empty.hidden = mode !== "packages" || shownPk > 0;
+    if (none) none.hidden = mode === "packages";
     if (mode === "packages") {
       if (total) total.textContent = plural(shownPk, "package");
       if (head) head.textContent = "Packages";  // the results bar carries the count

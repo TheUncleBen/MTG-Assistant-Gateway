@@ -35,6 +35,7 @@ from .decks import (
     _clean_deck_id,
     archidekt_wait,
     clean_target,
+    no_card_called,
 )
 from .schemas import (
     DeckChange,
@@ -571,7 +572,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 problems.append(
                     {
                         "error": "unknown_cards",
-                        "message": "No Magic card is called " + ", ".join(f"'{n}'" for n in unknown) + ".",
+                        "message": no_card_called(unknown),
                         "unknown_cards": unknown,
                     }
                 )

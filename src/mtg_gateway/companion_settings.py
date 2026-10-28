@@ -1584,4 +1584,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             p = await decks.propose_deck_details(sub, deck.id, details)
         except DeckError as exc:
             return settings_response(settings_form(deck, _csrf(s, sid), data, str(exc)), sub, sid, 400)
-        return await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
+        done = await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
+        # saved: back to the settings page with its note, not off to the deck (0.7.46 audit D-27)
+        if done.headers.get("location") == f"/decks/{deck.id}?ok=saved":
+            return RedirectResponse(f"/decks/{deck.id}/settings?ok=saved#ds-main", status_code=303)
+        return done  # Archidekt refused or writes are off: the review page says why

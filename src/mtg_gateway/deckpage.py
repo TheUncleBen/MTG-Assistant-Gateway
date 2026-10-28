@@ -490,6 +490,7 @@ def banner_html(
     data = (
         f" data-deck-id='{did}' data-deck-name='{esc(title)}' data-own='{1 if own and csrf else 0}'"
         f" data-can='{1 if csrf else 0}' data-forge='{1 if forge_on and csrf else 0}'"
+        + (" data-making='1'" if making else "")
     )
     return (
         f"<section class='banner{'' if art_url else ' noart'}'{style}{data} aria-label='Deck: {esc(title)}'>"
@@ -2778,9 +2779,6 @@ def colour_bar_html(colors: dict[str, Any] | None) -> str:
     return _bar(parts, label="Color identity") if parts else "<div class='cbar empty'></div>"
 
 
-NO_TAGS = "<span class='notags'>No deck tags</span>"
-
-
 def deck_card_html(
     d: dict[str, Any],
     *,
@@ -2810,9 +2808,11 @@ def deck_card_html(
     if not fmt and isinstance(d.get("format"), str):
         fmt = format_label(d["format"])
     line = (fmt or "Custom") + deck_card_bracket_text(d.get("bracket"))  # bracket_view.py
+    # the deck's tags, when it has any (no "No deck tags" line: noise on a list that is the
+    # member's own, 0.7.46 audit D-24); the owner's picture only on other people's decks
     tags = d.get("tags") or []
-    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6]) or NO_TAGS
-    tags_html = "" if plain else f"<span class='tags'>{pills}</span>"
+    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6])
+    tags_html = f"<span class='tags'>{pills}</span>" if pills and not plain else ""
     initial = esc((d.get("name") or "?")[:1].upper())
     size = d.get("size")
     sub_bits = []
@@ -2832,7 +2832,7 @@ def deck_card_html(
         + colour_bar_html(d.get("colors"))
         + "</span>"
         f"<span class='info{' plain' if plain else ''}'>"
-        + ("" if plain else avatar_html(d.get("owner") or "", "sm"))
+        + (avatar_html(d.get("owner") or "", "sm") if show_owner and not plain else "")
         + f"<span class='text'><span class='name' title='{esc(name)}'>{esc(name)}</span>"
         f"<span class='fmt' title='{esc(line)}'>{esc(line)}</span>"
         f"<span class='sub' title='{esc(sub_text)}'>{sub_html}</span>"

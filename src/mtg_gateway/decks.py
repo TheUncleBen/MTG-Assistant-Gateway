@@ -907,6 +907,20 @@ def _new_deck_fields(kind: str, result: Any) -> dict[str, Any]:
     return {"new_deck_id": str(new), "new_deck_url": f"https://archidekt.com/decks/{new}"}
 
 
+def no_card_called(names: list[str], *, in_deck: bool = False, meant: dict[str, str] | None = None) -> str:
+    """The refusal of a name that is no Magic card, in plain words with the names in curly
+    quotes: ``No card is called “Rampant”.`` ``in_deck``: the check of a new deck's list or a tool's
+    adds, where a name the deck already holds (a custom card) is not refused. ``meant``: the card a
+    misspelt name probably means, said beside it."""
+    quoted = ", ".join(
+        f"“{n}”" + (f" (did you mean “{meant[n]}”?)" if meant and meant.get(n) else "") for n in names
+    )
+    if not in_deck:
+        return f"No card is called {quoted}."
+    them = "it" if len(names) == 1 else "them"
+    return f"No card is called {quoted} (unless the deck already has {them})."
+
+
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
@@ -4894,13 +4908,7 @@ class DeckService:
     async def _refuse_unknown_cards(self, deck: Deck, changes: list[Change]) -> None:
         unknown = await unknown_card_names(deck, changes, self.known_cards)
         if unknown:
-            raise DeckError(
-                "unknown_cards",
-                "No Magic card is called "
-                + ", ".join(f"'{n}'" for n in unknown)
-                + ". Check the spelling; nothing was proposed.",
-                unknown_cards=unknown,
-            )
+            raise DeckError("unknown_cards", no_card_called(unknown), unknown_cards=unknown)
 
     def keep_no_backup(self, sub: str, proposal_id: str) -> None:
         """Record on a member's own save (the deck page, Card search, the deck editor with its
@@ -7921,15 +7929,7 @@ class DeckService:
             problems.append(
                 {
                     "error": "unknown_cards",
-                    "message": "No Magic card is called "
-                    + ", ".join(
-                        f"'{n}'" + (f" (did you mean '{meant[n]}'?)" if meant.get(n) else "") for n in unknown
-                    )
-                    + (
-                        " (unless the deck already has it)."
-                        if len(unknown) == 1
-                        else " (unless the deck already has them)."
-                    ),
+                    "message": no_card_called(unknown, in_deck=True, meant=meant),
                     "unknown_cards": unknown,
                     **({"did_you_mean": meant} if meant else {}),
                 }
