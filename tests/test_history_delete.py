@@ -8,8 +8,9 @@ from __future__ import annotations
 import html
 import re
 import time
+from pathlib import Path
 
-from mtg_gateway.db import SNAPSHOT_HELD_RESTORE
+from mtg_gateway.db import SNAPSHOT_HELD_BACKUP, SNAPSHOT_HELD_RESTORE, Database
 
 from .conftest import Stack, stack_with
 from .test_companion import COMPANION, NAV, linked_browser
@@ -129,6 +130,21 @@ async def test_a_snapshot_is_deleted_unless_a_waiting_restore_puts_it_back(stack
         assert [e["detail"]["snapshot_id"] for e in _events(gw.db, sub, "snapshot_deleted")] == ["snapfree"]
     finally:
         await b.aclose()
+
+
+def test_the_delete_itself_checks_the_backup_hold_again(tmp_path: Path) -> None:
+    """The route checks ``snapshot_held`` first, but a backup delete queued after that check still
+    keeps the snapshot: the delete checks both holds in its own transaction."""
+    db = Database(tmp_path / "g.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    _snapshot(db, "alice", "snapbackup")
+    assert db.snapshot_held("snapbackup", "alice") is None
+    db.queue_backup_delete(
+        "snapbackup", sub="alice", backup_deck_id="900", deck_id="42", proposal_id=None, due=0
+    )
+    assert db.snapshot_held("snapbackup", "alice") == SNAPSHOT_HELD_BACKUP
+    assert db.delete_snapshot("snapbackup", "alice") is False
+    assert db.get_snapshot("snapbackup", "alice") is not None
 
 
 async def test_another_members_report_or_snapshot_is_never_deleted(stack: Stack) -> None:

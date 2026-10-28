@@ -3497,35 +3497,38 @@ class Database:
         """Why the member's snapshot can't be deleted now, or None when it can: a waiting (or
         running) restore puts the deck back to it, or it holds the gateway's record of a backup
         copy on Archidekt the gateway may still delete (``_prune_snapshots`` keeps both too)."""
-        if self._one(
+        with self._lock:
+            return self._snapshot_held(self._conn, snapshot_id, owner_sub)
+
+    @staticmethod
+    def _snapshot_held(c: sqlite3.Connection, snapshot_id: str, owner_sub: str) -> str | None:
+        if c.execute(
             "SELECT 1 FROM proposals WHERE owner_sub = ? AND kind = 'restore' AND state IN ('pending', "
             "'applying') AND json_extract(changes_json, '$.snapshot_id') = ? LIMIT 1",
             (owner_sub, snapshot_id),
-        ):
+        ).fetchone():
             return SNAPSHOT_HELD_RESTORE
-        if self._one(
-            "SELECT 1 FROM backup_deletes WHERE snapshot_id = ? LIMIT 1", (snapshot_id,)
-        ) or self._one(
-            "SELECT 1 FROM snapshots s WHERE s.id = ? AND s.owner_sub = ? AND s.backup_deck_id IS NOT NULL "
-            "AND s.id = (SELECT s2.id FROM snapshots s2 WHERE s2.owner_sub = s.owner_sub AND "
-            "s2.deck_id = s.deck_id AND s2.backup_deck_id = s.backup_deck_id ORDER BY s2.taken_at, s2.rowid "
-            "LIMIT 1) AND EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id AND "
-            "coalesce(json_extract(j.detail_json, '$.kept'), 0) != 1)",
-            (snapshot_id, owner_sub, BACKUP_MADE_JOB),
+        if (
+            c.execute("SELECT 1 FROM backup_deletes WHERE snapshot_id = ? LIMIT 1", (snapshot_id,)).fetchone()
+            or c.execute(
+                "SELECT 1 FROM snapshots s WHERE s.id = ? AND s.owner_sub = ? AND "
+                "s.backup_deck_id IS NOT NULL AND s.id = (SELECT s2.id FROM snapshots s2 WHERE "
+                "s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id AND "
+                "s2.backup_deck_id = s.backup_deck_id ORDER BY s2.taken_at, s2.rowid LIMIT 1) AND "
+                "EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id AND "
+                "coalesce(json_extract(j.detail_json, '$.kept'), 0) != 1)",
+                (snapshot_id, owner_sub, BACKUP_MADE_JOB),
+            ).fetchone()
         ):
             return SNAPSHOT_HELD_BACKUP
         return None
 
     def delete_snapshot(self, snapshot_id: str, owner_sub: str) -> bool:
-        """Delete one of the member's snapshots (the caller checked ``snapshot_held`` first; it is
-        checked again in the same step). False when there is no such snapshot of theirs."""
+        """Delete one of the member's snapshots (the caller checked ``snapshot_held`` first; both
+        holds are checked again in the same step). False when there is no such snapshot of theirs,
+        or it is held."""
         with self.tx() as c:
-            held = c.execute(
-                "SELECT 1 FROM proposals WHERE owner_sub = ? AND kind = 'restore' AND state IN "
-                "('pending', 'applying') AND json_extract(changes_json, '$.snapshot_id') = ? LIMIT 1",
-                (owner_sub, snapshot_id),
-            ).fetchone()
-            if held:
+            if self._snapshot_held(c, snapshot_id, owner_sub):
                 return False
             return (
                 c.execute(
