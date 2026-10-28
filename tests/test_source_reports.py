@@ -134,22 +134,34 @@ async def test_a_simulated_comparison_is_kept_as_a_comparison_report(stack: Stac
         await b.aclose()
 
 
-async def test_a_read_only_app_compares_but_keeps_no_report(stack: Stack) -> None:
-    """compare_decks stays open to a read-only app (mtg.read); only a full-scope app stores the
-    simulated comparison as a report."""
+async def test_a_read_only_apps_comparison_is_kept_as_a_report_labelled_with_the_app(stack: Stack) -> None:
+    """compare_decks stays open to a read-only app (mtg.read), and its simulated comparison is kept
+    as one of the member's reports like a full-scope app's (owner decision C7, amending the earlier
+    rule that read-only apps store nothing): labelled with the app that ran it."""
     from .test_round4_data import _app_token
 
     h = stack.h
     await linked_user(stack)
-    token, _cid = await _app_token(h, "reader", scope="mtg.read")
+    token, cid = await _app_token(h, "reader", scope="mtg.read")
     other = LIST.replace("99 Island", "98 Island\n1 Opt")
     out = structured(
         await call(h, token, "compare_decks", {"a": "42", "b_list": other, "simulate": True, "games": 20})
     )
     assert out["ok"] and out["goldfish_ab"]["ok"], out
-    assert out["stored"] is False and "report_id" not in out, out
+    assert out["stored"] is True and out["report_id"], out
     sub = h.app.state.gateway.db._one("SELECT sub FROM users", ())["sub"]
-    assert h.app.state.gateway.reports.list(sub, None) == []
+    (kept,) = h.app.state.gateway.reports.list(sub, None)
+    assert kept["report_id"] == out["report_id"] and kept["created_by_client"] == cid, kept
+    assert kept["source"]["kind"] == "compare", kept
+    b = await _browser(stack)
+    try:
+        page = (await b.http.get(f"/history/reports/{out['report_id']}", headers=NAV)).text
+        meta = page.split("class='rv-meta'", 1)[1].split("</p>", 1)[0]
+        assert "By" in meta and "reader" in meta, meta
+        reports = (await b.http.get("/reports", headers=NAV)).text
+        assert "reader" in reports.split(f"/history/reports/{out['report_id']}", 1)[1][:3000]
+    finally:
+        await b.aclose()
 
 
 async def test_a_read_only_app_runs_no_report_of_a_list_or_a_proposal(stack: Stack) -> None:

@@ -12,7 +12,7 @@
 ## Summary
 
 - Quick solo test — Commander cast (median turn): Turn 5; 40 damage dealt by turn 10: 57%.
-- Forge games: Immortal Reckoning won 4 of 10 (40%).
+- Forge games: Immortal Reckoning won 4 of 10 (40%). Too few games to tell yet.
 - Forge solo test: won by turn 10 in 213 of 300 games (71%).
 - Validation: issues found.
 

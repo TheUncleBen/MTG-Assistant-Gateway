@@ -1324,6 +1324,9 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-lbl{display:inline-flex;align-items:center;gap:.3rem;height:24px;padding:0 .55rem 0 .45rem;
   border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
   border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
+/* a source label (what a test ran on) names a deck: it wraps instead of running out of the page */
+.ui-lbl.src{white-space:normal;height:auto;min-height:24px;max-width:100%;overflow-wrap:anywhere;
+  line-height:1.2;padding-top:.15rem;padding-bottom:.15rem}
 .ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;vertical-align:0}
 .ui-lbl .ui-spin{width:14px;height:14px;vertical-align:0}
 .ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}

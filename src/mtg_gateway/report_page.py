@@ -31,6 +31,7 @@ from .report_view import (
     OUT_OF_SCOPE_HEADING,
     OUT_OF_SCOPE_TEXT,
     PREFLIGHT_ONLY,
+    TOO_FEW_TEXT,
     UNMODELED_FORGE_TEXT,
     UNMODELED_HEADING,
     UNMODELED_SAVED_TEXT,
@@ -49,6 +50,7 @@ from .report_view import (
     _turn,
     ask_html,
     coverage,
+    forge_enough,
     forge_lines,
     forge_solo_done,
     forge_stopped_early,
@@ -726,7 +728,27 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
     res = (f or {}).get("result") if isinstance((f or {}).get("result"), dict) else {}
     seats = [x for x in res.get("seats") or [] if isinstance(x, dict)]
     games = _int(res.get("games")) or 0
-    if f and games and seats:
+    if f and games and seats and not forge_enough(f):
+        # a few Forge games say little: their widget follows the solo test's, without a headline rate
+        # (owner decision C7)
+        mine = seats[0]
+        low, high = (mine.get("win_rate_95") or [None, None])[:2]
+        interval = _interval([low, high])
+        later = ui.widget(
+            "Forge: your deck won",
+            "play",
+            "",
+            big_html=f"<span class='rv-few'>{_esc(TOO_FEW_TEXT)}</span>",
+            detail=(
+                f"{games} game{'s' if games != 1 else ''} so far"
+                + (f", 95% interval {interval}" if interval else "")
+                + ". More games narrow it."
+            ),
+            actions=[_go("Forge games", "#rv-forge")],
+        )
+    else:
+        later = ""
+    if f and games and seats and not later:
         mine = seats[0]
         low, high = (mine.get("win_rate_95") or [None, None])[:2]
         precons = len(seats) - 1
@@ -855,6 +877,8 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                 actions=[_go("Deck statistics", "#rv-stats")] if stats_section else [],
             )
         )
+    if later:  # after the solo test's numbers, before the deck's
+        out.insert((1 if cc else 0) + (1 if kill else 0), later)
     return (
         f"<section class='ui-widgets rv-w' aria-label='Key numbers'>{''.join(out)}</section>" if out else ""
     )
@@ -1149,7 +1173,15 @@ def validation_section_html(s: dict[str, Any]) -> str:
 
 
 def _jump_html(
-    r: dict[str, Any], s: dict[str, Any], *, model: bool, valid: bool, stats: bool, raw: bool
+    r: dict[str, Any],
+    s: dict[str, Any],
+    *,
+    model: bool,
+    valid: bool,
+    stats: bool,
+    raw: bool,
+    forge_first: bool = True,
+    tested: bool = False,
 ) -> str:
     g = s["goldfish"]
     h = (g or {}).get("honesty") or {}
@@ -1161,18 +1193,24 @@ def _jump_html(
     f = r.get("forge")
     forge = isinstance(f, dict) and f.get("state") != "skipped"
     items = []
+    forge_items = []
     if isinstance(r.get("forge_solo"), dict) and r.get("forge_solo"):
-        items.append(ui.Chip("Full-rules solo test", None, "#rv-solo-forge"))
+        forge_items.append(ui.Chip("Full-rules solo test", None, "#rv-solo-forge"))
     # a report without Forge games starts with its preflight-only section: no link to it
     if forge:
-        items.append(ui.Chip("Forge games", None, "#rv-forge"))
-    items.append(ui.Chip("Quick solo test", None, "#rv-solo"))
+        forge_items.append(ui.Chip("Forge games", None, "#rv-forge"))
+    if isinstance(r.get("paired"), dict):
+        items.append(ui.Chip("Against the deck now", None, "#rv-paired"))
+    solo_items = [ui.Chip("Quick solo test", None, "#rv-solo")]
     if model:
-        items.append(ui.Chip("What the quick test leaves out", n or None, "#rv-model"))
+        solo_items.append(ui.Chip("What the quick test leaves out", n or None, "#rv-model"))
+    items += forge_items + solo_items if forge_first else solo_items + forge_items
     if valid:
         items.append(ui.Chip("Validation", None, "#rv-valid"))
     if stats:
         items.append(ui.Chip("Deck statistics", None, "#rv-stats"))
+    if tested:
+        items.append(ui.Chip("Tested list", None, "#rv-tested"))
     if raw:
         items.append(ui.Chip("Raw output", None, "#rv-raw"))
     return f"<div class='rv-jump'>{ui.chips(items, label='Sections of this report')}</div>"
@@ -1185,19 +1223,365 @@ def comparison_section_html(r: dict[str, Any]) -> str:
     if not isinstance(ab, dict):
         return ""
     src = r.get("source") if isinstance(r.get("source"), dict) else {}
-    who = (
-        f"<p>Deck A: <strong>{_esc(src.get('a') or '')}</strong> · Deck B: "
-        f"<strong>{_esc(src.get('b') or '')}</strong>. Both decks played game for game under the same "
-        "seeds.</p>"
-        if src.get("a") or src.get("b")
+    if r.get("research") == "running":
+        return testing_section_html(r).replace("id='rv-solo'", "id='rv-compare'", 1)
+    body = ab_html(ab, str(src.get("a") or "Deck A"), str(src.get("b") or "Deck B"))
+    return _sec("rv-compare", "Comparison: paired solo test", body)
+
+
+# -- what the test kept and how it compares (owner decision C7) ---------------------------------------
+def _card_moves(diff: dict[str, list[dict[str, Any]]], *, most: int = 8) -> str:
+    """ "+1 Opt, −2 Island (maybeboard)…" for a list_diff: what came in, then what went."""
+    items = [("+", r) for r in diff.get("added") or []] + [("−", r) for r in diff.get("removed") or []]
+    words = [
+        f"<span class='mv {'in' if sign == '+' else 'out'}'>{sign}{int(r['quantity'])} "
+        f"{_esc(front_face(r['name']))}{' (side)' if r.get('zone') == 'side' else ''}</span>"
+        for sign, r in items[:most]
+    ]
+    more = len(items) - most
+    return ", ".join(words) + (f" and {more} more" if more > 0 else "")
+
+
+RESTORE_LIST_TEXT = "Put this list back (review first)"
+
+
+def deck_changes_html(
+    r: dict[str, Any], tested: list[dict[str, Any]] | None, now: Any, *, csrf: str, diff: Any = None
+) -> str:
+    """The line under the report's head: whether the deck has changed since this test and how, with
+    a button that puts the tested list back through an ordinary proposal (reviewed before anything
+    changes on Archidekt). ``now``: the deck as read now; ``diff``: list_diff(tested, now's rows)."""
+    rid = _esc(r.get("report_id") or "")
+    if tested is None:  # a report made before reports kept their list: the fingerprint alone
+        if getattr(now, "fingerprint", None) is None or now.fingerprint() == r.get("fingerprint"):
+            return ""
+        return (
+            "<div class='rv-changed' role='status'><p><strong>The deck has changed since this test.</strong> "
+            "This report was made before reports kept the list they played, so it can't say how.</p></div>"
+        )
+    if not diff or not (diff.get("added") or diff.get("removed")):
+        return (
+            "<div class='rv-changed same' role='status'><p>"
+            f"{icon('check')}The deck is as this test played it.</p></div>"
+        )
+    button = (
+        f"<form method='post' action='/history/reports/{rid}/restore' class='rv-restore'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        f"<button type='submit' class='btn-plain' data-busy-label='Making the proposal…'>"
+        f"{icon('undo')}{_esc(RESTORE_LIST_TEXT)}</button></form>"
+        if csrf
+        else ""
+    )
+    return (
+        "<div class='rv-changed' role='status'><p><strong>The deck has changed since this test:</strong> "
+        f"{_card_moves(diff)}.</p>{button}</div>"
+    )
+
+
+CHANGES_CHECKING = "Looking at the deck for changes since this test…"
+
+
+def changes_placeholder_html(report_id: Any) -> str:
+    """The changes line while the deck's read is still under way: report.js asks again."""
+    rid = _esc(report_id or "")
+    return (
+        f"<div class='rv-changed wait' data-changes-url='/history/reports/{rid}/changes' aria-live='polite'>"
+        f"<p class='ui-hint'>{_esc(CHANGES_CHECKING)}</p></div>"
+    )
+
+
+SINCE_SAME = "The same solo test numbers as last time."
+
+
+def since_last_html(
+    r: dict[str, Any],
+    prev: dict[str, Any] | None,
+    *,
+    tested: list[dict[str, Any]] | None = None,
+) -> str:
+    """ "Since your last test": this test's solo test numbers against the deck's test before it (the
+    same game and last turn), each with its move and whether it is better or worse, and the cards
+    that changed between the two lists. '' when there is no such test."""
+    from .report_view import compared_numbers, since_rows
+    from .reports import list_diff
+
+    if not prev:
+        return ""
+    rows = since_rows(compared_numbers(r.get("goldfish")), compared_numbers(prev.get("goldfish")))
+    before = prev.get("tested")
+    moves = list_diff(before, tested) if before is not None and tested is not None else None
+    if not rows and not moves:
+        return ""
+    items = []
+    for x in rows:
+        value = f"turn {_turn(x['now'])}" if x["unit"] == "turn" else f"{x['now']:.0f}%"
+        was = f"turn {_turn(x['before'])}" if x["unit"] == "turn" else f"{x['before']:.0f}%"
+        way = {"better": "Better", "worse": "Worse"}.get(x["way"], "")
+        mark = {"better": "check", "worse": "alert"}.get(x["way"], "")
+        items.append(
+            f"<li class='{_esc(x['way'])}'><span class='k'>{_esc(x['label'])}</span>"
+            f"<b>{_esc(value)}</b><span class='was'>was {_esc(was)}</span>"
+            f"<span class='mv'>{icon(mark) if mark else ''}{_esc(x['words'])}"
+            f"{f' · {way}' if way else ''}</span></li>"
+        )
+    cards = ""
+    if moves is not None:
+        cards = (
+            f"<p class='rv-since-cards'><span class='k'>Cards</span> {_card_moves(moves)}</p>"
+            if moves["added"] or moves["removed"]
+            else "<p class='rv-since-cards'><span class='k'>Cards</span> The same list both times.</p>"
+        )
+    href = f"/history/reports/{_esc(prev['report_id'])}"
+    return (
+        "<section class='rv-since' aria-labelledby='rv-since-h'>"
+        "<div class='rv-sh'><h2 id='rv-since-h'>Since your last test</h2>"
+        f"<span class='ui-sub'>{ui.when(prev.get('taken_at'))}</span>"
+        f"{ui.cap_link('Open that test', href)}</div>"
+        + (
+            f"<p class='rv-since-same'>{_esc(SINCE_SAME)}</p>"
+            if rows and all(x["way"] == "same" for x in rows)
+            else f"<ul class='rv-since-l'>{''.join(items)}</ul>"
+            if items
+            else ""
+        )
+        + cards
+        + "</section>"
+    )
+
+
+def tested_list_html(rows: list[dict[str, Any]] | None, text: str | None) -> str:
+    """The list this test played, folded: the commander, the deck and the side rows, with Copy."""
+    if not rows:
+        return ""
+    main = [x for x in rows if x.get("z") != "side"]
+    side = [x for x in rows if x.get("z") == "side"]
+    commanders = [x for x in main if x.get("cmd")]
+    deck = [x for x in main if not x.get("cmd")]
+
+    def group(title: str, part: list[dict[str, Any]]) -> str:
+        if not part:
+            return ""
+        n = sum(int(x["q"]) for x in part)
+        lis = "".join(
+            f"<li><span class='q'>{int(x['q'])}</span><button type='button' class='cardlink' "
+            f"data-card='{_esc(front_face(x['n']))}'>{_esc(x['n'])}</button></li>"
+            for x in sorted(part, key=lambda x: str(x["n"]).casefold())
+        )
+        return f"<h3>{_esc(title)} <span class='n'>{n}</span></h3><ul class='rv-list'>{lis}</ul>"
+
+    total = sum(int(x["q"]) for x in main)
+    copy = (
+        "<button type='button' class='btn-plain copybtn' data-copy='rep-list'>"
+        f"{icon('copy')}<span class='label'>Copy the list</span></button>"
+        f"<textarea id='rep-list' class='sr-only' readonly aria-label='The tested list'>{_esc(text or '')}"
+        "</textarea>"
+        if text
         else ""
     )
     body = (
-        f"<pre class='rv-ab'>{_esc(ab.get('text') or '')}</pre>"
-        if ab.get("ok")
-        else f"<p class='notice error'>{_esc(ab.get('text') or 'The comparison did not run.')}</p>"
+        f"<details class='rv-det' id='rv-tested-d'><summary class='fold-btn'>Show the {total} cards this "
+        "test played</summary>"
+        + group("Commander", commanders)
+        + group("Deck", deck)
+        + group("Sideboard and maybeboard", side)
+        + f"<div class='rv-acts2'>{copy}</div></details>"
     )
-    return _sec("rv-compare", "Comparison: paired solo test", who + body)
+    return _sec("rv-tested", "Tested list", body, flat=True)
+
+
+def ab_html(block: Any, a_name: str, b_name: str, *, who: str = "") -> str:
+    """A paired A/B's result: one row per number with its change (deck A minus deck B), whether it
+    is clear or within chance, then the research service's own text folded away."""
+    from .report_view import CHECK_FAILED, ab_deltas, ab_verdict, research_failure
+
+    if not isinstance(block, dict):
+        return ""
+    if not block.get("ok"):
+        why = research_failure(block, RESEARCH_PAIR_FAILED) or plain_words(
+            str(block.get("text") or "The paired test did not run.")
+        )
+        return f"<p class='notice error'>{_esc(why if why != CHECK_FAILED else RESEARCH_PAIR_FAILED)}</p>"
+    rows = ab_deltas(block)
+    table = ""
+    if rows:
+        lis = "".join(
+            f"<li class='{_esc(x['way'])}'><span class='k'>{_esc(x['label'])}</span>"
+            f"<span class='mv'>{_esc(x['words'])}"
+            + (
+                {"better": " · Better", "worse": " · Worse"}.get(x["way"], "")
+                if x["clear"] is not False
+                else ""
+            )
+            + "</span><span class='cl'>"
+            + ("Clear difference" if x["clear"] else "Could be chance" if x["clear"] is False else "")
+            + "</span></li>"
+            for x in rows
+        )
+        verdict = ab_verdict(rows)
+        table = (f"<p class='rv-verdict'>{_esc(verdict)}</p>" if verdict else "") + (
+            f"<ul class='rv-since-l rv-ab-l'>{lis}</ul>"
+        )
+    raw = (
+        "<details class='rv-det'><summary class='fold-btn'>The research service's own text</summary>"
+        f"<pre class='rv-ab'>{_esc(block.get('text') or '')}</pre></details>"
+        if block.get("text")
+        else ""
+    )
+    names = (
+        f"<p class='ui-sub'>{who}Deck A: <strong>{_esc(a_name)}</strong> · Deck B: <strong>{_esc(b_name)}"
+        "</strong>. Both played game for game under the same seeds; each change is deck A against deck B."
+        "</p>"
+    )
+    if not rows:  # an answer whose numbers the gateway can't read: its own text, open
+        raw = f"<pre class='rv-ab'>{_esc(block.get('text') or '')}</pre>"
+    return names + table + raw
+
+
+RESEARCH_PAIR_FAILED = "The paired test could not run: the research service did not answer."
+
+
+def paired_section_html(r: dict[str, Any]) -> str:
+    """A proposal's test: the deck after the change against the deck as it is now, game for game."""
+    from .reports import PAIRED_A, PAIRED_B
+
+    block = r.get("paired")
+    if not isinstance(block, dict):
+        return ""
+    return _sec(
+        "rv-paired",
+        "Against the deck now: paired solo test",
+        ab_html(block, PAIRED_A, PAIRED_B),
+    )
+
+
+# -- a Forge pair, head to head (owner decision C7) -----------------------------------------------
+HEAD_TO_HEAD_SUB = (
+    "Both decks played Forge games against the same opponents, so their win rates can be set side by "
+    "side. These games stay out of each deck's own trend."
+)
+
+
+def _side_html(r: dict[str, Any]) -> str:
+    """One deck of a pair: its name, its Forge state, its win rate with the 95% interval (or why there
+    is none yet) and a way to its report."""
+    f = r.get("forge") if isinstance(r.get("forge"), dict) else {}
+    res = f.get("result") if isinstance(f.get("result"), dict) else {}
+    seats = [x for x in res.get("seats") or [] if isinstance(x, dict)]
+    games = _int(res.get("games")) or 0
+    rid = _esc(r.get("report_id") or "")
+    name = _esc(r.get("deck_name") or "Unnamed deck")
+    if games and seats:
+        mine = seats[0]
+        low, high = (mine.get("win_rate_95") or [None, None])[:2]
+        interval = _interval([low, high])
+        big = (
+            f"<b class='h2h-rate'>{_pct(_float(mine.get('win_rate')))}</b>"
+            f"<span class='ui-sub'>won, {games} game{'s' if games != 1 else ''}</span>"
+            if forge_enough(f)
+            else f"<b class='h2h-few'>{_esc(TOO_FEW_TEXT)}</b><span class='ui-sub'>{games} game"
+            f"{'s' if games != 1 else ''} so far, {_pct(_float(mine.get('win_rate')))} won</span>"
+        )
+        bar = _ci_bar(_float(low), _float(high)) + (
+            f"<span class='ui-sub'>95% interval {_esc(interval)}</span>" if interval else ""
+        )
+    else:
+        big = f"<b class='h2h-few'>{_esc(FORGE_STATE_TEXT.get(_forge_key(f), '') or 'No games yet')}</b>"
+        bar = ""
+    return (
+        f"<section class='ui-card h2h-side' aria-labelledby='h2h-{rid}'>"
+        f"<h2 id='h2h-{rid}'>{name}</h2><p class='h2h-st'>{forge_state_label(f) if f else ''}</p>"
+        f"<div class='h2h-big'>{big}</div><div class='h2h-ci'>{bar}</div>"
+        f"<p>{ui.button_link('Open its report', f'/history/reports/{rid}')}</p></section>"
+    )
+
+
+def head_to_head_verdict(a: dict[str, Any], b: dict[str, Any]) -> str:
+    """One sentence on a pair: which deck won more often when the two 95% intervals do not overlap,
+    else that the games can't tell them apart yet."""
+
+    def rate(r: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
+        f = r.get("forge") if isinstance(r.get("forge"), dict) else {}
+        res = f.get("result") if isinstance(f.get("result"), dict) else {}
+        seats = [x for x in res.get("seats") or [] if isinstance(x, dict)]
+        if not (_int(res.get("games")) and seats):
+            return None, None, None
+        low, high = (seats[0].get("win_rate_95") or [None, None])[:2]
+        return _float(seats[0].get("win_rate")), _float(low), _float(high)
+
+    ra, rb = rate(a), rate(b)
+    if None in (*ra, *rb):
+        return "The verdict comes once both decks have played their games."
+    na, nb = (f"“{x.get('deck_name') or 'Unnamed deck'}”" for x in (a, b))
+    if ra[1] > rb[2]:  # type: ignore[operator]
+        return f"{na} won more often than {nb} against this table."
+    if rb[1] > ra[2]:  # type: ignore[operator]
+        return f"{nb} won more often than {na} against this table."
+    return (
+        "The two win rates overlap, so these games can't tell the decks apart yet. Play more games: "
+        "both decks get them."
+    )
+
+
+def head_to_head_html(a: dict[str, Any], b: dict[str, Any], *, csrf: str = "") -> str:
+    """Both reports of a Forge pair side by side, the verdict, the shared table and Play more games."""
+    fa = a.get("forge") if isinstance(a.get("forge"), dict) else {}
+    res = fa.get("result") if isinstance(fa.get("result"), dict) else {}
+    seats = [x for x in res.get("seats") or [] if isinstance(x, dict)]
+    table = [str(x.get("deck") or "") for x in seats[1:] if x.get("deck")]
+    if not table:
+        start = fa.get("seats") if isinstance(fa.get("seats"), list) else []
+        table = [str(x) for x in start[1:]]
+    opponents = (
+        "<section class='h2h-table'><h2>The table</h2><ul class='rv-list'>"
+        + "".join(f"<li>{_esc(n)}</li>" for n in table)
+        + "</ul></section>"
+        if table
+        else ""
+    )
+    live = any(
+        isinstance(x.get("forge"), dict) and str(x["forge"].get("state")) in ("queued", "running")
+        for x in (a, b)
+    )
+    marks = (
+        " data-pair-live "
+        + " ".join(f"data-pair-{i}='{_esc(x.get('report_id') or '')}'" for i, x in enumerate((a, b)))
+        if live
+        else ""
+    )
+    more = more_html(fa, csrf, str(a.get("report_id") or "")) if csrf else ""
+    back = ui.cap_link("← Back to the report", f"/history/reports/{_esc(b.get('report_id') or '')}")
+    return (
+        f"<div class='h2h-page gb-dash'{marks}><p class='hy-back'>{back}</p>"
+        + ui.page_head("Head to head", HEAD_TO_HEAD_SUB)
+        + f"<p class='rv-verdict' role='status'>{_esc(head_to_head_verdict(a, b))}</p>"
+        + f"<div class='h2h-sides'>{_side_html(a)}{_side_html(b)}</div>"
+        + more
+        + opponents
+        + "</div>"
+    )
+
+
+HEAD_TO_HEAD_CSS = """
+.h2h-page .h2h-sides{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem;
+  margin:0 0 1rem}
+.h2h-page .h2h-side h2{margin:0 0 .25rem;font-size:1.15rem;overflow-wrap:anywhere}
+.h2h-page .h2h-st{margin:0 0 .5rem;min-height:24px}
+.h2h-page .h2h-big{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .6rem}
+.h2h-page .h2h-rate{font-size:2.4rem;font-weight:900;font-variant-numeric:tabular-nums;line-height:1.1}
+.h2h-page .h2h-few{font-size:1.15rem;line-height:1.3}
+.h2h-page .h2h-ci{display:flex;flex-direction:column;gap:.25rem;margin:.5rem 0}
+.h2h-page .ci-w{position:relative;display:block;width:100%;height:8px;border-radius:4px;
+  background:var(--surface-2)}
+.h2h-page .ci-w i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--orange)}
+.h2h-page .rv-verdict{font-weight:700;margin:.5rem 0 1rem}
+.h2h-page .rv-more{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 1rem}
+.h2h-page .rv-more form{margin:0}
+.h2h-page .rv-more button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
+.h2h-page .rv-list{list-style:none;margin:0;padding:0}
+.h2h-page .rv-list li{min-height:44px;display:flex;align-items:center;border-top:1px solid var(--border-soft)}
+.h2h-page .rv-list li:first-child{border-top:0}
+.h2h-page .h2h-side .btn{display:inline-flex;align-items:center;min-height:44px}
+"""
 
 
 def status_label_html(status: Any, research: Any = None) -> str:
@@ -1218,12 +1602,20 @@ def report_page_html(
     csrf: str = "",
     card_types: Mapping[str, str] | None = None,
     my_models: str = "",
+    by_html: str = "",
+    changes_html: str = "",
+    since_html: str = "",
+    tested: list[dict[str, Any]] | None = None,
+    pair_href: str = "",
 ) -> str:
     """The signed-in report page's body. ``stats_html`` is the deck statistics strip
     (companion.stats_strip), ``actions_html`` the export buttons, ``notice_html`` a notice from the
     address (a Remove or a Play more games that started nothing), ``card_types`` the type lines the
     gateway knows for the cards Forge left out, ``my_models`` the My card models box
-    (card_models_view.box_html), whose opener sits where saved descriptions are mentioned."""
+    (card_models_view.box_html), whose opener sits where saved descriptions are mentioned.
+    Owner decision C7: ``by_html`` who ran it (the app chip), ``changes_html`` whether the deck changed
+    since (deck_changes_html or its placeholder), ``since_html`` the "since your last test" strip,
+    ``tested`` the rows it played (the Tested list), ``pair_href`` its head-to-head view."""
     s = report_sections(r)
     g = s["goldfish"]
     deck_id = _esc(r.get("deck_id"))
@@ -1246,6 +1638,8 @@ def report_page_html(
         meta.append(
             f"<span><a href='/proposals/{_esc(src['proposal_id'])}'>{source_label_html(r)}</a></span>"
         )
+    elif src.get("kind") == "pair" and pair_href:
+        meta.append(f"<span><a href='{_esc(pair_href)}'>{source_label_html(r)}</a></span>")
     elif src:
         meta.append(f"<span>{source_label_html(r)}</span>")
     if s["commander"]:
@@ -1257,6 +1651,8 @@ def report_page_html(
             f"<span><span class='k'>Solo test games</span> {_esc(g['games'])}{_esc(turns)}{_esc(seed)}</span>"
         )
     meta.append(f"<span><span class='k'>Run</span> {ui.when(r.get('taken_at'))}</span>")
+    if by_html:
+        meta.append(f"<span><span class='k'>By</span> {by_html}</span>")
     head = (
         "<header class='rv-head'><div class='rv-title'>"
         + (f"<h1><a href='/decks/{deck_id}'>{name}</a></h1>" if on_deck else f"<h1>{name}</h1>")
@@ -1304,21 +1700,42 @@ def report_page_html(
             f"Raw output from the research service</summary>{raw}</details>"
         )
     compare = comparison_section_html(r)
-    jump = _jump_html(r, s, model=bool(model), valid=bool(valid), stats=bool(stats), raw=bool(raw))
+    paired = paired_section_html(r)
+    if pair_href and forge:  # a Forge pair: both decks side by side on their own view
+        forge += (
+            "<p class='rv-pair'>"
+            + ui.button_link("See both decks head to head", pair_href, icon_name="swap")
+            + "</p>"
+        )
+    # The solo test leads until Forge has enough games to say something (owner decision C7)
+    lead_forge = forge_enough(r.get("forge"))
+    tested_html = tested_list_html(tested, r.get("tested_list"))
+    jump = _jump_html(
+        r,
+        s,
+        model=bool(model),
+        valid=bool(valid),
+        stats=bool(stats),
+        raw=bool(raw),
+        forge_first=lead_forge,
+        tested=bool(tested_html),
+    )
+    parts = [solo_forge, forge, solo, model] if lead_forge else [solo, model, solo_forge, forge]
     return (
         "<div class='report rv-page gb-dash'>"
         + crumbs
         + head
         + notice_html
+        + changes_html
+        + since_html
         + widgets_html(r, s, stats_section=bool(stats))
         + jump
         + compare
-        + solo_forge
-        + forge
-        + solo
-        + model
+        + paired
+        + "".join(parts)
         + valid
         + stats
+        + tested_html
         + raw
         + my_models
         + "</div>"
@@ -1552,5 +1969,51 @@ REPORT_PAGE_CSS = (
 .rv-page .cardlink{background:none;border:0;padding:0;margin:0;color:inherit;cursor:pointer;font:inherit;
   text-align:left;min-height:0}
 .rv-page .cardlink:hover{text-decoration:underline;color:var(--orange-text)}
+/* owner decision C7: has the deck changed since, since the last test, the tested list, paired tests */
+.rv-page .rv-changed{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 1rem;
+  padding:.6rem .9rem;border-left:4px solid var(--orange);background:var(--orange-tint);border-radius:6px}
+.rv-page .rv-changed p{margin:0;flex:1 1 20rem;overflow-wrap:anywhere}
+.rv-page .rv-changed.same{border-left-color:var(--green);background:var(--green-tint)}
+.rv-page .rv-changed.same p{display:flex;align-items:center;gap:.4rem}
+.rv-page .rv-changed.wait{border-left-color:var(--border);background:transparent}
+.rv-page .rv-changed form{margin:0}
+.rv-page .rv-changed button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
+.rv-page .mv.in{color:var(--green-text);font-weight:700}
+.rv-page .mv.out{color:var(--red-text);font-weight:700}
+.rv-page .rv-since{margin:0 0 1rem;padding:.75rem 0 .25rem;border-top:2px solid var(--card-border)}
+.rv-page .rv-since .rv-sh h2{font-size:1.1rem}
+.rv-page .rv-since .ui-cap{margin-left:auto}
+.rv-page .rv-since-l{list-style:none;margin:.5rem 0;padding:0;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,13rem),1fr));gap:0 1rem;
+  border-top:1px solid var(--border-soft)}
+.rv-page .rv-since-l li{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .5rem;padding:.55rem 0;
+  border-bottom:1px solid var(--border-soft);min-width:0}
+.rv-page .rv-since-l .k{flex-basis:100%;color:var(--text-muted);font-size:.86rem;font-weight:700}
+.rv-page .rv-since-l b{font-size:1.2rem;font-variant-numeric:tabular-nums}
+.rv-page .rv-since-l .was{color:var(--text-muted);font-size:.86rem}
+.rv-page .rv-since-l .mv,.rv-page .rv-since-l .cl{flex-basis:100%;display:flex;align-items:center;gap:.3rem;
+  font-size:.9rem}
+.rv-page .rv-since-l .cl{color:var(--text-muted)}
+.rv-page .rv-since-l .mv svg{width:16px;height:16px;flex:none}
+.rv-page .rv-since-l li.better .mv{color:var(--green-text);font-weight:700}
+.rv-page .rv-since-l li.worse .mv{color:var(--red-text);font-weight:700}
+.rv-page .rv-since-l li.same .mv{color:var(--text-muted)}
+.rv-page .rv-ab-l li b{display:none}
+.rv-page .rv-since-cards{margin:.25rem 0 .5rem;overflow-wrap:anywhere}
+.rv-page .rv-since-cards .k{color:var(--text-muted);font-weight:700;margin-right:.35rem}
+.rv-page .rv-verdict{font-weight:700;margin:.5rem 0}
+.rv-page .rv-few{font-size:1.05rem;font-weight:700;line-height:1.25}
+.rv-page .rv-pair{margin:-.5rem 0 1.25rem}
+.rv-page .rv-pair .btn{display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
+.rv-page .rv-list{list-style:none;margin:0 0 .5rem;padding:0;columns:16rem auto;column-gap:1.5rem}
+.rv-page .rv-list li{display:flex;gap:.5rem;align-items:baseline;break-inside:avoid;min-height:32px;
+  padding:.15rem 0}
+@media (pointer:coarse){.rv-page .rv-list li{min-height:44px;align-items:center}}
+.rv-page .rv-list .q{min-width:1.6rem;text-align:right;color:var(--text-muted);
+  font-variant-numeric:tabular-nums}
+.rv-page .rv-list .cardlink{overflow-wrap:anywhere}
+.rv-page #rv-tested h3 .n{color:var(--text-muted);font-weight:400;font-size:.9rem;margin-left:.3rem}
+.rv-page .rv-acts2{display:flex;flex-wrap:wrap;gap:.5rem;margin:.5rem 0}
+.rv-page .rv-acts2 button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
 """
 )

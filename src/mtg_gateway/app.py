@@ -291,8 +291,9 @@ def scope_guard_middleware():
             token = get_access_token()
             if name in WRITE_TOOLS and token is not None and not scopes_allow_writes(token.scopes):
                 message = (
-                    "This app was connected read-only (scope mtg.read), so it cannot propose, apply or "
-                    "store anything. Reconnect it with the mtg scope to make changes."
+                    "This app was connected read-only (scope mtg.read), so it cannot propose or apply "
+                    "changes or run tests (its deck comparisons are kept as reports). Reconnect it with "
+                    "the mtg scope to make changes."
                 )
                 return types.CallToolResult(
                     content=[types.TextContent(type="text", text=message)],

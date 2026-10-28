@@ -90,7 +90,7 @@
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(function (data) {
         if (!data || data.ok !== true) return;
-        if (document.querySelector("#rv-solo[data-research]")) {
+        if (document.querySelector("[data-research]")) {
           if (data.research === "running") { schedule(); return; }
           location.reload();
           return;
@@ -104,9 +104,34 @@
   }
 
   function schedule() {
-    if (!timer) timer = setTimeout(tick, document.querySelector("#rv-solo[data-research]") ? RESEARCH_INTERVAL : INTERVAL);
+    if (!timer) timer = setTimeout(tick, document.querySelector("[data-research]") ? RESEARCH_INTERVAL : INTERVAL);
   }
 
   document.addEventListener("visibilitychange", function () { if (!document.hidden && live()) schedule(); });
   if (live()) schedule();
+
+  // Head to head (a Forge pair's view, data-pair-live with both reports' ids): the page is read again
+  // whole when either deck's games move on, until both runs have ended.
+  var pair = document.querySelector("[data-pair-live]");
+  if (pair) {
+    var ids = [pair.getAttribute("data-pair-0"), pair.getAttribute("data-pair-1")].filter(Boolean);
+    var seen = null;
+    var pairTick = function () {
+      if (document.hidden || Date.now() - started > LIMIT) { setTimeout(pairTick, INTERVAL); return; }
+      Promise.all(ids.map(function (rid) {
+        return fetch("/api/v1/reports/" + encodeURIComponent(rid) + "/forge", {
+          credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }
+        }).then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+      })).then(function (all) {
+        var sig = all.map(function (d) {
+          var f = (d && d.forge) || {};
+          return [d && d.state, f.games_done || 0].join(":");
+        }).join("|");
+        if (seen !== null && sig !== seen) { location.reload(); return; }
+        seen = sig;
+        if (all.some(function (d) { return d && d.live; })) setTimeout(pairTick, INTERVAL);
+      }).catch(function () { /* signed out or offline: leave the page as it is */ });
+    };
+    setTimeout(pairTick, INTERVAL);
+  }
 })();

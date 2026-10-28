@@ -18,6 +18,7 @@ from mtg_gateway import report_page as rp
 from mtg_gateway import report_view as rv
 
 from .test_history_page import store_report
+from .test_report_page import forge_enough_games
 from .test_report_view import report
 from .test_reports_browser import FORGE_DONE
 from .test_social_browser import Server
@@ -54,7 +55,7 @@ FORGE_SOLO = {
 
 
 def _page(solo=FORGE_SOLO, **over) -> str:
-    r = report(forge=json.loads(json.dumps(FORGE_DONE)), status="complete", **over)
+    r = report(forge=forge_enough_games(), status="complete", **over)
     if solo is not None:
         r["forge_solo"] = json.loads(json.dumps(solo))
     return rp.report_page_html(r, card_types={"Pernicious Deed": "Enchantment"})
