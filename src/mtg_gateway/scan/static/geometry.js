@@ -6,7 +6,7 @@
    Memory: edge finding works on a grey copy at most 480 px wide, and the warp samples only the
    card's bounding box, downscaled to a long side of 2048 px; both buffers are reused between
    frames, so a frame or a large photo is never copied whole.
-   flattenCard(source, rect, opts) -> { canvas, corners, score } or null when no
+   flattenCard(source, rect, opts) -> { canvas, corners, score, sideways } or null when no
    convincing card outline is found (callers then fall back to the guide box). */
 (function () {
   'use strict';
@@ -186,7 +186,9 @@
 
   /* The card's outline inside r (grey pixels), each edge searched in a band of bandFrac of r's size
      around r's side: four straight edges meeting in a convex quad about the shape of a card, its
-     area within 0.3 to 1.6 times expectedArea. Returns { corners, score, area } in grey pixels or null. */
+     area within 0.3 to 1.6 times expectedArea. A window wider than it is tall looks for a card lying
+     sideways (the same shape turned a quarter). Returns { corners, score, area, sideways } in grey
+     pixels or null. */
   function quadIn(img, r, bandFrac, minStep, expectedArea) {
     const top = findEdge(img, 'top', r, r.h * bandFrac, minStep); if (!top) return null;
     const bottom = findEdge(img, 'bottom', r, r.h * bandFrac, minStep); if (!bottom) return null;
@@ -198,26 +200,42 @@
     // Sanity: a convex quad about the shape of a card, not a sliver or the whole frame.
     const wTop = dist(corners[0], corners[1]), wBot = dist(corners[3], corners[2]);
     const hL = dist(corners[0], corners[3]), hR = dist(corners[1], corners[2]);
-    const aspect = ((wTop + wBot) / 2) / ((hL + hR) / 2);
-    if (!(aspect > 0.55 && aspect < 0.95)) return null;
+    // Lying sideways the shape must be closer to a card's (63:88 is 0.72): an upright card whose
+    // own edge is lost against the table still shows boxes inside it, its title bar and art
+    // together nearly square (about 0.89), and those must not pass for a card on its side.
+    const sideways = r.w > r.h;
+    const aspect = sideways ? ((hL + hR) / 2) / ((wTop + wBot) / 2) : ((wTop + wBot) / 2) / ((hL + hR) / 2);
+    if (!(sideways ? aspect > 0.62 && aspect < 0.82 : aspect > 0.55 && aspect < 0.95)) return null;
     if (Math.min(wTop, wBot) / Math.max(wTop, wBot) < 0.7 || Math.min(hL, hR) / Math.max(hL, hR) < 0.7) return null;
     if (!convex(corners)) return null;
     const area = polyArea(corners);
     if (area < expectedArea * 0.3 || area > expectedArea * 1.6) return null;
-    return { corners, area, score: Math.min(top.coverage, bottom.coverage, left.coverage, right.coverage) };
+    return { corners, area, sideways, score: Math.min(top.coverage, bottom.coverage, left.coverage, right.coverage) };
   }
 
   /* A card anywhere in the picture, at any size from about a quarter of the picture's width up:
      the outline test above, run over card-shaped windows of falling size laid over the picture
      in steps of a fifth of the window, so some window has each edge of the card inside its band.
      The largest outline found wins (a window inside the card can only find the card's inner
-     frame, which is smaller than the card). */
+     frame, which is smaller than the card). The windows come upright and then lying sideways, so a
+     card turned a quarter (or a picture taken that way) is found too; an upright window over a
+     sideways card can only find something inside it, such as the art, which is smaller. */
   const SEARCH_SIZES = [0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.31, 0.26];
   function searchCard(img, minStep) {
-    const fitW = Math.min(img.w, img.h * 63 / 88);
+    let best = null;
+    for (const sideways of [false, true]) {
+      const q = searchWindows(img, minStep, sideways);
+      if (q && (!best || q.area > best.area * 1.02)) best = q;
+    }
+    return best;
+  }
+  function searchWindows(img, minStep, sideways) {
+    // The card's short side across the window: 63 of 88 upright, 88 of 63 lying sideways.
+    const across = sideways ? 88 / 63 : 63 / 88;
+    const fitW = Math.min(img.w, img.h * across);
     let best = null;
     for (const f of SEARCH_SIZES) {
-      const cw = fitW * f, ch = cw * 88 / 63;
+      const cw = fitW * f, ch = cw / across;
       const nx = Math.max(1, Math.ceil((img.w - cw) / (cw * 0.2))), ny = Math.max(1, Math.ceil((img.h - ch) / (ch * 0.2)));
       for (let j = 0; j <= ny; j++) {
         for (let i = 0; i <= nx; i++) {
@@ -249,7 +267,11 @@
       if (!q) q = searchCard(img, minStep);
     }
     if (!q) return null;
-    const corners = q.corners.map((p) => ({ x: p.x / s, y: p.y / s }));
+    // A card lying sideways is flattened upright as if it had been turned a quarter to the left
+    // (its top edge on the picture's left); turned the other way it comes out upside down, and the
+    // caller reads it both ways up (sideways: true).
+    const found = q.sideways ? [q.corners[3], q.corners[0], q.corners[1], q.corners[2]] : q.corners;
+    const corners = found.map((p) => ({ x: p.x / s, y: p.y / s }));
     const H = homography(corners, CARD_W, CARD_H);
     if (!H) return null;
     const xs = corners.map((c) => c.x), ys = corners.map((c) => c.y);
@@ -257,7 +279,8 @@
     const pad = 0.02 * Math.max(bx1 - bx0, by1 - by0);
     const box = { x: bx0 - pad, y: by0 - pad, w: bx1 - bx0 + 2 * pad, h: by1 - by0 + 2 * pad };
     const warped = warp(source, sw, sh, H, CARD_W, CARD_H, box);
-    return { canvas: warped.canvas, corners, score: q.score, width: CARD_W, height: CARD_H, sampled: warped.sampled };
+    return { canvas: warped.canvas, corners, score: q.score, width: CARD_W, height: CARD_H, sampled: warped.sampled,
+      sideways: !!q.sideways };
   }
 
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
