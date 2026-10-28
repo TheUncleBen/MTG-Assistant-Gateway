@@ -701,13 +701,16 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             page.goto(f"{server.base}/history", wait_until="networkidle")
             rows = page.locator(".hy-table .tr:not(.th):not(.daygroup):not(.group)")
             found: set[str] = set()
-            for i in range(min(rows.count(), 12)):
+            # History is the decks' timeline (0.7.46): changes, snapshots and tests interleave, so
+            # every row is opened, not the first few
+            for i in range(rows.count()):
                 rows.nth(i).locator(".title").click(button="right")
                 _menu(page)
                 found.update(_items(page))
                 page.keyboard.press("Escape")
             assert {"Details", "Open the deck"} <= found, found
             assert "Restore (review first)" in found and "Delete…" in found, found
+            assert "Open report" in found, found
             assert found <= {
                 "Details",
                 "Restore (review first)",
@@ -732,6 +735,7 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
                 "Open card",
                 "Add to deck…",
                 "Add to collection",
+                "Pin card",  # 0.7.46: pins it on Archidekt (Binder › Wants)
                 "Price alert…",
                 "Copy name",
                 "Open on Scryfall",
@@ -780,7 +784,11 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             assert items[:3] == ["Open card", "Add to deck…", "Add to collection"]
             assert "Copy name" in items and items[-1] == "Open on Scryfall"
             _pick(page, "Add to collection")
-            page.locator(".toast.cards-toast", has_text="added to your collection").wait_for(timeout=5000)
+            # the gateway's own words say which entry the copy went to (0.7.46 merge rule)
+            page.locator(
+                ".toast.cards-toast",
+                has_text=re.compile(r"Added (“.+” as a new entry|1 copy to the “.+” entry)"),
+            ).wait_for(timeout=5000)
             # the Collection: the quantity row, Details…, Remove from collection
             page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
             row = page.locator("ul.colllist li.row[data-id]").first
