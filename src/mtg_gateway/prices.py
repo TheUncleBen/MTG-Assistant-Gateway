@@ -297,7 +297,8 @@ class PriceService:
 
     def _card_head(self, w: dict[str, Any]) -> dict[str, Any]:
         """What a watched card's row says whatever its prices: its name, printing, finish, alerts
-        and, for a watch by name alone, the printing that was cheapest at the last check."""
+        and, for a watch by name alone, the printing that was cheapest at the last check and the
+        words that say which printing its price follows."""
         cheapest = None
         if not w.get("set_code") and w.get("cheapest_set"):
             cheapest = {"set": w["cheapest_set"], "collector_number": w.get("cheapest_cn") or ""}
@@ -312,6 +313,7 @@ class PriceService:
                 k: w[f"alert_{k}"] for k in ("pct", "above", "below") if w.get(f"alert_{k}") is not None
             },
             "priced": bool(series_key(w)),
+            **({} if w["set_code"] else {"follows": FOLLOWS_NAME}),
         }
 
     def card_view(self, w: dict[str, Any], days: int = 90) -> dict[str, Any]:
@@ -323,7 +325,6 @@ class PriceService:
             "currency": cur,
             **self._changes(series),
             "history": [{"day": d, "price": v} for d, v in series],
-            **({} if w["set_code"] else {"follows": FOLLOWS_NAME}),
         }
 
     def watched_cards(self, sub: str) -> list[dict[str, Any]]:
