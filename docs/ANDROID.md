@@ -288,8 +288,8 @@ else your gateway serves. A few things are native:
   app version, sign-in runs inside the app as before.
 - **Staying signed in.** The app's sign-in is a browser session like the
   website's, so it ends the same way: after a week unused (each use keeps it
-  going, up to 30 days after you signed in; the owner sets the week with
-  `MTG_BROWSER_SESSION_TTL`),
+  going, up to 30 days after you signed in; the owner sets both on the
+  gateway's Settings page, under **Sign-in**),
   when you use **Sign out on all my devices** on the `/logout` page, within a
   minute after the owner removes you from the gateway's group (the gateway
   checks with the sign-in service as you use it), and once

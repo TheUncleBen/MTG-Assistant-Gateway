@@ -37,7 +37,6 @@ from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
-from .db import BROWSER_SESSION_MAX_AGE
 from .decks import (
     REVIEW_PAGE,
     DeckError,
@@ -1087,7 +1086,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
         sid = secrets.token_urlsafe(32)
-        state.db.create_browser_session(sid, sub, s.browser_session_ttl)
+        ttl = min(
+            state.live.seconds("browser_session_ttl"), state.db.session_max_age()
+        )  # the Settings page's
+        state.db.create_browser_session(sid, sub, ttl)
         state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
         resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
         if via is not None:
@@ -1095,7 +1097,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.set_cookie(
             session_cookie,
             sid,
-            max_age=min(s.browser_session_ttl, BROWSER_SESSION_MAX_AGE),
+            max_age=ttl,
             path="/",
             httponly=True,
             secure=secure,
