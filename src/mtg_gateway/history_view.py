@@ -141,7 +141,7 @@ def build_events(
     for p in restores:
         taken = _taken(p.get("taken") or "")
         when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
-        line = f"{when} · <a href='/proposals/{_esc(p['id'])}'>proposal</a>"
+        line = f"{when} · " + ui.cap_link("Proposal", f"/proposals/{p['id']}")
         diff = str(p.get("diff_text") or "")
         details = (
             f"<p>{when}.</p>"
@@ -183,13 +183,16 @@ def build_events(
                 summary += " just before a change was applied"
             bits.append(_esc(summary))
         if x.get("proposal_id"):
-            bits.append(f"<a href='/proposals/{_esc(x['proposal_id'])}'>the change</a>")
+            bits.append(ui.cap_link("The change", f"/proposals/{x['proposal_id']}"))
         if x.get("backup_gone"):
             bits.append("its backup copy is no longer on Archidekt")
         elif x.get("backup_url"):
             bits.append(
-                f"<a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
-                "backup copy on Archidekt</a>"
+                ui.cap_link(
+                    "Backup copy on Archidekt",
+                    str(x["backup_url"]),
+                    attrs="target='_blank' rel='noopener noreferrer'",
+                )
             )
         restore_form = (
             "<form method='post' action='/history/restore' class='hy-restore'>"
@@ -219,11 +222,16 @@ def build_events(
             )
         elif x.get("backup_url"):
             backup = (
-                f"<p><a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
-                "Archidekt backup copy</a></p>"
+                "<p>"
+                + ui.cap_link(
+                    "Archidekt backup copy",
+                    str(x["backup_url"]),
+                    attrs="target='_blank' rel='noopener noreferrer'",
+                )
+                + "</p>"
             )
         link = (
-            f"<p>See <a href='/proposals/{_esc(x['proposal_id'])}'>the change it was taken before</a>.</p>"
+            "<p>" + ui.cap_link("The change it was taken before", f"/proposals/{x['proposal_id']}") + "</p>"
             if x.get("proposal_id")
             else ""
         )
@@ -398,7 +406,7 @@ def events_html(
             extra = ""
             if deck_id and not query.get("deck_id"):
                 own = query_string({**query, "offset": 0, "open": ""}, deck_id=str(deck_id))
-                extra = f" · <a href='/history{_esc(own)}'>only this deck</a>"
+                extra = " · " + ui.cap_link("Only this deck", f"/history{own}")
             out.append(
                 f"<div class='tr group hy-group'><span>{heading}</span>"
                 f"<span class='meta'>{n} {'entry' if n == 1 else 'entries'}{extra}</span></div>"

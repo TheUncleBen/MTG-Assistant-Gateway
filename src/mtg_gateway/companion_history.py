@@ -181,7 +181,7 @@ def add_history_routes(
         # the deck's report trends (none with fewer than two reports)
         trend = trend_html(reports.trend(sub, deck_id)) if deck_id else ""
         back = (
-            f"<p class='hy-back'><a href='/decks/{_esc(deck_id)}'>← Back to the deck</a></p>"
+            "<p class='hy-back'>" + ui.cap_link("← Back to the deck", f"/decks/{deck_id}") + "</p>"
             if deck_id
             else ""
         )
@@ -236,7 +236,7 @@ def add_history_routes(
             ui.assistant_head(
                 "/history",
                 "History" if not deck_id else "Deck history",
-                sub_html=f"{_esc(PAGE_SUB_TEXT)} <a href='/proposals'>Proposals</a>.",
+                sub_html=f"{_esc(PAGE_SUB_TEXT)} " + ui.cap_link("Proposals", "/proposals") + ".",
             )
             + back
             + _history_widgets(sub, deck_id, copies, now=now)

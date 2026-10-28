@@ -324,7 +324,8 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
         seed_history(gw.db, sub, now=int(time.time()))
         body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
-        assert "To apply or reject several at once, open <a href='/proposals'>Waiting</a>." in body
+        waiting = "<a class='ui-cap' href='/proposals'>Waiting</a>"
+        assert f"To apply or reject several at once, open {waiting}." in body
         assert "name='pick'" not in body  # no tick boxes on All
         ids = re.findall(r"href='/proposals/(p\d\d)\?show=all'", body)
         assert ids[:3] == ["p00", "p01", "p02"] and len(set(ids)) == 25
@@ -333,7 +334,7 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         assert "26–50 of 60" in older and "/proposals/p25?show=all" in older
         assert re.search(r"<span class='ui-lbl grey'>(<svg.*?</svg>)?Rejected</span>", body)
         # a failed one says why; the seeded ones store no error, so Archidekt did not refuse them
-        assert "Could not be applied · <a href='/proposals/p03'>Why</a>" in body
+        assert "Could not be applied · <a class='ui-cap' href='/proposals/p03'>Why</a>" in body
         assert "Archidekt refused it" not in body
         assert "(deck 4" not in body
     finally:
@@ -385,9 +386,10 @@ def test_a_failed_row_says_refused_only_when_archidekt_refused() -> None:
         return _closing_html(it, csrf=None, replaced_by=None, now=0.0)
 
     for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract", "verify_mismatch"):
-        assert line(refused) == "Archidekt refused it · <a href='/proposals/f1'>Why</a>", refused
+        why = "<a class='ui-cap' href='/proposals/f1'>Why</a>"
+        assert line(refused) == f"Archidekt refused it · {why}", refused
     for other in ("interrupted", "unavailable", "internal", "backup_failed", None):
-        assert line(other) == "Could not be applied · <a href='/proposals/f1'>Why</a>", other
+        assert line(other) == f"Could not be applied · {why}", other
 
 
 # -- H1 ------------------------------------------------------------------------------

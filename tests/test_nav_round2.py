@@ -91,7 +91,7 @@ def test_history_and_reports_mark_assistant_as_the_place(server: Server) -> None
 
 def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
     page = _client(server).get("/history").text
-    assert "proposed are on <a href='/proposals'>Proposals</a>.</p>" in page
+    assert "proposed are on <a class='ui-cap' href='/proposals'>Proposals</a>.</p>" in page
     assert "&lt;a href" not in page
 
 

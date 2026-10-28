@@ -564,10 +564,18 @@ def day_row(text: str) -> str:
     return f"<div class='tr daygroup'>{esc(text)}</div>"
 
 
+def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> str:
+    """A small action or way to go inside a line of text or a row (Why, Group by deck, Open as a
+    full page): the theme's grey capsule, 36 px inside a 44 px tap area, never bare blue text."""
+    ic = icon(icon_name) if icon_name else ""
+    extra = f" {attrs}" if attrs else ""
+    return f"<a class='ui-cap' href='{esc(href)}'{extra}>{ic}{esc(text)}</a>"
+
+
 def open_link(href: str, text: str) -> str:
-    """The row's open action: the word from 600 px, a 44 px chevron on phones."""
+    """The row's open action: the word in a capsule from 600 px, a 44 px chevron on phones."""
     return (
-        f"<a class='act linkbtn' href='{esc(href)}' aria-label='{esc(text)}'>"
+        f"<a class='act ui-cap' href='{esc(href)}' aria-label='{esc(text)}'>"
         f"<span class='sm-hide'>{esc(text)}</span><span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 

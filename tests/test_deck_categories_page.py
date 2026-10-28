@@ -345,7 +345,7 @@ async def test_save_applies_at_once_and_the_panel_says_so(stack: Stack) -> None:
         assert "Net " not in review and ">2 changes<" not in review
         assert "Undo this change</button>" in review
         history = (await b.http.get("/history", headers=NAV)).text  # the snapshot, linking the change
-        assert f"<a href='/proposals/{pid}'>the change</a>" in history
+        assert f"<a class='ui-cap' href='/proposals/{pid}'>The change</a>" in history
     finally:
         await b.aclose()
 

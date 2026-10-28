@@ -1446,7 +1446,7 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
-  .ui-table .act.linkbtn{padding:0}
+  .ui-table .act.ui-cap{padding:0;background:none}
 }
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
@@ -1457,6 +1457,26 @@ main.wrap.ui-wide{max-width:1200px}
   font-weight:700}
 .linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0 .4rem;font-weight:700}
 @media (pointer:fine){.linkbtn{min-height:32px}}
+/* No bare blue text for an action or a way to go (0.7.46). A small one inside a line or a row (Why,
+   Group by deck, Open as a full page, Undo, a row's Open) is a grey capsule like .disc, without the
+   chevron: 36px drawn inside a 44px tap area. */
+.ui-cap{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;
+  min-height:44px;margin:0 -4px;padding:4px 12px;border:4px solid transparent;border-radius:22px;
+  background:var(--surface-2) padding-box;color:var(--text);font:inherit;font-weight:600;
+  font-size:.86rem;line-height:1.2;text-decoration:none;vertical-align:middle;cursor:pointer}
+.ui-cap:hover{background:var(--surface-3) padding-box;color:var(--text)}
+.ui-cap:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.ui-cap svg.i{width:16px;height:16px;flex:none}
+/* a title that opens its row or group, or a deck named in a panel or a widget: the text colour,
+   bold, underlined on hover and focus, so the page carries no blue text */
+.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+.trend .tdata th a{color:var(--text);font-weight:700;text-decoration:none}
+.ui-table .title .t a:hover,.ui-table .title a.t:hover,.ui-table .tr.group > span a:hover,
+.ui-meta dd a:hover,.wdg .det a:hover,.trend .tdata th a:hover,
+.ui-table .title .t a:focus-visible,.ui-table .title a.t:focus-visible,
+.ui-table .tr.group > span a:focus-visible,.ui-meta dd a:focus-visible,.wdg .det a:focus-visible,
+.trend .tdata th a:focus-visible{
+  color:var(--text);text-decoration:underline}
 
 /* the sticky action bar while a list has a selection */
 .ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;

@@ -415,15 +415,16 @@ def forge_section_html(
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
     if live and pending and ahead and ahead.get("report_id"):
         links.append(
-            f"<a href='/history/reports/{_esc(ahead['report_id'])}'>Open the report it is waiting for</a>"
+            ui.cap_link("Open the report it is waiting for", f"/history/reports/{ahead['report_id']}")
         )
     choice = f.get("opponent_choice") if isinstance(f.get("opponent_choice"), dict) else {}
     pair = choice.get("shared_with") or f.get("shared_with")
     if isinstance(pair, dict) and isinstance(pair.get("report_id"), str):
         name = str(pair.get("deck_name") or "the other deck")
         links.append(
-            f"<a href='/history/reports/{_esc(pair['report_id'])}'>Open {_esc(name)}'s report, which met "
-            "the same opponents</a>"
+            ui.cap_link(
+                f"Open {name}'s report, which met the same opponents", f"/history/reports/{pair['report_id']}"
+            )
         )
     parts.extend(f"<p class='rv-link'>{a}</p>" for a in links)
     if games and seats:
