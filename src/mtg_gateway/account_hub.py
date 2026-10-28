@@ -80,8 +80,8 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
             "Your account",
             [
                 _row("Account details", "account", DETAILS),
+                _row("My lists", "list", "/lists"),
                 _row("My activity", "activity", "/activity"),
-                _row("Forum", "comment", "/forum"),
             ],
         ),
         (1, "Look", look),

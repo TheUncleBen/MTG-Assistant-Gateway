@@ -2304,7 +2304,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         return strip(msgs[code], "ok" if code in ("added", "removed", "updated", "imported") else "error")
 
     def head(actions_html: str = "") -> str:
-        return ui.page_head("Binder", PURPOSE, actions_html=actions_html)
+        # Binder's switch (Cards | Wants | Watchlist) names the page
+        return ui.binder_head("/collection", "Binder: Cards", PURPOSE, actions_html=actions_html)
 
     def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):

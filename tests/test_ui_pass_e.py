@@ -198,19 +198,19 @@ async def test_the_package_panels_budget_sits_in_the_controls_column(member: Bro
 
 async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None:
     """Since 0.7.46 (audit SH-03, My lists draws at once) a first visit draws the open tab's count
-    and the tab bar asks the other four after the page is there (data-counts, static/lists.js):
-    that answer has a number for every tab's link."""
+    and the tab bar asks the others after the page is there (data-counts, static/lists.js): that
+    answer has a number for every tab's link. The pins are Binder's Wants, not a tab."""
     account_lists.forget_counts("user-1")
-    page = (await member.http.get("/lists/pins")).text
+    page = (await member.http.get("/lists/templates")).text
     tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", page).group(0)
-    assert "Pinned cards<span class='n'>" in tabs and "data-counts='/lists/api/counts'" in tabs, tabs
+    assert tabs.count("<span class='n'>") == 1 and "data-counts='/lists/api/counts'" in tabs, tabs
     links = re.findall(r"<a href='/lists/([a-z]+)'", tabs)
     got = (await member.http.get("/lists/api/counts")).json()
-    assert len(links) == 5 and sorted(got["counts"]) == sorted(links), (links, got)
-    assert all(isinstance(n, int) for n in got["counts"].values()), got
-    again = (await member.http.get("/lists/pins")).text
+    assert len(links) == 4 and set(links) <= set(got["counts"]), (links, got)
+    assert all(isinstance(got["counts"][k], int) for k in links), got
+    again = (await member.http.get("/lists/templates")).text
     tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", again).group(0)
-    assert tabs.count("<span class='n'>") == 5, tabs
+    assert tabs.count("<span class='n'>") == 4, tabs
 
 
 async def test_the_scripts_carry_the_icons_their_buttons_ask_for(member: Browser) -> None:

@@ -23,7 +23,9 @@ TEXT = (
     ".lp-tabs a, .lp-chip, .ctxmenu [role=menuitem], .mtgbox h2, .mtgbox p, .mtgbox label, "
     ".mtgbox .acts button, .lp-under span"
 )
-TABS = ["templates", "defaults", "tags", "pins", "custom"]
+TABS = ["templates", "defaults", "tags", "custom"]
+# the lists under Account, and the pins as Binder's Wants page (decision C8)
+PAGES = [f"/lists/{slug}" for slug in TABS] + ["/collection/wants"]
 
 
 @pytest.fixture
@@ -54,8 +56,8 @@ def test_every_tab_fits_and_its_menu_opens_three_ways(server: Server, width: int
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        for slug in TABS:
-            page.goto(f"{server.base}/lists/{slug}", wait_until="networkidle")
+        for slug in PAGES:
+            page.goto(f"{server.base}{slug}", wait_until="networkidle")
             assert page.evaluate(MEASURE) == [], slug
             assert page.evaluate(CONTRAST, TEXT) == [], slug
             sizes = _targets(page, ".lp .ui-table .kebab, .lp-step button, .lp .list-head .btn, .lp-tabs a")
@@ -115,10 +117,12 @@ def test_the_page_holds_together_on_a_phone_at_200_percent_text(server: Server, 
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        for slug in TABS:
-            page.goto(f"{server.base}/lists/{slug}", wait_until="networkidle")
+        for slug in PAGES:
+            page.goto(f"{server.base}{slug}", wait_until="networkidle")
             page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
             assert page.evaluate(MEASURE) == [], slug
+        page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
+        page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         page.locator("[data-box-open='cc-box']").click()
         page.locator("#cc-box").wait_for(state="visible")
         assert page.evaluate(MEASURE) == []
@@ -136,7 +140,7 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1366, "light", exe)
         # pins: one more copy, then a note saved on leaving the field
-        page.goto(f"{server.base}/lists/pins", wait_until="networkidle")
+        page.goto(f"{server.base}/collection/wants", wait_until="networkidle")
         row = page.locator(".lp .ui-table .tr[data-row]").first
         row.locator(".lp-step button[aria-label='One more']").click()
         page.locator(".toast").wait_for(state="visible")

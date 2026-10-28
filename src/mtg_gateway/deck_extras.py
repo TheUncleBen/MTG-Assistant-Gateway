@@ -611,7 +611,7 @@ def lock_box_html(
         sentence = (
             f"None of this card's categories ({esc(', '.join(cats)) or 'none'}) is one of your category "
             "templates, so there is nothing to lock. Make a template first on "
-            "<a href='/lists/templates'>My lists</a>."
+            "<a href='/lists/templates'>My lists</a> (under Account)."
         )
     else:
         sentence = (

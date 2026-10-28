@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import ASSISTANT_PAGES, SPINNER, card_size_control, esc, hub_switch, icon
+from .theme import ASSISTANT_PAGES, SPINNER, binder_pages, card_size_control, esc, hub_switch, icon
 
 __all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
 
@@ -397,6 +397,19 @@ def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "
     line = f"<p class='ui-sub'>{sub_html}</p>" if sub_html else ""
     switch = hub_switch("Assistant", [(href, text, href) for href, text, _ic in ASSISTANT_PAGES], current)
     return f"<div class='hubbar'><h1 class='sr-only'>{esc(title)}</h1>{switch}</div>{line}"
+
+
+def binder_head(current: str, title: str, sub: str = "", *, actions_html: str = "") -> str:
+    """The head of the Binder place's pages (Cards, Wants, Watchlist; decision C8): their switch,
+    which names the page, so the page's heading is for screen readers only, the page's actions at
+    the row's end (the one orange button among them), then the purpose line. ``current``: the
+    page's path (theme.BINDER_PAGES)."""
+    line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
+    acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
+    switch = hub_switch("Binder", [(href, text, href) for href, text, _ic in binder_pages()], current)
+    return (
+        f"<div class='ui-head phead hubhead'><h1 class='sr-only'>{esc(title)}</h1>{switch}{acts}</div>{line}"
+    )
 
 
 def list_head(title: str, total: int | None = None, note: str = "") -> str:

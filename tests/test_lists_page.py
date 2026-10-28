@@ -1,5 +1,6 @@
-"""The My lists page (/lists, lists_page.py): five tabs over the member's account-wide Archidekt
-lists, each change the member's own press through a plain form (works without scripts), a delete
+"""The My lists page (/lists, lists_page.py): four tabs over the member's account-wide
+Archidekt lists under Account, and Binder's Wants page (/collection/wants) over the pinned
+cards; each change the member's own press through a plain form (works without scripts), a delete
 asking first with a box, Archidekt's refusal shown in the box, the custom card's picture through
 its own route, and the links to the page from the More menu and the Account page."""
 
@@ -68,8 +69,13 @@ async def member(stack: Stack):
         await b.aclose()
 
 
+def _page_of(tab: str) -> str:
+    """A tab's page: the pins are Binder's Wants page (decision C8), the rest are under /lists."""
+    return "/collection/wants" if tab == "pins" else f"/lists/{tab}"
+
+
 async def _post(b: Browser, tab: str, **data):
-    data.setdefault("csrf", await b.csrf(f"/lists/{tab}"))
+    data.setdefault("csrf", await b.csrf(_page_of(tab)))
     return await b.http.post(f"/lists/{tab}", data=data)
 
 
@@ -97,23 +103,27 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
         "custom": ("Custom cards", ["Grizzled Mentor"], "New custom card"),
     }
     for slug, (label, names, extra) in want.items():
-        page = (await member.http.get(f"/lists/{slug}")).text
-        assert f"<a href='/lists/{slug}' aria-current='page'>{label}" in page, slug
-        assert "<title>My lists" in page and extra in page, slug
+        page = (await member.http.get(_page_of(slug))).text
+        if slug == "pins":  # Binder's Wants page: its switch names it
+            assert "<a href='/collection/wants' aria-current=page>Wants</a>" in page
+            assert "<title>Binder: Wants" in page and extra in page
+        else:
+            assert f"<a href='/lists/{slug}' aria-current='page'>{label}" in page, slug
+            assert "<title>My lists" in page and extra in page, slug
         for n in names:
             assert f"data-name='{n}'" in page and f"aria-label='Menu for {n}'" in page, (slug, n)
         # every row's menu is a plain drop-down of links without scripts, its delete in red
         assert "<details class='dd rowmenu lp-dd'>" in page, slug
         assert "static/lists.js" in page or "lists.js" in page, slug
         assert "kept under History" in page, slug
-    page = (await member.http.get("/lists/pins")).text
+    page = (await member.http.get("/collection/wants")).text
     assert "1 / 150" in page and "for Meren" in page and "9 / 256" in page
     assert "class='danger' data-box='pin-rm'" in page
     page = (await member.http.get("/lists/templates")).text
     assert "class='danger' data-box='tpl-del'" in page
     # the tabs carry the counts read so far (one Archidekt read per tab view)
     assert "Category templates<span class='n'>2</span>" in page
-    assert "Pinned cards<span class='n'>1</span>" in page
+    assert "Custom cards<span class='n'>1</span>" in page and "Pinned cards" not in page
 
 
 async def test_an_unlinked_member_is_sent_to_link(stack: Stack) -> None:
@@ -270,13 +280,13 @@ async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stac
 async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "pins", action="edit", pin_id="31", quantity="2")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/pins?ok=pin_saved"
+    assert r.status_code == 303 and r.headers["location"] == "/collection/wants?ok=pin_saved"
     assert ark.account.pins[WHO][0]["quantity"] == 2
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Saved on Archidekt." and "<b class='n' aria-live='polite'>2</b>" in page
 
     # the note, saved on leaving the field with scripts: the same form, answered as JSON
-    csrf = await member.csrf("/lists/pins")
+    csrf = await member.csrf("/collection/wants")
     r = await member.http.post(
         "/lists/pins",
         data={"csrf": csrf, "action": "edit", "pin_id": "31", "notes": "Trade for it"},
@@ -293,14 +303,14 @@ async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> N
 
     # below one copy: the stepper's press asks first, as Remove pin does
     r = await _post(member, "pins", action="edit", pin_id="31", quantity="0")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/pins?remove=31"
+    assert r.status_code == 303 and r.headers["location"] == "/collection/wants?remove=31"
     page = (await member.http.get(r.headers["location"])).text
     assert "Remove the pin on “Sol Ring”?" in page and "data-open" in page
     assert ark.account.pins[WHO]
     r = await _post(member, "pins", action="unpin", pin_id="31", confirmed="1")
-    assert r.headers["location"] == "/lists/pins?ok=pin_removed"
+    assert r.headers["location"] == "/collection/wants?ok=pin_removed"
     assert ark.account.pins[WHO] == []
-    page = (await member.http.get("/lists/pins")).text
+    page = (await member.http.get("/collection/wants")).text
     assert "No pinned cards yet." in page and "Remove all…" not in page
 
 
@@ -309,18 +319,19 @@ async def test_remove_all_pins_asks_then_removes_every_pin(member: Browser, stac
     ark.account.pins[WHO].append(
         {"id": 32, "card": ark.account._card(9007), "notes": "", "modifier": "Foil", "quantity": 1}
     )
-    page = (await member.http.get("/lists/pins")).text
+    page = (await member.http.get("/collection/wants")).text
     assert "2 / 150" in page and "Foil" in page
     assert (
-        "<a class='btn btn-outline-danger' href='/lists/pins?remove_all=1' data-box-open='pin-all'>" in page
+        "<a class='btn btn-outline-danger' href='/collection/wants?remove_all=1' data-box-open='pin-all'>"
+        in page
     )
     r = await _post(member, "pins", action="remove_all")
-    assert r.headers["location"] == "/lists/pins?remove_all=1"
+    assert r.headers["location"] == "/collection/wants?remove_all=1"
     page = (await member.http.get(r.headers["location"])).text
     assert "Remove all 2 pinned cards?" in page and ">Remove all 2</button>" in page
     assert "class='danger' form='pin-all-f'" in page
     r = await _post(member, "pins", action="remove_all", confirmed="1")
-    assert r.headers["location"] == "/lists/pins?ok=pins_removed"
+    assert r.headers["location"] == "/collection/wants?ok=pins_removed"
     assert ark.account.pins[WHO] == []
 
 
@@ -444,31 +455,32 @@ async def test_the_picture_goes_through_its_own_route(member: Browser, stack: St
 # -- the links to the page ---------------------------------------------------------------------------
 
 
-async def test_the_more_menu_and_the_account_page_link_to_my_lists(member: Browser, stack: Stack) -> None:
+async def test_the_account_page_links_to_my_lists_and_more_does_not(member: Browser, stack: Stack) -> None:
     page = (await member.http.get("/reports")).text
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # More's Your cards group, after Watchlist (watchlists are on by default), before My card models
-    assert labels[-4:] == ["Scan", "Watchlist", "My lists", "My card models"]
-    assert "<a href='/lists'>" in menu
-    # the phone's More sheet and the rail list the same pages
-    assert page.count("href='/lists'") >= 2
+    # My lists lives under Account (decision C8): More's Your cards group has Scan and My card models
+    assert labels[-3:] == ["Scan", "My card models", "Forum"]
+    assert "href='/lists'" not in page
+    hub = (await member.http.get("/account")).text
+    assert "href='/lists'" in hub and "My lists" in hub
 
     # the Account page's panel, with the counts of the tabs read so far
     account_lists.forget_counts("user-1")  # as before any tab was opened
     acc = (await member.http.get("/account/details")).text
     assert "<h2>Your Archidekt lists</h2>" in acc
-    assert "Lists that follow you into every deck, kept on Archidekt:" in acc
+    assert "Lists that shape every deck, kept on Archidekt:" in acc
     assert "<a class='ui-cap' href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
     assert "<a class='btn' href='/lists'>" in acc and "Open My lists</a>" in acc
-    for slug in ("templates", "defaults", "tags", "pins", "custom"):
+    for slug in ("templates", "defaults", "tags", "custom"):
         await member.http.get(f"/lists/{slug}")
+    await member.http.get("/collection/wants")
     acc = (await member.http.get("/account/details")).text
     assert "<a class='ui-cap' href='/lists/templates'>2 category templates</a>" in acc
     assert "<a class='ui-cap' href='/lists/defaults'>1 card with default categories</a>" in acc
     assert "<a class='ui-cap' href='/lists/tags'>1 color tag</a>" in acc
-    assert "<a class='ui-cap' href='/lists/pins'>1 pinned card</a>" in acc
+    assert "href='/lists/pins'" not in acc and "href='/collection/wants'" in acc  # pins are Binder's Wants
     assert "<a class='ui-cap' href='/lists/custom'>1 custom card</a>" in acc
     assert account_lists.counts("user-1")["templates"] == 2
 
@@ -639,10 +651,11 @@ async def test_my_lists_draws_with_one_read_and_fills_the_other_counts_after(
     assert len(reads) <= 1, reads
     assert "data-counts='/lists/api/counts'" in page.text
     assert "Category templates<span class='n'>2</span>" in page.text
-    assert "Pinned cards<span class='n'>" not in page.text  # not read yet
+    assert "Custom cards<span class='n'>" not in page.text  # not read yet
     got = (await member.http.get("/lists/api/counts")).json()
-    assert got["ok"] is True and got["counts"]["templates"] == 2 and got["counts"]["pins"] == 1
+    assert got["ok"] is True and got["counts"]["templates"] == 2 and got["counts"]["custom"] == 1
+    assert "pins" not in got["counts"]  # the pins are Binder's Wants, not a tab
     again = await member.http.get("/lists/templates")
-    assert "Pinned cards<span class='n'>1</span>" in again.text and "data-counts" not in again.text
+    assert "Custom cards<span class='n'>1</span>" in again.text and "data-counts" not in again.text
     js = (await member.http.get("/static/lists.js")).text
     assert "data-counts" in js
