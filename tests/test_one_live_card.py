@@ -467,7 +467,13 @@ async def test_a_big_proposals_result_carries_a_few_rows_and_says_how_to_get_the
     res = await call(h, token, "propose_new_deck", {"name": "Big one", "cards": _cards(*names)})
     p = structured(res)
     assert len(p["rows"]) == CARD_ROWS and p["rows_total"] == 61, p.get("rows_total")
-    assert p["rows_summary"] == {"adds": 60, "removes": 0, "others": 1, "rows": 61}
+    assert p["rows_summary"] == {
+        "adds": 60,
+        "removes": 0,
+        "others": 1,
+        "rows": 61,
+        "groups": {"new_deck": 1, "add": 60},
+    }
     assert len(p["changes"]["cards"]) == CARD_ROWS and p["changes"]["cards_total"] == 60
     assert len(p["diff"].splitlines()) == 40 and p["diff_lines_total"] == 61
     assert "proposal_status with full true" in p["more"]

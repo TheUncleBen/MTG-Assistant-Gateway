@@ -28,7 +28,13 @@ NEW_DECK = {
     "rows": [{"kind": "new_deck", "name": "Atraxa", "format": "commander", "cards": 60, "private": True}]
     + [{"kind": "add", "name": f"Card {i}", "qty": 1} for i in range(7)],
     "rows_total": 61,
-    "rows_summary": {"adds": 60, "removes": 0, "others": 1, "rows": 61},
+    "rows_summary": {
+        "adds": 60,
+        "removes": 0,
+        "others": 1,
+        "rows": 61,
+        "groups": {"new_deck": 1, "add": 60},
+    },
 }
 WHOLE = {
     **NEW_DECK,
@@ -218,6 +224,9 @@ def test_a_big_proposal_shows_a_few_rows_and_loads_the_rest_on_show_all() -> Non
             assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 6
             assert card.locator("ul.changes img.pic").count() <= 6
             assert card.locator("#more").inner_text() == "Show all 61 changes"
+            # the group headings count the whole proposal, not the rows drawn so far
+            # (only the first rows are drawn: the new deck's own line, in Other, comes later)
+            assert card.locator("ul.changes li.group").all_text_contents() == ["Added (60)"]
             page.evaluate("(r) => { window.getReply = r; }", WHOLE)
             card.locator("#more").click()
             card.locator("ul.changes li:not(.group):not(.more-row)").nth(60).wait_for(timeout=5_000)

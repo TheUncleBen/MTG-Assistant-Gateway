@@ -377,7 +377,7 @@ button.danger:disabled{color:var(--red)}
     var compact = sc.state && sc.state !== "pending" && sc.state !== "applying" && drawnWaiting && !pressedHere;
     $("card").className = "card" + (compact ? " stub" : "");
     if (compact) { list.replaceChildren(); proposal = slim(sc); release(live(sc)); }
-    else renderRows(list, rows, total > COLLAPSE_AT ? COLLAPSE_AT : rows.length, total);
+    else renderRows(list, rows, total > COLLAPSE_AT ? COLLAPSE_AT : rows.length, total, sc.rows_summary);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
     if (Number(sc.version) > 1 && !sc.changed_by) foot.push("Version " + Number(sc.version));
@@ -661,8 +661,10 @@ button.danger:disabled{color:var(--red)}
     }, APPLYING_POLL_MS);
   }
 
-  function renderRows(list, rows, limit, total) {
+  function renderRows(list, rows, limit, total, summary) {
     total = Math.max(rows.length, Number(total) || 0);
+    // a card that holds only the first rows counts each group from the whole proposal's summary
+    var kinds = rows.length < total && summary && summary.groups && typeof summary.groups === "object" ? summary.groups : null;
     // Grouped by kind (GROUPS order, stable within a group); only the first ``limit`` rows are
     // drawn, then one "Show all" button draws the rest. Thumbnails only for drawn rows.
     var sorted = rows.map(function (r, i) { return [groupOf(r.kind), i, r]; }).sort(function (a, b) {
@@ -673,7 +675,8 @@ button.danger:disabled{color:var(--red)}
     for (var k = 0; k < sorted.length && shown < limit; k++) {
       var r = sorted[k][2], g = sorted[k][0];
       if (rows.length > 1 && g !== lastGroup) {
-        var count = sorted.filter(function (x) { return x[0] === g; }).length;
+        var count = kinds ? Object.keys(kinds).reduce(function (n, kd) { return groupOf(kd) === g ? n + (Number(kinds[kd]) || 0) : n; }, 0)
+          : sorted.filter(function (x) { return x[0] === g; }).length;
         list.appendChild(el("li", "group", (g < GROUPS.length ? GROUPS[g][1] : "Other") + " (" + count + ")"));
         lastGroup = g;
       }
@@ -690,7 +693,7 @@ button.danger:disabled{color:var(--red)}
       var more = el("li", "more-row");
       var btn = el("button", "more", "Show all " + total + " changes"); btn.type = "button"; btn.id = "more";
       btn.onclick = function () {
-        if (rows.length >= total) { renderRows(list, rows, rows.length, total); reportSize(); return; }
+        if (rows.length >= total) { renderRows(list, rows, rows.length, total, summary); reportSize(); return; }
         showAll(list, btn);
       };
       more.appendChild(btn); list.appendChild(more);

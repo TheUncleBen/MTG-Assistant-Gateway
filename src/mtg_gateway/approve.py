@@ -174,13 +174,17 @@ def proposal_tool_result(
     )
 
 
-def rows_summary(rows: list[Any]) -> dict[str, int]:
+def rows_summary(rows: list[Any]) -> dict[str, Any]:
     """What a proposal's rows add up to, for a card that shows only the first few: cards added,
-    cards taken out, other changes, and rows in all."""
+    cards taken out, other changes, rows in all, and rows of each kind (``groups``, the card's
+    group headings count them)."""
     adds = removes = others = 0
+    groups: dict[str, int] = {}
     for r in rows:
         if not isinstance(r, dict):
             continue
+        kind = str(r.get("kind") or "")
+        groups[kind] = groups.get(kind, 0) + 1
         qty = r.get("qty") if isinstance(r.get("qty"), int) else 0
         if r.get("kind") == "add":
             adds += qty
@@ -188,7 +192,7 @@ def rows_summary(rows: list[Any]) -> dict[str, int]:
             removes += qty
         else:
             others += 1
-    return {"adds": adds, "removes": removes, "others": others, "rows": len(rows)}
+    return {"adds": adds, "removes": removes, "others": others, "rows": len(rows), "groups": groups}
 
 
 def bounded(data: dict[str, Any], rows_limit: int | None) -> dict[str, Any]:
