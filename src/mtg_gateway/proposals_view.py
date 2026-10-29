@@ -529,7 +529,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         + (" data-low" if _low_checkable(it) else "")
         + f" aria-label='{esc(aria)}'{' checked' if checked else ''}></label>"
     )
-    num = f"<span class='no'>{esc(no)}</span>" if no else ""
+    num = f"<span class='no'>{esc(no)}</span><wbr>" if no else ""  # the number and the words may part
     title = (
         f"<label class='title' for='{esc(box)}'><span class='t'>{num}{esc(it['summary'])}"
         f"<span class='stin'>{_status_label(it)}</span></span>{_waiting_flags(it, now)}"
@@ -620,7 +620,7 @@ def list_row(
     """One proposal on every chip but Waiting: the change (a link to it) and its deck, risk,
     status with its closing line, the app, when."""
     no = _no(it)
-    num = f"<span class='no'>{esc(no)}</span>" if no else ""
+    num = f"<span class='no'>{esc(no)}</span><wbr>" if no else ""  # the number and the words may part
     closing = _closing_html(it, csrf=csrf, replaced_by=replaced_by, now=now)
     sm = f"<span class='sm-only'>{closing}</span>" if closing else ""
     flag = f"<span class='flag'>{closing}</span>" if closing else ""
