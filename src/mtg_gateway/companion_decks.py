@@ -850,7 +850,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             notice = deck_saving_html(deck.id, saving) + notice
         if deck.link_notice:  # the member's link was dropped while reading this deck
             notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
-        being_made = decks.being_made(deck.id)  # a new deck whose cards are still going in
+        being_made = decks.being_made(deck.id, sub)  # the member's new deck whose cards are still going in
         if being_made:  # with the progress ring, until static/deck.js sees it done and reloads
             notice = (
                 f"<p class='notice making' role='status' data-made-poll='/decks/{_esc(deck.id)}/made'>"
@@ -985,7 +985,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"made": False, "signed_in": False}, status_code=401)
-        made = decks.being_made(request.path_params["deck_id"]) is None
+        made = decks.being_made(request.path_params["deck_id"], sub) is None
         return JSONResponse({"made": made}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)

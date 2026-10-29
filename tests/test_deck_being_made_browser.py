@@ -26,7 +26,7 @@ def server(tmp_path: Path):
 
 def _making(server: Server) -> None:
     entries = [{"modifications": {"quantity": 1}} for _ in range(125)]
-    server.app.state.gateway.decks._being_made["42"] = ({"sent_entries": 50}, entries)
+    server.app.state.gateway.decks._being_made["42"] = ("user-1", {"sent_entries": 50}, entries)
 
 
 @pytest.mark.parametrize("width", [375, 1280])

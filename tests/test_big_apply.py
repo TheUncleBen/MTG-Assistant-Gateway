@@ -187,6 +187,18 @@ async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
         assert "data-own='1'" not in text.split("class='deckview", 1)[1].split(">", 1)[0]
         made = await b.http.get(f"/decks/{deck_id}/made")
         assert made.status_code == 200 and made.json() == {"made": False}
+        # another member learns nothing about it (security review 2, R2-05): no deck of theirs is
+        # being made, so the answer is the same as for any deck
+        from .test_access_control import AMY
+
+        alice, h.idp.user = h.idp.user, AMY
+        amy = Browser(h)
+        try:
+            await amy.login()
+            theirs = await amy.http.get(f"/decks/{deck_id}/made")
+        finally:
+            await amy.aclose()
+            h.idp.user = alice
         r = await b.http.post(
             f"/api/v1/decks/{deck_id}/edit",
             json={"changes": [{"action": "set_quantity", "card_name": "Test Card 50", "quantity": 2}]},
@@ -201,6 +213,7 @@ async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
         release.set()
         out = await applying
         assert out["state"] == "applied", out
+        assert theirs.status_code == 200 and theirs.json() == {"made": True}, theirs.text
         made = await b.http.get(f"/decks/{deck_id}/made")
         assert made.json() == {"made": True}
         # once it is made, the same edit goes through

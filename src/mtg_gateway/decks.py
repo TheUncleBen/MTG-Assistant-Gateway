@@ -3341,9 +3341,10 @@ class DeckService:
         self.client = client
         self.fernet = Fernet(settings.fernet_key.encode())
         self._deck_locks: dict[str, asyncio.Lock] = {}
-        # deck id -> the progress of the new-deck apply still putting its cards in (_apply_create):
-        # every other change to that deck is refused until it ends (being_made)
-        self._being_made: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+        # deck id -> the member making it and the progress of the new-deck apply still putting its
+        # cards in (_apply_create): every other change to that deck is refused until it ends
+        # (being_made)
+        self._being_made: dict[str, tuple[str, dict[str, Any], list[dict[str, Any]]]] = {}
         # the folders (with all inside) a member's running folder delete will delete: nothing is
         # moved or made in them meanwhile
         self._deleting: dict[str, set[int]] = {}
@@ -4229,12 +4230,16 @@ class DeckService:
         the deck sync waits for that to finish, so it never holds up a member or an assistant."""
         return bool(self._archidekt_in_flight) or bool(self._running) or self.client.pacer.busy()
 
-    def being_made(self, deck_id: str) -> str | None:
-        """The notice for a deck whose new-deck apply is still putting its cards in, else None."""
+    def being_made(self, deck_id: str, sub: str | None = None) -> str | None:
+        """The notice for a deck whose new-deck apply is still putting its cards in, else None.
+        With ``sub``, only for that member's own new deck: another member learns nothing of it
+        (security review 2, R2-05)."""
         made = self._being_made.get(str(deck_id))
         if made is None:
             return None
-        progress, entries = made
+        owner, progress, entries = made
+        if sub is not None and sub != owner:
+            return None
         sent = int(progress.get("sent_entries") or 0)
         cards = sum(int(e["modifications"]["quantity"]) for e in entries[:sent])
         total = sum(int(e["modifications"]["quantity"]) for e in entries)
@@ -7818,7 +7823,7 @@ class DeckService:
         # other change to it (the member's own edits on its page) is refused with how far it got
         lock = self._deck_locks.setdefault(f"{sub}:{created.id}", asyncio.Lock())
         await lock.acquire()
-        self._being_made[str(created.id)] = (progress, entries)
+        self._being_made[str(created.id)] = (sub, progress, entries)
         try:
             # each custom category with its switches first, so the cards go into it as it should be
             for f in spec.get("category_flags") or []:
