@@ -689,7 +689,8 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
         assert "Sample Commander Deck" in listed.text and "Deck trend and history" not in listed.text
         assert "/history?deck_id=42&amp;type=tests" in listed.text  # the Latest report widget's Deck trend
-        assert "<option value='42'" in listed.text and "1–1 of 1" in listed.text
+        # Load more under the table, no Newer / Older pager (0.7.46)
+        assert "<option value='42'" in listed.text and "All 1 report shown." in listed.text
         assert "aria-current='true'>All <span class='n'>1</span>" in listed.text
         none = await b.http.get("/reports?deck_id=999", headers=NAV)
         assert "No reports for this deck yet" in none.text
