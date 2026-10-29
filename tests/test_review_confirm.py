@@ -7,12 +7,13 @@ list change that deletes. Without scripts the plain form keeps its one press."""
 # ruff: noqa: F811 - the stack fixture is imported and then named as a parameter
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 
 from mtg_gateway import deckpage, proposals_view, theme
 
-from .conftest import Stack, stack_with
+from .conftest import Stack, sse_json, stack_with
 from .test_approval_modes import SHIPPED, _set_mode
 from .test_deck_custom_cards import _seed as seed_customs
 from .test_decks_and_proxy import Browser, call, linked_user, structured
@@ -85,16 +86,75 @@ async def test_deleting_a_deck_asks_in_the_shared_box_from_one_outline_button(st
     assert "Delete your deck &#x27;" not in page
 
 
-async def test_the_deck_delete_box_says_when_a_backup_copy_is_made_too(stack: Stack) -> None:
+async def test_the_deck_delete_box_never_promises_a_backup_copy_on_archidekt(stack: Stack) -> None:
+    """A delete makes no backup copy on Archidekt (decks.DELETE_KEEPS_NO_COPY), backups on or off:
+    the box says so, and that the snapshot it keeps can't be restored onto the deleted deck."""
     h = stack.h
     token = await linked_user(stack)
     h.app.state.gateway.decks.live.set("archidekt_backups", True, by=None)
     d = structured(await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
     page = await _review(h, d["proposal_id"])
+    box = re.search(r"<div class='ui-box mtgbox dangerbox' id='confirm-delete'.*?</div></div>", page, re.S)
+    assert box, page
+    assert "private copy" not in page and "backup folder" not in page
     assert (
-        "keeps a snapshot of it under History first, and a private copy is made in your backup folder "
-        "on Archidekt" in page
+        "keeps a snapshot of it under History first and checks that the deck is unchanged since this "
+        "proposal. No copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck."
+        in box.group(0)
     )
+    assert "<strong>Archidekt itself has no undo.</strong>" in box.group(0)
+
+
+def _js_function(src: str, name: str) -> str:
+    start = src.index(f"function {name}(")
+    return src[start : src.index("\n  function ", start + 1)]
+
+
+def test_the_my_decks_delete_boxes_never_promise_a_backup_copy() -> None:
+    """My decks' ⋮ Delete box for a deck and for a folder: the same words as the deck page's box,
+    with no copy on Archidekt whatever the backups setting."""
+    from mtg_gateway import decks
+
+    src = (STATIC / "menus.js").read_text(encoding="utf-8")
+    deck_box, folder_box = _js_function(src, "deleteDeck"), _js_function(src, "deleteFolder")
+    for box in (deck_box, folder_box):
+        for stale in ("backup folder", "backups", "copies first", "private copy"):
+            assert stale not in box, (stale, box)
+    assert decks.DELETE_KEPT_NOTE in deck_box
+    assert (
+        "each gets a snapshot under History first (no copy on Archidekt, and a snapshot can't be "
+        "restored onto a deleted deck)" in folder_box
+    )
+    assert "The gateway makes the snapshots first and stops if any of them fails." in folder_box
+
+
+async def test_every_other_delete_text_says_no_copy_is_made(stack: Stack) -> None:
+    """The deck settings page's Delete row, the tool's description, the delete-info and folder
+    contents answers and the notice after a folder delete: no backup copy anywhere."""
+    from mtg_gateway import companion, decks
+
+    h = stack.h
+    token = await linked_user(stack)
+    h.app.state.gateway.decks.live.set("archidekt_backups", True, by=None)
+    listed = sse_json(await h.mcp(token, "tools/list"))["result"]["tools"]
+    desc = {t["name"]: t for t in listed}["propose_delete_deck"]["description"]
+    b = Browser(h)
+    try:
+        await b.login()
+        settings = (await b.http.get("/decks/42/settings")).text
+        info = (await b.http.get("/decks/api/decks/42/delete-info")).json()
+    finally:
+        await b.aclose()
+    assert info["ok"] is True and "backups" not in info, info
+    row = settings.partition("id='ds-delete'")[2].partition("</section>")[0]
+    assert "A snapshot is kept under History; no copy is made on Archidekt." in row, row
+    assert "backup folder" not in row
+    assert html.escape(decks.DELETE_KEPT_NOTE) in settings  # the Delete box the page holds
+    assert companion.LIST_OK_MESSAGES["folder_deleted"] == (
+        "Folder deleted on Archidekt. Each deck's last snapshot is under History."
+    )
+    assert "backup copy on Archidekt when" not in desc
+    assert "no backup copy is made on Archidekt" in desc and "can't be restored onto a deleted deck" in desc
 
 
 async def test_taking_custom_cards_out_asks_in_the_same_box(stack: Stack) -> None:

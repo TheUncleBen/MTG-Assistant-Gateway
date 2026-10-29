@@ -545,13 +545,13 @@ def test_the_delete_folder_box_counts_asks_for_the_name_and_shows_the_progress(t
             body = box.locator(".body").inner_text()
             assert "This deletes, on Archidekt:" in body
             assert (
-                "3 decks: each gets a snapshot under History first, and a private copy in your backup "
-                "folder when backups are on" in body
+                "3 decks: each gets a snapshot under History first (no copy on Archidekt, and a snapshot "
+                "can't be restored onto a deleted deck)" in body
             )
             assert "1 card package: no snapshot or copy, it is lost" in body
             assert "2 folders inside it, and the folder itself" in body
             assert (
-                "The gateway makes the snapshots and copies first and stops if any of them fails. Then "
+                "The gateway makes the snapshots first and stops if any of them fails. Then "
                 "Archidekt deletes everything in one step, which can't be undone." in body
             )
             assert box.locator("label[for=mb-typed]").inner_text() == "Type the folder's name to confirm"

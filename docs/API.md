@@ -207,7 +207,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, checked by reading it back |
 | `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, checked by reading it back |
 | `/decks/{id}/move` (POST `folder_id`) | Move the deck into one of the member's folders; checked by reading it back |
-| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot and, with backups on, an Archidekt backup copy are made first, and the deletion is checked by reading the deck back. Owners only; never a tool |
+| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot is made first (no Archidekt backup copy; a snapshot can't be restored onto a deleted deck), and the deletion is checked by reading the deck back. Owners only; never a tool |
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `export.archidekt.txt`, `export.txt`, `export.csv`, `export.json`, `export.arena.txt`, `export.dek`, `export.pdf` | The Export page and its downloads: Archidekt import text, plain text, an Archidekt-style CSV, JSON, and the one-way Arena, MTGO and PDF files ([EXPORT-IMPORT.md](EXPORT-IMPORT.md)) |

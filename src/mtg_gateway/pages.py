@@ -976,7 +976,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 stamp,
                 step=not on_top,
                 others=others,
-                backups=bool(state.decks.live.get("archidekt_backups")),
             )
             + (
                 ""
@@ -2503,18 +2502,17 @@ def _confirm_box(title: str, body: str, keep: str, final: str) -> str:
     )
 
 
-def _delete_deck_box(p: dict[str, Any], *, backups: bool) -> str:
-    """Deleting a deck: the deck and its size, the snapshot (and backup copy) kept first."""
+def _delete_deck_box(p: dict[str, Any]) -> str:
+    """Deleting a deck: the deck and its size, the snapshot kept first (no backup copy on Archidekt,
+    whatever the backups setting: decks.DELETE_KEEPS_NO_COPY)."""
     name = str(p.get("deck_name") or "this deck")
     changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
     size = f" ({plural(int(changes['cards']), 'card')})" if str(changes.get("cards") or "").isdigit() else ""
-    kept = "The gateway keeps a snapshot of it under History first" + (
-        ", and a private copy is made in your backup folder on Archidekt" if backups else ""
-    )
     body = (
         f"<p>This deletes <strong>“{html.escape(name)}”</strong>{size} from your Archidekt account. "
-        f"{kept}, and checks that the deck is unchanged since this proposal. "
-        "<strong>Archidekt itself has no undo.</strong></p>"
+        "The gateway keeps a snapshot of it under History first and checks that the deck is unchanged "
+        "since this proposal. No copy is made on Archidekt, and a snapshot can't be restored onto a "
+        "deleted deck. <strong>Archidekt itself has no undo.</strong></p>"
         "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
         "you press Delete this deck.</p>"
     )
@@ -2664,12 +2662,10 @@ def _proposal_body(
     *,
     step: bool = True,
     others: list[dict[str, Any]] | None = None,
-    backups: bool = False,
 ) -> str:
     """One proposal's review: the panel beside the list from 1100 px, its own page below that
     (a side panel on wide screens). ``step=False``: what happens next is already in the error box above
-    (_failure_on_top). ``others``: the deck's other waiting changes. ``backups``: Archidekt backup
-    copies are on (the deck delete's confirm says so)."""
+    (_failure_on_top). ``others``: the deck's other waiting changes."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [
@@ -2841,7 +2837,7 @@ def _proposal_body(
                 "Nothing happens until you tap Delete.</p>"
             )
             apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger")
-            box = _delete_deck_box(p, backups=backups)
+            box = _delete_deck_box(p)
         elif p.get("kind") == "lists":
             deletes = any(r.get("destructive") for r in p.get("rows") or [])
             if deletes:

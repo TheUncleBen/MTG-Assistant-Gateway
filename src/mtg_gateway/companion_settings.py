@@ -534,8 +534,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             # (ds-delete: the Delete box the page holds is #delete)
             + "<section class='ui-card danger' id='ds-delete'><h2>Delete this deck</h2>"
             + row(
-                f"{icon('history')} A snapshot is kept under History, and a copy in your backup folder on "
-                "Archidekt when backups are on.",
+                f"{icon('history')} A snapshot is kept under History; no copy is made on Archidekt.",
                 "",
                 f"<a class='btn btn-outline-danger' href='/decks/{did}/delete' data-box-open='delete'>"
                 f"{icon('trash')} Delete deck…</a>",

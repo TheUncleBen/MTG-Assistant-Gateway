@@ -230,6 +230,12 @@ BACKUP_SHARE_SECONDS = 15 * 60
 # makes no backup copy on Archidekt: a copy made for a delete was a new deck left behind, and a delete
 # of that copy made another (assistant tool review, 2026-10-28).
 DELETE_KEEPS_NO_COPY = True
+# What every Delete box says is kept (deckpage.delete_box_html; static/menus.js says the same words).
+# A snapshot can't be restored onto a deleted deck (propose_restore_snapshot needs the deck).
+DELETE_KEPT_NOTE = (
+    "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot "
+    "can't be restored onto a deleted deck. Archidekt itself has no undo for a deleted deck."
+)
 DELETE_PREP_SECONDS = 60
 DELETE_PREP_REMEMBERED = 256
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
