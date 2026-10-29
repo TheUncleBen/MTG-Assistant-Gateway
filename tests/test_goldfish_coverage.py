@@ -70,7 +70,7 @@ def test_coverage_leads_the_report() -> None:
     assert cov["note"].startswith("Played with their effect: 97 of 100 cards.")
     assert "2 cards were played without their effect" in cov["note"]
     assert "the commander's abilities beyond combat are not modeled" in cov["note"]
-    assert "floor" in cov["note"]
+    assert "less reliable" in cov["note"]
     # saved card models are named: another assistant's model changes this run too
     gf["kept_models"] = [{"name": "Aetherflux Reservoir"}]
     assert "1 saved card model (Aetherflux Reservoir)" in solo_coverage(gf, deck_size=100)["note"]
@@ -138,3 +138,33 @@ def test_a_handful_of_forge_games_is_said_to_tell_little() -> None:
     assert any(line.startswith("Only 5 games: that tells you very little") for line in few), few
     many = forge_lines({"state": "done", "result": {"games": 40, "games_requested": 40, "seats": [seat]}})
     assert not any(line.startswith("Only ") for line in many), many
+
+
+def test_solo_numbers_are_never_called_a_floor() -> None:
+    """With no opponents to interact, a solo test usually makes a deck look faster than it is at a
+    table (independent review IR-07). Calling its numbers "a floor" said the opposite: that the deck
+    is at least this fast. Every place that describes the solo test's numbers says they overstate."""
+    from pathlib import Path
+
+    from mtg_gateway import guide, report_page
+    from mtg_gateway.reports import SIDE_BY_SIDE_NOTE
+
+    gf = _block()
+    _commander_aside(gf, "Urza, Chief Artificer")
+    gf["quantities"] = {"Aegis of the Gods": 1, "Sun Titan": 1, "Doom Blade": 1}
+    note = solo_coverage(gf, deck_size=100)["note"]
+    assert "floor" not in note and "floor" not in SIDE_BY_SIDE_NOTE
+    assert "Cards played without their effect make these numbers less reliable." in note
+    for text in (note, SIDE_BY_SIDE_NOTE, report_page.SOLO_SUB):
+        assert "faster than" in text, text
+    root = Path(__file__).resolve().parents[1]
+    sources = {
+        "guide": Path(guide.__file__).read_text(encoding="utf-8"),
+        "report view": (root / "src/mtg_gateway/report_view.py").read_text(encoding="utf-8"),
+        "skill": (root / "plugin/mtg-gateway/skills/mtg-gateway/SKILL.md").read_text(encoding="utf-8"),
+        "ChatGPT block": (root / "plugin/mtg-gateway/chatgpt-instructions.md").read_text(encoding="utf-8"),
+        "USING.md": (root / "docs/USING.md").read_text(encoding="utf-8"),
+    }
+    for name, text in sources.items():
+        flat = " ".join(text.replace('"', " ").split())
+        assert "faster than" in flat and "floor, not a forecast" not in flat, name

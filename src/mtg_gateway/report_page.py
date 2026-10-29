@@ -78,7 +78,7 @@ VALIDATION_LABEL = {
 SOLO_SUB = (
     "Each solo test game is played alone, with no opponent to interact: the deck draws, plays lands, "
     "casts what it can and attacks. The numbers say how fast the deck does its own thing, not how it "
-    "fares against interaction."
+    "fares against interaction, so they usually look faster than the deck plays at a table."
 )
 FORGE_SUB = (
     "Forge, an open-source rules engine, plays the deck against the opponent decks below, with combat, "
