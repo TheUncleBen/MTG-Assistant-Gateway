@@ -1629,7 +1629,9 @@ def add_box_html(
         "<span>Use this finish, condition and language next time</span></label></div>"
         "<p class='muted small'>Copies join an entry you already have only when its printing, finish, "
         "condition and language all match; anything else becomes a new entry.</p>"
-        "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
+        "<p class='muted small'>Scanning a pile is quicker: open "
+        + ui.cap_link("Scan", "/scan", icon_name="camera")
+        + ", then choose "
         "<strong>Save to binder</strong>. Everything you add is added to your binder.</p>"
         "</form>"
     )

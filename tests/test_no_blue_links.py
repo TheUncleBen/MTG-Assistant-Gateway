@@ -2,7 +2,8 @@
 link that does something or goes somewhere (Why, Group by deck, Waiting, Open as a full page, Undo,
 Open, the change, Only this deck) is the theme's capsule, and a row's or a group's title, a deck
 named in a panel or a widget, reads in the text colour, bold, underlined on hover. The report
-page's crumb trail keeps its links: it is the page's way back, drawn like every crumb trail."""
+page's crumb trail is capsules too, as History's "← Back to the deck" (independent review of
+0.7.46: crumbs use the back-link style)."""
 
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ BLUE = """() => {
   const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);
   const link = getComputedStyle(probe).color; probe.remove();
   return Array.from(document.querySelectorAll('main a, main button')).filter(a => {
-    if (!a.offsetParent || a.closest('nav.crumbs')) return false;
+    if (!a.offsetParent) return false;
     return getComputedStyle(a).color === link;
   }).map(a => (a.className || a.parentElement.className) + ': ' + a.innerText.trim().slice(0, 40));
 }"""
@@ -111,6 +112,7 @@ SHELL_PAGES = [
     "/decks/42",
     "/decks/42/settings",
     "/decks/42/compare",
+    "/collection?add=1",  # the Add box's "open Scan"
 ]
 CRUMBS = """() => {
   const probe = document.createElement('a'); probe.href = '#'; document.body.appendChild(probe);

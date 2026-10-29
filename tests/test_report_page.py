@@ -39,7 +39,7 @@ def _page(forge: dict | None = None, **over) -> str:
 
 def test_head_meta_and_crumbs() -> None:
     html = _page()
-    assert "<a href='/reports'>All reports</a>" in html and "← Back to the deck" in html
+    assert "<a class='ui-cap' href='/reports'>All reports</a>" in html and "← Back to the deck" in html
     assert "<span id='rep-status'><span class='ui-lbl green'>" in html and ">Complete</span>" in html
     assert "<span class='k'>Solo test games</span> 300, through turn 10" in html
     assert "<span class='k'>Commander</span> Liesa, Forgotten Archangel" in html
