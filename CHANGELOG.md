@@ -63,6 +63,7 @@ the whole gateway uses one name per thing.
     `suggested_wait`, `left_out` and `cards_unchanged`.
 
 ### Added
+- History can make a new deck from a deleted deck's snapshot, for you to review and apply.
 - `check_new_deck`: an assistant checks a new deck before proposing it, with no card in the chat.
 - `proposal_status`: an assistant checks a proposal with no card in the chat. `get_proposal` is now
   the card's own.
@@ -113,6 +114,11 @@ the whole gateway uses one name per thing.
 - `compare_decks` compares decks of different sizes, unpaired.
 
 ### Changed
+- Edits on the deck page within 10 minutes of each other share one snapshot and are one History
+  entry, and never push out the snapshot from before an assistant's change.
+- History, Proposals and My activity add more rows with Load more instead of Newer and Older pages.
+- The review page says what the deck will be once applied: its size, whether it is legal, and its
+  price and the change.
 - **One name per thing**: Binder (was Collection; “Add to binder”), Alerts (Archidekt's bell, was
   Notifications), Push notifications (notices on your phone), Apply (was Approve on proposal
   cards), Test with Solo test and Forge games, Printings… (one menu item), Card models. Pages,
@@ -234,6 +240,9 @@ the whole gateway uses one name per thing.
   (tried in the Android app). The website footer says “Assistant skill”.
 
 ### Fixed
+- Large text: the Binder and Assistant switches show their current page and fade the edge that
+  has more.
+- A proposal marked Needs a look no longer offers Apply or Delete; a failed change says why.
 - Signing in to the Android app comes back to the app by itself. The app could not see the phone's
   browsers, so it never opened the tab that returns to the app. It now opens that tab on the
   gateway's address first and only then tries the app's own address. The “Open the MTG Assistant
