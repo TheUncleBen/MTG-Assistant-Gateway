@@ -2034,12 +2034,14 @@ class ReportService:
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
         modes: tuple[str, str] = ("commander", "commander"),
+        unpaired: bool = False,
     ) -> dict[str, Any] | None:
         """A paired goldfish A/B of two decklists (game for game under the same seeds, with the
         deltas' confidence intervals and significance), as the research service reports it.
         Kept by compare_decks as a "Comparison" report (run_source). None without the service.
         ``modes`` is each list's ``sim_mode``: the A/B is refused when one is not simulated, or
-        when a Commander deck is compared with a 60-card one."""
+        when a Commander deck is compared with a 60-card one. ``unpaired`` (compare_decks): two
+        decks of different sizes each play their own games instead of being refused (_unpaired)."""
         if self.mf is None:
             return None
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
@@ -2058,9 +2060,54 @@ class ReportService:
             args["constructed"] = True
         out = await self._mf(sub, "goldfish_ab", args)
         if not out.get("ok") and str(out.get("text") or "").startswith(AB_SIZE_REFUSAL):
+            if unpaired:  # the paired games need the same size; each deck plays its own (AT-20)
+                return await self._unpaired(sub, (text_a, text_b), games, opts, modes[0], used)
             out["refused"] = True  # the two decks' sizes, not a failure
         if modes[0] == "commander":
             _ab_commanders_aside(out, (_list_commander(text_a), _list_commander(text_b)))
+        if used:
+            out["kept_models"] = used
+            out["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
+        return out
+
+    async def _unpaired(
+        self,
+        sub: str,
+        texts: tuple[str, str],
+        games: int,
+        opts: dict[str, Any],
+        mode: str,
+        used: list[Any],
+    ) -> dict[str, Any]:
+        """Two decks of different sizes compared the only honest way left: each plays its own
+        solo test of ``games`` games under one seed (the one asked for, else one picked here),
+        side by side. Not game for game, so there are no deltas or significance; the note says
+        so, and the result is not kept as a comparison report (that page reads paired deltas)."""
+        seed = opts.get("seed")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            seed = secrets.randbelow(2**31)
+        run = {k: v for k, v in opts.items() if k in RUN_OPTIONS and k not in GATEWAY_OPTIONS}
+        run["seed"] = seed
+        sides: dict[str, Any] = {}
+        for key, text, own in (("a", texts[0], "annotations_a"), ("b", texts[1], "annotations_b")):
+            side = dict(run)
+            if opts.get(own):
+                side["annotations"] = [*(side.get("annotations") or []), *opts[own]]
+            sides[key] = await self._mf(sub, "goldfish_run", _run_args(text, games, side, mode))
+        size_a, size_b = (sum(c.quantity for c in _cards_or_none(t) if c.zone == "main") for t in texts)
+        out: dict[str, Any] = {
+            "tool": "goldfish_unpaired",
+            "ok": bool(sides["a"].get("ok") and sides["b"].get("ok")),
+            "unpaired": True,
+            "seed": seed,
+            "games": games,
+            "note": UNPAIRED_NOTE.format(a=size_a, b=size_b, games=games),
+            "a": sides["a"],
+            "b": sides["b"],
+        }
+        if not out["ok"]:
+            failed = next(x for x in (sides["a"], sides["b"]) if not x.get("ok"))
+            out["text"] = str(failed.get("text") or failed.get("message") or "a solo test failed")
         if used:
             out["kept_models"] = used
             out["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
@@ -3522,6 +3569,12 @@ UNMARKED_COMMANDER_TEXT = (
 # The opening of the research service's refusal of an A/B of decks of different sizes (its paired
 # games deal both decks the same positions).
 AB_SIZE_REFUSAL = "A/B decks must be the same size"
+UNPAIRED_NOTE = (
+    "Unpaired: the decks have different sizes ({a} and {b} cards), so they could not play the same "
+    "games. Each played its own {games} games under the same seed: compare the two results side by "
+    "side, but they are not game for game, so a small difference may be chance. Not kept as a "
+    "report; run_deck_report keeps each deck's own."
+)
 MIXED_MODES_TEXT = (
     "No comparison games: one deck has a commander and the other does not. The comparison plays "
     "two Commander decks or two 60-card decks."

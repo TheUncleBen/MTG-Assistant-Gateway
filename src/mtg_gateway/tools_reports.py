@@ -214,7 +214,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
             "confidence intervals and significance; two Commander decks or two 60-card decks of the "
-            "same size, commanders aside, since game for game each deck draws the same positions). Does "
+            "same size, commanders aside, since game for game each deck draws the same positions; "
+            "decks of different sizes each play their own games under one seed instead, unpaired: true, "
+            "side by side but not game for game, and not stored). Does "
             "not touch Archidekt beyond reading the decks. This is the one tool for deck "
             "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
             "comparison of two decks. A simulated comparison is stored as one of the user's reports "
@@ -301,7 +303,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         if simulate:
             try:
                 ab = await state.reports.ab(
-                    _sub(), text_a, text_b, games=games, options=dumped(options), modes=(cmd_a, cmd_b)
+                    _sub(),
+                    text_a,
+                    text_b,
+                    games=games,
+                    options=dumped(options),
+                    modes=(cmd_a, cmd_b),
+                    unpaired=True,
                 )
             except DeckError as exc:
                 return _tool_error(exc)
@@ -314,7 +322,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             # Kept for every app, a read-only one (mtg.read) too (owner decision C7): a result kept
             # in the gateway's own table changes nothing on Archidekt, and the report names the app
             # that ran it. run_deck_report stays a write tool.
-            if not failed:
+            unpaired = isinstance(ab, dict) and ab.get("unpaired")  # not a paired A/B: not kept
+            if not failed and not unpaired:
                 try:
                     kept = await _store_comparison(deck_a, text_a, deck_b, out["goldfish_ab"])
                 except DeckError as exc:
