@@ -2,7 +2,7 @@
 
 Under the greeting and New deck come the things waiting for the member, each only when there
 is one: proposals waiting for their press, Forge tests running, Archidekt alerts (the bell's
-count, read after the page has loaded by static/bell.js) and watched cards past an alert line.
+count, read after the page has loaded by static/bell.js) and watched cards past a price alert.
 Then the newest decks as covers (more of them than before; a row to swipe on a phone), and the
 assistant connection details only while no assistant is connected. The navigation stays in the
 bars, so the page repeats none of it. The page is for signed-in members only; MCP clients use
@@ -171,7 +171,7 @@ def needs_you_html(
         rows.append(
             need_row(
                 "stats",
-                f"<b>{_n(len(watch_hits), 'watched card', 'watched cards')}</b> past an alert line",
+                f"<b>{_n(len(watch_hits), 'watched card', 'watched cards')}</b> past a price alert",
                 " · ".join(watch_hits[:2]),
                 ui.button_link("Open watchlist", "/watchlist"),
             )

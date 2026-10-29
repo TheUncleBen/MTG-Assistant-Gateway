@@ -668,7 +668,7 @@
     var hint = $(".ui-hint", inRow);
     if (hint) stack.appendChild(el("p", "ui-hint", hint.textContent));
     form.appendChild(stack);
-    var save = Box.button("Save alert", "primary", function () {
+    var save = Box.button("Save price alert", "primary", function () {
       if (form.requestSubmit) form.requestSubmit(); else form.submit();
     }, { icon: "bell" });
     Box.open({ title: "Price alert: " + name, body: form, actions: [Box.button("Cancel", "btn", null, { cancel: true }), save], returnFocus: focusBack });
@@ -681,7 +681,7 @@
     var key = tr.id.slice(3);
     var wx = document.getElementById("wx-" + key);
     var more = $(".act .more", tr);
-    var alert = item("Price alert…", "bell", function () {
+    var alert = item("Price alert…", "tag", function () {
       // a card row: its alert form as a box (M16), posting as the in-row form does; a row that is
       // already open, or a deck row (no alert fields), opens the row's details instead
       var inRow = wx ? $("form.wx-alert", wx) : null;
