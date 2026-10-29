@@ -205,7 +205,7 @@
       var n = info.cards || 0;
       // no copy on Archidekt for a delete: the words of decks.DELETE_KEPT_NOTE
       body.appendChild(el("p", null, "This deletes the deck (" + n + " card" + (n === 1 ? "" : "s") + ") from your Archidekt account. "
-        + "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck. Archidekt itself has no undo for a deleted deck."));
+        + "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck; History can make a new deck from it. Archidekt itself has no undo for a deleted deck."));
       var input = textInput("", { maxlength: 200, placeholder: name });
       body.appendChild(field("Type the deck's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete this deck", "danger", function () {
@@ -787,10 +787,12 @@
   function openHistoryMenu(tr, x, y) {
     var name = $(".title .t", tr) ? $(".title .t", tr).textContent.trim() : "";
     var details = $(".act a[href*='open=']", tr), restore = $("form.hy-restore button", tr);
+    var remake = $("form.hy-new-deck button", tr);  // a deleted deck's snapshot
     var report = $("a[href^='/history/reports/']", tr), deck = $(".title a.t[href^='/decks/']", tr);
     var items = [];
     if (details) items.push(link("Details", "eye", details.getAttribute("href")));
     if (restore) items.push(item("Restore (review first)", "undo", function () { restore.click(); }));
+    if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
     if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", deck.getAttribute("href"))); }
     // a report or a snapshot: its Details with the confirm box open (restores are proposals)

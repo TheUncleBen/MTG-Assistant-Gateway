@@ -240,7 +240,8 @@ DELETE_KEEPS_NO_COPY = True
 # A snapshot can't be restored onto a deleted deck (propose_restore_snapshot needs the deck).
 DELETE_KEPT_NOTE = (
     "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot "
-    "can't be restored onto a deleted deck. Archidekt itself has no undo for a deleted deck."
+    "can't be restored onto a deleted deck; History can make a new deck from it. Archidekt itself has "
+    "no undo for a deleted deck."
 )
 DELETE_PREP_SECONDS = 60
 DELETE_PREP_REMEMBERED = 256
@@ -8695,6 +8696,27 @@ class DeckService:
         """Newest first; ``narrow`` is passed to the database (deck_id, search, limit, offset)."""
         return self.db.list_snapshots(sub, **narrow)
 
+    async def propose_deck_from_snapshot(self, sub: str, snapshot_id: str) -> dict[str, Any]:
+        """A new-deck proposal made from a snapshot, for a deck deleted since (History's "Make a
+        new deck from this"): the snapshot's name, format, privacy, cards with their printings,
+        finishes and categories (Maybeboard and Sideboard rows too), as a restore would put them
+        back. Reviewed and applied like any new deck; nothing is written here."""
+        from .views import card_out
+
+        snap = self.snapshot(sub, str(snapshot_id or "").strip())
+        deck = parse_deck(snap["deck"])
+        details = snapshot_details(deck)
+        rows = [card_out(deck, c) for c in deck.cards]
+        return await self.propose_new_deck(
+            sub,
+            name=str(deck.name or f"Deck {snap['deck_id']}")[:200],
+            deck_format=str(details.get("deck_format") or "commander"),
+            json_text=json.dumps({"cards": rows}),
+            private=bool(details.get("private")),
+            theorycrafted=bool(details.get("theorycrafted")),
+            game=str(details.get("game") or "any"),
+        )
+
     @_dedupe
     async def propose_restore(self, sub: str, snapshot_id: str) -> dict[str, Any]:
         """A proposal that puts the deck back to what a snapshot recorded, relation by relation:
@@ -8719,7 +8741,8 @@ class DeckService:
                 "not_found",
                 f"Deck {snap['deck_id']} is no longer on your Archidekt account (deleted there?), so "
                 f"snapshot {snap['id']} cannot be restored onto it. Nothing was changed, and the "
-                "snapshot with its card list is still kept in the gateway.",
+                "snapshot with its card list is still kept in the gateway: Make a new deck from this, "
+                "under History, or propose_new_deck makes a new deck from it.",
             ) from exc
         self.recheck_waiting(sub, deck)
         payload, lines = restore_rows(wanted, deck)
