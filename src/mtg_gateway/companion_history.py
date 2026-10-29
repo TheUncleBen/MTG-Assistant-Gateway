@@ -138,9 +138,12 @@ def add_history_routes(
                 search=search,
                 since=since,
                 limit=fetch,
+                fold_sessions=True,  # one entry per sitting on the deck page
             )
             for r in restores:  # when the snapshot it put back was taken (its first review row)
                 if r.get("kind") != "restore":
+                    if r.get("created_by_client") == BROWSER_CLIENT_ID and r.get("snapshot_id"):
+                        r["session"] = state.db.page_session(sub, str(r["snapshot_id"]))
                     continue
                 full = state.db.get_proposal(r["id"], sub) or {}
                 head = (full.get("rows") or [{}])[0]

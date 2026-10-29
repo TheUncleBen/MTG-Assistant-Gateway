@@ -84,7 +84,13 @@ from .archidekt import (
 from .archidekt_csv import CsvError, parse_export
 from .busy import BUSY_TEXTS
 from .config import LiveSettings, Settings
-from .db import MAX_PROPOSAL_VERSIONS, RISK_REASON_KEY, Database, ProposalVersionsFull
+from .db import (
+    MAX_PROPOSAL_VERSIONS,
+    PAGE_SESSION_KINDS,
+    RISK_REASON_KEY,
+    Database,
+    ProposalVersionsFull,
+)
 from .decklist import (
     DecklistError,
     ListCard,
@@ -6970,6 +6976,17 @@ class DeckService:
             snapshot_id = shared[str(deck.id)]["snapshot_id"]
             self.db.finish_proposal(row["id"], state="applying", snapshot_id=snapshot_id)
             return snapshot_id
+        if (
+            shared is None
+            and row.get("created_by_client") == BROWSER_CLIENT
+            and row.get("kind") in PAGE_SESSION_KINDS
+        ):
+            # The member's own edits on the deck page, one after another (db.PAGE_SESSION_SECONDS):
+            # they share the snapshot from before the first, while the deck is as the last left it.
+            prev = self.db.page_session_snapshot(sub, str(deck.id))
+            if prev and prev["after_fingerprint"] == deck.fingerprint():
+                self.db.finish_proposal(row["id"], state="applying", snapshot_id=prev["snapshot_id"])
+                return prev["snapshot_id"]
         snapshot_id = secrets.token_urlsafe(12)
         saved = self.db.save_snapshot(
             snapshot_id,
@@ -8984,6 +9001,9 @@ class DeckService:
             "fields": sorted(changes) + organised,
             "verified": not mismatches,
             "mismatched_fields": mismatches,
+            # how the deck stood after it (a deck-page sitting's shared snapshot); the organise
+            # steps change it again after this read
+            **({} if organise else {"after_fingerprint": verified.fingerprint()}),
         }
         if mismatches:
             progress.update(result)  # apply() records it with the error

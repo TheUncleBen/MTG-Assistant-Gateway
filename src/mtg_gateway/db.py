@@ -201,6 +201,29 @@ APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
+# A run of the member's own edits on the deck page (and its settings and categories) shares one
+# snapshot, the one taken before its first edit, while each edit follows the last within this
+# many seconds and nothing else changed the deck between them: one restore point and one History
+# entry per sitting, not one per tap. Ten minutes covers a sitting of taps seconds apart, with a
+# pause to look a card up; Undo steps back through the edits in between. Those snapshots are
+# also counted apart from all others, so taps never push an assistant's change out of the newest.
+PAGE_SESSION_SECONDS = 600
+PAGE_SESSION_KINDS = ("edit", "details", "categories")
+# whether a snapshot was taken for one of those edits (SQL, on a row of snapshots named s)
+_PAGE_SNAPSHOT_SQL = (
+    "EXISTS (SELECT 1 FROM proposals p WHERE p.id = s.proposal_id AND p.owner_sub = s.owner_sub "
+    "AND p.created_by_client = '__browser__' AND p.kind IN ('edit', 'details', 'categories'))"
+)
+# an applied page edit that shares its snapshot with a newer applied page edit: shown in
+# History as part of that newer one (SQL, on a row of proposals named q)
+_FOLDED_SQL = (
+    "(q.created_by_client = '__browser__' AND q.kind IN ('edit', 'details', 'categories') "
+    "AND q.snapshot_id IS NOT NULL AND EXISTS ("
+    "SELECT 1 FROM proposals q2 WHERE q2.owner_sub = q.owner_sub AND q2.snapshot_id = q.snapshot_id "
+    "AND q2.state = 'applied' AND q2.created_by_client = '__browser__' "
+    "AND q2.kind IN ('edit', 'details', 'categories') "
+    "AND (q2.created_at > q.created_at OR (q2.created_at = q.created_at AND q2.rowid > q.rowid))))"
+)
 # Rows deleted per transaction by the purge's plain deletes, so the lock is
 # released between batches.
 PURGE_BATCH = 500
@@ -1837,7 +1860,10 @@ class Database:
     @staticmethod
     def _prune_snapshots(c: sqlite3.Connection, keep: int = SNAPSHOTS_KEEP_PER_DECK) -> int:
         """Keep the newest ``keep`` snapshots of each member's deck, and any snapshot a pending or
-        running proposal (a restore) still points at; delete the rest. Also kept:
+        running proposal (a restore) still points at; delete the rest. The snapshots of the
+        member's own deck-page edits (PAGE_SESSION_KINDS) count apart: the newest ``keep`` of them
+        and the newest ``keep`` of all the others, so a busy deck page never pushes out the
+        snapshot from before an assistant's change. Also kept:
         the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
         queued backup delete, so the gateway never loses its record of a copy it may delete.
         Only a copy the gateway may still delete holds
@@ -1848,8 +1874,11 @@ class Database:
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
                        SELECT id, ROW_NUMBER() OVER (
-                           PARTITION BY owner_sub, deck_id ORDER BY taken_at DESC, rowid DESC) AS n
-                       FROM snapshots)
+                           PARTITION BY owner_sub, deck_id, page ORDER BY taken_at DESC, rowid DESC) AS n
+                       FROM (SELECT s.id, s.owner_sub, s.deck_id, s.taken_at, s.rowid,
+                                    """
+            + _PAGE_SNAPSHOT_SQL
+            + """ AS page FROM snapshots s))
                    WHERE n > ?)
                AND id NOT IN (SELECT json_extract(changes_json, '$.snapshot_id') FROM proposals
                               WHERE kind = 'restore' AND state IN ('pending', 'applying')
@@ -2528,8 +2557,11 @@ class Database:
         until: int | None = None,
         offset: int = 0,
         oldest_first: bool = False,
+        fold_sessions: bool = False,
     ) -> list[dict[str, Any]]:
-        """Newest first (``oldest_first``: oldest first, so paging runs from the oldest). ``deck_id``,
+        """Newest first (``oldest_first``: oldest first, so paging runs from the oldest). With
+        ``fold_sessions`` (History) a deck-page sitting is its newest edit alone (page_session
+        has the rest). ``deck_id``,
         ``kinds`` (edit, create_deck, restore), ``states`` (pending,
         applied, failed, rejected, expired: a pending proposal past its expiry counts as expired),
         ``search`` (a case-insensitive match on the deck name or the change summary) and a time
@@ -2538,9 +2570,12 @@ class Database:
         sql = (
             "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
             "created_by_client, diff_text, version, board_no, status, status_reason, status_at, "
-            "amended_by_client FROM proposals WHERE owner_sub = ?"
+            "amended_by_client" + (", snapshot_id" if fold_sessions else "") + " FROM proposals q "
+            "WHERE owner_sub = ?"
         )
         args: list[Any] = [owner_sub]
+        if fold_sessions:
+            sql += " AND NOT " + _FOLDED_SQL
         if deck_id:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
@@ -2650,7 +2685,10 @@ class Database:
             kinds = ",".join("?" * len(DECK_CHANGE_KINDS))
             out["changes"] = int(
                 self._conn.execute(
-                    "SELECT COUNT(*) FROM proposals" + w + f" AND kind IN ({kinds}) AND state = 'applied'",
+                    "SELECT COUNT(*) FROM proposals q"
+                    + w
+                    + f" AND kind IN ({kinds}) AND state = 'applied' AND NOT "
+                    + _FOLDED_SQL,
                     [*a, *DECK_CHANGE_KINDS],
                 ).fetchone()[0]
             )
@@ -3464,6 +3502,42 @@ class Database:
             values += (owner_sub, proposal_id, owner_sub)
         with self.tx() as c:
             return c.execute(sql, values).rowcount == 1
+
+    def page_session_snapshot(
+        self, owner_sub: str, deck_id: str, *, now: int | None = None
+    ) -> dict[str, Any] | None:
+        """The snapshot a deck-page edit of ``deck_id`` shares (PAGE_SESSION_SECONDS): the deck's
+        newest snapshot, when the member's own page edits took it and the latest of them was
+        applied in the last PAGE_SESSION_SECONDS. ``snapshot_id`` and that edit's
+        ``after_fingerprint`` (how the deck stood after it), or None: then a new snapshot."""
+        since = int(time.time() if now is None else now) - PAGE_SESSION_SECONDS
+        kinds = ",".join("?" * len(PAGE_SESSION_KINDS))
+        row = self._one(
+            "SELECT s.id, json_extract(p.result_json, '$.after_fingerprint') FROM snapshots s "
+            "JOIN proposals p ON p.owner_sub = s.owner_sub AND p.snapshot_id = s.id "
+            "WHERE s.owner_sub = ? AND s.deck_id = ? AND p.state = 'applied' "
+            f"AND p.created_by_client = '__browser__' AND p.kind IN ({kinds}) AND p.applied_at >= ? "
+            "AND s.id = (SELECT id FROM snapshots WHERE owner_sub = ? AND deck_id = ? "
+            "ORDER BY taken_at DESC, rowid DESC LIMIT 1) "
+            "ORDER BY p.applied_at DESC, p.rowid DESC LIMIT 1",
+            (owner_sub, str(deck_id), *PAGE_SESSION_KINDS, since, owner_sub, str(deck_id)),
+        )
+        if not row or not row[1]:
+            return None
+        return {"snapshot_id": str(row[0]), "after_fingerprint": str(row[1])}
+
+    def page_session(self, owner_sub: str, snapshot_id: str) -> list[dict[str, Any]]:
+        """The member's applied deck-page edits that share ``snapshot_id``, oldest first: one
+        sitting on the deck page, shown in History as one entry."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, kind, diff_text, applied_at, created_at FROM proposals "
+                "WHERE owner_sub = ? AND snapshot_id = ? AND state = 'applied' "
+                "AND created_by_client = '__browser__' AND kind IN ('edit', 'details', 'categories') "
+                "ORDER BY created_at, rowid",
+                (owner_sub, snapshot_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def list_snapshots(
         self,

@@ -129,8 +129,9 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "snapshots_per_deck": (
         "Restore points kept per deck",
-        "Kept on the gateway, newest first, for History > Restore. Restore points that record a backup "
-        "copy the gateway may still delete are kept too.",
+        "Kept on the gateway, newest first, for History > Restore. Your own edits on the deck page count "
+        "apart, with the same number, so they never push out the one from before an assistant's change. "
+        "Restore points that record a backup copy the gateway may still delete are kept too.",
     ),
     "backup_hour_utc": ("Nightly backup hour (UTC)", "When the gateway backs up its own database, 0 to 23."),
     "backup_keep_days": (
