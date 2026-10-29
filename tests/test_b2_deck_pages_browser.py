@@ -312,6 +312,8 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
         box.wait_for(timeout=3000)
         box.locator(".acts button.primary").click()
         page.locator(".toast .msg", has_text="Categories saved to Archidekt.").wait_for(timeout=8000)
+        # the closing box stays on screen while it slides out (box.js); the next one is a new box
+        box.wait_for(state="hidden", timeout=3000)
         assert [b["isPremier"] for b in server.ark.category_patches][-1] is False
         page.locator(".toast .close").click()
         # a Not in deck switch asks too, in the box, with its own title and sentence
