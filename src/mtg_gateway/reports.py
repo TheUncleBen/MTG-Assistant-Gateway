@@ -3501,7 +3501,10 @@ def solo_coverage(goldfish: Any, *, deck_size: int | None = None) -> dict[str, A
             "saved by any of your assistants."
         )
     if blank or commander_aside:
-        parts.append("Read the kill and damage numbers as a floor, not a forecast.")
+        parts.append(
+            "Cards played without their effect make these numbers less reliable. With no opponents to "
+            "interact, they usually look faster than the deck plays at a table."
+        )
     return {
         "modeled": cov["modeled"],
         "known": cov["known"],
@@ -3516,8 +3519,9 @@ def solo_coverage(goldfish: Any, *, deck_size: int | None = None) -> dict[str, A
 
 SIDE_BY_SIDE_NOTE = (
     "The engines answer different questions. The solo test is the gateway's fast engine: it "
-    "plays only the cards it models (its coverage), so with much of the deck played without effect "
-    "its kill numbers are a floor. Forge solo plays every card by the full rules against opponents "
+    "plays only the cards it models (its coverage) and nobody interacts, so its kill numbers usually "
+    "look faster than the deck plays at a table, and less reliable with much of the deck played "
+    "without effect. Forge solo plays every card by the full rules against opponents "
     "who do nothing: how fast the deck can win when nobody stops it. Forge against precons is real "
     "games against other decks, the closest to a table. When they disagree, the Forge numbers say "
     "more about the deck as it is; the solo test says more about its speed, read with its coverage."

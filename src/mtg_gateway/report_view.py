@@ -1991,7 +1991,8 @@ def report_body_html(
             f"<div class='card'><h2>{_esc(solo_heading(g))}</h2>"
             "<p class='muted small'>Each solo test game is played alone, with no opponent to interact: "
             "the deck draws, plays lands, casts what it can and attacks. The numbers say how fast the "
-            "deck does its own thing, not how it fares against interaction.</p>"
+            "deck does its own thing, not how it fares against interaction, so they usually look faster "
+            "than the deck plays at a table.</p>"
             + warn
             + (f"<div class='tiles wide'>{tiles}</div>" if tiles else "")
             + (f"<div class='charts'>{charts}</div>" if charts else "")

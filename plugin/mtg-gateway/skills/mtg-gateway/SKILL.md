@@ -177,7 +177,9 @@ pages say "Run test" and "Solo test only" on the deck page; its "Goldfish"
 page is where the member plays a hand by hand, not a test. It measures
 modelled speed and consistency, such as "how often is the commander cast by
 turn 4". It does **not** predict a win rate in a real multiplayer game and it
-cannot value interaction, removal, politics or an opponent's deck.
+cannot value interaction, removal, politics or an opponent's deck. With nobody
+to interact, its speed numbers usually look faster than the deck plays at a
+table: say so, and never call them a floor or a minimum.
 
 1. For draw odds only ("chance of a 2-drop in my opening hand"), use
    `goldfish_odds`. It is exact maths, no solo test.

@@ -154,7 +154,8 @@ One deck:
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
 - **Run test** runs the statistics, the legality check and the
-  solo test (300 games, no opponents) and opens the result, filed under
+  solo test (300 games, no opponents; with nobody to interact, its numbers
+  usually look faster than the deck plays at a table) and opens the result, filed under
   History. It is the same run your assistant makes when you ask it for a
   deck report, so the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with

@@ -175,3 +175,17 @@ def test_removal_from_the_group_is_told_without_a_time_promise() -> None:
     # once 60 seconds have passed since it last let them in
     text = " ".join((ROOT / "docs/IDP-AUTHENTIK.md").read_text(encoding="utf-8").split())
     assert "(writes and admin pages wait once 60 seconds have passed since it last let them in)" in text
+
+
+def test_chatgpt_block_uses_the_glossary_and_names_the_newer_answers() -> None:
+    """Independent review of 0.7.46: the ChatGPT block still said "SIMULATION", "colour" and "user
+    approves", and never named deck_after, plan_first or propose_account_action, which Claude's skill
+    explains. The block uses the approved words and gives each a short line."""
+    block = CHATGPT.read_text(encoding="utf-8").split("```text\n", 1)[1].split("```", 1)[0]
+    assert "SIMULATION" not in block and "\nTEST\n" in block
+    assert "colour" not in block and "color identity" in block
+    assert "approves" not in block
+    assert "deck_after" in block and "unpriced_added" in block
+    assert "plan_first" in block
+    assert "propose_account_action" in block and "propose_delete_deck" in block
+    assert len(block) <= 4000
