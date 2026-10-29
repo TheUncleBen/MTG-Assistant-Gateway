@@ -151,7 +151,8 @@ async def test_a_simulation_refused_for_its_input_says_so_in_its_code(stack: Sta
     out = structured(rep)
     assert out["ok"] is False and out["error"] == "simulation_failed", out
     assert out["error_code"] == "INVALID_ARGUMENT" and out["retryable"] is False, out
-    # two decks of different sizes: the research service refuses the paired games
+    # two decks of different sizes: no paired games, so each deck plays its own under one seed
+    # (test_unpaired_compare), said as such, not refused
     lst = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
     out = structured(
         await call(
@@ -161,8 +162,7 @@ async def test_a_simulation_refused_for_its_input_says_so_in_its_code(stack: Sta
             {"a_list": lst, "b_list": lst.replace("99 Island", "102 Island"), "simulate": True, "games": 20},
         )
     )
-    assert out["ok"] is False and "same size" in out["message"], out
-    assert out["error_code"] == "INVALID_ARGUMENT", out
+    assert out["ok"] is True and out["goldfish_ab"]["unpaired"] is True, out
 
 
 async def test_removing_the_only_copy_twice_says_so(stack: Stack) -> None:
