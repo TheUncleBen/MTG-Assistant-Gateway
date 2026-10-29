@@ -358,6 +358,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     "land_count": stats.get("land_count", 0),
                     "side_count": sum(c.quantity for c in deck.side_cards),
                     "price_total": stats.get("price_total"),
+                    # no card priced: the page draws "–" for the cost, as it does on a load
+                    "priced_cards": stats.get("priced_cards", 0),
                     "salt_total": stats.get("salt_total"),
                     "format": deck.format,
                 },
@@ -488,6 +490,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
+        # the rules this save broke that the deck kept before (the same judgement that makes an
+        # assistant's proposal high risk), for the page's Saved note: saved, but said
+        broke = p.get("legality_after") or []
+        if broke:
+            out["warnings"] = [f"The deck now breaks its format's rules: {b}." for b in broke]
         return ok(out, 201)
 
     @route("/decks/{deck_id}/custom_cards", "POST", write=True)

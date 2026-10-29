@@ -70,7 +70,8 @@ async def test_a_swap_inside_the_rules_keeps_the_verdict_and_names_an_added_card
     assert after["card_count"] == 100 and after["legal"] is now["legal"], (now, after)
     assert after["problems"] == now["problems"] and "legality_after" not in p, (now, after)
     assert after["unpriced_added"] == ["Unpriced Growth"], after
-    assert after["price_change"] <= 0, after  # only the removed card's known price counts
+    # no card of this deck has a known price, before or after: no total and no change, not $0.00
+    assert after["price_total"] is None and after["price_change"] is None, after
     assert "unpriced" in after["price_note"] or "no price" in after["price_note"], after
 
 

@@ -416,7 +416,9 @@ def test_quick_add_puts_one_copy_in_place_with_undo(
         box.press("Enter")
         text = _error(page)
         assert text.startswith("Add not saved:") and "Zzyzx" in text, text
-        assert page.locator(".deck-toast.error button", has_text="Try again").count() == 1
+        # a refusal of the name would only repeat: a card search, not Try again
+        assert page.locator(".deck-toast.error button", has_text="Try again").count() == 0
+        assert page.locator(".deck-toast.error a.btn", has_text="Search cards").count() == 1
         assert page.url == url and box.input_value() == "Zzyzx"
         assert errors == []
         browser.close()

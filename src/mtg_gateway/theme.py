@@ -1739,6 +1739,9 @@ CARD_MENU_CSS = """
 .toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
 /* finger-sized on touch, in the corner the toast keeps clear for it (.toast > .close above) */
 @media (pointer:coarse){.toast.cards-toast .close{width:44px;height:44px;min-height:44px}}
+/* its action (Open Wants, Open the watchlist) is a button, finger-sized on a phone or the Fold */
+.toast.cards-toast a.btn{text-decoration:none}
+@media (pointer:coarse),(max-width:899.98px){.toast.cards-toast .btn{min-height:44px}}
 .toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 CSS += CARD_MENU_CSS

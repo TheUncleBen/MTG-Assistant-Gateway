@@ -192,7 +192,24 @@
     x.addEventListener("click", dismissToast);
     toastEl.appendChild(x);
     document.body.appendChild(toastEl);
+    placeToast(toastEl);
     if (!opts.error) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
+  }
+  // Two notes never cover each other: the deck page's own (static/deck.js) and this one each
+  // keep one at a time, so a new one that would sit on the other's is lifted above it.
+  function placeToast(t) {
+    var others = Array.prototype.filter.call(document.querySelectorAll(".toast"), function (o) {
+      return o !== t && o.getClientRects().length > 0;
+    });
+    if (!others.length) return;
+    var top = Math.min.apply(null, others.map(function (o) { return o.getBoundingClientRect().top; }));
+    var r = t.getBoundingClientRect();
+    var clear = others.every(function (o) {
+      var b = o.getBoundingClientRect();
+      return r.right <= b.left || b.right <= r.left || r.bottom <= b.top || b.bottom <= r.top;
+    });
+    if (clear) return;
+    t.style.bottom = Math.max(0, window.innerHeight - top + 8) + "px";
   }
   // Copies text: execCommand first, inside the press (the app's WebView may refuse the async
   // clipboard), then the async API. Resolves true when it was copied.
@@ -221,7 +238,7 @@
   function collect(name) {
     return post("/collection/api/add", { items: [{ name: name, quantity: 1 }], source: "manual" }).then(function (d) {
       if (d.ok && d.added && d.added.length) {
-        var a = el("a", null, "Open the binder");
+        var a = el("a", "btn", "Open the binder");
         a.href = "/collection?q=" + enc(name);
         // the gateway says which entry the copy went to (one already there, or a new one)
         toast(d.message || name + " added to your binder.", { ok: true, actions: [a] });
@@ -244,8 +261,8 @@
       return r.json().catch(function () { return { ok: false, message: ODD }; });
     }).then(function (d) {
       if (d.ok) {
-        var a = el("a", null, "Open Pinned");
-        a.href = "/lists/pins";
+        var a = el("a", "btn", "Open Wants");
+        a.href = "/collection/wants";
         toast(d.notice || "Pinned on Archidekt.", { ok: true, actions: [a] });
         return true;
       }
@@ -307,7 +324,7 @@
     if (keptWatched()) keepWatched();
   }
   function listLink(name) {
-    var a = el("a", null, "Open the watchlist");
+    var a = el("a", "btn", "Open the watchlist");
     a.href = "/watchlist?q=" + enc(name);
     return a;
   }
@@ -613,7 +630,7 @@
   window.MtgMenu = {
     open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
-    toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
+    toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
     copyText: copyText, copyAndSay: copyAndSay, collect: collect, pin: pin, enabled: enabled, phone: phone, norm: norm,
     // true while the menu's own history.back() has not landed yet (static/box.js asks)
     backPending: function () { return ignorePop; },
