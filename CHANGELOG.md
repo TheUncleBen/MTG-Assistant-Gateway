@@ -12,8 +12,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 Assistants keep one live card per change in the chat, proposals never apply themselves, and tool
 answers are shorter and use one spelling. Signing in to the Android app comes back by itself, a
 sign-in lasts as long as you use it, and one device that is signed out no longer signs out the
-others. Pages no longer wait behind Archidekt, a new deck reaches Archidekt in a few requests, and
-the deck page saves each change as you make it, with Undo. Every test is kept as a report, the
+others. A slow page shows its frame at once and fills in when Archidekt answers, a new deck
+reaches Archidekt in a few requests, and the deck page saves each change as you make it, with Undo. Every test is kept as a report, the
 website can start every kind of test, and History is your decks' timeline. The Binder gets prices
 and a faster Watchlist, the scanner finds more cards, new Archidekt alerts reach your phone, and
 the whole gateway uses one name per thing.
@@ -89,9 +89,9 @@ the whole gateway uses one name per thing.
 - Binder prices (while watchlists are on): its value, a price per entry and a price sort, and a
   price history in the card viewer for any printing you own, from the daily price check.
 - The Binder's Add box has a Language field. The Add box and the Watch form can remember your
-  finish, condition, language and alert, and card menus use them.
+  finish, condition, language and price alert, and card menus use them.
 - “Pin card” in card menus pins a card on Archidekt.
-- Home shows what needs you (proposals waiting, Forge games running, new Alerts, watchlist alerts)
+- Home shows what needs you (proposals waiting, Forge games running, new Alerts, price alerts reached)
   and your recent decks.
 - The Guide is a contents page with one page per topic, search, and the topics before and after.
   Old links still land on the right topic.
@@ -176,7 +176,8 @@ the whole gateway uses one name per thing.
   (Normal, Foil, Etched) with Undo; a one-click change needs fewer Archidekt requests.
 - Deck settings and categories save each change as you make it, with Undo, and stay on the page;
   leaving while a save runs asks first. A save Archidekt never answered shows what the deck has
-  now, a refused save offers Try again, and a reloaded page says “Saving…”.
+  now, a refused save offers Try again when trying again could work (Search cards for a name
+  Archidekt doesn't know), and a reloaded page says “Saving…”.
 - Stacks follow Archidekt's category order, with Maybeboard and Sideboard last; the drag handles
   and Reset stack order are gone. A side row's Remove names the category it leaves.
 - On a phone the deck editor's save bar keeps 44 px buttons, with the status on its own line.
