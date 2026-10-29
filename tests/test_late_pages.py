@@ -127,3 +127,21 @@ async def test_the_speed_log_counts_a_late_page_when_its_content_is_there(stack:
         assert rows[0].seconds >= 1.4 and rows[0].archidekt >= 1.4
     finally:
         await b.aclose()
+
+
+async def test_a_finished_page_is_never_shown_once_its_session_has_ended(stack: Stack) -> None:
+    """Security review 2, R2-04: the session cookie outlives its session (to say why it ended), so
+    a page finished just after a sign-out on all devices was still served to that browser."""
+    b = await _linked(stack)
+    try:
+        asked = _slow(stack, 1.5)
+        r = await b.http.get("/notifications", headers=PAGE)
+        key = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", r.text).group(1)
+        assert (await b.http.get(key)).json()["ready"] is True
+        sent = len(asked)
+        stack.h.db.delete_browser_sessions_for("user-1", "elsewhere")  # sign out on all devices
+        page = await b.http.get("/notifications", headers=PAGE)
+        assert page.status_code in (302, 303), page.status_code
+        assert "Alerts" not in page.text and len(asked) == sent
+    finally:
+        await b.aclose()
