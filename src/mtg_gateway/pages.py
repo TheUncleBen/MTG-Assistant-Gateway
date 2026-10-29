@@ -39,6 +39,7 @@ from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .db import SESSION_END_NOTICE
 from .decks import (
+    ADMIN_CLIENT,
     REVIEW_PAGE,
     DeckError,
     commander_row_texts,
@@ -1371,7 +1372,7 @@ ERR_MESSAGES = {
     "not_pending": "This proposal is no longer pending, so nothing was done.",
     "stale": "Not applied: the deck changed on Archidekt, and this change would now do something "
     "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
-    "review it again, then apply or reject it, or ask your assistant to amend it.",
+    "it can't be applied as it is. Ask your assistant to update it, or reject it.",
     "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
     "the new version below.",
     "now_held": "This change is held for a reason that came up after you opened this page, so nothing "
@@ -2180,14 +2181,59 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
 # The review page's words for a proposal the re-check (recheck.py) marked Needs a look: the deck
 # changed after it was made and the change no longer fits. The reason follows when known.
 OUT_OF_DATE_PAGE = (
-    "Needs a look: the deck changed after this change was made and it no longer fits, so Apply will "
-    "be refused and nothing will be sent. Ask your assistant to update it, or reject it."
+    "Needs a look: the deck changed after this change was made and it no longer fits, so it can't be "
+    "applied as it is. Ask your assistant to update it, or reject it."
 )
 
 
+# A failure that sent nothing: the reason first (_page_step), then this, by who made the change.
+# A change the member made on the website is made again there; there is no assistant to ask.
 FAILED_PLAIN_STEP = (
-    "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+    "Nothing was changed on Archidekt. Ask your assistant for a new proposal if you still want these edits."
 )
+FAILED_PLAIN_STEP_OWN = "Nothing was changed on Archidekt. Make the change again if you still want it."
+
+
+def _deck_after_html(p: dict[str, Any]) -> str:
+    """A waiting deck edit's line under its summary: the deck once applied (decks.deck_after_block,
+    what an assistant is told as ``deck_after``): its size, whether it is legal, and its price with
+    the change, from the prices known. A card with no known price is named, not guessed."""
+    after = p.get("deck_after")
+    if not isinstance(after, dict) or p.get("kind") not in (None, "edit"):
+        return ""
+    parts = []
+    n = after.get("card_count")
+    if isinstance(n, int):
+        parts.append(f"{n:,} card{'' if n == 1 else 's'}")
+    if after.get("legal") is True:
+        parts.append("legal")
+    elif after.get("legal") is False:
+        parts.append("not legal")
+    total, change = after.get("price_total"), after.get("price_change")
+    if isinstance(total, int | float):
+        price = f"${float(total):,.2f}"
+        if isinstance(change, int | float) and round(float(change), 2):
+            price += f" ({'up' if change > 0 else 'down'} ${abs(float(change)):,.2f})"
+        elif isinstance(change, int | float):
+            price += " (no change)"
+        parts.append(price)
+    else:
+        parts.append("no price is known for its cards")
+    line = "Once applied: " + ", ".join(parts) + "."
+    unpriced = [str(x) for x in after.get("unpriced_added") or [] if x]
+    if unpriced:
+        named = ", ".join(f"“{x}”" for x in unpriced[:5]) + (
+            f" and {len(unpriced) - 5} more" if len(unpriced) > 5 else ""
+        )
+        line += (
+            f" No price is known for {named}, so {'it is' if len(unpriced) == 1 else 'they are'} not counted."
+        )
+    return f"<p class='ui-why pr-after'>{html.escape(line)}</p>"
+
+
+def _made_by_member(p: dict[str, Any]) -> bool:
+    """Whether the member made this change on the gateway's own pages (or it predates a maker)."""
+    return p.get("created_by_client") in (None, "", BROWSER_CLIENT_ID, ADMIN_CLIENT)
 
 
 def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
@@ -2205,7 +2251,7 @@ def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
             and bool(p.get("writes_enabled"))
             and not p.get("out_of_date")
         )
-    return p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
+    return p.get("state") == "failed"
 
 
 def _page_step(p: dict[str, Any]) -> str:
@@ -2275,7 +2321,14 @@ def _page_step(p: dict[str, Any]) -> str:
         )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
-        return FAILED_PLAIN_STEP
+        # the reason, in the gateway's words (DeckError messages: no codes), then what is left
+        why = str(result.get("detail") or "").strip()
+        lead = (
+            f"This change could not be applied: {why.rstrip('.')}. "
+            if why
+            else "This change could not be applied. "
+        )
+        return lead + (FAILED_PLAIN_STEP_OWN if _made_by_member(p) else FAILED_PLAIN_STEP)
     if state == "rejected":
         by = {
             "assistant": " by your assistant (its reject_proposal call)",
@@ -2726,10 +2779,9 @@ def _proposal_body(
     ]
     if status == "updated":
         pills.append(ui.status_label("updated", title=str(p.get("status_reason") or "")))
+    # a closed one with nothing to judge it by shows no risk label at all (no lone dash)
     if p.get("risk") and ui.ALIASES.get(str(p["risk"]), str(p["risk"])) in ui.RISK_KEYS:
         pills.append(ui.risk_label(str(p["risk"]), title=_risk_reason(p)))
-    elif not p.get("risk"):  # closed with nothing to judge it by
-        pills.append(ui.no_risk_label())
     under = []
     if p.get("risk"):
         under.append(f"<p class='ui-why pr-why'>{html.escape(_risk_words(p))}</p>")
@@ -2805,12 +2857,13 @@ def _proposal_body(
         + stale
         + f"<h3 class='ui-section'>{heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
-        f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
+        + _deck_after_html(p)
+        + f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary class='fold-btn'>Plain-text diff</summary>{raw}</details>"
         + _lists_before(p)
         + _also_waiting(p, others)
     )
-    if pending and p["writes_enabled"]:
+    if pending and p["writes_enabled"] and not p.get("out_of_date"):
         # the member-only tier is shared: deleting a deck, deleting from the lists (below) and
         # taking custom cards out of a deck each say what they do, and each asks once more in the
         # site's one confirm box (_confirm_box) before the solid red button sends it

@@ -1331,6 +1331,9 @@ main.wrap.ui-wide{max-width:1200px}
 /* a source label (what a test ran on) names a deck: it wraps instead of running out of the page */
 .ui-lbl.src{white-space:normal;height:auto;min-height:24px;max-width:100%;overflow-wrap:anywhere;
   line-height:1.2;padding-top:.15rem;padding-bottom:.15rem}
+/* a review page's summary is a sentence ("1 Archidekt action; no cards change"): it wraps too */
+.summary-pills .ui-lbl{white-space:normal;height:auto;min-height:24px;max-width:100%;
+  overflow-wrap:anywhere;line-height:1.2;padding-top:.15rem;padding-bottom:.15rem}
 .ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;vertical-align:0}
 .ui-lbl .ui-spin{width:14px;height:14px;vertical-align:0}
 .ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}

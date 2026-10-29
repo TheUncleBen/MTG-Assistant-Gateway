@@ -373,7 +373,7 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     assert ">Try again</button>" in page or ">Try again<" in page
     assert page.count("class='notice") == 1
     stack.ark.fail_card_writes = False
-    # a failure that no retry fixes (the deck is gone) keeps the general box, once
+    # a failure that no retry fixes (the deck is gone): its reason in the one box, once
     res = await _propose(h, token, "Opt")
     p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
     stack.ark.decks.pop(42)
@@ -382,8 +382,9 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     )
     assert got["ok"] is False and got["state"] == "failed", got
     page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
-    assert page.count("This proposal could not be applied. Details are in the result below, if any.") == 1
-    assert page.count("Nothing else was changed. Ask your assistant for a new proposal") == 1
+    assert page.count("This change could not be applied:") == 1
+    assert page.count("Nothing was changed on Archidekt. Ask your assistant for a new proposal") == 1
+    assert page.count("class='notice") == 1
     await b.aclose()
 
 

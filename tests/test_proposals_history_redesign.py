@@ -176,7 +176,8 @@ async def test_a_stored_tier_keeps_its_own_reason_and_an_unjudged_one_is_a_dash(
         low = (await b.http.get("/proposals?show=all&risk=low", headers=NAV)).text.split("<main")[1]
         assert "/proposals/lo?" in low and "/proposals/nr?" not in low
         page = (await b.http.get("/proposals/nr", headers=NAV)).text.split("<aside")[1]
-        assert "Risk not judged" in page and "High" not in page
+        # the review page shows no risk label at all, not a lone dash (independent review of 0.7.46)
+        assert "Risk not judged" not in page and "ui-none" not in page and "High" not in page
     finally:
         await b.aclose()
 
@@ -214,7 +215,8 @@ async def test_a_risk_nobody_can_judge_is_a_dash_while_waiting_too(stack: Stack)
         for pid in ("wait", "shut"):
             assert "Risk not judged" in rows[pid] and "High" not in rows[pid], pid
         page = (await b.http.get("/proposals/wait", headers=NAV)).text.split("<aside")[1]
-        assert "Risk not judged" in page and "High" not in page
+        # the review page shows no risk label at all, not a lone dash (independent review of 0.7.46)
+        assert "Risk not judged" not in page and "ui-none" not in page and "High" not in page
         # another app changed it after it was made: that is a reason, and it stays High
         gw.db._conn.execute(
             "UPDATE proposals SET version = 2, amended_by_client = 'other-app' WHERE id = 'wait'"
