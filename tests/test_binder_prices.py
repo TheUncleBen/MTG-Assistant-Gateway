@@ -625,3 +625,68 @@ async def test_a_binder_not_opened_for_60_days_is_no_longer_kept(stack: Stack, m
     assert stack.h.db._conn.execute(held, (SUB,)).fetchone()[0] == 0
     assert stack.h.db._conn.execute("SELECT COUNT(*) FROM binder_reads").fetchone()[0] == 0
     assert len(stack.ark.collection_queries) == reads  # not read again
+
+
+async def test_the_value_being_worked_out_updates_by_itself_and_promises_no_time(
+    stack: Stack, monkeypatch
+) -> None:
+    """While "Work it out now" reads the whole Binder, the Value widget said "Refresh in a minute",
+    a time the gateway can't know. It shows a progress line that the page follows by itself
+    (/collection/api/value), then the value, with nothing to press."""
+    import asyncio
+
+    from .test_no_time_promises import PROMISE
+
+    Clock(monkeypatch)
+    sol = _card(stack, "Sol Ring", "frc", "21")
+    _priced_record(stack, 1, sol, 3)
+    b = await linked(stack)
+    gate = asyncio.Event()
+    real = stack.gw.prices.first_read
+
+    async def slow(sub: str) -> bool:
+        await gate.wait()
+        return await real(sub)
+
+    monkeypatch.setattr(stack.gw.prices, "first_read", slow)
+    try:
+        await b.http.get("/collection")
+        csrf = await b.csrf("/collection")
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "value"})
+        assert r.status_code == 303
+        page = (await b.http.get("/collection")).text
+        widget = page.split("data-value-reading", 1)[1].split("</div>", 1)[0]
+        assert "Reading your whole binder to work out its value" in widget
+        assert "updates by itself" in widget and not PROMISE.search(widget)
+        assert "in a minute" not in page
+        d = (await b.http.get("/collection/api/value")).json()
+        assert d["ok"] and d["reading"] is True and "data-value-reading" in d["html"]
+        gate.set()
+        for _ in range(100):
+            d = (await b.http.get("/collection/api/value")).json()
+            if not d["reading"]:
+                break
+            await asyncio.sleep(0.05)
+        assert d["reading"] is False and "$3.84" in d["html"] and "data-value-reading" not in d["html"]
+    finally:
+        gate.set()
+        await b.aclose()
+
+
+def test_a_binder_with_no_priced_entry_shows_no_value_not_zero() -> None:
+    """Every entry unpriced: the Value is "–" (as Scan's list value), never "$0.00"."""
+    from mtg_gateway.collection import value_widget
+
+    out = value_widget(
+        {"usd": 0.0, "priced": 0, "unpriced": 1, "entries": 1, "complete": True, "day": None},
+        reading=False,
+        now=0.0,
+    )
+    assert "$0.00" not in out and "<span class='big'>–</span>" in out
+    assert "1 entry has no price" in out
+    one = value_widget(
+        {"usd": 0.0, "priced": 1, "unpriced": 0, "entries": 1, "complete": True, "day": None},
+        reading=False,
+        now=0.0,
+    )
+    assert "$0.00" in one  # a priced entry worth nothing is still a value

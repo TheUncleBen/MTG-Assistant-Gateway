@@ -11947,9 +11947,9 @@ def _next_step(
         )
     if state == "applying":
         return (
-            "Archidekt is still being updated (progress shows how far it got; a large change takes a "
-            "few minutes because the gateway paces its requests). Tell the user it is under way and "
-            "check again with proposal_status in a minute. Do not apply it again or make a new proposal."
+            "Archidekt is still being updated (progress shows how far it got; a large change takes "
+            "longer because the gateway paces its requests). Tell the user it is under way and check "
+            "again with proposal_status later. Do not apply it again or make a new proposal."
         )
     if state == "applied" and applied:
         return f"Done. {applied}"

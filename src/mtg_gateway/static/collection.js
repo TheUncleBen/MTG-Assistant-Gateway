@@ -398,6 +398,29 @@
     setTimeout(poll, 1000);
   }
 
+  /* -- the Binder's value being worked out: its widget follows the read and shows the result -- */
+  var valueReading = $("[data-value-reading]");
+  if (valueReading) {
+    var valueTries = 0;
+    var valuePoll = function () {
+      fetch("/collection/api/value", { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          valueTries = 0;
+          var wdg = valueReading.closest(".wdg");
+          if (!d.ok || !wdg) return;
+          if (d.reading) { setTimeout(valuePoll, 2000); return; }
+          if (d.html) {
+            var tmp = document.createElement("div");
+            tmp.innerHTML = d.html;
+            if (tmp.firstElementChild) wdg.replaceWith(tmp.firstElementChild);
+          }
+          var live = $("#live");
+          if (live) live.textContent = "Your binder's value is worked out.";
+        }).catch(function () { valueTries += 1; setTimeout(valuePoll, Math.min(15000, 2000 * (valueTries + 1))); });
+    };
+    setTimeout(valuePoll, 1500);
+  }
+
   /* -- Load more: the next rows, appended ---------------------------------------------------- */
   document.addEventListener("click", function (e) {
     var a = e.target.closest ? e.target.closest(".loadmore [data-load-more]") : null;

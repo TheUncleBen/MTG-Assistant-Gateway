@@ -136,6 +136,9 @@ class FakeArchidekt:
         # the same for a folder delete (deleteItems), waited for without holding up the gateway's
         # other requests (_after)
         self.hold_folder_deletes: Any = None
+        # the same for the whole-Binder read's pages (pageSize 200, binder_prices.BINDER_PAGE_SIZE),
+        # so the page's own first rows still answer
+        self.hold_whole_binder_reads: Any = None
         # Faults a verify must catch: added rows stored without their finish, or with another
         # printing of the same card (card id -> card id to store instead).
         self.add_rows_lose_finish = False
@@ -1019,6 +1022,10 @@ class FakeArchidekt:
             self.collection_queries.append(dict(request.url.params))
             if self.fail_collection_reads:
                 return httpx.Response(503, text="unavailable")
+            held = self.hold_whole_binder_reads
+            if held is not None and not held.is_set() and request.url.params.get("pageSize") == "200":
+                self.collection_queries.pop()  # counted once, when answered
+                return self._after(held, request)
             name = request.url.params.get("cardName", "").lower()
             if name:
                 rows = [r for r in rows if name in r["card"]["oracleCard"]["name"].lower()]
