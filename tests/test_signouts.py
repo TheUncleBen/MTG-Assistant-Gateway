@@ -264,6 +264,45 @@ async def test_the_first_page_after_a_long_pause_does_not_wait(tmp_path: Path, i
         await b.aclose()
 
 
+async def test_after_a_restart_an_old_yes_on_file_is_not_enough(tmp_path: Path, idp: FakeIdP) -> None:
+    """Security review 2, R2-03: after a restart a page went ahead on the provider's last yes on
+    file however old it was. Older than STORED_YES_MAX_AGE, the page waits for the provider's
+    answer; a removed member then reads nothing."""
+    from mtg_gateway.membership import STORED_YES_MAX_AGE
+
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        loop = asyncio.get_running_loop()
+        checker = h.app.state.gateway.membership
+        checker._checked.clear()  # a restart
+        getattr(checker, "_owners", {}).clear()
+        with h.db.tx() as c:
+            c.execute(
+                "UPDATE idp_grants SET checked_at = ? WHERE sub = ?",
+                (int(time.time()) - STORED_YES_MAX_AGE - 60, SUB),
+            )
+        idp.userinfo_delay = 1.0
+        t0 = loop.time()
+        assert (await b.http.get("/account/details")).status_code == 200
+        assert loop.time() - t0 >= 1.0  # waited for the provider's answer
+        # and a member removed while the gateway was down reads nothing at all
+        idp.userinfo_delay = 0.0
+        checker._checked.clear()
+        getattr(checker, "_owners", {}).clear()
+        with h.db.tx() as c:
+            c.execute(
+                "UPDATE idp_grants SET checked_at = ? WHERE sub = ?",
+                (int(time.time()) - STORED_YES_MAX_AGE - 60, SUB),
+            )
+        idp.set_groups(SUB, ["someone-else"])
+        r = await b.http.get("/account/details")
+        assert r.status_code == 302
+        assert "no longer in the group" in await reason_page(b)
+        await b.aclose()
+    assert STORED_YES_MAX_AGE == 86400
+
+
 async def test_writes_and_admin_pages_still_wait_and_an_outage_fails_closed(
     tmp_path: Path, idp: FakeIdP
 ) -> None:

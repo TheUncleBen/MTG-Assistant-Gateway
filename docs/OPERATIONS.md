@@ -368,7 +368,8 @@ secret.
    letting that sign-in in is answered at once and Authentik is asked in
    the background, and a page being read (a GET outside `/admin`) is
    answered at once whenever Authentik let that sign-in in before, so the
-   first page after a pause never waits. Writes, admin pages and assistant
+   first page after a pause never waits (after a gateway restart, only
+   while Authentik's last yes is under a day old). Writes, admin pages and assistant
    requests past those 60 seconds wait for the answer, and so does every
    request once a background check found Authentik unreachable. So a
    removed member can write or use admin pages for at most 60 seconds, and
