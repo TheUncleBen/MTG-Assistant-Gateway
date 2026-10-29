@@ -2017,13 +2017,16 @@ def deck_after_block(now: dict[str, Any], then: dict[str, Any], after: Deck) -> 
     is known for, named rather than guessed."""
     checks = then.get("checks") or {}
     unpriced = sorted({c.name for c in after.main_cards if c.relation_id is None and c.price is None})
+    # no card with a price: no total and no change to give (never "$0.00")
+    priced = bool(then.get("priced_cards", 1))
+    known = priced or bool(now.get("priced_cards", 1))
     change = round(float(then.get("price_total") or 0) - float(now.get("price_total") or 0), 2)
     return {
         "card_count": then.get("card_count"),
         "legal": checks.get("legal") if after.format else None,
         "problems": list(checks.get("problems") or []),
-        "price_total": then.get("price_total"),
-        "price_change": change,
+        "price_total": then.get("price_total") if priced else None,
+        "price_change": change if known else None,
         "unpriced_added": unpriced,
         "price_note": PRICE_NOTE + (UNPRICED_NOTE if unpriced else ""),
     }

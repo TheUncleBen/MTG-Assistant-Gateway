@@ -217,6 +217,8 @@
     x.addEventListener("click", function () { dismissToast(); if (opts.onDismiss) opts.onDismiss(); });
     toastEl.appendChild(x);
     document.body.appendChild(toastEl);
+    // a card menu's note (Pin card, Watch) may be up too: this one sits clear of it
+    if (window.MtgMenu && window.MtgMenu.placeToast) window.MtgMenu.placeToast(toastEl);
     if (!opts.error && !opts.sticky) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
     return toastEl;
   }
@@ -324,6 +326,7 @@
       if (d.ok && d.status === 202 && d.proposal_id) return awaitApply(d.proposal_id, changes, undoChanges, opts);
       if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
       var failed = new Error(d.message || "The change could not be saved.");
+      failed.code = d.error || "";
       // Archidekt never answered, so the write may have landed: the answer carries what the deck
       // shows now, and the caller draws that instead of putting the card back (D-04)
       if (d.may_have_changed && d.rows) failed.answer = d;
@@ -773,6 +776,7 @@
      When Archidekt never answered, the write may have landed: nothing is put back; the rows the
      answer carries (what the deck shows now) are drawn instead (D-04). again: a Try again's own
      failure, after which there is nothing more to put back. */
+  var NO_RETRY = ["not_found", "unknown_cards", "invalid", "forbidden", "too_large", "not_linked"];
   function notSaved(plan, job, err, again) {
     var back = again ? "" : job.undo();
     if (err && err.cancelled) { dismissToast(); return; }
@@ -791,10 +795,24 @@
       }
     }
     var why = ((err && err.message) || "no connection").replace(/\.$/, "");
+    var said = job.what + " not saved: " + why + "." + (back ? " " + back : "");
+    // a refusal of the change itself (no such card, a change the deck can't take) would fail the
+    // same way again: no Try again then; a name that is no card gets a card search instead
+    if (err && NO_RETRY.indexOf(err.code) >= 0) {
+      var acts = [];
+      var added = (plan.changes || []).filter(function (ch) { return ch.action === "add"; })[0];
+      if (added && err.code === "not_found" || added && err.code === "unknown_cards") {
+        var find = el("a", "btn", "Search cards");
+        find.href = "/cards?q=" + enc(added.card_name);
+        acts.push(find);
+      }
+      toast(said, { error: true, actions: acts });
+      return;
+    }
     var retry = el("button", "btn", "Try again");
     retry.type = "button";
     retry.addEventListener("click", function () { dismissToast(); sendAgain(plan, job); });
-    toast(job.what + " not saved: " + why + "." + (back ? " " + back : ""), { error: true, actions: [retry] });
+    toast(said, { error: true, actions: [retry] });
   }
   // How the cards a change names look on the page, in the fields that change sets: the same
   // before and after a draw means the draw did not take the change
@@ -1271,14 +1289,17 @@
       var t = sp.textContent;
       if (/^Size:/.test(t) && st.card_count !== undefined) sp.textContent = "Size: " + st.card_count;
       else if (/distinct cards?$/.test(t) && st.distinct !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.distinct, "distinct card") : st.distinct + " distinct cards";
-      else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) b.textContent = money(st.price_total); }
+      else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) b.textContent = costText(st); }
       else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = String(st.salt_total); }
     });
     var tiles = $$(".stats .tiles .tile");
     if (tiles[0] && st.card_count !== undefined) $("b", tiles[0]).textContent = String(st.card_count);
     if (tiles[1] && st.land_count !== undefined) $("b", tiles[1]).textContent = String(st.land_count);
-    if (tiles[2] && st.price_total !== undefined && st.price_total !== null) $("b", tiles[2]).textContent = money(st.price_total);
+    if (tiles[2] && st.price_total !== undefined && st.price_total !== null) $("b", tiles[2]).textContent = costText(st);
   }
+  // the deck's cost as the page draws it on a load (deckpage.est_cost_html): a dash while no card
+  // has a price, never "$0.00"
+  function costText(st) { return st.priced_cards === 0 ? "–" : money(st.price_total); }
   // adds: the names this save added (a quick add): a row of one of them with no card on the page
   // is drawn from its markup; any other such row is a card a pending edit holds off the page
   function drawRows(rows, names, adds) {
@@ -1452,6 +1473,11 @@
   // which printing, and when the finish had to change with it)
   function applyAnswer(d, changes, undoChanges, replay, note) {
     var saved = note || "Saved. Snapshot kept under History.";
+    // saved, but the deck now breaks a rule it kept (a second copy in a singleton format): said,
+    // with Undo, and the note stays until dismissed
+    var warns = (d.warnings || []).filter(function (w) { return typeof w === "string" && w; });
+    var how = warns.length ? { warn: true, sticky: true } : {};
+    if (warns.length) saved += " " + warns.join(" ");
     var names = namesOf(changes);
     drawRows(d.rows, names, addsOf(changes));
     drawStats(d);
@@ -1475,12 +1501,12 @@
       setTimeout(function () {
         api(editUrl, { refresh: true, names: names }).then(function (r) {
           if (r.ok) { drawRows(r.rows, names); drawStats(r); if (menu && !menuCard.isConnected) closeMenu(); }
-          toast(saved, { actions: actions });
-        }).catch(function () { toast(saved, { actions: actions }); });
+          toast(saved, Object.assign({ actions: actions }, how));
+        }).catch(function () { toast(saved, Object.assign({ actions: actions }, how)); });
       }, 1500);
       return;
     }
-    toast(saved, { actions: actions });
+    toast(saved, Object.assign({ actions: actions }, how));
   }
 
   // -- the edits a card offers (menu and viewer alike) ----------------------------------------

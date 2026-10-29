@@ -920,3 +920,62 @@ async def test_a_read_too_old_to_reuse_is_made_again(stack: Stack, monkeypatch) 
         assert len(gets) == 4  # propose, apply, check before the write, verify
     finally:
         await b.aclose()
+
+
+async def test_a_save_that_breaks_the_rules_says_so_and_an_unpriced_deck_has_no_price(stack: Stack) -> None:  # noqa: F811
+    """Independent review of 0.7.46: a Quick add of a second copy in a Commander deck said only
+    "Added", while the same change as a proposal is high risk for breaking the singleton rule. The
+    page's answer names the rules the save broke (``warnings``), and says how many cards have a
+    price (``priced_cards``), so a deck with none shows "–", not "$0.00"."""
+    _legal_commander_deck(stack)
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "add", "card_name": "Cultivate", "quantity": 1}]},
+        )
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["applied"] is True
+        assert any(
+            w.startswith("The deck now breaks its format's rules:")
+            and "more than one copy" in w
+            and "Cultivate" in w
+            for w in d["warnings"]
+        ), d.get("warnings")
+        assert d["stats"]["priced_cards"] == 0 and d["stats"]["price_total"] in (0, 0.0, None)
+        # a save that breaks nothing new carries no warning
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 1}]},
+        )
+        assert r.status_code == 201, r.text
+        assert not r.json().get("warnings")
+    finally:
+        await b.aclose()
+
+
+def test_deck_after_has_no_price_total_when_nothing_is_priced() -> None:
+    from mtg_gateway.archidekt import Deck
+    from mtg_gateway.decks import deck_after_block
+
+    after = Deck(
+        id="1", name="d", owner="o", updated_at="", cards=[], categories=[], raw={}, format="commander"
+    )
+    out = deck_after_block(
+        {"price_total": 0.0, "priced_cards": 0}, {"price_total": 0.0, "priced_cards": 0}, after
+    )
+    assert out["price_total"] is None and out["price_change"] is None
+    out = deck_after_block(
+        {"price_total": 1.0, "priced_cards": 1}, {"price_total": 3.5, "priced_cards": 2}, after
+    )
+    assert out["price_total"] == 3.5 and out["price_change"] == 2.5
+    # the only priced card removed: no total now, but the change is known
+    out = deck_after_block(
+        {"price_total": 1.0, "priced_cards": 1}, {"price_total": 0.0, "priced_cards": 0}, after
+    )
+    assert out["price_total"] is None and out["price_change"] == -1.0
