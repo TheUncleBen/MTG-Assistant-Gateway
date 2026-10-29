@@ -1975,6 +1975,40 @@ async def test_a_research_call_past_the_members_share_waits_its_turn_and_says_so
     assert "waited" not in json.dumps(plain.model_dump(mode="json"))
 
 
+async def test_a_queued_research_call_spends_no_archidekt_budget_and_the_queue_has_a_cap() -> None:
+    """Security review 2, R2-06: a research call that reads Archidekt took from the member's
+    Archidekt budget before it waited, so one refused busy after its wait had still spent it; and
+    any number of one member's calls could wait at once. Now the budget is spent once the call has
+    its slot, and past MAX_WAITING_CALLS_PER_USER waiting calls another is refused at once."""
+    from mtg_gateway import mf_proxy
+    from mtg_gateway.mf_proxy import is_busy
+
+    spent: list[str] = []
+    proxy = MysticForgeProxy(
+        "http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()), queue_wait=0.2
+    )
+    proxy._listed = True
+    proxy.archidekt_budget = lambda owner: spent.append(owner)  # None: room left
+    proxy._in_flight["u1"] = 2
+    proxy._started["u1"] = [time.monotonic(), time.monotonic()]
+    out = await proxy.call("archidekt_deck", {"deck_id": 42}, owner="u1", internal=True)
+    assert is_busy(out), out
+    assert spent == []  # refused busy after its wait: nothing taken from the budget
+    # the cap on waiting calls: the next one does not wait at all
+    proxy.queue_wait = 5.0
+    proxy._waiting["u1"] = mf_proxy.MAX_WAITING_CALLS_PER_USER
+    start = time.monotonic()
+    out = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
+    assert is_busy(out) and time.monotonic() - start < 1.0, out
+    assert proxy._waiting["u1"] == mf_proxy.MAX_WAITING_CALLS_PER_USER  # its count is unchanged
+    # a call that gets its slot spends the budget as before, and leaves no waiting count behind
+    proxy._waiting.clear()
+    proxy._in_flight.clear()
+    proxy._started.clear()
+    await proxy.call("archidekt_deck", {"deck_id": 42}, owner="u1", internal=True)
+    assert spent == ["u1"] and proxy._waiting == {} and proxy._in_flight == {}
+
+
 class _ListingDown:
     """A Mystic Forge client whose tool listing fails while ``down`` is set (as a fresh gateway's
     first listing can, while the network attaches); calls still reach the fake Mystic Forge."""

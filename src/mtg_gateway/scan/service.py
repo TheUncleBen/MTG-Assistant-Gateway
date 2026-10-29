@@ -50,6 +50,10 @@ MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per acco
 # The printing picker's lookups wait this long for one of the account's places before "busy" (a
 # deck page opens several at once)
 LOOKUP_WAIT_SECONDS = 4.0
+# At most this many of one account's lookups wait for a place at once; one more is busy without
+# waiting (security review 2, R2-06)
+MAX_LOOKUP_WAITERS_PER_USER = 16
+MAX_RESOLVE_WAITERS_PER_USER = 4  # the same for resolve calls waiting their account's one turn
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
 # A second resolve call from one account waits this long for the first to finish (assistants send
@@ -469,6 +473,8 @@ class ScanService:
         self._in_flight: set[str] = set()
         self.queue_wait = RESOLVE_WAIT_SECONDS
         self._lookups: dict[str, int] = {}
+        self._lookup_waiting: dict[str, int] = {}  # an account's lookups waiting in _free_slot
+        self._resolve_waiting: dict[str, int] = {}  # an account's resolve calls waiting their turn
         # the picker lists last read (search_options), when, and the read running now
         self._options: dict[str, Any] | None = None
         self._options_error: ScanError | None = None
@@ -482,7 +488,8 @@ class ScanService:
     ) -> list[Resolution]:
         """Resolve ``inputs``. With ``owner`` set, one call per account runs at a time; a second
         concurrent call waits up to ``queue_wait`` seconds for its turn (the seconds it waited go
-        on ``waited`` when it waited at all), then is rejected (kind ``busy``, with
+        on ``waited`` when it waited at all; at most MAX_RESOLVE_WAITERS_PER_USER wait at once),
+        then is rejected (kind ``busy``, with
         suggested_wait) rather than queued behind the shared pacer."""
         if not inputs:
             raise ScanError("invalid", "nothing to resolve")
@@ -491,8 +498,17 @@ class ScanService:
         if owner is None:
             return await self._resolve(inputs)
         start = time.monotonic()
-        while owner in self._in_flight and time.monotonic() - start < self.queue_wait:
-            await asyncio.sleep(0.05)
+        if owner in self._in_flight and self._resolve_waiting.get(owner, 0) < MAX_RESOLVE_WAITERS_PER_USER:
+            self._resolve_waiting[owner] = self._resolve_waiting.get(owner, 0) + 1
+            try:
+                while owner in self._in_flight and time.monotonic() - start < self.queue_wait:
+                    await asyncio.sleep(0.05)
+            finally:
+                left = self._resolve_waiting.get(owner, 1) - 1
+                if left > 0:
+                    self._resolve_waiting[owner] = left
+                else:
+                    self._resolve_waiting.pop(owner, None)
         if owner in self._in_flight:
             raise ScanError(
                 "busy",
@@ -533,11 +549,21 @@ class ScanService:
     async def _free_slot(self, owner: str | None) -> None:
         """Wait up to LOOKUP_WAIT_SECONDS for one of ``owner``'s lookup places (``_lookup_slot``
         then takes it, with nothing awaited in between); after that, ``_lookup_slot`` says busy."""
-        if owner is None:
+        if owner is None or self._lookups.get(owner, 0) < MAX_LOOKUPS_PER_USER:
             return
+        if self._lookup_waiting.get(owner, 0) >= MAX_LOOKUP_WAITERS_PER_USER:
+            return  # enough of this account's lookups wait already: busy at once
         end = time.monotonic() + LOOKUP_WAIT_SECONDS
-        while self._lookups.get(owner, 0) >= MAX_LOOKUPS_PER_USER and time.monotonic() < end:
-            await asyncio.sleep(0.05)
+        self._lookup_waiting[owner] = self._lookup_waiting.get(owner, 0) + 1
+        try:
+            while self._lookups.get(owner, 0) >= MAX_LOOKUPS_PER_USER and time.monotonic() < end:
+                await asyncio.sleep(0.05)
+        finally:
+            left = self._lookup_waiting.get(owner, 1) - 1
+            if left > 0:
+                self._lookup_waiting[owner] = left
+            else:
+                self._lookup_waiting.pop(owner, None)
 
     async def _resolve(self, inputs: list[CardInput]) -> list[Resolution]:
         # The wall-clock budget runs from the start of the call, batched pass included.
