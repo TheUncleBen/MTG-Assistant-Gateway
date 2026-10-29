@@ -305,6 +305,9 @@ BLOCKED_TOOLS: frozenset[str] = frozenset(
 # finish (assistants send tool calls in parallel, AT-38), then is refused ("busy").
 MAX_CALLS_PER_USER = 2
 QUEUE_WAIT_SECONDS = 15.0
+# At most this many of one member's calls wait at once; one more is refused busy without waiting
+# (security review 2, R2-06), so one account can't pile up waiting calls.
+MAX_WAITING_CALLS_PER_USER = 6
 # Every proxied call is cut off after this long (a goldfish run included), so no call holds a
 # slot for hours. Mystic Forge itself may keep working on a cancelled call until it finishes.
 CALL_DEADLINE_SECONDS = 120.0
@@ -521,6 +524,7 @@ class MysticForgeProxy:
         self.max_calls_per_user = max_calls_per_user
         self.deadline = deadline
         self._in_flight: dict[str, int] = {}
+        self._waiting: dict[str, int] = {}  # a member's calls waiting for a slot (_wait_turn)
         self._started: dict[str, list[float]] = {}  # when each of a member's running calls began
         self._client_factory = client_factory or (lambda: Client(url))
         self._tools: list[dict[str, Any]] = []
@@ -660,10 +664,6 @@ class MysticForgeProxy:
                     except DeckError as exc:
                         return _deck_refusal(exc)
                     arguments = {**arguments, key: text}  # read here: nothing for the budget below
-        if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
-            refused = self.archidekt_budget(owner)
-            if refused:
-                return _refusal(refused)
         waited = 0.0
         if owner is not None:
             waited = await self._wait_turn(owner)
@@ -677,6 +677,11 @@ class MysticForgeProxy:
             # double-faced or split card by its front face only, as reports already send it.
             arguments = _front_face_arguments(arguments)
         try:
+            # spent once the call has its slot, so one refused busy after its wait spends nothing
+            if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
+                refused = self.archidekt_budget(owner)
+                if refused:
+                    return _refusal(refused)
             if isinstance(arguments, dict):
                 if not self._listed:
                     # Learn which tools take a params object. A flat call has no other way to
@@ -708,11 +713,25 @@ class MysticForgeProxy:
 
     async def _wait_turn(self, owner: str) -> float:
         """Wait up to ``queue_wait`` seconds while ``owner`` runs their share of calls; the seconds
-        waited. ``call`` takes the slot right after, with nothing awaited in between."""
+        waited. ``call`` takes the slot right after, with nothing awaited in between. With
+        MAX_WAITING_CALLS_PER_USER of the member's calls already waiting, no wait (``call`` then
+        says busy)."""
         start = time.monotonic()
+        if self._in_flight.get(owner, 0) < self.max_calls_per_user:
+            return 0.0
+        if self._waiting.get(owner, 0) >= MAX_WAITING_CALLS_PER_USER:
+            return 0.0
         end = start + self.queue_wait
-        while self._in_flight.get(owner, 0) >= self.max_calls_per_user and time.monotonic() < end:
-            await anyio.sleep(0.05)
+        self._waiting[owner] = self._waiting.get(owner, 0) + 1
+        try:
+            while self._in_flight.get(owner, 0) >= self.max_calls_per_user and time.monotonic() < end:
+                await anyio.sleep(0.05)
+        finally:
+            left = self._waiting.get(owner, 1) - 1
+            if left > 0:
+                self._waiting[owner] = left
+            else:
+                self._waiting.pop(owner, None)
         return time.monotonic() - start
 
     def _retry_after(self, owner: str) -> int | None:

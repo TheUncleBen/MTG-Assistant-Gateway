@@ -8,6 +8,7 @@ not made in the card's finish moving the finish with it."""
 from __future__ import annotations
 
 import asyncio
+import time
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -182,6 +183,31 @@ async def test_printings_wait_a_moment_for_the_accounts_other_lookups(
         assert r.status_code == 429 and r.json()["error"] == "busy"
     finally:
         scan._lookups.pop("user-1", None)
+        await b.aclose()
+
+
+async def test_waiting_printing_lookups_have_a_cap_per_account(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Security review 2, R2-06: past MAX_LOOKUP_WAITERS_PER_USER lookups of one account waiting
+    for a place, another is refused busy at once instead of joining the queue."""
+    from mtg_gateway.scan import service as scan_service
+
+    stack.sf.extra_cards = sol_ring_printings()
+    scan = stack.h.app.state.gateway.scan
+    monkeypatch.setattr(scan_service, "LOOKUP_WAIT_SECONDS", 5.0)
+    scan._lookups["user-1"] = scan_service.MAX_LOOKUPS_PER_USER
+    scan._lookup_waiting["user-1"] = scan_service.MAX_LOOKUP_WAITERS_PER_USER
+    b = await linked(stack)
+    try:
+        start = time.monotonic()
+        r = await b.http.get(f"/scan/api/prints?oracle_id={SOL_RING_ORACLE}")
+        assert r.status_code == 429 and r.json()["error"] == "busy", r.text
+        assert time.monotonic() - start < 2.0
+        assert scan._lookup_waiting["user-1"] == scan_service.MAX_LOOKUP_WAITERS_PER_USER
+    finally:
+        scan._lookups.pop("user-1", None)
+        scan._lookup_waiting.pop("user-1", None)
         await b.aclose()
 
 

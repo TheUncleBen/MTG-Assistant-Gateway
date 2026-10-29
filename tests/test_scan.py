@@ -498,6 +498,19 @@ async def test_one_resolve_in_flight_per_user(stack: Stack) -> None:
     again: list[float] = []
     assert (await service.resolve([CardInput("Sol Ring")], owner="alice", waited=again))[0].status == "exact"
     assert again == [] or again[0] < 0.1
+    # Security review 2, R2-06: with MAX_RESOLVE_WAITERS_PER_USER of the account's calls already
+    # waiting, one more is busy at once instead of joining them.
+    service._in_flight.add("alice")
+    service._resolve_waiting["alice"] = scan_service.MAX_RESOLVE_WAITERS_PER_USER
+    try:
+        start = time.monotonic()
+        with pytest.raises(ScanError) as exc:
+            await service.resolve([CardInput("Sol Ring")], owner="alice")
+        assert exc.value.kind == "busy" and time.monotonic() - start < 1.0
+        assert service._resolve_waiting["alice"] == scan_service.MAX_RESOLVE_WAITERS_PER_USER
+    finally:
+        service._in_flight.discard("alice")
+        service._resolve_waiting.pop("alice", None)
 
 
 async def test_resolve_cards_says_when_it_waited_its_turn(stack: Stack, monkeypatch) -> None:
