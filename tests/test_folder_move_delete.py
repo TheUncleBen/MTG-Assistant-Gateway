@@ -137,7 +137,7 @@ async def test_the_delete_box_counts_decks_packages_and_folders_inside(stack: St
         assert r.status_code == 200, r.text
         got = r.json()
         assert (got["name"], got["decks"], got["packages"], got["folders"]) == ("Commander", 3, 1, 2)
-        assert got["backups"] is True
+        assert "backups" not in got  # a delete makes no backup copy on Archidekt (decks.DELETE_KEEPS_NO_COPY)
     finally:
         await b.aclose()
 
@@ -472,7 +472,7 @@ async def test_the_deck_boxes_rename_move_delete_and_export(stack: Stack) -> Non
         assert r.status_code == 200 and r.json()["notice"] == "moved"
         assert stack.ark.deck_folder[42] == ids["archive"]
         info = (await b.http.get("/decks/api/decks/42/delete-info")).json()
-        assert info["name"] == "Renamed deck" and info["cards"] > 0 and info["backups"] is True
+        assert info["name"] == "Renamed deck" and info["cards"] > 0 and "backups" not in info
         exp = (await b.http.get("/decks/api/decks/42/export")).json()
         assert exp["name"] == "Renamed deck" and "Sol Ring" in exp["plain"]
         assert [f["label"] for f in exp["files"]] == [

@@ -261,7 +261,7 @@ async def test_deck_settings_use_the_shared_form_rows(stack: Stack) -> None:
         assert "not available through the gateway yet" not in page
         # delete: red outline opening the typed-name box the page holds
         assert "class='btn btn-outline-danger' href='/decks/42/delete' data-box-open='delete'" in page
-        assert "when backups are on." in page and "id='delete' role='dialog'" in page
+        assert "no copy is made on Archidekt." in page and "id='delete' role='dialog'" in page
         assert "id='ds-delete'" in page
         assert "class='panel settings'" not in page
     finally:

@@ -203,9 +203,9 @@
       box.setTitle("Delete “" + name + "”?");
       var body = el("div", "stack");
       var n = info.cards || 0;
+      // no copy on Archidekt for a delete: the words of decks.DELETE_KEPT_NOTE
       body.appendChild(el("p", null, "This deletes the deck (" + n + " card" + (n === 1 ? "" : "s") + ") from your Archidekt account. "
-        + "A snapshot of the deck is kept under History" + (info.backups ? ", and a private copy is made in your backup folder on Archidekt first" : "")
-        + ". Archidekt itself has no undo for a deleted deck."));
+        + "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck. Archidekt itself has no undo for a deleted deck."));
       var input = textInput("", { maxlength: 200, placeholder: name });
       body.appendChild(field("Type the deck's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete this deck", "danger", function () {
@@ -500,12 +500,12 @@
       if (said) body.appendChild(el("p", "notice warn", said));
       body.appendChild(el("p", null, "This deletes, on Archidekt:"));
       var ul = el("ul");
-      ul.appendChild(el("li", null, plural(c.decks, "deck") + ": each gets a snapshot under History first"
-        + (c.backups ? ", and a private copy in your backup folder when backups are on" : "")));
+      ul.appendChild(el("li", null, plural(c.decks, "deck")
+        + ": each gets a snapshot under History first (no copy on Archidekt, and a snapshot can't be restored onto a deleted deck)"));
       ul.appendChild(el("li", null, plural(c.packages, "card package") + ": no snapshot or copy, " + (c.packages === 1 ? "it is" : "they are") + " lost"));
       ul.appendChild(el("li", null, plural(c.folders, "folder") + " inside it, and the folder itself"));
       body.appendChild(ul);
-      body.appendChild(el("p", null, "The gateway makes the snapshots and copies first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
+      body.appendChild(el("p", null, "The gateway makes the snapshots first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
       var input = textInput("", { maxlength: 100, placeholder: name });
       body.appendChild(field("Type the folder's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete folder", "danger", function () {

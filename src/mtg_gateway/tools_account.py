@@ -286,9 +286,9 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "Step 1 of deleting one of the user's own Archidekt decks. Only when the user asked for this "
             "deck to be deleted. Returns a proposal (kind 'action', risk 'destructive') that only the user "
             "can approve, on the review page, whatever their approval mode: never call "
-            "apply_proposal for it. The gateway keeps a snapshot first (and a backup copy on Archidekt when "
-            "backups are on); Archidekt itself has no undo. A change to the deck after the proposal stops "
-            "the deletion."
+            "apply_proposal for it. The gateway keeps a snapshot first, but no backup copy is made on "
+            "Archidekt, and a snapshot can't be restored onto a deleted deck; Archidekt itself has no "
+            "undo. A change to the deck after the proposal stops the deletion."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

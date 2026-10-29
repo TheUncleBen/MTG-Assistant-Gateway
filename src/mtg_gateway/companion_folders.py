@@ -282,7 +282,6 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
             decks=len(got["decks"]),
             packages=len(got["packages"]),
             folders=len(got["folders"]),
-            backups=bool(decks.live.get("archidekt_backups")),
         )
 
     @server.custom_route("/decks/api/folders/{fid}/delete", methods=["POST"], include_in_schema=False)
@@ -390,9 +389,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         except DeckError as exc:
             return _from(exc)
         cards = sum(c.quantity for c in deck.cards if deck.in_deck(c))
-        return ok(
-            name=deck.name or "Unnamed deck", cards=cards, backups=bool(decks.live.get("archidekt_backups"))
-        )
+        return ok(name=deck.name or "Unnamed deck", cards=cards)
 
     @server.custom_route("/decks/api/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
     async def deck_delete(request: Request) -> Response:

@@ -50,7 +50,7 @@ from .deck_stats import (
     primary_category,
     primary_type,
 )
-from .decks import mana_value_text, split_label
+from .decks import DELETE_KEPT_NOTE, mana_value_text, split_label
 from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
 from .theme import SPINNER, card_size_control, esc, icon, plural
@@ -603,7 +603,7 @@ def delete_box_html(
     title = deck_title(deck)
     n = sum(c.quantity for c in deck.cards if deck.in_deck(c))
     # no backup copy on Archidekt for a delete (decks.DELETE_KEEPS_NO_COPY), whatever ``backups`` is
-    undo = "A snapshot of the deck is kept under History. Archidekt itself has no undo for a deleted deck."
+    undo = DELETE_KEPT_NOTE
     body = (
         (ui.notice(error, "error", role="alert") if error else "")
         + f"<form id='delf' method='post' action='/decks/{did}/delete' class='deleteform'>"

@@ -79,8 +79,9 @@ renames, moves, exports, compares, clones or deletes it; a folder's menu makes
 a folder inside it, renames, moves or deletes it. Deleting a folder deletes
 everything inside it on Archidekt: the box lists how many decks, card packages
 and folders that is and asks you to type the folder's name. The gateway first
-makes a snapshot of every deck (and a copy in your backup folder when backups
-are on) and stops if any of them fails; card packages get no snapshot or copy.
+makes a snapshot of every deck (no copy is made on Archidekt, and a snapshot
+can't be restored onto a deleted deck) and stops if any of them fails; card
+packages get no snapshot or copy.
 The backup folder can't be moved or deleted, and a folder holding it can't be
 moved or deleted. The assistant can't move or delete folders.
 
@@ -222,8 +223,8 @@ One deck:
   runs Forge: the same run without the Forge games), Deck settings, Export
   deck, History and snapshots, **Delete deck**, Compare with another deck,
   Deck stats and Open on Archidekt. Deleting asks you to type the deck's name; a snapshot is
-  kept under History and, when backups are on, a copy in your backup folder
-  on Archidekt. Archidekt itself has no undo for a deleted deck.
+  kept under History, but no copy is made on Archidekt, and a snapshot can't be
+  restored onto a deleted deck. Archidekt itself has no undo for a deleted deck.
 - **Deck settings** holds the name, format, bracket, description and
   privacy, and also the **cover image** (any card of the deck, or Archidekt's
   automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
@@ -606,7 +607,7 @@ mentioned at the end.
 - Once a day while watchlists are on: reading the decks you watch and, while you open your Binder at least every 60 days, your whole collection, to keep their prices.
 - Reading your decks (private ones included), folders, tags and collection.
 - Reading, as you, other people's decks and comment threads you or your assistant look at and the list of people you follow, and looking up the cards in the changes you make.
-- Making the deck, folder, tag and binder changes you make yourself, approve, or let your assistant make through your approval mode, including deleting a deck when you ask. It may first save a copy of the deck in a backup folder on your Archidekt account (the person who runs the server can turn that off).
+- Making the deck, folder, tag and binder changes you make yourself, approve, or let your assistant make through your approval mode, including deleting a deck when you ask. Before it changes a deck it may first save a copy of the deck in a backup folder on your Archidekt account (the person who runs the server can turn that off); deleting a deck makes no copy.
 - The likes, bookmarks, follows and comments you make yourself on these pages. No assistant can do those.
 
 *What is stored*

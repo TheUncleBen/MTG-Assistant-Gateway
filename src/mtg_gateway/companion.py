@@ -231,8 +231,7 @@ LIST_OK_MESSAGES = {
     "folder_created": "Folder created on Archidekt.",
     "folder_renamed": "Folder renamed on Archidekt.",
     "folder_moved": "Folder moved on Archidekt.",
-    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History; when "
-    "backups are on, a copy of each deck is in your backup folder.",
+    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History.",
 }
 DECK_ERR_MESSAGES = {
     "report_failed": "The deck report could not be made. Try again later.",

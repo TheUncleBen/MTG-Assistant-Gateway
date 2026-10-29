@@ -93,8 +93,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "at and the list of people you follow, and looking up the cards in the changes you make.",
             "Making the deck, folder, tag and binder changes you make yourself, approve, or let "
             "your assistant make through your approval mode, including deleting a deck when you "
-            "ask. It may first save a copy of the deck in a backup folder on your Archidekt account "
-            "(the person who runs the server can turn that off).",
+            "ask. Before it changes a deck it may first save a copy of the deck in a backup folder on "
+            "your Archidekt account (the person who runs the server can turn that off); deleting a "
+            "deck makes no copy.",
             "The likes, bookmarks, follows and comments you make yourself on these pages. No "
             "assistant can do those.",
         ),
