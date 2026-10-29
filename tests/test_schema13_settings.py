@@ -127,7 +127,7 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 18
+        assert new.schema_version == db_module.SCHEMA_VERSION == 19
         c = new._conn
         (count,) = c.execute("SELECT COUNT(*) FROM snapshots").fetchone()
         assert count == db_module._STEP_13_BATCH * 5 + 38

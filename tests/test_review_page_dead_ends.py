@@ -160,3 +160,25 @@ async def test_a_waiting_edit_says_the_price_once_applied(stack: Stack) -> None:
         assert f"${after['price_total']:,.2f}" in line, line
     if after["unpriced_added"]:
         assert "Opt" in line, line
+
+
+def test_an_older_database_gets_the_deck_after_column(tmp_path) -> None:
+    """Schema 19 keeps a waiting deck edit's deck once applied; a schema 18 database gains the
+    column on start, and a proposal saved before it reads as having none."""
+    import sqlite3
+
+    from mtg_gateway import db as db_module
+
+    path = tmp_path / "old.db"
+    db_module.Database(str(path)).close()
+    raw = sqlite3.connect(path)
+    raw.execute("ALTER TABLE proposals DROP COLUMN deck_after_json")
+    raw.execute("PRAGMA user_version = 18")
+    raw.commit()
+    raw.close()
+    again = db_module.Database(str(path), upgrade_dir=tmp_path / "before-upgrade")
+    try:
+        assert again.schema_version == db_module.SCHEMA_VERSION == 19
+        assert "deck_after_json" in {r[1] for r in again._conn.execute("PRAGMA table_info(proposals)")}
+    finally:
+        again.close()
