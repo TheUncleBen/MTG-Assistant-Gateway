@@ -1560,8 +1560,10 @@ main.wrap.ui-wide{max-width:1200px}
   border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
 .ui-drawer .pills{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .75rem}
 /* the value column may shrink (minmax(0,…)): at large text on a narrow screen a value such as an
-   app's name wraps instead of pushing the list, and the page, past the window's edge */
-.ui-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.35rem 1rem;margin:0 0 1rem;
+   app's name wraps instead of pushing the list, and the page, past the window's edge. The label
+   column takes at most half the width (its words wrap past that), so a value kept on one line,
+   such as a time, still has room beside it */
+.ui-meta{display:grid;grid-template-columns:fit-content(50%) minmax(0,1fr);gap:.35rem 1rem;margin:0 0 1rem;
   font-size:.95rem}
 .ui-meta dt{color:var(--text-muted)} .ui-meta dd{margin:0;overflow-wrap:anywhere}
 .ui-meta dd .ui-app{white-space:normal}
