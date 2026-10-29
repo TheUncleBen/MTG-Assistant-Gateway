@@ -125,7 +125,7 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     assert "https://cards.scryfall.io/small/front/0/0/" in page  # Esper Sentinel's picture
     assert "<span class='thumb' aria-hidden='true'><span>Mana Crypt</span></span>" in page  # none: a name box
     assert "MH2 12 · Normal" in page and "Cheapest printing · Foil" in page and "Non-foil" not in page
-    assert "<span class='none'>No alert</span>" in page
+    assert "<span class='none'>No price alert</span>" in page
     assert "class='ui-lbl blue'" in page and "Above $45.00 · below $30.00</span>" in page
     assert "7 days <span class='dl down'>" in page and "<span class='kv'>in 7 days</span>" in page
     assert len(re.findall(r"<div class='wx' id='wx-[\w]+' hidden>", page)) == 5  # every panel closed
@@ -154,7 +154,7 @@ def test_chips_search_finish_and_sort() -> None:
 
     page = _page()
     assert "aria-current='true'>All <span class='n'>4</span>" in page
-    assert "With an alert <span class='n'>3</span>" in page
+    assert "With a price alert <span class='n'>3</span>" in page
     assert (
         "Up in 7 days <span class='n'>1</span>" in page and "Down in 7 days <span class='n'>3</span>" in page
     )
@@ -177,7 +177,7 @@ def test_an_opened_row_has_its_chart_range_alert_and_remove() -> None:
     assert "class='pcl'" in panel and "<div class='pc-x' aria-hidden='true'>" in panel
     assert "Price history table" in panel and panel.count("<tr><th scope='row'>") == 30
     assert "Price alert <span class='ui-lbl blue'>" in panel and ">On</span>" in panel
-    assert "<button class='btn-plain' type='submit'>Save alert</button>" in panel
+    assert "<button class='btn-plain' type='submit'>Save price alert</button>" in panel
     assert "class='btn btn-plain' href='/cards?q=Mana%20Crypt'>Open card</a>" in panel
     assert "<button class='btn-outline-danger' type='submit' form='rm-w_b'" in panel
     # 20 days kept: no Full history button

@@ -470,7 +470,7 @@ and Watchlist) keeps the price of cards and decks you choose, once a day:
   30 days, a small chart of its price over time, and the same numbers as a
   table under **Price history table**.
 - **Price alert**: a move of more than a percentage from one day to the
-  next, or a price it rises above or falls below. Alerts reach you through
+  next, or a price it rises above or falls below. Price alerts reach you through
   push notifications (below).
 
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and

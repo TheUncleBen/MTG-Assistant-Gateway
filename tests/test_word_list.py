@@ -3,7 +3,8 @@ menus and toasts, on the cards in the chat, in the Android app, in the tool text
 relays, in the skill and in the docs use the one approved word list:
 
 - **Binder** for the member's own cards ("Add to binder", "Remove from binder");
-- **Alerts** for Archidekt's bell, **Push notifications** for what the app sends to a phone;
+- **Alerts** for Archidekt's bell, **Push notifications** for what the app sends to a phone, and
+  **Price alerts** for a watched card's price lines (never the bare "Alerts");
 - **Assistant** for the hub, with its tabs Proposals, History and Reports;
 - **Apply** for sending a change to Archidekt ("Apply now" only where the assistant could too;
   "Only you can apply" where it can't);
@@ -61,6 +62,16 @@ RETIRED: list[tuple[str, re.Pattern[str], str]] = [
         "push notifications",
         re.compile(rf"(?<!push )(?<!Push )(?<!Android's ){_C}notifications{_E}"),
         "Push notifications",
+    ),
+    (
+        # "Alerts" is Archidekt's bell: a watched card's price alert never takes the bare word
+        "price alerts",
+        re.compile(
+            rf"{_C}Alerts? (?:saved|reach you){_E}|{_C}With an alert{_E}|{_C}(?:Nothing past|crosses your) "
+            rf"an? alert{_E}|past an alert line|{_C}No alert{_E}|{_C}Save alert{_E}|{_C}Alerts?\s+\d[\d,]*\s*"
+            r"(?:<small>)?cards? ha(?:s|ve) one"
+        ),
+        "Price alert (a watched card's), never the bare “Alerts”",
     ),
     ("printings", re.compile(r"Change printing|Art variants"), "Printings…"),
     (
@@ -341,3 +352,20 @@ async def test_rendered_pages_use_the_word_list(stack: Stack) -> None:
         assert not found, "\n".join(found)
     finally:
         await b.aclose()
+
+
+def test_the_watchlist_names_a_card_s_alert_a_price_alert() -> None:
+    """Independent review of 0.7.46: the Watchlist's widget was "Alerts" with the bell, the word and
+    icon of Archidekt's Alerts in the nav. It is "Price alerts" with a price tag, and the rendered
+    page meets no retired word."""
+    from mtg_gateway.theme import icon
+    from mtg_gateway.watchlist_page import Query, watchlist_page_html
+
+    from .test_watchlist_page import DATA, NOW
+
+    page = watchlist_page_html(DATA, {}, "tok", Query(), now=NOW)
+    widgets = page.split("aria-label='At a glance'>")[1].split("</section>")[0]
+    assert f"<span class='lab'>{icon('tag')}Price alerts</span>" in widgets
+    assert icon("bell") not in page
+    found = _report("/watchlist", _visible(page))
+    assert not found, "\n".join(found)

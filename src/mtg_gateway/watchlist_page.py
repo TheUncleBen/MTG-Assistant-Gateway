@@ -32,7 +32,7 @@ from .theme import esc
 
 PAGE = ui.PER_PAGE
 FINISH_WORDS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
-CHIPS = (("", "All"), ("alert", "With an alert"), ("up", "Up in 7 days"), ("down", "Down in 7 days"))
+CHIPS = (("", "All"), ("alert", "With a price alert"), ("up", "Up in 7 days"), ("down", "Down in 7 days"))
 SORTS = (
     ("", "Sort: Name"),
     ("price", "Price"),
@@ -45,7 +45,7 @@ SHORT_DAYS = 30
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 OK_NOTES = {
     "card_added": "Added to your watchlist.",
-    "card_updated": "Alerts saved.",
+    "card_updated": "Price alert saved.",
     "card_removed": "Removed from your watchlist.",
     "deck_added": "Deck added to your watchlist.",
     "deck_removed": "Deck removed from your watchlist.",
@@ -56,8 +56,8 @@ CARD_HINT = (
 )
 SEARCH_HINT = "You can also watch a card from Card search: press and hold it, or right-click it."
 ALERT_HINT = (
-    "Checked once a day against the day before. Leave a box empty for no alert. Alerts reach you "
-    "through push notifications (Account page)."
+    "Checked once a day against the day before. Leave a box empty for no price alert. Price alerts "
+    "reach you through push notifications (Account page)."
 )
 DECK_HINT = (
     "A watched deck is read again once a day, so its value follows its cards. Its value uses "
@@ -164,8 +164,8 @@ def alert_text(alerts: dict[str, Any], currency: str) -> str:
 def alert_label(v: dict[str, Any]) -> str:
     alerts = v.get("alerts") or {}
     if not alerts:
-        return "<span class='none'>No alert</span>"
-    return ui.label(alert_text(alerts, v.get("currency") or "usd"), "blue", "bell")
+        return "<span class='none'>No price alert</span>"
+    return ui.label(alert_text(alerts, v.get("currency") or "usd"), "blue", "tag")
 
 
 def where_text(v: dict[str, Any]) -> str:
@@ -347,7 +347,7 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, qu
         f"inputmode='decimal' value='{esc(alerts.get(k, ''))}'></label>"
         for k, label in (("pct", "Moves more than (%)"), ("above", "Rises above"), ("below", "Falls below"))
     )
-    on = " " + ui.label("On", "blue", "bell") if alerts else ""
+    on = " " + ui.label("On", "blue", "tag") if alerts else ""
     details = _wx_chart(
         v,
         today,
@@ -358,7 +358,7 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, qu
         f"<form method='post' class='wx-alert'>{csrf_in}<input type='hidden' name='action' value='alerts'>"
         f"<input type='hidden' name='watch_id' value='{esc(wid)}'><h3>Price alert{on}</h3>"
         f"<div class='af'>{fields}</div><p class='ui-hint'>{ALERT_HINT}</p>"
-        "<div class='ui-actions'><button class='btn-plain' type='submit'>Save alert</button>"
+        "<div class='ui-actions'><button class='btn-plain' type='submit'>Save price alert</button>"
         f"<a class='btn btn-plain' href='/cards?q={quote(name)}'>Open card</a>"
         f"<button class='btn-outline-danger' type='submit' form='rm-{esc(wid)}' "
         f"aria-label='Remove {esc(name)} from your watchlist'>Remove</button></div></form>"
@@ -489,11 +489,11 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
     with_alert = [v for v in cards if v.get("alerts")]
     due = [d for d in (due_line(v) for v in with_alert) if d]
     if with_alert:
-        det = (due[0] + f" · checked {checked}") if due else f"Nothing past an alert · checked {checked}"
+        det = (due[0] + f" · checked {checked}") if due else f"Nothing past a price alert · checked {checked}"
         out.append(
             ui.widget(
-                "Alerts",
-                "bell",
+                "Price alerts",
+                "tag",
                 len(with_alert),
                 unit="card has one" if len(with_alert) == 1 else "cards have one",
                 detail=det,
@@ -502,7 +502,7 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
         )
     else:
         out.append(
-            ui.widget("Alerts", "bell", 0, unit="cards have one", detail="Set one in a card's Details.")
+            ui.widget("Price alerts", "tag", 0, unit="cards have one", detail="Set one in a card's Details.")
         )
     moved = [v for v in cards if v.get("change_7d_pct")]
     if moved:
@@ -609,7 +609,7 @@ def watchlist_page_html(
         )
         + "</select></label>"
         "<label for='w-pct'>Alert when it moves more than (%)<input id='w-pct' name='alert_pct' "
-        f"inputmode='decimal' maxlength='6' value='{esc(pct)}' placeholder='No alert'></label>"
+        f"inputmode='decimal' maxlength='6' value='{esc(pct)}' placeholder='No price alert'></label>"
         "<button class='btn-primary' type='submit'>Watch card</button>"
         "<label class='check wide'><input type='checkbox' name='remember' value='1' checked>"
         "<span>Use this finish and alert next time, here and in card menus</span></label></div>"
@@ -654,7 +654,7 @@ def watchlist_page_html(
             ui.Column("Price", "md-hide"),
             ui.Column("Change", "md-hide"),
             ui.Column("30 days", "md-hide"),
-            ui.Column("Alert", "md-hide"),
+            ui.Column("Price alert", "md-hide"),
             ui.Column(""),
         ]
     )

@@ -1,6 +1,6 @@
 """Decision C8 (0.7.46), Home: recent decks and what needs you, not a second copy of the
 navigation. Needs you lists proposals waiting, Forge tests running, Archidekt alerts (filled
-by static/bell.js) and watched cards past an alert line, each only when there is one; the
+by static/bell.js) and watched cards past a price alert, each only when there is one; the
 Find a deck form and the Quick access tiles are gone; Connect an AI assistant shows only while
 no assistant is connected; the site search suggests the member's own decks."""
 
@@ -58,7 +58,7 @@ def test_needs_you_shows_only_what_waits() -> None:
         "<li data-bell-row hidden>" in out
         and "<span data-bell-n>0</span> new <span data-bell-word>alerts</span>" in out
     )
-    assert "<b>1 watched card</b> past an alert line" in out and "Mana Crypt is below your $150.00" in out
+    assert "<b>1 watched card</b> past a price alert" in out and "Mana Crypt is below your $150.00" in out
     # not linked: no alerts row (the bell reads Archidekt)
     assert "data-bell-row" not in home.needs_you_html(
         pending=0, board=[], forge_running=1, watch_hits=[], linked=False, now=NOW

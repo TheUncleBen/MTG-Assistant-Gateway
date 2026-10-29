@@ -756,7 +756,7 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert box.locator("h2").inner_text().startswith("Price alert: ")
             assert box.locator("input[name=alert_pct]").count() == 1
             assert box.locator("form input[name=action][value=alerts]").count() == 1
-            assert box.locator(".acts button", has_text="Save alert").is_visible()
+            assert box.locator(".acts button", has_text="Save price alert").is_visible()
             page.keyboard.press("Escape")
             assert errors == [], errors
             browser.close()
