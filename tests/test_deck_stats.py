@@ -1125,7 +1125,7 @@ def test_list_rows_come_from_one_builder() -> None:
 
 def test_the_full_test_button_has_the_approved_texts() -> None:
     """The banner's approved texts, word for word: the manual page keeps the name Goldfish; the run
-    is "Run full test"."""
+    is "Run test"."""
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
@@ -1135,7 +1135,7 @@ def test_the_full_test_button_has_the_approved_texts() -> None:
         "the deck has a commander; saved under History. The report opens at once and fills in as each "
         "part finishes.'>" in html
     )
-    assert " Run full test</button>" in html
+    assert " Run test</button>" in html
     assert "Run simulation" not in html and "Simulating" not in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest on Archidekt</a>" in html  # names kept
 
@@ -1157,4 +1157,4 @@ def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:
     signed_out = banner_html(
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
-    assert "Solo test only" not in signed_out and "Run full test" not in signed_out
+    assert "Solo test only" not in signed_out and "Run test" not in signed_out

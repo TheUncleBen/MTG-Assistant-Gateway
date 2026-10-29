@@ -18,7 +18,7 @@
         badge.textContent = n > 99 ? "99+" : String(n);
         badge.hidden = !(n > 0);
       }
-      var name = bell.getAttribute("data-bell-label") || "Notifications"; // the rail's says Alerts
+      var name = bell.getAttribute("data-bell-label") || "Alerts";
       bell.setAttribute("aria-label", n > 0 ? name + ", " + n + " new" : name);
       bell.title = bell.getAttribute("aria-label");
     });
@@ -66,15 +66,15 @@
     var Box = window.MtgBox;
     if (!Box) { location.href = "/notifications"; return; }
     var body = el("div");
-    body.appendChild(el("p", "muted", "Reading Archidekt's notifications…"));
+    body.appendChild(el("p", "muted", "Reading your Archidekt alerts…"));
     var settings = el("a", "btn btn-plain");
     settings.href = "/account/details#email";
     var gear = window.MtgCardMenu && window.MtgCardMenu.icon ? window.MtgCardMenu.icon("settings") : null;
     if (gear) { settings.appendChild(gear); settings.appendChild(document.createTextNode(" ")); }
     settings.appendChild(document.createTextNode("Settings"));
     var box = Box.open({
-      title: "Notifications",
-      label: "Notifications",
+      title: "Alerts",
+      label: "Alerts",
       body: body,
       actions: [settings, Box.button("Close", "btn", null, { cancel: true })],
       returnFocus: back
@@ -95,7 +95,7 @@
         setCount(0);
         keep(0);
       }
-      var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Email and notifications.");
+      var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Email and alerts.");
       wrap.appendChild(note);
       box.setBody(wrap);
       box.focusFirst();

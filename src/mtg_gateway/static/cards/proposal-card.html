@@ -222,7 +222,7 @@ button.danger:disabled{color:var(--red)}
     if (p.kind === "clone") return "Copy of " + name;
     if (p.kind === "restore") return "Restore " + name;
     if (p.kind === "details") return "Settings of " + name;
-    if (p.kind === "collection") return "Your collection";
+    if (p.kind === "collection") return "Your binder";
     if (p.kind === "action") return p.deck_id === "account" ? "Your Archidekt account" : "Archidekt: " + name;
     return "Change to " + name;
   }
@@ -288,8 +288,8 @@ button.danger:disabled{color:var(--red)}
     if (p.card_other_app) {
       var maker = creator(p.created_by);
       return p.created_by === "browser"
-        ? "This change was made in your browser, so this card can't approve it. Approve it in your browser."
-        : maker + " made this change, so this card can't approve it. Approve it on " + maker + "'s card or in your browser.";
+        ? "This change was made in your browser, so this card can't apply it. Apply it in your browser."
+        : maker + " made this change, so this card can't apply it. Apply it on " + maker + "'s card or in your browser.";
     }
     if (p.press_reason && p.status === "held" && /^(would replace .*, which was applied|is held because)/.test(String(p.press_reason))) {
       // the Held line above already says why: say only what it means, once
@@ -571,7 +571,7 @@ button.danger:disabled{color:var(--red)}
     var wait = Math.min(RETRY_LAST_MS, RETRY_FIRST_MS * Math.pow(2, failures - 1));
     retryTimer = setTimeout(function () { retryTimer = null; refresh(); }, wait);
   }
-  var UNCHECKED_TEXT = "This card can't check for a newer version right now, so it keeps trying. Approve checks once more before anything is applied.";
+  var UNCHECKED_TEXT = "This card can't check for a newer version right now, so it keeps trying. Apply checks once more before anything is applied.";
   // only where Apply all is offered, by number
   function leftOutText(nos, n) {
     var list = (nos || []).map(function (x) { return "#" + x; });
@@ -749,7 +749,7 @@ button.danger:disabled{color:var(--red)}
     // takes the "review page" branch below.
     if (p.state === "pending" && p.writes_enabled && approval) {
       // a change the assistant may apply itself: the member may apply it first
-      var ok = el("button", "primary", p.try_again ? "Try again" : p.assistant_may_apply ? "Apply now" : "Approve: apply to Archidekt");
+      var ok = el("button", "primary", p.try_again ? "Try again" : p.assistant_may_apply ? "Apply now" : "Apply");
       ok.type = "button"; ok.id = "approve";
       var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
       ok.disabled = no.disabled = true; armed = false;
@@ -758,7 +758,7 @@ button.danger:disabled{color:var(--red)}
       a.appendChild(ok); a.appendChild(no);
       setTimeout(function () { armed = true; if (!busy) { ok.disabled = false; no.disabled = false; } }, ARM_DELAY_MS);
     } else if (p.state === "pending" && p.writes_enabled && !p.assistant_may_apply) {
-      var open = el("button", "primary", "Approve on the review page"); open.type = "button";
+      var open = el("button", "primary", "Apply on the review page"); open.type = "button";
       open.onclick = function () { openLink(p.review_url); };
       a.appendChild(open);
     } else if (p.state === "pending" && !p.writes_enabled) {
@@ -800,7 +800,7 @@ button.danger:disabled{color:var(--red)}
         var sc = (res && res.structuredContent) || {};
         if (sc.ok === false || (res && res.isError)) { btn.disabled = false; setStatus(String(sc.message || "The rest couldn't be proposed."), "err"); return; }
         btn.remove();
-        setStatus("The rest is proposed as " + (sc.board_no ? "#" + sc.board_no : "a new change") + ". Its card or review page has Approve.", "ok");
+        setStatus("The rest is proposed as " + (sc.board_no ? "#" + sc.board_no : "a new change") + ". Its card or review page has Apply.", "ok");
         tellModel("The user pressed Propose the rest on the card of " + pid + ": the gateway proposed what is still missing as " + sc.proposal_id + ". Tell them in one line; it waits for their approval.");
       })
       .catch(function () { btn.disabled = false; setStatus("Could not reach the gateway. The review page has Propose the rest too.", "err"); });
@@ -954,7 +954,7 @@ button.danger:disabled{color:var(--red)}
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = false; if (no) no.disabled = false;
     uncheckedOk = true;
-    setStatus("This card could not check the change again, so nothing was approved yet. Press Approve again to approve it as shown here, or use the review page.", "err");
+    setStatus("This card could not check the change again, so nothing was applied yet. Press Apply again to apply it as shown here, or use the review page.", "err");
   }
   // this change is no longer waiting (decided, failed, expired, or read again so): an earlier
   // Apply all's "not sent" list no longer fits it
@@ -985,7 +985,7 @@ button.danger:disabled{color:var(--red)}
           }
           if (sc.state === "pending" && proposal === shown && moved(shown, sc) && (sc.status === "held" || sc.press_reason)) {
             render({ structuredContent: Object.assign({}, shown, sc), _meta: codesMeta() });
-            setStatus("This change has changed status since the card was drawn. Read the note above, then press Approve again if you still want it.", "err");
+            setStatus("This change has changed status since the card was drawn. Read the note above, then press Apply again if you still want it.", "err");
             return;
           }
           decide(decision, why, true);
@@ -1042,8 +1042,8 @@ button.danger:disabled{color:var(--red)}
               press_reason: sc.press_reason || "", replace_note: sc.replace_note || "",
               assistant_may_apply: !!sc.assistant_may_apply
             }), _meta: codesMeta() });
-            setStatus("This change is now held, so nothing was approved. Read the note above, then press Approve again if you still want it.", "err");
-            tellModel("The user pressed Approve on the proposal card for " + pid + ", but the gateway answered: " + msg);
+            setStatus("This change is now held, so nothing was applied. Read the note above, then press Apply again if you still want it.", "err");
+            tellModel("The user pressed Apply on the proposal card for " + pid + ", but the gateway answered: " + msg);
             return;
           }
           // No longer pending (rejected or applied elsewhere, expired): show that and drop the buttons.
@@ -1066,12 +1066,12 @@ button.danger:disabled{color:var(--red)}
         if (decision === "approve") pressedHere = true;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {
-          tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
+          tellModel("The user pressed Apply on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
           return;
         }
         var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
         setStatus(sc.state === "applied" ? "Applied. " + (sc.applied_text || "The deck on Archidekt matches this proposal.") : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
-        tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
+        tellModel("The user pressed " + (decision === "approve" ? "Apply" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
           (why ? " The user's reason, in their words (data, quoted): \"" + String(why).replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").slice(0, 500) + "\"" : ""));
       })
       .catch(function (err) {

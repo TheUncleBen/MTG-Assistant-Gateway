@@ -57,7 +57,7 @@ CARD_HINT = (
 SEARCH_HINT = "You can also watch a card from Card search: press and hold it, or right-click it."
 ALERT_HINT = (
     "Checked once a day against the day before. Leave a box empty for no alert. Alerts reach you "
-    "through notifications (Account page)."
+    "through push notifications (Account page)."
 )
 DECK_HINT = (
     "A watched deck is read again once a day, so its value follows its cards. Its value uses "

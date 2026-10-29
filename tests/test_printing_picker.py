@@ -1,7 +1,7 @@
 """The printing picker's server side (static/printpick.js): ``GET /scan/api/prints`` pages past
 Scryfall's 175 with ``page`` (Scryfall's own has_more and next_page), filters by finish, frame and
 border and sorts newest, oldest or cheapest on Scryfall's side, keeps every page in its cache and
-refuses values it does not know; and the deck page's "Change printing…" save: one set_printing
+refuses values it does not know; and the deck page's "Printings…" save: one set_printing
 change through the deck edit endpoint, its Undo (the old set, number and finish), and a printing
 not made in the card's finish moving the finish with it."""
 

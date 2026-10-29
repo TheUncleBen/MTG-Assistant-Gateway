@@ -466,5 +466,5 @@ def test_review_page_next_step_never_names_a_tool() -> None:
     assert len(set(texts)) == len(texts)
     assert "Nothing changes on Archidekt until you apply it." in texts[1]
     assert texts[3].startswith("The last try stopped before anything changed")
-    assert "History" in texts[6] and "History" not in texts[7] and "your collection" in texts[8]
+    assert "History" in texts[6] and "History" not in texts[7] and "your binder" in texts[8]
     assert texts[9].startswith("A new deck was made on Archidekt")

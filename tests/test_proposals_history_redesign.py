@@ -260,7 +260,7 @@ async def test_waiting_dashboard(stack: Stack) -> None:
         for lab in (
             "Waiting for you",
             "Needs a look",
-            "Always need your press",
+            "Only you can apply",
             "Last 7 days",
             "Waiting by app",
         ):

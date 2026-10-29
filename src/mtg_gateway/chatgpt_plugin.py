@@ -62,7 +62,7 @@ ASSETS = {
 DEFAULT_PROMPTS = [
     "List my Archidekt decks.",
     "Check my Commander deck's curve, colors and legality.",
-    "Goldfish my deck and tell me how fast it is.",
+    "Test my deck and tell me how fast it is.",
 ]
 
 

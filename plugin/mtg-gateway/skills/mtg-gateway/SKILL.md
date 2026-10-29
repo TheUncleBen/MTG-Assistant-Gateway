@@ -1,6 +1,6 @@
 ---
 name: mtg-gateway
-description: Use the MTG Assistant Gateway connector for Magic The Gathering card research, deck analysis, goldfish simulation, and safely editing or creating Archidekt decks (propose, review, apply).
+description: Use the MTG Assistant Gateway connector for Magic The Gathering card research, deck analysis, solo test, and safely editing or creating Archidekt decks (propose, review, apply).
 ---
 
 # MTG Assistant Gateway
@@ -8,7 +8,7 @@ description: Use the MTG Assistant Gateway connector for Magic The Gathering car
 The MTG Assistant Gateway is a connector (remote MCP server) that the user has already
 signed in to. Every tool call runs as that person. Use it for any Magic: The
 Gathering question about cards, rules, Commander decks, combos, precons or
-simulation, and for reading, editing or creating the user's Archidekt decks.
+test, and for reading, editing or creating the user's Archidekt decks.
 
 The full tool catalogue, with arguments, is in
 [reference/tools.md](reference/tools.md). Read it the first time you need a
@@ -59,7 +59,7 @@ tool you have not used in this conversation.
 Pick the route that matches what the user gave you. The gateway's ingest
 tools (`get_deck`, `parse_decklist`, `parse_deck_export`) return a
 `decklist_text` (the deck proper, commander first) and a `sideboard_text`
-(maybeboard and sideboard) for the simulation and validation tools.
+(maybeboard and sideboard) for the test and validation tools.
 `get_deck`'s default `view` (`text`) gives those plus the statistics; ask for
 `view: "cards"` when you need the card rows (printing, finish, categories),
 `summary` for the numbers alone, `export` for Archidekt's import text. Lines
@@ -75,13 +75,13 @@ in `unread_lines`: tell the user they were skipped.
 | A **precon** name | `precon_search`, then `precon_decklist`. |
 | **Photos of physical cards** | Read every card title you can see and call `resolve_cards` with the names (add set code and collector number from the bottom of the card when legible). Ask about every result whose `status` is not `exact` or `printing`; never silently keep a `fuzzy` correction the user did not confirm. In an app that shows cards, the user ticks and picks on the picker card and their choice reaches you as text: wait for it. For an exact printing, `card_printings` shows the pictures and the tap reaches you as text too. |
 | "Find decks for this commander", "show me X's decks", "what are people playing in Y" | `search_decks` (by `commander`, `name`, `owner`, `format`, `colors`; `limit` for how many), then `get_deck` on the ones worth a closer look. Say the results are Archidekt's public decks and give each deck's `url`. For one person's public decks give `owner` with `order_by: "-updatedAt"`. A partial commander name is looked up: `commander_matched` names the commander searched, `commander_suggestions` asks you to pick one and search again. |
-| "Which of these do I own?", "add these to my collection", "what's in my collection?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The collection is the user's Collection on Archidekt, so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. |
+| "Which of these do I own?", "add these to my binder", "what's in my binder?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The binder is the user's binder (the user's Archidekt collection), so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. |
 | "Like this deck", "bookmark it", "follow its owner", "follow someone by name", "comment on it", "vote on that comment", "delete my deck", "make a folder", "add or remove a collaborator" | `propose_account_action` with the `action` that fits (`like`, `bookmark`, `follow_owner`, `follow_user`, `comment_post`, `comment_vote_up`, `create_folder`, `collaborator_add` and the others in the tool catalogue; comment ids from `get_deck_comments`, current collaborators from `get_deck_collaborators`), or `propose_delete_deck`. Each is a proposal only the user applies: their own press on the card in the chat or on the review page (give them `review_url`; deleting a deck, and an edit of a comment that has formatting: review page only), every time, whatever their approval mode. Never call `apply_proposal` for these. Comments are public under the user's Archidekt name: post only words the user asked for, and quote them back. |
-| "Ask Archidekt's community for help with my deck", "report this deck, card or comment", "enter my deck in this contest", "withdraw my entry", "change my bio, username, email switches or site preferences", "make my collection public" | `propose_account_action` (`help_post`, `help_edit`, `help_delist`, `report`, `contest_enter`, `contest_withdraw`), or `propose_profile_change` (read the current values with `get_my_profile`). Each is a proposal only the user applies, with their own press, every time, whatever their approval mode. Never call `apply_proposal` for these. A help request and a contest entry are public under the user's Archidekt name: use only words the user asked for, and quote them back. |
+| "Ask Archidekt's community for help with my deck", "report this deck, card or comment", "enter my deck in this contest", "withdraw my entry", "change my bio, username, email switches or site preferences", "make my binder public" | `propose_account_action` (`help_post`, `help_edit`, `help_delist`, `report`, `contest_enter`, `contest_withdraw`), or `propose_profile_change` (read the current values with `get_my_profile`). Each is a proposal only the user applies, with their own press, every time, whatever their approval mode. Never call `apply_proposal` for these. A help request and a contest entry are public under the user's Archidekt name: use only words the user asked for, and quote them back. |
 | "My category templates", "my default categories", "my color tags", "my pins", "my custom cards" | `get_my_lists` with `which_list`, then `propose_list_change` for a change (a small change with no delete is low risk; a delete always waits for the user's press). A custom card's picture is uploaded by the user on the My lists page.To put a custom card in a deck, take it out or change its count: `propose_custom_card_changes` (`get_deck` lists the deck's custom cards). |
 | "My card packages", "find a package for X", "add this package to my deck", "make a package" | `list_card_packages` (`whose`: mine, followed or all; filter by `name_contains`, `intended_format`, `budget`), `propose_add_package` (adding more than 10 cards always waits for the user; `color_tag` tags every added card), `propose_new_deck` with `package`, `propose_deck_details` with `package` for its settings. |
 | "What's new on the forum", "show that forum thread", "reply to that thread" | `get_forum` (no arguments: sections; `group` and `section`: threads; `thread_id`: one thread), then `propose_account_action` with `comment_post` and `thread_id` for a reply. A reply is public under the user's Archidekt name and only the user applies it: use only words the user asked for, and quote them back. Starting a new thread stays on Archidekt (it asks the person to prove they are human). |
-| "My notifications", "registration sheet for this deck" | `get_my_notifications`; `get_registration_pdf` (Archidekt makes the PDF; it gives back a link, and nothing changes on Archidekt). |
+| "My alerts", "registration sheet for this deck" | `get_my_notifications`; `get_registration_pdf` (Archidekt makes the PDF; it gives back a link, and nothing changes on Archidekt). |
 | "I scanned my cards" (on the gateway's `/scan` phone page) | `list_scan_sessions`, then `get_scan_session` with the name or id. Items without a `card` were not recognised; ask the user for them. Its `decklist_text` feeds `propose_new_deck`, its `changes` feed `propose_deck_changes`; or pass the session's id or name as `scan_session` to either tool and skip the copy. |
 
 After loading a deck, say how many cards it has and name the commander, so
@@ -97,12 +97,11 @@ own included (and gives the export text), `list_my_decks` lists the member's
 decks and `search_decks` public ones (another user's with `owner`),
 `propose_deck_details` changes a deck's settings, folder, tags and cover, `propose_deck_categories` renames its categories and switches their flags, `deck_stats` checks an Archidekt deck's legality and
 structure, `validate_decklist` checks a pasted list that is not a deck yet,
-`compare_decks` diffs decks and precons, `run_deck_report` runs goldfish
-games, `resolve_cards` turns names into exact printings. Mystic Forge's
+`compare_decks` diffs decks and precons, `run_deck_report` runs solo test games, `resolve_cards` turns names into exact printings. Mystic Forge's
 duplicates of these are not offered; a call to one answers with the name of
 the tool that owns the job.
 
-**Simulation and validation input.** `goldfish_annotate`, `validate_decklist`
+**Test and validation input.** `goldfish_annotate`, `validate_decklist`
 and `scryfall_price_list` take decklist text; pass the `decklist_text` from
 the ingest tool, never a private deck's id.
 
@@ -124,15 +123,15 @@ the ingest tool, never a private deck's id.
   mismatch, and give its `notes` (Archidekt's own) and `basis` lines. It
   says what the cards suggest, not how strong the deck plays.
 - **Testing:** `run_deck_report` reads the deck, keeps its statistics and,
-  when the research service is up, a `validate_decklist` and a goldfish run
+  when the research service is up, a `validate_decklist` and a solo test run
   (`games`, default 300), stored for the user. `list_deck_reports` (per deck
   with `deck_id`) shows the trend numbers over time and, with two or more
   reports, `trend`: first and latest value, dates and change per metric
-  (statistics and goldfish speed), the same as the deck's History page;
+  (statistics and solo test speed), the same as the deck's History page;
   `get_deck_report` one report in full. The same reports are on the gateway's History page
   (`/history`). An unchanged deck within ten minutes returns the earlier
   report (`reused: true`); say so rather than calling it a new run. The
-  goldfish rules below apply to the numbers inside a report too.
+  solo test rules below apply to the numbers inside a report too.
 - **Comparing:** `compare_decks` with each side once: `a` / `b` for a deck
   id or link or a snapshot id (`snap_...`), `a_list` / `b_list` for pasted
   decklist text. A reference it cannot read is refused (`invalid`), never
@@ -170,21 +169,22 @@ When recommending cuts and adds, show the reasoning per card and keep exact
 card names. Check that a suggested card is in the commander's colour identity
 and legal (validate the resulting list if in doubt).
 
-## Simulation (goldfish)
+## Solo test
 
-Goldfish simulation plays the deck alone, against no opponent. The gateway's
-pages call it the "solo test" ("Run full test" and "Solo test only" on the deck
-page); "Goldfish" there is the page where the member plays a hand. It measures
+The solo test plays the deck alone, against no opponent: what players call
+goldfishing, so a user who asks to "goldfish" a deck means this. The gateway's
+pages say "Run test" and "Solo test only" on the deck page; its "Goldfish"
+page is where the member plays a hand by hand, not a test. It measures
 modelled speed and consistency, such as "how often is the commander cast by
 turn 4". It does **not** predict a win rate in a real multiplayer game and it
 cannot value interaction, removal, politics or an opponent's deck.
 
 1. For draw odds only ("chance of a 2-drop in my opening hand"), use
-   `goldfish_odds`. It is exact maths, no simulation.
-2. Before a simulation, run `goldfish_annotate` on the deck's `decklist_text`.
+   `goldfish_odds`. It is exact maths, no solo test.
+2. Before a solo test, run `goldfish_annotate` on the deck's `decklist_text`.
    It reports which cards the engine models and which it cannot.
-3. Run `run_deck_report` (the one simulation tool for a deck: it validates
-   the deck, plays `games` goldfish games and stores the report for the
+3. Run `run_deck_report` (the one test tool for a deck: it validates
+   the deck, plays `games` solo test games and stores the report for the
    user). Pass what `goldfish_annotate` asked for as `options.annotations`;
    `options` also takes `combos`, `seed`, `until_turn`, `opponents` and
    `mulligan`. To compare two versions of a deck, call `compare_decks` with
@@ -193,26 +193,26 @@ cannot value interaction, removal, politics or an opponent's deck.
    confidence intervals and significance, which two separate reports cannot
    give.
 4. Report, every time:
-   - the number of games, turns simulated and mulligan settings from the
+   - the number of games, turns played and mulligan settings from the
      report's `goldfish` section;
    - the `report_id`, and which deck version you used (for an Archidekt deck,
      its `updated_at` from `get_deck`);
-   - which cards or mechanics were not simulated, and how much of the deck
+   - which cards or mechanics were not played, and how much of the deck
      that is (from the honesty report);
    - the confidence intervals, and that differences inside them are noise.
    - when the report has `side_by_side`, each engine's number next to the
      others, with its `note`: they answer different questions.
-5. Never call a goldfish number "the win rate".
+5. Never call a solo test number "the win rate".
 
 Mystic Forge's own stored reports and step-by-step games (`goldfish_report`,
 `goldfish_start`, `goldfish_step`, `goldfish_state`), watchlists and price
 history are switched off on this gateway (the gateway's own `watch_card`,
 `list_watchlist` and `card_price_history` replace the last two when the operator has turned
 watchlists on), and so are its `goldfish_run` and
-`goldfish_ab` (`run_deck_report` owns the simulation of one deck,
+`goldfish_ab` (`run_deck_report` owns the solo test of one deck,
 `compare_decks` the paired A/B). Do not offer them.
 
-## Simulation (Forge) and card truth
+## Forge games and card truth
 
 When the gateway runs Forge, a report from `run_deck_report` also has a
 `forge` section: real games of the deck against Commander precons, played by
@@ -236,7 +236,7 @@ a run that stopped early.
   never played by Forge: say it is not tournament-legal and explain it from
   its text.
 - To compare two decks like for like, use `compare_decks` with
-  `simulate=true` (a goldfish A/B, not Forge games). Forge seats each deck
+  `simulate=true` (a solo test A/B, not Forge games). Forge seats each deck
   against precons of its own bracket, so two decks' Forge win rates (one
   `run_deck_report` each) are each against their own bracket's table, not the
   same opponents, even with the same `options.seed` (check `forge.seats`).
@@ -327,7 +327,7 @@ own linked account. Follow every step, in order.
    app's waiting change would replace); the answer says why one waits.
    `assistant_may_apply` is the gateway's answer for this
    proposal; never argue with it or work around it.
-   **If your app shows the proposal as a card with Approve and Reject
+   **If your app shows the proposal as a card with Apply and Reject
    buttons** (Claude on the web, desktop and phones; ChatGPT), the user
    decides on the card: show the diff and the review link in your words,
    say nothing has changed yet, and stop. The gateway tells you the
@@ -464,7 +464,7 @@ flagged as an error too: say the lookup failed. Act on the code:
 
 | `error` | Meaning and what to do |
 | --- | --- |
-| `browser_required` | The user's approval mode wants their own press for this proposal (`approval_mode` and `risk` say why). Nothing was sent. Give the user the `review_url` and ask them to press Apply there (or Approve on the card); afterwards check with `proposal_status`. Do not retry. |
+| `browser_required` | The user's approval mode wants their own press for this proposal (`approval_mode` and `risk` say why). Nothing was sent. Give the user the `review_url` and ask them to press Apply there (or Apply on the card); afterwards check with `proposal_status`. Do not retry. |
 | `browser_pending` | The user's app opened the review page for them but they have not pressed Apply yet. Nothing was sent. Ask them, then check with `proposal_status`. |
 | `invalid_approval` / `in_chat_disabled` | Answers of `confirm_proposal`, the card's own tool. Never call it; the card does. |
 | `writes_disabled` | The owner has switched applying off. The proposal is kept. Give the user the review link and stop; do not retry. |

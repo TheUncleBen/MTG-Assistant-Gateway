@@ -75,7 +75,7 @@ OWNED_ELSEWHERE: dict[str, str] = {
 }
 # What each owner does, for the refusal an assistant gets when it calls the hidden duplicate.
 OWNER_NOTES: dict[str, str] = {
-    "run_deck_report": "the gateway's simulation: it reads the deck, validates it, runs the goldfish games "
+    "run_deck_report": "the gateway's test: it reads the deck, validates it, runs the solo test games "
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
     "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, include_text for rules text, "
@@ -84,7 +84,7 @@ OWNER_NOTES: dict[str, str] = {
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
     "deck_stats": "legality, structural checks, bracket, curve, colors and price from one read",
     "compare_decks": "the exact adds and cuts between two decks, snapshots or lists, with a precon-style "
-    "summary and an optional paired goldfish A/B",
+    "summary and an optional paired solo test A/B",
 }
 
 # What a simulation's "Full report: goldfish_report(...)" line becomes (see TEXT_REWRITES).

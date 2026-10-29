@@ -109,7 +109,7 @@ TREND_METRICS = (
     ("salt_total", "Salt total", ""),
     ("commander_cast_median_turn", "Commander cast (median turn)", "turn"),
     ("kill_median_turn", "Lethal damage dealt (median turn, when dealt)", "turn"),
-    ("kill_pct", "Games dealing lethal damage by the last simulated turn", "%"),
+    ("kill_pct", "Games dealing lethal damage by the last turn played", "%"),
 )
 TREND_LIMIT = 60
 # A member's Forge runs go one at a time, so nobody fills the engine's shared queue. A report made
@@ -2703,11 +2703,11 @@ class ReportService:
 FORGE_RESULT_KEYS = ("state", "result", "opponent_choice", "seed", "games_requested", "games")
 
 PROPOSAL_NOT_WAITING = (
-    "That proposal is no longer waiting, so its resulting deck can't be simulated. Run the report on "
+    "That proposal is no longer waiting, so its resulting deck can't be tested. Run the report on "
     "the deck itself."
 )
 PROPOSAL_NOT_A_LIST = (
-    "Only a proposal that changes a deck's cards, or makes a new deck, can be simulated. Run the "
+    "Only a proposal that changes a deck's cards, or makes a new deck, can be tested. Run the "
     "report on the deck itself."
 )
 
@@ -3515,7 +3515,7 @@ def solo_coverage(goldfish: Any, *, deck_size: int | None = None) -> dict[str, A
 
 
 SIDE_BY_SIDE_NOTE = (
-    "The engines answer different questions. The solo test is the gateway's fast simulator: it "
+    "The engines answer different questions. The solo test is the gateway's fast engine: it "
     "plays only the cards it models (its coverage), so with much of the deck played without effect "
     "its kill numbers are a floor. Forge solo plays every card by the full rules against opponents "
     "who do nothing: how fast the deck can win when nobody stops it. Forge against precons is real "
@@ -3537,7 +3537,7 @@ def side_by_side(
     cov = solo_coverage(goldfish, deck_size=deck_size)
     if speed.get("kill_pct") is not None or cov is not None:
         out["solo_test"] = {
-            "plays": "the gateway's simulator, the cards it models",
+            "plays": "the gateway's own engine, the cards it models",
             "kill_pct": speed.get("kill_pct"),
             "until_turn": speed.get("until_turn"),
             "kill_median_turn": speed.get("kill_median_turn"),
@@ -3730,14 +3730,14 @@ def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str
     if not options:
         return {}
     if not isinstance(options, dict):
-        raise DeckError("invalid", "simulation options must be an object")
+        raise DeckError("invalid", "test options must be an object")
     allowed = (*AB_OPTIONS, *AB_FLAGS) if ab else RUN_OPTIONS
     out = {k: v for k, v in options.items() if v is not None and v != [] and v != {}}
     unknown = sorted(k for k in out if k not in allowed)
     if unknown:
-        raise DeckError("invalid", f"unknown simulation option(s): {', '.join(unknown)}")
+        raise DeckError("invalid", f"unknown test option(s): {', '.join(unknown)}")
     if len(json.dumps(out)) > 60_000:
-        raise DeckError("too_large", "simulation options larger than 60 kB")
+        raise DeckError("too_large", "test options larger than 60 kB")
     for key, low, high in (
         ("opponents", 1, 5),
         ("until_turn", 1, 30),
@@ -3745,14 +3745,14 @@ def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str
         ("forge_seed", -(2**63), 2**63 - 1),
     ):
         if key in out and (not isinstance(out[key], int) or isinstance(out[key], bool)):
-            raise DeckError("invalid", f"simulation option {key} must be an integer")
+            raise DeckError("invalid", f"test option {key} must be an integer")
         if key in out and not low <= out[key] <= high:
-            raise DeckError("invalid", f"simulation option {key} must be from {low} to {high}")
+            raise DeckError("invalid", f"test option {key} must be from {low} to {high}")
     for key in ("annotations", "annotations_a", "annotations_b", "combos"):
         if key in out and not isinstance(out[key], list):
-            raise DeckError("invalid", f"simulation option {key} must be a list")
+            raise DeckError("invalid", f"test option {key} must be a list")
     if "mulligan" in out and not isinstance(out["mulligan"], dict):
-        raise DeckError("invalid", "simulation option mulligan must be an object")
+        raise DeckError("invalid", "test option mulligan must be an object")
     return out
 
 

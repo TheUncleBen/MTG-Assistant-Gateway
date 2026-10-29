@@ -347,7 +347,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "(compare it with account_status to tell whether the deck is the member's), format, "
             "bracket, counts and commanders. view picks the rest: 'text' (default: stats_brief, the "
             "headline numbers, plus decklist_text, one card per line with its categories, for the "
-            "research and simulation tools, and sideboard_text), 'summary' (the whole statistics, as "
+            "research and test tools, and sideboard_text), 'summary' (the whole statistics, as "
             "deck_stats gives them), 'cards' (stats_brief plus one row per card: set, collector "
             "number, finish (nonfoil, foil or etched, as the write tools take it), categories, "
             "in_deck, mana cost, type_line, price; a "
@@ -787,7 +787,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "pending_only: every waiting proposal, with no limit, as the deck's board: its number "
             "(board_no), version, status (updated, needs_look, held, with status_reason), the cards it "
             "touches, its links, and own (true when this app made it: you may apply or withdraw only "
-            'those). deck_id narrows to one deck ("collection" for collection changes); oldest_first '
+            'those). deck_id narrows to one deck ("collection" for binder changes); oldest_first '
             "puts the oldest first. proposal_status shows "
             "one in full. To let the user approve waiting changes in the chat, use show_waiting_changes."
         ),
@@ -1288,9 +1288,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
 
     @server.tool(
         name="confirm_proposal",
-        title="Approve or reject a proposal from its card",
+        title="Apply or reject a proposal from its card",
         description=(
-            "Called by the Approve and Reject buttons of the proposal card an app shows in the chat; not "
+            "Called by the Apply and Reject buttons of the proposal card an app shows in the chat; not "
             "for the assistant. It needs the card's one-time approval code, which the assistant never "
             "has: calls without the right code are refused and logged, and nothing is sent to Archidekt."
         ),

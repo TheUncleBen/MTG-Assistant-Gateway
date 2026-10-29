@@ -419,7 +419,7 @@ def banner_html(
             "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
             "opponents), a legality check and the deck statistics, plus Forge games against precons when "
             "Forge is on and the deck has a commander; saved under History. The report opens at once and "
-            f"fills in as each part finishes.'>{icon('stats')} Run full test"
+            f"fills in as each part finishes.'>{icon('stats')} Run test"
             "</button></form>"
         )
     if csrf and forge_on:
@@ -2624,7 +2624,7 @@ def forge_solo_line(deck: Deck, solo: dict[str, Any] | None, *, csrf: str | None
         run = (
             f"<form method='post' action='/decks/{did}/report' class='inline'>"
             f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
-            f"<button type='submit' data-busy-label='Testing…'>{icon('stats')} Run full test</button></form>"
+            f"<button type='submit' data-busy-label='Testing…'>{icon('stats')} Run test</button></form>"
             if csrf
             else ""
         )

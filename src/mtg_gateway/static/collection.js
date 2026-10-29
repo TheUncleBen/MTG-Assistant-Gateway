@@ -65,7 +65,7 @@
     var name = nameOf(item);
     item.remove();
     bumpCount(-1);
-    strip("Removed from your Collection on Archidekt.", "ok");
+    strip("Removed from your binder.", "ok");
     if (list && !$("li[data-id]", list)) location.reload();
     return name;
   }
@@ -77,7 +77,7 @@
     var qty = out ? parseInt(out.textContent, 10) || 1 : 1;
     var fin = FIN[item.getAttribute("data-fin")] || "Normal";
     var where = (item.getAttribute("data-setline") || "").trim();
-    var text = "This removes " + (qty === 1 ? "it" : "all " + qty + " copies") + " (" + (where ? where + ", " : "") + fin + ") from your Collection on Archidekt.";
+    var text = "This removes " + (qty === 1 ? "it" : "all " + qty + " copies") + " (" + (where ? where + ", " : "") + fin + ") from your binder.";
     if (!window.MtgBox) {
       if (window.confirm("Remove “" + name + "”? " + text)) doRemove(item);
       return;
@@ -254,7 +254,7 @@
         if (!d.ok) { strip(failText(d, name), "error"); return; }
         applyRow(item, d.row || {});
         if (window.MtgBox) window.MtgBox.close();
-        strip("Card details saved to your Collection on Archidekt.", "ok");
+        strip("Card details saved to your binder.", "ok");
       }).catch(function () { btns.forEach(function (b) { b.disabled = false; }); strip(failText(null, name), "error"); });
     });
   }

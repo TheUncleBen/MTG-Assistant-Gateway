@@ -88,14 +88,13 @@ In plain terms:
   Plus is still untested.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
   tool as read-only except the ones that apply, approve, reject or tidy
-  waiting changes, start Forge games, save a scan, remove a saved card
-  description or change your watchlist: `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
+  waiting changes, start Forge games, save a scan, remove a card model or change your watchlist: `apply_proposal`, `confirm_proposal`, `confirm_waiting`, `reject_proposal`,
   `amend_proposal`, `withdraw_proposal`, `combine_proposals`,
   `run_deck_report`, `play_more_games`, `save_scan_session` and
   `remove_card_model`, and, unless the operator has turned watchlists off,
   `watch_card`, `watch_deck` and `unwatch`. Making a proposal only
   records it, so even if ChatGPT limits you to read-only tools you should
-  still be able to propose changes and then press Approve on the card
+  still be able to propose changes and then press Apply on the card
   ChatGPT shows with the proposal, or Apply on the gateway's review page in
   your browser. On Pro no such limit showed in the
   owner's check. Whether a plan with the "read/fetch" limit follows those
@@ -140,7 +139,7 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    - You first see the gateway's **Connect an application** page. It says "An application wants to connect to your
      account", names the application (**Claude**) and the host it's
      "identified by", lists what it'll be able to do (read your decks and
-     your collection, and propose changes on your Archidekt account, and
+     your binder, and propose changes on your Archidekt account, and
      apply them only when you approve, unless the approval mode on your
      account page lets it apply changes without asking), and
      shows "After sign-in you go to" a host. That host should be
@@ -159,7 +158,7 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    warning when connecting Claude (inferred from that address, not tested).
 
 The **Connect an application** page is tested in Chromium (the engine behind
-Chrome and Edge) by an automated browser test that presses Approve and Deny.
+Chrome and Edge) by an automated browser test that presses Approve and sign in, and Deny.
 It hasn't been tested in Firefox or Safari, or with the real Claude app yet.
 If sign-in gets stuck on that page, remove the connector, add it again with
 **Register automatically**, and tell the owner which browser you used.
@@ -213,12 +212,12 @@ doesn't list mobile, so add it on the web or desktop.
 
 When the assistant proposes a deck change, Claude shows the proposal as a
 card right in the conversation: the exact change with a small picture of
-each card, and **Approve** and **Reject** buttons (Claude on the web,
+each card, and **Apply** and **Reject** buttons (Claude on the web,
 desktop, iOS and Android; Claude Code shows the text and the review link
 instead). The first time, Claude asks whether to display the app; allow it
-for this connector. Nothing reaches Archidekt until you press Approve on
+for this connector. Nothing reaches Archidekt until you press Apply on
 the card or Apply on the review page, unless you chose a looser approval
-mode on your Account page (see below). The card's Approve button sends a
+mode on your Account page (see below). The card's Apply button sends a
 one-time code the assistant never receives, and the gateway refuses that
 tool without it, so a tricked assistant can't approve its own proposal.
 That rests on Claude keeping the card's tool and code away from the model,
@@ -229,7 +228,7 @@ from every card.
 In an app that shows cards, on a gateway that lets you approve in the chat,
 ask the assistant what is waiting and it can show the **waiting changes**
 card (`show_waiting_changes`). It lists every change waiting for your press,
-oldest first, with **Approve** and **Reject** on each of that assistant's own
+oldest first, with **Apply** and **Reject** on each of that assistant's own
 changes. When two or more can go together, **Apply all** applies them in
 order after one confirmation (`confirm_waiting`, with the card's own one-time
 code). Each one is checked against the deck just before it is sent. Apply all
@@ -261,8 +260,7 @@ stay.
 **Your approval mode.** On the gateway's Account page you choose how much
 your assistant may do without asking: *Manual*, shown as "Ask me every
 time" (every change waits for your press; the starting mode by default), *Semi-auto*, shown
-as "Apply low-risk changes without asking" (it applies a small deck or
-collection edit itself: up to the row limit, 5 card rows by default,
+as "Apply low-risk changes without asking" (it applies a small deck or binder edit itself: up to the row limit, 5 card rows by default,
 each a card added or removed, or a new quantity, category, finish,
 printing, color tag or custom mana value, no more than 4 copies a row,
 never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of
@@ -284,7 +282,7 @@ offer **Try again**. If part of an edit reached Archidekt before it
 stopped, they offer **Propose the rest**, which makes a new proposal of
 what is still missing. A change to one of your
 decks still keeps a snapshot you can restore from the History page; a
-collection change keeps none. Restoring a snapshot does not put back a
+binder change keeps none. Restoring a snapshot does not put back a
 deck's folder, tags, cover or custom cards. The cost: an assistant can be tricked by text
 it reads into making changes you did not ask for. If you let your assistant
 apply changes without asking, such a change can land on Archidekt without
@@ -292,7 +290,7 @@ your press.
 
 Claude lets you set each tool to always allow, needs approval, or blocked
 (reported). Keep `apply_proposal` on **needs approval**: in Semi-auto and
-Full auto that's the tool that actually changes your deck or collection; the
+Full auto that's the tool that actually changes your deck or binder; the
 proposal tools only record a change on the gateway and never reach Archidekt.
 Claude's Research mode can
 call connector tools without asking (reported). Everything except
@@ -332,8 +330,8 @@ buttons for the name, description and URL, and the icon to download.
 5. Name: the gateway's name as the owner set it (`MTG Assistant Gateway`
    unless they changed it; the install page shows the right one, cut at a
    word to 80 characters, the most ChatGPT takes).
-6. Description: `Magic: The Gathering deck research, goldfish testing and
-   safe Archidekt deck edits, from a self-hosted gateway.` This is the
+6. Description: `Magic: The Gathering deck research, deck tests and safe
+   Archidekt deck edits, from a self-hosted gateway.` This is the
    description the gateway also gives apps itself.
 7. MCP server URL: the connector URL above, exactly as shown.
 8. Icon: the file from step 2. Set it now: ChatGPT reportedly lets you set
@@ -380,7 +378,7 @@ mode or apps entry). Then ask it to call `whoami`.
 OpenAI says ChatGPT asks for confirmation before write actions by default,
 and may block some risky ones (reported). OpenAI also says ChatGPT renders
 MCP Apps (reported), and the cards did show in ChatGPT when it was tried
-with this gateway, so a proposal should appear as a card with Approve and Reject
+with this gateway, so a proposal should appear as a card with Apply and Reject
 buttons like in Claude. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
 proposal's review link and press Apply there. The other cards (the waiting
@@ -394,17 +392,17 @@ pictures.
 OpenAI says some plans only get reading tools (reported). Every gateway
 tool is marked read-only except the ones named in
 [Which apps and devices work](#which-apps-and-devices-work), so all of this
-keeps working: research (Scryfall, EDHREC, rules), goldfish odds, reading
+keeps working: research (Scryfall, EDHREC, rules), draw odds, reading
 and importing decks, card lookups for scanning, and making deck and
 collection proposals. For the write tools:
 
-- `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
+- `apply_proposal`: press **Apply** on the proposal card if ChatGPT shows
   one, or open the proposal's review link (or **Proposals** on the
   gateway) and press **Apply** there. Same preview, same checks. If you
   chose an auto approval mode on your Account page, the assistant applies
   what the mode allows itself.
 - `reject_proposal`: press **Reject this proposal** on the review page.
-- `run_deck_report`: press **Run full test** on the deck's page under
+- `run_deck_report`: press **Run test** on the deck's page under
   **Decks** on the gateway.
 - `save_scan_session`: scan on the gateway's `/scan` page in your browser
   instead.

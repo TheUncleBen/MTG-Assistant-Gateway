@@ -8,8 +8,8 @@ manager unless it says otherwise. Service names assume the stack is called
 | --- | --- | --- |
 | Gateway | `mtg_mtg-assistant-gateway` | `gateway` |
 | Mystic Forge (internal research service) | `mtg_mtg-assistant-mysticforge` | `mysticforge` |
-| ntfy (notifications for the Android app) | `mtg_mtg-assistant-ntfy` | `ntfy` |
-| Forge (simulations, only when turned on) | `mtg_mtg-assistant-forge` | `forge` |
+| ntfy (push notifications for the Android app) | `mtg_mtg-assistant-ntfy` | `ntfy` |
+| Forge (tests, only when turned on) | `mtg_mtg-assistant-forge` | `forge` |
 
 **Running with Docker Compose?** The same things, from the folder with
 `docker-compose.yml`:
@@ -41,7 +41,7 @@ the gateway's user.
 - [Archidekt links and relinking](#archidekt-links-and-relinking)
 - [Archidekt writes and the kill switch](#archidekt-writes-and-the-kill-switch)
 - [The admin page](#the-admin-page)
-- [Watchlists, prices and notifications](#watchlists-prices-and-notifications)
+- [Watchlists, prices and push notifications](#watchlists-prices-and-push-notifications)
 - [Looking at proposals, snapshots, links and the audit log](#looking-at-proposals-snapshots-links-and-the-audit-log)
 
 ## Logs and health
@@ -61,7 +61,7 @@ project the gateway runs. When Mystic Forge is down, or the Forge
 engine is on (`FORGE_REPLICAS` above 0) and does not answer, `status` is
 `"degraded"` but the reply is still
 HTTP 200: the gateway's own pages and Archidekt tools keep working without
-it, so the container is not restarted for it; only research and simulations
+it, so the container is not restarted for it; only research and tests
 fail. The admin page's **System** card shows the version, database size and
 schema, when the newest backup (and the newest backup copy) was written, and
 the research service's and the Forge engine's state as the health check last found them.
@@ -153,7 +153,7 @@ kinds of AI client:
 
 Every sign-in from an AI client, of either kind, first shows the gateway's
 **Connect an application** page. It names the client and the host the sign-in
-returns to, and Authentik opens only after **Approve**. Authentik can't tell
+returns to, and Authentik opens only after **Approve and sign in**. Authentik can't tell
 AI clients apart (they all reach it through the gateway's one OIDC client), so
 without this page anyone could register a client of their own and send a
 signed-in member a link that hands them that member's access.
@@ -320,8 +320,8 @@ not in your backups.
   them again after the restore). Archidekt links don't come back: the
   backup holds none, so everyone relinks. Phones don't stay connected either:
   backups from 0.7.39 on hold no phone keys, so each member who uses
-  notifications opens their Account page in the Android app and presses
-  **Save notifications** again. Before you start the stack again,
+  push notifications opens their Account page in the Android app and presses
+  **Save push notifications** again. Before you start the stack again,
   end every session in the restored file so everyone signs in once more
   (which re-checks their Authentik groups). On the gateway's node, as the
   `PUID` user (`1000` here):
@@ -562,8 +562,8 @@ The gateway only writes to someone's Archidekt account in two steps:
 1. `propose_deck_changes` (edit a deck), `propose_new_deck` (create one) or
    `propose_restore_snapshot` (undo an edit) saves a proposal with the exact
    diff.
-2. The user approves it: with Approve on the card their AI app shows next
-   to the proposal (Claude, ChatGPT; **Approve buttons in the chat** on the
+2. The user approves it: with Apply on the card their AI app shows next
+   to the proposal (Claude, ChatGPT; **Apply buttons in the chat** on the
    Settings page) or with the Apply
    button on `/proposals/<id>`. A user who chose a looser approval mode on
    their Account page lets the assistant apply low-risk changes (semi) or
@@ -611,7 +611,7 @@ missing); it is not on the Settings page.
   made by hand on the deck settings page and the Folders page: deleting a
   deck and creating a folder (since 0.7.25), the cover image, tags,
   moving a deck to a folder and renaming a folder (since 0.7.26), and likes,
-  bookmarks, follows, comments, collaborators and Collection edits (since
+  bookmarks, follows, comments, collaborators and binder edits (since
   0.7.27). Nothing is sent to Archidekt for any of them.
 
 With writes off, people can still sign in, link Archidekt, use research
@@ -623,20 +623,20 @@ deck.
 
 ### Approving on the card in the chat
 
-With **Approve buttons in the chat** on (the default), an AI app that renders MCP Apps
+With **Apply buttons in the chat** on (the default), an AI app that renders MCP Apps
 (Claude on the web, desktop and phones; ChatGPT) shows every proposal as a
-card with the change, each card's picture, and Approve and Reject buttons.
+card with the change, each card's picture, and Apply and Reject buttons.
 The buttons call the `confirm_proposal` tool, which the app offers to the
 card and not to the model, and which needs a one-time code the gateway
 puts only in the tool result's `_meta` (handed to the card, kept out of the
 model's context). A call without the right code is refused and logged as
 `approval_refused`, with nothing sent; the code is tied to the proposal, the
-member and the app that proposed, and is spent by the apply. Approve also
+member and the app that proposed, and is spent by the apply. Apply also
 sends the status the card showed: a change held since (for example, the
 change it would replace was applied in the meantime) is refused with nothing
 sent, and the card shows the hold, even when the app does not let the card
-read the change again first. The waiting changes card's Approve, and Apply
-all on either card, send what they showed too. Approve refuses a change held
+read the change again first. The waiting changes card's Apply, and Apply
+all on either card, send what they showed too. Apply refuses a change held
 since, as above. Apply all leaves it out, lists it as not sent with why it is
 held, and goes on with the rest. The review page refuses such a change too,
 and the Proposals page's Apply confirm leaves it out as Apply all does. The gateway
@@ -679,7 +679,7 @@ keep it out of the log: NPM's generated `proxy.conf` already carries the
 `proxy_pass` for the host, and the extra block took a gateway offline
 (0.7.4's optional step, withdrawn in 0.7.9). The AI app loads
 each card's pictures from Scryfall directly, never through the gateway.
-Turning **Approve buttons in the chat** off removes every card and this endpoint.
+Turning **Apply buttons in the chat** off removes every card and this endpoint.
 
 ### Approval modes: when the assistant may apply by itself
 
@@ -692,7 +692,7 @@ of mode is in the audit log as `approval_mode_set`.
 | Mode | What the assistant may apply with `apply_proposal` |
 |---|---|
 | `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
-| `semi` | Low-risk proposals only (small deck or collection edits and clones; see below). High-risk ones wait for the member's press as in manual. |
+| `semi` | Low-risk proposals only (small deck or binder edits and clones; see below). High-risk ones wait for the member's press as in manual. |
 | `auto` | Every proposal except those that wait for the member's press on the card or the review page: a restore, a new deck, a commander change, a big edit (more rows than **Rows before an edit counts as big** on the Settings page, default 20), making a deck public or unlisted, a category change that touches the commander or which cards count in the deck, and any edit of a description that has formatting, such as bold text, links or pictures. In every mode an assistant never applies a proposal that is held (one it depends on was rejected, withdrawn, failed or expired, or the one it would replace was already applied), one waiting for a proposal it depends on, one another app changed after it was made, one that replaces another app's proposal, or one that another app's waiting proposal would replace. |
 
 The risk of a proposal comes from its stored review rows, so it is judged
@@ -700,7 +700,7 @@ on what the review page would show, not on what the assistant says:
 
 | Tier | Proposals |
 |---|---|
-| Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row, never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; a private copy of a deck (a clone), which changes nothing that exists; and a change to your Archidekt lists (category templates, default categories, color tags, pins or custom cards) of at most 5 entries, with no deletes. (The row limit is **Rows a small edit may have** on the Settings page, default 5.) |
+| Low | A small edit to an existing deck or to your binder: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row, never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; a private copy of a deck (a clone), which changes nothing that exists; and a change to your Archidekt lists (category templates, default categories, color tags, pins or custom cards) of at most 5 entries, with no deletes. (The row limit is **Rows a small edit may have** on the Settings page, default 5.) |
 | High | Everything else: more rows than that, adding more than 10 cards from a card package, a commander change, a new deck, restoring a snapshot, the deck's details (name, format, bracket, description, visibility, folder, tags and cover), and its categories (a new category, a new name, Premier, Not in deck or Not in price, or deleting one). A commander change is a change to which cards are the deck's commanders or to the categories of a row in its commander zone (Archidekt's commander categories, whatever they are named): a card moved into or out of the zone, the commander removed, a new card added to it, or any other change to the categories of a row that has a commander category before or after. A commander is a card whose row in the commander zone is in the deck: a row whose primary category is Maybeboard or Sideboard (or another category the deck does not count) is not in the deck, so that card is no commander. It waits for the member's press in every mode. So does a lowered count on a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard. Another copy, printing or finish of a commander already there is not a commander change. |
 | Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. |
 
@@ -725,7 +725,7 @@ card or review page, also gets a backup copy on Archidekt. The member's own
 saves in the deck editor make one only when its "Also keep a backup copy on
 Archidekt" box is ticked (unticked unless the Settings page's
 **Backup box ticked by default** is on), and the deck page's own edits and Card
-search's Add to deck, which have no such box, never make one. A collection change, a clone, a new deck
+search's Add to deck, which have no such box, never make one. A binder change, a clone, a new deck
 and the other actions on the member's Archidekt account (likes, votes,
 bookmarks, follows, comments, new folders and collaborator changes) keep no
 snapshot.
@@ -747,7 +747,7 @@ read and a write to Archidekt.
 
 Tell people to keep `apply_proposal` on "ask every time" (or "needs
 approval") in their AI app rather than "always allow": in Semi-auto and Full
-auto that's the tool that actually changes their deck or collection.
+auto that's the tool that actually changes their deck or binder.
 
 Each proposal records the app that made it (or "browser"), and the review
 page and the proposal list show it. An app may apply or reject only its own
@@ -756,10 +756,9 @@ their Account page, that app's pending proposals are rejected and can no
 longer be applied. A member may hold at most 100 pending proposals in all.
 
 An app connected with the read-only scope `mtg.read` can read decks,
-proposals, snapshots, reports and the collection but can't propose (deck or
-collection changes), apply, confirm, reject, run reports or save scans
+proposals, snapshots, reports and the binder but can't propose (deck or binder changes), apply, confirm, reject, run reports or save scans
 (`insufficient_scope`). The one thing it keeps is a deck comparison with a
-paired simulation (`compare_decks` with `simulate`): stored as a report in the
+paired solo test (`compare_decks` with `simulate`): stored as a report in the
 gateway's own database, labelled with the app's name. It changes nothing on
 Archidekt; `run_deck_report` stays a write tool.
 
@@ -883,7 +882,7 @@ Archidekt busy for everyone:
   waiting;
 - at most 120 started per 10 minutes (**Archidekt work per member per 10
   minutes** on the Settings page), refilled evenly. Deck reads, proposals, applies, links and
-  research tools (goldfish, precon) given an Archidekt deck id or link all
+  research tools (solo test, precon) given an Archidekt deck id or link all
   count. Past it the member gets
   `rate_limited` until enough of the allowance has refilled;
 - at most five failed Archidekt link attempts (wrong username or password)
@@ -923,11 +922,11 @@ What it shows:
   for one person from the Users page (`?sub=`).
 - **Metrics** (`/admin/metrics`): 30-day totals per counter (see
   [the metrics table](#the-metrics-table) below).
-- **Card models** (`/admin/models`): the card models the simulator keeps,
+- **Card models** (`/admin/models`): the card models the solo test keeps,
   most recently changed first, 100 to a page. Each row shows the card, who
   added it and when, and when it was last changed, with a **Remove** button
   (audited as `card_model_removed`). Each member's models are used only in
-  their own simulations.
+  their own tests.
 - **Settings** (`/admin/settings`): the gateway's settings an
   admin may change without a redeploy (see [the Settings page](#the-settings-page) below).
 
@@ -961,7 +960,7 @@ the gateway runs: approvals, deck sync, backups (including **Backup folder on
 Archidekt**, the folder each member's backup copies go in, "MTG Gateway
 Backups" by default, up to 100 characters; a new name applies to the next
 copy, and copies already in an older folder are still recognised),
-simulation, watchlists and prices, the gateway's name and log detail,
+test, watchlists and prices, the gateway's name and log detail,
 sign-in times, Archidekt and Scryfall pacing, and card scanning (folded away). Each one shows
 its allowed range and where its value comes from: the gateway's default, a
 change made here (who and when), or your stack. The row's own text says
@@ -1031,7 +1030,7 @@ row and a "relink at /account" message to the user, when there is no refresh
 token, the refresh itself is rejected, or a freshly refreshed token is
 rejected too.
 
-## Watchlists, prices and notifications
+## Watchlists, prices and push notifications
 
 Watchlists are on by default. An admin turns them off with **Watchlist and
 price features** on the Settings page (or `MTG_WATCHLISTS_ENABLED=false` in the
@@ -1072,16 +1071,16 @@ queries whatever the list's size and draws 25 rows at a time. "Delete
 my data" removes a member's watches, deck values, Binder copy and notification
 choices.
 
-Notifications go from the stack's own ntfy server to the members' Android
+Push notifications go from the stack's own ntfy server to the members' Android
 app. Phones reach the server through the gateway's own address, so it needs
 no proxy host of its own.
-[DEPLOY.md](DEPLOY.md#notifications-on-members-phones) explains how it works. The token never
+[DEPLOY.md](DEPLOY.md#push-notifications-on-members-phones) explains how it works. The token never
 appears in a log line; a message ntfy refuses is logged as
 `ntfy publish refused: HTTP <status>`, one that cannot be sent as
 `ntfy publish failed: <error type>`. The gateway has no AI model and writes
 summaries with fixed sentences; members who want an AI-written one use their
 own assistant's scheduled task with the read-only `get_summary` tool
-([USING.md](USING.md#notifications-and-summaries)).
+([USING.md](USING.md#push-notifications-and-summaries)).
 
 ## Looking at proposals, snapshots, links and the audit log
 
@@ -1104,7 +1103,7 @@ For the SQL snippets on this page, put the query inside the
 | `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone`, `collection` or `action`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`, `withdrawn`, `replaced`, `expired`; a waiting one counts as `expired` once its expiry time passes), result and timestamps |
 | `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy in the user's Archidekt backup folder, when there is one (only with backup copies on, and not for the saves that make none). That is the copy made at that moment, or the deck's earlier copy when the apply shared it (within 15 minutes of that copy, or with the deck unchanged since). Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
 | `archidekt_links` | One row per user who linked Archidekt: Archidekt username, encrypted session, status and timestamps |
-| `reports` | Stored deck reports (`run_deck_report`, the "Run full test" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the goldfish and validation results as JSON. The newest 200 per user are kept |
+| `reports` | Stored deck reports (`run_deck_report`, the "Run test" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the solo test and validation results as JSON. The newest 200 per user are kept |
 | `metrics` | Per-day usage counters, see [The metrics table](#the-metrics-table) |
 | `audit_log` | Kept for a year. Sign-ins and rejected sign-ins, token events, proposals created and rejected, every apply attempt (refusals included), link, unlink, refresh and expiry events, reports created, and `admin_*` actions. `client_id` is the OAuth client that made the request (`__browser__` for the review page) and `detail_json` carries its registered `client_name`, so you can tell which assistant did what |
 

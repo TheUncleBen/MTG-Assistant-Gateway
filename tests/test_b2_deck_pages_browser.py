@@ -197,7 +197,7 @@ def test_goldfish_cards_have_the_shared_menu_with_the_games_moves(server: Server
         menu = _menu(page)
         labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
         assert labels[0] == "Open card" and "Play to the battlefield" in labels and "Copy name" in labels
-        assert "Open on Scryfall" in labels and "Add to collection" in labels
+        assert "Open on Scryfall" in labels and "Add to binder" in labels
         menu.locator("[role=menuitem]", has_text="Play to the battlefield").click()
         page.wait_for_timeout(100)
         assert page.locator("#gf-battlefield .gf-card").count() == 1

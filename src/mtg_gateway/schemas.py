@@ -249,9 +249,7 @@ class CollectionAdd(_Card):
 
 class CollectionRemove(BaseModel):
     model_config = ConfigDict(extra="allow")
-    id: StrictInt | str | None = Field(
-        default=None, description="The collection row id from list_collection."
-    )
+    id: StrictInt | str | None = Field(default=None, description="The binder row id from list_collection.")
     name: str | None = Field(default=None, description="Or the card's name: every row of it.")
     quantity: StrictInt | None = Field(
         default=None, ge=1, description="Copies to remove; omit to remove every copy."
@@ -355,13 +353,13 @@ class _SimShared(BaseModel):
     )
     seed: StrictInt | None = Field(default=None, description="Random seed (default 42), for repeatable runs.")
     until_turn: StrictInt | None = Field(
-        default=None, ge=1, le=30, description="Simulate through this turn (default 10)."
+        default=None, ge=1, le=30, description="Play through this turn (default 10)."
     )
 
 
 class RunOptions(_SimShared):
     opponents: StrictInt | None = Field(
-        default=None, ge=1, le=5, description="Goldfish opponents (default 1)."
+        default=None, ge=1, le=5, description="Opponents who do nothing (default 1)."
     )
     forge_seed: StrictInt | None = Field(
         default=None,

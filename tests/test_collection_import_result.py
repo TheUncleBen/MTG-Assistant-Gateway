@@ -82,8 +82,8 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
     assert result["cards"] == 7
     html = import_result_html(result)
     assert html == (
-        "<div class='notice ok importres' role='status'><p>Imported 7 cards into your Collection on "
-        "Archidekt.</p><ul><li>Kept as English, because Phyrexian is not a language Archidekt stores "
+        "<div class='notice ok importres' role='status'><p>Imported 7 cards into your binder."
+        "</p><ul><li>Kept as English, because Phyrexian is not a language Archidekt stores "
         "for collection cards: "
         "line 2 (Sol Ring), line 5 (Forest).</li>"
         "<li>Kept as English, because “XYZ” is not a language Archidekt stores "
@@ -107,12 +107,12 @@ def test_two_rows_into_entries_already_there_and_nothing_added() -> None:
         },
     )
     assert import_result_html(one) == (
-        "<div class='notice ok importres' role='status'><p>Imported 2 cards into your Collection on "
-        "Archidekt.</p><ul><li>Added to entries you already had, with the same printing, finish, "
+        "<div class='notice ok importres' role='status'><p>Imported 2 cards into your binder."
+        "</p><ul><li>Added to entries you already had, with the same printing, finish, "
         "condition and language: row 1 (Opt), row 2 (Forest).</li></ul></div>"
     )
     single = import_result(parse_collection_import("1 Opt\n"), {"added": [{"id": 1}]})
-    assert "<p>Imported 1 card into your Collection on Archidekt.</p></div>" in import_result_html(single)
+    assert "<p>Imported 1 card into your binder.</p></div>" in import_result_html(single)
     none = import_result(items, {"added": [], "skipped": [{"index": 0}, {"index": 1}], "merged": []})
     assert import_result_html(none) == (
         "<div class='notice error importres' role='status'><p>Nothing was imported: no card in the list was "
@@ -141,7 +141,7 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
         # Japanese is its own entry; never added to the English one (0.7.46)
         assert sorted((c["quantity"], c["language"]) for c in recs) == [(1, 1), (2, 6)]
         page = (await b.http.get(where, headers=NAV)).text
-        assert "Imported 3 cards into your Collection on Archidekt." in page
+        assert "Imported 3 cards into your binder." in page
         assert (
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt)." in page
@@ -152,7 +152,7 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
         assert "data-coltab='import' aria-selected='true'" in page
         # read once: the same address falls back to the plain notice
         again = (await b.http.get(where, headers=NAV)).text
-        assert "Imported into your Collection on Archidekt." in again and "Foo Bar" not in again
+        assert "Imported into your binder." in again and "Foo Bar" not in again
         # a refusal names the line
         bad = "Quantity,Name\n1,Opt\nx,Sol Ring\n"
         r = await import_list(b, {"csrf": csrf, "action": "import", "text": bad})
@@ -191,7 +191,7 @@ async def test_a_result_token_is_only_read_by_the_member_who_imported(stack: Sta
         await bob.login("/collection")
         assert (await bob.link("amy", "pw-amy")).status_code == 303
         page = (await bob.http.get(where, headers=NAV)).text
-        assert "Phyrexian" not in page and "Imported into your Collection on Archidekt." in page
+        assert "Phyrexian" not in page and "Imported into your binder." in page
     finally:
         await bob.aclose()
 
@@ -237,8 +237,8 @@ def test_an_unknown_condition_is_near_mint_and_named() -> None:
         import_result(parse_collection_import("Quantity,Name,Condition\n1,Opt,EX\n"), {"added": [{"id": 1}]})
     )
     assert one == (
-        "<div class='notice ok importres' role='status'><p>Imported 1 card into your Collection on "
-        "Archidekt.</p><ul><li>Kept as Near Mint, because “EX” is not a condition Archidekt stores "
+        "<div class='notice ok importres' role='status'><p>Imported 1 card into your binder."
+        "</p><ul><li>Kept as Near Mint, because “EX” is not a condition Archidekt stores "
         "for collection cards: line 2 (Opt).</li></ul></div>"
     )
     two = import_result_html(

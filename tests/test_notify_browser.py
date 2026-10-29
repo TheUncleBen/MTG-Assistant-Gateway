@@ -70,7 +70,7 @@ def test_each_app_button_reaches_the_app() -> None:
     ("state", "button", "shown"),
     [
         ("connected", False, "Always connected"),
-        ("off", True, "doesn't get your notifications yet"),
+        ("off", True, "doesn't get your push notifications yet"),
         ("blocked", True, "turned off for this app"),
         (None, False, "Update the app"),  # an app from before 0.7.30
     ],
@@ -92,12 +92,13 @@ def test_the_phone_part_shows_only_what_applies(
     with sync_playwright() as p:
         browser, page = _page(p, exe, html, state)
         try:
-            assert page.get_by_role("button", name="Get notifications on this phone").is_visible() is button
+            get = page.get_by_role("button", name="Get push notifications on this phone")
+            assert get.is_visible() is button
             assert page.get_by_text(shown, exact=False).first.is_visible()
             visible = [t for t in page.locator(".phone > p").all() if t.is_visible()]
             assert len(visible) == 1
             if button:
-                page.get_by_role("button", name="Get notifications on this phone").click()
+                page.get_by_role("button", name="Get push notifications on this phone").click()
                 assert page.evaluate("window.calls") == [f"startNotifications:{key}"]
         finally:
             browser.close()

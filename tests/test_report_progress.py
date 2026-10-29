@@ -1,6 +1,6 @@
 """A run shows from the press (0.7.46): the report is stored as soon as its deck is read, before the
 research service's validation and solo test come back, so Reports, History and the deck list it
-while it runs, and the website's Run full test opens the report page at once. The page's solo test
+while it runs, and the website's Run test opens the report page at once. The page's solo test
 section says it is running and fills in by itself. An assistant's run still waits for its result,
 and a refused one keeps nothing; a gateway restart in the middle leaves a report that says so."""
 

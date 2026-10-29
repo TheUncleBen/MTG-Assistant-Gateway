@@ -172,7 +172,7 @@ async def _finish_warnings(adds: list[dict[str, Any]], scan: Any) -> list[str]:
         if made and a.get("finish") not in made:
             out.append(
                 f"{a.get('name') or 'A card'} ({a['set'].upper()} {a['collector_number']}) is not made in "
-                f"{a['finish']}; Scryfall lists {', '.join(made)}. Amend the finish, or the collection "
+                f"{a['finish']}; Scryfall lists {', '.join(made)}. Amend the finish, or the binder "
                 "will hold a printing that does not exist."
             )
     return out
@@ -840,7 +840,7 @@ class CollectionService:
             for rec in found.records:
                 if rec.get("id") == rid:
                     return rec
-            raise CollectionError("not_found", "no such card in your collection")
+            raise CollectionError("not_found", "no such card in your binder")
         page = 1
         while page <= 10:
             body = await self._run(
@@ -852,7 +852,7 @@ class CollectionService:
             if not body.get("next"):
                 break
             page += 1
-        raise CollectionError("not_found", "no such card in your collection")
+        raise CollectionError("not_found", "no such card in your binder")
 
     async def set_quantity(
         self, sub: str, rid: int, quantity: int | None = None, *, delta: int = 0, name: str = ""
@@ -1148,7 +1148,7 @@ def import_result_html(result: dict[str, Any]) -> str:
         cls = "error"
     elif result.get("added"):
         n = int(result.get("cards") or 0)
-        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Collection on Archidekt.", "ok"
+        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your binder.", "ok"
     else:
         lead, cls = "Nothing was imported: no card in the list was found.", "error"
     items = "".join(f"<li>{_esc(n)}</li>" for n in notes)
@@ -1255,7 +1255,7 @@ CONDITION_WORDS = {
     "HP": "Heavily Played",
     "DMG": "Damaged",
 }
-PURPOSE = "The cards you own: your collection on Archidekt."
+PURPOSE = "The cards you own, kept in your Archidekt account (your Archidekt collection)."
 TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 7.5rem 8.5rem var(--ctl)"
 TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
 TABLE_SM = "minmax(0,1fr) var(--ctl)"
@@ -1411,7 +1411,7 @@ def _shims(r: dict[str, Any], csrf_in: str) -> str:
     name = _esc(r["name"])
     return (
         f"<form method='post' action='/collection' class='rm' hidden>{csrf_in}<button name='action' "
-        f"value='remove' aria-label='Remove {name} from your collection'>Remove</button></form>"
+        f"value='remove' aria-label='Remove {name} from your binder'>Remove</button></form>"
         "<details class='rowmenu' hidden><summary>Details</summary></details>"
     )
 
@@ -1511,7 +1511,7 @@ def list_html(rows: list[dict[str, Any]], csrf: str, *, view: str) -> str:
     if view == "list":
         style = _esc(f"--cols:{TABLE_COLS};--cols-md:{TABLE_MD};--cols-sm:{TABLE_SM}")
         return (
-            f"<ul class='ui-table colllist' id='cards' role='table' aria-label='Your collection' "
+            f"<ul class='ui-table colllist' id='cards' role='table' aria-label='Your binder' "
             f"style='{style}'>{table_head_html()}{items}</ul>"
         )
     return f"<ul class='cardgrid collgrid' id='cards'>{items}</ul>"
@@ -1568,7 +1568,7 @@ def details_box_html(r: dict[str, Any] | None, csrf: str, *, open: bool = False)
         actions=[
             ui.box_button("Cancel", cancel=True),
             ui.box_button(
-                "Remove from collection",
+                "Remove from binder",
                 kind="danger",
                 form="col-detailsform",
                 name="action",
@@ -1630,8 +1630,7 @@ def add_box_html(
         "<p class='muted small'>Copies join an entry you already have only when its printing, finish, "
         "condition and language all match; anything else becomes a new entry.</p>"
         "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
-        "<strong>Save to collection</strong>. Everything you add is added to your Collection on "
-        "Archidekt.</p>"
+        "<strong>Save to binder</strong>. Everything you add is added to your binder.</p>"
         "</form>"
     )
     import_form = (
@@ -2186,7 +2185,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if job["state"] in ("done", "failed"):
             return f"The import has ended: {done} of {of} lines done."
         return (
-            f"Importing your list into your Collection on Archidekt: {done} of {of} lines done. "
+            f"Importing your list into your binder: {done} of {of} lines done. "
             "You can leave this page; the import goes on."
         )
 
@@ -2284,12 +2283,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 inner = re.sub(r"</(p|div)>$", "", inner)
                 return strip(inner, kind, html=True)
         msgs = {
-            "added": "Added to your Collection on Archidekt.",
-            "removed": "Removed from your Collection on Archidekt.",
-            "updated": "Card details saved to your Collection on Archidekt.",
+            "added": "Added to your binder.",
+            "removed": "Removed from your binder.",
+            "updated": "Card details saved to your binder.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
             "nothingimported": "Nothing was imported: no card in the list was found.",
-            "imported": "Imported into your Collection on Archidekt.",
+            "imported": "Imported into your binder.",
             "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
             "import the rest after.",
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
@@ -2310,9 +2309,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):
             return (
-                "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
-                "<p>Link your Archidekt account to see it here. Your cards stay in your Collection on "
-                "Archidekt.</p><div class='actions'>"
+                "<section class='panel coll-empty'><h2>Your binder lives on Archidekt</h2>"
+                "<p>Link your Archidekt account to see it here. Your cards stay on Archidekt (your "
+                "Archidekt collection).</p><div class='actions'>"
                 + ui.button_link(
                     "Link Archidekt", "/account/details#archidekt", kind="primary", icon_name="account"
                 )
@@ -2320,7 +2319,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             )
         return (
             f"<div id='col-notes'>{strip(str(exc), 'error')}</div>"
-            "<section class='panel'><p class='muted'>Your collection is read live from Archidekt; when "
+            "<section class='panel'><p class='muted'>Your binder is read live from Archidekt; when "
             "Archidekt is slow or down the page cannot show it.</p></section>"
         )
 
@@ -2906,10 +2905,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="list_collection",
         title="List the cards I own",
         description=(
-            "The signed-in user's Collection on Archidekt (the account they linked): the cards they "
-            "own, one row per printing and finish with a quantity, 100 a page in Archidekt's "
+            "The signed-in user's binder, their Archidekt collection (the account they linked): the "
+            "cards they own, one row per printing and finish with a quantity, 100 a page in Archidekt's "
             "newest-first order. Optional `query` filters by card name; `sort` is added, edition "
-            "(set release) or price (highest first, from the collection as the daily price check last "
+            "(set release) or price (highest first, from the binder as the daily price check last "
             "read it, with each card's price; only once the member opened their Binder); `page` pages. "
             "Returns cards, count and total_pages. Read-only."
         ),
@@ -2967,7 +2966,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 rows = await service.find_by_name(sub, str(entry["name"]))
                 if not rows:
                     raise CollectionError(
-                        "not_found", f"no card named '{_clean(str(entry['name']), 60)}' in your collection"
+                        "not_found", f"no card named '{_clean(str(entry['name']), 60)}' in your binder"
                     )
             else:
                 raise CollectionError("invalid", "each remove entry needs id or name")
@@ -3041,7 +3040,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         try:
             rows = await service._raw_rows(sub, max_pages=10)
         except CollectionError as exc:
-            return False, [f"could not read the collection back: {exc}"]
+            return False, [f"could not read the binder back: {exc}"]
         have = {r.get("id"): r for r in rows}
         all_read = len(rows) < 10 * COLLECTION_PAGE_SIZE  # else a missing record may sit further on
         wrong: list[str] = []
@@ -3067,11 +3066,12 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
 
     @server.tool(
         name="propose_collection_changes",
-        title="Propose changes to my collection",
+        title="Propose changes to my binder",
         description=(
-            "Propose adding cards to, or removing cards from, the user's Archidekt Collection. Like a "
-            "deck edit this is a proposal: show its diff and review_url; it is applied by the user "
-            "(Approve on the proposal card or the review page) or by you when assistant_may_apply is "
+            "Propose adding cards to, or removing cards from, the user's binder (their Archidekt "
+            "collection). Like a deck edit this is a proposal: show its diff and review_url; it is "
+            "applied by the user "
+            "(Apply on the proposal card or the review page) or by you when assistant_may_apply is "
             "true, with apply_proposal. add: a list of {name, set_code?, collector_number?, quantity?, "
             "finish?, condition?, language?} or plain names (a card named without set_code and "
             "collector_number is added in a printing Archidekt picks, as a nonfoil unless finish says "

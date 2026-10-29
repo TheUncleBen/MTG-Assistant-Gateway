@@ -69,7 +69,7 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         # Delete my data: the merged list, a red-outline opener with the trash icon, the box behind it
         delete = card(page, "delete-data")
         assert f"<p>Delete everything this gateway keeps for your account: {pages.DELETED_LIST}." in delete
-        assert "your simulator card models" in delete and "deck covers" in delete and "view choices" in delete
+        assert "your card models" in delete and "deck covers" in delete and "view choices" in delete
         assert (
             "<a class='btn btn-outline-danger' href='/account/details?delete=1'"
             " data-box-open='delete'>" in delete

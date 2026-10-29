@@ -1,5 +1,5 @@
 """The printing picker (static/printpick.js) in headless Chromium: the deck page's card menu has
-"Change printing…" (on every row); the picker searches by set name or code,
+"Printings…" (on every row); the picker searches by set name or code,
 filters by finish, frame and border, sorts newest, oldest or cheapest, hides digital-only and
 preview printings until the switch shows them (labelled), never lists another language, and
 pages past Scryfall's page with Load more (filtered on Scryfall's side then). Hovering a tile
@@ -214,7 +214,7 @@ def _open_menu(page, card) -> None:
 
 def _open_picker(page, card) -> None:
     _open_menu(page, card)
-    page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+    page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
     page.locator(".printpick.open[role=dialog]").wait_for(timeout=3000)
     page.locator(".printpick .pptile").first.wait_for(timeout=5000)
 
@@ -331,12 +331,12 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         # test_row_targets_browser)
         _open_menu(page, side)
         labels = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
-        assert any("Change printing…" in x for x in labels), labels
+        assert any("Printings…" in x for x in labels), labels
         page.keyboard.press("Escape")
         _open_menu(page, card)
         labels = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
-        assert any("Change printing…" in x for x in labels), labels
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        assert any("Printings…" in x for x in labels), labels
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         dlg = page.locator(".printpick.open[role=dialog]")
         dlg.wait_for(timeout=3000)
         assert page.locator(".ctxmenu").count() == 0
@@ -798,7 +798,7 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         assert page.locator(".picker").count() == 0  # the old picker is gone
         row = page.locator(".erow[id='card-Sol Ring']")
         row.locator("details.rowmenu summary").click()
-        row.locator(".menu button", has_text="Change printing").click()
+        row.locator(".menu button", has_text="Printings…").click()
         dlg = page.locator(".printpick.open[role=dialog]")
         dlg.wait_for(timeout=3000)
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)
@@ -814,7 +814,7 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         assert server.sol_ring() == [("cmr", "472", "Normal")]
         # the picker opened again marks the pick waiting; picking the deck's own takes it back
         row.locator("details.rowmenu summary").click()
-        row.locator(".menu button", has_text="Change printing").click()
+        row.locator(".menu button", has_text="Printings…").click()
         page.locator(".printpick .pptile.picked").wait_for(timeout=5000)
         assert "Picked" in page.locator(".printpick .pptile.picked").inner_text()
         page.locator(".printpick .pptile.current").click()
@@ -875,7 +875,7 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         card = page.locator(".deckview .c[data-card='Sol Ring'][data-zone='main']")
         _open_menu(page, card)
         _shot(page, f"menu-{width}-{theme}")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)
         page.wait_for_timeout(250)  # the dialog's entrance
         problems = page.evaluate(MEASURE) + page.evaluate(COVERED)
@@ -1055,7 +1055,7 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
         row = page.locator(".erow[id='card-Sol Ring']")
         for _ in range(2):  # queue a pick, then open the picker again on it
             press(row.locator("details.rowmenu summary"))
-            press(row.locator(".menu button", has_text="Change printing"))
+            press(row.locator(".menu button", has_text="Printings…"))
             page.locator(".printpick .pptile").first.wait_for(timeout=5000)
             if not page.locator(".printpick .pptile.picked").count():
                 press(page.locator(".printpick .pptile", has_text="SLD #1074"))
@@ -1210,7 +1210,7 @@ def test_the_picker_finds_the_rows_own_printing_and_waits_out_a_busy_answer(serv
         page.route(prints, lambda r: r.fulfill(status=503, content_type="application/json", body=down))
         page.reload(wait_until="networkidle")
         _open_menu(page, card)
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         status = page.locator(".printpick .ppstatus.error")
         status.wait_for(timeout=5000)
         assert "Printings could not be loaded. Scryfall is not answering right now." in status.inner_text()
@@ -1248,7 +1248,7 @@ def test_the_picker_spins_while_it_looks_and_says_plainly_when_other_lookups_hol
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
         _open_menu(page, card)
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         status = page.locator(".printpick .ppstatus")
         status.wait_for(timeout=5000)
         assert status.locator(".ui-spin[aria-hidden=true]").count() == 1
@@ -1261,7 +1261,7 @@ def test_the_picker_spins_while_it_looks_and_says_plainly_when_other_lookups_hol
         page.route(prints, lambda r: r.fulfill(status=429, content_type="application/json", body=busy))
         page.reload(wait_until="networkidle")
         _open_menu(page, card)
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         error = page.locator(".printpick .ppstatus.error")
         error.wait_for(timeout=15000)
         assert error.locator(".ui-spin").count() == 0

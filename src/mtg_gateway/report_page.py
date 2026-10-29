@@ -179,7 +179,7 @@ def remove_model_boxes(
         out.append(
             ui.box(
                 bid,
-                f"Remove the saved description of “{card}”?",
+                f"Remove the card model of “{card}”?",
                 body,
                 actions=[
                     ui.box_button("Keep it", cancel=True),
@@ -452,7 +452,7 @@ def more_html(f: Any, csrf: str, report_id: str) -> str:
 
 
 # -- the solo test played by Forge (the report's ``forge_solo`` block; None when Forge is off) ----
-SOLO_FORGE_NAME = "Full-rules solo test by Forge"
+SOLO_FORGE_NAME = "Forge solo test"
 SOLO_FORGE_SUB = (
     "Against opponents that do nothing, up to turn {turns}: how fast the deck works on its own, not how "
     "it fares against interaction."
@@ -972,7 +972,7 @@ def solo_section_html(
     summary = ""
     if g.get("summary"):
         summary = (
-            "<details class='rv-det'><summary class='fold-btn'>The simulator's own summary</summary>"
+            "<details class='rv-det'><summary class='fold-btn'>The solo test's own summary</summary>"
             "<ul class='rv-notes'>"
             + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
             + "</ul></details>"
@@ -1195,7 +1195,7 @@ def _jump_html(
     items = []
     forge_items = []
     if isinstance(r.get("forge_solo"), dict) and r.get("forge_solo"):
-        forge_items.append(ui.Chip("Full-rules solo test", None, "#rv-solo-forge"))
+        forge_items.append(ui.Chip("Forge solo test", None, "#rv-solo-forge"))
     # a report without Forge games starts with its preflight-only section: no link to it
     if forge:
         forge_items.append(ui.Chip("Forge games", None, "#rv-forge"))
@@ -1662,7 +1662,7 @@ def report_page_html(
     if reused:
         notice_html += (
             "<p class='notice'>The deck had not changed since its last report a few minutes ago, so that "
-            "report is shown instead of running the simulation again.</p>"
+            "report is shown instead of testing it again.</p>"
         )
     rid = str(r.get("report_id") or "")
     forge = forge_section_html(
@@ -1691,7 +1691,7 @@ def report_page_html(
     v = s["validation"]
     raw = ""
     if g and g.get("raw"):
-        raw += f"<h3>Simulation output</h3><pre>{_esc(g['raw'])}</pre>"
+        raw += f"<h3>Solo test output</h3><pre>{_esc(g['raw'])}</pre>"
     if v and v.get("raw"):
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:

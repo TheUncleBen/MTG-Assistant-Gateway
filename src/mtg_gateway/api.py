@@ -393,7 +393,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if row.get("created_by_client") != BROWSER_CLIENT_ID:
                 raise DeckError(
                     "invalid",
-                    "That proposal was made by an assistant. Approve it on its review page.",
+                    "That proposal was made by an assistant. Apply it on its review page.",
                     review_url=f"/proposals/{pid}",
                 )
             if p.get("state") != "pending":
@@ -522,7 +522,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if row.get("created_by_client") != BROWSER_CLIENT_ID:
                 raise DeckError(
                     "invalid",
-                    "That proposal was made by an assistant. Approve it on its review page.",
+                    "That proposal was made by an assistant. Apply it on its review page.",
                     review_url=f"/proposals/{pid}",
                 )
             if p.get("state") != "pending":

@@ -4,7 +4,7 @@ The gateway already tells AI clients the basics when they connect: who
 you are, that research is read-only, and that edits take two steps. The
 **MTG Assistant Gateway skill** goes further. It covers which tool to use for which
 question, how to load a deck from a link, a pasted list or a CSV export, how
-to report simulations honestly, and the propose, review, apply routine for
+to report tests honestly, and the propose, review, apply routine for
 deck edits, including what every error means. It's optional, but worth it.
 
 | File | For |
@@ -27,12 +27,12 @@ ChatGPT text to copy, built from the files above.
 - Load any deck the right way: an Archidekt link with `get_deck`, your own
   decks with `list_my_decks` and then `get_deck`, a pasted list with
   `parse_decklist`, or an Archidekt CSV export with `parse_deck_export`.
-- Run goldfish simulations and always report the seed, number of games,
-  mulligan settings, what wasn't simulated and the confidence intervals,
+- Run solo test and always report the seed, number of games,
+  mulligan settings, what wasn't tested and the confidence intervals,
   without calling the result a win rate.
 - Edit decks you own, or create new ones in your account, in two steps:
   propose and show you the exact diff, then leave the decision to you: the
-  Approve button on the card your app shows, the Apply button on the
+  Apply button on the card your app shows, the Apply button on the
   gateway's review page, or, if you chose a looser approval mode on your
   Account page, the assistant applies it itself.
   Then report the result with the snapshot and how to undo it.

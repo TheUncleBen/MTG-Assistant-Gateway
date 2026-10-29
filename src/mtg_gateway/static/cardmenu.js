@@ -221,13 +221,13 @@
   function collect(name) {
     return post("/collection/api/add", { items: [{ name: name, quantity: 1 }], source: "manual" }).then(function (d) {
       if (d.ok && d.added && d.added.length) {
-        var a = el("a", null, "Open the collection");
+        var a = el("a", null, "Open the binder");
         a.href = "/collection?q=" + enc(name);
         // the gateway says which entry the copy went to (one already there, or a new one)
-        toast(d.message || name + " added to your collection.", { ok: true, actions: [a] });
+        toast(d.message || name + " added to your binder.", { ok: true, actions: [a] });
         return true;
       }
-      toast(d.message || "The card could not be added to your collection.", { error: true });
+      toast(d.message || "The card could not be added to your binder.", { error: true });
       return false;
     }, function () { toast("No connection; the card was not added.", { error: true }); return false; });
   }
@@ -643,11 +643,11 @@
     } else if (s.addHref) {
       items.push(link("Add to deck…", "plus", s.addHref));
     }
-    if (s.collect) items.push(item("Add to collection", "collection", function () { collect(name); }));
+    if (s.collect) items.push(item("Add to binder", "collection", function () { collect(name); }));
     if (s.watch) {
       if (s.watch.watched || isWatched(name)) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
       else items.push(item("Watch this card", "bookmark", s.watch.onWatch, { focusBack: true }));
-      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Art variants…", "image", s.watch.onArt));
+      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Printings…", "image", s.watch.onArt));
     }
     if (s.collect) items.push(item("Pin card", "pin", function () { pin(name); }));
     (s.before || []).forEach(function (n) { items.push(n); });

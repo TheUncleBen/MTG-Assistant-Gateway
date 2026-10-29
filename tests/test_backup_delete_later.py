@@ -455,7 +455,7 @@ async def test_a_collection_apply_stopped_after_a_record_was_added_stays_failed(
     assert len(ark.collection_posts) == 1 and row["state"] == "failed", row
     assert result["sent_entries"] == 1 and result["of_entries"] == 2, result
     assert result["detail"] == (
-        f"{ark_mod.PATIENCE_SPENT} 1 of 2 collection changes had already been sent, so your collection "
+        f"{ark_mod.PATIENCE_SPENT} 1 of 2 binder changes had already been sent, so your binder "
         "is partly changed. Try the rest again later with a new proposal."
     ), result["detail"]
 

@@ -36,7 +36,7 @@
     var Box = window.MtgBox;
     if (!form || !Box || !Box.confirm) { location.href = rm.getAttribute("href"); return; }
     Box.confirm({
-      title: "Remove the saved description of “" + card + "”?",
+      title: "Remove the card model of “" + card + "”?",
       text: "Later solo tests play “" + card + "” without its effect again, until a new description is saved. The reports that already played it keep their numbers.",
       ok: "Remove",
       cancel: "Keep it",

@@ -1132,9 +1132,7 @@ def test_card_menu_rows_without_an_icon_keep_the_slot_so_text_lines_up(server: S
         assert comp.get_attribute("aria-checked") == "false"
         assert comp.locator(".ic-slot[aria-hidden=true]").count() == 1 and comp.locator("svg").count() == 0
         starts = page.evaluate(MENU_TEXT_X)
-        assert {s["text"] for s in starts} >= {"Open card", "Companion", "Add to collection", "Copy name"}, (
-            starts
-        )
+        assert {s["text"] for s in starts} >= {"Open card", "Companion", "Add to binder", "Copy name"}, starts
         xs = {s["x"] for s in starts}
         assert len(xs) == 1, starts
         assert errors == []

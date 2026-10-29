@@ -48,7 +48,7 @@ LATE_MAX = 300  # pages running or kept at most (the oldest kept ones go first)
 # The pages that read Archidekt before they draw: (address, title, the nav place to mark).
 _PAGES = (
     (re.compile(r"^/decks/\d{1,12}$"), "Deck", "/decks"),
-    (re.compile(r"^/notifications$"), "Notifications", ""),
+    (re.compile(r"^/notifications$"), "Alerts", ""),
     (re.compile(r"^/forum(/[^/]+){0,3}$"), "Forum", ""),
     (re.compile(r"^/users/[^/]{1,80}$"), "Profile", ""),
     (re.compile(r"^/lists/[a-z_-]{1,20}$"), "My lists", ""),

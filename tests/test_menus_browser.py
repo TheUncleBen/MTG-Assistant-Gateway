@@ -36,7 +36,7 @@ OWN = [
     "Open in a new tab",
     "Edit deck",
     "Goldfish",
-    "Run full test",
+    "Run test",
     "Clone",
     "Rename…",
     "Move to folder…",
@@ -53,7 +53,7 @@ OTHERS = [
     "Open in a new tab",
     "Clone into my decks",
     "Goldfish",
-    "Run full test",
+    "Run test",
     "Export…",
     "Compare with…",
     "Bookmark",
@@ -734,7 +734,7 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert _items(page) == [
                 "Open card",
                 "Add to deck…",
-                "Add to collection",
+                "Add to binder",
                 "Pin card",  # 0.7.46: pins it on Archidekt (Binder › Wants)
                 "Price alert…",
                 "Copy name",
@@ -781,23 +781,23 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             tile.locator("button.kebab").click()
             _menu(page)
             items = _items(page)
-            assert items[:3] == ["Open card", "Add to deck…", "Add to collection"]
+            assert items[:3] == ["Open card", "Add to deck…", "Add to binder"]
             assert "Copy name" in items and items[-1] == "Open on Scryfall"
-            _pick(page, "Add to collection")
+            _pick(page, "Add to binder")
             # the gateway's own words say which entry the copy went to (0.7.46 merge rule)
             page.locator(
                 ".toast.cards-toast",
                 has_text=re.compile(r"Added (“.+” as a new entry|1 copy to the “.+” entry)"),
             ).wait_for(timeout=5000)
-            # the Collection: the quantity row, Details…, Remove from collection
+            # the Collection: the quantity row, Details…, Remove from binder
             page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
             row = page.locator("ul.colllist li.row[data-id]").first
             row.locator(".name").click(button="right")
             menu = _menu(page)
             items = _items(page)
             assert items[:2] == ["Open card", "Add to deck…"]
-            assert "Details…" in items and items[-1] == "Remove from collection"
-            assert "Add to collection" not in items
+            assert "Details…" in items and items[-1] == "Remove from binder"
+            assert "Add to binder" not in items
             assert menu.locator(".mqty .lbl").inner_text() == "Quantity"
             n = int(menu.locator(".mqty .n").inner_text())
             menu.locator(".mqty button.step", has_text="+").click()
@@ -821,8 +821,8 @@ def test_cards_have_their_menus_on_search_the_collection_and_the_editor(tmp_path
             erow.locator(".name").click(button="right")
             _menu(page)
             items = _items(page)
-            assert items[:3] == ["Open card", "Add to collection", "Watch this card"]
-            assert "Change printing…" in items and "Remove from deck" in items
+            assert items[:3] == ["Open card", "Add to binder", "Watch this card"]
+            assert "Printings…" in items and "Remove from deck" in items
             assert "Copy name" in items and items[-1] == "Open on Scryfall"
             assert errors == [], errors
             browser.close()

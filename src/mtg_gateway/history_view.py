@@ -588,7 +588,7 @@ def details_panel(e: dict[str, Any], query: dict[str, Any], *, extra_html: str =
 
 
 COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
-COLLECTION_LABEL = "Your Archidekt collection"
+COLLECTION_LABEL = "Your binder"
 LISTS_ID = "lists"  # account_lists.LISTS_TARGET: changes to the member's lists file under it
 LISTS_LABEL = "Your Archidekt lists"
 
@@ -849,7 +849,7 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     shown = trend["metrics"]
     turns = any(isinstance(p.get("until_turn"), int) for p in series)
     head = "".join(f"<th scope='col'>{_esc(m['label'])}</th>" for m in shown)
-    head += "<th scope='col'>Turns simulated</th>" if turns else ""
+    head += "<th scope='col'>Turns played</th>" if turns else ""
     head += "<th scope='col'>Settings</th>"
     rows = []
     for p in series:
@@ -864,15 +864,15 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     n = trend["reports"]
     changed = (
         "<p class='notice warn'>The run settings changed between these reports (see Settings in the "
-        "numbers by report). A simulation number is only compared across reports run the same way.</p>"
+        "numbers by report). A solo test number is only compared across reports run the same way.</p>"
         if trend.get("settings_changes")
         else ""
     )
     return (
         "<section class='card trend' aria-labelledby='trend-h'><h2 id='trend-h'>Report trends</h2>"
         f"<p class='muted'>How this deck's {n} most recent stored reports moved, oldest to newest, from "
-        f"{time_html(trend['first_at'])} to {time_html(trend['latest_at'])}. The goldfish numbers come "
-        "from the reports that ran a simulation.</p>"
+        f"{time_html(trend['first_at'])} to {time_html(trend['latest_at'])}. The solo test numbers come "
+        "from the reports that ran a solo test.</p>"
         + changed
         + f"<ul class='plain tmetrics'>{''.join(items)}</ul>"
         "<details class='tdata'><summary class='fold-btn'>The numbers by report</summary>"

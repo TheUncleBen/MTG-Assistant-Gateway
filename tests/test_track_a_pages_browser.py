@@ -394,7 +394,7 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
 
 
 def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) -> None:
-    """The banner's full-test texts on the deck page: Test and play's "Run full test" and "Solo test
+    """The banner's full-test texts on the deck page: Test and play's "Run test" and "Solo test
     only", with their buttons' tooltips, at 344, 360 and 390 px, on the Fold and on desktop, light
     and dark, 100% and 200% text. No sideways scroll, words whole, labels readable (contrast at least
     4.5:1), and the tooltips word for word."""
@@ -429,7 +429,7 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                             page = ctx.new_page()
                             page.goto(f"{s.base}/decks/42", wait_until="networkidle")
                             # navigation round 2: the banner's Test and play opens the shared
-                            # menu; its Run full test and Solo test only submit the banner's hidden
+                            # menu; its Run test and Solo test only submit the banner's hidden
                             # forms, whose buttons keep the busy label and the title
                             run = page.locator("#fullf button")
                             assert run.get_attribute("data-busy-label") == "Testing…", where
@@ -447,7 +447,7 @@ def test_the_full_test_buttons_fit_every_screen_and_text_size(tmp_path: Path) ->
                             ), where
                             page.locator(".banner .decktestbtn").click()
                             menu = ".ctxmenu[role=menu] [role=menuitem]"
-                            full = page.locator(menu, has_text="Run full test")
+                            full = page.locator(menu, has_text="Run test")
                             solo = page.locator(menu, has_text="Solo test only")
                             for b in (page.locator(".banner .decktestbtn"), full, solo):
                                 assert b.is_visible(), where
@@ -625,7 +625,7 @@ def test_card_search_keeps_its_name_and_no_mana_data_is_readable(tmp_path: Path)
 
 
 def test_the_deck_menus_run_full_test_submits_the_full_test(tmp_path: Path) -> None:
-    """N-5 (review 2026-10-22): More's "Run full test" finds the banner's full-test form without a
+    """N-5 (review 2026-10-22): More's "Run test" finds the banner's full-test form without a
     has-selector and submits it: the report page opens, with no script error."""
     import re
 
@@ -647,7 +647,7 @@ def test_the_deck_menus_run_full_test_submits_the_full_test(tmp_path: Path) -> N
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.goto(f"{s.base}/decks/42", wait_until="networkidle")
                 page.locator(".banner .decktestbtn").click()
-                page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Run full test").click()
+                page.locator(".ctxmenu[role=menu] [role=menuitem]", has_text="Run test").click()
                 page.wait_for_url(re.compile(r"/(history/reports|decks/42/report)"), timeout=60000)
                 assert errors == [], errors
             finally:

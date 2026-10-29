@@ -82,17 +82,11 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         _import(page, server, FIRST)
-        assert (
-            page.locator("#col-notes .notice").inner_text()
-            == "Imported 1 card into your Collection on Archidekt."
-        )
+        assert page.locator("#col-notes .notice").inner_text() == "Imported 1 card into your binder."
         _import(page, server, MIXED)
         assert "&r=" in page.url and "Foo" not in page.url
         lines = page.locator("#col-notes .notice li").all_inner_texts()
-        assert (
-            page.locator("#col-notes .notice p").inner_text()
-            == "Imported 4 cards into your Collection on Archidekt."
-        )
+        assert page.locator("#col-notes .notice p").inner_text() == "Imported 4 cards into your binder."
         assert lines == [
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt).",

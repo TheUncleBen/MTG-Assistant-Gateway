@@ -63,7 +63,7 @@
       skip: "button, input, select, summary, details.rowmenu",
       open: function (li, x, y) {
         var m = li.mtgMenu, before = [];
-        before.push(Menu.item("Change printing…", "swap", m.printing));
+        before.push(Menu.item("Printings…", "swap", m.printing));
         before.push(Menu.item(m.removeLabel, "x", m.remove, { danger: true }));
         Card.open({
           name: m.name, onOpen: m.open, collect: true,
@@ -480,7 +480,7 @@
       more.addEventListener("toggle", function () {
         if (menuBox.firstChild) return;
         menuBox.appendChild(el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); }, c.name)]));
-        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Change printing" })]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Printings…" })]));
         menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " " + removeLabel })]));
       });
       var nameEl = el("span", { class: "name", text: c.name, title: c.name });

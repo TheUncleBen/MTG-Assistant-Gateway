@@ -129,7 +129,7 @@ h2.dh + .delta{margin-top:0}
     drawDelta(sc.stats_delta);
     var notes = [];
     if (sc.unread_lines && typeof sc.unread_lines === "object") notes.push("Some lines of a pasted list are not cards; the assistant's message lists them.");
-    if (sc.goldfish_ab) notes.push("The A/B simulation's numbers are in the assistant's message.");
+    if (sc.goldfish_ab) notes.push("The solo test A/B's numbers are in the assistant's message.");
     if (notes.length) { $("note").textContent = notes.join(" "); $("note").className = "note"; }
     if (sc.ok === false && sc.message) B.setStatus(String(sc.message), "err");
     draw();

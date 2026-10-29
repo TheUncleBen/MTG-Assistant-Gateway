@@ -66,7 +66,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "label": ",#656565",  # archidekt.com's empty tag, sent with every modify
                 "mana_value": None,
                 "notes": "",
-                # the row's printing, so a printing change redraws the picture (Change printing…)
+                # the row's printing, so a printing change redraws the picture (Printings…)
                 "set_code": d["rows"][0]["set_code"],
                 "collector_number": d["rows"][0]["collector_number"],
                 "image": d["rows"][0]["image"],
@@ -120,7 +120,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "label": ",#656565",
                 "mana_value": None,
                 "notes": "",
-                # the row's printing, so a printing change redraws the picture (Change printing…)
+                # the row's printing, so a printing change redraws the picture (Printings…)
                 "set_code": d["rows"][0]["set_code"],
                 "collector_number": d["rows"][0]["collector_number"],
                 "image": d["rows"][0]["image"],

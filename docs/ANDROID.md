@@ -25,7 +25,7 @@ real device yet.
 - [1. Getting the app](#1-getting-the-app)
   - [Updates](#updates)
   - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
-  - [Notifications](#notifications)
+  - [Push notifications](#push-notifications)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
 - [4. Foldables and large screens](#4-foldables-and-large-screens)
@@ -182,25 +182,24 @@ For operators whose image has no app, or who build their own:
 Requirements: Android 10 or later. A camera is optional; without one the app
 still works, it just can't scan.
 
-### Notifications
+### Push notifications
 
-From 0.7.30 the app shows the member's notifications itself. There is no
+From 0.7.30 the app shows the member's push notifications itself. There is no
 Google push service and no separate notification app. On the Account page in
-the app, the member ticks **Send me notifications** and presses **Save
-notifications**. The page then starts **Get notifications on this phone**
+the app, the member ticks **Send me push notifications** and presses **Save push notifications**. The page then starts **Get push notifications on this phone**
 by itself (the button stays on the card while this phone isn't connected).
 That asks Android to allow
-notifications (Android 13 and later ask; older versions allow them by
+push notifications (Android 13 and later ask; older versions allow them by
 default) and, once, to let the app run in the background. When the gateway
 has no notification server set up, the card says that the app can't get
-notifications. Once this phone is connected, the app runs
+push notifications. Once this phone is connected, the app runs
 a foreground service that holds one connection to the gateway's own address
 (`/app/notifications/stream`). Android shows its quiet **Always connected**
 notification while the service runs, as it does for every foreground
 service. The app is built to start the service again after the phone
 restarts, after an app update and whenever the app is opened (tested on an
 emulator; a real-phone check is still to come). It stops when the gateway says the
-phone's key is no longer valid or notifications are off, and when the app is
+phone's key is no longer valid or push notifications are off, and when the app is
 set up for another gateway. A connection that fails is tried again after 5
 seconds, then after longer waits up to 5 minutes, and at once when the
 phone's network comes back.
@@ -219,7 +218,7 @@ deck replaced and withdrawn, swiping the app away from Recents, dismissing
 the ongoing notification, Doze, an app update, a reboot, a message missed
 while offline, a force stop (`am force-stop`, the nearest adb step to
 Android's Stop button) and opening the app again, and the gateway switching
-notifications off. Passing on an emulator with a stand-in gateway does not
+push notifications off. Passing on an emulator with a stand-in gateway does not
 show that a real phone behaves the same. The test also takes launcher screenshots at phone and Fold
 widths. The debug build it tests trusts a certificate made for that run
 only; a release build never does. A 24 hour battery test needs a real phone.
@@ -411,7 +410,7 @@ The app talks only to pages and endpoints the gateway already serves:
 | Sign-in return and App Links | `GET /.well-known/assetlinks.json`: the gateway vouches for the app it ships (its package ID and signing certificate), with no setting |
 | Keeping the sign-in page in the app | `GET /.well-known/mtg-gateway` (the sign-in address the gateway advertises; an older gateway without it still works) |
 | Updates | `GET /app/latest.json` (the version, size and checksums of the APK the gateway ships), then `GET /app/mtg-assistant-gateway.apk`, both with the app's sign-in ([Updates](#updates)) |
-| Notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Notifications](#notifications)) |
+| Push notifications | `GET /app/notifications/stream` with the phone's notification key, held open by the app's foreground service ([Push notifications](#push-notifications)) |
 
 The pages work with any gateway version; the phone-camera hand-off needs a scan
 page that has those hooks (the edge-detection scan page with continuous mode,
@@ -713,8 +712,8 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
   the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
   only to notice the connection coming back while a page has failed to load.
-  For notifications it asks for `POST_NOTIFICATIONS` (to show your messages;
-  Android 13 and later ask you when you get notifications on this phone),
+  For push notifications it asks for `POST_NOTIFICATIONS` (to show your messages;
+  Android 13 and later ask you when you get push notifications on this phone),
   `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_SPECIAL_USE` (the service that
   keeps the connection to the gateway open while the app is closed),
   `RECEIVE_BOOT_COMPLETED` (to start that service again after the phone
@@ -789,7 +788,7 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   that page falls back to the redirect that directly follows a gateway
   `/login`. The sign-in service's pages stay in the app only during a
   sign-in; any further site it redirects to opens in the browser. On the page
-  where you approve or deny connecting an AI application, Approve continues
+  where you approve or deny connecting an AI application, Approve and sign in continues
   in the app only to that sign-in service, and Deny, which goes back to the
   application's own site, always opens in the browser. A page from another
   site that slips in without the app being asked (the redirect after a form)

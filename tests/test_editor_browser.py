@@ -144,7 +144,7 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         assert row.locator(".name .pip").count() >= 1
         # the printing picker is a dialog, closed by Escape
         page.locator(".erow:not(.new) details.rowmenu summary").first.click()
-        page.locator(".erow:not(.new) .menu button", has_text="Change printing").first.click()
+        page.locator(".erow:not(.new) .menu button", has_text="Printings…").first.click()
         picker = page.locator(".printpick[role=dialog]")
         picker.wait_for(state="visible", timeout=3000)
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)

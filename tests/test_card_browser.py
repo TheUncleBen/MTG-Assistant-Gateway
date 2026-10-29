@@ -215,7 +215,7 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             assert card.locator("a.link", has_text="Open the deck on Archidekt").count() == 1
             # The model is told what happened, in words, through the host.
             ctx = _calls(page, "ui/update-model-context")
-            assert ctx and "pressed Approve" in ctx[0]["params"]["content"][0]["text"]
+            assert ctx and "pressed Apply" in ctx[0]["params"]["content"][0]["text"]
             # A host request to tear down gets an answer.
             page.evaluate("() => window.teardown()")
             page.wait_for_function("() => window.log.some(m => m.id === 999 && 'result' in m)", timeout=5_000)
@@ -294,7 +294,7 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             card.locator("#title").wait_for()
             page.wait_for_timeout(900)
             assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
-            button = card.locator("button", has_text="Approve on the review page")
+            button = card.locator("button", has_text="Apply on the review page")
             assert button.count() == 1
             button.click()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/open-link')", timeout=5_000)

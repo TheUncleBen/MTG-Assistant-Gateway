@@ -942,7 +942,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
         notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
         if not on_top and request.query_params.get("ok") == "applied" and p.get("applied_text"):
-            # an account action or collection change says what it did, not that a deck matches
+            # an account action or binder change says what it did, not that a deck matches
             notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
             f"{_new_what(p)}: {p['deck_name']}"
@@ -1339,9 +1339,9 @@ OK_MESSAGES = {
     "disconnected_all": "All apps were disconnected.",
     "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
-    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
+    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or binder "
     "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-    "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
+    "a snapshot you can restore from History; a binder change keeps none. Restoring a snapshot does "
     "not put back a deck's folder, tags, cover or custom cards.",
     "mode_auto": "Saved: your assistant applies changes without asking. Restoring a "
     "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
@@ -1352,7 +1352,7 @@ OK_MESSAGES = {
     "in, one that replaces another app's change, or one that another app's waiting change would replace. "
     "When a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
-    "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
+    "can restore from History; a binder change keeps none. Restoring a snapshot does not put back "
     "a deck's folder, tags, cover or custom cards.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
@@ -1443,8 +1443,8 @@ def _ok(msg: str) -> str:
 # What "Delete my data" deletes, word for word on the Account page's card and on the "Your data
 # was deleted" page (db.py MEMBER_TABLES is the code's list; tests keep the two in step).
 DELETED_LIST = (
-    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your simulator "
-    "card models, your notification and view choices, your Archidekt link, connected apps and your "
+    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your card "
+    "models, your push notification and view choices, your Archidekt link, connected apps and your "
     "sign-in"
 )
 
@@ -2268,7 +2268,7 @@ def _page_step(p: dict[str, Any]) -> str:
             "proposal of what is still missing, for you to review."
         )
     if state == "failed" and result.get("sent_entries"):
-        where = "your collection" if p.get("kind") == "collection" else "the deck"
+        where = "your binder" if p.get("kind") == "collection" else "the deck"
         undo = (
             "; the snapshot taken just before it can be restored from History."
             if result.get("snapshot_id")
@@ -2321,7 +2321,7 @@ def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
     """The review page's one message for an apply that stopped because Archidekt asked the gateway
     to wait longer than an apply may: why, how far it got, and to try again later."""
     again = "Try again later: ask your assistant for a new proposal."
-    where = "your collection" if p.get("kind") == "collection" else "the deck"
+    where = "your binder" if p.get("kind") == "collection" else "the deck"
     undo = (
         " The snapshot taken just before it can be restored from History."
         if result.get("snapshot_id") and p.get("kind") != "collection"
@@ -2395,7 +2395,7 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
     if p.get("kind") == "create_deck" and p["deck_id"] == "new":
         return "Deck", "Creates a new deck"
     if p.get("kind") == "collection":
-        return "Target", "Your Archidekt collection"
+        return "Target", "Your binder"
     if p.get("kind") == "action" and p["deck_id"] == "account":
         return "Target", "Your Archidekt account"
     if p.get("kind") == "action" and str(p["deck_id"]).startswith("forum:"):
@@ -2868,7 +2868,7 @@ def _proposal_body(
             )
             apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-primary")
         else:
-            where = "your collection" if p.get("kind") == "collection" else "your deck"
+            where = "your binder" if p.get("kind") == "collection" else "your deck"
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to Archidekt?</h3>"
                 f"<p>Applying writes these changes to {where} on Archidekt. "
@@ -3170,7 +3170,7 @@ def _confirm_body(
             "all.</strong> They run in this order, each checked against the deck just before it is "
             "sent. A snapshot of each deck is kept first, so Undo can put its cards and details back. "
             "Only deck edits, details changes and restores have Undo: account actions (likes, follows, "
-            "comments and the like), collection edits, new decks and copies don't.</p>"
+            "comments and the like), binder edits, new decks and copies don't.</p>"
         )
     for deck in plan["decks"]:
         out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")

@@ -256,8 +256,7 @@ def test_the_scan_pages_wording() -> None:
     assert "throw new Error('Give the scan a name.')" in scan
     assert "{ text: 'Add to deck…', icon: 'plus', href: '/cards?q=' + encodeURIComponent(name) }" in scan
     assert (
-        "items.push({ text: 'Add to collection', icon: 'collection', onClick: () => CM.collect(name) })"
-        in scan
+        "items.push({ text: 'Add to binder', icon: 'collection', onClick: () => CM.collect(name) })" in scan
     )
     assert "document.body.hasAttribute('data-watchlist')" in scan
     assert "items.push({ text: 'Watch this card', icon: 'bookmark'" in scan

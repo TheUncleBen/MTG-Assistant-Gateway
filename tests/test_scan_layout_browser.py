@@ -247,9 +247,9 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         assert _menu_items(page) == [
             "Open card",
             "Add to deck…",
-            "Add to collection",
+            "Add to binder",
             "Watch this card",
-            "Change printing…",
+            "Printings…",
             "One fewer",
             "One more",
             "Copy name",
@@ -265,7 +265,7 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         page.evaluate("() => document.body.removeAttribute('data-watchlist')")  # watchlists off
         rows.first.locator(".name > span").first.click(button="right")
         expect(menu).to_be_visible()
-        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to collection", "Change printing…"]
+        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to binder", "Printings…"]
         page.evaluate("() => document.body.setAttribute('data-watchlist', '')")
         page.keyboard.press("Escape")
         expect(menu).to_have_count(0)
@@ -300,11 +300,11 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         page.keyboard.press("Shift+F10")
         expect(menu).to_be_visible()
         assert menu.locator(".head").inner_text() == "Cultivate"
-        assert "Change printing…" not in _menu_items(page)  # no printing without a match
+        assert "Printings…" not in _menu_items(page)  # no printing without a match
         page.keyboard.press("Escape")
-        # Change printing… opens the printing picker
+        # Printings… opens the printing picker
         rows.first.locator(".kebab").click()
-        menu.get_by_role("menuitem", name="Change printing…").click()
+        menu.get_by_role("menuitem", name="Printings…").click()
         expect(page.locator("#picker .sheet[role=dialog]")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#picker")).to_have_count(0)

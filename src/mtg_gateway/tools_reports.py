@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 KEPT_MODELS_TEXT = (
     "When the gateway keeps card models (goldfish.models_saved is then true), annotations that "
     "pass its check of Mystic Forge's format are kept for the user once the run goes through (from "
-    "a stored deck's report only, and only for cards the simulator cannot play on its own) "
+    "a stored deck's report only, and only for cards the solo test cannot play on its own) "
     "(goldfish.models_kept names them, and why any was not), and the user's later solo tests play "
     "them unless the run passes its own annotation for that card (goldfish.kept_models: card, model "
     "hash, when last changed). Each user keeps their own: no one else's models play in the user's "
@@ -75,7 +75,7 @@ def run_answer(report: dict[str, Any]) -> dict[str, Any]:
     if out.get("report_id"):
         out["full_report"] = (
             f"get_deck_report report_id {out['report_id']} has the whole report: every statistic, "
-            "the simulation's metrics and the Forge games"
+            "the solo test's metrics and the Forge games"
         )
     return out
 
@@ -151,7 +151,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         if not isinstance(goldfish, dict):
             if state.mf_proxy is None:
                 return "the research service is not configured on this gateway"
-            return "no simulation result came back"
+            return "no solo test result came back"
         reason = str(goldfish.get("message") or goldfish.get("text") or goldfish.get("error") or "it failed")
         return clean_text(reason)[:300].rstrip(". ")
 
@@ -211,15 +211,15 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "reference that is none of those is refused rather than guessed. Lines of a list that are not "
             "cards (a 'Total: 100' footer, a link) are skipped and listed in unread_lines: tell the user. "
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
-            "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
+            "'this precon versus my build'. simulate=true adds a paired solo test A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
             "confidence intervals and significance; two Commander decks or two 60-card decks of the "
             "same size, commanders aside, since game for game each deck draws the same positions; "
             "decks of different sizes each play their own games under one seed instead, unpaired: true, "
             "side by side but not game for game, and not stored). Does "
             "not touch Archidekt beyond reading the decks. This is the one tool for deck "
-            "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
-            "comparison of two decks. A simulated comparison is stored as one of the user's reports "
+            "differences, precon upgrades and A/B tests; its solo test A/B is the like-for-like "
+            "comparison of two decks. A tested comparison is stored as one of the user's reports "
             "(source Comparison, on their Reports page; report_id in the result), filed under deck a "
             "when it is a deck and labelled with the app that ran it (an app connected read-only "
             "too). Forge seats each deck against "
@@ -242,10 +242,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         a_list: Annotated[str | None, Field(description="Or deck a as pasted decklist text.")] = None,
         b_list: Annotated[str | None, Field(description="Or deck b as pasted decklist text.")] = None,
         simulate: Annotated[
-            bool, Field(description="Also run a paired goldfish A/B of the two decks.")
+            bool, Field(description="Also run a paired solo test A/B of the two decks.")
         ] = False,
         games: Annotated[int, Field(description="Games per deck for the A/B (10 to 2000).")] = 300,
-        options: Annotated[AbOptions | None, Field(description="Simulator options for the A/B.")] = None,
+        options: Annotated[AbOptions | None, Field(description="Solo test options for the A/B.")] = None,
     ) -> dict[str, object]:
         unread: dict[str, list[str]] = {}
 
@@ -370,7 +370,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Run and store a deck report",
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
-            "goldfish simulation (games, default 300; the website calls it the solo test) and a legality "
+            "solo test (games against opponents who do nothing, default 300) and a legality "
             "check (validate_decklist, for Commander decks only). A deck with a commander "
             "plays from the command zone at 40 life; a deck without one and with at least 60 cards "
             "(Standard, Modern, Pioneer, Legacy, Pauper and the like) plays a 60-card game: 7-card "
@@ -380,13 +380,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "marked [Commander] or *CMDR*). Every report is stored for the user (see list_deck_reports "
             "and the gateway's Reports and History pages): a deck's reports are compared over time; a "
             "pasted list's report has source Pasted list and is filed under no deck. proposal_id "
-            "(one of the user's waiting proposals, a deck edit or a new deck) simulates the deck as it "
+            "(one of the user's waiting proposals, a deck edit or a new deck) tests the deck as it "
             "would be once that proposal is applied (the deck as it is now plus its changes; it applies "
             "nothing): the report has source 'Proposal #N for DECK', is filed under that deck and is "
             "linked from the proposal's page; give it instead of deck_ref. Reports of a list, a proposal "
             "or a comparison never count in a deck's trend. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
-            "returns the existing one (not when options are given). options passes the simulator's knobs "
+            "returns the existing one (not when options are given). options passes the solo test's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan); "
             "forge_seed is the gateway's own: the Forge games' seed, which otherwise is seed. "
             + (KEPT_MODELS_TEXT if card_models.SWITCHED_ON else "")
@@ -413,11 +413,12 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "games_requested stopped early). Forge plays only decks with a "
             "commander: a 60-card deck's report, or one with no commander marked, "
             "never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
-            "for a quick solo-test-only report (default: as simulate). A pasted list and a proposal's "
-            "resulting deck get Forge games by the same rules (Forge plays the list's text: no "
+            "for a quick solo-test-only report (default: on when simulate=true). A pasted list and a "
+            "proposal's resulting deck get Forge games by the same rules (Forge plays the list's text: no "
             "Archidekt deck is needed). A report without Forge games is "
-            "labelled engine_label 'Preflight only (no rules engine)'. With Forge, a simulated report also "
-            "gets forge_solo: the deck alone on Forge by the full rules against opponents who do nothing "
+            "labelled engine_label 'Preflight only (no rules engine)'. With Forge, a report with a solo "
+            "test also gets forge_solo: the deck alone on Forge by the full rules against opponents "
+            "who do nothing "
             "(the solo test's full-rules check), started after the games against precons, one unfinished per "
             "member (two for reports that share opponents); status stays queued or running until it "
             "ends too. Its result "
@@ -436,7 +437,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "other deck is read first, and if it can't be read no report is made. status is the "
             "report's overall state: queued, running, complete, partial or failed. "
             "This is the one tool that "
-            "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
+            "runs solo test games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
@@ -449,12 +450,12 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "pasted decklist text. Leave it empty with proposal_id."
             ),
         ] = "",
-        games: Annotated[int, Field(description="Games to simulate (10 to 2000).")] = 300,
-        simulate: Annotated[bool, Field(description="Run the goldfish simulation.")] = True,
-        options: Annotated[RunOptions | None, Field(description="Simulator options.")] = None,
+        games: Annotated[int, Field(description="Solo test games (10 to 2000).")] = 300,
+        simulate: Annotated[bool, Field(description="Run the solo test.")] = True,
+        options: Annotated[RunOptions | None, Field(description="Solo test options.")] = None,
         forge: Annotated[
             bool | None,
-            Field(description="Run Forge games when the gateway has Forge (default: as simulate)."),
+            Field(description="Run Forge games when the gateway has Forge (default: on when simulate=true)."),
         ] = None,
         same_opponents_as: Annotated[
             str | None,
@@ -474,7 +475,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         proposal_id: Annotated[
             str | None,
             Field(
-                description="One of your waiting proposals (a deck edit or a new deck): simulate the deck "
+                description="One of your waiting proposals (a deck edit or a new deck): test the deck "
                 "as it would be once it is applied. Give it instead of deck_ref."
             ),
         ] = None,
@@ -541,7 +542,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     **run_answer(report),
                     "ok": False,
                     "error": "simulation_failed",
-                    "message": f"The simulation did not run: {failed}. {_KEPT}",
+                    "message": f"The solo test did not run: {failed}. {_KEPT}",
                     **_input_code(report.get("goldfish")),
                 }
             return {"ok": True, **run_answer(report)}
@@ -555,11 +556,11 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "The user's stored deck reports, newest first, with the trend numbers (card count, average mana "
             "value, lands, price, salt) per report. Filter by deck_id. With deck_id and two or more "
             "reports, trend is the deck's History-page trend: its last 60 reports oldest first (series, "
-            "with the goldfish speed numbers: commander median cast turn, median turn lethal damage was "
+            "with the solo test speed numbers: commander median cast turn, median turn lethal damage was "
             "dealt (40, or 20 in a 60-card game), share of games dealing it by until_turn) and per "
             "metric the first and latest values, their dates and the change; otherwise null. Each report "
             "and series point carries settings (mode commander or constructed, games, seed, until_turn, "
-            "engines): a simulation number is only trended across reports with the same mode and until_turn "
+            "engines): a solo test number is only trended across reports with the same mode and until_turn "
             "(left_out says how many earlier ones were not compared) and settings_changes lists where the "
             "settings changed. Each report has its status and engine_label. get_deck_report returns one in "
             "full."
@@ -610,7 +611,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Get a stored deck report",
         description=(
             "One stored report: view 'full' (default) is the whole report (status: queued, running, "
-            "complete, partial or failed; engine_label; settings; statistics, the simulation "
+            "complete, partial or failed; engine_label; settings; statistics, the solo test "
             "result, the validation and the forge section); view 'forge' is only forge_status (state, "
             "games_done of games_requested, job_id, and while queued its position, the report it waits "
             "for and expected_seconds), forge_solo and, once the games against precons are played, "

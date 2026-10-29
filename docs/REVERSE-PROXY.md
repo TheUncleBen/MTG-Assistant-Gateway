@@ -23,7 +23,7 @@ real use, but aren't run by the tests.
 | **Pass the original `Host` header** | The `/mcp` endpoint only answers requests whose `Host` matches `MTG_PUBLIC_URL` (protection against DNS rebinding). Most proxies do this by default |
 | Send `X-Forwarded-For` and `X-Forwarded-Proto` | Used for logs, the request scheme and the per-network limits on sign-in attempts. The gateway trusts them only from addresses in `MTG_TRUSTED_PROXIES` (default: private networks and loopback) |
 | Allow request bodies of at least **2 MB** | Saved card-scan sessions can be up to 2 MB. nginx's default of 1 MB is too small |
-| Read timeout of about **300 seconds** | Most calls take well under a second, but goldfish simulations and some research calls can take a while |
+| Read timeout of about **300 seconds** | Most calls take well under a second, but solo test and some research calls can take a while |
 | A valid certificate | Let's Encrypt is fine. Self-signed certificates won't work with Claude or ChatGPT |
 
 The gateway sends `Strict-Transport-Security: max-age=31536000` itself when
@@ -34,7 +34,7 @@ of them. Add it at your proxy only if every subdomain serves https.
 
 What it doesn't need: websockets, sticky sessions or special headers. The
 `/mcp` endpoint answers with plain JSON, not a stream, but the Android app's
-notifications come over one long response (`/app/notifications/stream`), so
+push notifications come over one long response (`/app/notifications/stream`), so
 the proxy must not hold back what the gateway sends: the gateway asks nginx
 not to buffer it (`X-Accel-Buffering: no`), and the nginx example turns
 buffering off anyway.

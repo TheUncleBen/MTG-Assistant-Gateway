@@ -190,7 +190,7 @@
       h('ol', { class: 'steps' },
         step(1, 'Scan.', 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
         step(2, 'Check the list.', 'Fix a wrong match, pick the exact printing or foil, change quantities.'),
-        step(3, 'Choose what to do with the cards.', 'Save them to your collection, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
+        step(3, 'Choose what to do with the cards.', 'Save them to your binder, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
       h('div', { class: 'list-actions' }, h('button', { onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
     return box;
   }
@@ -1623,11 +1623,11 @@
       const CM = window.MtgCardMenu;
       const items = [{ text: 'Open card', icon: 'eye', onClick: () => { location.href = '/cards?q=' + encodeURIComponent(name); } },
         { text: 'Add to deck…', icon: 'plus', href: '/cards?q=' + encodeURIComponent(name) }];
-      if (CM && CM.collect) items.push({ text: 'Add to collection', icon: 'collection', onClick: () => CM.collect(name) });
+      if (CM && CM.collect) items.push({ text: 'Add to binder', icon: 'collection', onClick: () => CM.collect(name) });
       if (CM && CM.watch && document.body.hasAttribute('data-watchlist')) {
         items.push({ text: 'Watch this card', icon: 'bookmark', onClick: () => CM.watch({ name }, { was: false }).catch(() => {}) });
       }
-      if (it.card) items.push({ text: 'Change printing…', icon: 'image', onClick: () => openPicker(it) });
+      if (it.card) items.push({ text: 'Printings…', icon: 'image', onClick: () => openPicker(it) });
       items.push({ qty: { get: () => it.quantity, set: (v) => { it.quantity = v; changed(); } } },
         { text: 'Copy name', icon: 'copy', focusBack: true, onClick: async () => {
           try { await navigator.clipboard.writeText(name); told(msg, 'Name copied.'); }
@@ -1649,7 +1649,7 @@
           card.image_small ? h('img', { src: card.image_small, alt: '' }) : h('span', { class: 'thumb' }),
           h('div', { class: 'name' }, h('span', { text: it.name || '?' }),
             h('small', null, h('span', { class: 'status-' + it.status, text: statusLabel(it) }),
-              card.set ? h('button', { type: 'button', class: 'setbtn', 'aria-label': 'Change printing of ' + (it.name || 'card') + ', now ' + card.set.toUpperCase() + ' ' + card.collector_number,
+              card.set ? h('button', { type: 'button', class: 'setbtn', 'aria-label': 'Printings of ' + (it.name || 'card') + ', now ' + card.set.toUpperCase() + ' ' + card.collector_number,
                 onclick: () => openPicker(it) },
                 h('span', { class: 'setcode', text: card.set.toUpperCase() + ' ' + card.collector_number }), icon('chev')) : '',
               it.foil ? h('span', { class: 'foil', text: 'Foil' }) : '')),
@@ -1719,17 +1719,17 @@
       if (!resolved.length) { note('error', 'No card is matched yet; fix the unresolved ones first.'); return; }
       toCollection.disabled = true;
       try {
-        note('', 'Saving ' + plural(resolved.length, 'card') + ' to your Archidekt collection… about a second a card.');
+        note('', 'Saving ' + plural(resolved.length, 'card') + ' to your binder…');
         const out = await api('/collection/api/add', 'POST', { items: resolved.map((it) => ({ card: it.card, quantity: it.quantity, foil: isFoil(it) })), source: 'scan', scan_session: state.sessionId || undefined });
         const n = (out.added || []).reduce((a, r) => a + (r.quantity || 0), 0);
         msg.textContent = '';
-        msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural((out.added || []).length, 'card') + ' (' + n + ' copies) to your Archidekt collection. ', h('a', { href: '/collection' }, 'Open the collection'),
+        msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural((out.added || []).length, 'card') + ' (' + n + ' copies) to your binder. ', h('a', { href: '/collection' }, 'Open the binder'),
           (out.skipped || []).length || resolved.length < state.items.length ? ' Cards Archidekt could not match were left out.' : ''));
         if (state.sessionId) { state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); renderBadge(); }
         buzz(30);
-      } catch (err) { note('error', 'Could not add to the collection: ' + why(err)); }
+      } catch (err) { note('error', 'Could not add to the binder: ' + why(err)); }
       toCollection.disabled = false;
-    } }, 'Save to collection');
+    } }, 'Save to binder');
     const deckSel = h('select', { id: 'deck-pick', 'aria-label': 'Deck to add the cards to' }, h('option', { value: '', text: 'Loading your decks…' }));
     const toDeck = h('button', { class: 'secondary', disabled: true, onclick: async () => {
       if (!deckSel.value) { note('error', 'Pick a deck first.'); return; }
@@ -1750,7 +1750,7 @@
     } }, 'New deck from these cards');
     return h('section', { class: 'card next', 'aria-label': 'What next' },
       h('h2', { text: 'What next?' }),
-      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Keep them as owned cards' }), h('small', { class: 'muted', text: 'Adds the matched cards to your Collection on Archidekt; the scan is then done with.' })), toCollection),
+      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Keep them as owned cards' }), h('small', { class: 'muted', text: 'Adds the matched cards to your binder; the scan is then done with.' })), toCollection),
       h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Add them to one of your decks' }), h('small', { class: 'muted', text: 'Opens the deck editor with these cards filled in; you review the change before it is applied.' }), deckSel), toDeck),
       h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Start a new deck' }), h('small', { class: 'muted', text: 'Opens the new-deck form with this list as the decklist.' })), newDeck));
   }

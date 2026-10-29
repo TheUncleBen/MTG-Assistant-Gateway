@@ -112,8 +112,8 @@ What's on it:
 - **Type.** Card name with instant suggestions as you type, or paste a whole decklist.
 - **List.** Quantities, cards still unresolved, **Save scan** and
   **Copy decklist**, then **What next?** with the three places the cards
-  can go: **Save to collection** (your Collection on Archidekt, see
-  [USING.md](USING.md#collection); the scan is removed once saved), **Add to deck** (pick one of your decks;
+  can go: **Save to binder** (your binder, see
+  [USING.md](USING.md#binder); the scan is removed once saved), **Add to deck** (pick one of your decks;
   the deck editor opens with the cards filled in and you review the change
   before it is applied) and **New deck from these cards** (the new-deck form
   opens with the list as its decklist). The first two save the scan on the
@@ -130,15 +130,13 @@ light.
 
 Once you've saved, you can also tell the assistant: *"get my scan session
 &lt;name&gt;"*. From there it can create a deck (`propose_new_deck`), add
-the cards to one of your decks (`propose_deck_changes`), add them to your
-collection (`propose_collection_changes` with `scan_session`), or just talk about
+the cards to one of your decks (`propose_deck_changes`), add them to your binder (`propose_collection_changes` with `scan_session`), or just talk about
 them.
 
 Scan sessions belong to you and live in the gateway's database (so they're
 in the nightly backup) for as long as you keep them: they are drafts, up to
 500 cards each and 500 drafts per person, and never expire by age (only past that
-ceiling does the oldest go). Saving a scan's cards to a deck or your
-collection removes the draft. Scanning itself never sends anything to
+ceiling does the oldest go). Saving a scan's cards to a deck or your binder removes the draft. Scanning itself never sends anything to
 Archidekt.
 
 ## How matching works

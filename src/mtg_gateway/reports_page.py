@@ -521,7 +521,7 @@ def reports_page_html(
             empty = "No older reports."
         elif not index:
             empty = (
-                "No reports yet. Open one of your decks and press <strong>Run full test</strong>, or ask "
+                "No reports yet. Open one of your decks and press <strong>Run test</strong>, or ask "
                 "your assistant to test a deck."
             )
         elif query.deck_id and not query.show and not (query.q or query.by or query.when):
@@ -554,7 +554,7 @@ def reports_page_html(
         pager = ui.load_more("", done=f"All {total:,} {'report' if total == 1 else 'reports'} shown.")
     note = (
         f"<p class='ui-note'>{QUEUE_NOTE} To run a report, open one of your decks and press "
-        "<strong>Run full test</strong>, or ask your assistant to test a deck.</p>"
+        "<strong>Run test</strong>, or ask your assistant to test a deck.</p>"
     )
     return (
         "<div class='reports-page gb-dash'>"

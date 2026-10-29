@@ -210,7 +210,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         name="waiting-card",
         title="Waiting changes",
         description=(
-            "The changes waiting for the user's approval, each with Approve and Reject, and Apply all."
+            "The changes waiting for the user's approval, each with Apply and Reject, and Apply all."
         ),
         csp=ResourceCsp(),
         prefers_border=True,

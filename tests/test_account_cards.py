@@ -33,10 +33,11 @@ async def test_each_card_has_one_orange_button_and_every_tick_its_own_row(stack:
         await _opt_in(b)
         page = (await b.http.get("/account/details")).text
         notes, summ = _card(page, "notifications"), _card(page, "summary")
-        assert "<h2 id='n-h'>Notifications</h2><span class='ui-lbl green'>" in notes and "On</span>" in notes
+        assert "<h2 id='n-h'>Push notifications</h2><span class='ui-lbl green'>" in notes
+        assert "On</span>" in notes
         # the summary is its own card after Notifications, not a part inside it
         assert "id='summary'" not in notes and page.index("id='notifications'") < page.index("id='summary'")
-        assert _orange(notes) == 1 and "Save notifications" in notes
+        assert _orange(notes) == 1 and "Save push notifications" in notes
         assert _orange(summ) == 1 and "Save summary" in summ
         # each tick its own 44 px row (.ui-checks label); the When group has no panel border
         assert "<div class='ui-checks master'><label><input type='checkbox' name='ntfy_on'" in notes
@@ -47,8 +48,8 @@ async def test_each_card_has_one_orange_button_and_every_tick_its_own_row(stack:
         assert "<button class='btn-plain'>Send test</button>" in notes
         assert "<button class='btn-plain' aria-describedby='n-disc'>Disconnect my phones</button>" in notes
         assert (
-            "Disconnect my phones: your phones stop getting notifications until each one is connected again."
-            in notes
+            "Disconnect my phones: your phones stop getting push notifications until each one is "
+            "connected again." in notes
         )
         assert "title='Your phones stop" not in page
     finally:
@@ -126,7 +127,7 @@ async def test_send_it_now_waits_for_notifications_and_a_choice(stack: Stack) ->
         await _post(b, "/account", {"action": "notify_save"})  # notifications off
         summ = _card((await b.http.get("/account/details")).text, "summary")
         button = re.search(r"<button[^>]*>[^<]*<svg[^>]*>.*?</svg>Send it now", summ).group(0)
-        assert " disabled" in button and "Notifications are off" in summ
+        assert " disabled" in button and "Push notifications are off" in summ
         sent = len(stack.ntfy.messages)
         r = await _post(b, "/account", {"action": "summary_send"})
         assert r.headers["location"] == "/account/details?err=summary_send_failed#summary"
