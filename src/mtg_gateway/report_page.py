@@ -1624,13 +1624,14 @@ def report_page_html(
     on_deck = str(r.get("deck_id") or "").isdigit()
     crumbs = (
         "<nav class='crumbs rv-crumbs' aria-label='Back'>"
+        # capsules, as History's way back (ui.cap_link): never bare blue text
         + (
-            f"<a href='/decks/{deck_id}'>← Back to the deck</a><span aria-hidden='true'>·</span>"
-            f"<a href='/history?deck_id={deck_id}'>Deck history</a><span aria-hidden='true'>·</span>"
+            f"<a class='ui-cap' href='/decks/{deck_id}'>← Back to the deck</a>"
+            f"<a class='ui-cap' href='/history?deck_id={deck_id}'>Deck history</a>"
             if on_deck
             else ""
         )
-        + "<a href='/reports'>All reports</a></nav>"
+        + "<a class='ui-cap' href='/reports'>All reports</a></nav>"
     )
     meta = [f"<span id='rep-status'>{status_label_html(r.get('status'), r.get('research'))}</span>"]
     src = r.get("source") if isinstance(r.get("source"), dict) else {}
