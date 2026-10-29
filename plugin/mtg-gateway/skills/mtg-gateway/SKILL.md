@@ -200,6 +200,8 @@ cannot value interaction, removal, politics or an opponent's deck.
    - which cards or mechanics were not simulated, and how much of the deck
      that is (from the honesty report);
    - the confidence intervals, and that differences inside them are noise.
+   - when the report has `side_by_side`, each engine's number next to the
+     others, with its `note`: they answer different questions.
 5. Never call a goldfish number "the win rate".
 
 Mystic Forge's own stored reports and step-by-step games (`goldfish_report`,
@@ -347,6 +349,9 @@ own linked account. Follow every step, in order.
 4. **Preview in chat.** Show the user the whole `diff` (for a new deck, the
    full card list, the name, the format and whether it is private) and the
    `review_url`. Say plainly: "Nothing has been changed on Archidekt yet."
+   Say what `deck_after` says: whether the deck would be legal, and its
+   price change (naming any `unpriced_added` card). A `plan_first` in the
+   result means you are sending many small edits: finish the plan first.
    When `assistant_may_apply` is false (manual mode, or a high-risk
    proposal in semi mode), the user decides: on the card if your app shows
    one, else on the review page. Say so and stop; do not apply in this
