@@ -140,3 +140,46 @@ def test_pin_card_from_the_card_menu(server: Server, width: int) -> None:
         _shot(page, "pin-toast", width, "light")
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width,theme", [(390, "dark"), (840, "light"), (1280, "light")])
+def test_the_value_being_worked_out_follows_the_read_by_itself(
+    server: Server, width: int, theme: str
+) -> None:
+    """While the whole Binder is read, the Value widget shows a spinning progress line with no time
+    in it, and the finished value replaces it with nothing pressed and no reload."""
+    import threading
+
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme=theme, touch=width < 900)
+        page.goto(f"{server.base}/collection", wait_until="networkidle")
+        gate = threading.Event()
+        server.ark.hold_whole_binder_reads = gate
+        try:
+            with page.expect_navigation(wait_until="domcontentloaded"):
+                page.locator(".wdg button", has_text="Work it out now").click()
+            line = page.locator("[data-value-reading]")
+            line.wait_for(timeout=5000)
+            assert "updates by itself" in line.inner_text() and "minute" not in line.inner_text()
+            assert page.locator("[data-value-reading] .ui-spin").count() == 1
+            assert page.evaluate(MEASURE) == []
+            _shot(page, "binder-value-reading", width, theme)
+            loads = page.evaluate("performance.getEntriesByType('navigation').length")
+            gate.set()
+            for _ in range(100):
+                if "$14.79" in page.locator(".ui-widgets").inner_text():
+                    break
+                page.wait_for_timeout(100)
+            assert "$14.79" in page.locator(".ui-widgets").inner_text()
+            assert page.locator("[data-value-reading]").count() == 0
+            assert page.evaluate("performance.getEntriesByType('navigation').length") == loads
+            assert page.evaluate(CONTRAST, ".wdg .det, .wdg .big") == []
+        finally:
+            gate.set()
+        assert errors == []
+        browser.close()

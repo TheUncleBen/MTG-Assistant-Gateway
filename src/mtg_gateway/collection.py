@@ -1726,11 +1726,17 @@ def value_widget(
     whole read of the Binder, as the member, then its prices)."""
     if value is None:
         if reading:
+            # a progress line the page follows by itself (static/collection.js polls
+            # /collection/api/value and swaps in the finished widget); Refresh is for no script
             return ui.widget(
                 "Value",
                 "stats",
                 "…",
-                detail="Reading your whole binder to work out its value. Refresh in a minute to see it.",
+                detail_html=(
+                    "<span class='value-reading' data-value-reading role='status'>"
+                    "<span class='ui-spin' aria-hidden='true'></span>Reading your whole binder to work "
+                    "out its value. This updates by itself.</span>"
+                ),
                 actions=[ui.button_link("Refresh", "/collection", icon_name="refresh")],
             )
         now_btn = (
@@ -1760,7 +1766,9 @@ def value_widget(
         parts.append(f"{n:,} {'entry has' if n == 1 else 'entries have'} no price")
     if not value.get("complete"):
         parts.append(f"your first {value['entries']:,} entries")
-    return ui.widget("Value", "stats", money(value["usd"]) or "$0.00", detail=" · ".join(parts))
+    # no entry priced: no value to show (as Scan's list value), never "$0.00"
+    big = (money(value["usd"]) or "$0.00") if int(value.get("entries") or 0) > n else "–"
+    return ui.widget("Value", "stats", big, detail=" · ".join(parts))
 
 
 def widgets_html(
@@ -1881,6 +1889,7 @@ def panel_html(*, q: str, sort: str, direction: str, view: str, count: int, pric
 
 
 COLLECTION_CSS = """
+.value-reading .ui-spin{margin-right:.35em}
 .collection .ui-head .acts{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .collection .ui-head .acts .btn{margin:0}
 .collection .ui-head.phead{align-items:center}
@@ -2869,6 +2878,26 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             },
             headers=NO_STORE,
         )
+
+    @server.custom_route("/collection/api/value", methods=["GET"], include_in_schema=False)
+    async def api_value(request: Request) -> Response:
+        """The Value widget while "Work it out now" reads the whole Binder, for the page to follow
+        (static/collection.js): whether the read still runs, and the widget as it stands."""
+        who = api_user(request, write=False)
+        if isinstance(who, Response):
+            return who
+        sub = who[0]
+        if not priced():
+            return JSONResponse({"ok": True, "reading": False, "html": ""}, headers=NO_STORE)
+        reading = sub in first_reads
+        html_out = value_widget(
+            service.binder.value(sub),
+            reading=reading,
+            now=time.time(),
+            csrf=_csrf(s, who[1]) or "",
+            failed=sub in first_read_failed,
+        )
+        return JSONResponse({"ok": True, "reading": reading, "html": html_out}, headers=NO_STORE)
 
     @server.custom_route("/collection/api/summary", methods=["GET"], include_in_schema=False)
     async def api_summary(request: Request) -> Response:
