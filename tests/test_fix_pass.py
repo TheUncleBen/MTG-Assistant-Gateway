@@ -215,7 +215,9 @@ def test_history_offers_no_restore_for_a_deck_gone_from_archidekt() -> None:
     kept = history_view.build_events([], [_snapshot()], [], csrf_input="")
     gone = history_view.build_events([], [_snapshot(deck_gone=True)], [], csrf_input="")
     assert "Restore (review first)" in kept[0]["action"] and "hy-restore" in kept[0]["action"]
-    assert gone[0]["action"] == "" and "hy-restore" not in gone[0]["details"]
+    # a deleted deck offers a new deck from its snapshot instead (0.7.46), never a restore
+    assert "hy-restore" not in gone[0]["action"] and "hy-restore" not in gone[0]["details"]
+    assert "Make a new deck from this" in gone[0]["action"], gone[0]["action"]
     assert "This deck is no longer on your Archidekt account" in gone[0]["details"]
     assert "Restore (review first)" in history_view.events_html(kept, now=1_700_000_100)
     assert "Restore (review first)" not in history_view.events_html(gone, now=1_700_000_100)
