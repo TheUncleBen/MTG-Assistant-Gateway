@@ -431,7 +431,7 @@ async def test_a_card_from_before_card_numbers_still_gets_its_code_when_no_card_
 
 async def test_the_card_numbers_survive_in_the_database(stack: Stack) -> None:
     h = stack.h
-    assert db_module.SCHEMA_VERSION == 18
+    assert db_module.SCHEMA_VERSION == 19
     cols = {r[1] for r in h.db._conn.execute("PRAGMA table_info(proposals)")}
     assert "card_seqs" in cols
     token = await linked_user(stack)
@@ -453,7 +453,7 @@ def test_an_older_database_gets_the_card_numbers_column(tmp_path) -> None:
     raw.close()
     again = db_module.Database(str(path))
     try:
-        assert again.schema_version == 18
+        assert again.schema_version == 19
         assert "card_seqs" in {r[1] for r in again._conn.execute("PRAGMA table_info(proposals)")}
     finally:
         again.close()

@@ -19,8 +19,9 @@ and a faster Watchlist, the scanner finds more cards, new Archidekt alerts reach
 the whole gateway uses one name per thing.
 
 ### Upgrade notes
-- **The database goes to schema 18**: one live chat card per change (16), sign-ins kept per device
-  with the reason you were signed out (17), and Binder records and prices (18). The gateway saves a
+- **The database goes to schema 19**: one live chat card per change (16), sign-ins kept per device
+  with the reason you were signed out (17), Binder records and prices (18), and a waiting deck
+  change's deck once applied, for its review page (19). The gateway saves a
   copy before it upgrades, as in [docs/UPGRADING.md](docs/UPGRADING.md). Existing sign-ins carry
   on. A card watched by name alone starts a new price history from the first daily price check;
   a watch limit already saved on the Settings page stays as saved.
