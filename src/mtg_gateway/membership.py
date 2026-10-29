@@ -20,12 +20,13 @@ The answer is cached for MTG_MEMBERSHIP_CHECK_TTL seconds (5 by default, 0 = eve
 spare the identity provider from page bursts. Past that, a request is answered at once and the
 provider asked in the background when the provider let that sign-in in within GRACE seconds (60),
 or, for a page being read (GET or HEAD outside /admin, with a session cookie), whenever it let it
-in before: the first page after a while away never waits for the provider. Everything else waits
-for the answer: a write, an admin page, an assistant's request past GRACE, and every request once
-the provider could not be reached (until it answers again). So a member removed at the provider
-keeps going for at most GRACE seconds with writes and admin pages, and can read their own pages for
-the moment the background check takes after a pause. With MTG_MEMBERSHIP_CHECK_TTL=0 every request
-waits for the provider's answer, as before. Outcomes:
+in before: the first page after a while away never waits for the provider. After a restart that
+"before" is the yes on file, honoured while it is younger than STORED_YES_MAX_AGE (a day).
+Everything else waits for the answer: a write, an admin page, an assistant's request past GRACE,
+and every request once the provider could not be reached (until it answers again). So a member
+removed at the provider keeps going for at most GRACE seconds with writes and admin pages, and can
+read their own pages for the moment the background check takes after a pause. With
+MTG_MEMBERSHIP_CHECK_TTL=0 every request waits for the provider's answer, as before. Outcomes:
 
 - still allowed: the groups are recorded, so the admin check sees a removal at once too;
 - no longer in the required group (or the provider names someone else): every token, browser
@@ -84,6 +85,10 @@ MAX_CACHED = 10_000
 # for the next check (which then runs in the background). The longest a removed member can go on
 # writing or using admin pages; reading pages never waits (see the module's docstring).
 GRACE = 60.0
+# After a restart, a page being read goes ahead on the provider's last yes on file (the grant's
+# checked_at) only while that yes is younger than this; an older one waits for the provider's
+# answer (security review 2, R2-03), so a member removed while the gateway was down reads nothing.
+STORED_YES_MAX_AGE = 86400
 # Who holds a grant besides a browser session (SESSION_HOLDER): the member's AI apps, and a sign-in
 # on its way to the session it is for.
 ASSISTANT_HOLDER = "ai:"
@@ -236,9 +241,11 @@ class MembershipChecker:
             if not page:
                 return None
             # Not asked since the gateway started: the provider's last yes on file will do for a
-            # page being read.
+            # page being read, while it is younger than STORED_YES_MAX_AGE.
             grant = self.db.get_idp_grant(holder)
             if grant is None or grant.get("sub") != sub or not grant.get("checked_at"):
+                return None
+            if time.time() - int(grant["checked_at"]) >= STORED_YES_MAX_AGE:
                 return None
             return "background"
         age = time.monotonic() - last
