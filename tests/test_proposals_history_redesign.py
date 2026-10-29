@@ -338,9 +338,9 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         assert "name='pick'" not in body  # no tick boxes on All
         ids = re.findall(r"href='/proposals/(p\d\d)\?show=all'", body)
         assert ids[:3] == ["p00", "p01", "p02"] and len(set(ids)) == 25
-        assert "1–25 of 60" in body and "offset=25" in body and "Earlier" not in body
+        assert "25 of 60</p>" in body and "offset=25" in body and "Earlier" not in body
         older = (await b.http.get("/proposals?show=all&offset=25", headers=NAV)).text
-        assert "26–50 of 60" in older and "/proposals/p25?show=all" in older
+        assert "50 of 60</p>" in older and "/proposals/p25?show=all" in older
         assert re.search(r"<span class='ui-lbl grey'>(<svg.*?</svg>)?Rejected</span>", body)
         # a failed one says why; the seeded ones store no error, so Archidekt did not refuse them
         assert "Could not be applied · <a class='ui-cap' href='/proposals/p03'>Why</a>" in body

@@ -882,9 +882,12 @@ def _empty(path: str, query: Query, nothing_at_all: str) -> str:
 
 
 def _pager(path: str, query: Query, total: int) -> str:
-    newer = query.href(path, offset=max(0, query.offset - PER_PAGE)) if query.offset > 0 else None
-    older = query.href(path, offset=query.offset + PER_PAGE) if query.offset + PER_PAGE < total else None
-    return ui.pager(query.offset, total, newer_href=newer, older_href=older)
+    """Load more under the list (Standard 13): the next page's link, whose rows the shared
+    static/loadmore.js adds in place."""
+    upto = min(total, query.offset + PER_PAGE)
+    if upto < total:
+        return ui.load_more(query.href(path, offset=upto), shown=upto, total=total, into=".act-table")
+    return ui.load_more("", done=f"All {total:,} shown.") if total > PER_PAGE else ""
 
 
 def _event_options(log: Log, *, admin_page: bool) -> list[tuple[str, str]]:

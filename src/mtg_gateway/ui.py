@@ -630,21 +630,30 @@ def pager(
 
 
 def load_more(
-    href: str, *, text: str = "Load more", shown: int | None = None, total: int | None = None, done: str = ""
+    href: str,
+    *,
+    text: str = "Load more",
+    shown: int | None = None,
+    total: int | None = None,
+    done: str = "",
+    into: str = "",
 ) -> str:
     """ "Load more" under a list that grows in place (the standard's Load more button; Ben: a button,
     never endless scrolling). ``href`` is the next page's address (the link works without scripts;
     a page's script may fetch it and append the rows). ``shown`` of ``total`` gives the line under
     it ("25 of 112"); ``done`` is the line shown instead when there is no more ("That is every
-    card.")."""
+    card."). ``into``: the selector of the table whose rows the next page adds to, for the shared
+    static/loadmore.js (a page with its own script leaves it out)."""
     if done:
         return f"<div class='loadmore'><p class='muted'>{esc(done)}</p></div>"
     line = ""
     if shown is not None and total is not None:
         line = f"<p class='muted'>{shown:,} of {total:,}</p>"
+    target = f" data-into='{esc(into)}'" if into else ""
+    script = "<script src='/static/loadmore.js' defer></script>" if into else ""
     return (
-        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' data-load-more>"
-        f"{esc(text)}</a>{line}</div>"
+        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' "
+        f"data-load-more{target}>{esc(text)}</a>{line}</div>{script}"
     )
 
 

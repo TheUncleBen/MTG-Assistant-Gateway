@@ -203,7 +203,7 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
 # -- pages -------------------------------------------------------------------------
 def _table(body: str) -> str:
     """The History table's markup (between its opening tag and the pager)."""
-    return body.split("class='ui-table hy-table'")[1].split("<nav class='ui-pager'")[0]
+    return body.split("class='ui-table hy-table'")[1].split("<div class='loadmore'")[0]
 
 
 def _entries(body: str) -> list[str]:
@@ -255,7 +255,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         changes = [r for r in rows if "open=p-p08'" in r]
         assert changes and ">Change</span>" in changes[0] and "+1 Sol Ring; -1 Card 8" in changes[0]
         # 15 + 20 snapshots, 15 applied changes (the restore among them), 2 tests
-        assert "Older →" in body and "1–25 of 52" in body
+        assert "Load more</a>" in body and "25 of 52</p>" in body
         assert "<div class='tr daygroup'>Today · " in body and "<div class='tr daygroup'>Yesterday · " in body
         snaps = [r for r in rows if "open=s-" in r and "open=p-" not in r]
         assert snaps and all("Restore (review first)" in r and ">Details</a>" in r for r in snaps)
@@ -282,7 +282,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert "<option value='day' selected>Group by day</option>" in body
         # older page
         older = (await b.http.get("/history?deck_id=42&offset=25", headers=NAV)).text.split("<main")[1]
-        assert "← Newer" in older and "26–50 of 52" in older
+        assert "50 of 52</p>" in older
         last = (await b.http.get("/history?deck_id=42&offset=50", headers=NAV)).text.split("<main")[1]
         assert not _ids(body) & _ids(older) and len(_ids(body) | _ids(older) | _ids(last)) == 52
         # chips and search
@@ -387,9 +387,9 @@ async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatc
         for i in range(30):
             snapshot(f"s_fill{i}", now - 100 - i)
         pbody = (await b.http.get("/history?when=today", headers=NAV)).text.split("<main")[1]
-        assert "href='/history?when=today&amp;offset=25' rel='next'>Older →</a>" in pbody
+        assert "href='/history?when=today&amp;offset=25' rel='next' data-load-more" in pbody
         obody = (await b.http.get("/history?when=today&offset=25", headers=NAV)).text.split("<main")[1]
-        assert "href='/history?when=today' rel='prev'>← Newer</a>" in obody and "s_yesterday" not in obody
+        assert "s_yesterday" not in obody
     finally:
         await b.aclose()
 
@@ -446,7 +446,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             "<h1><a href='/decks/42'>Immortal Reckoning</a></h1>",
             "<span class='k'>Commander</span> Liesa, Forgotten Archangel",
             "<span class='k'>Solo test games</span> 300, through turn 10 (seed 42)",
-            "<a href='/reports'>All reports</a>",
+            "<a class='ui-cap' href='/reports'>All reports</a>",
             "Played with their effect",
             "report is shown instead of testing it again",
             "class='tiles wide rv-stats'",
