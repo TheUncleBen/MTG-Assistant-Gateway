@@ -427,7 +427,11 @@ assistant applies what that mode allows, with a snapshot first for a change to o
   check never changes a deck, a snapshot or your undo history, and it waits
   while you or your assistant are working.
 - **History** is your decks' timeline: the changes applied to them (restores
-  among them), their snapshots and their tests, with chips for each. A test
+  among them), their snapshots and their tests, with chips for each. Your own
+  edits on the deck page, each within 10 minutes of the last with nothing else
+  changing the deck, share the snapshot taken before the first and are one
+  entry; their snapshots count apart from the others, so they never push out
+  the one from before an assistant's change. A test
   opens its report page, its one home; **Reports** is the list of every test
   run. A snapshot's details have **Test this version**, which tests the deck
   as the snapshot recorded it.
