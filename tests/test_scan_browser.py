@@ -364,10 +364,12 @@ def test_two_quick_scans_do_not_collide(server: Server) -> None:
         assert names == ["Sol Ring", "Aesi, Tyrant of Gyre Strait"]
         assert statuses == [200, 200], statuses
 
-        # Someone else (an assistant call) holds this account's lookup for a moment: the page
-        # gets a 429 first, retries on its own and still shows the card.
+        # Someone else (an assistant call) holds this account's lookup past the gateway's own short
+        # wait (none here): the page gets a 429 first, retries on its own and still shows the card.
+        # The hold ends when that 429 is seen, so the retry finds the lookup free.
+        service.queue_wait = 0.0
         service._in_flight.add("user-1")
-        threading.Timer(0.7, lambda: service._in_flight.discard("user-1")).start()
+        page.on("response", lambda r: service._in_flight.discard("user-1") if r.status == 429 else None)
         statuses.clear()
         name = page.evaluate(
             """() => window.__scan.api('/scan/api/resolve', 'POST', { cards: [{ name: 'Sol Ring' }] })
