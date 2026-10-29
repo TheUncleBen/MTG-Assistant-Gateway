@@ -100,14 +100,19 @@ class LateStore:
         return None
 
 
-def _owner(scope: Scope, cookie: str) -> str | None:
+def _cookie(scope: Scope, cookie: str) -> str | None:
     for k, v in scope.get("headers", []):
         if k == b"cookie":
             for part in v.decode("latin-1").split(";"):
                 name, _, val = part.strip().partition("=")
                 if name == cookie and val:
-                    return hashlib.sha256(val.strip().encode()).hexdigest()[:32]
+                    return val.strip()
     return None
+
+
+def _owner(scope: Scope, cookie: str) -> str | None:
+    value = _cookie(scope, cookie)
+    return hashlib.sha256(value.encode()).hexdigest()[:32] if value else None
 
 
 def _wants_html(scope: Scope) -> bool:
@@ -139,14 +144,18 @@ class LatePageMiddleware:
         from .auth_provider import cookie_name
         from .pages import SESSION_COOKIE
 
-        owner = _owner(scope, cookie_name(SESSION_COOKIE, self.state.settings)) if page else None
-        if page is None or owner is None or not _wants_html(scope):
+        cookie = _cookie(scope, cookie_name(SESSION_COOKIE, self.state.settings)) if page else None
+        owner = hashlib.sha256(cookie.encode()).hexdigest()[:32] if cookie else None
+        if page is None or cookie is None or owner is None or not _wants_html(scope):
             await self.app(scope, receive, send)
             return
         url = _url(scope)
         now = time.monotonic()
         self.store.prune(now)
-        kept = self.store.finished(owner, url)
+        # Only while the session is live: its cookie outlives it (to say why it ended), and a page
+        # that finished after a sign-out is never shown again (security review 2, R2-04). The
+        # request then goes on as usual and is signed out.
+        kept = self.store.finished(owner, url) if self.state.db.get_browser_session(cookie) else None
         if kept is not None:
             for message in kept:
                 await send(message)
