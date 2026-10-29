@@ -6182,6 +6182,14 @@ class DeckService:
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
+        client = current_client.get()
+        if client != BROWSER_CLIENT and client != row.get("created_by_client"):
+            # the card's button (security review 2, R2-02): another connected app of the member
+            # would otherwise make the rest as its own proposal, and might apply it in its mode
+            raise DeckError(
+                "invalid",
+                "Only the app that made this change, or you on its review page, can propose the rest.",
+            )
         made = (
             (row.get("result") or {}).get("rest_proposal_id") if isinstance(row.get("result"), dict) else None
         )

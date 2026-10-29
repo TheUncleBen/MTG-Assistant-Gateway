@@ -419,6 +419,43 @@ async def test_a_change_that_stopped_partway_offers_propose_the_rest(stack: Stac
     assert tools["propose_rest"]["_meta"]["ui"]["visibility"] == ["app"]  # the card's, not the model's
 
 
+async def test_only_the_app_that_made_a_stopped_change_or_the_member_proposes_its_rest(stack: Stack) -> None:
+    """Security review 2, R2-02: propose_rest is the card's button, so another connected app of the
+    same member can't call it on this app's stopped change (and become the new proposal's maker).
+    The app that made it, and the member on the review page, still can."""
+    from mtg_gateway.decks import BROWSER_CLIENT, current_client
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    await _mode(h, "manual")
+    claude = await _token_for_app(h, CLAUDE_CALLBACK)
+    p = await _propose(h, claude, [_add("Opt"), {"action": "remove", "name": "Acidic Slime"}])
+    _second_card_write_fails(ark)
+    got = await press_approve(h, claude, p["proposal_id"])
+    assert got["state"] == "failed", got
+    other = await _token_for_app(h, "https://client.test/cb")
+    refused = structured(await call(h, other, "propose_rest", {"proposal_id": p["proposal_id"]}))
+    assert refused["ok"] is False and refused["error"] == "invalid", refused
+    assert "app that made this change" in refused["message"], refused
+    row = h.db.get_proposal(p["proposal_id"], "user-1")
+    assert not (row["result"] or {}).get("rest_proposal_id"), row["result"]
+    assert len([r for r in h.db.list_proposals("user-1") if r["state"] == "pending"]) == 0
+    # the member's own press on the review page proposes it, as the browser
+    decks = h.app.state.gateway.decks
+    mark = current_client.set(BROWSER_CLIENT)
+    try:
+        rest = await decks.propose_rest("user-1", p["proposal_id"])
+    finally:
+        current_client.reset(mark)
+    assert rest["state"] == "pending", rest
+    # asked again by the app that made the change: the same proposal, not another one
+    again = structured(await call(h, claude, "propose_rest", {"proposal_id": p["proposal_id"]}))
+    assert again["ok"] and again["proposal_id"] == rest["proposal_id"], again
+    # and the other app is still refused, even now that the rest exists
+    still = structured(await call(h, other, "propose_rest", {"proposal_id": p["proposal_id"]}))
+    assert still["ok"] is False and still["error"] == "invalid", still
+
+
 async def test_the_proposals_list_offers_try_again_after_archidekt_didnt_answer(stack: Stack) -> None:
     from .test_decks_and_proxy import Browser
 
