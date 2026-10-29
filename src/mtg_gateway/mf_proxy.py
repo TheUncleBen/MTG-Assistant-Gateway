@@ -123,26 +123,40 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
 
 # A scryfall_search in a Commander context (a colour identity or a commander term, or Commander
 # legality) is about paper decks, so it leaves out cards that exist only on Arena or MTGO: the
-# gateway adds game:paper unless the query already names a game. Said in the tool's description.
+# gateway adds game:paper unless the query already names a game. A colour identity with no format
+# named also gets f:commander, so Un-cards and other cards Commander does not allow stay out (an
+# id<=r search listed Goblin Cruciverbalist; assistant tool review, 2026-10-28). Both said in the
+# tool's description.
 _COMMANDER_QUERY = re.compile(
     r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)|\b(?:f|format|legal|is):commander\b",
     re.IGNORECASE,
 )
+_IDENTITY_TERM = re.compile(r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)", re.IGNORECASE)
+_FORMAT_TERM = re.compile(r"(?<![\w])-?(?:f|format|legal|banned|restricted)[:=]", re.IGNORECASE)
 _GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
+_OR_TERM = re.compile(r"(?<![\w])or(?![\w])", re.IGNORECASE)
 SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
 PAPER_SEARCH_NOTE = (
     " In a Commander search (a color identity such as id<=wu, commander:, f:commander or "
     "is:commander in the query) the gateway adds game:paper, so cards that exist only on Arena or "
-    "MTGO are left out; put a game: term in the query (e.g. game:arena) to choose otherwise."
+    "MTGO are left out, and with a color identity and no format named it adds f:commander, so "
+    "cards Commander does not allow (Un-cards) are left out too; put a game: or format term in the "
+    "query (e.g. game:arena, legal:brawl) to choose otherwise."
 )
 
 
 def paper_search_query(query: str) -> str:
-    """``query`` with game:paper added when it is a Commander search that names no game."""
+    """``query`` with game:paper added when it is a Commander search that names no game, and
+    f:commander too when it has a colour identity and names no format."""
     if not _COMMANDER_QUERY.search(query) or _GAME_TERM.search(query):
         return query
-    paper = f"{query.rstrip()} game:paper"
-    return paper if len(paper) <= SEARCH_QUERY_MAX else query
+    base = query.strip()
+    if _OR_TERM.search(base):  # the added terms apply to the whole query, not its last "or" part
+        base = f"({base})"
+    out = f"{base} game:paper"
+    if _IDENTITY_TERM.search(query) and not _FORMAT_TERM.search(query):
+        out += " f:commander"
+    return out if len(out) <= SEARCH_QUERY_MAX else query
 
 
 def rewrite_text(text: str) -> str:
