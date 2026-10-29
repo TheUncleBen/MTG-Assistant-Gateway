@@ -364,17 +364,15 @@ secret.
    that carries a browser session or a gateway token, it asks Authentik's
    userinfo endpoint for the person's current groups (the answer is cached
    for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default). So that pages
-   don't wait for Authentik, a request within 60 seconds of Authentik last
-   letting that sign-in in is answered at once and Authentik is asked in
-   the background, and a page being read (a GET outside `/admin`) is
-   answered at once whenever Authentik let that sign-in in before, so the
-   first page after a pause never waits (after a gateway restart, only
-   while Authentik's last yes is under a day old). Writes, admin pages and assistant
-   requests past those 60 seconds wait for the answer, and so does every
-   request once a background check found Authentik unreachable. So a
-   removed member can write or use admin pages for at most 60 seconds, and
-   can read their own pages for the moment the background check takes after
-   a pause; `MTG_MEMBERSHIP_CHECK_TTL=0` makes every request wait for
+   don't wait for Authentik, a page being read (a GET outside `/admin`) is
+   answered at once and Authentik asked in the background whenever
+   Authentik let that sign-in in before, so the first page after a pause
+   never waits (after a gateway restart, only while Authentik's last yes is
+   under a day old). Writes, admin pages and assistant requests wait for
+   the answer, and so does every request once a background check found
+   Authentik unreachable. So a removed member is refused on their next
+   write, admin page or assistant request, and can read their own pages for
+   the moment the background check takes; `MTG_MEMBERSHIP_CHECK_TTL=0` makes every request wait for
    Authentik's answer instead. Someone taken out of the group loses every
    gateway token, every browser session (web pages and Android app), the
    Authentik tokens the gateway kept, and their stored Archidekt session,

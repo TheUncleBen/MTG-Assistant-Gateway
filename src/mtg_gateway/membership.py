@@ -17,16 +17,15 @@ the AI apps' gateway tokens are the member's, not one device's. A session from b
 no grant of its own and is checked like a bearer token until it ends.
 
 The answer is cached for MTG_MEMBERSHIP_CHECK_TTL seconds (5 by default, 0 = every request) to
-spare the identity provider from page bursts. Past that, a request is answered at once and the
-provider asked in the background when the provider let that sign-in in within GRACE seconds (60),
-or, for a page being read (GET or HEAD outside /admin, with a session cookie), whenever it let it
-in before: the first page after a while away never waits for the provider. After a restart that
-"before" is the yes on file, honoured while it is younger than STORED_YES_MAX_AGE (a day).
-Everything else waits for the answer: a write, an admin page, an assistant's request past GRACE,
-and every request once the provider could not be reached (until it answers again). So a member
-removed at the provider keeps going for at most GRACE seconds with writes and admin pages, and can
-read their own pages for the moment the background check takes after a pause. With
-MTG_MEMBERSHIP_CHECK_TTL=0 every request waits for the provider's answer, as before. Outcomes:
+spare the identity provider from page bursts. Past that, a page being read (GET or HEAD outside
+/admin, with a session cookie) is answered at once and the provider asked in the background when
+it let that sign-in in before: the first page after a while away never waits for the provider.
+After a restart that "before" is the yes on file, honoured while it is younger than
+STORED_YES_MAX_AGE (a day). Everything else waits for the answer: a write, an admin page, an
+assistant's request, and every request once the provider could not be reached (until it answers
+again). So a member removed at the provider is refused on their next write, admin page or
+assistant request, and can read their own pages only for the moment the background check takes.
+With MTG_MEMBERSHIP_CHECK_TTL=0 every request waits for the provider's answer. Outcomes:
 
 - still allowed: the groups are recorded, so the admin check sees a removal at once too;
 - no longer in the required group (or the provider names someone else): every token, browser
@@ -81,10 +80,6 @@ RENEW_WINDOW = 15 * 60
 # token of a device left for a while does not run out while its gateway sign-in is still live.
 KEEP_ALIVE = 86400
 MAX_CACHED = 10_000
-# How long after the provider last let a sign-in in a request of theirs is answered without waiting
-# for the next check (which then runs in the background). The longest a removed member can go on
-# writing or using admin pages; reading pages never waits (see the module's docstring).
-GRACE = 60.0
 # After a restart, a page being read goes ahead on the provider's last yes on file (the grant's
 # checked_at) only while that yes is younger than this; an older one waits for the provider's
 # answer (security review 2, R2-03), so a member removed while the gateway was down reads nothing.
@@ -225,8 +220,7 @@ class MembershipChecker:
         how = self._fresh(sub, holder, page)
         if how == "fresh":
             return Membership.ALLOWED
-        if how == "background":
-            self._check_in_background(holder, sub, holder)
+        if how == "background" and self._check_in_background(holder, sub, holder):
             return Membership.ALLOWED
         return await self._check_now(sub, holder)
 
@@ -248,12 +242,9 @@ class MembershipChecker:
             if time.time() - int(grant["checked_at"]) >= STORED_YES_MAX_AGE:
                 return None
             return "background"
-        age = time.monotonic() - last
-        if age < ttl:
+        if time.monotonic() - last < ttl:
             return "fresh"
-        if age < GRACE or page:
-            return "background"
-        return None
+        return "background" if page else None
 
     async def _check_member(self, sub: str, page: bool) -> Membership:
         """Any of the member's sign-ins the provider still honours answers for them."""
@@ -261,8 +252,7 @@ class MembershipChecker:
         ways = [self._fresh(sub, h, page) for h in holders]
         if "fresh" in ways:
             return Membership.ALLOWED
-        if "background" in ways:
-            self._check_in_background("member:" + sub, sub, None)
+        if "background" in ways and self._check_in_background("member:" + sub, sub, None):
             return Membership.ALLOWED
         return await self._check_member_now(sub, holders)
 
@@ -280,14 +270,15 @@ class MembershipChecker:
                 return outcome
         return Membership.SIGN_IN
 
-    def _check_in_background(self, key: str, sub: str, holder: str | None) -> None:
+    def _check_in_background(self, key: str, sub: str, holder: str | None) -> bool:
         """Ask the provider after this request: one such check per sign-in (or member) at a time.
-        Its own context, so its time is not counted against the request (timing.py)."""
+        Its own context, so its time is not counted against the request (timing.py). False when
+        no check is under way for it and none can start: the request then waits for the answer."""
         running = self._background.get(key)
         if running is not None and not running.done():
-            return
+            return True
         if len(self._background) >= MAX_CACHED:
-            return  # never a task per member without bound: the grace runs out and requests wait
+            return False  # never a task per member without bound, and never a page unchecked
         work = self._check_now(sub, holder) if holder is not None else self._check_member_now(sub)
         task = asyncio.get_running_loop().create_task(work, context=contextvars.Context())
         self._background[key] = task
@@ -299,6 +290,7 @@ class MembershipChecker:
                 logger.warning("background membership check failed: %r", t.exception())
 
         task.add_done_callback(done)
+        return True
 
     async def _check_now(self, sub: str, holder: str) -> Membership:
         ttl = self.settings.membership_check_ttl

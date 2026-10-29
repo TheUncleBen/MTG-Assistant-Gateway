@@ -306,8 +306,6 @@ async def test_after_a_restart_an_old_yes_on_file_is_not_enough(tmp_path: Path, 
 async def test_writes_and_admin_pages_still_wait_and_an_outage_fails_closed(
     tmp_path: Path, idp: FakeIdP
 ) -> None:
-    from mtg_gateway.membership import GRACE
-
     settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
     async with running(_with_admin(Harness(settings, idp))) as h:
         idp.user = {**idp.user, "groups": ["mtg-users", "mtg-admins"]}
@@ -315,14 +313,14 @@ async def test_writes_and_admin_pages_still_wait_and_an_outage_fails_closed(
         await b.login("/admin")
         loop = asyncio.get_running_loop()
         idp.userinfo_delay = 1.0
-        _age(h, GRACE + 1)
+        _age(h, 10)  # past the 5 s cache
         t0 = loop.time()
         await b.http.get("/admin/users")
         assert loop.time() - t0 >= 1.0  # an admin page waits for the answer
         idp.userinfo_delay = 0.0
         # The provider goes down while the member is away: the page that starts the check is
         # answered, and once the check found the provider out, the next one waits (503).
-        _age(h, GRACE + 1)
+        _age(h, 10)  # past the 5 s cache
         idp.down = True
         assert (await b.http.get("/account/details", headers=NAV)).status_code == 200
         await _settle(h)

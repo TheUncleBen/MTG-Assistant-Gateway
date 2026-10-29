@@ -171,10 +171,11 @@ def test_removal_from_the_group_is_told_without_a_time_promise() -> None:
         text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
         assert "loses access within a minute" not in text and "within a minute it revokes" not in text, name
         assert "asked again in the background" in text, name
-    # owner decision C2: a page being read never waits for the provider; writes and admin pages do,
-    # once 60 seconds have passed since it last let them in
+    # a page being read never waits for the provider; writes, admin pages and assistant requests do,
+    # so a removed member is refused on the next one (tests/e2e/test_08_live_membership.py)
     text = " ".join((ROOT / "docs/IDP-AUTHENTIK.md").read_text(encoding="utf-8").split())
-    assert "(writes and admin pages wait once 60 seconds have passed since it last let them in)" in text
+    assert "(writes, admin pages and assistant requests wait for the answer)" in text
+    assert "60 seconds" not in text
 
 
 def test_chatgpt_block_uses_the_glossary_and_names_the_newer_answers() -> None:

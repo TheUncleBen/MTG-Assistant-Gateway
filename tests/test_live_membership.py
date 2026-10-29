@@ -540,11 +540,8 @@ async def _background_checks(h: Harness) -> None:
 async def test_a_member_checked_recently_is_not_kept_waiting_for_the_provider(
     tmp_path: Path, idp: FakeIdP
 ) -> None:
-    """Within GRACE seconds of the provider last letting the member in, a request is answered at
-    once and the provider is asked in the background. Past it, a page being read still is (C2:
-    the first page after a pause never waits); a write waits for the answer."""
-    from mtg_gateway.membership import GRACE
-
+    """Past the cache, a page being read is answered at once and the provider asked in the
+    background (C2: the first page after a pause never waits); a write waits for the answer."""
     async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
         b = Browser(h)
         await b.login()
@@ -558,23 +555,23 @@ async def test_a_member_checked_recently_is_not_kept_waiting_for_the_provider(
         assert loop.time() - t0 < 0.5  # not the provider's second
         await _background_checks(h)
         assert idp.userinfo_calls == calls + 1  # asked once, in the background
-        # Past the grace, a page being read is still answered at once ...
-        _age_last_check(h, GRACE + 1)
+        # After a long pause, a page being read is still answered at once ...
+        _age_last_check(h, 3600)
         t0 = loop.time()
         assert (await b.http.get("/account/details")).status_code == 200
         assert loop.time() - t0 < 0.5
         await _background_checks(h)
-        # ... and a write waits for the provider's answer.
-        _age_last_check(h, GRACE + 1)
+        # ... and a write just past the cache waits for the provider's answer.
+        _age_last_check(h, 10)
         t0 = loop.time()
         await b.http.post("/theme", data={"theme": "dark"})
         assert loop.time() - t0 >= 1.0
         await b.aclose()
 
 
-async def test_a_removal_takes_effect_within_the_grace(tmp_path: Path, idp: FakeIdP) -> None:
-    from mtg_gateway.membership import GRACE
-
+async def test_a_removal_ends_page_reads_after_one_page_and_refuses_the_first_write(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
     async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
         b = Browser(h)
         await b.login()
@@ -588,18 +585,55 @@ async def test_a_removal_takes_effect_within_the_grace(tmp_path: Path, idp: Fake
         assert page.status_code == 302 and page.headers["location"].startswith("/login")
         await b.aclose()
 
-        # Past the grace, the very first write is refused: it waited for the provider.
+        # The very first write past the cache is refused: it waited for the provider.
         b = Browser(h)
         idp.set_groups(SUB, ["mtg-users"])
         await b.login()
         csrf = await b.csrf("/logout")
-        _age_last_check(h, GRACE + 1)
+        _age_last_check(h, 10)
         idp.set_groups(SUB, ["someone-else"])
         await b.http.post("/theme", data={"csrf": csrf, "theme": "dark"})
         assert not h.app.state.gateway.membership._background  # it waited, nothing runs after
         with h.db.tx() as c:
             assert c.execute("SELECT COUNT(*) FROM browser_sessions WHERE sub = ?", (SUB,)).fetchone()[0] == 0
         assert "mtg_theme" not in b.http.cookies  # the write was refused
+        await b.aclose()
+
+
+async def test_an_assistant_of_a_removed_member_is_refused_on_its_next_request(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    """An AI app's request past the cache waits for the provider, however recently it let the
+    member in, so a member taken out of the group is cut off on the next tool call (the e2e test
+    of the same, against a real Authentik)."""
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        client = await h.register()
+        tokens = await h.tokens_for(client)
+        assert (await whoami(h, tokens["access_token"])).status_code == 200
+        _age_last_check(h, 6)  # just past the 5 s cache, as the e2e test waits
+        idp.set_groups(SUB, ["someone-else"])
+        assert (await whoami(h, tokens["access_token"])).status_code == 401
+        assert live_tokens(h) == 0
+        await b.aclose()
+
+
+async def test_a_page_waits_for_the_provider_when_no_background_check_can_start(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The background checks are bounded; at the bound a page waits for the answer rather than
+    being served with nobody asking the provider."""
+    from mtg_gateway import membership
+
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        monkeypatch.setattr(membership, "MAX_CACHED", 0)
+        _age_last_check(h, 10)
+        idp.set_groups(SUB, ["someone-else"])
+        page = await b.http.get("/account/details")
+        assert page.status_code == 302 and page.headers["location"].startswith("/login")
         await b.aclose()
 
 
