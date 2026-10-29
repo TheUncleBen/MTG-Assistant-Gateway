@@ -94,6 +94,6 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> CallToolResult:
         try:
             out = await state.decks.propose_lists(_sub(), which_list, changes)
-            return _proposal({"ok": True, **out})
+            return h._proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

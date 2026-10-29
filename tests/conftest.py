@@ -72,6 +72,12 @@ class FakeIdP:
         # touching userinfo or the default behaviour.
         self.id_token_claims: dict[str, object] = {}
         self.id_token_omit: set[str] = set()
+        # When the person last entered credentials here: set by an authorize request with
+        # prompt=login or max_age=0 (unless honours_prompt_login is off) and sent as the ID token's
+        # auth_time.
+        # None sends no auth_time, as before.
+        self.honours_prompt_login = True
+        self.auth_time: int | None = None
         # "HS256" signs the ID token with the client secret, as Authentik does when the provider
         # has no Signing Key.
         self.id_token_alg = "RS256"
@@ -102,6 +108,10 @@ class FakeIdP:
         self.userinfo_omit: set[str] = set()
         self.refresh_id_token = False
         self.refresh_error: str | None = None
+        # A slow provider: userinfo answers after this many seconds. ``token_status`` makes only the
+        # token endpoint answer with that HTTP status (a 502 from a proxy in front of it, say).
+        self.userinfo_delay = 0.0
+        self.token_status: int | None = None
         self.app = Starlette(
             routes=[
                 Route("/application/o/mtg/.well-known/openid-configuration", self.discovery),
@@ -128,6 +138,8 @@ class FakeIdP:
         assert q["client_id"] == CLIENT_ID
         assert q["code_challenge_method"] == "S256"
         code = secrets.token_urlsafe(16)
+        if (q.get("prompt") == "login" or q.get("max_age") == "0") and self.honours_prompt_login:
+            self.auth_time = int(time.time())
         self.pending[code] = q
         return RedirectResponse(f"{q['redirect_uri']}?{urlencode({'code': code, 'state': q['state']})}", 302)
 
@@ -149,6 +161,8 @@ class FakeIdP:
             form["_auth_method"] = "client_secret_post"
             ok = form.get("client_id") == CLIENT_ID and form.get("client_secret") == CLIENT_SECRET
         self.token_calls.append(form)
+        if self.token_status is not None:
+            return JSONResponse({"error": "temporarily_unavailable"}, status_code=self.token_status)
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         if not ok:
@@ -177,6 +191,7 @@ class FakeIdP:
             "nonce": q["nonce"],
             **{k: v for k, v in self.user.items() if k not in self.id_token_omit},
             **self._uploaded_claims(str(self.user["sub"]), full=False),
+            **({"auth_time": self.auth_time} if self.auth_time is not None else {}),
             **self.id_token_claims,
         }
         if self.id_token_alg == "HS256":
@@ -207,6 +222,8 @@ class FakeIdP:
 
     async def userinfo(self, req: Request) -> Response:
         self.userinfo_calls += 1
+        if self.userinfo_delay:
+            await asyncio.sleep(self.userinfo_delay)
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         token = req.headers.get("authorization", "").removeprefix("Bearer ")

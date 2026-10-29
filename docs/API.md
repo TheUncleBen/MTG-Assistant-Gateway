@@ -30,7 +30,10 @@ A missing or invalid credential answers `401` with `{"ok": false, "error": "unau
 "login": "/login"}`. Someone no longer in `MTG_REQUIRED_GROUP` gets the same `401`: before a request is served the gateway
 asks the identity provider whether the caller is still a member (cached for `MTG_MEMBERSHIP_CHECK_TTL`
 seconds) and revokes a removed member's tokens and browser sessions. When the identity provider can't be
-reached, the request gets `503` with `"error": "idp_unavailable"` instead, and nothing is revoked.
+reached, the request gets `503` with `"error": "idp_unavailable"` instead, and nothing is revoked. When
+the identity provider no longer honours any of the member's sign-ins (its refresh token ran out, say), a
+bearer request gets `403` with `"error": "sign_in_again"`: the token is kept and works again once the
+member signs in on the website.
 
 Responses are JSON objects with `"ok": true` on success. Failures carry `ok: false`, an `error`
 code and a human `message`:
@@ -44,7 +47,7 @@ code and a human `message`:
 | `browser_required` | 403 | the member's approval mode wants their own press for this proposal (review page or in-chat card); nothing was sent (`review_url` is included) |
 | `browser_pending` | 409 | MCP only: the client opened the review page for the user (URL elicitation) but the proposal is still pending |
 | `invalid_approval` | 403 | MCP only: `confirm_proposal` was called without the card's one-time code for this proposal, app and member; audited as `approval_refused` |
-| `now_held` | 409 | MCP only: Approve on the card reached a change held for a reason that came up after the card showed it; nothing was sent, and the reply carries the hold (`status`, `status_reason`) so the card shows it |
+| `now_held` | 409 | MCP only: Apply on the card reached a change held for a reason that came up after the card showed it; nothing was sent, and the reply carries the hold (`status`, `status_reason`) so the card shows it |
 | `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
 | `insufficient_scope` | 403 | the bearer token is read-only (`mtg.read`) and the route writes |
 | `csrf` | 403 | a browser-session write without a valid `X-CSRF-Token` header; reload the page and retry |
@@ -79,18 +82,18 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it. A change to one of the member's existing decks gets a snapshot, an Archidekt backup copy (with backups on), a re-check, the write and a check by reading it back; a new deck, a clone or a collection change is written and then read back. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply. The browser session must send `{"version": n}`, the version of the proposal the page showed: without it `400 invalid` ("Send the version of the proposal the page showed."), with one that isn't a whole number `400 invalid` ("version must be a whole number"), and with an older one `409 changed` with `review_url` and the current version. A bearer caller may send the version too and gets the same `409 changed` when it is out of date, but needn't. Another member's proposal is `404 not_found`, checked before a missing or out-of-date version. The in-chat card uses the `confirm_proposal` MCP tool instead, not this route. The deck editor's own save that asked first may also send `archidekt_backup: false` (browser session only), and then gets no backup copy. The field is honoured only for the member's own saves: an assistant's proposal keeps its copy. A member's own save that skips the copy (from the deck page, Card search, or the deck editor with its box unticked) keeps that choice when it waits and is applied later, unless an app amended it in the meantime. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (only the member's own press applies one, with Apply on the review page or Approve on the in-chat card; a deck deletion, and an edit of a comment that has formatting, only on the review page) |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it. A change to one of the member's existing decks gets a snapshot, an Archidekt backup copy (with backups on), a re-check, the write and a check by reading it back; a new deck, a clone or a binder change is written and then read back. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything except what Full auto still leaves to the member, listed in OPERATIONS.md under Approval modes), judged inside the apply. The browser session must send `{"version": n}`, the version of the proposal the page showed: without it `400 invalid` ("Send the version of the proposal the page showed."), with one that isn't a whole number `400 invalid` ("version must be a whole number"), and with an older one `409 changed` with `review_url` and the current version. A bearer caller may send the version too and gets the same `409 changed` when it is out of date, but needn't. Another member's proposal is `404 not_found`, checked before a missing or out-of-date version. The in-chat card uses the `confirm_proposal` MCP tool instead, not this route. The deck editor's own save that asked first may also send `archidekt_backup: false` (browser session only), and then gets no backup copy. The field is honoured only for the member's own saves: an assistant's proposal keeps its copy. A member's own save that skips the copy (from the deck page, Card search, or the deck editor with its box unticked) keeps that choice when it waits and is applied later, unless an app amended it in the meantime. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (only the member's own press applies one, with Apply on the review page or on the in-chat card; a deck deletion, and an edit of a comment that has formatting, only on the review page) |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
 | `GET /api/v1/reports?deck_id=` | Stored deck reports, newest first, with their trend `metrics` |
-| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. `"forge": false` leaves the Forge games out (default: as `simulate`); a 60-card deck, or one with no commander marked, never runs Forge. `"same_opponents_as": "<report id>"` seats another of your reports' Forge opponents; `"compare_with": "<deck id>"` picks the precons for the higher of this deck's and that deck's brackets (use it on the first of two reports, then `same_opponents_as` on the second; with `"forge": false`, no Forge on the gateway, or a deck with no commander, the report is refused; the other deck is read first, and if it can't be read no report is made). Give `compare_with` or `same_opponents_as`, not both. An unchanged deck within ten minutes returns the existing report with `reused: true`. A report has `status` (`queued`, `running`, `complete`, `partial`, `failed`), `engine_label` and its run `settings` |
+| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and solo test when Mystic Forge is configured. `"forge": false` leaves the Forge games out (default: as `simulate`); a 60-card deck, or one with no commander marked, never runs Forge. `"same_opponents_as": "<report id>"` seats another of your reports' Forge opponents; `"compare_with": "<deck id>"` picks the precons for the higher of this deck's and that deck's brackets (use it on the first of two reports, then `same_opponents_as` on the second; with `"forge": false`, no Forge on the gateway, or a deck with no commander, the report is refused; the other deck is read first, and if it can't be read no report is made). Give `compare_with` or `same_opponents_as`, not both. An unchanged deck within ten minutes returns the existing report with `reused: true`. A report has `status` (`queued`, `running`, `complete`, `partial`, `failed`), `engine_label` and its run `settings` |
 | `GET /api/v1/reports/{rid}` | One report with `stats`, `goldfish`, `validation` |
 | `GET /api/v1/reports/{rid}/forge` | A report's Forge run alone while it plays: its state, games done of games asked for, the report's status. Reads the gateway only |
-| `POST /api/v1/reports/{rid}/forge/more` | Play more games, as the report page's button and the `play_more_games` tool do, with the same rules: once the report's Forge games have finished, the games-per-report number again against the same opponents, up to 50 Forge games a report; it queues like any report and starts nothing when 2 of your reports already wait (on a comparison, which needs room for 2, when any already waits); on a comparison the other deck's report gets the same number. `202` with the report as it now is (`forge.more_note` when the games did not start); a refusal is `400` with `message` and `reason` (`queue`, `full`, `ended`, `none`, `noforge`, `pairwait`, `paircant`, `pairqueue`, `setup`), and a report that is not yours is `404` with `reason` `notfound`. Never asks Archidekt; a read-only (`mtg.read`) token gets `403` `insufficient_scope` |
+| `POST /api/v1/reports/{rid}/forge/more` | Play more games, as the report page's button and the `play_more_games` tool do, with the same rules: once the report's Forge games have finished, the games-per-report number again against the same opponents, up to 50 Forge games a report; it queues like any report and starts nothing when 2 of your reports already wait (on a comparison, which needs room for 2, when any already waits); on a comparison the other deck's report gets the same number. `202` with the report as it now is (`forge.more_note` when the games did not start); a refusal is `400` with `message` and `reason` (`queue`, `full`, `forge_running`, `none`, `noforge`, `pairwait`, `paircant`, `pairqueue`, `setup`), and a report that is not yours is `404` with `reason` `notfound`. Never asks Archidekt; a read-only (`mtg.read`) token gets `403` `insufficient_scope` |
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
-| `GET /api/v1/prefs` | Browser session only: the choices kept on the member's account for the pages (views, card size, stack orders, deck stats toggles, dismissed tips) as `prefs`. A bearer token gets `403 browser_required` |
+| `GET /api/v1/prefs` | Browser session only: the choices kept on the member's account for the pages (views, each page's card size as `card.size.<page>`, stack orders, deck stats toggles, dismissed tips) as `prefs`. A bearer token gets `403 browser_required` |
 | `POST /api/v1/prefs` | Browser session only (CSRF header): `{"set": {name: value or null}}` saves each choice (null forgets it); `{"copy": {...}}` saves only the names the account doesn't have yet. Answers `saved` and `refused` |
 
 The printings card an AI app shows in the chat loads a card's printings from `GET /cards/data/{token}`,
@@ -104,7 +107,7 @@ was disabled or removed from the group since, 403 `forbidden`; a card Scryfall n
 `MTG_APPLY_IN_CHAT` on. It is not a public API: the token is the only credential and it cannot be
 requested.
 
-The collection is the member's own Archidekt Collection, read and written through their linked
+The binder is the member's own Archidekt collection, read and written through their linked
 session; the gateway stores none of it. Its small JSON API serves the pages and the Android app,
 under the browser session only (cookie plus `X-CSRF-Token` on writes; a bearer token uses the
 `*_collection` tools instead): `POST /collection/api/add` with `{"items": [{"name" | "scryfall_id"
@@ -113,12 +116,12 @@ under the browser session only (cookie plus `X-CSRF-Token` on writes; a bearer t
 second apart; at most 100 cards a call; a `scan_session` given with `source: "scan"` is deleted
 once saved); `POST /collection/api/rows/{id}` with `{"quantity": n}` (0 removes) or `finish` /
 `condition`; `DELETE /collection/api/rows/{id}`; `GET /collection/api/summary` (`rows`, and
-`cards` when the collection fits one page). Ids are Archidekt's record ids; a record that is not
+`cards` when the binder fits one page). Ids are Archidekt's record ids; a record that is not
 in the member's own collection answers `404`, and a member without a linked account `409`
 `not_linked`.
 
 Archidekt's social actions for the browser are under `/social/api` (an assistant proposes the same
-through `propose_deck_social` and `propose_comment`; there is no `/api/v1` counterpart): `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
+through `propose_account_action`; there is no `/api/v1` counterpart): `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
 (a like is an up-vote on the deck's thread; answers the new `vote` and `points`), `POST
 /social/api/decks/{id}/bookmark` `{"on": bool}`, `GET` and `POST /social/api/users/{id}/follow`
 (`{"on": bool}`; the GET answers `following` and `self`), `GET /social/api/decks/{id}/comments?page=`
@@ -186,7 +189,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/` | Home: newest decks with covers, a deck search box, one tile per section (with the count of pending proposals), the assistant connection details |
 | `/search?name=&commander=&owner=&format=&colors=&order=&page=` | Public deck search on Archidekt (name substring, commander, owner, format, colour identity; order `-updatedAt`, `-createdAt`, `-viewCount`, `-size`, `edhBracket`; Archidekt pages of 60) |
 | `/users/{username}` | One Archidekt user's public decks |
-| `/collection?q=&sort=added|edition&view=grid|list&page=` | My collection: the member's Archidekt Collection, filtered by name, grid or list, plus and minus, remove, add by name, a details menu per row (finish, condition, language, price paid; `action=details`); `/collection/export.csv` downloads it |
+| `/collection?q=&sort=added|edition&view=grid|list&page=` | My binder: the member's Archidekt collection, filtered by name, grid or list, plus and minus, remove, add by name, a details menu per row (finish, condition, language, price paid; `action=details`); `/collection/export.csv` downloads it |
 | `/guide` | The in-app guide (end-user documentation) |
 | `/cards?q=` | Card search by name (picture, mana cost, type), each card in the card viewer, and an add to one of the member's decks; `/cards/api/text` and `/cards/api/rulings` feed the viewer |
 | `/watchlist` (GET, POST) | The member's card watchlist and price history; only while watchlists are on (the default) |
@@ -204,7 +207,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, checked by reading it back |
 | `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, checked by reading it back |
 | `/decks/{id}/move` (POST `folder_id`) | Move the deck into one of the member's folders; checked by reading it back |
-| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot and, with backups on, an Archidekt backup copy are made first, and the deletion is checked by reading the deck back. Owners only; never a tool |
+| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot is made first (no Archidekt backup copy; a snapshot can't be restored onto a deleted deck), and the deletion is checked by reading the deck back. Owners only; never a tool |
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `export.archidekt.txt`, `export.txt`, `export.csv`, `export.json`, `export.arena.txt`, `export.dek`, `export.pdf` | The Export page and its downloads: Archidekt import text, plain text, an Archidekt-style CSV, JSON, and the one-way Arena, MTGO and PDF files ([EXPORT-IMPORT.md](EXPORT-IMPORT.md)) |
@@ -224,7 +227,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the top bar and the Account page |
 | `/app`, `/app/mtg-assistant-gateway.apk`, `/app/latest.json` | `/app` redirects to `/install?for=android`; the APK download and the version file the app checks for updates ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
-| `/admin/models` (GET, POST) | Admin: the simulator's kept card models, who added each and when, with a Remove button per model |
+| `/admin/models` (GET, POST) | Admin: the solo test's kept card models, who added each and when, with a Remove button per model |
 | `/admin/settings` (GET, POST) | Admin: the gateway's settings, grouped, with where each value comes from; a value set in the deployment is shown read-only, the others can be changed here |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |
 | `/.well-known/assetlinks.json` | Android statement vouching for the app the gateway ships (its package ID and signing certificate); an empty list when it ships none |

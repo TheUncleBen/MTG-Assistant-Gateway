@@ -50,7 +50,8 @@
     return btn;
   }
   var rowEls = {}; // lower name -> the <li> of an existing card
-  // the rows' menu: Open card, Change printing…, Remove from deck, then the card items every page has
+  // the rows' menu: Open card, Change printing…, Remove from deck (Remove from “Sideboard” on a
+  // row whose category is not in the deck), then the card items every page has
   if (window.MtgCardMenu && window.MtgMenu) (function () {
     var Menu = window.MtgMenu, Card = window.MtgCardMenu;
     function rowOf(t) {
@@ -62,8 +63,8 @@
       skip: "button, input, select, summary, details.rowmenu",
       open: function (li, x, y) {
         var m = li.mtgMenu, before = [];
-        before.push(Menu.item("Change printing…", "swap", m.printing));
-        before.push(Menu.item("Remove from deck", "x", m.remove, { danger: true }));
+        before.push(Menu.item("Printings…", "swap", m.printing));
+        before.push(Menu.item(m.removeLabel, "x", m.remove, { danger: true }));
         Card.open({
           name: m.name, onOpen: m.open, collect: true,
           watch: Menu.enabled() ? { watched: false, onWatch: function () { Card.watch({ name: m.name }).catch(function () {}); } } : null,
@@ -434,8 +435,11 @@
       var r = rows[key];
       if (zone === "side") {
         if (rowEls[key]) return;  // the same side card listed twice: one row
+        // the row leaves its category (Sideboard, Maybeboard), not the deck it does not count in
+        var sideLabel = "Remove from “" + g.name + "”";
+        var sideThumb = thumb(r, c.name);
         var sideLi = el("li", { class: "erow side" }, [
-          thumb(r, c.name),
+          sideThumb,
           el("span", { class: "main" }, [
             el("span", { class: "name", text: c.name }),
             el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " #" + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
@@ -443,8 +447,15 @@
           ]),
           qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
           categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, true, c.name),
-          el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + c.name, title: "Remove", onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
+          el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + c.name + " from “" + g.name + "”", title: sideLabel, onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
         ]);
+        // the row's menu (a right-click, a press and hold or Shift+F10), as the deck's rows have
+        sideLi.mtgMenu = {
+          name: c.name, focus: sideThumb, removeLabel: sideLabel,
+          open: function () { if (sideThumb.click) sideThumb.click(); },
+          printing: function () { openPicker(r); },
+          remove: function () { mutate(function () { r.after = 0; }); }
+        };
         rowEls[key] = sideLi;
         ul.appendChild(sideLi);
         return;
@@ -464,11 +475,13 @@
         el("summary", { class: "mini", "aria-label": "More for " + c.name, title: "More" }, [svg("more")]),
         menuBox
       ]);
+      // a row whose category is not in the deck leaves that category, not the deck
+      var removeLabel = c.in_deck ? "Remove from deck" : "Remove from “" + g.name + "”";
       more.addEventListener("toggle", function () {
         if (menuBox.firstChild) return;
         menuBox.appendChild(el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); }, c.name)]));
-        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Change printing" })]));
-        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Printings…" })]));
+        menuBox.appendChild(el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " " + removeLabel })]));
       });
       var nameEl = el("span", { class: "name", text: c.name, title: c.name });
       if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
@@ -486,7 +499,7 @@
       ]);
       // the row's menu (static/menus.js's layer): a right-click, a press and hold or Shift+F10
       li.mtgMenu = {
-        name: c.name, focus: thumbEl,
+        name: c.name, focus: thumbEl, removeLabel: removeLabel,
         open: function () { if (thumbEl.click) thumbEl.click(); },
         printing: function () { openPicker(r); },
         remove: function () { mutate(function () { r.after = 0; }); }
@@ -520,7 +533,7 @@
   // Chips above it say where the card goes; "3 sol ring" adds three; the printings of the
   // highlighted name show beside the list on wide screens, and a click on one adds that printing.
   var addForm = root.querySelector("form.addcard");
-  var input = root.querySelector("input[name=card]");
+  var input = root.querySelector("input[name=name]");
   var catIn = root.querySelector("input[name=addcat]"), zoneIn = root.querySelector("input[name=addzone]");
   var foilIn = root.querySelector("input[name=foil]");
   var addStatus = root.querySelector(".addstatus");
@@ -754,6 +767,31 @@
     var by = ev.submitter || null;
     askToLeave(function () { if (form.requestSubmit) form.requestSubmit(by); else form.submit(); });
   }, true);
+
+  // On a phone the save bar sits fixed over the tab bar with Save, Undo and Redo only (and the
+  // status on its own line): the card size and the backup tick move out to a row of their own
+  // under the bar, with room for 44 px controls (0.7.46 audit D-10). They move back on a wider
+  // window; their listeners go with them.
+  (function () {
+    var bar = root.querySelector(".editbar");
+    if (!bar) return;
+    var opts = document.createElement("div");
+    opts.className = "editopts";
+    var narrow = window.matchMedia("(max-width: 599.98px)");
+    function place() {
+      var parts = [root.querySelector(".editbar .backup, .editopts .backup"), root.querySelector(".editbar .cardsize, .editopts .cardsize")];
+      if (narrow.matches) {
+        parts.forEach(function (e) { if (e) opts.appendChild(e); });
+        if (opts.childNodes.length && !opts.parentNode) bar.parentNode.insertBefore(opts, bar.nextSibling);
+      } else {
+        var status = bar.querySelector(".status");
+        parts.forEach(function (e) { if (e) bar.insertBefore(e, status); });
+        if (opts.parentNode) opts.remove();
+      }
+    }
+    place();
+    if (narrow.addEventListener) narrow.addEventListener("change", place); else narrow.addListener(place);
+  })();
 
   // save: one proposal, applied at once (apply:true); a big removal asks first. The tick box says
   // whether Archidekt also gets a backup copy (the gateway's snapshot is kept either way).

@@ -19,7 +19,7 @@ rejected, withdrawn or failed) or that another app changed after it was made.
 Every apply to one of the member's decks snapshots the deck first, so an auto-applied deck change
 can be restored from the History page (a restore leaves the folder, tags, cover and custom cards as
 they are); a
-collection change, a clone and a new deck keep no snapshot. The risk tiers are decided from the
+binder change, a clone and a new deck keep no snapshot. The risk tiers are decided from the
 proposal's stored review rows, so a proposal is low risk only if what the review page would show is
 small and safe:
 
@@ -124,7 +124,7 @@ def _rows(max_rows: int) -> str:
 def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
     """Which proposals are low risk (risk_of), as one sentence."""
     return (
-        f"A small edit to an existing deck or to your collection: at most {_rows(max_rows)}, each "
+        f"A small edit to an existing deck or to your binder: at most {_rows(max_rows)}, each "
         f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies a row, never a change to which "
         "cards are the commanders or to the categories of a row in the commander zone, and never fewer "
         "copies of a card that has a row in the commander zone and another row, both in the deck or "
@@ -175,7 +175,7 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
         )
     if mode == "semi":
         return (
-            "Your assistant applies low-risk changes itself: a small edit to a deck or your collection "
+            "Your assistant applies low-risk changes itself: a small edit to a deck or your binder "
             f"(at most {_rows(max_rows)}, each {LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} "
             "copies each, never a change to which cards are the commanders or to the categories of a "
             "row in the commander zone, or fewer copies of a card that has a row in the commander zone "
@@ -196,6 +196,26 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
         + " "
         + MEMBER_ONLY_TEXT
     )
+
+
+def assistant_note(
+    mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DEFAULT_BIG_EDIT_ROWS
+) -> str:
+    """What ``mode`` means for the assistant, in two sentences (account_status, A7). The full list
+    is mode_help's, on the account page; each proposal's assistant_may_apply settles it per change."""
+    if mode == "manual":
+        first = "Every change waits for the user's press on the card or the review page."
+    elif mode == "semi":
+        first = (
+            f"You may apply a small low-risk edit (at most {_rows(max_rows)}) or a private copy of a "
+            "deck yourself; everything else waits for the user's press."
+        )
+    else:
+        first = (
+            f"You may apply most changes you propose yourself; bigger edits (more than {_rows(big_rows)}), "
+            "new decks, restores and account actions wait for the user's press."
+        )
+    return first + " Each proposal's assistant_may_apply says which, so never guess."
 
 
 _STILL_WAITS = (
@@ -226,7 +246,7 @@ def mode_points(
             (
                 "Your assistant applies low-risk changes itself:",
                 [
-                    f"a small edit to a deck or your collection: at most {_rows(max_rows)}, each "
+                    f"a small edit to a deck or your binder: at most {_rows(max_rows)}, each "
                     f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies each",
                     "a private copy of a deck (a clone), which changes nothing that exists",
                     lists_low_text(max_rows),
@@ -278,7 +298,7 @@ AUTO_WARNING = (
     "An assistant can be tricked by text it reads (a web page, a deck description, a pasted "
     "list) into making changes you did not ask for. If you let your assistant apply changes "
     "without asking, such a change can land on Archidekt without your press. A change to one of "
-    "your decks still keeps a snapshot you can restore from the History page; a collection change "
+    "your decks still keeps a snapshot you can restore from the History page; a binder change "
     "keeps none. Restoring a snapshot does not put back a deck's folder, tags, cover or custom cards."
 )
 
@@ -399,6 +419,8 @@ def category_wait(rows: list[dict[str, Any]] | None) -> str | None:
     return None
 
 
+# A deck edit that would make the deck break a format rule it keeps now (decks._judge_rules).
+BREAKS_RULES_REASON = "would make the deck break its format's rules ({rules})"
 COMMANDER_COPIES_REASON = "changes the commander's copies"
 COMPANION_REASON = "changes the deck's companion"
 COMMANDER_ZONE_REASON = "adds or changes a row with a commander-zone category"
@@ -448,7 +470,7 @@ def risk_of(
     if kind == "custom_cards":
         return custom_cards_risk(rows, max_rows=max_rows)
     if kind not in ("edit", "collection"):
-        return "high", "not a plain deck or collection edit"
+        return "high", "not a plain deck or binder edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
         return "high", NO_ROWS_REASON
     # a card package's own line only says where the adds come from (packages.py); not a change
@@ -457,6 +479,16 @@ def risk_of(
     kinds = [str(r.get("kind")) for r in rows]
     if any(k == "commander" for k in kinds):
         return "high", commander_reason(rows)
+    broken = [str(b) for r in rows for b in r.get("breaks") or []]
+    if broken:  # decks.DeckService._judge_rules: a legal deck made illegal is never low risk
+        return "high", BREAKS_RULES_REASON.format(rules="; ".join(dict.fromkeys(broken)))
+    # decks.DeckService._check_names: a card Archidekt lacks, or a name nothing could check
+    missing = [str(r.get("name")) for r in rows if r.get("missing")]
+    if missing:
+        return "high", "adds a card Archidekt doesn't have: " + ", ".join(missing)
+    unchecked = [str(r.get("name")) for r in rows if r.get("unchecked")]
+    if unchecked:
+        return "high", "adds a card name that couldn't be checked: " + ", ".join(unchecked)
     if any(r.get("companion_card") for r in rows):
         return "high", COMPANION_REASON
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
@@ -660,7 +692,7 @@ def auto_waits(
         return category_wait(rows)
     if kind == "clone":
         return None
-    return "is not a deck or collection change"
+    return "is not a deck or binder change"
 
 
 def assistant_may_apply(mode: str, risk: str, *, auto_wait: str | None = None) -> bool:

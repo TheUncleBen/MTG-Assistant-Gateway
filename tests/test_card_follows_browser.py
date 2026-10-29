@@ -147,7 +147,8 @@ def test_an_older_card_draws_the_amended_version_and_approves_it_with_its_code()
     def test(page) -> None:
         card = _open(page, [V2], [{**V2, "state": "rejected"}])
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
-        assert "Changed by Claude. Last change: now +1 Ponder." in card.locator("#note").inner_text()
+        # the app that made it changed it itself: "Updated: …", not "Changed by" (0.7.46, A20)
+        assert "Updated: now +1 Ponder." in card.locator("#note").inner_text()
         assert card.locator("#status").inner_text() == REDRAWN
         card.locator("#reject:enabled").wait_for(timeout=5_000)
         card.locator("#reject").click()
@@ -222,7 +223,7 @@ def test_a_newer_version_read_without_a_code_offers_the_review_page_only() -> No
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
         page.wait_for_timeout(900)  # past the arming delay
         assert card.locator("#approve").count() == 0
-        assert card.locator("#actions button", has_text="Approve on the review page").count() == 1
+        assert card.locator("#actions button", has_text="Apply on the review page").count() == 1
 
     _run(test)
 
@@ -271,7 +272,7 @@ def test_a_changed_answer_with_no_read_leaves_the_review_page_not_locked_buttons
         card = _open(page, [V1, V1, "refuse"], [changed])
         card.locator("#approve:enabled").wait_for(timeout=5_000)
         card.locator("#approve").click()
-        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        card.locator("#actions button", has_text="Apply on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
         assert card.locator("#status").inner_text() == "There is a newer version."
 
@@ -286,7 +287,7 @@ def test_a_changed_answer_whose_read_finds_nothing_leaves_the_review_page() -> N
         card = _open(page, [V1, V1, gone], [changed])
         card.locator("#approve:enabled").wait_for(timeout=5_000)
         card.locator("#approve").click()
-        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        card.locator("#actions button", has_text="Apply on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
 
     _run(test)

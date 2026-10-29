@@ -6,7 +6,7 @@ A self-hosted [Model Context Protocol](https://modelcontextprotocol.io) (MCP)
 server for Magic: The Gathering. You run it in Docker, on one machine with
 Compose or on a Swarm, for you and whoever you invite. Each person adds one URL to Claude or ChatGPT and signs
 in with their own account. From there their assistant can look up cards and
-Commander data, goldfish a deck, and edit their own
+Commander data, test a deck, and edit their own
 [Archidekt](https://archidekt.com) decks. It never changes a deck until that
 person has said yes to the exact change.
 
@@ -53,7 +53,7 @@ person has said yes to the exact change.
   ([docs/ANDROID.md](docs/ANDROID.md)).
 - **What it talks to:** Archidekt for decks, Scryfall for cards, and an
   internal [Mystic Forge](https://github.com/Kautiontape/mystic-forge)
-  container (no published port) for research and simulation. Mystic Forge pulls from EDHREC,
+  container (no published port) for research and tests. Mystic Forge pulls from EDHREC,
   Commander Spellbook and the Comprehensive Rules.
 - **Accountability:** every tool call is tied to whoever signed in, and every
   deck change lands in an audit log.
@@ -102,7 +102,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [PLUGIN.md](docs/PLUGIN.md) | Users and operators | The one-link plugin for Claude Code, Claude, ChatGPT and Codex, plus the operator plugin |
 | [SKILL.md](docs/SKILL.md) | Users | The MTG skill and the ChatGPT instructions that teach the assistant the safe way to work |
 | [API.md](docs/API.md) | Contributors and app builders | The JSON API and the companion pages: authentication, every endpoint, proposal kinds, the page routes the Android app wraps |
-| [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist, a deck or your collection with your phone camera or a photo |
+| [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist, a deck or your binder with your phone camera or a photo |
 | [USING.md](docs/USING.md) | Users | What the pages do: home, decks, search, scan, collection, proposals and history, the guide; the same text the in-app Guide shows |
 | [CAPABILITIES.md](docs/CAPABILITIES.md) | Everyone | The capability map: every assistant tool and who owns each job, every hand action on the pages and in the app, and how the two paths relate |
 | [EXPORT-IMPORT.md](docs/EXPORT-IMPORT.md) | Users | Which decklist formats go where between archidekt.com, the gateway's pages, the app and the assistant, and what survives each trip |
@@ -128,8 +128,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **Sign in.** Users sign in from Claude or ChatGPT with OAuth, through the
   operator's identity provider. The `whoami` tool shows who's signed in.
 - **Research.** Card search, prices, rulings, the Comprehensive Rules,
-  EDHREC, Commander Spellbook combos, precons, deck validation and goldfish
-  simulation.
+  EDHREC, Commander Spellbook combos, precons, deck validation and solo test.
   - These come from Mystic Forge. The gateway only passes through tools on
     an allowlist, and always as the signed-in user. Mystic Forge tools that
     duplicate a gateway tool are hidden, so each job has exactly one tool
@@ -164,8 +163,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   uncategorised rows). A bracket set on the deck is the deck's bracket; the
   estimate says what the cards suggest, and the tools say so.
 - **Deck reports and history.** `run_deck_report` stores the statistics
-  together with a decklist validation and a goldfish simulation (when Mystic
-  Forge is up; the simulator's options such as annotations, seed, turns,
+  together with a decklist validation and a solo test (when Mystic
+  Forge is up; the solo test's options such as annotations, seed, turns,
   opponents and mulligan rules pass through; a deck without a commander and with 60 or more cards
   plays a 60-card game) so a deck's numbers can be followed over time with
   `list_deck_reports` and `get_deck_report`, or on the `/history` page next
@@ -174,7 +173,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   changed between any two of: an Archidekt deck, a snapshot
   (`get_snapshot` shows one in full) or a pasted list, with the change in
   the statistics, a precon-style summary (cut and added percentages, basic
-  lands apart) and, on request, a paired goldfish A/B of the two.
+  lands apart) and, on request, a paired solo test A/B of the two.
 - **Safe writes.** Every edit starts as a proposal:
   - `propose_deck_changes` (edit a deck), `propose_new_deck` (build one
     from a card list, a pasted list or a CSV; it warns about a deck size
@@ -185,7 +184,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     proposal (Claude on the web, desktop and phones; ChatGPT), with the
     Apply button on the review page, or, when the member chose a Semi-auto
     or Full-auto approval mode on their Account page, the assistant applies
-    it with `apply_proposal`. The card's Approve button carries a one-time code
+    it with `apply_proposal`. The card's Apply button carries a one-time code
     the assistant never sees, so a tricked assistant can't press it.
   - For an edit, the gateway checks the change still does what was reviewed on the deck as it is now, saves a
     snapshot, makes the change, then reads the deck back to confirm it. With backups on (the operator's
@@ -221,7 +220,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     `propose_deck_details` proposal you approve. It can propose deleting a
     deck or creating a folder, but only your own press applies those;
     renaming folders is yours alone, on the Folders page.
-- **Collection.** The cards you own, which is your Collection on Archidekt
+- **Binder.** The cards you own (your Archidekt collection),
   shown and edited through the gateway (nothing about them is stored here):
   add by name or from a scan, count copies, set a card's finish, condition,
   language and price paid, filter, export CSV. Owned cards
@@ -232,8 +231,9 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **Likes, bookmarks, follows and comments.** Archidekt's social buttons on
   every deck and user page, each behind a confirmation and sent under your
   own Archidekt name; your own comments can be edited and deleted, and other
-  people's voted on. The assistant can propose the same (`propose_deck_social`,
-  `propose_comment`), but you apply each one yourself, in every approval mode.
+  people's voted on. The assistant can propose the same
+  (`propose_account_action`), but you apply each one yourself, in every
+  approval mode.
 - **Adaptive layout.** Bottom tab bar on phones, a navigation rail from
   600 px on touch screens and in the Android app, the desktop bar in wider
   browsers; the layout follows the live window, so a foldable, split screen
@@ -258,15 +258,15 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   comes with an interactive card (MCP Apps; Claude on the web, desktop and
   phones, ChatGPT as reported): the printings of a card as pictures to tap,
   the cards read from photos or a list to keep or drop, the proposal with
-  Approve and Reject, and the waiting changes with Apply all. Other answers
+  Apply and Reject, and the waiting changes with Apply all. Other answers
   come as plain text, so a long chat stays light. A pick on the printings or
   recognised-cards card goes back to the assistant as plain text and never
-  changes anything by itself; only Approve, Reject and Apply all act, each
+  changes anything by itself; only Apply, Reject and Apply all act, each
   with the card's one-time code. Bulky data reaches the card through a
   ten-minute signed link, not through the model.
 - **Card scanning.** The `/scan` page reads physical cards with your phone
   camera. Text recognition runs on the phone, no third-party app needed.
-  The scanned list goes into your collection, into one of your decks or
+  The scanned list goes into your binder, into one of your decks or
   into a new deck. `resolve_cards` turns card names read from photos into
   exact cards.
 - **One-link setup.** The gateway serves its own assistant plugin and an
@@ -289,9 +289,9 @@ assistant never has to guess which one to use:
 | Legality, structural checks, bracket, curve, colours and price of a deck | `deck_stats` | `validate_archidekt_deck` |
 | Legality of a pasted list that is not a deck yet | `validate_decklist` | |
 | Cuts and adds between two decks, a precon included, with the summary and basics apart | `compare_decks` | `precon_diff` |
-| Paired goldfish A/B of two decks (same seeds game for game, deltas with confidence intervals) | `compare_decks` with `simulate` | `goldfish_ab` |
-| Goldfish simulation of one deck, stored, with the simulator's options | `run_deck_report` | `goldfish_run` |
-| Draw odds without a simulation, and what the engine models | `goldfish_odds`, `goldfish_annotate` | |
+| Paired solo test A/B of two decks (same seeds game for game, deltas with confidence intervals) | `compare_decks` with `simulate` | `goldfish_ab` |
+| Solo test of one deck, stored, with the solo test's options | `run_deck_report` | `goldfish_run` |
+| Draw odds without a solo test, and what the engine models | `goldfish_odds`, `goldfish_annotate` | |
 | Card names from photos or text to exact printings | `resolve_cards` | |
 
 A test pins the hidden list, and the tool descriptions say who owns what.
@@ -304,13 +304,13 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion, and any edit of a description or comment that has formatting, is approved only on its review page). Try your first edit on a deck you don't care about |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Apply button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, always waits for the member's own press, in every mode, on the card in the chat or on its review page; a deck deletion, and any edit of a description or comment that has formatting, is approved only on its review page). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as tested, reported or not tested |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked on a live deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also not confirmed). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
 | Forge games in deck reports (0.7.14; on by default in the example files from 0.7.40) | Built. The Forge image is built and smoke-tested on arm64 in CI, with card-coverage checks of 99.5% of the cards legal in at least one format and 99.6% of the Commander-legal cards (measured 99.60% of all and 99.71% of Commander-legal cards on 2026-10-21; what Forge lacks is listed in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#cards-forge-cannot-play) and named in every report). Timed once on a Raspberry Pi 5: 38 seconds and about 740 MiB for a game an x86 machine played in 18 to 19 seconds. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks (the Forge solo test, from 0.7.40, also plays 60-card decks) |
 | Watchlists and price history (0.7.23) | Built and covered by tests against fakes; off unless the operator sets `MTG_WATCHLISTS_ENABLED=true` |
-| Features not built yet | The full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
+| Features not built yet | The full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved solo test reports stay hidden too; the gateway's stored deck reports replace them) |
 
 ## How it works
 

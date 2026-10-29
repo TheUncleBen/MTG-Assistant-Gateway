@@ -1,0 +1,504 @@
+Subject: Card names: one front-face rule for every collection lookup
+
+Scryfall's POST /cards/collection finds a split, adventure, modal
+double-faced or transform card by its front face only: {"name": "Fire"}
+returns Fire // Ice, {"name": "Fire // Ice"} is not_found (checked
+2026-10-28). scryfall_card_text, scryfall_price_list and format_archidekt
+sent the full name and reported "Fire // Ice" and "Brazen Borrower // Petty
+Theft" as not found. validate_decklist indexed what came back by the full
+name ("fire // ice") and looked cards up by the name given, so "Fire",
+"Fire // Ice" and "Wear // Tear" in a Galadriel deck were neither flagged
+outside the commander's colors nor reported missing: a card that could not
+be matched was skipped without a word.
+
+This patch adds one rule, _collection_name (the front face of "A // B"),
+used by every name identifier: the decklist entries (card text, price
+list), format_archidekt, validate_decklist, validate_archidekt_deck,
+precon_diff's names, the goldfish card fetch and the watchlist bulk add.
+_collection_lookup asks for names 75 at a time and matches each card back
+under its full name or any face (_card_name_aliases), falling back to
+Scryfall's identifier order. validate_decklist and validate_archidekt_deck
+list every card a failed request could not check ("could not be checked")
+instead of passing it, and check color identity by the names given.
+scryfall_card_text's not-found lines name what the user wrote.
+
+Tests: tests/test_card_face_names.py (a split, an adventure, a transform
+and a modal double-faced card, by full name and by front face).
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has no fix. Needs patches
+0001-0012 applied first.
+
+diff --git a/server.py b/server.py
+index 3a5cfa5..38dd702 100644
+--- a/server.py
++++ b/server.py
+@@ -1139,9 +1139,19 @@ async def scryfall_card_text(params: CardTextInput) -> str:
+         parts.append(block)
+         parts.append("")
+ 
++    # A two-part name is asked for by its front face (_collection_name); the
++    # line names what the user wrote.
++    written = {_identifier_key(_entry_identifier(e)): e for e in entries}
++
++    def label(ident: dict) -> str:
++        entry = written.get(_identifier_key(ident))
++        if entry is None or "collector_number" in ident:
++            return _identifier_label(ident)
++        return _identifier_label({**ident, "name": entry.name})
++
+     if not_found:
+         parts.append(f"## Not found ({len(not_found)})")
+-        parts.extend(f"- {_identifier_label(ident)}" for ident in not_found)
++        parts.extend(f"- {label(ident)}" for ident in not_found)
+         parts.append(
+             "(Bulk lookup needs exact names — retry these one at a time with "
+             "scryfall_named, which fuzzy-matches.)"
+@@ -1151,7 +1161,7 @@ async def scryfall_card_text(params: CardTextInput) -> str:
+     if unchecked:
+         parts.append(
+             f"## Could not be checked — Scryfall request failed ({len(unchecked)})")
+-        parts.extend(f"- {_identifier_label(ident)}" for ident in unchecked)
++        parts.extend(f"- {label(ident)}" for ident in unchecked)
+         parts.append(f"({errors[0]})")
+         parts.append("")
+ 
+@@ -2254,28 +2264,17 @@ async def format_archidekt(params: FormatDeckInput) -> str:
+     Assign categories based on each card's role in the deck.
+     """
+     # Batch validate on Scryfall
+-    unique_names = list({c.name for c in params.cards})
+-    found: dict[str, dict] = {}
+-    not_found_names: list[str] = []
+-
+-    for i in range(0, len(unique_names), 75):
+-        batch = unique_names[i:i + 75]
+-        identifiers = [{"name": name} for name in batch]
+-        try:
+-            data = await _scryfall_post("/cards/collection", {"identifiers": identifiers})
+-            for card in data.get("data", []):
+-                found[card["name"].lower()] = card
+-            for item in data.get("not_found", []):
+-                not_found_names.append(item.get("name", str(item)))
+-        except Exception as e:
+-            return f"Scryfall lookup failed: {_scryfall_error(e)}"
++    found, _missing, unchecked, errors = await _collection_lookup(
++        [c.name for c in params.cards])
++    if unchecked:
++        return f"Scryfall lookup failed: {errors[0]}"
+ 
+     lines: list[str] = []
+     warnings: list[str] = []
+     printings: dict = {}    # (name, finish) -> (printing, finishes), one lookup each
+ 
+     for entry in params.cards:
+-        scryfall_card = found.get(entry.name.lower())
++        scryfall_card = found.get(entry.name)
+ 
+         # Use Scryfall's canonical name if found
+         if scryfall_card:
+@@ -2462,6 +2461,67 @@ def _parse_decklist(text: str) -> list[tuple[int, str]]:
+     return [(e.quantity, e.name) for e in _parse_decklist_entries(text)]
+ 
+ 
++def _collection_name(name: str) -> str:
++    """The name POST /cards/collection finds a card by: the front face of a
++    two-part name. The lookup knows a split, adventure, modal double-faced or
++    transform card by its front face ("Fire", "Brazen Borrower") but answers
++    not_found for the full "Fire // Ice" (checked 2026-10-28), so every name
++    identifier goes through here. The card that comes back carries its full
++    name, and _card_name_aliases indexes it under each face as well, so a
++    line written either way finds it again."""
++    front = re.split(r"\s*//\s*", name, maxsplit=1)[0].strip()
++    return front or name.strip()
++
++
++async def _collection_lookup(
++    names: list[str],
++) -> tuple[dict[str, dict], list[str], list[str], list[str]]:
++    """Look card names up 75 at a time, each by _collection_name.
++
++    Returns (found, not_found, unchecked, errors): found maps each input name
++    (as given) to its card, not_found holds the input names Scryfall did not
++    know, unchecked the ones in a request that failed (never reported as
++    missing: a failed request says nothing about the card), errors the
++    failure texts. Every input name is in exactly one of the three.
++    """
++    unique = list(dict.fromkeys(n for n in names if n and n.strip()))
++    by_lookup: dict[str, list[str]] = {}
++    for name in unique:
++        by_lookup.setdefault(_collection_name(name).lower(), []).append(name)
++    lookups = list(dict.fromkeys(_collection_name(n) for n in unique))
++    found: dict[str, dict] = {}
++    not_found: list[str] = []
++    unchecked: list[str] = []
++    errors: list[str] = []
++    for batch in _chunk(lookups, 75):   # Scryfall's hard per-request cap
++        try:
++            data = await _scryfall_post(
++                "/cards/collection", {"identifiers": [{"name": n} for n in batch]})
++        except Exception as e:
++            unchecked.extend(n for b in batch for n in by_lookup.get(b.lower(), []))
++            errors.append(_scryfall_error(e))
++            continue
++        cards = data.get("data", [])
++        index = _index_collection_results(cards)
++        # Scryfall answers in identifier order, leaving out what it echoes
++        # in not_found; by position is the fallback for a card it answered
++        # under a name of its own that matches no face of the asked name.
++        missing = {str(i.get("name") or "").lower()
++                   for i in data.get("not_found", []) if isinstance(i, dict)}
++        answered = [b.lower() for b in batch if b.lower() not in missing]
++        by_position = dict(zip(answered, cards)) if len(answered) == len(cards) else {}
++        for asked in batch:
++            for name in by_lookup.get(asked.lower(), []):
++                card = (index.get(("name", name.lower().strip()))
++                        or index.get(("name", asked.lower()))
++                        or by_position.get(asked.lower()))
++                if card is not None:
++                    found[name] = card
++                else:
++                    not_found.append(name)
++    return found, not_found, unchecked, errors
++
++
+ def _entry_identifier(entry: DecklistEntry) -> dict:
+     """Scryfall /cards/collection identifier naming this entry's printing.
+ 
+@@ -2472,8 +2532,8 @@ def _entry_identifier(entry: DecklistEntry) -> dict:
+     if entry.set_code and entry.collector_number:
+         return {"set": entry.set_code, "collector_number": entry.collector_number}
+     if entry.set_code:
+-        return {"name": entry.name, "set": entry.set_code}
+-    return {"name": entry.name}
++        return {"name": _collection_name(entry.name), "set": entry.set_code}
++    return {"name": _collection_name(entry.name)}
+ 
+ 
+ def _identifier_key(identifier: dict) -> str:
+@@ -2743,28 +2803,27 @@ async def validate_decklist(params: ValidateDecklistInput) -> str:
+     issues: list[str] = []
+     total_qty = sum(qty for qty, _ in cards)
+ 
+-    # Batch-verify card names via Scryfall collection API (75 at a time)
+-    unique_names = list({name for _, name in cards})
+-    all_found: dict[str, dict] = {}
+-    not_found: list[str] = []
+-
+-    for i in range(0, len(unique_names), 75):
+-        batch = unique_names[i:i + 75]
+-        identifiers = [{"name": name} for name in batch]
+-        try:
+-            data = await _scryfall_post("/cards/collection", {"identifiers": identifiers})
+-            for card in data.get("data", []):
+-                all_found[card["name"].lower()] = card
+-            for item in data.get("not_found", []):
+-                not_found.append(item.get("name", str(item)))
+-        except Exception as e:
+-            issues.append(f"Scryfall lookup failed: {_scryfall_error(e)}")
++    # Batch-verify card names via Scryfall collection API (75 at a time).
++    # Each card is found by its full name or any face of it.
++    unique_names = list(dict.fromkeys(name for _, name in cards))
++    names = unique_names + ([params.commander] if params.commander else [])
++    all_found, not_found, unchecked, errors = await _collection_lookup(names)
++    not_found = [n for n in not_found if n in unique_names]
++    unchecked = [n for n in unchecked if n in unique_names]
++    if errors:
++        issues.append(f"Scryfall lookup failed: {errors[0]}")
+ 
+     # Report invalid card names
+     if not_found:
+         issues.append(f"**{len(not_found)} card(s) not found on Scryfall:**")
+         for name in not_found:
+             issues.append(f"  - {name}")
++    # A card the lookup could not reach is never passed: it is named, unchecked.
++    if unchecked:
++        issues.append(f"**{len(unchecked)} card(s) could not be checked** "
++                      "(name and color identity):")
++        for name in unchecked:
++            issues.append(f"  - {name}")
+ 
+     # Deck size check
+     if total_qty != 100:
+@@ -2772,7 +2831,7 @@ async def validate_decklist(params: ValidateDecklistInput) -> str:
+ 
+     # Commander color identity check
+     if params.commander:
+-        commander_data = all_found.get(params.commander.lower())
++        commander_data = all_found.get(params.commander)
+         if not commander_data:
+             # Try fetching commander directly
+             try:
+@@ -2792,8 +2851,8 @@ async def validate_decklist(params: ValidateDecklistInput) -> str:
+             # Color identity check
+             commander_ci = set(commander_data.get("color_identity", []))
+             violations: list[str] = []
+-            for _, name in cards:
+-                card_data = all_found.get(name.lower())
++            for name in unique_names:
++                card_data = all_found.get(name)
+                 if card_data:
+                     card_ci = set(card_data.get("color_identity", []))
+                     outside = card_ci - commander_ci
+@@ -2896,31 +2955,25 @@ async def validate_archidekt_deck(params: ValidateArchidektInput) -> str:
+ 
+     commander_name = commander_cards[0] if commander_cards else None
+ 
+-    # Batch verify on Scryfall
+-    unique_names = list({name for _, name in in_deck_cards})
+-    all_found: dict[str, dict] = {}
+-    not_found_names: list[str] = []
+-
+-    for i in range(0, len(unique_names), 75):
+-        batch = unique_names[i:i + 75]
+-        identifiers = [{"name": name} for name in batch]
+-        try:
+-            resp = await _scryfall_post("/cards/collection", {"identifiers": identifiers})
+-            for card in resp.get("data", []):
+-                all_found[card["name"].lower()] = card
+-            for item in resp.get("not_found", []):
+-                not_found_names.append(item.get("name", str(item)))
+-        except Exception as e:
+-            issues.append(f"Scryfall lookup error: {_scryfall_error(e)}")
++    # Batch verify on Scryfall (each card by its full name or any face)
++    unique_names = list(dict.fromkeys(name for _, name in in_deck_cards))
++    all_found, not_found_names, unchecked, errors = await _collection_lookup(unique_names)
++    if errors:
++        issues.append(f"Scryfall lookup error: {errors[0]}")
+ 
+     if not_found_names:
+         issues.append(f"**{len(not_found_names)} card(s) not found on Scryfall:**")
+         for name in not_found_names:
+             issues.append(f"  - {name}")
++    if unchecked:
++        issues.append(f"**{len(unchecked)} card(s) could not be checked** "
++                      "(name and color identity):")
++        for name in unchecked:
++            issues.append(f"  - {name}")
+ 
+     # Commander legality + color identity
+     if commander_name and is_commander:
+-        cmd_data = all_found.get(commander_name.lower())
++        cmd_data = all_found.get(commander_name)
+         if cmd_data:
+             type_line = cmd_data.get("type_line", "")
+             oracle_text = cmd_data.get("oracle_text", "")
+@@ -2931,8 +2984,8 @@ async def validate_archidekt_deck(params: ValidateArchidektInput) -> str:
+ 
+             commander_ci = set(cmd_data.get("color_identity", []))
+             violations: list[str] = []
+-            for _, name in in_deck_cards:
+-                card_data = all_found.get(name.lower())
++            for name in unique_names:
++                card_data = all_found.get(name)
+                 if card_data:
+                     card_ci = set(card_data.get("color_identity", []))
+                     outside = card_ci - commander_ci
+@@ -3594,26 +3647,16 @@ async def _canonical_names(names: list[str]) -> Optional[tuple[dict[str, str], s
+     falls back to raw names). Recognition is judged by Scryfall's own not_found list
+     — a name it resolves under a fuller canonical spelling is NOT unrecognized.
+     """
+-    mapping: dict[str, str] = {}
+-    not_found: set[str] = set()
+-    try:
+-        for i in range(0, len(names), 75):
+-            batch = names[i:i + 75]
+-            data = await _scryfall_post(
+-                "/cards/collection",
+-                {"identifiers": [{"name": n} for n in batch]},
+-            )
+-            for card in data.get("data", []):
+-                cname = card.get("name", "")
+-                if cname:
+-                    mapping[_diff_key(cname)] = cname
+-            for item in data.get("not_found", []):
+-                nm = item.get("name", "") if isinstance(item, dict) else str(item)
+-                if nm:
+-                    not_found.add(_diff_key(nm))
+-    except Exception:
++    found, missing, unchecked, _errors = await _collection_lookup(names)
++    if unchecked:
+         return None
+-    return mapping, not_found
++    mapping: dict[str, str] = {}
++    for name, card in found.items():
++        cname = card.get("name", "")
++        if cname:
++            mapping[_diff_key(cname)] = cname
++            mapping[_diff_key(name)] = cname
++    return mapping, {_diff_key(n) for n in missing}
+ 
+ 
+ # ── Precon Input Models ──────────────────────────────────────────────────────
+@@ -3959,7 +4002,7 @@ _GOLDFISH_EXAMPLE_SIGNET = ('{"name": "Boros Signet",\n'
+ 
+ def _goldfish_front_face(name: str) -> str:
+     """The name a Scryfall collection lookup finds: the front face of "A // B"."""
+-    return name.split(" // ", 1)[0].strip() or name
++    return _collection_name(name)
+ 
+ 
+ async def _goldfish_fetch_cards(names: list[str]) -> tuple[list[dict], list[str]]:
+@@ -5884,7 +5927,7 @@ async def _bulk_add_cards(db, row, decklist: str, note: Optional[str] = None,
+     for i in range(0, len(wanted), 75):
+         batch = wanted[i:i + 75]
+         identifiers = [({"set": s.lower(), "collector_number": c} if s
+-                        else {"name": n}) for n, s, c, _ in batch]
++                        else {"name": _collection_name(n)}) for n, s, c, _ in batch]
+         try:
+             data = await _scryfall_post("/cards/collection",
+                                         {"identifiers": identifiers})
+@@ -5892,7 +5935,8 @@ async def _bulk_add_cards(db, row, decklist: str, note: Optional[str] = None,
+             out["error"] = f"Scryfall lookup failed: {_scryfall_error(e)}"
+             return out
+         for card in data.get("data", []):
+-            found[card["name"].lower()] = card
++            for alias in _card_name_aliases(card):
++                found.setdefault(alias, card)
+             found[(card.get("set", "").upper(), card.get("collector_number"))] = card
+ 
+     for name, set_code, cn, spec in wanted:
+diff --git a/tests/test_card_face_names.py b/tests/test_card_face_names.py
+new file mode 100644
+index 0000000..f39c87b
+--- /dev/null
++++ b/tests/test_card_face_names.py
+@@ -0,0 +1,139 @@
++"""Two-part card names ("Fire // Ice") through every name lookup.
++
++Scryfall's POST /cards/collection knows a split, adventure, modal
++double-faced or transform card by its front face only: {"name": "Fire"}
++returns Fire // Ice, {"name": "Fire // Ice"} is not_found (checked
++2026-10-28). The fake below answers the same way.
++"""
++import server
++
++
++def _card(name, ci, faces=None, set_code="tst", number="1", **extra):
++    card = {"name": name, "color_identity": ci, "set": set_code,
++            "collector_number": number, "type_line": extra.pop("type_line", "Instant"),
++            "oracle_text": extra.pop("oracle_text", ""), "finishes": ["nonfoil"],
++            "prices": {"usd": "1.00"}, "games": ["paper"], "released_at": "2020-01-01",
++            **extra}
++    if faces:
++        card["card_faces"] = [{"name": f, "type_line": "Instant", "oracle_text": ""}
++                              for f in faces]
++    return card
++
++
++CARDS = [
++    _card("Fire // Ice", ["R", "U"], ["Fire", "Ice"], number="10"),  # split
++    _card("Wear // Tear", ["R", "W"], ["Wear", "Tear"], number="11"),  # split
++    _card("Brazen Borrower // Petty Theft", ["U"], ["Brazen Borrower", "Petty Theft"],
++          number="12"),  # adventure
++    _card("Delver of Secrets // Insectile Aberration", ["U"],
++          ["Delver of Secrets", "Insectile Aberration"], number="13"),  # transform
++    _card("Valki, God of Lies // Tibalt, Cosmic Impostor", ["B", "R"],
++          ["Valki, God of Lies", "Tibalt, Cosmic Impostor"], number="14"),  # modal DFC
++    _card("Lightning Bolt", ["R"], number="15"),
++    _card("Galadriel, Elven-Queen", ["G", "U"], number="16",
++          type_line="Legendary Creature — Elf Noble"),
++]
++
++
++def _by_collection_name(name):
++    """Scryfall's collection name match: a one-part card by its name, a
++    two-part card by a face, never by its full "A // B" name."""
++    for card in CARDS:
++        faces = [f["name"] for f in card.get("card_faces", [])]
++        names = faces[:1] if faces else [card["name"]]
++        if name.lower() in (n.lower() for n in names):
++            return card
++    return None
++
++
++def _install(monkeypatch, fail=False):
++    asked = []
++
++    async def post(endpoint, body):
++        assert endpoint == "/cards/collection"
++        asked.append(body["identifiers"])
++        if fail:
++            raise RuntimeError("down")
++        data, not_found = [], []
++        for ident in body["identifiers"]:
++            card = _by_collection_name(ident["name"]) if "name" in ident else None
++            (data.append(card) if card else not_found.append(ident))
++        return {"object": "list", "data": data, "not_found": not_found}
++
++    async def get(endpoint, params=None):
++        raise RuntimeError(f"unexpected GET {endpoint}")
++
++    monkeypatch.setattr(server, "_scryfall_post", post)
++    monkeypatch.setattr(server, "_scryfall_get", get)
++    monkeypatch.setattr(server, "_today", lambda: "2026-10-28")
++    return asked
++
++
++FULL = ["Fire // Ice", "Brazen Borrower // Petty Theft",
++        "Delver of Secrets // Insectile Aberration",
++        "Valki, God of Lies // Tibalt, Cosmic Impostor"]
++FRONT = ["Fire", "Brazen Borrower", "Delver of Secrets", "Valki, God of Lies"]
++
++
++def test_collection_name_is_the_front_face():
++    assert server._collection_name("Fire // Ice") == "Fire"
++    assert server._collection_name("Fire//Ice") == "Fire"
++    assert server._collection_name("Sol Ring") == "Sol Ring"
++
++
++async def test_card_text_finds_full_and_front_names(monkeypatch):
++    _install(monkeypatch)
++    for names in (FULL, FRONT):
++        out = await server.scryfall_card_text(
++            server.CardTextInput(cards="\n".join(names)))
++        assert "Not found" not in out, out
++        assert f"# Card Text ({len(names)} card(s))" in out
++
++
++async def test_card_text_not_found_names_what_was_written(monkeypatch):
++    _install(monkeypatch)
++    out = await server.scryfall_card_text(
++        server.CardTextInput(cards="Fire // Ice\nNotacard // Zzz"))
++    assert "## Not found (1)" in out
++    assert "- Notacard // Zzz" in out
++
++
++async def test_price_list_prices_full_names(monkeypatch):
++    _install(monkeypatch)
++    out = await server.scryfall_price_list(
++        server.PriceListInput(decklist="1 Fire // Ice\n1 Brazen Borrower // Petty Theft"))
++    assert "Not found" not in out, out
++    assert "(2 of 2 cards priced)" in out
++
++
++async def test_format_archidekt_full_name_is_found(monkeypatch):
++    _install(monkeypatch)
++    out = await server.format_archidekt(server.FormatDeckInput(cards=[
++        server.DeckCardEntry(name="Fire // Ice"),
++        server.DeckCardEntry(name="Delver of Secrets"),
++    ]))
++    assert "WARNING" not in out, out
++    assert "1x Fire // Ice" in out
++    assert "1x Delver of Secrets // Insectile Aberration" in out
++
++
++async def test_validate_decklist_flags_two_part_cards_outside_identity(monkeypatch):
++    _install(monkeypatch)
++    deck = "1 Fire // Ice\n1 Wear // Tear\n1 Fire\n1 Lightning Bolt\n1 Brazen Borrower"
++    out = await server.validate_decklist(server.ValidateDecklistInput(
++        decklist=deck, commander="Galadriel, Elven-Queen"))
++    assert "4 card(s) outside commander's color identity (G, U)" in out, out
++    for line in ("- Fire // Ice (has R)", "- Wear // Tear (has R, W)", "- Fire (has R)",
++                 "- Lightning Bolt (has R)"):
++        assert line in out
++    assert "Brazen Borrower (has" not in out
++    assert "not found" not in out
++
++
++async def test_validate_decklist_names_cards_it_could_not_check(monkeypatch):
++    _install(monkeypatch, fail=True)
++    out = await server.validate_decklist(server.ValidateDecklistInput(
++        decklist="1 Fire // Ice\n1 Sol Ring", commander="Galadriel, Elven-Queen"))
++    assert "Validation: ISSUES FOUND" in out
++    assert "2 card(s) could not be checked" in out
++    assert "  - Fire // Ice" in out and "  - Sol Ring" in out

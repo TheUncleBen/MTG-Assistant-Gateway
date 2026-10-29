@@ -346,6 +346,16 @@ class ArtIndex:
         art["status"] = "matched"
         return {**same_art[0].card, "art": art}
 
+    async def gallery(self, oracle_id: str) -> list[_Printing]:
+        """Every learned printing of one card (id, illustration, hashes, card), learning them first
+        when that is due. Unlike ``match``, which only starts the learning, this waits for it: the
+        measurement script (scripts/measure_scanner.py) compares a photo with whole galleries."""
+        if self._ensure_gallery(oracle_id, self._state(oracle_id)):
+            task = self._tasks.get(oracle_id)
+            if task is not None:
+                await task
+        return self._rows(oracle_id)
+
     # -- storage ----------------------------------------------------------------
     def _rows(self, oracle_id: str) -> list[_Printing]:
         with self.db.tx() as c:

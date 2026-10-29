@@ -419,8 +419,8 @@ def pdf_box_html(
         + "</div><div class='dx-two'>"
         + field(
             "dx-pd",
-            "dci_number",
-            "DCI number",
+            "dci_id",
+            "DCI ID",
             v.get("dci_number", ""),
             placeholder="Digits only",
             limit=registration.DCI_MAX,
@@ -611,7 +611,7 @@ def lock_box_html(
         sentence = (
             f"None of this card's categories ({esc(', '.join(cats)) or 'none'}) is one of your category "
             "templates, so there is nothing to lock. Make a template first on "
-            "<a href='/lists/templates'>My lists</a>."
+            "<a href='/lists/templates'>My lists</a> (under Account)."
         )
     else:
         sentence = (
@@ -1192,6 +1192,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, sid, data = got
         keys = ("first_name", "last_name", "dci_number", "event", "location", "date", "deck_name", "designer")
         details = {k: data.get(k, "") for k in keys}
+        if data.get("dci_id") is not None:  # a page opened before the update sends dci_number
+            details["dci_number"] = data["dci_id"]
         sort = data.get("sort") or "alpha"
         values = {**details, "sort": sort}
         try:

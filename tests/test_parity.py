@@ -36,7 +36,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-card-size=m>" in page.text
+        assert "<html lang='en' data-card-size=m " in page.text
         assert "class='tabbar'" in page.text and "class='icon-btn acct' href='/account'" in page.text
         # Theme lives on the Account page (Look), as a form posting to /theme
         hub = await b.http.get("/account", headers=NAV)
@@ -45,7 +45,7 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         assert r.status_code == 303 and r.headers["location"] == "/decks"
         assert "mtg_theme=light" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-theme=light data-card-size=m>" in page.text
+        assert "<html lang='en' data-theme=light data-card-size=m " in page.text
         # an unknown theme falls back to system (cookie cleared), an off-site next is ignored
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "neon", "next": "https://evil.test/"})
         assert r.status_code == 303 and r.headers["location"] == "/account"
@@ -101,7 +101,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         # Archidekt's own playtester in its own tab; the simulation (the same run as
         # run_deck_report) is one click; the compare view is under More
         assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in deck.text
-        assert "Run full test" in deck.text
+        assert "Run test" in deck.text
         assert "href='/decks/42/compare'" in deck.text and "Run deck report" not in deck.text
         assert "/decks/42/settings" in deck.text and "Deck stats" in deck.text
         assert "cards.scryfall.io" in deck.headers["content-security-policy"]
@@ -169,7 +169,7 @@ async def test_new_deck_settings_and_clone_forms(stack: Stack) -> None:
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=saved#ds-main", r.text
         page = await b.http.get(r.headers["location"], headers=NAV)
         assert "Now with a primer." in page.text and "Saved to Archidekt" in page.text
         # recorded as an applied proposal, with its snapshot, so History can undo it
@@ -512,7 +512,7 @@ async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) 
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=saved#ds-main", r.text
         assert ark.decks[42]["deckFormat"] is None
         assert rich_text(ark.decks[42]["description"]) == "Only the description changes."
     finally:

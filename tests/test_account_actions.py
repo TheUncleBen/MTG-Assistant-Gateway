@@ -20,6 +20,7 @@ from .conftest import Stack, stack_with
 from .fake_archidekt import FakeArchidekt
 from .test_approval_modes import SHIPPED, _set_mode
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import account_call
 
 SUB = "user-1"  # the signed-in member of linked_user
 
@@ -72,7 +73,7 @@ async def _press(h, token: str, res) -> dict:
 
 
 async def _propose_and_apply(h, token: str, tool: str, args: dict) -> dict:
-    res = await call(h, token, tool, args)
+    res = await account_call(h, token, tool, args)
     p = structured(res)
     assert p["ok"] and p["kind"] == "action" and p["state"] == "pending", p
     assert p["risk"] in modes.MEMBER_ONLY and p["assistant_may_apply"] is False, p
@@ -101,7 +102,7 @@ async def test_like_bookmark_and_follow_through_proposals(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "auto")
-    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    res = await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
     p = structured(res)
     assert p["risk"] == "consent" and p["assistant_may_apply"] is False
     assert ark.votes == {}  # a proposal changes nothing by itself
@@ -113,9 +114,11 @@ async def test_like_bookmark_and_follow_through_proposals(stack: Stack) -> None:
     await _propose_and_apply(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
     assert 78 in ark.follows["alice"]
     # your own deck's owner is you
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "42", "action": "follow_owner"}))
+    p = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "42", "action": "follow_owner"})
+    )
     assert p["ok"] is False and "yourself" in p["message"]
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "hug"}))
+    p = structured(await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "hug"}))
     assert p["ok"] is False and p["error"] == "invalid"
 
 
@@ -126,7 +129,7 @@ async def test_a_like_already_given_says_so_and_sends_nothing(stack: Stack) -> N
     token = await linked_user(stack)
     await _propose_and_apply(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
     sent = len(ark.vote_calls)
-    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    res = await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
     assert structured(res)["rows"][0]["text"].endswith("(already the case; applying changes nothing)")
     await _press(h, token, res)
     assert len(ark.vote_calls) == sent and ark.votes == {("alice", 300043): 1}
@@ -154,7 +157,9 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
             "type": 4,
         }
     ]
-    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Nice ramp!"})
+    res = await account_call(
+        h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Nice ramp!"}
+    )
     p = structured(res)
     assert p["rows"][0]["after_text"] == "Nice ramp!" and len(ark.comments[300043]) == 1
     await _press(h, token, res)
@@ -174,7 +179,7 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     assert ark.votes[("alice", 555001)] == 1
     # not your comment: no edit; your own: no vote
     p = structured(
-        await call(
+        await account_call(
             h,
             token,
             "propose_comment",
@@ -183,12 +188,12 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     )
     assert p["ok"] is False and p["error"] == "forbidden"
     p = structured(
-        await call(
+        await account_call(
             h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": mine["id"]}
         )
     )
     assert p["ok"] is False
-    res = await call(
+    res = await account_call(
         h, token, "propose_comment", {"deck_id": "43", "action": "delete", "comment_id": mine["id"]}
     )
     p = structured(res)
@@ -279,7 +284,9 @@ async def test_a_comment_that_loses_nothing_gets_no_note(stack: Stack, text: str
     )
     assert "note" not in p, p
     if not text.startswith("{"):  # the MCP layer turns JSON text into an object and refuses it
-        res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": text})
+        res = await account_call(
+            h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": text}
+        )
         assert structured(res)["ok"] and "note" not in structured(res), structured(res)
 
 
@@ -289,7 +296,7 @@ async def test_a_comment_stored_by_0726_tells_the_assistant_in_get_proposal(stac
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     ark.comments[300043] = []
-    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "x"})
+    res = await account_call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "x"})
     pid = structured(res)["proposal_id"]
     row = h.db.get_proposal(pid, SUB)
     phish = json.dumps({"ops": [{"insert": "Hi", "attributes": {"bold": True}}, {"insert": "\n"}]})
@@ -326,16 +333,18 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "semi")
-    res = await call(h, token, "propose_create_folder", {"name": "Brews"})
+    res = await account_call(h, token, "propose_create_folder", {"name": "Brews"})
     p = structured(res)
     assert p["risk"] == "consent" and p["assistant_may_apply"] is False and p["deck_id"] == "account"
     await _press(h, token, res)
     assert any(f["name"] == "Brews" for f in ark.folders["alice"])
-    p = structured(await call(h, token, "propose_create_folder", {"name": "Inner", "inside": "Brews"}))
+    p = structured(
+        await account_call(h, token, "propose_create_folder", {"name": "Inner", "inside": "Brews"})
+    )
     assert "in 'Brews'" in p["rows"][0]["text"]
-    p = structured(await call(h, token, "propose_create_folder", {"name": "X", "inside": "Nope"}))
+    p = structured(await account_call(h, token, "propose_create_folder", {"name": "X", "inside": "Nope"}))
     assert p["ok"] is False and "Brews" in p["message"]
-    p = structured(await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    p = structured(await account_call(h, token, "propose_create_folder", {"name": "Brews"}))
     assert p["ok"] is False and "already" in p["message"]
 
 
@@ -347,7 +356,7 @@ async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "semi")
-    done = await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    done = await _press(h, token, await account_call(h, token, "propose_create_folder", {"name": "Brews"}))
     assert done["applied_text"] == "The folder is created on Archidekt."
     assert done["next_step"] == "Done. The folder is created on Archidekt."
     b = Browser(h)
@@ -360,33 +369,27 @@ async def test_an_applied_action_says_what_it_did(stack: Stack) -> None:
     assert html.escape("Done. The folder is created on Archidekt.") in page
     assert "matches this proposal" not in page
     gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
-    assert gone["result"]["backup_deck_id"] and gone["next_step"] == (
-        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
-        "your backup folder."
+    # a delete makes no backup copy on Archidekt (assistant tool review, 2026-10-28): the snapshot only
+    assert not gone["result"].get("backup_deck_id") and gone["next_step"] == (
+        "Done. The deck is deleted on Archidekt. A snapshot of it was kept."
     )
 
 
-async def test_a_deletion_never_says_its_backup_copy_is_there_once_it_is_gone(stack: Stack) -> None:
-    """A deck deletion's text is rebuilt on every view: once the member's deck list read after it
-    no longer holds the backup copy (deleted on Archidekt), it doesn't say the copy is there."""
+async def test_a_deletion_leaves_no_backup_deck_behind(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28), confirmed live: each delete made a new backup deck on
+    Archidekt, and deleting that backup made a backup of the backup. A delete keeps the gateway's
+    snapshot only, with backups on, and says so."""
     h, ark = stack.h, stack.ark
+    assert h.app.state.gateway.decks.live.get("archidekt_backups")
     token = await linked_user(stack)
+    before = set(ark.decks)
     gone = await _press(h, token, await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
-    copy = int(gone["result"]["backup_deck_id"])
-    pid = gone["proposal_id"]
-    with_copy = (
-        "Done. The deck is deleted on Archidekt. A snapshot was kept, and a backup copy was made in "
-        "your backup folder."
-    )
-    await call(h, token, "list_my_decks")  # a list read with the copy in it
-    assert structured(await call(h, token, "get_proposal", {"proposal_id": pid}))["next_step"] == with_copy
-    ark.decks.pop(copy)  # the member deletes the copy on archidekt.com
-    for user in ark.users.values():
-        if copy in user.get("decks", []):
-            user["decks"].remove(copy)
-    h.app.state.gateway.decks.deck_lists.drop("user-1")
-    await call(h, token, "list_my_decks")  # the next read of the list
-    p = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert gone["state"] == "applied" and ark.deleted == [42], gone
+    assert set(ark.decks) == before - {42}  # no new deck on Archidekt
+    assert not gone["result"].get("backup_deck_id"), gone
+    snaps = [x for x in h.app.state.gateway.db.list_snapshots("user-1") if x["deck_id"] == "42"]
+    assert snaps and not snaps[0]["backup_deck_id"]
+    p = structured(await call(h, token, "get_proposal", {"proposal_id": gone["proposal_id"]}))
     assert p["next_step"] == "Done. The deck is deleted on Archidekt. A snapshot of it was kept.", p
 
 
@@ -398,19 +401,21 @@ async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(st
     token = await linked_user(stack)
     await _set_mode(h, "semi")
     for name in ("MTG Gateway Backups", "mtg gateway backups"):
-        p = structured(await call(h, token, "propose_create_folder", {"name": name}))
+        p = structured(await account_call(h, token, "propose_create_folder", {"name": name}))
         assert p["ok"] is False and p["message"] == (
             f"'{name}' is the name of the gateway's backup folder. Pick another name."
         ), p
     assert not any(f["name"].casefold() == "mtg gateway backups" for f in ark.folders.get("alice", []))
     # the same name in other capitals inside another folder is not the backup folder's
-    await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    await _press(h, token, await account_call(h, token, "propose_create_folder", {"name": "Brews"}))
     inner = structured(
-        await call(h, token, "propose_create_folder", {"name": "mtg gateway backups", "inside": "Brews"})
+        await account_call(
+            h, token, "propose_create_folder", {"name": "mtg gateway backups", "inside": "Brews"}
+        )
     )
     assert inner["ok"] is True, inner
     # at apply: a name that became the backup folder's after the proposal was made is refused there
-    p = structured(await call(h, token, "propose_create_folder", {"name": "Archive"}))
+    p = structured(await account_call(h, token, "propose_create_folder", {"name": "Archive"}))
     assert p["ok"] is True, p
     h.app.state.gateway.decks.live.set("archidekt_backup_folder", "Archive", by=None)
     out = await _browser_apply(h, p["proposal_id"])
@@ -424,7 +429,7 @@ async def test_review_page_shows_the_action(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
     p = structured(
-        await call(
+        await account_call(
             h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "<b>hi</b> there"}
         )
     )
@@ -446,7 +451,9 @@ async def test_review_page_shows_the_action(stack: Stack) -> None:
         assert "Apply these changes to Archidekt" not in page
         # a deck name written to read like more of the sentence stays out of the sentence
         stack.ark.decks[43]["name"] = "X' by Bob on Archidekt (safe) <i>"
-        like = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
+        like = structured(
+            await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+        )
         assert like["rows"][0]["text"] == "Like the deck by amy on Archidekt"
         page = (await b.http.get(f"/proposals/{like['proposal_id']}")).text
         assert "<i>" not in page and "Do this on Archidekt?" in page
@@ -513,7 +520,7 @@ async def test_no_mode_lets_the_assistant_apply_an_account_action(
     token = await linked_user(stack)
     _seed_comment(ark)
     await _set_mode(h, mode)
-    p = structured(await call(h, token, tool, args))
+    p = structured(await account_call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
     assert p["risk"] in modes.MEMBER_ONLY and p["assistant_may_apply"] is False
     assert "Do not call apply_proposal" in p["next_step"]
@@ -535,7 +542,7 @@ async def test_the_apply_path_refuses_an_account_action_even_if_its_tier_said_ye
     token = await linked_user(stack)
     await _set_mode(h, "auto")
     monkeypatch.setattr(modes, "assistant_may_apply", lambda mode, risk, **_: True)
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
+    p = structured(await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required" and ark.votes == {}
 
@@ -552,17 +559,16 @@ async def test_delete_refuses_a_deck_that_changed_after_the_proposal(stack: Stac
     assert ark.deleted == []
 
 
-async def test_delete_whose_backup_fails_goes_back_to_pending(stack: Stack) -> None:
+async def test_a_delete_does_not_wait_on_a_backup_copy(stack: Stack) -> None:
+    """A delete makes no backup copy, so a backup route that fails does not hold it back."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     ark.fail_backup = True
     res = await call(h, token, "propose_delete_deck", {"deck_id": "42"})
     p = structured(res)
     out = await _browser_apply(h, p["proposal_id"])
-    assert out["ok"] is False and out["error"] == "backup_failed", out
-    assert ark.deleted == []
-    again = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
-    assert again["state"] == "pending" and again["result"]["error"] == "backup_failed"
+    assert out["ok"] is not False and out["state"] == "applied", out
+    assert ark.deleted == [42]
 
 
 async def test_no_vote_proposal_for_an_archived_comment(stack: Stack) -> None:
@@ -571,7 +577,9 @@ async def test_no_vote_proposal_for_an_archived_comment(stack: Stack) -> None:
     _seed_comment(ark)
     ark.comments[300043][0]["archived"] = True
     p = structured(
-        await call(h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555001})
+        await account_call(
+            h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555001}
+        )
     )
     assert p["ok"] is False and "archived" in p["message"]
 
@@ -588,7 +596,7 @@ async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     _seed_comment(ark)
-    res = await call(h, token, tool, args)
+    res = await account_call(h, token, tool, args)
     p = structured(res)
     assert p["ok"] and p["kind"] == "action", p
     deletion = tool == "propose_delete_deck"
@@ -597,7 +605,8 @@ async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_
     row = h.db.get_proposal(p["proposal_id"], SUB)
     before = _archidekt_state(ark)
     # the assistant's own apply and the REST apply with the assistant's bearer token: refused
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    own = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    out = structured(own)
     assert out["ok"] is False and out["error"] == "browser_required", out
     r = await h.http.post(
         f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
@@ -626,6 +635,9 @@ async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_
         return
     assert code, res.get("_meta")
     assert "proposal card in the chat" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
+    # the assistant's refused apply is a plain answer and draws no second card (0.7.46), so the
+    # card drawn with the proposal stays the one that applies it
+    assert APPROVAL_META_KEY not in (own.get("_meta") or {}) and own.get("isError") is False, own
     # a wrong code does nothing; the card's own code applies it
     bad = structured(
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": "x" * 40})
@@ -669,11 +681,15 @@ async def test_collaborators_are_listed_added_and_removed_on_the_members_press(
     assert listed == {"ok": True, "collaborators": []}
     # only people the member follows can be added, as on Archidekt's own settings page
     p = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
     )
     assert p["ok"] is False and p["error"] == "not_found" and "follow" in p["message"], p
     ark.follows["alice"] = {78}
-    res = await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "@AMY"})
+    res = await account_call(
+        h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "@AMY"}
+    )
     p = structured(res)
     assert p["risk"] == "consent" and p["assistant_may_apply"] is False, p
     assert p["rows"][0]["text"] == "Let amy edit your deck on Archidekt as a collaborator"
@@ -686,22 +702,28 @@ async def test_collaborators_are_listed_added_and_removed_on_the_members_press(
     assert listed["collaborators"][0]["username"] == "amy"
     assert listed["collaborators"][0]["added_by"] == "alice"
     again = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
     )
     assert again["ok"] is False and "already" in again["message"]
-    res = await call(
+    res = await account_call(
         h, token, "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}
     )
     assert structured(res)["rows"][0]["text"] == "Stop amy editing your deck on Archidekt"
     await _press(h, token, res)
     assert ark.editors[42] == []
     gone = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}
+        )
     )
     assert gone["ok"] is False and gone["error"] == "not_found"
     # someone else's deck has no collaborators the member can change
     other = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "43", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "43", "action": "add", "username": "amy"}
+        )
     )
     assert other["ok"] is False
 
@@ -715,7 +737,9 @@ async def test_no_mode_lets_the_assistant_change_collaborators(stack: Stack, mod
     if action == "remove":
         ark.editors[42] = [_amy_row()]
     await _set_mode(h, mode)
-    res = await call(h, token, "propose_collaborator", {"deck_id": "42", "action": action, "username": "amy"})
+    res = await account_call(
+        h, token, "propose_collaborator", {"deck_id": "42", "action": action, "username": "amy"}
+    )
     p = structured(res)
     assert p["ok"] and p["kind"] == "action" and p["risk"] in modes.MEMBER_ONLY, p
     assert (res.get("_meta") or {}).get(APPROVAL_META_KEY)  # the member's press on the card may
@@ -846,7 +870,9 @@ async def test_an_assistant_token_cannot_use_the_settings_page_collaborator_form
     )
     assert r.status_code in (302, 303, 401, 403) and not ark.editors.get(42), r.text
     p = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
     )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required" and not ark.editors.get(42)
@@ -857,7 +883,7 @@ async def test_the_json_api_does_not_apply_an_account_action(stack: Stack) -> No
     with the member's signed-in session and CSRF token."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
+    p = structured(await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
     b = Browser(h)
     try:
         await b.login()
@@ -885,7 +911,9 @@ async def test_a_collaborator_archidekt_did_not_add_is_reported_not_applied(
     token = await linked_user(stack)
     ark.follows["alice"] = {78}
     p = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
     )
     out = await _browser_apply(h, p["proposal_id"])
     assert out["ok"] is False, out
@@ -917,7 +945,10 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
 
 
 def _contest_ready(ark: FakeArchidekt) -> None:
-    """alice's deck 42 entered in contest 880 (to withdraw); contest 881 has no entry yet."""
+    """alice's deck 42 entered in contest 880 (to withdraw); contest 881 has no entry yet. Both are
+    contest threads on the forum."""
+    for tid in (880, 881):
+        ark.forum_threads[tid] = {"title": f"Contest {tid}", "section": "Contests", "type": 7, "owner": "amy"}
     ark.account.entries[880] = [
         {"id": 9100, "deck": {"id": 42, "name": "x"}, "owner": {"id": 77, "username": "alice"}}
     ]
@@ -957,7 +988,7 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     _help_ready(ark)
     _contest_ready(ark)
     await _set_mode(h, "auto")
-    p = structured(await call(h, token, tool, args))
+    p = structured(await account_call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
     decks = h.app.state.gateway.decks
     before = (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])])
@@ -993,7 +1024,7 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
     for tool, args in ALL_ACCOUNT_ACTIONS:
         if tool == "propose_collaborator" and args["action"] == "add":
             ark.editors[42] = []
-        p = structured(await call(h, token, tool, args))
+        p = structured(await account_call(h, token, tool, args))
         assert p["ok"], (tool, args, p)
         seen.add(p["rows"][0]["action"])
         h.app.state.gateway.decks.reject(SUB, p["proposal_id"])
@@ -1037,12 +1068,12 @@ async def test_a_read_only_token_cannot_propose_an_account_action(
     await linked_user(stack)
     ark.follows["alice"] = {78}
     token, _cid = await _app_token(h, "reader", scope="mtg.read")
-    res = await call(h, token, tool, args)
+    res = await account_call(h, token, tool, args)
     assert res.get("isError") and "insufficient_scope" in json.dumps(res), res
     assert h.db.list_proposals(SUB) == []
     # the same tool with a full-scope token still makes its proposal (the positive control)
     full, _cid = await _app_token(h, "writer")
-    assert structured(await call(h, full, tool, args))["ok"] is True
+    assert structured(await account_call(h, full, tool, args))["ok"] is True
 
 
 def test_every_proposal_tool_is_a_write_tool() -> None:
@@ -1074,7 +1105,7 @@ async def test_the_refusal_reports_the_rows_real_tier(stack: Stack, via: str) ->
     if via == "app":  # 0.7.29: the card's press may apply a folder; only a deletion is refused
         cases = cases[:1]
     for tool, args, risk in cases:
-        p = structured(await call(h, token, tool, args))
+        p = structured(await account_call(h, token, tool, args))
         with pytest.raises(DeckError) as refused:
             await decks.apply(SUB, p["proposal_id"], via=via)
         assert refused.value.kind == "browser_required"
@@ -1099,7 +1130,7 @@ async def test_the_rest_apply_refuses_an_account_action_in_every_mode(stack: Sta
         ("propose_delete_deck", {"deck_id": "42"}, "destructive"),
         ("propose_deck_social", {"deck_id": "43", "action": "like"}, "consent"),
     ):
-        p = structured(await call(h, token, tool, args))
+        p = structured(await account_call(h, token, tool, args))
         r = await h.http.post(
             f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
         )
@@ -1150,7 +1181,7 @@ async def test_reject_attribution_uses_the_review_page_marker(stack: Stack) -> N
     token = await linked_user(stack)
     decks = h.app.state.gateway.decks
     ids = [
-        structured(await call(h, token, "propose_create_folder", {"name": n}))["proposal_id"]
+        structured(await account_call(h, token, "propose_create_folder", {"name": n}))["proposal_id"]
         for n in ("A1", "A2", "A3")
     ]
     reset = current_client.set(BROWSER_CLIENT)
@@ -1171,7 +1202,7 @@ def test_the_card_has_no_branch_for_an_action_with_a_code() -> None:
     html = card_html()
     for dead in ("Delete this deck on Archidekt", "Approve: do this on Archidekt", "warnline", "destroy"):
         assert dead not in html, dead
-    assert "Approve on the review page" in html
+    assert "Apply on the review page" in html
 
 
 async def test_folders_page_new_folder_takes_one_press_and_a_confirmation(stack: Stack) -> None:
@@ -1362,7 +1393,9 @@ async def test_likes_bookmarks_follows_comments_and_collection_edits_obey_the_wr
 # -- an action whose write landed, then whose check met Archidekt's long wait ---------------------------
 async def _own_comment(h, token: str, ark) -> int:
     """Post a comment of the member's own on deck 43 (through a proposal) and return its id."""
-    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Mine."})
+    res = await account_call(
+        h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Mine."}
+    )
     await _press(h, token, res)
     return next(c["id"] for c in ark.comments[300043] if c["text"] == rich_doc("Mine."))
 
@@ -1419,7 +1452,7 @@ async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
         tool, args = "propose_create_folder", {"name": "Brews"}
         method, path = "POST", "/decks/folders/"
         landed = lambda: any(f["name"] == "Brews" for f in ark.folders["alice"])  # noqa: E731
-    p = structured(await call(h, token, tool, args))
+    p = structured(await account_call(h, token, tool, args))
     assert p["ok"] and p["state"] == "pending", p
     orig = ark.transport.handler
     wrote = {"x": False}
@@ -1453,28 +1486,29 @@ async def test_follow_and_unfollow_someone_by_username(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     before = len(ark.calls)
-    res = await call(h, token, "propose_deck_social", {"action": "follow_user", "username": "@amy"})
+    res = await account_call(h, token, "propose_deck_social", {"action": "follow_user", "username": "@amy"})
     p = structured(res)
     assert p["ok"] and p["kind"] == "action" and p["assistant_may_apply"] is False, p
     assert p["rows"][0]["text"] == "Follow amy on Archidekt", p["rows"]
     assert [c for c in ark.calls[before:] if "/decks/v3/" in c[1]], ark.calls[before:]
-    refused = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    again = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    refused = structured(again)
     assert refused["ok"] is False and 78 not in ark.follows.get("alice", set()), refused
-    await _press(h, token, res)
+    await _press(h, token, res)  # the card drawn with the proposal (a refused apply draws none)
     assert 78 in ark.follows["alice"]
-    res = await call(h, token, "propose_deck_social", {"action": "unfollow_user", "username": "amy"})
+    res = await account_call(h, token, "propose_deck_social", {"action": "unfollow_user", "username": "amy"})
     assert structured(res)["rows"][0]["text"] == "Stop following amy on Archidekt"
     await _press(h, token, res)
     assert 78 not in ark.follows["alice"]
     # yourself, someone with no public decks, and no name at all are refused, with nothing proposed
     for name, kind in (("alice", "invalid"), ("nobody-here", "not_found"), ("", "invalid")):
         out = structured(
-            await call(h, token, "propose_deck_social", {"action": "follow_user", "username": name})
+            await account_call(h, token, "propose_deck_social", {"action": "follow_user", "username": name})
         )
         assert out["ok"] is False and out["error"] == kind, (name, out)
     ark.private.add(43)  # amy's only deck private: she can't be found
     out = structured(
-        await call(h, token, "propose_deck_social", {"action": "follow_user", "username": "amy"})
+        await account_call(h, token, "propose_deck_social", {"action": "follow_user", "username": "amy"})
     )
     assert out["error"] == "not_found" and "public decks" in out["message"], out
 
@@ -1486,11 +1520,12 @@ async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stac
 
     h = stack.h
     token = await linked_user(stack)
-    await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
-    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
+    await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    res = await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
     info = structured(res)["deck_waiting"]
     ids = res["_meta"][APPROVAL_SET_META_KEY]["ids"]
-    lines = {x["proposal_id"]: x["summary"] for x in info["set_lines"]}
+    lines = {x["proposal_id"]: x["summary"] for x in res["_meta"][APPROVAL_SET_META_KEY]["lines"]}
+    assert "set_lines" not in info
     assert len(ids) == 2 and set(lines) == set(ids), (ids, lines)
     assert any("Like" in s for s in lines.values()) and any("Follow" in s for s in lines.values()), lines
 
@@ -1502,16 +1537,16 @@ async def test_a_deck_help_request_posts_edits_and_delists(stack: Stack) -> None
     token = await linked_user(stack)
     words = " ".join(["ramp"] * 12)
     untagged = structured(
-        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
+        await account_call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
     )
     assert untagged["ok"] is False and "deck tag" in untagged["message"]
     _help_ready(ark)
     short = structured(
-        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": "win", "issues": words})
+        await account_call(h, token, "propose_deck_help", {"deck_id": "42", "goals": "win", "issues": words})
     )
     assert short["ok"] is False and "10 to 200 words" in short["message"]
     others = structured(
-        await call(h, token, "propose_deck_help", {"deck_id": "43", "goals": words, "issues": words})
+        await account_call(h, token, "propose_deck_help", {"deck_id": "43", "goals": words, "issues": words})
     )
     assert others["ok"] is False  # not the member's own deck
     out = await _propose_and_apply(
@@ -1520,7 +1555,7 @@ async def test_a_deck_help_request_posts_edits_and_delists(stack: Stack) -> None
     assert out["result"]["verified"] is True and "listed on Archidekt for 7 days" in out["applied_text"], out
     assert json.loads(ark.account.help[42]["goals"])["ops"][0]["insert"].strip() == words
     again = structured(
-        await call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
+        await account_call(h, token, "propose_deck_help", {"deck_id": "42", "goals": words, "issues": words})
     )
     assert again["ok"] is False and "already has a help request" in again["message"]
     new = " ".join(["draw"] * 15)
@@ -1537,14 +1572,18 @@ async def test_reports_name_the_page_and_never_apply_by_themselves(stack: Stack)
     token = await linked_user(stack)
     await _set_mode(h, "auto")
     bad = structured(
-        await call(h, token, "propose_report", {"deck_id": "43", "report_kind": "user", "message": "x"})
+        await account_call(
+            h, token, "propose_report", {"deck_id": "43", "report_kind": "user", "message": "x"}
+        )
     )
     assert bad["ok"] is False
     empty = structured(
-        await call(h, token, "propose_report", {"deck_id": "43", "report_kind": "deck", "message": " "})
+        await account_call(
+            h, token, "propose_report", {"deck_id": "43", "report_kind": "deck", "message": " "}
+        )
     )
     assert empty["ok"] is False
-    res = await call(
+    res = await account_call(
         h,
         token,
         "propose_report",

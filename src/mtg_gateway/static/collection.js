@@ -65,7 +65,7 @@
     var name = nameOf(item);
     item.remove();
     bumpCount(-1);
-    strip("Removed from your Collection on Archidekt.", "ok");
+    strip("Removed from your binder.", "ok");
     if (list && !$("li[data-id]", list)) location.reload();
     return name;
   }
@@ -77,7 +77,7 @@
     var qty = out ? parseInt(out.textContent, 10) || 1 : 1;
     var fin = FIN[item.getAttribute("data-fin")] || "Normal";
     var where = (item.getAttribute("data-setline") || "").trim();
-    var text = "This removes " + (qty === 1 ? "it" : "all " + qty + " copies") + " (" + (where ? where + ", " : "") + fin + ") from your Collection on Archidekt.";
+    var text = "This removes " + (qty === 1 ? "it" : "all " + qty + " copies") + " (" + (where ? where + ", " : "") + fin + ") from your binder.";
     if (!window.MtgBox) {
       if (window.confirm("Remove “" + name + "”? " + text)) doRemove(item);
       return;
@@ -92,7 +92,7 @@
     var id = item.getAttribute("data-id");
     var name = nameOf(item);
     $$("button", item).forEach(function (b) { b.disabled = true; });
-    return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id)).then(function (d) {
+    return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id) + "?name=" + encodeURIComponent(name)).then(function (d) {
       if (!d.ok) { strip(failText(d, name), "error"); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
       gone(item);
       return false;
@@ -122,11 +122,11 @@
       var action = btn.value;
       e.preventDefault();
       if (action === "remove" || (action === "dec" && current <= 1)) { askRemove(item, $("form.qty button[value=dec]", item) || $(".kebab", item)); return; }
-      var next = action === "inc" ? current + 1 : Math.max(0, current - 1);
       if (action !== "inc" && action !== "dec") { form.submit(); return; }
       var name = nameOf(item);
       $$("form.qty button", item).forEach(function (b) { b.disabled = true; });
-      request("POST", "/collection/api/rows/" + encodeURIComponent(id), { quantity: next }).then(function (d) {
+      /* one more or one fewer than Archidekt holds now: another tab's presses add up, not overwrite */
+      request("POST", "/collection/api/rows/" + encodeURIComponent(id), { delta: action === "inc" ? 1 : -1, name: name }).then(function (d) {
         $$("form.qty button", item).forEach(function (b) { b.disabled = false; });
         if (!d.ok) { strip(failText(d, name), "error"); return; }
         if (!d.row || d.row.quantity === 0) { gone(item); return; }
@@ -240,6 +240,7 @@
       if (sub && sub.value === "remove") { e.preventDefault(); return; }
       e.preventDefault();
       var body = {
+        name: nameOf(item),
         finish: form.elements.finish.value,
         condition: form.elements.condition.value,
         language: form.elements.language.value,
@@ -253,7 +254,7 @@
         if (!d.ok) { strip(failText(d, name), "error"); return; }
         applyRow(item, d.row || {});
         if (window.MtgBox) window.MtgBox.close();
-        strip("Card details saved to your Collection on Archidekt.", "ok");
+        strip("Card details saved to your binder.", "ok");
       }).catch(function () { btns.forEach(function (b) { b.disabled = false; }); strip(failText(null, name), "error"); });
     });
   }
@@ -293,9 +294,13 @@
     }, true);
   }
 
-  /* -- the panel: the name box narrows the list as you type; drop-downs apply on change ----- */
+  /* -- the panel: the name box filters as you type; drop-downs apply on change ------------- */
   var listform = $("#listform");
   var nomatch = $(".col-nomatch");
+  /* the name the rows on the page were read for ("" for the whole binder) */
+  var listQuery = (($("#col-q") || {}).value || "").trim().toLowerCase();
+  /* the rows already on the page, at once; "No cards match" only when they are every row that
+     could match (all loaded, read for a name the new one contains) */
   function narrow(q) {
     if (!list) return;
     q = q.trim().toLowerCase();
@@ -305,11 +310,59 @@
       li.hidden = !ok;
       if (ok) any = true;
     });
-    if (nomatch) nomatch.hidden = any || !$("[data-name]", list);
+    var all = !$(".loadmore [data-load-more]") && q.indexOf(listQuery) !== -1;
+    if (nomatch) nomatch.hidden = any || !all || !$("[data-name]", list);
+  }
+  /* then, once typing stops, the whole binder: Archidekt's own name filter, with the count */
+  var searchSeq = 0, searchTimer = null;
+  function search() {
+    var params = new URLSearchParams(new FormData(listform));
+    params.delete("offset");
+    if (!params.get("q")) params.delete("q");
+    /* the defaults stay out of the address, as the page's own links leave them */
+    if (params.get("sort") !== "edition") { params.delete("sort"); params.delete("dir"); }
+    else if (params.get("dir") === "desc") params.delete("dir");
+    var mine = ++searchSeq;
+    if (list) list.setAttribute("aria-busy", "true");
+    fetch("/collection/api/rows?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (mine !== searchSeq) return;
+        if (list) list.removeAttribute("aria-busy");
+        if (!d.ok) throw new Error(d.message || "");
+        if (list) { list.innerHTML = d.html; list.hidden = !d.total; }
+        var c = $("#col-count");
+        if (c) c.textContent = d.count_text;
+        var more = $(".loadmore");
+        if (more && d.more) {
+          var tmp = document.createElement("div");
+          tmp.innerHTML = d.more;
+          more.parentNode.replaceChild(tmp.firstChild, more);
+        }
+        if (nomatch) nomatch.hidden = d.total > 0;
+        listQuery = (params.get("q") || "").trim().toLowerCase();
+        if (!/[?&]view=/.test(location.search)) params.delete("view");
+        try { history.replaceState(history.state, "", "/collection" + (params.toString() ? "?" + params.toString() : "")); } catch (err) { /* keep the address */ }
+        say(d.count_text + (params.get("q") ? " match “" + params.get("q") + "”." : "."));
+      }).catch(function () {
+        if (mine !== searchSeq) return;
+        if (list) list.removeAttribute("aria-busy");
+        strip(NOT_ANSWERING, "error");
+      });
   }
   if (listform) {
     var qbox = $("#col-q", listform);
-    if (qbox) qbox.addEventListener("input", function () { narrow(qbox.value); });
+    if (qbox) qbox.addEventListener("input", function () {
+      narrow(qbox.value);
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(search, 300);
+    });
+    listform.addEventListener("submit", function (e) {
+      /* Enter in the name box: the same search at once, no page load */
+      if (!qbox || document.activeElement !== qbox) return;
+      e.preventDefault();
+      clearTimeout(searchTimer);
+      search();
+    });
     var sortf = $(".sortf", listform), dirIn = $("input[name=dir]", listform), dirBtn = $(".dirbtn", listform), sortc = $(".sortc", listform);
     function go(sort, dir) {
       if (sortf) sortf.value = sort;
@@ -324,6 +377,48 @@
     if (sortc) sortc.addEventListener("change", function () { var p = sortc.value.split(":"); go(p[0], p[1]); });
     if (sortf) sortf.addEventListener("change", function () { go(sortf.value, dirIn ? dirIn.value : "desc"); });
     $$("input[name=view]", listform).forEach(function (r) { r.addEventListener("change", submit); });
+  }
+
+  /* -- an import in the background: its strip follows it, and the page shows the result -------- */
+  var importing = $("[data-import]");
+  if (importing) {
+    var itext = $(".itext", importing);
+    var failures = 0;
+    var poll = function () {
+      fetch("/collection/api/import/" + encodeURIComponent(importing.getAttribute("data-import")),
+        { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          failures = 0;
+          if (!d.ok) { location.replace("/collection"); return; }
+          if (itext && itext.textContent !== d.text) { itext.textContent = d.text; }
+          if ((d.state === "done" || d.state === "failed") && d.next) { location.replace(d.next); return; }
+          setTimeout(poll, 1500);
+        }).catch(function () { failures += 1; setTimeout(poll, Math.min(15000, 1500 * (failures + 1))); });
+    };
+    setTimeout(poll, 1000);
+  }
+
+  /* -- the Binder's value being worked out: its widget follows the read and shows the result -- */
+  var valueReading = $("[data-value-reading]");
+  if (valueReading) {
+    var valueTries = 0;
+    var valuePoll = function () {
+      fetch("/collection/api/value", { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          valueTries = 0;
+          var wdg = valueReading.closest(".wdg");
+          if (!d.ok || !wdg) return;
+          if (d.reading) { setTimeout(valuePoll, 2000); return; }
+          if (d.html) {
+            var tmp = document.createElement("div");
+            tmp.innerHTML = d.html;
+            if (tmp.firstElementChild) wdg.replaceWith(tmp.firstElementChild);
+          }
+          var live = $("#live");
+          if (live) live.textContent = "Your binder's value is worked out.";
+        }).catch(function () { valueTries += 1; setTimeout(valuePoll, Math.min(15000, 2000 * (valueTries + 1))); });
+    };
+    setTimeout(valuePoll, 1500);
   }
 
   /* -- Load more: the next rows, appended ---------------------------------------------------- */

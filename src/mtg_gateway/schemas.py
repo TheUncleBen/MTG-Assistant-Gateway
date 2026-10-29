@@ -249,9 +249,7 @@ class CollectionAdd(_Card):
 
 class CollectionRemove(BaseModel):
     model_config = ConfigDict(extra="allow")
-    id: StrictInt | str | None = Field(
-        default=None, description="The collection row id from list_collection."
-    )
+    id: StrictInt | str | None = Field(default=None, description="The binder row id from list_collection.")
     name: str | None = Field(default=None, description="Or the card's name: every row of it.")
     quantity: StrictInt | None = Field(
         default=None, ge=1, description="Copies to remove; omit to remove every copy."
@@ -271,6 +269,26 @@ class PackageSettings(BaseModel):
     intended_formats: list[str] | None = Field(
         default=None, description="The formats it is meant for, by name (commander, modern, ...)."
     )
+
+
+class NewDeckFields(BaseModel):
+    """amend_proposal's new_deck: what changes in a waiting new deck or card package. A field left
+    out keeps what the proposal has; a card list replaces the whole list."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, description="The new deck's name.")
+    deck_format: DeckFormat | None = Field(default=None, description="The deck's format.")
+    cards: list[NewDeckCard] | None = Field(default=None, description="The whole new card list.")
+    decklist_text: str | None = Field(default=None, description="Or the whole new list, pasted.")
+    csv_text: str | None = Field(default=None, description="Or an Archidekt CSV export.")
+    json_text: str | dict[str, Any] | None = Field(
+        default=None, description="Or a deck as JSON (get_deck's or the Export page's .json)."
+    )
+    private: StrictBool | None = Field(default=None, description="Private deck.")
+    theorycrafted: StrictBool | None = Field(default=None, description="Theorycrafted.")
+    game: Literal["any", "paper", "mtgo", "arena"] | None = Field(default=None, description="Game type.")
+    package: PackageSettings | None = Field(default=None, description="A card package's settings.")
+    folder: str | None = Field(default=None, description="One of the user's folders, by name.")
 
 
 class DeckDetails(BaseModel):
@@ -335,13 +353,13 @@ class _SimShared(BaseModel):
     )
     seed: StrictInt | None = Field(default=None, description="Random seed (default 42), for repeatable runs.")
     until_turn: StrictInt | None = Field(
-        default=None, ge=1, le=30, description="Simulate through this turn (default 10)."
+        default=None, ge=1, le=30, description="Play through this turn (default 10)."
     )
 
 
 class RunOptions(_SimShared):
     opponents: StrictInt | None = Field(
-        default=None, ge=1, le=5, description="Goldfish opponents (default 1)."
+        default=None, ge=1, le=5, description="Opponents who do nothing (default 1)."
     )
     forge_seed: StrictInt | None = Field(
         default=None,
@@ -398,9 +416,19 @@ def change_for_assistant(change: Any) -> Any:
     foil = out.pop("foil", None)
     if isinstance(foil, bool) and "finish" not in out:
         out["finish"] = "foil" if foil else "nonfoil"
-    if out.get("finish") == "normal":
-        out["finish"] = "nonfoil"
+    if isinstance(out.get("finish"), str):
+        # stored as Archidekt spells it (Normal, Foil, Etched)
+        out["finish"] = {"normal": "nonfoil"}.get(out["finish"].lower(), out["finish"].lower())
     return out
+
+
+def changes_for_assistant(changes: Any) -> Any:
+    """A proposal's stored change list in the spelling every tool input takes (``name``, never
+    ``card_name``), so an assistant can pass it straight back to amend_proposal. Anything that is
+    not a list of changes (a details or new-deck object) is left as it is."""
+    if not isinstance(changes, list):
+        return changes
+    return [change_for_assistant(c) for c in changes]
 
 
 def new_deck_card_for_service(card: Any) -> Any:
@@ -425,6 +453,7 @@ __all__ = [
     "DeckDetails",
     "FINISH_ALIASES",
     "NewDeckCard",
+    "NewDeckFields",
     "RunOptions",
     "card_aliases",
     "change_for_assistant",

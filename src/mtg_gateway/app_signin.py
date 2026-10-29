@@ -12,24 +12,43 @@ and autofill work, and the browser hands the result back to the app.
    ``/login?next=...&app_challenge=<SHA-256 of the verifier>`` in the browser.
 3. After the identity provider, ``/auth/callback`` sets no cookie in the browser. It keeps a
    one-time code (two minutes, in memory) bound to the challenge and sends the browser to
-   ``RETURN_PATH?code=...`` on the gateway's own address. The app opened the sign-in in an Auth
-   Tab where the browser has one: the Auth Tab hands that address back to the app and closes, with
-   no tap, but only to an app the gateway vouches for in ``/.well-known/assetlinks.json`` (the app
-   this gateway ships, signed with the certificate its build recorded; app_page.py). Any other
-   browser, or an app the gateway does not vouch for, loads the address: a page whose button opens
-   the app through an ``intent:`` link pinned to the app's package ID.
+   ``RETURN_PATH?code=...`` on the gateway's own address. Where a browser on the phone has an
+   Auth Tab, the app opened the sign-in in one that returns on that https address: it hands the
+   address back to the app and closes, with no tap, but only for an app the gateway vouches for in
+   ``/.well-known/assetlinks.json`` (app_page.py). In a Custom Tab the address loads a page with a
+   button that opens the app through an ``intent:`` link pinned to the app's package ID. The page
+   follows that link once by itself only after a sign-in made during the leg (see below): any app
+   can open ``/login?app_challenge=...`` with a plain link, and a browser still signed in at the
+   provider passes it straight through, so otherwise the page waits for the member's tap under its
+   warning.
 4. The app posts the code with its verifier to ``/login/app`` from its WebView; only then is the
    browser session created, with its cookie set in the WebView.
+
+Only when the browser reports that it could not confirm the app for that address (Digital Asset
+Links failed or timed out), or the gateway's address can't take an https Auth Tab return (a port,
+say), does the app try again with an Auth Tab on its own scheme (``app_return=scheme``): the
+callback then sends the browser to ``mtgassistant-signin://signin?code=...``. An Auth Tab returns
+a scheme to whichever app opened it, and any app on the phone could open one at
+``/login?app_challenge=...&app_return=scheme`` with a verifier of its own: with the browser still
+signed in at the provider, a silent pass-through would hand that app a session. So that leg asks
+the identity provider for a sign-in of its own (``prompt=login`` and ``max_age=0``), and the
+callback does not rely on the provider honouring it: the ID token's ``auth_time`` must be no
+earlier than the leg's start, less ``FRESH_SKEW`` (a few seconds: the gateway's and the provider's
+clocks must agree, docs/IDP-AUTHENTIK.md). Without that proof (no ``auth_time``, or an older one) no
+code is made, the browser goes to ``SCHEME_REFUSED``, and the app finishes in a Custom Tab instead.
+An https leg asks for the same after a sign-out on the device (``fresh``); with that proof its
+return page opens the app by itself.
 
 The code alone is useless: without the verifier, which never leaves the app that started the
 sign-in, ``/login/app`` refuses it, and ``/login/app`` takes posts only from the app (its user
 agent, not from another site's page), so nobody can push their own code into someone else's
 browser. An app on the phone that starts a sign-in of its own (and so knows its own verifier)
-should not receive the code either. The Auth Tab returns the address only to an app whose
+should not receive the code either. The https Auth Tab returns the address only to an app whose
 package ID and signing certificate the gateway's assetlinks.json names. The ``intent:`` link
 names the gateway's app by package ID, and Android lets only one installed app hold a package
 ID; that relies on the browser honouring ``package=`` in ``intent:`` links (Chrome documents
-it; other browsers are not verified), so the link also waits for a tap and says which app it opens.
+it; other browsers are not verified), so the page also says which app it opens. The scheme leg
+hands a code only after a person signed in during it, in a browser page that names the gateway.
 """
 
 from __future__ import annotations
@@ -53,7 +72,12 @@ CODE = re.compile(r"[A-Za-z0-9_-]{43}")
 SCHEME = "mtgassistant-signin"
 SCRIPT = "/static/app-signin.js"
 RETURN_PATH = "/login/app-return"  # where the Auth Tab hands back; BrowserSignIn.RETURN_PATH in the app
+SCHEME_RETURN = "scheme"  # app_return=scheme: back on SCHEME (BrowserSignIn.SCHEME_RETURN in the app)
 CODE_TTL = 120
+FRESH_SKEW = 5  # seconds of clock difference allowed between the gateway and the identity provider
+# Where a scheme leg ends when the ID token can't show a sign-in made during the leg: no code, so
+# nothing for any app; the app then finishes in a Custom Tab (BrowserSignIn.isSchemeRefusal).
+SCHEME_REFUSED = f"{SCHEME}://signin?error=sign_in_not_fresh"
 MAX_PENDING = 500
 
 
@@ -68,6 +92,8 @@ class _Pending:
     challenge: str
     next_path: str
     expires: float
+    fresh: bool = False  # signed in during the leg: the return page opens the app by itself
+    grant: str | None = None  # where the sign-in's provider grant waits for the app's session
 
 
 class AppSignins:
@@ -84,7 +110,9 @@ class AppSignins:
     def _key(code: str) -> str:
         return hashlib.sha256(code.encode("ascii")).hexdigest()
 
-    def issue(self, sub: str, challenge: str, next_path: str) -> str:
+    def issue(
+        self, sub: str, challenge: str, next_path: str, *, fresh: bool = False, grant: str | None = None
+    ) -> str:
         code = secrets.token_urlsafe(32)
         now = self._clock()
         with self._lock:
@@ -92,8 +120,17 @@ class AppSignins:
                 del self._codes[k]
             while len(self._codes) >= MAX_PENDING:  # oldest first; dicts keep insertion order
                 del self._codes[next(iter(self._codes))]
-            self._codes[self._key(code)] = _Pending(sub, challenge, next_path, now + self._ttl)
+            self._codes[self._key(code)] = _Pending(sub, challenge, next_path, now + self._ttl, fresh, grant)
         return code
+
+    def fresh(self, code: str) -> bool:
+        """Whether ``code`` was made after a sign-in during its leg (the return page then opens the
+        app by itself). Looking does not use the code up."""
+        if not CODE.fullmatch(code or ""):
+            return False
+        with self._lock:
+            pending = self._codes.get(self._key(code))
+        return pending is not None and pending.expires > self._clock() and pending.fresh
 
     def redeem(self, code: str, verifier: str) -> _Pending | None:
         """The pending sign-in for ``code`` if ``verifier`` matches its challenge, else None. A code
@@ -107,6 +144,24 @@ class AppSignins:
         if not hmac.compare_digest(challenge_of(verifier), pending.challenge):
             return None
         return pending
+
+
+def scheme_url(code: str) -> str:
+    """Where a leg started with ``app_return=scheme`` ends; ``code`` is URL-safe base64."""
+    return f"{SCHEME}://signin?code={code}"
+
+
+def signed_in_since(auth_time: object, started: object, skew: int = FRESH_SKEW) -> bool:
+    """Whether the ID token's ``auth_time`` shows the person signed in at the identity provider
+    after a scheme leg started at ``started`` (Unix seconds, kept in the login session), allowing
+    ``skew`` seconds of clock difference. No auth_time, or no start, is not proof: False."""
+    if isinstance(auth_time, bool) or not isinstance(auth_time, (int, float)):
+        return False
+    try:
+        start = int(str(started))
+    except ValueError:
+        return False
+    return auth_time >= start - skew
 
 
 def intent_url(code: str, package: str) -> str:
@@ -135,16 +190,30 @@ def handoff_body(next_path: str, fresh: bool) -> str:
     )
 
 
-def return_body(code: str, package: str) -> str:
-    """The browser's last page: a button that opens the app with the one-time code."""
+def return_body(code: str, package: str, *, auto: bool = False) -> str:
+    """The browser's last page: a button that opens the app with the one-time code. With ``auto``
+    (a sign-in made during the leg, ``AppSignins.fresh``) app-signin.js follows it once by itself
+    where the browser allows that without a tap. The script runs once the page has loaded, so the
+    small print is drawn before it leaves."""
     url = html.escape(intent_url(code, package))
-    return smallpage.panel(
-        "Signed in",
-        "<p>You're signed in. Go back to the MTG Assistant Gateway app to finish.</p>",
-        f"<a class='btn btn-primary' id='app-return' href='{url}'>Open the MTG Assistant Gateway app</a>",
+    flag = " data-auto='1'" if auto else ""
+    button = (
+        f"<a class='btn btn-primary' id='app-return' href='{url}'{flag}>"
+        "Open the MTG Assistant Gateway app</a>"
+    )
+    small_print = (
         "<p class='muted small' style='margin-bottom:0'>The link works once, for two minutes. If the app "
-        "doesn't open, go back to it and sign in again. You stay signed out in this browser. If you didn't "
-        "start this sign-in from the MTG Assistant Gateway app, don't tap the button.</p>",
+        "doesn't open, go back to it and sign in again. You stay signed out in this browser. If you "
+        "didn't start this sign-in from the MTG Assistant Gateway app, don't tap the button.</p>"
+    )
+    return (
+        smallpage.panel(
+            "Signed in",
+            "<p>You're signed in. Go back to the MTG Assistant Gateway app to finish.</p>",
+            button,
+            small_print,
+        )
+        + f"<script src='{SCRIPT}' defer></script>"
     )
 
 
@@ -166,4 +235,5 @@ __all__ = [
     "handoff_body",
     "intent_url",
     "return_body",
+    "scheme_url",
 ]

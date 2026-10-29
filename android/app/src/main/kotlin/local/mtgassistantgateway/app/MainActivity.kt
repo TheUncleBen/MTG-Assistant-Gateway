@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
@@ -48,6 +49,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.browser.customtabs.CustomTabsService
 import androidx.core.util.Consumer
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter
 import androidx.window.layout.FoldingFeature
@@ -118,6 +120,7 @@ class MainActivity : ComponentActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingCameraPermission: PermissionRequest? = null
     private var pendingCamera = false // open the camera as soon as the /scan page is ready
+    private var pendingAuto = false // ...with Auto on (the page's Auto switch asked for it)
     private var scanReloaded = false // the /scan page was reloaded once to get its hooks; never loop
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -323,7 +326,10 @@ class MainActivity : ComponentActivity() {
         updateText = findViewById(R.id.update_text)
         updateNow = findViewById(R.id.update_now)
         updateLater = findViewById(R.id.update_later)
-        updateLater.setOnClickListener { updateBar.visibility = View.GONE } // asked again at the next check
+        updateLater.setOnClickListener {
+            updateOffer?.let(updater::later) // that version waits three days; Check for app updates still offers it
+            updateBar.visibility = View.GONE
+        }
         updateNow.setOnClickListener { updateOffer?.let(updater::install) }
         updater = Updater(this, object : Updater.Ui {
             override fun showOffer(offer: AppUpdate.Offer) {
@@ -354,7 +360,7 @@ class MainActivity : ComponentActivity() {
         menu.menuInflater.inflate(R.menu.main, menu.menu)
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                R.id.menu_scan -> startScan()
+                R.id.menu_scan -> startScan(auto = false)
                 R.id.menu_reload -> web.reload()
                 R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
@@ -510,9 +516,14 @@ class MainActivity : ComponentActivity() {
         fab.visibility = if (camera == null && !gatewayPage) View.VISIBLE else View.GONE
     }
 
-    /** Opens the phone-camera scan panel, going to the /scan page first if needed. */
-    private fun startScan() {
+    /**
+     * Opens the phone-camera scan panel, going to the /scan page first if needed; with [auto], it
+     * starts scanning on its own (the page's Auto switch). Calls that resume a deferred open keep the
+     * choice made when it was asked for.
+     */
+    private fun startScan(auto: Boolean = pendingAuto) {
         if (camera != null) return
+        pendingAuto = auto
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             pendingCamera = true
             requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_PERM_NATIVE_CAMERA)
@@ -523,7 +534,10 @@ class MainActivity : ComponentActivity() {
                 if (ready == "true") {
                     scanReloaded = false
                     // Park the page on its list tab (stops its own camera) while the panel has the lens.
-                    web.evaluateJavascript(ScanGlue.BEGIN) { if (camera == null && !isDestroyed) openCamera() }
+                    web.evaluateJavascript(ScanGlue.BEGIN) {
+                        if (camera == null && !isDestroyed) openCamera(pendingAuto)
+                        pendingAuto = false
+                    }
                 } else if (!scanReloaded) {
                     scanReloaded = true
                     pendingCamera = true
@@ -543,29 +557,65 @@ class MainActivity : ComponentActivity() {
 
     /** The Auth Tab's answer: registered before the activity starts, as Android requires. */
     private val authTab = AuthTabIntent.registerActivityResultLauncher(this) { onAuthTabResult(it) }
-    /** The sign-in the Auth Tab is running, to start again in a Custom Tab if the gateway can't vouch for this app. */
-    private var authTabSignIn: Pair<String?, Boolean>? = null
+    /** The ways the browser's part can return, tried in this order ([BrowserSignIn]). */
+    private enum class SignInLeg { HTTPS_AUTH_TAB, SCHEME_AUTH_TAB, CUSTOM_TAB }
+    private data class AuthTabSignIn(val next: String?, val fresh: Boolean, val leg: SignInLeg)
+    /** The sign-in the Auth Tab is running, to start again the next way if it can't finish. */
+    private var authTabSignIn: AuthTabSignIn? = null
 
-    private fun startBrowserSignIn(next: String?, fresh: Boolean, authTabAllowed: Boolean = true) {
+    /** The browser to open an Auth Tab in ([BrowserSignIn.pickAuthTabBrowser]), or null. */
+    private fun authTabBrowser(): String? {
+        val default = CustomTabsClient.getPackageName(this, emptyList())
+        @Suppress("DEPRECATION")
+        val installed = packageManager.queryIntentServices(Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION), 0)
+            .mapNotNull { it.serviceInfo?.packageName }
+        val browser = BrowserSignIn.pickAuthTabBrowser(default, installed, ::isSystemApp) {
+            CustomTabsClient.isAuthTabSupported(this, it)
+        }
+        Log.i(TAG, "sign-in: default browser $default, Custom Tabs browsers $installed, Auth Tab in ${browser ?: "none"}")
+        return browser
+    }
+
+    /** Whether [pkg] came with the phone (a system app, or an update of one). */
+    private fun isSystemApp(pkg: String): Boolean = try {
+        val flags = packageManager.getApplicationInfo(pkg, 0).flags
+        flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    private fun startBrowserSignIn(next: String?, fresh: Boolean, first: SignInLeg = SignInLeg.HTTPS_AUTH_TAB) {
         val verifier = BrowserSignIn.newVerifier()
         prefs.setPendingSignIn(origin, verifier, System.currentTimeMillis())
-        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, BrowserSignIn.challengeOf(verifier), fresh))
-        val host = BrowserSignIn.authTabHost(origin)
-        val browser = CustomTabsClient.getPackageName(this, emptyList())
-        if (authTabAllowed && host != null && browser != null && CustomTabsClient.isAuthTabSupported(this, browser)) {
+        val challenge = BrowserSignIn.challengeOf(verifier)
+        val browser = if (first != SignInLeg.CUSTOM_TAB) authTabBrowser() else null
+        if (browser != null) {
+            // First the Auth Tab on the gateway's own https address, which the browser returns
+            // only to this app (Digital Asset Links); the one on this app's scheme only as a retry,
+            // or when the address can't take an https return (the gateway then asks for a new
+            // sign-in at the identity provider).
+            val host = if (first == SignInLeg.HTTPS_AUTH_TAB) BrowserSignIn.authTabHost(origin) else null
+            val leg = if (host != null) SignInLeg.HTTPS_AUTH_TAB else SignInLeg.SCHEME_AUTH_TAB
+            if (first == SignInLeg.HTTPS_AUTH_TAB && host == null) {
+                Log.i(TAG, "sign-in: the gateway's address can't take an https Auth Tab return; the app's scheme instead")
+            }
             try {
-                // Returns, and closes itself, once the gateway sends it to its own RETURN_PATH.
+                val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, schemeReturn = host == null))
                 val tab = AuthTabIntent.Builder().build()
                 tab.intent.setPackage(browser)
-                tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
-                authTabSignIn = next to fresh
+                if (host != null) tab.launch(authTab, url, host, BrowserSignIn.RETURN_PATH)
+                else tab.launch(authTab, url, BrowserSignIn.SCHEME)
+                authTabSignIn = AuthTabSignIn(next, fresh, leg)
+                Log.i(TAG, "sign-in: Auth Tab ($leg) opened in $browser")
                 return
             } catch (e: ActivityNotFoundException) {
-                // the Custom Tab below
+                Log.i(TAG, "sign-in: Auth Tab could not open in $browser; a Custom Tab instead")
             }
         }
+        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh))
         try {
             CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
+            Log.i(TAG, "sign-in: Custom Tab opened; it ends on the page that opens the app")
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, getString(R.string.sign_in_no_browser), Toast.LENGTH_LONG).show()
         }
@@ -574,16 +624,29 @@ class MainActivity : ComponentActivity() {
     private fun onAuthTabResult(result: AuthTabIntent.AuthResult) {
         val started = authTabSignIn
         authTabSignIn = null
+        Log.i(TAG, "sign-in: Auth Tab (${started?.leg}) result ${result.resultCode}")
         when (result.resultCode) {
             AuthTabIntent.RESULT_OK -> {
-                val code = BrowserSignIn.codeOfReturn(origin, result.resultUri?.toString())
-                if (code != null) finishBrowserSignIn(code)
-                else Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+                val returned = result.resultUri?.toString()
+                val code = BrowserSignIn.codeOfReturn(origin, returned) ?: BrowserSignIn.codeOfSchemeReturn(returned)
+                when {
+                    code != null -> finishBrowserSignIn(code)
+                    BrowserSignIn.isSchemeRefusal(returned) -> {
+                        // The gateway saw no new sign-in on the scheme leg, so it gave no code.
+                        Log.i(TAG, "sign-in: the gateway refused the scheme return; a Custom Tab instead")
+                        Toast.makeText(this, getString(R.string.sign_in_finish_in_browser), Toast.LENGTH_LONG).show()
+                        started?.let { startBrowserSignIn(it.next, it.fresh, SignInLeg.CUSTOM_TAB) }
+                    }
+                    else -> Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+                }
             }
-            // The browser could not confirm the gateway vouches for this app (a build signed with
-            // another key, say): the same sign-in in a Custom Tab, ending on the page with the button.
-            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->
-                started?.let { (next, fresh) -> startBrowserSignIn(next, fresh, authTabAllowed = false) }
+            // The browser could not verify this app for the gateway's address: the same sign-in on
+            // this app's scheme; and should that report it too, in a Custom Tab.
+            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT -> started?.let {
+                val nextLeg = if (it.leg == SignInLeg.HTTPS_AUTH_TAB) SignInLeg.SCHEME_AUTH_TAB else SignInLeg.CUSTOM_TAB
+                Log.i(TAG, "sign-in: Auth Tab could not verify the app; trying $nextLeg")
+                startBrowserSignIn(it.next, it.fresh, nextLeg)
+            }
             else -> Unit // closed by the person: nothing to finish
         }
     }
@@ -626,7 +689,7 @@ class MainActivity : ComponentActivity() {
 
     // -- the scan panel ----------------------------------------------------------
 
-    private fun openCamera() {
+    private fun openCamera(auto: Boolean = false) {
         lateinit var panel: CameraPanel
         panel = CameraPanel(this, root, object : CameraPanel.Host {
             override fun photo(jpeg: ByteArray, guide: FloatArray?) {
@@ -663,6 +726,7 @@ class MainActivity : ComponentActivity() {
         fab.visibility = View.GONE
         panel.onFold(fold)
         panel.resume()
+        if (auto) panel.startAuto()
         syncBackCallback()
     }
 
@@ -1214,7 +1278,11 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
-        fun openCamera() = onGatewayPage { startScan() }
+        fun openCamera() = onGatewayPage { startScan(auto = false) }
+
+        /** The scan page's Auto switch: the phone camera, scanning on its own. */
+        @JavascriptInterface
+        fun openCameraAuto() = onGatewayPage { startScan(auto = true) }
 
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""

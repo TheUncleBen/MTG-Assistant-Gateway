@@ -7,6 +7,323 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.46] - 2026-10-28
+
+Assistants keep one live card per change in the chat, proposals never apply themselves, and tool
+answers are shorter and use one spelling. Signing in to the Android app comes back by itself, a
+sign-in lasts as long as you use it, and one device that is signed out no longer signs out the
+others. A slow page shows its frame at once and fills in when Archidekt answers, a new deck
+reaches Archidekt in a few requests, and the deck page saves each change as you make it, with Undo. Every test is kept as a report, the
+website can start every kind of test, and History is your decks' timeline. The Binder gets prices
+and a faster Watchlist, the scanner finds more cards, new Archidekt alerts reach your phone, and
+the whole gateway uses one name per thing.
+
+### Upgrade notes
+- **The database goes to schema 19**: one live chat card per change (16), sign-ins kept per device
+  with the reason you were signed out (17), Binder records and prices (18), and a waiting deck
+  change's deck once applied, for its review page (19). The gateway saves a
+  copy before it upgrades, as in [docs/UPGRADING.md](docs/UPGRADING.md). Existing sign-ins carry
+  on. A card watched by name alone starts a new price history from the first daily price check;
+  a watch limit already saved on the Settings page stays as saved.
+- **Sign-ins now last 7 days unused** and renew as you use them, up to 30 days after you signed
+  in. `MTG_BROWSER_SESSION_TTL` is now that unused time (default `604800`, at most `2592000`). If
+  your variables still set `MTG_BROWSER_SESSION_TTL=7200` from an older example file, remove the
+  line or set `604800`, or sign-ins still end after 2 hours unused.
+- **Sign-in times are on the Settings page** (a new Sign-in group). The example stack and compose
+  files now leave `MTG_BROWSER_SESSION_TTL`, `MTG_ACCESS_TOKEN_TTL` and `MTG_REFRESH_TOKEN_TTL`
+  empty; a value you set still wins and locks its row.
+- **`MTG_SERVER_NAME` is back.** Empty (the default) leaves the name to the Settings page's
+  **Gateway name** row; a name there locks the row.
+- **Forge games per report now defaults to 5.** A value you set on the Settings page stays.
+- **Update the Android app** from inside the app after the gateway update. Auto opening the phone's
+  camera already scanning needs the 0.7.46 app.
+- **ChatGPT: re-paste the instructions block** from the gateway's ChatGPT setup page.
+- **Seven account-action tools are now one, `propose_account_action`**: `propose_deck_social`,
+  `propose_comment`, `propose_create_folder`, `propose_collaborator`, `propose_deck_help`,
+  `propose_report` and `propose_contest_entry`. Scripts that call them must switch.
+- **Proposals are read-only.** Every propose tool only proposes; `apply_proposal` is the one call
+  that writes, and it no longer draws a card in the chat.
+- **The research image is `1.3.2-mag7`.** The example stack and compose files name it; change it
+  if you pinned the image yourself.
+- **Renamed and removed tool result keys**, for anyone with scripts:
+  - `deck_stats`: `colour_pips`, `colour_identity`, `cards_colour_identity`,
+    `checks.colour_identity_violations` and `out_of_identity.cards[].colours` are spelt `color`;
+    the top-level `legality_problems` is gone (use `checks.legality` and `checks.legal_problems`).
+    Stored reports read under the new names.
+  - `get_deck` and the decks API: finishes are `nonfoil`, `foil` and `etched` (were `Normal`,
+    `Foil`, `Etched`); `color_identity` and `colors` are letters; the text and cards views send
+    `stats_brief` instead of `stats`; the cards view drops `types` and `subtypes`; `flavor_text`
+    and `artist` come only in the full view.
+  - `run_deck_report`: `stats_brief` instead of `stats`; the metrics JSON and
+    `goldfish.quantities` are gone; `forge` is null when Forge was skipped; new `full_report`.
+  - `play_more_games`: the refusal reason `ended` is now `forge_running` (the page's `?more=`
+    notice too).
+  - Proposal tools: `deck_waiting.set_lines` moved into the card's own data.
+  - New keys: `deck_after`, `plan_first`, `side_by_side`, `unpaired`, `waited_seconds`,
+    `suggested_wait`, `left_out` and `cards_unchanged`.
+
+### Added
+- History can make a new deck from a deleted deck's snapshot, for you to review and apply.
+- `check_new_deck`: an assistant checks a new deck before proposing it, with no card in the chat.
+- `proposal_status`: an assistant checks a proposal with no card in the chat. `get_proposal` is now
+  the card's own.
+- Every test is kept as a report on the Reports page: a pasted list (“Pasted list”), the deck a
+  waiting proposal would make (“Proposal #N for “DECK””, linked from the proposal, with
+  `run_deck_report` `proposal_id`) and a test comparison (“Comparison”). None of them count in a
+  deck's trend. An app connected read-only keeps its comparisons as reports, labelled with the app.
+- The website starts every kind of test: a pasted list (Reports), a snapshot (History), a proposal
+  (“Test this change”) and a paired test of two decks or a deck and its snapshot (Compare, which
+  now lists your decks and snapshots).
+- A proposal is tested against the deck as it is now, game for game, and its page shows what
+  changed.
+- Reports keep the exact list they tested, say when the deck has changed since, and can put that
+  list back as a proposal. “Since your last test” compares a report with the deck's previous test.
+- A report shows its Solo test and Forge games side by side, with how much of the deck the solo
+  test played, and names the app that ran it.
+- History is your decks' timeline: applied changes, snapshots and tests; a test opens its report.
+- Delete one report or one snapshot from History, its menus or the report page, after a box that
+  asks first. A snapshot a waiting restore needs says why it can't go. An assistant can only hand
+  you the box to press; it can also ask to delete a scan, which you confirm on the Scan page.
+- **Push notifications for new Archidekt alerts** (a comment, a reply, a new follower), in
+  Archidekt's own words; pressing one opens the deck, thread or profile in the gateway, and several
+  at once come as one message. On for members with push notifications set up; untick “A new alert
+  on Archidekt” on the Push notifications card to stop them.
+- Binder prices (while watchlists are on): its value, a price per entry and a price sort, and a
+  price history in the card viewer for any printing you own, from the daily price check.
+- The Binder's Add box has a Language field. The Add box and the Watch form can remember your
+  finish, condition, language and price alert, and card menus use them.
+- “Pin card” in card menus pins a card on Archidekt.
+- Home shows what needs you (proposals waiting, Forge games running, new Alerts, price alerts reached)
+  and your recent decks.
+- The Guide is a contents page with one page per topic, search, and the topics before and after.
+  Old links still land on the right topic.
+- Scanner: a card lying on its side is read the right way up; the viewfinder's corner shows how
+  many cards the scan holds (tap to open the list); the Scan page shows the scan's value from
+  Scryfall's prices and how many cards have no price.
+- `scripts/measure_scanner.py` measures text recognition and artwork matching on your own phone
+  photos; [docs/SCANNING.md](docs/SCANNING.md) explains how to take and label them.
+- Settings → Sign-in: how long a website sign-in lasts unused (7 days) and at most (30 days), and
+  how long an assistant's access (1 hour) and refresh (30 days) last. Each applies to the next
+  sign-in or token, with no restart.
+- The signed-out page says why you were signed out, with one Sign in button.
+- Admin has a “Speed, last 24 h” card showing which pages were slow and why, and a request that
+  takes over 3 seconds is logged as a warning, split into Archidekt and identity provider time.
+- More lists Card models.
+- Card search: Commander-legal identity searches, 20 cards a page, the newest paper printing,
+  better rules search, and precons by set name. `list_card_packages` takes a limit.
+- `compare_decks` compares decks of different sizes, unpaired.
+
+### Changed
+- Edits on the deck page within 10 minutes of each other share one snapshot and are one History
+  entry, and never push out the snapshot from before an assistant's change.
+- History, Proposals and My activity add more rows with Load more instead of Newer and Older pages.
+- The review page says what the deck will be once applied: its size, whether it is legal, and its
+  price and the change.
+- **One name per thing**: Binder (was Collection; “Add to binder”), Alerts (Archidekt's bell, was
+  Notifications), Push notifications (notices on your phone), Apply (was Approve on proposal
+  cards), Test with Solo test and Forge games, Printings… (one menu item), Card models. Pages,
+  chat cards, the Android app, tool descriptions, the skill, the ChatGPT instructions, the Guide
+  and the docs all use them; doc links changed where headings did.
+- **One live card per change in the chat.** Only the newest card for a change keeps Apply and
+  Reject; older cards and decided ones shrink to one line with no pictures and stop checking. The
+  gateway refuses a press from an older card (“Use the newest card”). Cards show a summary, 6 rows
+  and a few pictures, with Show all for the rest, and are about a fifth smaller.
+- **Proposals never apply themselves**: every propose tool is read-only, and `apply_proposal` is
+  the one write. In Semi and Full auto, a change your assistant may apply has Apply now and Reject
+  on its card.
+- Cards no longer post “Approved, go on” as your message, and a card that can't reach the gateway
+  tries again a few times, waiting longer each time.
+- **A new deck waiting for approval is changed in place**: `amend_proposal` takes the new deck's
+  list and settings, and the same name again from the same app updates the waiting proposal
+  (one waiting draft per deck per app). `propose_new_deck` takes `replaces`.
+- An apply that failed before anything reached Archidekt waits again with Try again; one that
+  stopped partway offers Propose the rest.
+- Card names Archidekt doesn't have, or that couldn't be checked, are flagged and make a change
+  high risk; at apply they are left out and named.
+- Every deck edit says whether the deck would be legal and how its price changes. Many quick edits
+  to one deck get a hint to plan first, and waiting changes that overlap are flagged first.
+- A closed proposal keeps the risk reason it was judged by, and the reason typed on Reject is shown
+  on the review page and the Proposals list.
+- Tool answers are shorter and use one spelling: compact text, a two-sentence account status, one
+  next-step sentence, rounded numbers; `get_deck` sends the headline statistics and lists empty
+  categories; `run_deck_report` answers with the headline (`get_deck_report` has the rest);
+  `get_summary` lists only cards whose price moved. See the upgrade notes for renamed keys.
+- A research call or card lookup over your share waits briefly for its turn instead of being
+  refused.
+- Assistants are told that reading and test tools never wait for approval.
+- Reports name the app that ran them, deck prices name their source, and a Commander deck's color
+  identity is its commander's. A new Commander deck with no commander gets a warning.
+- Until Forge has played enough games, reports lead with the Solo test, don't headline a win rate,
+  and say a handful of Forge games tells little. A second Forge test waits its turn instead of
+  being dropped; Forge pairs from Compare open a Head to head page and stay out of each deck's
+  trend.
+- Run full test opens the report at once, listed as “Solo test running”, and it fills in as each
+  part finishes. Forge progress is shown as games played and your place in line.
+- **Sign-ins**: a sign-in renews as you use the gateway (see the upgrade notes). When the sign-in
+  service stops accepting one of your sign-ins, only that device signs in again; your other
+  devices, your Archidekt link and your AI apps stay connected. Only removal from the group signs
+  you out everywhere.
+- If none of your sign-ins is accepted any more, your AI apps wait, still connected, and work again
+  once you sign in on the website.
+- Pages you read no longer wait for the identity provider: it is asked again in the background.
+  Changes, admin pages and assistant requests still wait for its answer, so someone removed from
+  the group is refused on their next one.
+- The Guide and the Guided setup page can be read without signing in; downloads and the ChatGPT
+  instructions still need a sign-in.
+- **Faster pages**: a slow page shows its frame at once and fills in when Archidekt answers;
+  several Archidekt reads for one page start together, and the same read asked twice is sent once.
+  Part of the Archidekt request limit is kept for your pages, and background requests no longer
+  hold the line.
+- A deck page or My decks you saw recently shows at once and updates behind; reloading soon after
+  doesn't ask Archidekt again. When Archidekt can't be reached, a deck you opened earlier shows as
+  last read, says how old it is, and offers Try again, with changes off.
+- Back is instant on ordinary pages. My lists shows at once and fills in its counts after; the bell
+  and watched names are asked once a minute. Archidekt problems are described in plain words.
+- **Deck page**: Quick add adds one copy at once, with Undo; the card menu sets a card's finish
+  (Normal, Foil, Etched) with Undo; a one-click change needs fewer Archidekt requests.
+- Deck settings and categories save each change as you make it, with Undo, and stay on the page;
+  leaving while a save runs asks first. A save Archidekt never answered shows what the deck has
+  now, a refused save offers Try again when trying again could work (Search cards for a name
+  Archidekt doesn't know), and a reloaded page says “Saving…”.
+- Stacks follow Archidekt's category order, with Maybeboard and Sideboard last; the drag handles
+  and Reset stack order are gone. A side row's Remove names the category it leaves.
+- On a phone the deck editor's save bar keeps 44 px buttons, with the status on its own line.
+- A deck still being made shows how far it got, has edits off and reloads when done.
+- My decks: tiles no longer say “No deck tags” or show your own avatar, the folder menu never covers
+  the folder name, and the Packages tab has one empty state with New package as its main button.
+- **Binder is one place**: Cards, Wants (your Archidekt pins) and Watchlist. My lists moves under
+  Account. Forum sits in More and on the rail, and a member without a linked Archidekt account can
+  read it.
+- Adding a card joins an existing Binder entry only when printing, finish, condition and language
+  all match, and says which entry it went to. An import runs in the background with a progress
+  strip, and + and − add to what Archidekt holds.
+- The Binder's name box searches the whole Binder as you type, and the Binder reads your
+  cards and your profile together, so the page comes sooner.
+- The Watchlist stays fast with large lists, with Load more; members may watch up to 5,000 cards
+  and 100 decks. Add takes up to 9,999 copies, and a price alert opens its row.
+- A card watched by name alone follows its cheapest printing and says which printing its price is
+  for, on the page and in `list_watchlist`.
+- Home greets you by name, and its search suggests your own decks first.
+- On a proposal's review page, deleting a deck, taking custom cards out of a deck or deleting from
+  your Archidekt lists asks once more in the site's box, with Keep it first. Reject on the
+  Proposals page and the deck's Proposals box asks in the same box.
+- Every delete confirmation, and the assistant's delete tool, says no copy is made on Archidekt and
+  that a snapshot can't be restored onto a deleted deck.
+- Alerts for forum replies and new followers open the thread or profile here; Archidekt news and
+  contests still open Archidekt.
+- Each page keeps its own card size (S, M or L), for your account and on each device.
+- The Printings box says it filters these printings by set, and offers a search of all cards when
+  nothing matches. The printing detail lets you pick a finish the printing is made in.
+- One moving progress ring on the Running, Forge running and Applying labels, a busy button, a
+  box that is loading, the printing picker while it looks up printings and a deck still being
+  made (it pulses instead when you ask for less motion); Play more games says “Starting…”.
+- No more bare blue links: small actions on Proposals, Reports, History, My activity, chat cards,
+  Account details, Deck settings and Compare are grey pill buttons, and titles read in the text
+  colour.
+- Report downloads share one outline, name no tools and print cleanly; the HTML file matches the
+  site's look in light and dark, and the Markdown file is clean Markdown.
+- Exports: the MTGO .dek and the plain list name each card once per zone and leave the Maybeboard
+  out; the CSV Label column holds the tag's name.
+- Typed suggestions offer token names (Treasure, Food, Soldier) after the matching cards.
+- Compare lists your decks while the deck list is still being read; long deck names wrap.
+- Scanner: the Photo button always opens your pictures and the shutter is the camera; in the
+  Android app the shutter and the viewfinder open the phone's own camera, and Auto opens it already
+  scanning.
+- Scanner: when Auto can't find a card's edges it reads the dashed box and asks you to check the
+  card it found; a card found this way, or one whose printing is in doubt, waits for your tap.
+- Scanner: text recognition in the app gets ready as soon as the camera opens and shows how far it
+  got; “How scanning works” is open on your first visit only; a hint suggests a light background
+  for black-bordered cards.
+- Android app: a phone shows only the brand's mark in the top bar, and “Later” on the update bar
+  hides that version for three days.
+- ChatGPT setup: the phone apps work once the connector is added on chatgpt.com in a browser
+  (tried in the Android app). The website footer says “Assistant skill”.
+
+### Fixed
+- Large text: the Binder and Assistant switches show their current page and fade the edge that
+  has more.
+- A proposal marked Needs a look no longer offers Apply or Delete; a failed change says why.
+- Signing in to the Android app comes back to the app by itself. The app could not see the phone's
+  browsers, so it never opened the tab that returns to the app. It now opens that tab on the
+  gateway's address first and only then tries the app's own address. The “Open the MTG Assistant
+  Gateway app” page stays as the last way.
+- A page no longer waits behind a slow Archidekt request from the deck check or an assistant.
+- A new deck reaches Archidekt 50 cards to a request instead of one request per card. Edits to it
+  wait until it is made.
+- A change to one row of a card that has several (for example a card both in the deck and in a
+  category outside it) changes that row only: remove, count, move and printing. The review names
+  the row's own category, and Maybeboard and Sideboard rows offer Printings….
+- Deleting a deck or folder no longer leaves a backup deck on Archidekt; the gateway keeps its
+  snapshot.
+- A new card package that Archidekt saved differently says what differs instead of “Archidekt
+  refused it”; pages and cards say “New card package: NAME”, and a long name no longer stands one
+  letter per line.
+- Every place you can watch a card shows when it is already on your watchlist, down to the
+  printing, and the same card is never added twice.
+- The Binder can change the oldest entries of a large Binder, and adding a printing again adds to
+  its entry instead of making a second one.
+- Card forms no longer make Android offer to fill in payment cards.
+- The Printings list finds a row's card by its own printing, lists tokens, and tries again when
+  Scryfall is busy.
+- Card names with two faces or halves, like “Fire // Ice”, are found everywhere by their full name.
+- Decklists with “## Commander” style headings are read correctly, and lines that could not be
+  read are listed.
+- Proposals say when a change would break the deck's format rules; removing more copies than a
+  deck has is refused; a contest entry into a contest that does not exist is refused.
+- `check_deck_changes` lists every problem at once and suggests the card a misspelt name probably
+  means.
+- Saved scans keep a foil asked for on a name match and hold only cards that were found. A Binder
+  add in a finish its printing is not made in is warned.
+- `card_printings`' “more” flag and note are accurate; card-package name search matches package
+  names only; deleting unused categories names Archidekt's default boards when it removes them;
+  an applied copy of a deck names the new deck.
+- Test reports say how much of the deck the solo games played and treat the commander correctly.
+  Lands and mana makers are no longer listed as cards that “never mattered”.
+- When the research service fails, a report says “The solo test could not run” and offers Run
+  again. A Forge test that ended with no counted game says why, and Forge games whose winner is
+  not one of the seats are counted as unread.
+- Activity says “Website” for reports you run or add games to on the website; History and
+  Activity name a deck by its newest name; a deck with no priced cards shows “No price” instead of
+  $0; the backup folder name uses curly quotes; a refused restore has buttons back to the snapshot
+  and History.
+- The scanner finds a card that fills only part of the photo or is held further back than the
+  dashed box, no longer takes a grainy table for a card outline, and reads the set code and foil
+  mark more reliably.
+- A failed scan says whether the card's edges or its name were the problem; a HEIC photo says the
+  browser can't open it and suggests JPEG or the camera.
+- A browser window of middle width with a mouse has search again; the top bar's search box fills
+  its space, and its suggestions on a phone are as wide as the box.
+- The bell says “You're signed out” with a Sign in button when you signed out in another tab.
+- “Sign-in unavailable” offers the Guide instead of a Home button that led back to it.
+- Back after changing Theme or Layout goes to the page before.
+- Large text: the tab bar's and rail's labels grow; the scanner hint no longer covers the dashed
+  box; Account's Theme and Layout rows, the review page's facts, the Proposals / History / Reports
+  switch, Forge tables, proposal titles and Admin's user details no longer run together or push
+  the page sideways.
+- Home keeps two deck tiles a row on narrow screens such as a folded phone's cover screen.
+- The ⋮ on a deck tile sits under the picture at every card size.
+- Deck settings lists Archidekt's Maybeboard and Sideboard on a deck that hasn't changed them yet.
+- A card name shown as a button (for example under Played without their effect) opens the card.
+- The review page writes the deck's name in curly quotes, and a hidden button stays hidden on
+  every page.
+- The Connected apps button on Proposals opens Account details instead of a missing page.
+- The install page's plain-text address is readable in both themes.
+- ChatGPT's logo shows at full size instead of a grey dot; admins see why an app has no logo.
+
+### Security
+- The Android app signs in only in the default browser, or a Chrome that came with the phone, and
+  only when it offers the tab that returns to the app.
+- When the app's sign-in comes back on the app's own address, the identity provider is asked for a
+  fresh sign-in, and the gateway gives a sign-in code only when the ID token shows one made during
+  that attempt; the return page opens the app by itself only then.
+- After the gateway restarts, a page goes ahead on your last sign-in check only if that check is
+  under a day old, and a slow page that finishes after you were signed out is not shown.
+- Only the app that made a change that stopped partway, or you on its review page, can propose the
+  rest.
+- Whether a new deck is still being made is shown only to the member making it.
+- A research call that has to wait no longer uses your Archidekt allowance first, and only a few of
+  one member's research calls and card lookups can wait at once.
+
 ## [0.7.45] - 2026-10-26
 
 Shorter stack and example variables files with every feature on by default, the tuning settings on

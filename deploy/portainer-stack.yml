@@ -63,12 +63,13 @@ services:
       MTG_SCAN_ART_ENABLED: ${MTG_SCAN_ART_ENABLED:-}
       MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-}
       MTG_DECK_SYNC_MINUTES: ${MTG_DECK_SYNC_MINUTES:-}
+      MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
       MTG_TRUSTED_PROXIES: ${MTG_TRUSTED_PROXIES:-}
       MTG_CIMD_ENABLED: ${MTG_CIMD_ENABLED:-true}
       MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
-      MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
-      MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
-      MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
+      MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-}
+      MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-}
+      MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
       MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
       # Fixed: secrets, the stack's own services, the backup copy folder (mounted below)
@@ -130,7 +131,7 @@ services:
 
   # Mystic Forge: the research service. Only the gateway can reach it; no proxy host for it.
   mtg-assistant-mysticforge:
-    image: ghcr.io/theuncleben/mtg-assistant-mysticforge:1.3.2-mag6
+    image: ghcr.io/theuncleben/mtg-assistant-mysticforge:1.3.2-mag7
     logging: *logging
     healthcheck:
       test:

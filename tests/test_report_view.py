@@ -66,7 +66,9 @@ def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
     assert h["unrecognized"][1]["drawn"] == pytest.approx(0.1667, abs=0.001)
     assert [grp["kind"] for grp in h["out_of_scope"]] == ["interaction_removal", "unmodeled_other"]
     assert h["out_of_scope"][0]["label"] == "Removal and other interaction"
-    assert len(h["out_of_scope"][0]["cards"]) == 11 and len(h["low_impact"]) == 25
+    # the basic lands (Plains, Swamp) are never cards that "never mattered": their effect is the mana
+    assert len(h["out_of_scope"][0]["cards"]) == 11 and len(h["low_impact"]) == 23
+    assert "Plains" not in h["low_impact"] and "Swamp" not in h["low_impact"]
     # the approximations exist only in the text
     assert {a["kind"] for a in h["approximations"]} >= {"any-color", "fetch", "residual-text"}
     assert "Lotus Field" in next(a["cards"] for a in h["approximations"] if a["kind"] == "any-color")
@@ -75,7 +77,7 @@ def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
     g2 = rv.parse_goldfish({"ok": True, "text": stripped})
     assert len(g2["honesty"]["unrecognized"]) == 32 and g2["honesty"]["unrecognized"][1]["drawn"] == 0.17
     assert [len(x["cards"]) for x in g2["honesty"]["out_of_scope"]] == [11, 6]
-    assert len(g2["honesty"]["low_impact"]) == 25
+    assert len(g2["honesty"]["low_impact"]) == 23  # no basic lands, as from the JSON
 
 
 def test_validation_verdicts() -> None:
@@ -186,7 +188,7 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
         "Deck statistics",
         "Raw output from the research service",
         "## Metrics",
-        "report is shown instead of running the simulation again",
+        "report is shown instead of testing it again",
     ):
         assert text in html, text
     assert "goldfish_" not in html and "run_deck_report" not in html
@@ -216,7 +218,7 @@ def test_markdown_and_html_exports() -> None:
     r = report()
     md = rv.report_markdown(r)
     assert md.startswith("# Deck report: Immortal Reckoning\n")
-    assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
+    assert "| Commander | Liesa, Forgotten Archangel |" in md and "| Games | 300, through turn 10 |" in md
     assert (
         "## Quick solo test (300 games, no opponents)" in md
         and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
@@ -225,10 +227,11 @@ def test_markdown_and_html_exports() -> None:
         "Played without their effect: 32 of 98 cards (33% of the deck)." in md
         and "## Validation: issues found" in md
     )
-    assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
+    # the research service's raw output stays on the report's page (test_report_export_outline)
+    assert "## Raw output" in md and "## Metrics" not in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
-    assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme:dark" in doc
+    assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme: light" in doc
     assert "<title>Deck report: Immortal Reckoning</title>" in doc
 
 
@@ -325,9 +328,9 @@ def test_preflight_only_label_and_overall_status() -> None:
     assert "id='rep-status'><span class='ui-lbl orange'>" in html and ">Partial</span>" in html
     running = rv.report_body_html(report(forge={"state": "running"}, status="running"))
     assert "Preflight only" not in running and ">Forge games (against precons)</h2>" in running
-    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge going</span>" in running
+    assert "id='rep-status'><span class='ui-lbl orange'>" in running and ">Forge running</span>" in running
     md = rv.report_markdown(report(forge=skipped, status="complete"))
-    assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
+    assert "## Preflight only (no rules engine)" in md and "| Status | Complete |" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
     assert "## Forge games (against precons)" in rv.report_markdown(
         report(forge={"state": "running"}, status="running")

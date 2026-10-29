@@ -7,6 +7,9 @@ import html
 import json
 import re
 
+from mtg_gateway.busy import area_of
+from mtg_gateway.decks import PAGE_DECK_STALE
+
 from .conftest import AUTO_PROXY, FakeIdP, Stack, sse_json, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
 from .track_a_helpers import apply_any
@@ -210,8 +213,10 @@ async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> Non
         await h.http.post("/api/v1/reports", json={"deck_id": "42"}, headers=auth)
         csrf = await b.csrf("/account/details")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         assert ran.status_code == 303
         await b.http.post("/decks/42/report", data={"csrf": csrf})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         assert seen == [False, None, False, None]
     finally:
         reports.run = real_run
@@ -248,9 +253,13 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         assert r.status_code == 303, r.text
         assert [s[:3] for s in seen] == [("42", False, True), ("43", False, True)] and seen[0][3] is None
         first_id = seen[1][3]
-        assert r.headers["location"].startswith("/history/reports/rep_") and first_id
-        shown = await b.http.get(r.headers["location"], headers=NAV)
-        assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck's report" in shown.text
+        # the pair opens side by side (owner decision C7), each deck's report one press away
+        where = r.headers["location"]
+        assert where.startswith("/history/reports/rep_") and where.endswith("/head-to-head") and first_id
+        both = await b.http.get(where, headers=NAV)
+        assert both.status_code == 200 and f"href='/history/reports/{first_id}'" in both.text
+        shown = await b.http.get(where.removesuffix("/head-to-head"), headers=NAV)
+        assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck’s report" in shown.text
         assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
         bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "nope"})
         assert bad.status_code == 400 and "Pick the other deck" in bad.text
@@ -270,7 +279,7 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
                 h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "same_opponents_as": first_id}
             )
         )
-        assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
+        assert listed["ok"] is False and "pasted list can't be paired for Forge" in listed["message"]
         # The higher of the two decks' set brackets picks them, whichever page it ran
         # from (the runs wait behind the member's first one, so each keeps the bracket it waits with)
         from mtg_gateway.forge import PAIR_LEAD, bracket_parts, shared_opponents
@@ -339,6 +348,7 @@ async def test_compare_press_starts_or_queues_both_decks_or_neither(stack: Stack
     try:
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
         db.execute("DELETE FROM reports")
         reports.forge = FakeForge(brackets=BRACKETED).client()
@@ -408,6 +418,7 @@ async def test_compare_presses_at_once_never_pass_the_member_limit(stack: Stack)
     try:
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         sub = db.execute("SELECT owner_sub FROM reports").fetchone()[0]
         db.execute("DELETE FROM reports")
         reports.forge = FakeForge(brackets=BRACKETED).client()
@@ -595,8 +606,8 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             await call(h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "compare_with": "43"})
         )
         assert listed["ok"] is False and listed["message"] == (
-            "A pasted list gets no Forge games, so compare_with works only when deck_ref is a deck id, URL "
-            "or snapshot id."
+            "A pasted list can't be paired for Forge, so compare_with works only when deck_ref is a deck "
+            "id, URL or snapshot id."
         )
         # the REST route's compare_with
         auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
@@ -669,15 +680,17 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
     fake = FakeForge()
     try:
         empty = await b.http.get("/reports", headers=NAV)
-        assert empty.status_code == 200 and "No reports yet" in empty.text and "Run full test" in empty.text
+        assert empty.status_code == 200 and "No reports yet" in empty.text and "Run test" in empty.text
         assert "Nothing plays or waits now." in empty.text
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         listed = await b.http.get("/reports", headers=NAV)
         assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
         assert "Sample Commander Deck" in listed.text and "Deck trend and history" not in listed.text
-        assert "/history?deck_id=42&amp;type=reports" in listed.text  # the Latest report widget's Deck trend
-        assert "<option value='42'" in listed.text and "1–1 of 1" in listed.text
+        assert "/history?deck_id=42&amp;type=tests" in listed.text  # the Latest report widget's Deck trend
+        # Load more under the table, no Newer / Older pager (0.7.46)
+        assert "<option value='42'" in listed.text and "All 1 report shown." in listed.text
         assert "aria-current='true'>All <span class='n'>1</span>" in listed.text
         none = await b.http.get("/reports?deck_id=999", headers=NAV)
         assert "No reports for this deck yet" in none.text
@@ -720,7 +733,7 @@ async def test_new_tools_are_listed_and_work(stack: Stack) -> None:
         stats = structured(await call(h, token, "deck_stats", {"deck_ref": "42"}))
         assert stats["ok"] and stats["deck"]["id"] == "42" and "mana_curve" in stats["stats"]
         deck = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
-        assert deck["ok"] and "stats" in deck and "commanders" in deck
+        assert deck["ok"] and "stats_brief" in deck and "commanders" in deck
         listed = structured(await call(h, token, "list_my_decks", {"name_contains": "zzz-no-such"}))
         assert listed["ok"] and listed["decks"] == []
         p = structured(
@@ -772,7 +785,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run full test" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run test" in deck.text and "Edit deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404
@@ -786,6 +799,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert js.status_code == 200 and js.json()["id"] == "42"
         csrf = await b.csrf("/account/details")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
+        await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
         assert shown.status_code == 200 and "Quick solo test (" in shown.text and "## Metrics" in shown.text
@@ -994,15 +1008,34 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
 
         source = structured(await call(h, token, "get_deck", {"deck_ref": "42", "view": "cards"}))
         want = shape(source)
-        assert ("Sol Ring", 1, "Etched", False, True) in want and ("Swamp", 2, "Foil", False, True) in want
-        assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "Normal", False, False) in want
+        # get_deck says the finish as the write tools take it (nonfoil, foil, etched: AT-30)
+        assert ("Sol Ring", 1, "etched", False, True) in want and ("Swamp", 2, "foil", False, True) in want
+        assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "nonfoil", False, False) in want
         exports = {
-            "plain .txt": ("decklist_text", (await b.http.get("/decks/42/export.txt")).text),
             "archidekt .txt": ("decklist_text", (await b.http.get("/decks/42/export.archidekt.txt")).text),
             ".csv": ("csv_text", (await b.http.get("/decks/42/export.csv")).text),
             ".json": ("json_text", (await b.http.get("/decks/42/export.json")).text),
         }
-        assert "[Commander]" in exports["plain .txt"][1] and "*E*" in exports["plain .txt"][1]
+        # The plain .txt is names only (no finish, no Maybeboard: test_export_standard); it still
+        # reads back with its commander, the deck and every copy.
+        plain = (await b.http.get("/decks/42/export.txt")).text
+        assert plain.startswith("Commander\n") and "*E*" not in plain and "Opt" not in plain
+        made = structured(await call(h, token, "propose_new_deck", {"name": "Plain", "decklist_text": plain}))
+        assert made["ok"], made
+        applied = await apply_any(h, token, made["proposal_id"])
+        copy = structured(
+            await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"], "view": "cards"})
+        )
+
+        def copies(deck: dict) -> dict[tuple, int]:
+            out: dict[tuple, int] = {}
+            for c in deck["cards"]:
+                if c["in_deck"]:
+                    key = (c["name"], "Commander" in c["categories"])
+                    out[key] = out.get(key, 0) + c["quantity"]
+            return out
+
+        assert copies(copy) == copies(source)
         assert json.loads(exports[".json"][1])["id"] == "42"  # the gateway's own deck JSON, as is
         for label, (field, text) in exports.items():
             made = structured(
@@ -1164,6 +1197,9 @@ BUSY_PAGES = (
     "/search?name=Sample",
     "/precons",
 )
+# the busy pages that draw the deck page itself (its boxes drawn open): with a read of the deck
+# kept, they show it read-only and dated instead (0.7.46 audit D-03)
+HELD_DECK_PAGES = {"/decks/42", "/decks/42/export", "/decks/42/delete"}
 BUSY_DOWNLOADS = (
     "/decks/42/export.txt",
     "/decks/42/export.archidekt.txt",
@@ -1176,7 +1212,13 @@ BUSY_DOWNLOADS = (
 
 def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -> None:
     assert r.status_code == status, (path, r.status_code, r.text[:300])
-    assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    if path.startswith("/collection"):  # the Binder keeps its own frame, the busy words in its list
+        assert "<title>Binder" in r.text and f"<h2 class='busy-title'>{title}</h2>" in r.text, path
+    else:
+        assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    # never Archidekt's raw words: codes, exception names, seconds (0.7.46 audit D-05, C-15)
+    for raw in ("HTTP 5", "HTTP 4", "ReadTimeout", "request failed:", " seconds"):
+        assert raw not in r.text, (path, raw)
     assert f"<a class='btn btn-primary' href='{html.escape(path)}'>Try again</a>" in r.text, path
     assert 1 <= int(r.headers["retry-after"]) <= max_wait, (path, r.headers)
     assert r.headers["cache-control"] == "no-store", path
@@ -1198,14 +1240,26 @@ async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stac
         decks.archidekt_budget = RateBudget(per_window=1, window=600)
         first = await b.http.get("/decks/42", headers=NAV)
         assert first.status_code == 200  # the one call of the window
+        # too old to be shown without a read: the deck page then shows that read, read-only and
+        # dated, instead of the busy page (0.7.46 audit D-03)
+        decks._page_decks = {k: (t - PAGE_DECK_STALE - 1, d) for k, (t, d) in decks._page_decks.items()}
         for path in BUSY_PAGES:
-            # as Reload asks (a deck page just read would be shown again from memory, no call)
             r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
+            if path.split("?")[0] in HELD_DECK_PAGES:
+                assert r.status_code == 200 and "data-card='Sol Ring'" in r.text, path
+                assert "Too many requests right now, so this is the deck as it was read" in r.text, path
+                assert "Changes are off" in r.text and "/decks/42/edit" not in r.text, path
+                continue
             _assert_busy_page(r, path, status=429, title="Too many requests right now", max_wait=600)
             assert "used up its Archidekt allowance for the last 10 minutes" in r.text, path
             assert "once there is room" in r.text, path
-            assert "Your account has used its 1 Archidekt actions" in r.text, path
-            assert "href='/decks'>My decks</a>" in r.text, path
+            # the page's own area: "your collection" on the Binder, "your decks" on the deck pages
+            noun, back, label = area_of(path)
+            assert f"Nothing is wrong with your {noun} or your account" in r.text or (
+                noun is None and "Nothing is wrong with your account" in r.text
+            ), path
+            if back != path.split("?")[0]:
+                assert f"href='{back}'>{label}</a>" in r.text, path
         for path in BUSY_DOWNLOADS:
             r = await b.http.get(path)
             assert r.status_code == 429 and r.text.startswith("Too many requests right now."), (path, r.text)

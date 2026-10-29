@@ -56,7 +56,14 @@ def test_card_viewer_watches_a_card_and_shows_its_price(server: Server) -> None:
         page.get_by_role("button", name="Watch this card").click()
         page.wait_for_selector("#cardview-prices table", timeout=5000)
         text = page.locator("#cardview-prices").inner_text()
-        assert "$" in text and "nonfoil" in text, text
+        assert "$" in text and "Nonfoil" in text and "nonfoil" not in text, text
+        # the way to the watchlist is a capsule button, not a plain blue link, and opens the card's row
+        link = page.locator("#cardview-prices a", has_text="Open the watchlist")
+        assert "btn" in (link.get_attribute("class") or "").split()
+        wid = server.app.state.gateway.prices.watched_cards("user-1")[0]["id"]
+        assert link.get_attribute("href") == f"/watchlist?open={wid}#wr-{wid}"
+        box = link.bounding_box()  # a standard control: 39 px with a mouse, 44 px on touch
+        assert box is not None and box["height"] >= 39, box
         overflow = page.evaluate(
             "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
@@ -196,7 +203,7 @@ def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, 
                     """() => [document.documentElement.scrollWidth, innerWidth,
                       [...document.querySelectorAll('main *')].filter(e => e.getClientRects().length
                         && e.getBoundingClientRect().right > innerWidth + 1 && !e.closest('.tbl')
-                        && !e.closest('.ui-chips'))
+                        && !e.closest('.ui-chips') && !e.closest('.hubseg'))
                         .map(e => e.tagName + '.' + e.className).slice(0, 5)]"""
                 )
                 assert out[0] <= out[1] and not out[2], (scheme, zoom, out)

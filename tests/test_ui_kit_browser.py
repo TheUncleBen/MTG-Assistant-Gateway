@@ -64,7 +64,7 @@ def _list(now: float) -> str:
                 ),
                 ui.widget("Needs a look", "alert", 1, detail="Sol Ring changed", tone="alert"),
                 ui.widget(
-                    "Always need your press",
+                    "Only you can apply",
                     "hand",
                     2,
                     detail_html=ui.label_for("your_press", word="Your press 1")

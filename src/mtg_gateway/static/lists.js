@@ -17,6 +17,25 @@
   }
   showTab();
   if (curTab && window.ResizeObserver) new ResizeObserver(showTab).observe(curTab);
+  // the other tabs' counts, read after the page has drawn (lists_page.COUNTS_API)
+  var tabBar = document.querySelector(".lp-tabs[data-counts]");
+  if (tabBar && window.fetch) {
+    fetch(tabBar.getAttribute("data-counts"), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.counts) return;
+        Array.prototype.forEach.call(tabBar.querySelectorAll("a[href]"), function (a) {
+          var n = d.counts[a.getAttribute("href").split("/").pop()];
+          if (typeof n !== "number" || a.querySelector(".n")) return;
+          var span = document.createElement("span");
+          span.className = "n";
+          span.textContent = n.toLocaleString("en");
+          a.appendChild(span);
+        });
+        showTab(); // the tabs before the current one grew: bring it back into view
+      })
+      .catch(function () { /* the counts stay blank */ });
+  }
   var Menu = window.MtgMenu, Box = window.MtgBox;
   var root = document.querySelector(".lp[data-tab]");
   if (!root || !Menu || !Box) return;
@@ -213,7 +232,7 @@
         if (crop) resetCrop(crop, has, has ? "/lists/api/custom_picture/" + d.id + "?face=" + pf[1] : "");
       });
       setValue(box, "set_code", editing ? (d.setCode || "") : "");
-      setValue(box, "collector_number", editing ? (d.collectorNumber || "") : "");
+      setValue(box, "cn", editing ? (d.collectorNumber || "") : "");
       var back = $("#cc-back", box);
       if (back) back.checked = editing && !!d.hasBack;
       backFace(box);

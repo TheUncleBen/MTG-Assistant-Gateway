@@ -25,7 +25,10 @@ async def test_list_my_proposals_pages_through_all_of_them_and_takes_the_collect
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "manual")
-    made = [structured(await call(h, token, "propose_deck_changes", _add(f"Card {i}"))) for i in range(25)]
+    made = [
+        structured(await call(h, token, "propose_deck_changes", {**_add(f"Card {i}"), "separate": True}))
+        for i in range(25)
+    ]
     assert all(p["ok"] for p in made)
     first = structured(await call(h, token, "list_my_proposals"))
     assert len(first["proposals"]) == 20 and first["has_more"] is True and first["next_offset"] == 20
@@ -144,9 +147,7 @@ def test_an_applied_collection_change_says_so_only_when_the_read_back_found_it()
     mismatches, so its text says every change is there unless the read-back found otherwise. One
     applied before the read-back arrived has no "verified" and keeps the plain text."""
     for result in ({"verified": True}, {}, None):
-        assert applied_text("collection", {}, result) == (
-            "Your collection on Archidekt has these changes now."
-        )
+        assert applied_text("collection", {}, result) == ("Your binder has these changes now.")
     assert applied_text("collection", {}, {"verified": False, "mismatches": [{"name": "Sol Ring"}]}) == (
         "Sent to Archidekt, but the read-back didn't confirm every change. See Result on the review page."
     )

@@ -37,6 +37,9 @@ Every sentence has to stay true of the code; the source of each claim is noted b
 - kept after unlink: ``Database.revoke_link`` blanks only the session; ``delete_member_data``
   removes the row; the audit log is kept for ``AUDIT_RETENTION_SECONDS`` (a year);
 - backups: ``Database.backup_to`` blanks every stored session before the copy is written;
+- the daily reads and copies: ``prices.PriceService.run_daily`` (watched decks, ``_read_binders``
+  with ``collection.CollectionService.read_whole``), ``binder_prices.BinderStore`` (the copies,
+  dropped by ``forget_old`` after ``PRICED_FOR_DAYS``);
 - ending it: unlink, delete my data, admin unlink or disable blank the stored session at once;
   the optional hourly clean-up (``idp_sweep.py``) does for members Authentik no longer lists;
   removal from the required group does so only at the member's next request (``membership.py``),
@@ -83,13 +86,16 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "Only when you, or an assistant you connected, ask for something. A big change you "
             "approved may finish in the background.",
+            "Once a day while watchlists are on: reading the decks you watch and, while you open "
+            "your Binder at least every 60 days, your whole collection, to keep their prices.",
             "Reading your decks (private ones included), folders, tags and collection.",
             "Reading, as you, other people's decks and comment threads you or your assistant look "
             "at and the list of people you follow, and looking up the cards in the changes you make.",
-            "Making the deck, folder, tag and collection changes you make yourself, approve, or let "
+            "Making the deck, folder, tag and binder changes you make yourself, approve, or let "
             "your assistant make through your approval mode, including deleting a deck when you "
-            "ask. It may first save a copy of the deck in a backup folder on your Archidekt account "
-            "(the person who runs the server can turn that off).",
+            "ask. Before it changes a deck it may first save a copy of the deck in a backup folder on "
+            "your Archidekt account (the person who runs the server can turn that off); deleting a "
+            "deck makes no copy.",
             "The likes, bookmarks, follows and comments you make yourself on these pages. No "
             "assistant can do those.",
         ),
@@ -102,6 +108,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "what you typed to sign in, which may be your email); when you linked and when the "
             "session was last renewed and used; activity-log entries for each link, unlink, "
             "renewal and failed attempt.",
+            "Plain text, while watchlists are on: your binder as last read whole and the card "
+            "lists of your own decks you opened, so they can be priced. Each goes once you have not "
+            "opened it for 60 days.",
             "Never stored: your password.",
             "After an unlink, your Archidekt username and user number stay until you or an admin "
             "delete your data. Activity-log entries, including the Archidekt username noted when "
@@ -120,7 +129,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "They can read everything else the gateway keeps about you, unencrypted: your name, "
             "email, username, user ID and groups at the sign-in service, profile picture (if "
             "sent), sign-in and last-seen times, approval mode, Archidekt username and user "
-            "number, proposed and applied deck and collection changes, deck snapshots, reports and "
+            "number, proposed and applied deck and binder changes, deck snapshots, reports and "
             "covers, scans, connected apps, usage counts and the activity log. The sign-in "
             "service's tokens the gateway keeps to check your groups use the same key, so they can "
             "open those too.",
@@ -135,7 +144,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "sign-in service, your Archidekt username, first sign-in and last seen, connected "
             "apps, how many app tokens and browser sessions you have open, whether and when you "
             "were disabled, and the activity log: what you did, when and with which app (links, "
-            "unlinks, proposals, deck and collection changes, scans, likes, bookmarks, follows and "
+            "unlinks, proposals, deck and binder changes, scans, likes, bookmarks, follows and "
             "comments, with deck, proposal and comment numbers).",
             "They can unlink your Archidekt account, disable and enable your account, sign you "
             "out everywhere and delete your data.",

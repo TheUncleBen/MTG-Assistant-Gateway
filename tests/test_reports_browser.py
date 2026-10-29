@@ -111,8 +111,9 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         )
         _shot(page, f"history-{width}-{scheme}")
         assert hist["scrollWidth"] <= hist["innerWidth"], hist
-        # deck 42's 15 snapshots, its restore and the two reports, under day rows
-        assert hist["rows"] == 18 and hist["days"] >= 2, hist
+        # deck 42's 15 snapshots, its 15 applied changes (the restore among them) and the two tests
+        # (owner decision C7: History is the timeline): a page of 25, under day rows
+        assert hist["rows"] == 25 and hist["days"] >= 2, hist
         assert hist["selectArrow"] == "none" and 0 < hist["selectWidth"] <= hist["innerWidth"]
         assert hist["trendBorder"] == "solid", "trend cards are styled"
         # a snapshot's Details: the side panel on a wide screen, its own page on a phone, with
@@ -193,7 +194,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
         assert page.locator(".forge[data-forge-live]").count() == 1
         assert "updates by itself" in page.locator(".forge").inner_text()
-        assert page.locator("#rep-status").inner_text().startswith("Forge going")  # the overall status
+        assert page.locator("#rep-status").inner_text().startswith("Forge running")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
         # a poll that brings nothing new leaves the live card's nodes untouched, so
         # screen readers are not told the whole card again every 5 seconds
@@ -633,15 +634,15 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert "Played with their effect" in coverage and "Known:" in coverage
         # Remove asks first (2026-10-21, POPUP-INVENTORY): the red outline opens a box whose solid
         # red button removes
-        page.get_by_role("button", name="Remove the saved description of Sol Ring").click()
+        page.get_by_role("button", name="Remove the card model of Sol Ring").click()
         box = page.locator("#rm-model-sol-ring")
         box.wait_for(state="visible")
-        assert "Remove the saved description of “Sol Ring”?" in box.inner_text()
+        assert "Remove the card model of “Sol Ring”?" in box.inner_text()
         assert any(k[1] == "sol ring" for k in store.rows)  # nothing removed yet
         box.locator("button.danger").click()
         page.wait_for_load_state("networkidle")
         assert "models=removed" in page.url and not any(k[1] == "sol ring" for k in store.rows)
-        assert "The saved description was removed." in page.locator("main").inner_text()
+        assert "The card model was removed." in page.locator("main").inner_text()
         assert page.locator(".report .kept button").count() == 0
         assert not errors, errors
         browser.close()
@@ -771,7 +772,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         page.locator("#forge-more button").click()
         page.wait_for_load_state("networkidle")
         assert page.url.endswith("/history/reports/rep_more")
-        assert len(fake.started) == 1 and fake.started[0]["games"] == 4
+        assert len(fake.started) == 1 and fake.started[0]["games"] == 5  # the games-per-report default
         assert [d.get("precon") for d in fake.started[0]["decks"][1:]] == seats[1:]
         assert page.locator("#forge-more button").count() == 0  # none while the games play
         # a refusal, shown from its code
@@ -787,7 +788,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         assert h.post("/history/reports/rep_more/forge/more", data={}).status_code == 403
         csrf = h.get("/history/reports/rep_more").text.split("name='csrf' value='", 1)[1].split("'", 1)[0]
         ended = h.post("/history/reports/rep_more/forge/more", data={"csrf": csrf})
-        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=ended")
+        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=forge_running")
         assert h.post("/history/reports/nope/forge/more", data={"csrf": csrf}).status_code == 404
 
 

@@ -20,12 +20,12 @@ import re
 import time
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, unquote
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import prefs, profile, ui
+from . import alerts_push, notify, prefs, profile, ui
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -62,7 +62,7 @@ EMAIL_ROWS = (
     ("contactable", "Other members can contact me", "Lets members message you through Archidekt."),
     ("newsletter", "Archidekt's newsletter", "Occasional email about the site."),
     ("comment_emails", "Email me when someone comments", "On your decks and your forum posts."),
-    ("site_notifications", "Archidekt notifications", "Shows Archidekt's notifications in the bell."),
+    ("site_notifications", "Archidekt alerts", "Shows Archidekt's alerts in the bell."),
 )
 # the new-device defaults profile.PREFERENCES supports, in the mockup's order: (name, label,
 # help, choices as (value, words) for a drop-down, or None for a switch)
@@ -104,6 +104,9 @@ KIND_WORDS = {
     "Contest": "Contest",
 }
 _DECK_URL = re.compile(r"https://archidekt\.com/decks/(\d+)$")
+_THREAD_URL = re.compile(r"https://archidekt\.com/forum/thread/(\d+)$")
+# Archidekt's profile address names a user; /users/ here takes a username, so a bare number stays there
+_USER_URL = re.compile(r"https://archidekt\.com/user/([^/?#]*[^/?#\d][^/?#]*)$")
 
 CSS = """
 .acc .pr-me{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
@@ -238,6 +241,9 @@ async def notification_list(decks: Any, sub: str) -> dict[str, Any]:
         return hit[1]
     got = await profile.notifications(decks, sub)
     _LIST[sub] = (time.monotonic() + LIST_TTL, got)
+    if notify.prefs(decks.db, sub)["ntfy_on"]:
+        # what the member just saw here is never pushed to their phone later (alerts_push.py)
+        alerts_push.seen_in_bell(decks.db, sub, profile.user_id(decks, sub), got["notifications"])
     # the site zeroes its badge once the list was read (no mark-as-read request was seen in its
     # scripts)
     _COUNT[sub] = (time.monotonic() + COUNT_TTL, 0)
@@ -436,7 +442,7 @@ def account_cards(
             )
         )
     email = (
-        f"<div class='card' id='email'><h2>Email and notifications on Archidekt</h2>{note('email')}"
+        f"<div class='card' id='email'><h2>Email and alerts on Archidekt</h2>{note('email')}"
         + "".join(email_rows)
         + "</div>"
     )
@@ -519,14 +525,14 @@ def collection_visibility(
     if err:
         strip = ui.notice(err, "error", role="alert")
     elif ok == "public":
-        strip = ui.notice("Your collection is public on Archidekt.", "ok", role="status")
+        strip = ui.notice("Your binder is public on Archidekt.", "ok", role="status")
     elif ok == "private":
-        strip = ui.notice("Your collection is private on Archidekt.", "ok", role="status")
+        strip = ui.notice("Your binder is private on Archidekt.", "ok", role="status")
     elif ok == "unconfirmed":
         strip = ui.notice(UNCONFIRMED, "warn", role="status")
     box = ui.box(
         "col-vis",
-        "Make your collection public?",
+        "Make your binder public?",
         f"<form id='col-vis-f' method='post' action='/account/profile'>{hidden}"
         "<input type='hidden' name='on' value='1'><input type='hidden' name='confirmed' value='1'>"
         "<p>Anyone can then see every card you own, with finish and condition, on your Archidekt profile. "
@@ -545,20 +551,26 @@ def collection_visibility(
 
 
 def _gateway_url(url: str | None) -> str | None:
-    """A deck's notification opens the gateway's own deck page; everything else stays on Archidekt."""
+    """A notification opens the gateway's own page where it has one: a deck's, a forum thread's
+    (a reply, a sticky, news of a feature) and a follower's profile. News and contests stay on
+    Archidekt."""
     if not url:
         return None
-    m = _DECK_URL.match(url)
-    return f"/decks/{m.group(1)}" if m else url
+    if m := _DECK_URL.match(url):
+        return f"/decks/{m.group(1)}"
+    if m := _THREAD_URL.match(url):
+        return f"/forum/thread/{m.group(1)}"
+    if m := _USER_URL.match(url):
+        return f"/users/{quote(unquote(m.group(1)), safe='')}"
+    return url
 
 
 def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
     """The bell's list: each row the notification's text and kind, tinted while unseen, a link to
-    its target where Archidekt names one (the gateway's deck page for a deck)."""
+    its target where Archidekt names one (the gateway's own page where it has one)."""
     if not linked:
         return (
-            "<p class='muted'>Link your Archidekt account under Account details to see its notifications "
-            "here.</p>"
+            "<p class='muted'>Link your Archidekt account under Account details to see its alerts here.</p>"
         )
     rows = got.get("notifications") or []
     if not rows:
@@ -586,19 +598,8 @@ def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
 
 BELL_NOTE = (
     "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. "
-    "Turn them off under Account › Email and notifications."
+    "Turn them off under Account › Email and alerts."
 )
-
-
-def home_widget() -> str:
-    """Home's On Archidekt widget: the count comes after the page has loaded (static/bell.js)."""
-    return (
-        f"<div class='wdg' data-bell-widget><a class='lab' href='/notifications'>{icon('bell')}On Archidekt"
-        "</a>"
-        "<span class='big'><span data-bell-big>…</span></span>"
-        "<span class='det'><span data-bell-det>Archidekt's notifications</span></span>"
-        "<span class='go'><a class='btn btn-plain' href='/notifications' data-bell-open>Open</a></span></div>"
-    )
 
 
 # -- the routes --------------------------------------------------------------------------------------------
@@ -801,7 +802,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             except DeckError as exc:
                 error = str(exc)
         if cross_site and is_linked:
-            body = f"<p><a class='btn' href='/notifications'>{icon('bell')} Show my notifications</a></p>"
+            body = f"<p><a class='btn' href='/notifications'>{icon('bell')} Show my alerts</a></p>"
         elif error:
             body = ui.notice(error, "error", role="alert")
         else:
@@ -813,9 +814,9 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             )
         badge = f" <span class='bell-badge'>{got['unseen']} new</span>" if got.get("unseen") else ""
         return page(
-            "Notifications",
-            f"<div class='bell-page'><div class='ui-head'><h1>Notifications{badge}</h1></div>"
-            "<p class='ui-sub'>Your notifications from Archidekt.</p>"
+            "Alerts",
+            f"<div class='bell-page'><div class='ui-head'><h1>Alerts{badge}</h1></div>"
+            "<p class='ui-sub'>Your alerts from Archidekt.</p>"
             f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
             "<div class='ui-actions'><a class='btn btn-plain' href='/account/details#email'>"
             f"{icon('settings')} Settings</a>"

@@ -18,7 +18,13 @@ package local.mtgassistantgateway.app
  * nonce and the photo's sequence number so stale or spoofed events are dropped: the page's own
  * `scan:auto-added`, `scan:unsure`, `scan:unidentified` and `scan:undo` events, then `done` when
  * the photo has been fully processed, with the status line the page would have shown, or `no-card`
- * in its place when continuous mode found no card outline and so read nothing. In continuous mode the page's own rules apply
+ * in its place when continuous mode found no card outline and read nothing. Without an outline the
+ * page's own rule applies (`noOutlineFrame`, pages from 0.7.46): after a few such photos in a row it
+ * reads the dashed box, and a card found there only ever waits on the page for a tap (`unsure`,
+ * then `done` with `pending`); older pages read nothing without an outline. The page's
+ * text recognition starts loading as soon as the phone camera opens ([BEGIN]; the first use
+ * downloads about 8 MB), and its progress comes back as `ocr` events (`state` loading, ready, failed
+ * or missing, `progress` 0 to 1) for the panel's status line. In continuous mode the page's own rules apply
  * (`state.continuous`): a clean, unambiguous read is added without a tap, once per card shown, and
  * a shaky one waits for a tap on the page.
  *
@@ -72,6 +78,12 @@ object ScanGlue {
       send({ type: n, seq: seq, name: d.name || d.text || '', total: d.total, count: d.count, status: d.status, foil: !!d.foil, undoable: left });
     });
   });
+  // Text recognition loading (pages from 0.7.46): the panel shows the progress, and each step tells
+  // it the page is still at work on a photo it was handed.
+  document.addEventListener('scan:ocr', function (e) {
+    var d = e.detail || {};
+    send({ type: 'ocr', seq: seq, state: String(d.state || ''), progress: typeof d.progress === 'number' ? d.progress : 0 });
+  });
   var total = function (s) { return s.state.items.reduce(function (n, it) { return n + (it.quantity || 0); }, 0); };
   function statusBox() {
     var root = document.getElementById('scan-app') || document.body;
@@ -113,11 +125,18 @@ object ScanGlue {
     var flat = s.flattenCard(c, guide ? g : null);
     if (flat) {
       s.state.noCardFrames = 0;
-      await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), s.infoRegionOf(0, 0, flat.width, flat.height), flat);
+      // flatInfoRegion (pages from 0.7.46) keeps the info line's second row whole; older pages lack it.
+      var info = s.flatInfoRegion ? s.flatInfoRegion(flat.width, flat.height) : s.infoRegionOf(0, 0, flat.width, flat.height);
+      await s.scanRegion(flat.canvas, s.flatTitleRegion(flat.width, flat.height), info, flat);
     } else if (s.state.continuous) {
-      // Continuous mode reads nothing without an outline (the page does the same): count the
-      // frame so a card that has left comes back as new, and say so.
-      s.noCardFrame();
+      // No outline: the page counts the frame (so a card that has left comes back as new) and, after
+      // a few in a row, reads the dashed box; a card found there waits on the page for a tap. A photo
+      // that placed no card says so.
+      if (typeof s.noOutlineFrame === 'function') {
+        if (await s.noOutlineFrame(c, g) === 'read') return;
+      } else {
+        s.noCardFrame();
+      }
       send({ type: 'no-card', seq: n, frames: s.state.noCardFrames, total: total(s) });
       return 'no-card'; // stands in for 'done'
     } else {
@@ -135,6 +154,10 @@ object ScanGlue {
       s.showTab('list'); // stops the page's own camera; the list shows what has been added so far
       s.state.pending = null; s.state.continuous = false;
       statusBox();
+      // Start loading text recognition now, while the person frames the first card, rather than on
+      // the first photo (the page's own camera tab, which would have started it, is not shown).
+      if (s.state.ocrState === 'missing') send({ type: 'ocr', seq: seq, state: 'missing', progress: 0 });
+      else if (typeof s.ensureOcr === 'function') s.ensureOcr();
       return 'ok';
     },
     setContinuous: function (on) {

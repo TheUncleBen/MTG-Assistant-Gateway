@@ -83,7 +83,9 @@ def test_new_icons_are_drawn_in_the_theme_style() -> None:
 @pytest.mark.parametrize("key,word,colour,icon", STATUS_TABLE)
 def test_status_labels_match_the_standard(key: str, word: str, colour: str, icon: str) -> None:
     out = ui.status_label(key)
-    assert out == f"<span class='ui-lbl {colour}'>{theme.icon(icon)}{word}</span>"
+    # Applying draws the theme's one animated spinner (0.7.46), the others their icon
+    mark = theme.SPINNER if icon == "spinner" else theme.icon(icon)
+    assert out == f"<span class='ui-lbl {colour}'>{mark}{word}</span>"
 
 
 @pytest.mark.parametrize("key,word,colour,icon", RISK_TABLE)
@@ -282,7 +284,7 @@ def test_table_pieces() -> None:
     )
     assert ui.day_row("Today") == "<div class='tr daygroup'>Today</div>"
     link = ui.open_link("/proposals/1", "Review")
-    assert "class='act linkbtn'" in link and "aria-label='Review'" in link and "sm-only chev" in link
+    assert "class='act ui-cap'" in link and "aria-label='Review'" in link and "sm-only chev" in link
 
 
 def test_pager_says_where_you_are_and_never_caps_silently() -> None:
@@ -307,7 +309,7 @@ def test_selection_bar_and_side_panel() -> None:
         "#1 Sol Ring", "<p>body</p>", label="Proposal #1", close_href="/p", back_text="Back"
     )
     assert panel.startswith("<aside class='ui-drawer' aria-label='Proposal #1'>")
-    assert "<p class='page-only'><a href='/p'>← Back</a></p>" in panel
+    assert "<p class='page-only'><a class='ui-cap' href='/p'>← Back</a></p>" in panel
     assert "class='close btn panel-only' href='/p' aria-label='Close' title='Close'>" in panel
     assert ui.split("L") == "<div class='ui-split'>L</div>"
     assert (

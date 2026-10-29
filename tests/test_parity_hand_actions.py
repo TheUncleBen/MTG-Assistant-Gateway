@@ -199,7 +199,7 @@ async def test_tag_box_suggests_archidekts_tags_gently(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_delete_needs_the_typed_name_and_keeps_a_snapshot_and_backup(stack: Stack) -> None:
+async def test_delete_needs_the_typed_name_and_keeps_a_snapshot_only(stack: Stack) -> None:
     b = await linked(stack)
     db = stack.h.app.state.gateway.db
     try:
@@ -211,9 +211,10 @@ async def test_delete_needs_the_typed_name_and_keeps_a_snapshot_and_backup(stack
         assert r.status_code == 303 and r.headers["location"] == "/decks?ok=deleted"
         assert stack.ark.deleted == [42] and 42 not in stack.ark.decks
         snaps = [s for s in db.list_snapshots("user-1") if s["deck_id"] == "42"]
-        assert snaps and snaps[0]["proposal_id"] is None and snaps[0]["backup_deck_id"]
-        copy = stack.ark.decks[int(snaps[0]["backup_deck_id"])]
-        assert copy["name"].startswith("Sample Commander Deck (backup") and len(copy["cards"]) > 50
+        assert snaps and snaps[0]["proposal_id"] is None and snaps[0]["card_count"] > 50
+        # no backup copy on Archidekt for a delete (assistant tool review, 2026-10-28)
+        assert not snaps[0]["backup_deck_id"]
+        assert not any("(backup" in str(d.get("name")) for d in stack.ark.decks.values())
         r = await b.http.get("/decks?ok=deleted", headers=NAV)
         assert "Deck deleted on Archidekt" in r.text
         # someone else's deck cannot be deleted
@@ -544,7 +545,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
     stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
     checks = stats["checks"]
     assert set(checks) == {
-            "deck_size", "commander_zone", "colour_identity_violations", "singleton_violations",
+            "deck_size", "commander_zone", "color_identity_violations", "singleton_violations",
             "copy_limit_violations", "uncategorised", "problems", "ok",
             "format_family", "legality", "companion", "bracket",  # every-format checks (0.7.2)
             "legal", "legal_problems",  # the deck's verdict, as archidekt.com's banner gives it
@@ -583,7 +584,8 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
             await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "options": {"nn": 5}})
         )
         assert bad["ok"] is False and bad["error"] == "invalid" and "options.nn" in bad["message"], bad
-        # compare_decks simulate=true is the paired A/B (goldfish_ab), with its own knobs, not stored
+        # compare_decks simulate=true is the paired A/B (goldfish_ab), with its own knobs, kept as a
+        # Comparison report (0.7.46)
         before = len(gw.reports.list("user-1"))
         ab = structured(
             await call(
@@ -602,7 +604,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
         )  # gateway rendering, commander first
         assert args["allow_different_commanders"] is True and args["annotations_b"] == [{"card": "Opt"}]
         assert "opponents" not in args
-        assert len(gw.reports.list("user-1")) == before  # an A/B is not a stored report
+        assert len(gw.reports.list("user-1")) == before + 1 and ab["stored"] is True
         bad = structured(
             await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Opt", "simulate": True,
                                                        "options": {"opponents": 2}})

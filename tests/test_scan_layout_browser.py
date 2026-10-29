@@ -1,5 +1,5 @@
 """The Scan page in headless Chromium, in a browser and as inside the Android app (its user agent
-and its window.MtgNative, which adds the "Phone camera" button): one column at the form width,
+and its window.MtgNative, which makes the shutter open the phone camera): one column at the form width,
 the options row and the capture bar each one row, the capture button a circle in the middle, the
 site's icons and no emoji, one orange button, 44 px targets on touch, and the row menus of the
 list and of the saved scans. Needs no OCR assets, unlike test_scan_browser.py. Skipped without a
@@ -159,10 +159,9 @@ def test_one_column_one_row_bars_and_a_round_centred_capture_button(
             # the page keeps the standard's form column, not a width of its own
             assert _style(page.locator("main.wrap"), "maxWidth") == "728px"
             assert _style(page.locator(".cam-panel"), "display") == "flex"
-            # the app's phone camera button closes the options row; a browser has none
-            assert page.locator("#phone-camera").count() == (1 if app else 0)
-            if app:
-                assert page.locator(".scan-opts > :last-child").get_attribute("id") == "phone-camera"
+            # Auto closes the options row; in the app the shutter and the viewfinder are the phone camera
+            assert page.locator(".scan-opts > :last-child").get_attribute("id") == "auto-switch"
+            assert page.locator("#open-phone-camera").count() == (1 if app else 0)
             # the × sits inside the Set box, and the hint is its tooltip
             box, clear = (
                 page.locator(".setbox").bounding_box(),
@@ -248,9 +247,9 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         assert _menu_items(page) == [
             "Open card",
             "Add to deck…",
-            "Add to collection",
+            "Add to binder",
             "Watch this card",
-            "Change printing…",
+            "Printings…",
             "One fewer",
             "One more",
             "Copy name",
@@ -266,7 +265,7 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         page.evaluate("() => document.body.removeAttribute('data-watchlist')")  # watchlists off
         rows.first.locator(".name > span").first.click(button="right")
         expect(menu).to_be_visible()
-        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to collection", "Change printing…"]
+        assert _menu_items(page)[:4] == ["Open card", "Add to deck…", "Add to binder", "Printings…"]
         page.evaluate("() => document.body.setAttribute('data-watchlist', '')")
         page.keyboard.press("Escape")
         expect(menu).to_have_count(0)
@@ -301,11 +300,11 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         page.keyboard.press("Shift+F10")
         expect(menu).to_be_visible()
         assert menu.locator(".head").inner_text() == "Cultivate"
-        assert "Change printing…" not in _menu_items(page)  # no printing without a match
+        assert "Printings…" not in _menu_items(page)  # no printing without a match
         page.keyboard.press("Escape")
-        # Change printing… opens the printing picker
+        # Printings… opens the printing picker
         rows.first.locator(".kebab").click()
-        menu.get_by_role("menuitem", name="Change printing…").click()
+        menu.get_by_role("menuitem", name="Printings…").click()
         expect(page.locator("#picker .sheet[role=dialog]")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#picker")).to_have_count(0)
@@ -497,5 +496,116 @@ def test_the_card_size_switch_sizes_the_list_pictures_and_the_picker_tiles(
             "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         assert over <= 0
+        assert errors == []
+        browser.close()
+
+
+def test_photo_always_chooses_a_picture(server: Server) -> None:  # noqa: F811
+    """Photo is "choose a picture" on every platform: no capture attribute, which made Chrome on
+    Android open the camera while the app's file chooser opened the gallery."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), 390, False, "light")
+        file = page.locator("#photo-file")
+        assert file.get_attribute("accept") == "image/*"
+        assert file.get_attribute("capture") is None
+        assert errors == []
+        browser.close()
+
+
+def test_the_intro_folds_after_the_first_visit_and_how_it_works_is_a_button(server: Server) -> None:  # noqa: F811
+    """The intro is open on the first visit only; after that it is folded to its title, so the
+    camera starts on a phone's first screen. "How it works" is a button (not a blue link) that
+    opens it, and Got it still hides it for good."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        for scheme in ("light", "dark"):
+            _intro_round(p, exe, server, sid, scheme)
+
+
+def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> None:  # noqa: F811
+    server.db.delete_pref("user-1", "scan.intro")
+    browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+    ctx = browser.new_context(
+        viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme=scheme
+    )
+    ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+    page = ctx.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+
+    def visit() -> None:
+        page.goto(f"{server.base}/scan")
+        page.wait_for_function("() => window.__scan && window.__scan.showTab")
+
+    visit()
+    assert page.locator("#intro").evaluate("e => e.open") is True
+    for _ in range(50):  # the save goes out after the page acts
+        if server.db.get_pref("user-1", "scan.intro") == "seen":
+            break
+        page.wait_for_timeout(100)
+    assert server.db.get_pref("user-1", "scan.intro") == "seen"
+    # The second visit: folded to its title, and the camera view starts above 450 px.
+    visit()
+    assert page.locator("#intro").count() == 1
+    assert page.locator("#intro").evaluate("e => e.open") is False
+    top = page.locator("#camera").bounding_box()["y"]
+    assert top < 450, top
+    # How it works: a capsule button in the text colour that opens the intro.
+    how = page.locator("#how-it-works")
+    assert how.evaluate("e => e.tagName") == "BUTTON"
+    link = page.evaluate(
+        "() => { const a = document.createElement('a'); a.href = '#'; document.body.append(a);"
+        " const c = getComputedStyle(a).color; a.remove(); return c; }"
+    )
+    assert _style(how, "color") != link
+    assert _style(how, "color") == _style(page.locator("main h1").first, "color")
+    box = how.bounding_box()
+    assert box["height"] >= 43.5 and box["width"] >= 43.5, box
+    how.click()
+    assert page.locator("#intro").evaluate("e => e.open") is True
+    # Got it hides it on every later visit.
+    page.locator("#intro button:has-text('Got it')").click()
+    assert page.locator("#intro").count() == 0
+    for _ in range(50):
+        if server.db.get_pref("user-1", "scan.intro") is True:
+            break
+        page.wait_for_timeout(100)
+    visit()
+    assert page.locator("#intro").count() == 0
+    how.click()
+    assert page.locator("#intro").evaluate("e => e.open") is True
+    assert errors == [], errors
+    browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 390, 840])
+def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, width: int) -> None:  # noqa: F811
+    """With text at twice its size the "Fit the card…" hint stays readable and off the dashed
+    name box (it covered it, inside the viewfinder)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
+        page.evaluate("() => { document.documentElement.style.fontSize = '32px'; }")
+        page.evaluate("() => window.__scan.showTab('camera')")
+        hint = page.get_by_text("Fit the card in the frame, name in the dashed box")
+        assert hint.is_visible()
+        h, box = hint.bounding_box(), page.locator("#camera .guide .title").bounding_box()
+        apart = (
+            h["y"] + h["height"] <= box["y"]
+            or box["y"] + box["height"] <= h["y"]
+            or h["x"] + h["width"] <= box["x"]
+            or box["x"] + box["width"] <= h["x"]
+        )
+        assert apart, (h, box)
+        # and wraps inside the window (the site's own tab bar is another matter, outside the page)
+        assert h["x"] >= 0 and h["x"] + h["width"] <= width, h
         assert errors == []
         browser.close()

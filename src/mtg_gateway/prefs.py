@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .theme import VIEW_COOKIE, VIEW_KINDS
+from .theme import CARD_SIZE, CARD_SIZE_PAGES, VIEW_COOKIE, VIEW_KINDS
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -32,12 +32,21 @@ if TYPE_CHECKING:
     from .db import Database
 
 VIEW = "view."  # + one of theme.VIEW_KINDS
-CARD_SIZE = "card.size"
+# CARD_SIZE: the one size every page used before 2026-10-28, still read by a page without its own;
+# CARD_SIZE + "." + one of theme.CARD_SIZE_PAGES: that page's own size
 CARD_SIZES = ("s", "m", "l")
 DECKSTATS = "deckstats"
 EDHPLAY_STEPS = "edhplay.steps"
 SCAN_INTRO = "scan.intro"
 STACK = "stack:"  # + deck id + ":" + grouping
+# The Binder's Add box and the Watchlist's Watch form, as last used with "Use ... next time" ticked
+# (2026-10-28): {finish, condition, language} and {finish, alert_pct}. A card menu's "Add to
+# binder" or Watch, which asks nothing, uses them too.
+BINDER_ADD = "binder.add"
+WATCH_ADD = "watch.add"
+_FINISHES = ("nonfoil", "foil", "etched")
+_CONDITIONS = ("NM", "LP", "MP", "HP", "DMG")
+_LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
 MAX_STACK_ORDERS = 150  # the newest 150; saving one more forgets the oldest
 MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # Set by "Forget my view choices" and kept: from then on a device's pre-0.7.29 choices (a view
@@ -45,6 +54,8 @@ MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # the update can't bring the forgotten choices back. Not a choice: the pages' API can't read or
 # set it.
 FORGOTTEN = "prefs.forgotten"
+
+CARD_SIZE_NAMES = (CARD_SIZE, *(f"{CARD_SIZE}.{page}" for page in CARD_SIZE_PAGES))
 
 _STACK_NAME = re.compile(r"^stack:(\d{1,12}):([a-z0-9_-]{0,40})$")
 _WORD = re.compile(r"^[a-z0-9_-]{1,40}$")
@@ -55,10 +66,31 @@ def valid(name: str, value: Any) -> bool:
     store holds only what the pages read back)."""
     if name.startswith(VIEW):
         return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.match(value))
-    if name == CARD_SIZE:
+    if name in CARD_SIZE_NAMES:
         return value in CARD_SIZES
-    if name in (EDHPLAY_STEPS, SCAN_INTRO):
+    if name == EDHPLAY_STEPS:
         return value is True
+    if name == SCAN_INTRO:  # "seen": shown once, folded from then on; True: dismissed with Got it
+        return value is True or value == "seen"
+    if name == BINDER_ADD:
+        return (
+            isinstance(value, dict)
+            and set(value) <= {"finish", "condition", "language"}
+            and value.get("finish", "nonfoil") in _FINISHES
+            and value.get("condition", "NM") in _CONDITIONS
+            and value.get("language", "EN") in _LANGUAGES
+        )
+    if name == WATCH_ADD:
+        pct = value.get("alert_pct") if isinstance(value, dict) else None
+        return (
+            isinstance(value, dict)
+            and set(value) <= {"finish", "alert_pct"}
+            and value.get("finish", "nonfoil") in _FINISHES
+            and (
+                pct is None
+                or (isinstance(pct, int | float) and not isinstance(pct, bool) and 0 < pct <= 1000)
+            )
+        )
     if name == DECKSTATS:
         return (
             isinstance(value, dict)
@@ -95,7 +127,7 @@ def save(db: Database, sub: str, name: str, value: Any) -> bool:
 def valid_name(name: str) -> bool:
     return (
         (name.startswith(VIEW) and name[len(VIEW) :] in VIEW_KINDS)
-        or name in (CARD_SIZE, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO)
+        or name in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD)
         or bool(_STACK_NAME.match(name))
     )
 
@@ -105,11 +137,17 @@ def forget(db: Database, sub: str) -> int:
     dismissed tips. Other things kept on the account (notifications, approval mode) stay."""
     n = db.delete_prefs(
         sub,
-        names=(CARD_SIZE, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO),
+        names=(*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO),
         prefixes=(VIEW, STACK),
     )
     db.set_pref(sub, FORGOTTEN, True)
     return n
+
+
+def choices(db: Database, sub: str, name: str) -> dict[str, Any]:
+    """The remembered Add or Watch choices (BINDER_ADD, WATCH_ADD), or {}."""
+    value = db.get_pref(sub, name)
+    return value if isinstance(value, dict) and valid(name, value) else {}
 
 
 def copies_refused(db: Database, sub: str) -> bool:
@@ -117,9 +155,11 @@ def copies_refused(db: Database, sub: str) -> bool:
     return db.get_pref(sub, FORGOTTEN) is True
 
 
-def card_size(db: Database, sub: str | None) -> str:
-    size = db.get_pref(sub, CARD_SIZE) if sub else None
-    return size if size in CARD_SIZES else "m"
+def card_sizes(db: Database, sub: str, page: str) -> dict[str, Any]:
+    """What theme.set_card_size needs to draw ``page``: its own size, the printings dialog's, the
+    one size chosen before for every page, and the "forgotten" marker."""
+    names = (CARD_SIZE, f"{CARD_SIZE}.{page}", f"{CARD_SIZE}.printings", FORGOTTEN)
+    return {n: v for n in names if (v := db.get_pref(sub, n)) is not None}
 
 
 def from_this_site(request: Request) -> bool:

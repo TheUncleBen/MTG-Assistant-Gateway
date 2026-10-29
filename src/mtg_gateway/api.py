@@ -23,9 +23,11 @@ from . import deck_stats, modes, prefs
 from .archidekt import page_turn
 from .decks import (
     DeckError,
+    changed_anything,
     current_client,
     edit_mismatches,
     is_outside_category,
+    one_click,
     parse_changes,
     printing_not_shown,
     scopes_allow_writes,
@@ -65,6 +67,7 @@ STATUS_FOR = {
     "auth": 409,
     "backup_failed": 502,
     "verify_mismatch": 502,
+    "deck_being_made": 409,
 }
 
 
@@ -276,8 +279,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
         from .deckpage import (
+            GROUPS,
+            ROW_VIEWS,
+            SORTS,
+            VIEWS,
             card_image,
+            card_row,
             checks_panel_html,
+            group_cards,
+            image_card,
             legal_problems,
             legality_chip_html,
             legality_panel_html,
@@ -292,15 +302,33 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+        # the page's view, grouping and sort (a quick add draws its new card in place: each
+        # touched row then carries its markup and the stack it belongs in)
+        draw = data.get("view") if data.get("view") in VIEWS else None
+        grouping = data.get("group") if data.get("group") in GROUPS else "category"
+        sorting = data.get("sort") if data.get("sort") in SORTS else "name"
 
         def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
             """The rows of the touched cards and the page fragments, from one read of the deck."""
             stats = deck_stats.compute(deck)
             checks = stats.get("checks") or {}
+            shown = [c for c in deck.cards if front_face(c.name).casefold() in touched]
+            drawn: dict[int, dict[str, Any]] = {}
+            if draw and shown:
+                owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} or None
+                where = {id(c): name for name, group in group_cards(deck, grouping, sorting) for c in group}
+                for c in shown:
+                    html = (
+                        card_row(c, deck=deck, view=draw, owned=owned)
+                        if draw in ROW_VIEWS
+                        else image_card(c, deck=deck, owned=owned)
+                    )
+                    drawn[id(c)] = {"html": html, "stack": where.get(id(c))}
             return {
                 "stale": stale,
                 "rows": [
                     {
+                        **drawn.get(id(c), {}),
                         "name": c.name,
                         "qty": c.quantity,
                         "zone": "main" if deck.in_deck(c) else "side",
@@ -316,8 +344,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "image": card_image(c),
                         "price": c.price,
                     }
-                    for c in deck.cards
-                    if front_face(c.name).casefold() in touched
+                    for c in shown
                 ],
                 "stats": {
                     # the banner's verdict: every format rule met, the deck size included
@@ -331,6 +358,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     "land_count": stats.get("land_count", 0),
                     "side_count": sum(c.quantity for c in deck.side_cards),
                     "price_total": stats.get("price_total"),
+                    # no card priced: the page draws "–" for the cost, as it does on a load
+                    "priced_cards": stats.get("priced_cards", 0),
                     "salt_total": stats.get("salt_total"),
                     "format": deck.format,
                 },
@@ -346,6 +375,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 raise DeckError("invalid", "names must be a list of up to 40 card names")
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
+        decks.refuse_while_made(deck_id)  # its new-deck apply is still putting the cards in
+        # the proposal's read and the apply's verify read, shared with the apply (decks.one_click);
+        # set for the rest of this request only (a request runs in a context of its own)
+        kept: dict[str, Any] = {}
+        one_click.set(kept)
         pid = data.get("proposal_id")
         answer = pid is not None
         if answer:
@@ -361,7 +395,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if row.get("created_by_client") != BROWSER_CLIENT_ID:
                 raise DeckError(
                     "invalid",
-                    "That proposal was made by an assistant. Approve it on its review page.",
+                    "That proposal was made by an assistant. Apply it on its review page.",
                     review_url=f"/proposals/{pid}",
                 )
             if p.get("state") != "pending":
@@ -397,13 +431,39 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
         # gateway's snapshot but not the extra copy on Archidekt: one deck copy per click
         # would fill the backup folder and slow each save by paced Archidekt writes.
-        result = await decks.apply(
-            who.sub,
-            pid,
-            via="browser",
-            archidekt_backup=False,
-            version=data.get("version") if answer else None,
-        )
+        try:
+            result = await decks.apply(
+                who.sub,
+                pid,
+                via="browser",
+                archidekt_backup=False,
+                version=data.get("version") if answer else None,
+            )
+        except DeckError as exc:
+            # The write may have landed although Archidekt never answered (a timeout): the page
+            # never says "not saved" then. It gets what Archidekt has now and draws that (0.7.46
+            # audit D-04). A failure that changed nothing is answered as it is.
+            stored = (state.db.get_proposal(pid, who.sub) or {}).get("result") or {}
+            if not changed_anything(stored):
+                raise
+            try:
+                deck = await decks.get_own_deck(who.sub, deck_id)
+            except DeckError:
+                raise exc from None
+            asked = parse_changes(p.get("changes"), row_flags=True)
+            touched = {front_face(ch.card_name).casefold() for ch in asked}
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": exc.kind,
+                    "message": str(exc),
+                    **exc.extra,
+                    "may_have_changed": True,
+                    "proposal_id": pid,
+                    **view(deck, touched, stale=False),
+                },
+                STATUS_FOR.get(exc.kind, 400),
+            )
         applied = result.get("state") == "applied"
         out: dict[str, Any] = {
             "applied": applied,
@@ -414,10 +474,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if not applied:  # a large edit still running: the page says so and offers the review page
             return ok(out, 202)
         changes = parse_changes(result.get("changes") or p.get("changes"), row_flags=True)
-        # The apply verified the deck once; this read is the one the page draws from. Archidekt's
-        # reads have been seen to lag a write, so a deck that does not show the change yet is
-        # read once more after a short pause, and the answer says when it still has not caught up.
-        deck = await decks.get_own_deck(who.sub, deck_id)
+        # The apply's verify read is the one the page draws from (0.7.46 audit D-01: no read of its
+        # own). Archidekt's reads have been seen to lag a write, so a deck that does not show the
+        # change yet is read once more after a short pause, and the answer says when it still has
+        # not caught up.
+        deck = kept.get("verified") or await decks.get_own_deck(who.sub, deck_id)
         stale = False
         try:
             before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
@@ -429,6 +490,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
+        # the rules this save broke that the deck kept before (the same judgement that makes an
+        # assistant's proposal high risk), for the page's Saved note: saved, but said
+        broke = p.get("legality_after") or []
+        if broke:
+            out["warnings"] = [f"The deck now breaks its format's rules: {b}." for b in broke]
         return ok(out, 201)
 
     @route("/decks/{deck_id}/custom_cards", "POST", write=True)
@@ -463,7 +529,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if row.get("created_by_client") != BROWSER_CLIENT_ID:
                 raise DeckError(
                     "invalid",
-                    "That proposal was made by an assistant. Approve it on its review page.",
+                    "That proposal was made by an assistant. Apply it on its review page.",
                     review_url=f"/proposals/{pid}",
                 )
             if p.get("state") != "pending":

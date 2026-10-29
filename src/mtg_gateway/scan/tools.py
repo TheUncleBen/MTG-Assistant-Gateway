@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
     from ..cards import CardLinks
 
+# card_printings' note, true whether or not the app shows the printings card
+PRINTINGS_NOTE = (
+    "In an app that shows cards, every printing with its picture is on the card in the chat, where the "
+    "user can tap the one they mean. Otherwise ask which set, then call again with set_code."
+)
+
 CARD_FIELDS = (
     "name",
     "set",
@@ -39,12 +45,13 @@ def _sub() -> str:
 
 
 def _err(exc: ScanError) -> dict[str, Any]:
-    return {"ok": False, "error": exc.kind, "message": str(exc)}
+    return {"ok": False, "error": exc.kind, "message": str(exc), **getattr(exc, "extra", {})}
 
 
-# Card fields the Scan page draws with (image links, the Scryfall page) and the assistant has no
-# use for: left out of what the tools return, which keeps a card's printings list small.
-_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri")
+# Card fields the Scan page draws with (image links, the Scryfall page, the prices behind its
+# running value) and the assistant has no use for: left out of what the tools return, which keeps
+# a card's printings list small.
+_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri", "prices")
 
 
 def _slim(card: Any) -> Any:
@@ -113,7 +120,9 @@ def summarize_sets(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(sets.values(), key=lambda r: str(r.get("newest") or ""), reverse=True)
 
 
-def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks | None = None) -> None:
+def add_scan_tools(
+    server: MCPServer, service: ScanService, *, links: CardLinks | None = None, public_url: str = ""
+) -> None:
     @server.tool(
         name="resolve_cards",
         title="Resolve card names to exact cards",
@@ -128,8 +137,9 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "out on paper; the newer ones passed over are listed in `newer_printings`. "
             "Returns a decklist and `changes` ready for propose_deck_changes, without conflicts. "
             "In an app that shows cards, the user sees the recognized cards with pictures, can drop some, "
-            "pick among suggestions and confirm; wait for that before proposing. "
-            "Does not touch Archidekt."
+            "pick among suggestions and confirm; wait for that before proposing. One lookup per account "
+            "runs at a time: another waits its turn briefly (waited_seconds), else is refused busy with "
+            "suggested_wait (seconds). Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PICKER_CARD_URI) if links is not None else None,
@@ -143,12 +153,15 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
                 raise ScanError("invalid", "give `cards` or `text` with at least one card")
-            results = await service.resolve(inputs, owner=_sub())
+            waited: list[float] = []
+            results = await service.resolve(inputs, owner=_sub(), waited=waited)
             results = await _ask_about_ambiguous(ctx, results)
         except ScanError as exc:
             return with_card(_err(exc), None)
         described = service.describe(results)
         out = {"ok": True, **_for_assistant(described)}
+        if waited and waited[0] >= 1:  # it waited for the account's other card lookup (AT-38)
+            out["waited_seconds"] = round(waited[0])
         return with_card(out, {"rows": _picker_rows(described["cards"])} if links is not None else None)
 
     async def _ask_about_ambiguous(ctx: Context, results: list[Any]) -> list[Any]:
@@ -203,7 +216,8 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "not sold on paper (`paper: false`). Give `oracle_id` from a resolve_cards result, or `name`. "
             "Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that come in it). "
             "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
-            "rows (default 25) and `truncated` means that cap cut the list. `sets` lists the sets the card "
+            "rows (default 25) and `truncated` means that cap cut the list; `has_more` means more printings "
+            "exist than `cards` holds. `sets` lists the sets the card "
             "was printed in, newest first, not narrowed by set_code or finish; `limit` caps it too, "
             "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that "
             "shows cards, the user sees every printing's picture and taps the one they mean; wait for "
@@ -252,17 +266,16 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "cards": rows,
             # this tool's own limit cut the matching rows; nothing to do with Scryfall's pages
             "truncated": len(cards) > shown,
+            # more printings exist than the rows returned, whatever cut them
+            "has_more": len(cards) > shown or bool(out.get("has_more")),
             # Scryfall shows 175 printings a page; past that, filters only see the newest 175
-            "has_more": bool(out.get("has_more")),
+            "scryfall_more_pages": bool(out.get("has_more")),
             "total_cards": out.get("total_cards"),  # every printing of the card, before any filter
             "sets": sets[:shown],
             "sets_total": len(sets),
             "sets_truncated": len(sets) > shown,
             "sets_scope": "the sets the card was printed in, not narrowed by set_code or finish",
-            "note": (
-                "Every printing with its picture is on the card in the chat, where the user can tap the "
-                "one they mean. Without the card, ask which set, then call again with set_code."
-            ),
+            "note": PRINTINGS_NOTE,
         }
         card = None
         if links is not None:
@@ -337,3 +350,29 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             return {"ok": True, **_for_assistant(service.find_session(_sub(), session))}
         except ScanError as exc:
             return _err(exc)
+
+    @server.tool(
+        name="propose_delete_scan_session",
+        title="Ask to delete a scan session",
+        description=(
+            "Ask the user to delete one of their scan sessions, by id (scan_…) or by name. It never "
+            "deletes anything itself: it checks the scan is the user's and returns delete_url, the "
+            "Scan page's Sessions tab with the Delete question open for that scan, where only the "
+            "user's own press deletes it. Use it only when the user asked for the scan to go."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_scan_session(session: str) -> dict[str, Any]:
+        try:
+            found = service.find_session(_sub(), session)
+        except ScanError as exc:
+            return _err(exc)
+        return {
+            "ok": True,
+            "deleted": False,
+            "delete_url": f"{public_url}/scan?delete={found['id']}",
+            "message": (
+                f"Nothing is deleted until the user presses Yes under “{found['name']}” on that page; "
+                "give them the link. It can't be undone, and nothing changes on Archidekt."
+            ),
+        }

@@ -5,7 +5,7 @@ its server, and the gateway reads the same page data (``ArchidektClient.site_pag
 is not an API, so a site update can change it; when it does, the gateway says so in plain words
 (FORUM_CHANGED) and a thread still opens from its link or number. A thread itself is a comment
 tree, read through the comment API the deck comments use, and a reply is a comment
-(``propose_comment`` with ``thread_id``).
+(``propose_account_action`` comment_post with ``thread_id``).
 
 Shapes, from Archidekt's forum scripts (read 2026-10-22, not yet seen live):
 - /forum: ``forums.results`` = [{title (the group), children: [{title, description, posts}]}].
@@ -20,8 +20,9 @@ import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .archidekt import ArchidektError
 from .decklist import clean_text
-from .decks import DeckError
+from .decks import DeckError, archidekt_wait
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -61,11 +62,30 @@ def _thread_id(value: Any) -> int:
     return int(raw)
 
 
+def linked(decks: DeckService, sub: str) -> bool:
+    """Whether the member has an Archidekt account linked. The forum is public on Archidekt: its
+    pages and its threads' comments answer an anonymous reader, so a member without a link reads
+    it too (decision C8) and only replying needs the link."""
+    return decks.db.get_link(sub) is not None
+
+
+async def _anonymous(decks: DeckService, sub: str, fn: Any) -> Any:
+    """``fn()`` as an anonymous reader, inside the member's Archidekt slot (counted against their
+    budget like any other read)."""
+    async with decks.archidekt_slot(sub):
+        try:
+            return await fn()
+        except ArchidektError as exc:
+            raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
+
+
 async def _page(
     decks: DeckService, sub: str, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     try:
-        return await decks._call(sub, lambda _token, *_: decks.client.site_page_data(path, params))
+        if linked(decks, sub):
+            return await decks._call(sub, lambda _token, *_: decks.client.site_page_data(path, params))
+        return await _anonymous(decks, sub, lambda: decks.client.site_page_data(path, params))
     except DeckError as exc:
         if exc.kind == "changed":
             raise DeckError("unavailable", FORUM_CHANGED) from exc
@@ -218,7 +238,10 @@ async def thread(decks: DeckService, sub: str, thread_id: Any, *, page: int = 1)
 
     tid = _thread_id(thread_id)
     page = max(1, min(int(page or 1), MAX_PAGE))
-    body = await decks._call(sub, lambda token, *_: decks.client.comment_thread(token, tid, page=page))
+    if linked(decks, sub):
+        body = await decks._call(sub, lambda token, *_: decks.client.comment_thread(token, tid, page=page))
+    else:
+        body = await _anonymous(decks, sub, lambda: decks.client.comment_thread(None, tid, page=page))
     kids = body.get("children")
     results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
     links = kids.get("links") if isinstance(kids, dict) else {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from types import SimpleNamespace
@@ -20,7 +21,7 @@ from .decks import (
     deck_to_text,
 )
 from .report_view import MORE_DID_NOT_START
-from .reports import PAIR_UNREAD, _sentence, sim_mode
+from .reports import PAIR_UNREAD, SOURCE_COMPARE, SOURCE_LIST, _sentence, list_deck, sim_mode
 from .schemas import (
     AbOptions,
     RunOptions,
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 KEPT_MODELS_TEXT = (
     "When the gateway keeps card models (goldfish.models_saved is then true), annotations that "
     "pass its check of Mystic Forge's format are kept for the user once the run goes through (from "
-    "a stored deck's report only, and only for cards the simulator cannot play on its own) "
+    "a stored deck's report only, and only for cards the solo test cannot play on its own) "
     "(goldfish.models_kept names them, and why any was not), and the user's later solo tests play "
     "them unless the run passes its own annotation for that card (goldfish.kept_models: card, model "
     "hash, when last changed). Each user keeps their own: no one else's models play in the user's "
@@ -48,6 +49,35 @@ NOT_DECK_OR_SNAPSHOT = (
     "That is not an Archidekt deck or one of your snapshots: give the deck's number, its archidekt.com "
     "link, or a snapshot id from list_snapshots."
 )
+
+
+_METRICS_BLOCK = re.compile(r"## Metrics\s*```json.*?```", re.DOTALL)
+METRICS_LEFT_OUT = "## Metrics\n(The metrics JSON is in get_deck_report.)"
+
+
+def run_answer(report: dict[str, Any]) -> dict[str, Any]:
+    """run_deck_report's answer: the report without what only repeats itself (AT-33). The
+    statistics as stats_brief (deck_stats and get_deck_report have them whole), the simulation's
+    text without its Metrics JSON and without the copies map the report page uses, and no forge
+    section when Forge did not start (forge_status says so, with the reason)."""
+    out = dict(report)
+    if "stats" in out:
+        out["stats_brief"] = deck_stats.brief(out.pop("stats"))
+    gold = out.get("goldfish")
+    if isinstance(gold, dict):
+        gold = {k: v for k, v in gold.items() if k != "quantities"}
+        if isinstance(gold.get("text"), str):
+            gold["text"] = _METRICS_BLOCK.sub(METRICS_LEFT_OUT, gold["text"])
+        out["goldfish"] = gold
+    forge = out.get("forge")
+    if isinstance(forge, dict) and forge.get("state") == "skipped" and out.get("forge_status"):
+        out["forge"] = None
+    if out.get("report_id"):
+        out["full_report"] = (
+            f"get_deck_report report_id {out['report_id']} has the whole report: every statistic, "
+            "the solo test's metrics and the Forge games"
+        )
+    return out
 
 
 def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
@@ -121,9 +151,16 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         if not isinstance(goldfish, dict):
             if state.mf_proxy is None:
                 return "the research service is not configured on this gateway"
-            return "no simulation result came back"
+            return "no solo test result came back"
         reason = str(goldfish.get("message") or goldfish.get("text") or goldfish.get("error") or "it failed")
         return clean_text(reason)[:300].rstrip(". ")
+
+    def _input_code(goldfish: Any) -> dict[str, str]:
+        """INVALID_ARGUMENT for a simulation refused for what the deck is (no commander, too few
+        cards, decks of different sizes: reports marks it ``refused``), so a client tells it from
+        a research service that failed (UPSTREAM_ERROR, the code of simulation_failed)."""
+        refused = isinstance(goldfish, dict) and goldfish.get("refused")
+        return {"error_code": "INVALID_ARGUMENT"} if refused else {}
 
     def _looks_like_list(ref: str) -> bool:
         """A pasted decklist rather than a deck id, URL or snapshot id: more than one line, or a
@@ -164,7 +201,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Compare two decks",
         description=(
             "Cards added, removed and changed from deck a to deck b (names matched by front face, case "
-            "aside), a summary with cut and added percentages and the basic-land changes apart, and, when "
+            "aside), a summary (cut, added and kept count cards, not names, with basic lands left out; "
+            "cut and added percentages; the basic-land changes apart) and, when "
             "both sides are Archidekt decks or snapshots, stats_delta (the difference in their "
             "statistics; a pasted list has no card data for it). Give each side once: a or b is an "
             "Archidekt deck id or URL, or a snapshot id from list_snapshots; a_list or b_list is pasted "
@@ -173,12 +211,19 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "reference that is none of those is refused rather than guessed. Lines of a list that are not "
             "cards (a 'Total: 100' footer, a link) are skipped and listed in unread_lines: tell the user. "
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
-            "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
+            "'this precon versus my build'. simulate=true adds a paired solo test A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
-            "confidence intervals and significance; two Commander decks or two 60-card decks), not "
-            "stored. Does not touch Archidekt beyond reading the decks. This is the one tool for deck "
-            "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
-            "comparison of two decks. Forge seats each deck against precons of its own bracket, so two "
+            "confidence intervals and significance; two Commander decks or two 60-card decks of the "
+            "same size, commanders aside, since game for game each deck draws the same positions; "
+            "decks of different sizes each play their own games under one seed instead, unpaired: true, "
+            "side by side but not game for game, and not stored). Does "
+            "not touch Archidekt beyond reading the decks. This is the one tool for deck "
+            "differences, precon upgrades and A/B tests; its solo test A/B is the like-for-like "
+            "comparison of two decks. A tested comparison is stored as one of the user's reports "
+            "(source Comparison, on their Reports page; report_id in the result), filed under deck a "
+            "when it is a deck and labelled with the app that ran it (an app connected read-only "
+            "too). Forge seats each deck against "
+            "precons of its own bracket, so two "
             "decks' Forge win rates (one run_deck_report each) are each against their own bracket's table, "
             "even with the same options.seed; for the same table, run deck a's report with compare_with "
             "set to deck b (opponents for the higher of the two decks' brackets, so the order doesn't "
@@ -197,10 +242,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         a_list: Annotated[str | None, Field(description="Or deck a as pasted decklist text.")] = None,
         b_list: Annotated[str | None, Field(description="Or deck b as pasted decklist text.")] = None,
         simulate: Annotated[
-            bool, Field(description="Also run a paired goldfish A/B of the two decks.")
+            bool, Field(description="Also run a paired solo test A/B of the two decks.")
         ] = False,
         games: Annotated[int, Field(description="Games per deck for the A/B (10 to 2000).")] = 300,
-        options: Annotated[AbOptions | None, Field(description="Simulator options for the A/B.")] = None,
+        options: Annotated[AbOptions | None, Field(description="Solo test options for the A/B.")] = None,
     ) -> dict[str, object]:
         unread: dict[str, list[str]] = {}
 
@@ -258,7 +303,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         if simulate:
             try:
                 ab = await state.reports.ab(
-                    _sub(), text_a, text_b, games=games, options=dumped(options), modes=(cmd_a, cmd_b)
+                    _sub(),
+                    text_a,
+                    text_b,
+                    games=games,
+                    options=dumped(options),
+                    modes=(cmd_a, cmd_b),
+                    unpaired=True,
                 )
             except DeckError as exc:
                 return _tool_error(exc)
@@ -268,30 +319,74 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "message": "the research service is not configured on this gateway",
             }
             failed = _simulation_failure(out["goldfish_ab"])
+            # Kept for every app, a read-only one (mtg.read) too (owner decision C7): a result kept
+            # in the gateway's own table changes nothing on Archidekt, and the report names the app
+            # that ran it. run_deck_report stays a write tool.
+            unpaired = isinstance(ab, dict) and ab.get("unpaired")  # not a paired A/B: not kept
+            if not failed and not unpaired:
+                try:
+                    kept = await _store_comparison(deck_a, text_a, deck_b, out["goldfish_ab"])
+                except DeckError as exc:
+                    return _tool_error(exc)
+                out.update(report_id=kept["report_id"], stored=True)
             if failed:
                 # the A/B was asked for and did not run: the result says so at the top
                 message = f"The A/B did not run: {failed}. {_KEPT}"
                 logger.warning("compare_decks: the A/B did not run: %s", failed)
-                out.update(ok=False, error="simulation_failed", message=message)
+                code = _input_code(out["goldfish_ab"])
+                out.update(ok=False, error="simulation_failed", message=message, **code)
         return out
+
+    def _side_name(deck: Any) -> str:
+        return SOURCE_LIST if isinstance(deck, dict) else str(deck.name or f"Deck {deck.id}")
+
+    async def _store_comparison(deck_a: Any, text_a: str, deck_b: Any, ab: dict[str, Any]) -> dict[str, Any]:
+        """A simulated comparison as one of the member's reports (source "Comparison"): deck a's
+        statistics with the A/B as its simulation, filed under deck a when it is a deck."""
+        if isinstance(deck_a, dict):
+            cards = parse_decklist(text_a)
+            deck, stats = list_deck(cards, SOURCE_LIST), deck_stats.compute_from_text(cards)
+        else:
+            deck, stats = deck_a, deck_stats.compute(deck_a)
+        source = {
+            "kind": "compare",
+            "label": SOURCE_COMPARE,
+            "a": _side_name(deck_a),
+            "b": _side_name(deck_b),
+            **({"b_deck_id": str(deck_b.id)} if not isinstance(deck_b, dict) and deck_b.id else {}),
+        }
+        return await state.reports.run_source(
+            _sub(),
+            dataclasses.replace(deck, name=f"{source['a']} vs {source['b']}"),
+            source=source,
+            stats=stats,
+            simulate=False,
+            forge=False,
+            goldfish=ab,
+        )
 
     @server.tool(
         name="run_deck_report",
         title="Run and store a deck report",
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
-            "goldfish simulation (games, default 300; the website calls it the solo test) and a legality "
+            "solo test (games against opponents who do nothing, default 300) and a legality "
             "check (validate_decklist, for Commander decks only). A deck with a commander "
             "plays from the command zone at 40 life; a deck without one and with at least 60 cards "
             "(Standard, Modern, Pioneer, Legacy, Pauper and the like) plays a 60-card game: 7-card "
             "London mulligan with no free one, 20 life, on the play, sideboard left out. deck_ref is an "
             "Archidekt id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the "
             "commander "
-            "marked [Commander] or *CMDR*). A deck's report is stored for the user (see "
-            "list_deck_reports and the gateway's History page) so results can be compared over time; a "
-            "pasted list is simulated the same way but returned with stored=false and not kept. "
+            "marked [Commander] or *CMDR*). Every report is stored for the user (see list_deck_reports "
+            "and the gateway's Reports and History pages): a deck's reports are compared over time; a "
+            "pasted list's report has source Pasted list and is filed under no deck. proposal_id "
+            "(one of the user's waiting proposals, a deck edit or a new deck) tests the deck as it "
+            "would be once that proposal is applied (the deck as it is now plus its changes; it applies "
+            "nothing): the report has source 'Proposal #N for DECK', is filed under that deck and is "
+            "linked from the proposal's page; give it instead of deck_ref. Reports of a list, a proposal "
+            "or a comparison never count in a deck's trend. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
-            "returns the existing one (not when options are given). options passes the simulator's knobs "
+            "returns the existing one (not when options are given). options passes the solo test's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan); "
             "forge_seed is the gateway's own: the Forge games' seed, which otherwise is seed. "
             + (KEPT_MODELS_TEXT if card_models.SWITCHED_ON else "")
@@ -318,9 +413,12 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "games_requested stopped early). Forge plays only decks with a "
             "commander: a 60-card deck's report, or one with no commander marked, "
             "never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
-            "for a quick solo-test-only report (default: as simulate). A report without Forge games is "
-            "labelled engine_label 'Preflight only (no rules engine)'. With Forge, a simulated report also "
-            "gets forge_solo: the deck alone on Forge by the full rules against opponents who do nothing "
+            "for a quick solo-test-only report (default: on when simulate=true). A pasted list and a "
+            "proposal's resulting deck get Forge games by the same rules (Forge plays the list's text: no "
+            "Archidekt deck is needed). A report without Forge games is "
+            "labelled engine_label 'Preflight only (no rules engine)'. With Forge, a report with a solo "
+            "test also gets forge_solo: the deck alone on Forge by the full rules against opponents "
+            "who do nothing "
             "(the solo test's full-rules check), started after the games against precons, one unfinished per "
             "member (two for reports that share opponents); status stays queued or running until it "
             "ends too. Its result "
@@ -339,7 +437,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "other deck is read first, and if it can't be read no report is made. status is the "
             "report's overall state: queued, running, complete, partial or failed. "
             "This is the one tool that "
-            "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
+            "runs solo test games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
@@ -349,15 +447,15 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             str,
             Field(
                 description="Archidekt deck id or URL, one of your snapshot ids (list_snapshots), or "
-                "pasted decklist text."
+                "pasted decklist text. Leave it empty with proposal_id."
             ),
-        ],
-        games: Annotated[int, Field(description="Games to simulate (10 to 2000).")] = 300,
-        simulate: Annotated[bool, Field(description="Run the goldfish simulation.")] = True,
-        options: Annotated[RunOptions | None, Field(description="Simulator options.")] = None,
+        ] = "",
+        games: Annotated[int, Field(description="Solo test games (10 to 2000).")] = 300,
+        simulate: Annotated[bool, Field(description="Run the solo test.")] = True,
+        options: Annotated[RunOptions | None, Field(description="Solo test options.")] = None,
         forge: Annotated[
             bool | None,
-            Field(description="Run Forge games when the gateway has Forge (default: as simulate)."),
+            Field(description="Run Forge games when the gateway has Forge (default: on when simulate=true)."),
         ] = None,
         same_opponents_as: Annotated[
             str | None,
@@ -374,19 +472,39 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 "first report, then same_opponents_as on the second."
             ),
         ] = None,
+        proposal_id: Annotated[
+            str | None,
+            Field(
+                description="One of your waiting proposals (a deck edit or a new deck): test the deck "
+                "as it would be once it is applied. Give it instead of deck_ref."
+            ),
+        ] = None,
     ) -> dict[str, object]:
         options = dumped(options)
         try:
-            if _looks_like_list(deck_ref):
-                if same_opponents_as is not None or compare_with is not None:
-                    which = "same_opponents_as" if same_opponents_as is not None else "compare_with"
+            pairing = "same_opponents_as" if same_opponents_as is not None else "compare_with"
+            paired = same_opponents_as is not None or compare_with is not None
+            if proposal_id:
+                if str(deck_ref or "").strip():
+                    raise DeckError("invalid", "Give deck_ref or proposal_id, not both.")
+                if paired:
                     raise DeckError(
                         "invalid",
-                        f"A pasted list gets no Forge games, so {which} works only when deck_ref is a deck "
-                        "id, URL or snapshot id.",
+                        f"A proposal's deck can't be paired for Forge, so {pairing} works only when "
+                        "deck_ref is a deck id, URL or snapshot id.",
+                    )
+                report = await state.reports.run_proposal(
+                    _sub(), proposal_id, simulate=simulate, games=games, options=options, forge=forge
+                )
+            elif _looks_like_list(deck_ref):
+                if paired:
+                    raise DeckError(
+                        "invalid",
+                        f"A pasted list can't be paired for Forge, so {pairing} works only when deck_ref "
+                        "is a deck id, URL or snapshot id.",
                     )
                 report = await state.reports.run_text(
-                    _sub(), deck_ref, simulate=simulate, games=games, options=options
+                    _sub(), deck_ref, simulate=simulate, games=games, options=options, forge=forge
                 )
             else:
                 # A snapshot id is one of the member's own snapshots (as compare_decks reads it),
@@ -421,12 +539,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 # the simulation was asked for and did not run: the result says so at the top
                 logger.warning("run_deck_report: the simulation did not run: %s", failed)
                 return {
-                    **report,
+                    **run_answer(report),
                     "ok": False,
                     "error": "simulation_failed",
-                    "message": f"The simulation did not run: {failed}. {_KEPT}",
+                    "message": f"The solo test did not run: {failed}. {_KEPT}",
+                    **_input_code(report.get("goldfish")),
                 }
-            return {"ok": True, **report}
+            return {"ok": True, **run_answer(report)}
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -437,11 +556,11 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "The user's stored deck reports, newest first, with the trend numbers (card count, average mana "
             "value, lands, price, salt) per report. Filter by deck_id. With deck_id and two or more "
             "reports, trend is the deck's History-page trend: its last 60 reports oldest first (series, "
-            "with the goldfish speed numbers: commander median cast turn, median turn lethal damage was "
+            "with the solo test speed numbers: commander median cast turn, median turn lethal damage was "
             "dealt (40, or 20 in a 60-card game), share of games dealing it by until_turn) and per "
             "metric the first and latest values, their dates and the change; otherwise null. Each report "
             "and series point carries settings (mode commander or constructed, games, seed, until_turn, "
-            "engines): a simulation number is only trended across reports with the same mode and until_turn "
+            "engines): a solo test number is only trended across reports with the same mode and until_turn "
             "(left_out says how many earlier ones were not compared) and settings_changes lists where the "
             "settings changed. Each report has its status and engine_label. get_deck_report returns one in "
             "full."
@@ -492,10 +611,12 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Get a stored deck report",
         description=(
             "One stored report: view 'full' (default) is the whole report (status: queued, running, "
-            "complete, partial or failed; engine_label; settings; statistics, the simulation "
+            "complete, partial or failed; engine_label; settings; statistics, the solo test "
             "result, the validation and the forge section); view 'forge' is only forge_status (state, "
             "games_done of games_requested, job_id, and while queued its position, the report it waits "
-            "for and expected_seconds) and forge_solo, small enough to poll while the Forge games play."
+            "for and expected_seconds), forge_solo and, once the games against precons are played, "
+            "forge_result (win rates, seats, the opponents chosen and the games), small enough to poll "
+            "while the Forge games play."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
@@ -511,6 +632,54 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             return {"ok": True, **state.reports.get(_sub(), report_id)}
         except DeckError as exc:
             return _tool_error(exc)
+
+    _DELETE_NOTE = (
+        "Nothing is deleted until the user presses Delete in the box on that page; give them the "
+        "link. It can't be undone there, and nothing changes on Archidekt."
+    )
+
+    @server.tool(
+        name="propose_delete_report",
+        title="Ask to delete a report",
+        description=(
+            "Ask the user to delete one of their stored reports. It never deletes anything itself: it "
+            "checks the report is the user's and returns delete_url, the report's page with its "
+            "Delete box open, where only the user's own press deletes it. Use it only when the user "
+            "asked for the report to go."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_report(report_id: str) -> dict[str, object]:
+        try:
+            r = state.reports.get(_sub(), report_id)
+        except DeckError as exc:
+            return _tool_error(exc)
+        url = f"{state.settings.public_url}/history/reports/{r['report_id']}?box=delete"
+        return {"ok": True, "deleted": False, "delete_url": url, "message": _DELETE_NOTE}
+
+    @server.tool(
+        name="propose_delete_snapshot",
+        title="Ask to delete a snapshot",
+        description=(
+            "Ask the user to delete one of their snapshots (list_snapshots). It never deletes anything "
+            "itself: it returns delete_url, the snapshot's History details with the Delete box open, "
+            "where only the user's own press deletes it. A snapshot a waiting restore puts back, or one "
+            "that holds the record of a backup copy the gateway may still delete, can't be deleted: the "
+            "result says why. Use it only when the user asked for the snapshot to go."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def propose_delete_snapshot(snapshot_id: str) -> dict[str, object]:
+        sub = _sub()
+        sid = str(snapshot_id or "").strip()
+        sid = sid[5:] if sid.startswith("snap_") else sid
+        if not sid or state.db.get_snapshot(sid, sub) is None:
+            return {"ok": False, "error": "not_found", "message": "No such snapshot for your account."}
+        held = state.db.snapshot_held(sid, sub)
+        if held:
+            return {"ok": False, "error": "held", "message": held}
+        url = f"{state.settings.public_url}/history?open=s-{sid}&box=delete"
+        return {"ok": True, "deleted": False, "delete_url": url, "message": _DELETE_NOTE}
 
     @server.tool(
         name="play_more_games",

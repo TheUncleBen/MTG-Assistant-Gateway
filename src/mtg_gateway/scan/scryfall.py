@@ -27,6 +27,7 @@ few requests.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
@@ -48,6 +49,18 @@ class ScryfallError(Exception):
     def __init__(self, kind: str, message: str):
         super().__init__(message)
         self.kind = kind
+
+
+def collection_ident(ident: dict[str, str]) -> dict[str, str]:
+    """``ident`` as POST /cards/collection finds it: a name identifier names a split, adventure or
+    two-faced card by its front face, the only name that lookup knows it by ({"name": "Fire"}
+    returns Fire // Ice, {"name": "Fire // Ice"} is not_found; checked 2026-10-28). The card that
+    comes back carries its full name."""
+    name = ident.get("name")
+    if not isinstance(name, str) or "//" not in name:
+        return ident
+    front = re.split(r"\s*//\s*", name, maxsplit=1)[0].strip()
+    return {**ident, "name": front} if front else ident
 
 
 def today() -> str:
@@ -97,6 +110,9 @@ PRINT_FRAMES = ("1993", "1997", "2003", "2015", "future")
 PRINT_BORDERS = ("black", "white", "borderless", "silver", "gold")
 PRINT_ORDERS = {"newest": ("released", "desc"), "oldest": ("released", "asc"), "cheapest": ("usd", "asc")}
 PRINT_PAGES = 20  # 3,500 printings, more than any card has (a basic land has about 1,000)
+PRINTINGS_PER_SEARCH = 20  # cards one search for every printing asks for (printings_of)
+PRINTINGS_PAGES = 60  # pages of it at most: 10,500 printings
+_ORACLE_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def summarize(card: dict[str, Any]) -> dict[str, Any]:
@@ -127,6 +143,9 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
         "image_art": image_uris.get("art_crop"),
         "scryfall_uri": card.get("scryfall_uri"),
         "finishes": [f for f in (card.get("finishes") or []) if isinstance(f, str)],
+        # the printing's prices as Scryfall listed them when it was read (its daily prices): the
+        # Scan page's running value and the printing picker; the tools leave them out
+        "prices": _prices(card),
     }
     legal = card.get("legalities") or {}
     if legal:
@@ -139,6 +158,17 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _prices(card: dict[str, Any]) -> dict[str, str]:
+    """The prices Scryfall gives, only those it has (a string each): usd, usd_foil, usd_etched,
+    eur, eur_foil, tix."""
+    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
+    return {
+        k: str(prices[k])
+        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
+        if isinstance(prices.get(k), str) and prices[k]
+    }
+
+
 def _cn(number: str) -> str:
     """A collector number for Scryfall's ``cn:``: as it is when it is plain letters and digits,
     else in double quotes (numbers such as ``1★``)."""
@@ -148,15 +178,9 @@ def _cn(number: str) -> str:
 def browse_row(card: dict[str, Any]) -> dict[str, Any]:
     """A summary plus what the card search's list view and the printing picker show: prices,
     power, toughness and loyalty, and the printing's frame, border and treatments."""
-    out = summarize(card)
+    out = summarize(card)  # with the printing's prices
     faces = [f for f in card.get("card_faces") or [] if isinstance(f, dict)]
     front = faces[0] if faces else {}
-    prices = card.get("prices") if isinstance(card.get("prices"), dict) else {}
-    out["prices"] = {
-        k: str(prices[k])
-        for k in ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
-        if isinstance(prices.get(k), str) and prices[k]
-    }
     for key in ("power", "toughness", "loyalty"):
         value = card.get(key, front.get(key))
         if isinstance(value, str) and value:
@@ -217,6 +241,8 @@ def slim(card: dict[str, Any]) -> dict[str, Any]:
     legal = card.get("legalities")
     if isinstance(legal, dict) and "commander" in legal:
         out["legalities"] = {"commander": legal["commander"]}
+    # the printing's prices (six short strings at most) for the Scan page's running value
+    out["prices"] = _prices(card)
     return out
 
 
@@ -488,6 +514,9 @@ class ScryfallClient:
             "dir": direction,
             "q": f"oracleid:{oracle_id}" + (f" {terms}" if terms else ""),
             "unique": "prints",
+            # a token's or an emblem's printings: Scryfall's search leaves these extras out
+            # otherwise (one card's oracle id only ever matches that card's own printings)
+            "include_extras": "true",
         }
         if page > 1:
             params["page"] = page
@@ -512,6 +541,56 @@ class ScryfallClient:
             "page": page,
         }
         self.prints_cache.put(key, out)
+        return out
+
+    async def printings_of(
+        self, oracle_ids: list[str], *, interval: float | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Every printing of each card in ``oracle_ids`` with its prices, by oracle id: one search
+        for up to PRINTINGS_PER_SEARCH cards (``oracleid:a or oracleid:b ...``, every page of it, at
+        most PRINTINGS_PAGES). For the cheapest printing of a watch by name alone (prices.py), so
+        nothing is cached: today's prices are the point. A card Scryfall finds no printing of is
+        left out."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        ids = sorted({o.strip().lower() for o in oracle_ids if _ORACLE_RE.fullmatch(o.strip().lower())})
+        for i in range(0, len(ids), PRINTINGS_PER_SEARCH):
+            chunk = ids[i : i + PRINTINGS_PER_SEARCH]
+            params: dict[str, Any] = {
+                "q": " or ".join(f"oracleid:{o}" for o in chunk),
+                "unique": "prints",
+                "include_extras": "true",
+                "order": "released",
+                "dir": "desc",
+            }
+            for page in range(1, PRINTINGS_PAGES + 1):
+                if page > 1:
+                    params["page"] = page
+                resp = await self._request("GET", "/cards/search", params=params, interval=interval)
+                data = self._json(resp)
+                if resp.status_code == 404:
+                    break  # none of these cards (or a page past the end)
+                if data.get("object") != "list" or not isinstance(data.get("data"), list):
+                    raise ScryfallError("contract", str(data.get("details") or "unexpected search reply"))
+                for c in data["data"]:
+                    if not isinstance(c, dict) or c.get("object") != "card":
+                        continue
+                    faces = c.get("card_faces") if isinstance(c.get("card_faces"), list) else []
+                    oid = c.get("oracle_id") or (faces[0].get("oracle_id") if faces else None)
+                    if not isinstance(oid, str):
+                        continue
+                    out.setdefault(oid, []).append(
+                        {
+                            "id": c.get("id"),
+                            "oracle_id": oid,
+                            "name": c.get("name"),
+                            "set": c.get("set"),
+                            "collector_number": c.get("collector_number"),
+                            "finishes": [f for f in c.get("finishes") or [] if isinstance(f, str)],
+                            "prices": c.get("prices") if isinstance(c.get("prices"), dict) else {},
+                        }
+                    )
+                if not data.get("has_more"):
+                    break
         return out
 
     async def search(
@@ -634,7 +713,11 @@ class ScryfallClient:
         found: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for i in range(0, len(identifiers), COLLECTION_MAX):
-            chunk = identifiers[i : i + COLLECTION_MAX]
+            asked = identifiers[i : i + COLLECTION_MAX]
+            # A two-part card goes by its front face (collection_ident); a miss is handed back as
+            # the caller asked for it.
+            chunk = [collection_ident(ident) for ident in asked]
+            sent = {json.dumps(c, sort_keys=True): a for c, a in zip(chunk, asked, strict=True)}
             resp = await self._request(
                 "POST", "/cards/collection", json={"identifiers": chunk}, interval=interval
             )
@@ -646,5 +729,5 @@ class ScryfallClient:
                     found.append(card)
             for ident in data.get("not_found") or []:
                 if isinstance(ident, dict):
-                    missing.append(ident)
+                    missing.append(sent.get(json.dumps(ident, sort_keys=True), ident))
         return found, missing

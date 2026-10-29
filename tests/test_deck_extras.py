@@ -327,6 +327,8 @@ async def test_lock_saves_the_cards_template_categories_as_its_defaults(stack: S
 
 async def test_a_contest_entry_and_its_withdrawal_go_through_the_review_page(stack: Stack) -> None:
     ark = stack.ark
+    _contest_ready(ark)
+    ark.account.entries.clear()
     b, _token = await _member(stack)
     try:
         page = (await b.http.get("/decks/42/contest")).text

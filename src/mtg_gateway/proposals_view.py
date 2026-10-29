@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
+from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
@@ -60,9 +61,11 @@ NO_APP_NAME = "An assistant"  # an app with no registered name: never its client
 # gateway's own refusals of what it was about to send); anything else (the gateway restarted, a
 # network error or a timeout, the backup copy) is "could not be applied", not a refusal.
 ARCHIDEKT_REFUSALS = frozenset(
-    {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit", "verify_mismatch"}
+    {"auth", "forbidden", "not_found", "rate_limited", "contract", "invalid", "edit"}
 )
 NOT_APPLIED = "Could not be applied"
+# a reason typed on the card's Reject, as much of it as the list's line shows
+REASON_SHOWN = 80
 
 PAGE_SUB = (
     "Every change your assistants proposed, waiting and past. Past proposals stay here for 30 days "
@@ -221,7 +224,9 @@ def _gathered(
                 risk, why = UNJUDGED, ""
         elif not risk:  # closed before its tier was stored: as the close would judge it
             full = db.get_proposal(r["id"], sub)
-            risk = decks.stored_risk(full) if full else UNJUDGED
+            risk, why = decks.stored_risk(full) if full else (UNJUDGED, "")
+        elif isinstance(r.get("result"), dict):  # the reason stored with its tier when it closed
+            why = str(r["result"].get(RISK_REASON_KEY) or "")
         app = names.of(r.get("created_by_client"))
         item = {
             "id": r["id"],
@@ -361,7 +366,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     w2 = ui.widget(
         "Needs a look", "alert", len(look), detail=det2, actions=acts2, tone="alert" if look else ""
     )
-    # 3. Always need your press
+    # 3. Only you can apply
     press = sum(1 for it in waiting if it["risk"] == "consent")
     delete = sum(1 for it in waiting if it["risk"] == "destructive")
     det3 = (
@@ -378,7 +383,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         if press + delete
         else []
     )
-    w3 = ui.widget("Always need your press", "hand", press + delete, detail_html=det3, actions=acts3)
+    w3 = ui.widget("Only you can apply", "hand", press + delete, detail_html=det3, actions=acts3)
     # 4. Last 7 days
     week = now - 7 * 86400
 
@@ -417,7 +422,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         0,
         big_html=big,
         detail_html=det5,
-        actions=[ui.button_link("Connected apps", "/apps")],
+        actions=[ui.button_link("Connected apps", "/account/details#apps")],
         wide_sm=True,
     )
     return ui.widgets([w1, w2, w3, w4, w5])
@@ -475,10 +480,25 @@ def _waiting_flags(it: dict[str, Any], now: float) -> str:
         )
     if line.get("link_note"):
         out.append(f"<span class='flag'>{esc(line['link_note'])}</span>")
+    if _try_again(it):
+        out.append(f"<span class='flag'>{esc(TRY_AGAIN_FLAG)}</span>")
     v = _version_line(it, now)
     if v:
         out.append(f"<span class='flag'>{esc(v)}</span>")
     return "".join(out)
+
+
+TRY_AGAIN_FLAG = "Archidekt didn't answer, so nothing was changed."
+
+
+def _try_again(it: dict[str, Any]) -> bool:
+    """A waiting change whose last apply Archidekt didn't answer, with nothing changed there
+    (decks.TRY_AGAIN_KINDS): its row offers Try again."""
+    return (
+        it["state"] == "pending"
+        and bool((it.get("result") or {}).get("try_again"))
+        and it["status"] != "needs_look"
+    )
 
 
 def _deck_line(it: dict[str, Any]) -> str:
@@ -509,7 +529,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         + (" data-low" if _low_checkable(it) else "")
         + f" aria-label='{esc(aria)}'{' checked' if checked else ''}></label>"
     )
-    num = f"<span class='no'>{esc(no)}</span>" if no else ""
+    num = f"<span class='no'>{esc(no)}</span><wbr>" if no else ""  # the number and the words may part
     title = (
         f"<label class='title' for='{esc(box)}'><span class='t'>{num}{esc(it['summary'])}"
         f"<span class='stin'>{_status_label(it)}</span></span>{_waiting_flags(it, now)}"
@@ -524,7 +544,7 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         f"<label class='md-hide' for='{esc(box)}'>{_chip(it)}</label>"
         f"<label class='md-hide' for='{esc(box)}'>{ui.when(it['created_at'], now=now)}</label>"
         f"<input type='hidden' name='v_{pid}' value='{int(it['version'])}'>"
-        + ui.open_link(f"/proposals/{it['id']}{qs}", "Review")
+        + ui.open_link(f"/proposals/{it['id']}{qs}", "Try\u00a0again" if _try_again(it) else "Review")
         + "</div>"
     )
 
@@ -548,30 +568,43 @@ def _closing_html(
         return esc(_version_line(it, now))
     if st == "applied":
         at = it["applied_at"] or it["status_at"] or it["created_at"]
-        undo = " · " + _undo_form(it, csrf, "Undo", "linkbtn inline") if _undoable(it, csrf) else ""
+        undo = " · " + _undo_form(it, csrf, "Undo", "ui-cap") if _undoable(it, csrf) else ""
         return f"Applied {ui.when(at, now=now)}{undo}"
     if st == "rejected":
         by = (it["result"] or {}).get("rejected_by")
         if by == "assistant":
             return esc(f"Rejected by {it['app'] or 'your assistant'}")
-        # The member's own presses: their pages, the review page or the chat card's Reject.
-        return "Rejected by you" if by in ("review_page", "browser", "card") else ""
+        # The member's own presses: their pages, the review page or the chat card's Reject, with
+        # the reason they typed on the card, shortened to a line (the review page has it whole)
+        said = " ".join(str((it["result"] or {}).get("reject_reason") or "").split())
+        if len(said) > REASON_SHOWN:
+            said = said[: REASON_SHOWN - 1].rstrip() + "…"
+        mine = "Rejected by you" if by in ("review_page", "browser", "card") else ""
+        if said:
+            return esc(f"{mine or 'Rejected'}: “{said}”")
+        return mine
     if st == "expired":
         return esc(f"Expired {ui.when_text(it['expires_at'], now=now)}")
     if st == "replaced":
         if replaced_by is not None:
             no = f"#{replaced_by['board_no']}" if replaced_by.get("board_no") else "a newer change"
-            return f"Replaced by <a href='/proposals/{esc(replaced_by['id'])}'>{esc(no)}</a>"
+            return "Replaced by " + ui.cap_link(no, f"/proposals/{replaced_by['id']}")
         return ""
     if st == "withdrawn":
         return (
             esc(f"Withdrawn by {it['app']}") if it["app"] and it["app"] not in (FROM_YOU, FROM_ADMIN) else ""
         )
     if st == "failed":
+        error = (it["result"] or {}).get("error")
+        # the check after the write found something other than asked: Archidekt took it
         said = (
-            "Archidekt refused it" if (it["result"] or {}).get("error") in ARCHIDEKT_REFUSALS else NOT_APPLIED
+            "Archidekt saved it differently"
+            if error == "verify_mismatch"
+            else "Archidekt refused it"
+            if error in ARCHIDEKT_REFUSALS
+            else NOT_APPLIED
         )
-        return f"{said} · <a href='/proposals/{esc(it['id'])}'>Why</a>"
+        return f"{said} · " + ui.cap_link("Why", f"/proposals/{it['id']}")
     return ""
 
 
@@ -587,7 +620,7 @@ def list_row(
     """One proposal on every chip but Waiting: the change (a link to it) and its deck, risk,
     status with its closing line, the app, when."""
     no = _no(it)
-    num = f"<span class='no'>{esc(no)}</span>" if no else ""
+    num = f"<span class='no'>{esc(no)}</span><wbr>" if no else ""  # the number and the words may part
     closing = _closing_html(it, csrf=csrf, replaced_by=replaced_by, now=now)
     sm = f"<span class='sm-only'>{closing}</span>" if closing else ""
     flag = f"<span class='flag'>{closing}</span>" if closing else ""
@@ -701,7 +734,7 @@ def _waiting_table(
     def group(key: str, title_html: str, aria: str, lines: list[dict[str, Any]], open_deck: str) -> None:
         oldest = _span(now - min(x["created_at"] for x in lines))
         meta = f"{len(lines)} waiting · oldest {oldest}" + (
-            f" · <a href='{open_deck}'>Open deck</a>" if open_deck else ""
+            " · " + ui.cap_link("Open deck", open_deck) if open_deck else ""
         )
         box = (
             f"<label class='chk'><input type='checkbox' class='all' data-all='{esc(key)}' "
@@ -849,15 +882,15 @@ def list_html(
     elif query["group"] == "deck":
         side = (
             "Grouped by deck · "
-            f"<a href='/proposals{esc(query_string(query, group='', offset=0))}'>Show newest first</a>"
+            + ui.cap_link("Show newest first", "/proposals" + query_string(query, group="", offset=0))
             if query["order"] != "old"
             else "Grouped by deck · "
-            f"<a href='/proposals{esc(query_string(query, group='', offset=0))}'>Show oldest first</a>"
+            + ui.cap_link("Show oldest first", "/proposals" + query_string(query, group="", offset=0))
         )
     else:
         first = "Oldest first" if query["order"] == "old" else "Newest first"
-        grouped = esc(query_string(query, group="deck", offset=0))
-        side = f"{first} · <a href='/proposals{grouped}'>Group by deck</a>"
+        grouped = query_string(query, group="deck", offset=0)
+        side = f"{first} · " + ui.cap_link("Group by deck", "/proposals" + grouped)
     head = (
         f"<div class='list-head'><h2>All proposals <span class='ui-sub'>{counts['all']:,}</span></h2>"
         f"<span class='ui-sub'>{side if not waiting_view else esc(side)}</span></div>"
@@ -885,7 +918,8 @@ def list_html(
         waiting_href = "/proposals" + query_string(query, show="waiting", offset=0)
         parts.append(
             "<p class='ui-note'>To apply or reject several at once, open "
-            f"<a href='{esc(waiting_href)}'>Waiting</a>.</p>"
+            + ui.cap_link("Waiting", waiting_href)
+            + ".</p>"
         )
         if query["order"] == "old":
             rows = list(reversed(rows))
@@ -906,17 +940,18 @@ def list_html(
                     qs=qs,
                 )
             )
-            newer = (
-                "/proposals" + query_string(query, offset=max(0, offset - ui.PER_PAGE))
-                if offset > 0
-                else None
+            # Load more (Standard 13): the next page's link, whose rows static/loadmore.js adds
+            upto = offset + len(page)
+            parts.append(
+                ui.load_more(
+                    "/proposals" + query_string(query, offset=upto),
+                    shown=upto,
+                    total=total,
+                    into=".pr-table",
+                )
+                if upto < total
+                else ui.load_more("", done=f"All {total:,} shown. {PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}.")
             )
-            older = (
-                "/proposals" + query_string(query, offset=offset + ui.PER_PAGE)
-                if offset + ui.PER_PAGE < total
-                else None
-            )
-            parts.append(ui.pager(offset, total, newer_href=newer, older_href=older, note=PAGER_NOTE))
         else:
             parts.append(
                 "<div class='ui-card pr-empty'><p>"
@@ -956,15 +991,6 @@ PROPOSALS_CSS = """
 .ui-drawer details[open]>summary:not(.fold-btn)::before{transform:rotate(90deg)}
 .ui-drawer form.reject{margin:.75rem 0 .25rem}
 .pr-undo{display:inline;margin:0}
-.pr-undo .linkbtn{background:none;border:0;padding:0;margin:0;color:var(--link);text-decoration:underline;
-  font:inherit;font-weight:400;line-height:inherit;min-height:0;width:auto}
-@media (pointer:coarse){.pr-undo .linkbtn{min-height:44px;min-width:44px;text-align:left}}
-.ui-bar .rejectask,.ui-drawer .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
-  flex:1 1 100%}
-.ui-bar .rejectask span,.ui-drawer .rejectask span{flex:1 1 10rem;font-weight:700}
-.ui-bar .rejectask button,.ui-drawer .rejectask button{min-height:44px;margin:0}
-.ui-bar .rejectask button:focus,.ui-drawer .rejectask button:focus{
-  outline:2px solid var(--focus);outline-offset:2px}
 .ui-bar button[disabled]{opacity:.55}
 .ui-bar [hidden]{display:none}
 @media (max-width:599.98px){

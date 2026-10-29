@@ -71,11 +71,23 @@
     setTimeout(function () { clear(form); }, button && button.dataset && button.dataset.busyLabel ? LONG_RESET_MS : RESET_MS);
   });
 
-  // Coming back with the Back button restores the page from memory: nothing is sending any more.
+  // Coming back with the Back button restores the page from memory, or from the browser's cache
+  // as it was: nothing is sending any more, and the page was drawn with the look of its time.
+  // After Theme changed on Account the theme is put right in place; after Layout changed (the
+  // viewport itself) the page is read again.
   window.addEventListener("pageshow", function (e) {
-    if (!e.persisted) return;
-    var forms = document.querySelectorAll("form[data-sending]");
+    var forms = e.persisted ? document.querySelectorAll("form[data-sending]") : [];
     for (var i = 0; i < forms.length; i++) clear(forms[i]);
+    var cookies = {};
+    document.cookie.split(";").forEach(function (part) {
+      var at = part.indexOf("=");
+      if (at > 0) cookies[part.slice(0, at).trim()] = part.slice(at + 1).trim();
+    });
+    var root = document.documentElement, theme = cookies.mtg_theme || "";
+    if (theme !== (root.getAttribute("data-theme") || "")) {
+      if (theme) root.setAttribute("data-theme", theme); else root.removeAttribute("data-theme");
+    }
+    if ((cookies.mtg_layout === "desktop") !== document.body.classList.contains("desktop")) window.location.reload();
   });
 
   function openMenus() { return document.querySelectorAll("details.dd[open]"); }
@@ -272,7 +284,7 @@
     if (e.key !== "Escape" || e.defaultPrevented) return;
     var close = document.querySelector(".ui-split.with-panel .ui-drawer .close");
     if (!close || !close.offsetParent) return;
-    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open]")) return;
+    if (document.querySelector("details[open].dd, [aria-expanded=true], dialog[open], .mtgbox-scrim")) return;
     close.click();
   });
   // "1 card" / "7 cards" next to a number field: the word follows the value (the odds form).
@@ -377,6 +389,61 @@
   });
   // Back to this page from memory (the Back button): nothing is loading any more.
   window.addEventListener("pageshow", function (e) { if (e.persisted) navEnd(); });
+
+  // 8. A page still being read from Archidekt (latepage.py) comes as the site's frame with a
+  //    skeleton: wait for the page to finish, then load its address, which the gateway answers
+  //    with the finished page. If the wait can't be asked, say so with a button that loads it.
+  var late = document.querySelector("[data-late]");
+  if (late) {
+    var lateTries = 0;
+    var lateWait = function () {
+      fetch(late.getAttribute("data-late"), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
+        .then(function (r) {
+          if (r.status === 202 && ++lateTries < 10) { lateWait(); return; }
+          location.replace(late.getAttribute("data-href"));
+        })
+        .catch(function () {
+          if (++lateTries < 4) { setTimeout(lateWait, 2000); return; }
+          var note = late.querySelector(".late-note");
+          if (note) note.textContent = "The gateway can't be reached right now.";
+          var again = document.createElement("a");
+          again.className = "btn";
+          again.href = late.getAttribute("data-href");
+          again.textContent = "Try again";
+          late.appendChild(again);
+        });
+    };
+    lateWait();
+  }
+
+  // 9. A deck shown as last read while the gateway reads it again (deckpage.deck_check_html):
+  //    after a Reload, a deck that changed is loaded again at once; on another view the strip
+  //    offers the changes. When Archidekt could not be asked, the strip says how old the copy is.
+  var check = document.querySelector("[data-check]");
+  if (check) {
+    fetch(check.getAttribute("data-check"), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (d) {
+        var reload = check.getAttribute("data-reload") === "1";
+        if (d.changed && reload) { location.replace(location.href); return; }
+        if (d.changed) {
+          check.textContent = "This deck changed on Archidekt. ";
+          var show = document.createElement("a");
+          show.className = "btn";
+          show.href = location.href;
+          show.textContent = "Show the changes";
+          check.appendChild(show);
+        } else if (d.failed) {
+          check.className += " warn";
+          check.textContent = check.getAttribute("data-failed");
+        } else {
+          check.hidden = true;
+          return;
+        }
+        check.hidden = false;
+      })
+      .catch(function () { check.hidden = true; });
+  }
 
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});

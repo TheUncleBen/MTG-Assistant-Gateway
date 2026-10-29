@@ -37,6 +37,9 @@ class ScanGlueTest {
         }
         for (type in listOf("'no-card'", "'done'")) assertTrue(type, install.contains("type: $type"))
         assertTrue(install.contains("MtgNative.scanEvent(JSON.stringify(ev))"))
+        // A photo without an outline goes to the page's own rule (it reads the dashed box after a few),
+        // with the old count-only path kept for pages before it.
+        assertTrue(install.contains("s.noOutlineFrame(c, g)") && install.contains("s.noCardFrame()"))
         // The camera panel is the only screen while photos are taken: the page must never start its own camera.
         assertTrue(!install.contains("showTab('camera')") || install.indexOf("showTab('camera')") > install.indexOf("end: function"))
     }

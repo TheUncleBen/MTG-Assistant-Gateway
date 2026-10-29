@@ -73,6 +73,9 @@ async def test_delete_data_during_apply_leaves_no_snapshot(stack: Stack) -> None
         return await real(*a, **kw)
 
     gw.archidekt.resolve_card = slow_resolve
+    # the propose already looked Opt up on Archidekt (0.7.46, A6); forget that answer so the apply
+    # asks again, which is where this test holds it
+    gw.decks._printings.clear()
     b = Browser(h)
     await b.login()
     csrf = await b.csrf("/account/details")
@@ -550,7 +553,7 @@ async def test_one_app_may_use_every_pending_slot(stack: Stack, monkeypatch: pyt
     quiet, _ = await _app_token(h, "quiet")
     assert not hasattr(decks_module, "MAX_PENDING_PER_CLIENT")
     for card in ("Opt", "Ponder", "Brainstorm"):
-        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]}
+        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}], "separate": True}
         assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
     change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Preordain"}]}
     refused = structured(await call(h, quiet, "propose_deck_changes", change))

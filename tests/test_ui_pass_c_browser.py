@@ -366,7 +366,7 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         assert "Color tag…" in items and "Mana value…" in items, items
         # ... and no report of the member's own card (kept on another member's deck)
         for gone in (
-            "Change printing…",
+            "Printings…",
             "Edit in deck editor",
             "Open on Scryfall",
             "Add to deck…",
@@ -716,11 +716,11 @@ def test_add_to_deck_on_my_lists_custom_cards(server: Server, width: int, theme:
             box.wait_for(state="visible")
             page.wait_for_function("() => !document.querySelector('#cc-add select[name=category]').disabled")
         # the copies are checked before anything is sent
-        page.fill("#cc-add-qty", "0")
+        page.fill("#cu-add-qty", "0")
         box.locator(".acts button", has_text="Add to deck").click()
         assert "Copies must be a whole number from 1 to 99." in box.inner_text()
         assert ark.decks[42]["customCards"] == []
-        page.fill("#cc-add-qty", "2")
+        page.fill("#cu-add-qty", "2")
         box.locator("select[name=category]").select_option(label="Ramp")
         box.locator(".acts button", has_text="Add to deck").click()
         page.wait_for_url("**/lists/custom?ok=card_added**")

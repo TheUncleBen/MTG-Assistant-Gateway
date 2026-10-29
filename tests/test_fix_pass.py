@@ -215,7 +215,9 @@ def test_history_offers_no_restore_for_a_deck_gone_from_archidekt() -> None:
     kept = history_view.build_events([], [_snapshot()], [], csrf_input="")
     gone = history_view.build_events([], [_snapshot(deck_gone=True)], [], csrf_input="")
     assert "Restore (review first)" in kept[0]["action"] and "hy-restore" in kept[0]["action"]
-    assert gone[0]["action"] == "" and "hy-restore" not in gone[0]["details"]
+    # a deleted deck offers a new deck from its snapshot instead (0.7.46), never a restore
+    assert "hy-restore" not in gone[0]["action"] and "hy-restore" not in gone[0]["details"]
+    assert "Make a new deck from this" in gone[0]["action"], gone[0]["action"]
     assert "This deck is no longer on your Archidekt account" in gone[0]["details"]
     assert "Restore (review first)" in history_view.events_html(kept, now=1_700_000_100)
     assert "Restore (review first)" not in history_view.events_html(gone, now=1_700_000_100)
@@ -248,14 +250,15 @@ def test_a_deck_with_no_name_reads_unnamed_deck_in_the_deck_list_card() -> None:
 
 def test_the_scan_pages_wording() -> None:
     scan = (PKG / "scan" / "static" / "scan.js").read_text(encoding="utf-8")
-    assert "'aria-label': 'Scan card'" in scan
+    # the shutter is Scan card in a browser; in the Android app it opens the phone's camera (0.7.46)
+    assert "const shutterLabel = app ? 'Scan with the phone camera' : 'Scan card';" in scan
+    assert "title: shutterLabel, 'aria-label': shutterLabel," in scan
     assert "Shoot" not in scan  # that word is the Android camera screen's own
     assert "told(msg, 'Name copied.')" in scan
     assert "throw new Error('Give the scan a name.')" in scan
     assert "{ text: 'Add to deck…', icon: 'plus', href: '/cards?q=' + encodeURIComponent(name) }" in scan
     assert (
-        "items.push({ text: 'Add to collection', icon: 'collection', onClick: () => CM.collect(name) })"
-        in scan
+        "items.push({ text: 'Add to binder', icon: 'collection', onClick: () => CM.collect(name) })" in scan
     )
     assert "document.body.hasAttribute('data-watchlist')" in scan
     assert "items.push({ text: 'Watch this card', icon: 'bookmark'" in scan

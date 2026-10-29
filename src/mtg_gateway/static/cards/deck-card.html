@@ -52,7 +52,7 @@
     var s = $("stat"); s.replaceChildren();
     var fmt = el("span"); fmt.appendChild(el("b", "", d.format || "deck")); s.appendChild(fmt);
     if (d.commanders && d.commanders.length) { var c = el("span", "", "Commander: "); c.appendChild(el("b", "", d.commanders.join(" / "))); s.appendChild(c); }
-    var ci = el("span", "", "Colors "); ci.appendChild(pips(d.colour_identity)); s.appendChild(ci);
+    var ci = el("span", "", "Colors "); ci.appendChild(pips(d.color_identity || d.colour_identity)); s.appendChild(ci);
     var curve = d.curve || {}, keys = ["0", "1", "2", "3", "4", "5", "6", "7+"], max = 1;
     keys.forEach(function (k) { max = Math.max(max, Number(curve[k]) || 0); });
     var cv = el("span", "curve"); cv.setAttribute("aria-label", "Mana curve");

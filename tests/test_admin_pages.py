@@ -165,12 +165,53 @@ async def test_users_list_reads_in_words_with_widgets_chips_and_filters(gw: Harn
         await b.aclose()
 
 
+async def test_a_members_panel_says_why_an_app_has_no_logo(gw: Harness) -> None:
+    """T-201: the admin's panel names where each connected app sends members back (hosts only), so
+    an app that shows the neutral icon instead of its logo can be told apart from one that does."""
+    gw.db.save_client(
+        "gpt-app",
+        {
+            "client_name": "ChatGPT",
+            "redirect_uris": [
+                "https://chatgpt.com/connector_platform_oauth_redirect",
+                "https://elsewhere.example/cb?x=secret",
+            ],
+        },
+    )
+    gw.db.save_token(
+        "tok-gpt",
+        kind="access",
+        client_id="gpt-app",
+        sub="user-2",
+        scopes=["mcp"],
+        resource=None,
+        family="fg",
+        expires_at=NOW + 3600,
+    )
+    b = await admin_browser(gw)
+    try:
+        panel = (await _get(b, "/admin/users?open=user-2")).split("<aside class='ui-drawer'", 1)[1]
+        assert (
+            "No logo: it sends members back to chatgpt.com and elsewhere.example, not only to one "
+            "company’s addresses." in panel
+        )
+        assert "No logo: its registration names no address to send members back to." in panel  # claude-app
+        assert "secret" not in panel and "connector_platform" not in panel
+    finally:
+        await b.aclose()
+    gw.db.save_client("gpt-app", {"client_name": "ChatGPT", "redirect_uris": ["https://chatgpt.com/cb"]})
+    assert ui.client_brand_note("gpt-app") == "OpenAI’s logo: it sends members back only to chatgpt.com."
+    assert ui.client_brand_note("https://claude.ai/oauth/x") == "Claude’s logo: its address is on claude.ai."
+    assert ui.client_brand_note("https://e.example/m.json") == "No logo: its address is on e.example."
+    assert ui.client_brand_note("unknown-app") == "No logo: no registration is kept for it."
+
+
 async def test_a_members_panel_holds_the_ids_the_actions_and_the_two_boxes(gw: Harness) -> None:
     b = await admin_browser(gw)
     try:
         text = await _get(b, "/admin/users?open=user-2")
         panel = text.split("<aside class='ui-drawer' aria-label='bob'>", 1)[1]
-        assert "<a href='/admin/users'>← All members</a>" in panel
+        assert "<a class='ui-cap' href='/admin/users'>← All members</a>" in panel
         assert "<code>user-2</code>" in panel and "<code>claude-app</code>" in panel
         assert "<span class='nm'>Claude</span>" in panel and "bob_brews" in panel
         assert "class='btn btn-outline-danger' href='/admin/users?open=user-2&box=disable'" in panel
@@ -293,7 +334,7 @@ async def test_card_models_search_member_filter_and_widgets(gw: Harness) -> None
         assert _widgets(text) == ["Models kept", "Members with models", "Changed in 7 days"]
         assert "<span class='big'>2</span>" in text or "<span class='big'>2<small>" in text
         assert "<span class='big'>2<small>of 4</small></span>" in text
-        assert "<input type='search' name='q'" in text and "placeholder='Search card name'" in text
+        assert "<input type='search' name='q'" in text and "placeholder='Search by name'" in text
         opts = text.split("<select name='member'", 1)[1].split("</select>", 1)[0]
         assert "<option value='' selected>Every member</option>" in opts
         assert ">bob</option>" in opts and ">a member with no name</option>" in opts

@@ -30,7 +30,7 @@ from urllib.parse import quote
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, update_check
+from . import __version__, card_models, update_check
 from .mana import SPRITE
 from .menus import MENUS_CSS
 
@@ -75,8 +75,9 @@ APP_UA_MARK = "MTGAssistant/"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
 _app_version: ContextVar[str] = ContextVar("mtg_app_version", default="")
-# The signed-in member's card size (prefs.py), set by pages.browser_session for this request.
-_card_size: ContextVar[str] = ContextVar("mtg_card_size", default="m")
+# The signed-in member's card sizes (prefs.py) by pref name, and the page drawn, set by
+# pages.browser_session for this request.
+_card_size: ContextVar[tuple[str, dict[str, Any]]] = ContextVar("mtg_card_size", default=("deck", {}))
 
 # Archidekt's light set (body custom properties). Emitted twice: under prefers-color-scheme for
 # "system" and under [data-theme=light] for an explicit choice.
@@ -543,6 +544,8 @@ button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--text);
   text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
+/* a button a script hides stays hidden (inline-flex above would beat the browser's own rule) */
+button[hidden],.btn[hidden]{display:none}
 button:hover,.btn:hover{background:var(--surface-2);color:var(--text)}
 button:disabled,.btn[aria-disabled=true]{opacity:.5;cursor:default}
 /* Every press shows at once: pressed look on touch, and a busy state while a form submits
@@ -552,12 +555,35 @@ button[aria-busy=true],.btn[aria-busy=true]{cursor:progress;opacity:.75}
 /* a list being filtered as you type dims at once (static/decks.js, static/precons.js) and the
    answer undims it; the dim never hides the list that is there */
 #decks-list[aria-busy=true]:not(:empty),main[aria-busy=true] .pre-grp{opacity:.6;transition:opacity .15s}
-button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none;
-  border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
-  animation:busy .8s linear infinite}
-@keyframes busy{to{transform:rotate(360deg)}}
+button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none}
+/* The one progress spinner (ui.spinner, a busy button, a box that is loading): a Material-style arc
+   that grows and shrinks as it turns, in CSS alone. It is drawn only while the run or load is going
+   (the live status puts it there and takes it away), never on a timer. Under reduced motion the
+   ring stays whole and pulses instead. */
+.ui-spin,button[aria-busy=true]::after,.btn[aria-busy=true]::after,
+.mtgbox .loading::before,.mtgbox .progress::before{box-sizing:border-box;display:inline-block;
+  border-radius:50%;border:2px solid currentColor;
+  animation:ui-spin-arc .8s infinite linear alternate,ui-spin-turn 1.6s infinite linear}
+.ui-spin{width:1em;height:1em;flex:none;vertical-align:-.15em}
+@keyframes ui-spin-arc{
+  0%{clip-path:polygon(50% 50%,0 0,50% 0,50% 0,50% 0,50% 0,50% 0)}
+  12.5%{clip-path:polygon(50% 50%,0 0,50% 0,100% 0,100% 0,100% 0,100% 0)}
+  25%{clip-path:polygon(50% 50%,0 0,50% 0,100% 0,100% 100%,100% 100%,100% 100%)}
+  50%{clip-path:polygon(50% 50%,0 0,50% 0,100% 0,100% 100%,50% 100%,0 100%)}
+  62.5%{clip-path:polygon(50% 50%,100% 0,100% 0,100% 0,100% 100%,50% 100%,0 100%)}
+  75%{clip-path:polygon(50% 50%,100% 100%,100% 100%,100% 100%,100% 100%,50% 100%,0 100%)}
+  100%{clip-path:polygon(50% 50%,50% 100%,50% 100%,50% 100%,50% 100%,50% 100%,0 100%)}}
+@keyframes ui-spin-turn{
+  0%{transform:scaleY(1) rotate(0deg)}
+  49.99%{transform:scaleY(1) rotate(135deg)}
+  50%{transform:scaleY(-1) rotate(0deg)}
+  100%{transform:scaleY(-1) rotate(-135deg)}}
+@keyframes ui-spin-pulse{from{opacity:1}to{opacity:.3}}
 @media (prefers-reduced-motion:reduce){
-  button[aria-busy=true]::after,.btn[aria-busy=true]::after{animation:none} }
+  /* the spinner pulses in place: no turning, no growing arc (over the page-wide animation:none) */
+  .ui-spin,button[aria-busy=true]::after,.btn[aria-busy=true]::after,
+  .mtgbox .loading::before,.mtgbox .progress::before{clip-path:none;transform:none;
+    animation:ui-spin-pulse 1s infinite ease-in-out alternate !important}}
 .btn-primary,button.primary{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
 .btn-primary:hover,button.primary:hover{background:var(--orange);color:var(--on-orange);
   filter:brightness(1.1)}
@@ -747,7 +773,10 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
   text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid;min-width:0;
   hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}
 .changes .name{font-weight:700;font-size:1.05rem;overflow-wrap:anywhere}
-.changes .qty{font-weight:700;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+/* long text there (a new deck's or package's settings) wraps in its own column, never wider
+   than about half the row: the name beside it keeps its width */
+.changes .qty{font-weight:700;text-align:right;font-variant-numeric:tabular-nums;max-width:45cqi;
+  overflow-wrap:break-word}
 .changes .qty .was{color:var(--text-muted);font-weight:400;text-decoration:line-through}
 .changes li.add{border-left-color:var(--green);background:var(--green-tint)}
 .changes li.add .act,.changes li.add .qty{color:var(--green-text);border-color:var(--green)}
@@ -947,6 +976,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home .searchbox .field{flex:1 1 14rem;margin:0}
 .home .searchbox button{margin:0}
 .home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr));gap:.75rem}
+/* two a row down to 320 px (the Fold's cover screen): one a row made each tile a screen's third */
+@media (max-width:419.98px){ .home .recent{grid-template-columns:repeat(2,minmax(0,1fr))} }
 .home .recent a{display:block;position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f) center/cover no-repeat;color:#fff;text-decoration:none;
   font-weight:700}
@@ -971,6 +1002,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home .recent.skeleton>span{aspect-ratio:16/9}
 ul.decklist.skeleton>li{height:230px;list-style:none}
 @keyframes skeleton{50%{opacity:.55}}
+.late-skel>span{height:3.5rem;margin:.5rem 0}
+.late-skel>span:first-child{height:6rem}
 @media (prefers-reduced-motion:reduce){ .skeleton>*{animation:none} }
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
    bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 1279px) on a touch screen, such as
@@ -1038,6 +1071,10 @@ footer.site .legal{color:#ababab;max-width:60rem}
 """
 )
 
+# The tab bar's and the rail's labels: 11 px at the usual text size, growing with the page's text
+# size (rem) up to 15 px, so a larger default font reads larger without pushing a label out of its tab.
+CSS += ":root{--tab-label:min(.786rem,15px)}\n"
+
 # The compact layout (bottom tab bar), written once and applied under each condition (a media
 # query cannot see a body class, so the rules are emitted per condition). {b} prefixes selectors
 # on <body>.
@@ -1054,7 +1091,7 @@ _MOBILE_RULES = """
     border-top:1px solid var(--border);
     padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 10px rgba(0,0,0,.08)}
   body{b} .tabbar > a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
-    height:56px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:11px;
+    height:56px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:var(--tab-label);
     transition:color .2s ease;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:22px;height:22px;transition:transform .15s ease}
   body{b} .tabbar > a:active svg{transform:scale(.92)}
@@ -1064,7 +1101,7 @@ _MOBILE_RULES = """
     background:var(--orange);border-radius:0 0 3px 3px}
   body{b} .tabbar > a{position:relative}
   body{b} .tabbar details.more summary{display:flex;flex-direction:column;align-items:center;
-    justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
+    justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:var(--tab-label);
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
   /* large text (a phone's font scale): a label wraps inside its tab and the bar grows */
@@ -1077,9 +1114,10 @@ _MOBILE_RULES = """
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
-# the account menu and loses its text links. The rail lists every page (More's too) and drops
-# More; its 64 px tabs give up a little height (down to 52 px) when the screen is too short for
-# all of them, and on a shorter one still it scrolls. The body is padded by the rail's width so
+# the account menu and loses its text links and its bell. The rail lists the tab bar's pages, then
+# Alerts (the bell) and More, whose sheet opens beside the rail at its foot; its 64 px tabs give
+# up a little height (down to 52 px) when the screen is too short for all of them, and on a
+# shorter one still it scrolls. The body is padded by the rail's width so
 # every page re-centres in the remaining space.
 _RAIL_RULES = """
   body{b} .topbar nav.site{display:none}
@@ -1095,7 +1133,7 @@ _RAIL_RULES = """
   body{b} .tabbar > a{position:relative;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:.3rem;height:64px;flex:0 1 auto;min-height:52px;color:var(--toolbar-text);
     text-decoration:none;
-    font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
+    font-weight:700;font-size:var(--tab-label);-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     padding:0 2px}
@@ -1108,7 +1146,7 @@ _RAIL_RULES = """
   body{b} .tabbar details.more{display:block}
   body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:.3rem;height:64px;min-height:52px;color:var(--toolbar-text);font-weight:700;
-    font-size:11px;-webkit-tap-highlight-color:transparent}
+    font-size:var(--tab-label);-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
     height:32px;margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
@@ -1132,7 +1170,8 @@ CSS = CSS.replace(
     + "}\n"
     + "body.app footer.site{display:none}\n"
     + "body.app .topbar{padding-top:env(safe-area-inset-top)}\n"
-    + "body.app .topbar .brand .word{display:inline}\n",
+    # the app shows its name beside the mark from 600 px; on a phone only the mark, as the website
+    + "@media (min-width:600px){ body.app .topbar .brand .word{display:inline} }\n",
 )
 # The top bar's second row for large text with a mouse (the container queries above): the brand
 # mark and the account side share the first row, the text links wrap in the row under them.
@@ -1156,8 +1195,15 @@ CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
 # page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
 # 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
 # follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
-# (no flash) and by static/prefs.js when the S / M / L switch is pressed.
+# (no flash) and by static/prefs.js when the S / M / L switch is pressed. Each page keeps its own
+# (Ben, 2026-10-28): the account's card.size.<page>, else the one size chosen for every page before
+# (card.size), else M. The printings dialog has its own too, on <html data-card-size-printings>
+# and on the dialog itself.
 CARD_SIZES = ("s", "m", "l")
+CARD_SIZE = "card.size"
+CARD_SIZE_PAGES = (
+    "deck", "editor", "goldfish", "decks", "search", "collection", "watchlist", "scan", "printings"
+)  # fmt: skip
 CSS += """
 /* the S / M / L switch, styled as card search's Grid / List switch */
 .sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
@@ -1188,8 +1234,8 @@ html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
 /* My decks and the folders in it: as many deck tiles as fit (S 160, M 220, L 300 px at least) */
 html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr))}
 html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))}
-html[data-card-size=s] ul.decklist .thumb{height:140px}
-html[data-card-size=l] ul.decklist .thumb{height:220px}
+html[data-card-size=s] ul.decklist{--deck-thumb:140px}
+html[data-card-size=l] ul.decklist{--deck-thumb:220px}
 html[data-card-size=s] ul.folderlist.grid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,11.25rem),1fr))}
 html[data-card-size=l] ul.folderlist.grid{
@@ -1201,8 +1247,8 @@ html[data-card-size=s] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
 html[data-card-size=l] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(230px,16.2rem)),1fr))}
-html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
-html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
+.printpick[data-card-size=s] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
+.printpick[data-card-size=l] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
 /* list views (R-175): the row pictures follow the same choice through --thumb-scale (S 0.75, L 1.35);
    a page's own list thumbnail multiplies its width and height by it (ui.thumb_size_css). The scale
    is set on the thumbnails themselves, never on <html>: a custom property changed on the root is
@@ -1234,8 +1280,8 @@ html[data-card-size=s] .erow .thumb,html[data-card-size=l] .erow .thumb{
   html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   html[data-card-size=l] ul.decklist.grid{grid-template-columns:minmax(0,1fr)} }
 @media (max-width:700px){
-  html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
-  html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(186px,1fr))} }
+  .printpick[data-card-size=s] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+  .printpick[data-card-size=l] .ppgrid{grid-template-columns:repeat(auto-fill,minmax(186px,1fr))} }
 @media (max-width:600px){
   html[data-card-size=s] .deckview.grid .cards,
   html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -1254,7 +1300,19 @@ UI_CSS = """
 main.wrap.ui-wide{max-width:1200px}
 /* A place's switch (theme.hub_switch): a segmented control, as iOS draws one; it names the page.
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
-.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%}
+/* its parts never shrink under their words: when they are wider than the screen (large text on a
+   Fold's inner screen beside the rail), the switch scrolls sideways inside, never the page */
+.hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%;
+  overflow-x:auto;scrollbar-width:none}
+.hubseg::-webkit-scrollbar{display:none}
+/* more parts that way (static/topbar.js): the edge fades out */
+.hubseg.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
+.hubseg.more-start{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent)}
+.hubseg.more-start.more-end{
+  -webkit-mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent)}
 .hubseg a{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;flex:1 1 0;min-height:38px;
   padding:0 1.1rem;border-radius:9px;color:var(--text);text-decoration:none;font-weight:700}
 .hubseg a{white-space:nowrap}
@@ -1262,7 +1320,7 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a[aria-current=page]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
 @media (pointer:coarse){ .hubseg a{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
-@media (max-width:599.98px){ .hubseg{display:flex;width:100%;overflow-x:auto;scrollbar-width:none}
+@media (max-width:599.98px){ .hubseg{display:flex;width:100%}
   .hubbar{display:block}
   /* large text on a narrow phone: a part's name wraps between words, and a word longer than its
      part scrolls the switch sideways instead of the page */
@@ -1278,7 +1336,14 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-lbl{display:inline-flex;align-items:center;gap:.3rem;height:24px;padding:0 .55rem 0 .45rem;
   border-radius:999px;font-size:.82rem;font-weight:700;line-height:1;white-space:nowrap;
   border:1px solid transparent;background:var(--surface-2);color:var(--text);vertical-align:middle}
+/* a source label (what a test ran on) names a deck: it wraps instead of running out of the page */
+.ui-lbl.src{white-space:normal;height:auto;min-height:24px;max-width:100%;overflow-wrap:anywhere;
+  line-height:1.2;padding-top:.15rem;padding-bottom:.15rem}
+/* a review page's summary is a sentence ("1 Archidekt action; no cards change"): it wraps too */
+.summary-pills .ui-lbl{white-space:normal;height:auto;min-height:24px;max-width:100%;
+  overflow-wrap:anywhere;line-height:1.2;padding-top:.15rem;padding-bottom:.15rem}
 .ui-lbl svg.i{width:15px;height:15px;stroke-width:2.2;vertical-align:0}
+.ui-lbl .ui-spin{width:14px;height:14px;vertical-align:0}
 .ui-lbl.orange{background:var(--orange-tint);color:var(--orange-text)}
 .ui-lbl.green{background:var(--green-tint);color:var(--green-text)}
 .ui-lbl.red{background:var(--red-tint);color:var(--red-text)}
@@ -1293,6 +1358,9 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-app svg.i{width:16px;height:16px;color:var(--text-muted);stroke-width:2}
 .ui-app img.logo{width:16px;height:16px;flex:none;display:inline-block;object-fit:contain}
 .ui-app img.on-light{display:none}
+/* OpenAI's file keeps its clear space inside the picture (the blossom fills its middle half): drawn
+   at twice the size in the same 16 px slot, the mark itself is as big as Claude's (T-201) */
+.ui-app img.on-light,.ui-app img.on-dark{width:32px;height:32px;margin:-8px;pointer-events:none}
 @media (prefers-color-scheme: dark){ :root:not([data-theme=light]) .ui-app img.on-light{display:none}
   :root:not([data-theme=light]) .ui-app img.on-dark{display:inline-block} }
 @media (prefers-color-scheme: light){ :root:not([data-theme=dark]) .ui-app img.on-light{display:inline-block}
@@ -1418,7 +1486,7 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table .act .btn,.ui-table .act button{padding:0 .6rem;font-size:.86rem}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
-  .ui-table .act.linkbtn{padding:0}
+  .ui-table .act.ui-cap{padding:0;background:none}
 }
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
@@ -1429,6 +1497,28 @@ main.wrap.ui-wide{max-width:1200px}
   font-weight:700}
 .linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0 .4rem;font-weight:700}
 @media (pointer:fine){.linkbtn{min-height:32px}}
+/* No bare blue text for an action or a way to go (0.7.46). A small one inside a line or a row (Why,
+   Group by deck, Open as a full page, Undo, a row's Open) is a grey capsule like .disc, without the
+   chevron: 36px drawn inside a 44px tap area. */
+.ui-cap{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;
+  min-height:44px;margin:0 -4px;padding:4px 12px;border:4px solid transparent;border-radius:22px;
+  background:var(--surface-2) padding-box;color:var(--text);font:inherit;font-weight:600;
+  font-size:.86rem;line-height:1.2;text-decoration:none;vertical-align:middle;cursor:pointer}
+.ui-cap:hover{background:var(--surface-3) padding-box;color:var(--text)}
+.ui-cap:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.ui-cap svg.i{width:16px;height:16px;flex:none}
+/* a row of capsules (Your Archidekt lists on Account details): they wrap, with room between */
+.ui-caps{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-left:4px}
+/* a title that opens its row or group, or a deck named in a panel or a widget: the text colour,
+   bold, underlined on hover and focus, so the page carries no blue text */
+.ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+.trend .tdata th a{color:var(--text);font-weight:700;text-decoration:none}
+.ui-table .title .t a:hover,.ui-table .title a.t:hover,.ui-table .tr.group > span a:hover,
+.ui-meta dd a:hover,.wdg .det a:hover,.trend .tdata th a:hover,
+.ui-table .title .t a:focus-visible,.ui-table .title a.t:focus-visible,
+.ui-table .tr.group > span a:focus-visible,.ui-meta dd a:focus-visible,.wdg .det a:focus-visible,
+.trend .tdata th a:focus-visible{
+  color:var(--text);text-decoration:underline}
 
 /* the sticky action bar while a list has a selection */
 .ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;
@@ -1480,8 +1570,14 @@ main.wrap.ui-wide{max-width:1200px}
   background:transparent;
   border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
 .ui-drawer .pills{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 .75rem}
-.ui-meta{display:grid;grid-template-columns:auto 1fr;gap:.35rem 1rem;margin:0 0 1rem;font-size:.95rem}
+/* the value column may shrink (minmax(0,…)): at large text on a narrow screen a value such as an
+   app's name wraps instead of pushing the list, and the page, past the window's edge. The label
+   column takes at most half the width (its words wrap past that), so a value kept on one line,
+   such as a time, still has room beside it */
+.ui-meta{display:grid;grid-template-columns:fit-content(50%) minmax(0,1fr);gap:.35rem 1rem;margin:0 0 1rem;
+  font-size:.95rem}
 .ui-meta dt{color:var(--text-muted)} .ui-meta dd{margin:0;overflow-wrap:anywhere}
+.ui-meta dd .ui-app{white-space:normal}
 .ui-why{color:var(--text-muted);font-size:.88rem}
 /* a proposal's changes: ADD / REMOVE / QTY, the card and the count */
 ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radius-panel);
@@ -1620,7 +1716,7 @@ CARD_MENU_CSS = """
     max-width:none;max-height:85vh;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;
     padding-bottom:calc(.75rem + env(safe-area-inset-bottom))}
 }
-/* Watch: a pill, a check and "Watching" when the card is watched; .icon is the icon alone */
+/* Watch: a pill, a check and "On your watchlist" when the card is watched; .icon is the icon alone */
 .wbtn{display:inline-flex;align-items:center;gap:.3rem;
   margin:0;height:32px;min-height:32px;padding:0 .55rem;border-radius:999px;border:1px solid
   var(--control-border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:700;
@@ -1654,6 +1750,9 @@ CARD_MENU_CSS = """
 .toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
 /* finger-sized on touch, in the corner the toast keeps clear for it (.toast > .close above) */
 @media (pointer:coarse){.toast.cards-toast .close{width:44px;height:44px;min-height:44px}}
+/* its action (Open Wants, Open the watchlist) is a button, finger-sized on a phone or the Fold */
+.toast.cards-toast a.btn{text-decoration:none}
+@media (pointer:coarse),(max-width:899.98px){.toast.cards-toast .btn{min-height:44px}}
 .toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 CSS += CARD_MENU_CSS
@@ -1689,6 +1788,8 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .bx:hover,.mtgbox .bx:focus-visible{background:var(--surface-2);color:var(--text)}
 .mtgbox .bx svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .mtgbox[data-locked=true] .bx{display:none}
+/* a delete box (ui.box cls="dangerbox"): the title in red, its final button the solid red one */
+.mtgbox.dangerbox .bh h2{color:var(--danger-text)}
 .mtgbox > h2{margin:0 0 .75rem;font-size:1.25rem}
 .mtgbox .body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
 .mtgbox .body > .stack{display:flex;flex-direction:column;gap:.75rem}
@@ -1723,13 +1824,10 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .acts button,.mtgbox .acts .btn{margin:0}
 .mtgbox .acts svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
 .mtgbox .loading,.mtgbox .progress{display:flex;align-items:center;gap:.6rem}
-.mtgbox .loading::before,.mtgbox .progress::before{content:'';width:1rem;height:1rem;flex:none;
-  border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
-  animation:mtgbox-spin .8s linear infinite}
-@keyframes mtgbox-spin{to{transform:rotate(360deg)}}
+/* the spinner itself is the theme's one spinner (CSS, "The one progress spinner") */
+.mtgbox .loading::before,.mtgbox .progress::before{content:'';width:1rem;height:1rem;flex:none}
 @media (prefers-reduced-motion:reduce){
-  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}
-  .mtgbox .loading::before,.mtgbox .progress::before{animation:none}}
+  .mtgbox-scrim,.mtgbox-scrim > .mtgbox{transition:none}}
 /* a box the page holds (ui.box) before a script opens it: hidden; drawn open without scripts (the
    old address), it is a plain panel at the top of the page and its Cancel buttons are not shown */
 .ui-box[hidden]{display:none}
@@ -1779,9 +1877,10 @@ CSS += BELL_CSS
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 1279 px); under 600 px folded behind the magnifier
 # (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
-# keeps its text links, Search among them, and has no room for the box. The box's rules address
-# the input through .box, not the .suggest wrapper the script puts around it, so the room for the
-# magnifier is there before the script runs and without it (0.7.43: the icon sat on "Search").
+# keeps its text links and has no room for the box: it is folded behind the magnifier there too.
+# The box's rules address the input through .box, not the .suggest wrapper the script puts around
+# it, so the room for the magnifier is there before the script runs and without it (0.7.43: the
+# icon sat on "Search").
 _TOPSEARCH_CSS = """
 .topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
 /* The box's own width, which the bar starts from before it grows or gives way: 20rem, not the
@@ -1792,6 +1891,9 @@ _TOPSEARCH_CSS = """
    rest when the box grows. */
 .topbar .topsearch .box{position:relative;display:grid;grid-template-columns:minmax(9rem,20rem) auto}
 .topbar .topsearch .box > input{grid-column:1 / -1}
+/* the wrapper static/suggest.js puts around the input spans the box too: in the first column only,
+   the input (and under 600 px its suggestion list) stopped 20rem in, short of the box's end */
+.topbar .topsearch .box > .suggest{grid-column:1 / -1}
 .topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
@@ -1826,6 +1928,15 @@ _TOPSEARCH_CSS = """
     background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0}
   body.search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
   body.search-open .topbar .searchbtn{color:var(--orange)} }
+/* A narrow window with a mouse (600 to 899 px) has no room for the box beside its text links: the
+   magnifier shows, and opens the box under the bar as on a phone (it had no search at all) */
+@media (min-width:600px) and (max-width:899.98px) and (hover:hover) and (pointer:fine){
+  body:not(.app) .topbar .searchbtn{display:inline-flex}
+  body:not(.app).search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
+    padding:.5rem 1.25rem .6rem;background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0;
+    max-width:none;margin:0}
+  body:not(.app).search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
+  body:not(.app).search-open .topbar .searchbtn{color:var(--orange)} }
 /* the site search's groups in the suggestion list */
 .suggest-list li.head{padding:.5rem 1rem .2rem;font-size:.78rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.04em;color:var(--menu-head);cursor:default}
@@ -2101,6 +2212,7 @@ ICONS = {
     "user": "<circle cx='12' cy='8' r='4'/><path d='M4 21a8 8 0 0 1 16 0'/>",
     "heart": "<path d='M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z'/>",
     "bookmark": "<path d='M6 3h12v18l-6-4-6 4z'/>",
+    "pin": "<path d='M9 3h6l-1 6 4 4H6l4-4z'/><path d='M12 13v8'/>",
     "comment": "<path d='M4 5h16v11H9l-5 4z'/>",
     "follow": "<circle cx='10' cy='8' r='4'/><path d='M2 21a8 8 0 0 1 16 0'/><path d='M19 8v6M16 11h6'/>",
     "thumb": "<path d='M7 11v9H3v-9zM7 11l4-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2l-1.5 7a2 2 0 0 1-2 2H7'/>",
@@ -2194,6 +2306,10 @@ def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
     return f"{count} {word if one else (plural_word or word + 's')}"
 
 
+# The one progress spinner (styled in CSS above); ui.label draws it for the "spinner" icon.
+SPINNER = "<span class='ui-spin' aria-hidden='true'></span>"
+
+
 def icon(name: str, *, cls: str = "i") -> str:
     """One of our own inline SVG icons (``aria-hidden``; pair it with visible or sr-only text)."""
     return f"<svg class='{cls}' viewBox='0 0 24 24' aria-hidden='true'>{ICONS[name]}</svg>"
@@ -2237,37 +2353,81 @@ def current_layout() -> str:
     return _layout.get()
 
 
-def set_card_size(size: object) -> None:
-    """The card size this request's page is drawn with (the account's, prefs.py)."""
-    _card_size.set(size if isinstance(size, str) and size in CARD_SIZES else "m")
+def card_size_page(path: str) -> str:
+    """Which page's card size (CARD_SIZE_PAGES) the page at ``path`` uses. A page not named here
+    (Home, the site search, a profile) shows deck tiles: it shares My decks' size."""
+    parts = [p for p in path.split("/") if p]
+    head = parts[0] if parts else ""
+    if head == "decks" and len(parts) >= 2 and parts[1] not in ("new", "new-package", "open"):
+        return {"goldfish": "goldfish", "edit": "editor"}.get(parts[2] if len(parts) > 2 else "", "deck")
+    return {"cards": "search", "collection": "collection", "watchlist": "watchlist", "scan": "scan"}.get(
+        head, "decks"
+    )
 
 
-def current_card_size() -> str:
-    return _card_size.get()
+def set_card_size(sizes: object, page: str | None = None) -> None:
+    """The card sizes this request's page is drawn with: the account's choices by pref name
+    (prefs.py; a plain size is the one for every page), and the page (card_size_page of the
+    request's path when not given)."""
+    if isinstance(sizes, str):
+        sizes = {CARD_SIZE: sizes}
+    _card_size.set((page or card_size_page(current_path()), dict(sizes) if isinstance(sizes, dict) else {}))
+
+
+def _stored_card_size(page: str) -> str | None:
+    sizes = _card_size.get()[1]
+    for name in (f"{CARD_SIZE}.{page}", CARD_SIZE):
+        if sizes.get(name) in CARD_SIZES:
+            return sizes[name]
+    return None
+
+
+def current_card_size(page: str | None = None) -> str:
+    """The card size of ``page`` (this request's page when not given): its own, else the one size
+    chosen before for every page, else M."""
+    return _stored_card_size(page or _card_size.get()[0]) or "m"
+
+
+def card_size_attrs() -> str:
+    """``<html>``'s card size attributes: the page's size and name, ``data-card-size-unset`` when
+    the account has no size for it (static/prefs.js may then use this device's copy), and the
+    printings dialog's size."""
+    page, sizes = _card_size.get()
+    unset = _stored_card_size(page) is None and sizes.get("prefs.forgotten") is not True
+    return (
+        f" data-card-size={current_card_size(page)} data-card-size-page={page}"
+        + (" data-card-size-unset" if unset else "")
+        + f" data-card-size-printings={current_card_size('printings')}"
+    )
 
 
 def card_size_control(*, cls: str = "field cardsize") -> str:
     """The one S / M / L card size switch (R-175): put it in the toolbar of every view that shows card
     pictures, list rows included. static/prefs.js presses it, applies it at once on
-    ``<html data-card-size>`` and keeps the choice on the account (prefs.CARD_SIZE), so one choice
-    follows the member to every view. ``cls`` is the wrapper's class (keep ``cardsize`` in it)."""
-    size = current_card_size()
+    ``<html data-card-size>`` and keeps the choice on the account as this page's own
+    (card.size.<page>, prefs.py), so it follows the member to this page on every device and leaves
+    the other pages as they are. ``cls`` is the wrapper's class (keep ``cardsize`` in it)."""
+    page = _card_size.get()[0]
+    size = current_card_size(page)
     buttons = "".join(
         f"<button type='button' data-card-size-set='{k}' aria-pressed='{'true' if k == size else 'false'}' "
         f"aria-label='{label} cards' title='{label} cards'>{k.upper()}</button>"
         for k, label in (("s", "Small"), ("m", "Medium"), ("l", "Large"))
     )
     return (
-        f"<div class='{esc(cls)}'><span class='lbl' aria-hidden='true'>Card size</span>"
+        f"<div class='{esc(cls)}' data-card-size-page='{page}'>"
+        "<span class='lbl' aria-hidden='true'>Card size</span>"
         f"<span class='sizeseg' role='group' aria-label='Card size'>{buttons}</span></div>"
     )
 
 
 # The site navigation (Ben, 2026-10-25): four places and More, the same on every screen. The top bar
 # on a computer, the bottom tab bar on a phone and the rail (an unfolded Fold, a tablet, the app from
-# 600 px) list these; the rail adds Alerts (the bell) before More. Assistant is the assistant's own
-# pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with the count of
-# proposals waiting for the member.
+# 600 px) list these; the rail adds Forum and Alerts (the bell) before More. Assistant is the
+# assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
+# the count of proposals waiting for the member. Binder is the member's cards, behind one switch too
+# (BINDER_PAGES): Cards (the Archidekt collection), Wants (the cards pinned on Archidekt) and
+# Watchlist (decision C8, 0.7.46).
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
@@ -2280,20 +2440,43 @@ ASSISTANT_PAGES = (
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
 )
-NAV_PLACE = {"/history": "/proposals", "/reports": "/proposals"}
-# More, in groups. Account, Guide, Forum and Admin live on the Account page your picture opens.
+# Binder's switch (Cards, Wants, Watchlist); Watchlist only while watchlists are on (binder_pages)
+BINDER_PAGES = (
+    ("/collection", "Cards", "collection"),
+    ("/collection/wants", "Wants", "bookmark"),
+    ("/watchlist", "Watchlist", "stats"),
+)
+NAV_PLACE = {
+    "/history": "/proposals",
+    "/reports": "/proposals",
+    "/collection/wants": "/collection",
+    "/watchlist": "/collection",
+}
+# The pages that light the picture (the Account place): the Account pages and the Archidekt lists
+# that live under Account (category templates, default categories, color tags, custom cards)
+ACCOUNT_PAGES = ("/account", "/account/details", "/lists")
+# The rail's extra places between the four and More (the phone bar keeps the bell in the top bar
+# and Forum under More): (href, label, icon, class)
+RAIL_EXTRA = (("/forum", "Forum", "comment", "railonly"),)
+# More, in groups. Account, Guide and Admin live on the Account page your picture opens; the
+# Archidekt lists live under Account; Watchlist lives in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
-    (
-        "Your cards",
-        [("/scan", "Scan", "scan"), ("/watchlist", "Watchlist", "stats"), ("/lists", "My lists", "list")],
-    ),
+    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),
+    ("Community", [("/forum", "Forum", "comment")]),
 ]
 
 
+def binder_pages() -> list[tuple[str, str, str]]:
+    """Binder's switch, without Watchlist while watchlists are off."""
+    return [p for p in BINDER_PAGES if p[0] != "/watchlist" or WATCHLISTS]
+
+
 def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
-    """More's groups, without Watchlist while watchlists are off."""
-    return [(head, [x for x in links if WATCHLISTS or x[0] != "/watchlist"]) for head, links in MORE_GROUPS]
+    """More's groups, without My card models while descriptions are not kept
+    (card_models.SWITCHED_ON)."""
+    off = set() if card_models.SWITCHED_ON else {"/history/models"}
+    return [(head, [x for x in links if x[0] not in off]) for head, links in MORE_GROUPS]
 
 
 def hub_switch(label: str, items: list[tuple[str, str, str]], current: str, *, badge: int = 0) -> str:
@@ -2386,6 +2569,7 @@ def render(
     body_class: str = "",
     main_class: str = "",
     sub: str | None = None,
+    signin_link: bool = True,
 ) -> HTMLResponse:
     """Render a page. ``form_action`` adds exact origins a form on this page may submit or be
     redirected to (browsers apply form-action to the redirect that follows a POST too).
@@ -2393,7 +2577,8 @@ def render(
     forbidden). ``current`` names the nav link to mark as the current page (its path);
     ``heading=False`` leaves the <h1> to the body (deck banner). ``sub`` is the signed-in
     member, for the Assistant place's count of waiting proposals. ``main_class`` adds classes to
-    <main> (``ui-wide`` for the UI standard's 1200 px list pages)."""
+    <main> (``ui-wide`` for the UI standard's 1200 px list pages). ``signin_link`` False leaves
+    the signed-out top bar's Sign in out (a page that says the person is signed in elsewhere)."""
     theme = current_theme()
     app = in_app()
     # "Use desktop layout": a wide fixed viewport, as a browser's "Desktop site" switch
@@ -2437,7 +2622,7 @@ def render(
         who = f" data-who='{hashlib.sha256(sub.encode()).hexdigest()[:16]}'" if sub else ""
         account_link = (
             f"<a class='icon-btn acct' href='/account' aria-label='Account' title='Account'{who}"
-            f"{' aria-current=page' if cur in ('/account', '/account/details') else ''}>"
+            f"{' aria-current=page' if cur in ACCOUNT_PAGES else ''}>"
             # The member's own picture (their provider's, else their initials: /account/avatar).
             "<img class='av' src='/account/avatar' alt='' width='28' height='28'></a>"
         )
@@ -2470,7 +2655,7 @@ def render(
         # /notifications page without scripts. Beside the picture on a phone and a computer; the
         # rail has it as Alerts instead.
         bell = (
-            "<a class='icon-btn bell' href='/notifications' aria-label='Notifications' title='Notifications' "
+            "<a class='icon-btn bell' href='/notifications' aria-label='Alerts' title='Alerts' "
             f"data-bell{' aria-current=page' if cur == '/notifications' else ''}>{icon('bell')}"
             "<span class='n' hidden aria-hidden='true'></span></a>"
         )
@@ -2490,7 +2675,9 @@ def render(
                 tab(href, label, ic, extra=badge(waiting, "waiting") if href == "/proposals" else "")
                 for href, label, ic in NAV_LINKS
             )
-            # the bell as a rail place (railonly: the phone bar keeps it in the top bar)
+            # Forum, then the bell, as rail places (railonly: the phone bar keeps the bell in the
+            # top bar and Forum under More)
+            + "".join(tab(href, label, ic, cls) for href, label, ic, cls in RAIL_EXTRA)
             + tab(
                 "/notifications",
                 "Alerts",
@@ -2509,6 +2696,8 @@ def render(
         right = (
             "<nav class='user' aria-label='Account'>"
             f"<a class='btn signin' href='/login'>{icon('login')} Sign in</a></nav>"
+            if signin_link
+            else ""
         )
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
@@ -2545,7 +2734,7 @@ def render(
     description = f"{site}: a private gateway to your Magic: The Gathering decks on Archidekt."
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}"
-        f"{f' data-card-size={current_card_size()}' if signed_in else ''}>"
+        f"{card_size_attrs() if signed_in else ''}>"
         "<head><meta charset='utf-8'>"
         f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
@@ -2597,7 +2786,7 @@ def render(
             # The website footer; the Android app has no footer (its pages end at the tab bar).
             # (the top bar already has Decks, Binder, Search and Scan)
             "<footer class='site'><div class='links'>"
-            "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant</a>"
+            "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant skill</a>"
             + "<a href='/install?for=android'>Apps</a>"
             + ("<a href='/account'>Account</a>" if signed_in else "<a href='/login'>Sign in</a>")
             + "</div>"
@@ -2611,6 +2800,7 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
+        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
         + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )
@@ -2618,7 +2808,7 @@ def render(
         versioned_static(doc),
         status_code=status,
         headers={
-            "Cache-Control": "no-store",
+            "Cache-Control": page_cache_control(current_path(), status),
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             # Scripts only from the gateway's own origin, never inline: every page loads
@@ -2628,6 +2818,33 @@ def render(
             "Content-Security-Policy": DEFAULT_CSP + "".join(f" {src}" for src in form_action),
         },
     )
+
+
+# Ordinary pages may be kept by the member's own browser, always asked again before use, so Back
+# shows the page at once from the back/forward cache (owner decision, 0.7.46). Pages under these
+# addresses stay no-store: sign-in and sign-out, the Account pages (the Archidekt link, connected
+# apps), Admin, the assistant connection consent, the app's install pages; and any page that is
+# not a plain 200 (an error, a busy page).
+PAGE_CACHE = "private, no-cache"
+NO_STORE_PREFIXES = (
+    "/account",
+    "/admin",
+    "/login",
+    "/logout",
+    "/signed-out",
+    "/data-deleted",
+    "/auth",
+    "/install",
+    "/app",
+    "/authorize",
+)
+
+
+def page_cache_control(path: str, status: int) -> str:
+    """The Cache-Control of a page rendered for ``path`` with ``status``."""
+    if status != 200 or path.startswith(NO_STORE_PREFIXES):
+        return "no-store"
+    return PAGE_CACHE
 
 
 class ThemeMiddleware:
@@ -2662,7 +2879,7 @@ class ThemeMiddleware:
         ptoken = _path.set(path)
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
-        ctoken = _card_size.set("m")
+        ctoken = _card_size.set((card_size_page(path), {}))
         try:
             await self.app(scope, receive, send)
         finally:

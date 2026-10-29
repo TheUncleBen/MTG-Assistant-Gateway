@@ -47,8 +47,21 @@ MAX_PREFIX_LOOKUPS = 5
 MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
+# The printing picker's lookups wait this long for one of the account's places before "busy" (a
+# deck page opens several at once)
+LOOKUP_WAIT_SECONDS = 4.0
+# At most this many of one account's lookups wait for a place at once; one more is busy without
+# waiting (security review 2, R2-06)
+MAX_LOOKUP_WAITERS_PER_USER = 16
+MAX_RESOLVE_WAITERS_PER_USER = 4  # the same for resolve calls waiting their account's one turn
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
+# A second resolve call from one account waits this long for the first to finish (assistants send
+# calls in parallel, AT-38) before it is refused busy. The refusal suggests a wait (suggested_wait,
+# seconds) rather than a retry_after: the running call's end is not known (its budget bounds its
+# extra lookups, not each Scryfall answer).
+RESOLVE_WAIT_SECONDS = 15.0
+SUGGESTED_WAIT_SECONDS = 10
 MIN_PREFIX = 4
 # The card search's picker lists (sets, blocks, types): read again once they are a day old, and
 # a read that came back incomplete (Scryfall busy or down) is tried again after a minute.
@@ -125,9 +138,10 @@ _SKIP = re.compile(r"^\s*(//|#|$)|^\s*(deck|sideboard|commander|maybeboard|compa
 class ScanError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, unavailable, rate_limited, busy."""
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, extra: dict[str, Any] | None = None):
         super().__init__(message)
         self.kind = kind
+        self.extra = dict(extra or {})  # fields the refusal carries (suggested_wait for busy)
 
 
 @dataclass
@@ -351,9 +365,11 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     When every copy of a name is one agreed printing (status ``printing``: title and collector
     line agreed, or the printing was chosen by hand) in one finish, the addition also carries
     ``set_code``, ``collector_number`` and ``foil`` so the deck tools can keep that printing.
-    Copies matched by name alone, or spread over several printings, are added by name alone.
+    Copies matched by name alone, or spread over several printings, are added by name alone; the
+    copies of those asked for in foil are a separate addition that carries ``foil``.
     """
     counts: dict[str, int] = {}
+    foils: dict[str, int] = {}
     prints: dict[str, set[tuple[str, str, bool | None]]] = {}
     by_name_only: set[str] = set()
     for it in items:
@@ -362,6 +378,8 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         name = card["name"]
         counts[name] = counts.get(name, 0) + int(it.get("quantity", 1))
+        if it.get("foil") is True:
+            foils[name] = foils.get(name, 0) + int(it.get("quantity", 1))
         if it.get("status") == "printing" and card.get("set") and card.get("collector_number"):
             foil = it.get("foil")
             prints.setdefault(name, set()).add(
@@ -372,17 +390,33 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for name, qty in counts.items():
         change: dict[str, Any] = {"action": "add", "card_name": name}
+        piles: list[tuple[dict[str, Any], int]] = []
         if name not in by_name_only and len(prints.get(name, ())) == 1:
             set_code, number, foil = next(iter(prints[name]))
             change.update({"set_code": set_code, "collector_number": number})
             if foil is not None:  # an unknown finish is not a claim of "not foil"
                 change["foil"] = foil
-        # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
-        while qty > 99:
-            out.append({**change, "quantity": 99})
-            qty -= 99
-        out.append({**change, "quantity": qty})
+            piles.append((change, qty))
+        else:
+            # a finish asked for is kept even when the printing is not: foil copies first
+            foil_qty = foils.get(name, 0)
+            if foil_qty:
+                piles.append(({**change, "foil": True}, foil_qty))
+            if qty - foil_qty:
+                piles.append((change, qty - foil_qty))
+        for pile, n in piles:
+            # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
+            while n > 99:
+                out.append({**pile, "quantity": 99})
+                n -= 99
+            out.append({**pile, "quantity": n})
     return out
+
+
+def ready_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Items ready to use: a card was found, and it is not a conflict waiting for someone to pick
+    the card. Only these go into decklist_text and changes."""
+    return [it for it in items if it.get("card") and it.get("status") != "conflict"]
 
 
 def change_fields(resolved: list[dict[str, Any]]) -> dict[str, Any]:
@@ -437,7 +471,10 @@ class ScanService:
         self.art_matcher = art_matcher
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
+        self.queue_wait = RESOLVE_WAIT_SECONDS
         self._lookups: dict[str, int] = {}
+        self._lookup_waiting: dict[str, int] = {}  # an account's lookups waiting in _free_slot
+        self._resolve_waiting: dict[str, int] = {}  # an account's resolve calls waiting their turn
         # the picker lists last read (search_options), when, and the read running now
         self._options: dict[str, Any] | None = None
         self._options_error: ScanError | None = None
@@ -446,17 +483,41 @@ class ScanService:
         self._options_task: asyncio.Task[None] | None = None
 
     # -- resolution -----------------------------------------------------------
-    async def resolve(self, inputs: list[CardInput], *, owner: str | None = None) -> list[Resolution]:
+    async def resolve(
+        self, inputs: list[CardInput], *, owner: str | None = None, waited: list[float] | None = None
+    ) -> list[Resolution]:
         """Resolve ``inputs``. With ``owner`` set, one call per account runs at a time; a second
-        concurrent call is rejected (kind ``busy``) rather than queued behind the shared pacer."""
+        concurrent call waits up to ``queue_wait`` seconds for its turn (the seconds it waited go
+        on ``waited`` when it waited at all; at most MAX_RESOLVE_WAITERS_PER_USER wait at once),
+        then is rejected (kind ``busy``, with
+        suggested_wait) rather than queued behind the shared pacer."""
         if not inputs:
             raise ScanError("invalid", "nothing to resolve")
         if len(inputs) > MAX_RESOLVE_CARDS:
             raise ScanError("invalid", f"at most {MAX_RESOLVE_CARDS} cards per call")
         if owner is None:
             return await self._resolve(inputs)
+        start = time.monotonic()
+        if owner in self._in_flight and self._resolve_waiting.get(owner, 0) < MAX_RESOLVE_WAITERS_PER_USER:
+            self._resolve_waiting[owner] = self._resolve_waiting.get(owner, 0) + 1
+            try:
+                while owner in self._in_flight and time.monotonic() - start < self.queue_wait:
+                    await asyncio.sleep(0.05)
+            finally:
+                left = self._resolve_waiting.get(owner, 1) - 1
+                if left > 0:
+                    self._resolve_waiting[owner] = left
+                else:
+                    self._resolve_waiting.pop(owner, None)
         if owner in self._in_flight:
-            raise ScanError("busy", "another card lookup for your account is still running; wait for it")
+            raise ScanError(
+                "busy",
+                "another card lookup for your account is still running after a short wait; try again "
+                "when it has finished",
+                extra={"suggested_wait": SUGGESTED_WAIT_SECONDS},
+            )
+        if waited is not None and time.monotonic() - start >= 0.05:
+            waited.append(time.monotonic() - start)
         self._in_flight.add(owner)
         token = art_owner.set(owner)  # gallery builds this call starts count against this member
         try:
@@ -484,6 +545,25 @@ class ScanService:
                 self._lookups[owner] = left
             else:
                 self._lookups.pop(owner, None)
+
+    async def _free_slot(self, owner: str | None) -> None:
+        """Wait up to LOOKUP_WAIT_SECONDS for one of ``owner``'s lookup places (``_lookup_slot``
+        then takes it, with nothing awaited in between); after that, ``_lookup_slot`` says busy."""
+        if owner is None or self._lookups.get(owner, 0) < MAX_LOOKUPS_PER_USER:
+            return
+        if self._lookup_waiting.get(owner, 0) >= MAX_LOOKUP_WAITERS_PER_USER:
+            return  # enough of this account's lookups wait already: busy at once
+        end = time.monotonic() + LOOKUP_WAIT_SECONDS
+        self._lookup_waiting[owner] = self._lookup_waiting.get(owner, 0) + 1
+        try:
+            while self._lookups.get(owner, 0) >= MAX_LOOKUPS_PER_USER and time.monotonic() < end:
+                await asyncio.sleep(0.05)
+        finally:
+            left = self._lookup_waiting.get(owner, 1) - 1
+            if left > 0:
+                self._lookup_waiting[owner] = left
+            else:
+                self._lookup_waiting.pop(owner, None)
 
     async def _resolve(self, inputs: list[CardInput]) -> list[Resolution]:
         # The wall-clock budget runs from the start of the call, batched pass included.
@@ -941,6 +1021,7 @@ class ScanService:
             if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)) or num != "1":
                 raise ScanError("invalid", "set and number must name one printing, on page 1")
             picks.update(set_code=code, number=cn)
+        await self._free_slot(owner)
         try:
             with self._lookup_slot(owner):
                 out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
@@ -951,6 +1032,31 @@ class ScanService:
             if exc.kind in ("unavailable", "rate_limited", "not_found"):
                 raise ScanError(exc.kind, str(exc)) from exc
             raise ScanError("unavailable", str(exc)) from exc
+
+    async def printing(self, set_code: str, number: str, *, owner: str | None = None) -> dict[str, Any]:
+        """One printing by set code and collector number, as a card summary: how the printing
+        picker finds a deck row's own card (a token named "Goblin" is that token, never a card
+        whose name starts the same). ``not_found`` when Scryfall has no such printing."""
+        code = str(set_code or "").strip().lower()
+        cn = str(number or "").strip()
+        if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)):
+            raise ScanError("invalid", "set and number must name one printing")
+        key = f"print:{code}:{cn.lower()}"
+        if (hit := self.scryfall.cards.get(key)) is not None:
+            return hit
+        await self._free_slot(owner)
+        try:
+            with self._lookup_slot(owner):
+                found, _ = await self.scryfall.collection([{"set": code, "collector_number": cn}])
+        except ScryfallError as exc:
+            if exc.kind in ("unavailable", "rate_limited"):
+                raise ScanError(exc.kind, str(exc)) from exc
+            raise ScanError("unavailable", str(exc)) from exc
+        if not found:
+            raise ScanError("not_found", f"Scryfall has no printing {code.upper()} {cn}")
+        summary = summarize(found[0])
+        self.scryfall.cards.put(key, summary)
+        return summary
 
     async def named_raw(self, name: str, *, owner: str | None = None) -> dict[str, Any]:
         """The whole Scryfall object of one card by exact name (rules text included), through the
@@ -1147,7 +1253,7 @@ class ScanService:
             counts[r.status] = counts.get(r.status, 0) + 1
         # A conflict keeps the card its name matched, for review, but is not ready to use: it stays
         # out of the counts, the decklist and the changes until someone picks the card.
-        resolved = [it for it in items if it["card"] and it["status"] != "conflict"]
+        resolved = ready_items(items)
         deferred = counts.get("deferred", 0)
         conflicts = counts.get("conflict", 0)
         out = {
@@ -1167,7 +1273,7 @@ class ScanService:
         if conflicts:
             out["conflicts"] = conflicts
             out["conflicts_note"] = (
-                f"{conflicts} of {len(results)} cards name a printing that is a different card. They are "
+                f"{conflicts} of {len(results)} lines name a printing that is a different card. They are "
                 "left out of decklist_text and changes until the user says which card they mean."
             )
         if deferred:
@@ -1278,6 +1384,20 @@ class ScanService:
             out[name] = found
         return out
 
+    async def did_you_mean(self, names: list[str]) -> dict[str, str]:
+        """For names that are no card, the card Scryfall's fuzzy match takes each for: one paced
+        lookup per name, at most ``MAX_CARD_CHECK_LOOKUPS``; a name with no match is left out."""
+        out: dict[str, str] = {}
+        for name in names[:MAX_CARD_CHECK_LOOKUPS]:
+            try:
+                card = await self.scryfall.named(name, fuzzy=True)
+            except ScryfallError:
+                continue
+            found = str(card.get("name") or "")
+            if found and found.casefold() != name.casefold():
+                out[name] = found
+        return out
+
     def guessed_names(self, sub: str) -> dict[str, str]:
         """Card names this member's scans matched from a misread name: matched name (lower case)
         -> what was read. A proposal adding one of these cards says the name was guessed."""
@@ -1294,7 +1414,8 @@ class ScanService:
     @staticmethod
     def describe_session(row: dict[str, Any]) -> dict[str, Any]:
         items = row["items"]
-        resolved = [it for it in items if it.get("card")]
+        found = [it for it in items if it.get("card")]
+        resolved = ready_items(items)
         return {
             "id": row["id"],
             "name": row["name"],
@@ -1304,9 +1425,9 @@ class ScanService:
             "updated_at": row["updated_at"],
             "item_count": len(items),
             "card_count": sum(int(it.get("quantity", 1)) for it in items),
-            "unresolved": len(items) - len(resolved),
+            "unresolved": len(items) - len(found),
             "items": items,
-            "decklist_text": decklist_text(items),
+            "decklist_text": decklist_text(resolved),
             **change_fields(resolved),
         }
 

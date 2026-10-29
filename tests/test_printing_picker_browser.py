@@ -1,5 +1,5 @@
 """The printing picker (static/printpick.js) in headless Chromium: the deck page's card menu has
-"Change printing…" (the deck proper's rows only); the picker searches by set name or code,
+"Printings…" (on every row); the picker searches by set name or code,
 filters by finish, frame and border, sorts newest, oldest or cheapest, hides digital-only and
 preview printings until the switch shows them (labelled), never lists another language, and
 pages past Scryfall's page with Load more (filtered on Scryfall's side then). Hovering a tile
@@ -214,7 +214,7 @@ def _open_menu(page, card) -> None:
 
 def _open_picker(page, card) -> None:
     _open_menu(page, card)
-    page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+    page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
     page.locator(".printpick.open[role=dialog]").wait_for(timeout=3000)
     page.locator(".printpick .pptile").first.wait_for(timeout=5000)
 
@@ -327,15 +327,16 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         url = page.url
         card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
         side = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='side']")
-        # the maybeboard row's menu has no printing item (Archidekt's printing change is for the deck)
+        # the maybeboard row's menu has its own printing item (it changes that row only:
+        # test_row_targets_browser)
         _open_menu(page, side)
         labels = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
-        assert not any("Change printing" in x for x in labels), labels
+        assert any("Printings…" in x for x in labels), labels
         page.keyboard.press("Escape")
         _open_menu(page, card)
         labels = page.locator(".ctxmenu [role=menuitem]").all_inner_texts()
-        assert any("Change printing…" in x for x in labels), labels
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        assert any("Printings…" in x for x in labels), labels
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         dlg = page.locator(".printpick.open[role=dialog]")
         dlg.wait_for(timeout=3000)
         assert page.locator(".ctxmenu").count() == 0
@@ -449,18 +450,18 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert page.evaluate("() => document.activeElement.innerText") == "Use this printing"
         with page.expect_request(EDIT_URL) as req:
             page.locator(".pppreview .ppuse").click()
-        assert json.loads(req.value.post_data) == {
-            "changes": [
-                {
-                    "action": "set_printing",
-                    "card_name": "Sol Ring",
-                    "set_code": "sld",
-                    "collector_number": "1074",
-                    "finish": "etched",
-                }
-            ],
-            "confirmed": False,
-        }
+        sent = json.loads(req.value.post_data)
+        assert sent["changes"] == [
+            {
+                "action": "set_printing",
+                "card_name": "Sol Ring",
+                "set_code": "sld",
+                "collector_number": "1074",
+                "finish": "etched",
+            }
+        ]
+        assert sent["confirmed"] is False
+        assert (sent["view"], sent["group"], sent["sort"]) == ("text", "category", "name")  # the page's own
         assert page.locator(".printpick.open").count() == 0
         # shown at once, then Saved: the message says the finish changed
         assert card.get_attribute("data-set") == "SLD 1074" and card.get_attribute("data-finish") == "Etched"
@@ -797,7 +798,7 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         assert page.locator(".picker").count() == 0  # the old picker is gone
         row = page.locator(".erow[id='card-Sol Ring']")
         row.locator("details.rowmenu summary").click()
-        row.locator(".menu button", has_text="Change printing").click()
+        row.locator(".menu button", has_text="Printings…").click()
         dlg = page.locator(".printpick.open[role=dialog]")
         dlg.wait_for(timeout=3000)
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)
@@ -813,7 +814,7 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         assert server.sol_ring() == [("cmr", "472", "Normal")]
         # the picker opened again marks the pick waiting; picking the deck's own takes it back
         row.locator("details.rowmenu summary").click()
-        row.locator(".menu button", has_text="Change printing").click()
+        row.locator(".menu button", has_text="Printings…").click()
         page.locator(".printpick .pptile.picked").wait_for(timeout=5000)
         assert "Picked" in page.locator(".printpick .pptile.picked").inner_text()
         page.locator(".printpick .pptile.current").click()
@@ -874,7 +875,7 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         card = page.locator(".deckview .c[data-card='Sol Ring'][data-zone='main']")
         _open_menu(page, card)
         _shot(page, f"menu-{width}-{theme}")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Change printing…").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
         page.locator(".printpick .pptile").first.wait_for(timeout=5000)
         page.wait_for_timeout(250)  # the dialog's entrance
         problems = page.evaluate(MEASURE) + page.evaluate(COVERED)
@@ -1054,7 +1055,7 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
         row = page.locator(".erow[id='card-Sol Ring']")
         for _ in range(2):  # queue a pick, then open the picker again on it
             press(row.locator("details.rowmenu summary"))
-            press(row.locator(".menu button", has_text="Change printing"))
+            press(row.locator(".menu button", has_text="Printings…"))
             page.locator(".printpick .pptile").first.wait_for(timeout=5000)
             if not page.locator(".printpick .pptile.picked").count():
                 press(page.locator(".printpick .pptile", has_text="SLD #1074"))
@@ -1079,6 +1080,9 @@ STALE_SCROLL_THEN_OPEN = """
   const btn = document.querySelector(".printpick .msel-btn[aria-label='Frame']");
   // the box overflowed in CI (its fonts differ); a list that won't shrink stands in for that
   box.querySelector('.ppmain').style.flex = 'none';
+  // the scroll event, once sent (select.js's closer, on the document's capture, has seen it first)
+  window.__boxScrolled = false;
+  box.addEventListener('scroll', () => { window.__boxScrolled = true; }, { once: true });
   box.scrollTop += 6;
   btn.click();
   return box.scrollTop;
@@ -1094,6 +1098,8 @@ SCROLL_THE_BOX = """
   spacer.style.cssText = 'flex:none;height:600px';
   box.appendChild(spacer);
   const before = box.scrollTop;
+  window.__boxScrolled = false;
+  box.addEventListener('scroll', () => { window.__boxScrolled = true; }, { once: true });
   box.scrollTop = before > 0 ? 0 : 40;
   return [before, box.scrollTop];
 }
@@ -1122,7 +1128,8 @@ def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: P
             if not page.locator(".printpick .msel-btn[aria-label='Frame']").is_visible():
                 page.locator(".printpick .ppfiltbtn").click()
             assert page.evaluate(STALE_SCROLL_THEN_OPEN) > 0, "the picker box didn't scroll"
-            page.wait_for_timeout(300)  # several frames: the scroll event has arrived
+            # the scroll event comes a frame or more later (later still on a busy machine)
+            page.wait_for_function("() => window.__boxScrolled")
             assert page.locator(".msel-list").count() == 1, page.evaluate("() => window.__mselLog")
             page.locator(".msel-list [role=option]", has_text="1993 frame").first.click()
             assert page.locator(".msel-list").count() == 0
@@ -1131,7 +1138,7 @@ def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: P
             assert page.locator(".msel-list").count() == 1
             moved = page.evaluate(SCROLL_THE_BOX)
             assert moved[0] != moved[1], moved
-            page.wait_for_timeout(300)
+            page.wait_for_function("() => window.__boxScrolled")
             assert page.locator(".msel-list").count() == 0
             browser.close()
             assert errors == []
@@ -1159,4 +1166,259 @@ def test_a_resting_pointer_never_takes_the_keyboards_place_in_the_preview(server
         assert page.evaluate("() => document.activeElement.innerText") == "Use this printing"
         assert "Limited Edition Alpha" in page.locator(".pppreview h3").inner_text()
         assert errors == []
+        browser.close()
+
+
+def test_the_picker_finds_the_rows_own_printing_and_waits_out_a_busy_answer(server: Server) -> None:
+    """The deck row's own printing (CMR 472) names its card: no lookup by name. A busy answer
+    (the account's other lookups) is asked again after a moment instead of failing, and an
+    answer that keeps failing says why in plain words, with a Retry button that loads the list."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    busy = json.dumps({"ok": False, "error": "busy", "message": "other card lookups are still running"})
+    down = json.dumps({"ok": False, "error": "unavailable", "message": "Scryfall did not answer"})
+    prints = re.compile(r"/scan/api/prints\?")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        asked: list[str] = []
+        page.on("request", lambda r: asked.append(r.url) if "/scan/api/" in r.url else None)
+        left = {"busy": 1}
+
+        def once_busy(route) -> None:
+            if left["busy"]:
+                left["busy"] -= 1
+                route.fulfill(status=429, content_type="application/json", body=busy)
+            else:
+                route.continue_()
+
+        page.route(prints, once_busy)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_picker(page, card)
+        assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
+        assert page.locator(".printpick .ppstatus.error").count() == 0
+        assert any("/scan/api/printing?set=cmr&number=472" in u for u in asked), asked
+        assert not any("/scan/api/peek" in u for u in asked), asked
+        assert sum("/scan/api/prints?" in u for u in asked) >= 2, asked
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        # Scryfall down (a fresh page: the picker keeps the lists it read): the reason in plain
+        # words, and Retry loads the list once it answers
+        page.unroute(prints)
+        page.route(prints, lambda r: r.fulfill(status=503, content_type="application/json", body=down))
+        page.reload(wait_until="networkidle")
+        _open_menu(page, card)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
+        status = page.locator(".printpick .ppstatus.error")
+        status.wait_for(timeout=5000)
+        assert "Printings could not be loaded. Scryfall is not answering right now." in status.inner_text()
+        page.unroute(prints)
+        status.get_by_role("button", name="Retry").click()
+        page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+        assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
+        assert errors == []
+        browser.close()
+
+
+def test_the_picker_spins_while_it_looks_and_says_plainly_when_other_lookups_hold_it(
+    server: Server,
+) -> None:
+    """While printings are looked up (busy answers asked again included) the status line has the
+    theme's progress ring; it goes when the tiles show. Lookups that stay busy say so plainly."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    busy = json.dumps({"ok": False, "error": "busy", "message": "other card lookups are still running"})
+    prints = re.compile(r"/scan/api/prints\?")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        held = {"n": 2}
+
+        def busy_twice(route) -> None:
+            if held["n"]:
+                held["n"] -= 1
+                route.fulfill(status=429, content_type="application/json", body=busy)
+            else:
+                route.continue_()
+
+        page.route(prints, busy_twice)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_menu(page, card)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
+        status = page.locator(".printpick .ppstatus")
+        status.wait_for(timeout=5000)
+        assert status.locator(".ui-spin[aria-hidden=true]").count() == 1
+        assert "Looking up printings…" in status.inner_text()
+        page.locator(".printpick .pptile").first.wait_for(timeout=10000)
+        assert status.locator(".ui-spin").count() == 0
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        page.unroute(prints)
+        page.route(prints, lambda r: r.fulfill(status=429, content_type="application/json", body=busy))
+        page.reload(wait_until="networkidle")
+        _open_menu(page, card)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Printings…").click()
+        error = page.locator(".printpick .ppstatus.error")
+        error.wait_for(timeout=15000)
+        assert error.locator(".ui-spin").count() == 0
+        assert (
+            "Printings could not be loaded. Your other card lookups are still running. "
+            "Retry when you\u2019re ready." in error.inner_text()
+        )
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [375, 1280])
+def test_the_filter_box_says_it_filters_by_set_and_offers_a_card_search(server: Server, width: int) -> None:
+    """The box over the printings shows "Filter by set" (its label for screen readers stays
+    "Filter these printings by set"), with a filter
+    icon. Text that matches no printing and does not look like a set code (a card's name, say)
+    offers "Search all cards for “…”", which opens the card search; a set code does not."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        for theme in ("light", "dark"):
+            browser, page, errors = _page(p, server, sid, width, theme=theme, touch=width == 375)
+            page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+            _open_picker(page, page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']"))
+            box = page.locator("#pp-q")
+            assert box.get_attribute("placeholder") == "Filter by set"
+            assert box.get_attribute("aria-label") == "Filter these printings by set"
+            assert page.locator(".printpick .ppsearch svg.i").count() == 1
+            go = page.locator(".printpick .ppempty a.btn")
+            box.fill("zzz")
+            page.wait_for_timeout(100)
+            assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
+            assert go.count() == 0
+            box.fill("Lightning Bolt")
+            page.wait_for_timeout(100)
+            assert go.inner_text() == "Search all cards for \u201cLightning Bolt\u201d"
+            assert go.get_attribute("href") == "/cards?q=Lightning%20Bolt"
+            assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
+            assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppempty p, .printpick .ppempty .btn") == []
+            # as tall as "Clear filters" beside it (44 px on a touch screen)
+            clear = page.locator(".printpick .ppempty button", has_text="Clear filters").bounding_box()
+            assert go.bounding_box()["height"] == clear["height"]
+            if width == 375:
+                assert page.evaluate(SMALL) == []
+            go.click()
+            page.wait_for_url(re.compile(r"/cards\?q=Lightning"), timeout=5000)
+            assert errors == []
+            browser.close()
+
+
+# -- Finish: Normal, Foil or Etched from the card menu and in the printing detail (owner C4) ------
+
+
+def test_the_card_menu_sets_the_finish_with_undo(server: Server) -> None:
+    """The card menu has a Finish list (Normal, Foil, Etched; the card's own marked and off);
+    picking one changes the badge at once and saves set_finish; Undo puts it back. A maybeboard
+    row has no Finish list (the gateway refinishes cards in the deck itself)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        side = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='side']")
+        _open_menu(page, side)
+        assert page.locator(".ctxmenu [role=menuitem]", has_text="Finish").count() == 0
+        page.keyboard.press("Escape")
+        _open_menu(page, card)
+        fin = page.locator(".ctxmenu [role=menuitem]", has_text="Finish")
+        assert fin.get_attribute("aria-haspopup") == "true"
+        fin.click()
+        sub = page.locator(".ctxmenu .finsub[aria-label='Finishes']")
+        assert sub.locator("[role=menuitem]").all_inner_texts() == ["Normal", "Foil", "Etched"]
+        assert sub.locator("[role=menuitem]", has_text="Normal").is_disabled()
+        with page.expect_request(EDIT_URL) as req:
+            sub.locator("[role=menuitem]", has_text="Foil").click()
+        assert json.loads(req.value.post_data)["changes"] == [
+            {"action": "set_finish", "card_name": "Sol Ring", "finish": "foil"}
+        ]
+        assert page.locator(".ctxmenu").count() == 0
+        assert card.get_attribute("data-finish") == "Foil" and card.locator(".finish").inner_text() == "F"
+        toast = page.locator(".deck-toast .msg", has_text="Saved")
+        toast.wait_for(timeout=8000)
+        assert toast.inner_text() == "Saved. Sol Ring is foil now. Snapshot kept under History."
+        assert server.sol_ring() == [("cmr", "472", "Foil")]
+        with page.expect_request(EDIT_URL) as req2:
+            page.locator(".deck-toast button", has_text="Undo").click()
+        assert json.loads(req2.value.post_data)["changes"] == [
+            {"action": "set_finish", "card_name": "Sol Ring", "finish": "normal"}
+        ]
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert card.get_attribute("data-finish") == "Normal" and card.locator(".finish").count() == 0
+        assert server.sol_ring() == [("cmr", "472", "Normal")]
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_printing_detail_offers_the_finishes_it_is_made_in(server: Server) -> None:
+    """A printing made in several finishes: the detail has a Finish choice, the fitting finish
+    first; a picked finish goes with the printing, and the Saved note names it. The card's own
+    printing in another finish: Use this printing is on and changes the finish alone."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_picker(page, card)
+        page.mouse.move(640, 4)
+        pv = page.locator(".pppreview")
+        # the card's own printing (one finish): no choice, Use this printing off
+        assert pv.locator(".ppfinish").count() == 0 and pv.locator(".ppuse").is_disabled()
+        sld = page.locator(".printpick .pptile", has_text="SLD #1075")
+        sld.click()
+        assert "SLD #1075" in pv.locator(".ppline").inner_text()
+        choice = pv.locator(".ppfinish")
+        assert choice.locator("label").all_inner_texts() == ["Normal", "Foil", "Etched"]
+        assert choice.locator("input:checked").get_attribute("value") == "nonfoil"
+        choice.locator("label", has_text="Foil").click()
+        with page.expect_request(EDIT_URL) as req:
+            pv.locator(".ppuse").click()
+        assert json.loads(req.value.post_data)["changes"] == [
+            {
+                "action": "set_printing",
+                "card_name": "Sol Ring",
+                "set_code": "sld",
+                "collector_number": "1075",
+                "finish": "foil",
+            }
+        ]
+        toast = page.locator(".deck-toast .msg", has_text="Saved")
+        toast.wait_for(timeout=8000)
+        assert toast.inner_text() == "Saved. Sol Ring is now SLD #1075, foil. Snapshot kept under History."
+        assert server.sol_ring() == [("sld", "1075", "Foil")]
+        assert card.get_attribute("data-finish") == "Foil"
+        page.locator(".deck-toast .close").click()
+        # the printing it has now, in another finish: the finish alone changes
+        _open_picker(page, card)
+        page.mouse.move(640, 4)
+        page.locator(".printpick .pptile.current", has_text="SLD #1075").click()
+        choice = pv.locator(".ppfinish")
+        assert choice.locator("input:checked").get_attribute("value") == "foil"
+        assert pv.locator(".ppuse").is_disabled()
+        choice.locator("label", has_text="Etched").click()
+        assert pv.locator(".ppuse").is_enabled()
+        with page.expect_request(EDIT_URL) as req2:
+            pv.locator(".ppuse").click()
+        assert json.loads(req2.value.post_data)["changes"] == [
+            {"action": "set_finish", "card_name": "Sol Ring", "finish": "etched"}
+        ]
+        page.locator(".deck-toast .msg", has_text="Sol Ring is etched now").wait_for(timeout=8000)
+        assert server.sol_ring() == [("sld", "1075", "Etched")]
+        assert not errors, errors
         browser.close()

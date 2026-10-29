@@ -44,19 +44,19 @@ def _client(server: Server, *, admin: bool = False) -> httpx.Client:
 # -- the bars --------------------------------------------------------------------------------------
 
 
-def test_the_places_are_four_and_more_holds_two_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_places_are_four_and_more_holds_three_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", True)
     assert [label for _h, label, _i in theme.NAV_LINKS] == ["Home", "Decks", "Binder", "Assistant"]
     groups = theme.more_groups()
-    assert [g for g, _links in groups] == ["Find", "Your cards"]
+    assert [g for g, _links in groups] == ["Find", "Your cards", "Community"]
     hrefs = [h for _g, links in groups for h, _l, _i in links]
-    assert hrefs == ["/search", "/precons", "/scan", "/watchlist", "/lists"]
+    # Watchlist lives in Binder and My lists under Account (decision C8): neither is in More
+    assert hrefs == ["/search", "/precons", "/scan", "/history/models", "/forum"]
 
 
-def test_watchlist_leaves_more_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_watchlist_leaves_binder_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", False)
-    hrefs = [h for _g, links in theme.more_groups() for h, _l, _i in links]
-    assert "/watchlist" not in hrefs and "/lists" in hrefs
+    assert [h for h, _l, _i in theme.binder_pages()] == ["/collection", "/collection/wants"]
 
 
 def test_the_switch_marks_its_page_and_counts_on_its_first_part() -> None:
@@ -91,12 +91,16 @@ def test_history_and_reports_mark_assistant_as_the_place(server: Server) -> None
 
 def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
     page = _client(server).get("/history").text
-    assert "proposed are on <a href='/proposals'>Proposals</a>.</p>" in page
+    # History is the decks' timeline (owner decision C7); the changes still waiting are on Proposals
+    assert "Changes waiting for you are on <a class='ui-cap' href='/proposals'>Proposals</a>.</p>" in page
     assert "&lt;a href" not in page
 
 
 def test_a_long_word_scrolls_the_switch_not_the_page() -> None:
-    assert ".hubseg{display:flex;width:100%;overflow-x:auto;scrollbar-width:none}" in theme.CSS
+    # the switch scrolls inside at every width (large text on a Fold's inner screen beside the
+    # rail pushed the page sideways); full width on a phone
+    assert "max-width:100%;\n  overflow-x:auto;scrollbar-width:none}" in theme.CSS
+    assert ".hubseg{display:flex;width:100%}" in theme.CSS
     js = (Path(theme.__file__).parent / "static" / "topbar.js").read_text(encoding="utf-8")
     assert 'seg.querySelector("[aria-current=page]")' in js
 
@@ -142,14 +146,16 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
         assert f"<h2>{name}</h2>" in hub, name
     for href in (
         "/account/details",
+        "/lists",  # My lists sits under Account (decision C8)
         "/activity",
-        "/forum",
         "/guide",
         "/install?for=skill",
         "/install?for=android",
     ):
         assert f"<a class='yrow' href='{href}'>" in hub, href
     assert "href='/admin'" not in hub and "<h2>This app</h2>" not in hub
+    # Forum is in More and on the rail now (decision C8), not on the Account page
+    assert "<a class='yrow' href='/forum'>" not in hub
     assert "<form method='post' action='/theme'>" in hub and "<form method='post' action='/layout'>" in hub
     # Sign out: one real button, centred at the foot
     assert re.search(
@@ -197,7 +203,7 @@ def test_test_and_play_holds_the_runs_and_the_other_sites() -> None:
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     test = html.split("<details class='dd decktest'>")[1].split("</details>")[0]
     assert "Test and play</summary>" in html
-    assert " Goldfish</a>" in test and "id='fullf'" in test and "Run full test</button>" in test
+    assert " Goldfish</a>" in test and "id='fullf'" in test and "Run test</button>" in test
     assert "Playtest on Archidekt</a>" in test and "data-edhplay" in test
     # the banner's buttons are not repeated in the no-script More
     more = html.split("<details class='dd deckmore'>")[1].split("</details>")[0]

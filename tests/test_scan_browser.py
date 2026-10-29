@@ -364,10 +364,12 @@ def test_two_quick_scans_do_not_collide(server: Server) -> None:
         assert names == ["Sol Ring", "Aesi, Tyrant of Gyre Strait"]
         assert statuses == [200, 200], statuses
 
-        # Someone else (an assistant call) holds this account's lookup for a moment: the page
-        # gets a 429 first, retries on its own and still shows the card.
+        # Someone else (an assistant call) holds this account's lookup past the gateway's own short
+        # wait (none here): the page gets a 429 first, retries on its own and still shows the card.
+        # The hold ends when that 429 is seen, so the retry finds the lookup free.
+        service.queue_wait = 0.0
         service._in_flight.add("user-1")
-        threading.Timer(0.7, lambda: service._in_flight.discard("user-1")).start()
+        page.on("response", lambda r: service._in_flight.discard("user-1") if r.status == 429 else None)
         statuses.clear()
         name = page.evaluate(
             """() => window.__scan.api('/scan/api/resolve', 'POST', { cards: [{ name: 'Sol Ring' }] })
@@ -757,6 +759,35 @@ def test_printing_picker_keeps_the_chosen_finish(server: Server) -> None:
         browser.close()
 
 
+@pytest.mark.parametrize("left", [True, False], ids=["turned-left", "turned-right"])
+def test_a_card_lying_sideways_is_read_the_right_way_up(server: Server, tmp_path: Path, left: bool) -> None:
+    """A photo of a card lying on its side, either way: the outline is found, the card flattened
+    upright, and its name read with real text recognition (the way up that reads is kept)."""
+    from playwright.sync_api import expect, sync_playwright
+
+    from .test_scan_detect_browser import scene, sideways_corners
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    card = tmp_path / "sol-ring-card.jpg"
+    card_photo(card, "Sol Ring")
+    photo = tmp_path / "sideways.jpg"
+    scene(card, photo, (1800, 2400), sideways_corners(900, 1200, 900, left))
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/scan")
+        page.wait_for_function("() => window.__scan && window.__scan.flattenCard && window.ScanGeometry")
+        page.set_input_files("#photo-file", str(photo))
+        expect(page.locator("#result h3")).to_have_text("Sol Ring", timeout=90_000)
+        assert page.evaluate("() => window.__scan.state.pending.ocr.flattened") is True
+        browser.close()
+
+
 # ---------------------------------------------------------------- Android glue
 ANDROID_GLUE = Path(__file__).resolve().parents[1] / "android" / "app" / "src" / "main" / "kotlin"
 ANDROID_GLUE = ANDROID_GLUE / "local" / "mtgassistantgateway" / "app" / "ScanGlue.kt"
@@ -846,8 +877,12 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
                 "() => window.__events.some((e) => e.type === 'done' || e.type === 'no-card')", timeout=60_000
             )
             evs = events()
-            # Every event names the glue's nonce and the photo it belongs to, so the app can drop stale ones.
-            assert all(e["nonce"] == GLUE_NONCE and e["seq"] == seqs[-1] for e in evs), evs
+            assert all(e["nonce"] == GLUE_NONCE for e in evs), evs
+            # Text recognition's own loading reports (the page's camera tab started it) are not
+            # about the photo; the slow-download test below covers them.
+            evs = [e for e in evs if e["type"] != "ocr"]
+            # Every other event names the photo it belongs to, so the app can drop stale ones.
+            assert all(e["seq"] == seqs[-1] for e in evs), evs
             return evs
 
         # Opening the phone camera parks the page on its list tab, with a hidden status line to read back.
@@ -884,6 +919,12 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
         for frames in (1, 2, 3):
             evs = shoot("table.jpg")
             assert [e["type"] for e in evs] == ["no-card"] and evs[0]["frames"] == frames, evs
+        # The fourth reads the dashed box: a card found there waits on the page for a tap, never added.
+        evs = shoot("table.jpg")
+        assert [e["type"] for e in evs] == ["unsure", "done"], evs
+        assert evs[1]["pending"] is True and evs[1]["total"] == 0
+        assert page.evaluate("() => window.__scan.state.pending.ocr.guide") is True
+        page.evaluate("() => { window.__scan.state.pending = null; }")
         evs = shoot("sol-ring.jpg")
         assert [e["type"] for e in evs] == ["auto-added", "done"], evs
         # A shaky read (a name that begins another card's name) waits on the page.
@@ -895,9 +936,8 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
         # Closing the phone camera: the page goes back to its camera tab only because a read waits there.
         assert page.evaluate("() => window.__mtgNative.end()") == "pending"
         assert page.evaluate("() => window.__scan.state.tab") == "camera"
-        # Inside the app the camera tab offers the phone camera; a browser (no MtgNative) does not.
-        assert page.locator("#phone-camera").count() == 1
-        page.locator("#phone-camera").click()
+        # Inside the app the shutter is the phone camera (test_scan_direction_browser.py has the rest).
+        page.locator("#shutter").click()
         assert page.evaluate("() => window.__opened") == 1
         assert page.evaluate("() => window.__mtgNative.ready()") is True
         assert page.evaluate("() => window.__scan.state.continuous") is False
@@ -908,3 +948,105 @@ def test_android_glue_drives_the_real_page(server: Server, tmp_path: Path) -> No
         assert page.evaluate("() => window.__scan.state.tab") == "list"
         assert errors == []
         browser.close()
+
+
+class _SlowVendor:
+    """The gateway as seen over a slow connection: each text-recognition file (the engine, its
+    worker, its core and the language data) answers only after ``delay`` seconds."""
+
+    def __init__(self, app, delay: float):
+        self.app, self.delay = app, delay
+
+    async def __call__(self, scope, receive, send):
+        import asyncio
+
+        if scope["type"] == "http" and scope["path"].startswith("/scan/static/vendor/"):
+            await asyncio.sleep(self.delay)
+        await self.app(scope, receive, send)
+
+
+def _app_watchdog_ms() -> int:
+    """The app's watchdog (CameraPanel.kt PAGE_TIMEOUT_MS): a photo with no word from the page for
+    this long counts as lost. Each `ocr` loading or ready event while a photo is with the page
+    starts it over."""
+    import re
+
+    src = (ANDROID_GLUE.parent / "CameraPanel.kt").read_text(encoding="utf-8")
+    return int(re.search(r"PAGE_TIMEOUT_MS = ([\d_]+)L", src).group(1).replace("_", ""))
+
+
+def test_the_app_camera_loads_text_recognition_at_once_and_shows_progress(tmp_path: Path) -> None:
+    """The first use of the app's camera over a slow connection (10 s per text-recognition file).
+    The page starts loading text recognition when the phone camera opens, not when the first photo
+    arrives, and reports its progress to the app; the first photo waits for it and is read, and the
+    app's watchdog, started over by each progress report, never gives up on it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    import base64
+
+    card = tmp_path / "sol-ring-card.jpg"
+    card_photo(card, "Sol Ring")
+    photo = tmp_path / "sol-ring.jpg"
+    skewed_photo(photo, card, [(300, 220), (1130, 300), (1060, 1620), (230, 1520)])
+    srv = Server(tmp_path)
+    srv.server.config.app = _SlowVendor(srv.app, 10.0)
+    srv.start()
+    try:
+        sid = srv.sign_in()
+        errors: list[str] = []
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            ctx = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": srv.base}])
+            # As in the app before the camera permission is answered: the page's own camera never starts.
+            ctx.add_init_script("navigator.mediaDevices.getUserMedia = () => new Promise(() => {});")
+            page = ctx.new_page()
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(f"{srv.base}/scan")
+            page.wait_for_function("() => window.__scan && window.__scan.flattenCard")
+            page.evaluate(
+                """() => { window.__events = [];
+                     window.MtgNative = { scanEvent: (j) => window.__events.push(
+                                            Object.assign(JSON.parse(j), {at: performance.now()})),
+                                          openCamera: () => {}, version: () => 'test' }; }"""
+            )
+            assert page.evaluate(android_glue()) == "installed"
+            assert page.evaluate("() => window.__scan.state.ocrState") == "idle"
+            # The phone camera opens; a second later the first photo is taken.
+            assert page.evaluate("() => window.__mtgNative.begin()") == "ok"
+            page.wait_for_timeout(1000)
+            url = page.evaluate(
+                """(b) => { const bin = atob(b), a = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+                    return URL.createObjectURL(new Blob([a], {type: 'image/jpeg'})); }""",
+                base64.b64encode(photo.read_bytes()).decode(),
+            )
+            shot = page.evaluate("() => performance.now()")
+            assert page.evaluate(f"() => window.__mtgNative.onPhoto({url!r}, null)").startswith("ok:")
+            page.wait_for_function("() => window.__events.some((e) => e.type === 'done')", timeout=120_000)
+            events = page.evaluate("() => window.__events")
+            browser.close()
+    finally:
+        srv.stop()
+    assert errors == []
+    ocr = [e for e in events if e["type"] == "ocr"]
+    done = next(e for e in events if e["type"] == "done")
+    # Loading began when the camera opened, before the photo, and its progress rose to ready.
+    assert ocr and ocr[0]["state"] == "loading" and ocr[0]["at"] < shot, ocr
+    loading = [e["progress"] for e in ocr if e["state"] == "loading"]
+    assert len(loading) >= 4 and loading == sorted(loading) and 0 < loading[-1] <= 1, loading
+    assert ocr[-1]["state"] == "ready" and ocr[-1]["at"] < done["at"], ocr
+    assert all(e["nonce"] == GLUE_NONCE for e in ocr)
+    # The photo was read once text recognition was there.
+    assert "Matched" in done["status"], done
+    assert done["at"] - shot > 30_000, "the slow download was not slow"
+    # The app's watchdog as CameraPanel runs it: started with the photo, started over by each
+    # progress report while the photo is with the page; it never ran out.
+    armed, watchdog = shot, _app_watchdog_ms()
+    assert watchdog == 45_000
+    for e in [e for e in ocr if e["at"] > shot] + [done]:
+        assert e["at"] - armed < watchdog, (e, armed)
+        armed = e["at"]

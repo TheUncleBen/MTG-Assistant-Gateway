@@ -4,7 +4,7 @@ bookmark it, follow its owner, read and post comments.
 These routes are a person's own clicks: every write needs the browser session and the page's
 CSRF token, every call runs under that member's own linked Archidekt session, and the page asks
 for a confirmation before each write. Since 0.7.17 an assistant can propose the same actions
-(propose_deck_social, propose_comment; actions.py), but it can never apply one: each is applied
+(propose_account_action; actions.py), but it can never apply one: each is applied
 only by the member's own press on its review page, which then runs the code here.
 
 Routes and bodies are the ones archidekt.com's own pages send (read from its bundle on

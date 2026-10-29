@@ -8,15 +8,17 @@ decks with their own form and table. "Details" opens one row in place: the chang
 chart with "30 days" and "Full history (N days)", the price history table, the alert form, "Open
 card" and a red-outline "Remove".
 
-Everything comes from ``PriceService.overview`` (at most 200 cards and 10 decks): the chips,
-search, filter and sort work on that in the page, with no new query. static/watchlist.js opens the
-rows in place and draws the full history from the existing ``/watchlist/api/card`` (cards) or the
-deck row's own data (decks)."""
+The rows come from ``PriceService.card_summaries`` and ``deck_summaries`` (0.7.46): each watch's
+latest price and its changes, in one query each whatever the list's size (up to 5,000 cards and
+100 decks); the chips, search, filter and sort work on those. Only the rows on screen get their
+30 days of prices (``card_histories``, ``deck_histories``: two queries each). Load more shows 25
+more cards, or 25 more decks. static/watchlist.js opens the rows in place and draws the full
+history from ``/watchlist/api/card`` (cards) or ``/watchlist/api/deck`` (decks)."""
 
 from __future__ import annotations
 
-import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -30,7 +32,7 @@ from .theme import esc
 
 PAGE = ui.PER_PAGE
 FINISH_WORDS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
-CHIPS = (("", "All"), ("alert", "With an alert"), ("up", "Up in 7 days"), ("down", "Down in 7 days"))
+CHIPS = (("", "All"), ("alert", "With a price alert"), ("up", "Up in 7 days"), ("down", "Down in 7 days"))
 SORTS = (
     ("", "Sort: Name"),
     ("price", "Price"),
@@ -43,19 +45,19 @@ SHORT_DAYS = 30
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 OK_NOTES = {
     "card_added": "Added to your watchlist.",
-    "card_updated": "Alerts saved.",
+    "card_updated": "Price alert saved.",
     "card_removed": "Removed from your watchlist.",
     "deck_added": "Deck added to your watchlist.",
     "deck_removed": "Deck removed from your watchlist.",
 }
 CARD_HINT = (
-    "A name alone follows the printing Scryfall gives for that name; add a set code and number to "
-    "follow one printing."
+    "A name alone follows the cheapest printing of the card, checked daily; add a set code and number "
+    "to follow one printing."
 )
 SEARCH_HINT = "You can also watch a card from Card search: press and hold it, or right-click it."
 ALERT_HINT = (
-    "Checked once a day against the day before. Leave a box empty for no alert. Alerts reach you "
-    "through notifications (Account page)."
+    "Checked once a day against the day before. Leave a box empty for no price alert. Price alerts "
+    "reach you through push notifications (Account page)."
 )
 DECK_HINT = (
     "A watched deck is read again once a day, so its value follows its cards. Its value uses "
@@ -65,32 +67,39 @@ DECK_HINT = (
 
 @dataclass(frozen=True)
 class Query:
-    """What the address asks for: the chip, the search, the finish, the sort, the page and the open row."""
+    """What the address asks for: the chip, the search, the finish, the sort, how many rows are
+    shown (``upto``, which Load more raises) and the open row."""
 
     show: str = ""
     q: str = ""
     finish: str = ""
     sort: str = ""
-    offset: int = 0
+    upto: int = 0  # rows shown; 0 is the first screenful (PAGE)
     open: str = ""
+    dupto: int = 0  # decks shown, as ``upto``
 
     @classmethod
     def parse(cls, qp: Any) -> Query:
         def get(k: str, n: int) -> str:
             return str(qp.get(k) or "").strip()[:n]
 
-        try:
-            offset = max(0, min(int(qp.get("offset") or 0), 1000))
-        except ValueError:
-            offset = 0
+        def number(k: str) -> int:
+            try:
+                return max(0, min(int(qp.get(k) or 0), 10_000))
+            except ValueError:
+                return 0
+
+        # an old page link (``offset``) still shows the rows it pointed at
+        upto = number("upto") or (number("offset") + PAGE if number("offset") else 0)
         show, finish, sort = get("show", 10), get("finish", 10), get("sort", 10)
         return cls(
             show=show if show in dict(CHIPS) else "",
             q=get("q", 100),
             finish=finish if finish in FINISH_WORDS else "",
             sort=sort if sort in dict(SORTS) else "",
-            offset=offset,
+            upto=upto,
             open=get("open", 64),
+            dupto=number("dupto"),
         )
 
     def href(self, **change: Any) -> str:
@@ -99,7 +108,8 @@ class Query:
             "q": self.q,
             "finish": self.finish,
             "sort": self.sort,
-            "offset": self.offset,
+            "upto": self.upto,
+            "dupto": self.dupto,
             **change,
         }
         params = {k: v for k, v in values.items() if v}
@@ -154,13 +164,19 @@ def alert_text(alerts: dict[str, Any], currency: str) -> str:
 def alert_label(v: dict[str, Any]) -> str:
     alerts = v.get("alerts") or {}
     if not alerts:
-        return "<span class='none'>No alert</span>"
-    return ui.label(alert_text(alerts, v.get("currency") or "usd"), "blue", "bell")
+        return "<span class='none'>No price alert</span>"
+    return ui.label(alert_text(alerts, v.get("currency") or "usd"), "blue", "tag")
 
 
 def where_text(v: dict[str, Any]) -> str:
+    """The printing a row follows: "CMR 472 · Foil", or for a watch by name alone "Cheapest
+    printing (now PLST CMR-365) · Normal"."""
     where = " ".join(p for p in ((v.get("set") or "").upper(), v.get("collector_number") or "") if p)
-    return f"{where or 'any printing'} · {FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
+    if not where:
+        low = v.get("cheapest") or {}
+        now_at = " ".join(p for p in ((low.get("set") or "").upper(), low.get("collector_number") or "") if p)
+        where = f"Cheapest printing (now {now_at})" if now_at else "Cheapest printing"
+    return f"{where} · {FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
 
 
 def _priced(hist: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -310,7 +326,7 @@ def _row(
 def _wx_chart(view: dict[str, Any], today: str, what: str, heading: str, *, extra: str = "") -> str:
     cur = view.get("currency") or "usd"
     hist = view.get("history") or []
-    full_days = len(_priced(hist))
+    full_days = int(view.get("full_days") or len(_priced(hist)))
     short = hist[-SHORT_DAYS:]
     return (
         f"<p class='wx-chg'>{changes_html(view)}</p>"
@@ -331,7 +347,7 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, qu
         f"inputmode='decimal' value='{esc(alerts.get(k, ''))}'></label>"
         for k, label in (("pct", "Moves more than (%)"), ("above", "Rises above"), ("below", "Falls below"))
     )
-    on = " " + ui.label("On", "blue", "bell") if alerts else ""
+    on = " " + ui.label("On", "blue", "tag") if alerts else ""
     details = _wx_chart(
         v,
         today,
@@ -342,7 +358,7 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, qu
         f"<form method='post' class='wx-alert'>{csrf_in}<input type='hidden' name='action' value='alerts'>"
         f"<input type='hidden' name='watch_id' value='{esc(wid)}'><h3>Price alert{on}</h3>"
         f"<div class='af'>{fields}</div><p class='ui-hint'>{ALERT_HINT}</p>"
-        "<div class='ui-actions'><button class='btn-plain' type='submit'>Save alert</button>"
+        "<div class='ui-actions'><button class='btn-plain' type='submit'>Save price alert</button>"
         f"<a class='btn btn-plain' href='/cards?q={quote(name)}'>Open card</a>"
         f"<button class='btn-outline-danger' type='submit' form='rm-{esc(wid)}' "
         f"aria-label='Remove {esc(name)} from your watchlist'>Remove</button></div></form>"
@@ -375,7 +391,6 @@ def card_row(v: dict[str, Any], uid: str | None, csrf_in: str, today: str, *, qu
 def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, query: Query) -> str:
     did = str(v["deck_id"])
     name = v.get("name") or "Unnamed deck"
-    full = [[h["day"], h["price"]] for h in _priced(v.get("history") or [])]
     read = ""
     if v.get("refreshed_at"):
         read = f"Read again once a day; last read {ui.when_text(v['refreshed_at'])}."
@@ -384,7 +399,7 @@ def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, query: Query) -> st
         today,
         f"Value of {name}",
         "Value, last 30 days",
-        extra=f" data-full='{esc(json.dumps(full))}' data-currency='usd'",
+        extra=f" data-deck='{esc(did)}' data-currency='usd'",
     ) + (
         "<div class='wx-alert'><h3>This deck</h3>"
         + (f"<p class='ui-hint'>{esc(read)}</p>" if read else "")
@@ -466,7 +481,7 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
             "Cards watched",
             "stats",
             len(cards),
-            unit=f"of {lim['cards']}",
+            unit=f"of {lim['cards']:,}",
             detail=total,
             actions=[ui.button_link("Watch a card", "#w-add")],
         )
@@ -474,11 +489,11 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
     with_alert = [v for v in cards if v.get("alerts")]
     due = [d for d in (due_line(v) for v in with_alert) if d]
     if with_alert:
-        det = (due[0] + f" · checked {checked}") if due else f"Nothing past an alert · checked {checked}"
+        det = (due[0] + f" · checked {checked}") if due else f"Nothing past a price alert · checked {checked}"
         out.append(
             ui.widget(
-                "Alerts",
-                "bell",
+                "Price alerts",
+                "tag",
                 len(with_alert),
                 unit="card has one" if len(with_alert) == 1 else "cards have one",
                 detail=det,
@@ -487,7 +502,7 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
         )
     else:
         out.append(
-            ui.widget("Alerts", "bell", 0, unit="cards have one", detail="Set one in a card's Details.")
+            ui.widget("Price alerts", "tag", 0, unit="cards have one", detail="Set one in a card's Details.")
         )
     moved = [v for v in cards if v.get("change_7d_pct")]
     if moved:
@@ -525,7 +540,7 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
             "Decks watched",
             "decks",
             len(decks),
-            unit=f"of {lim['decks']}",
+            unit=f"of {lim['decks']:,}",
             detail=det,
             actions=[ui.button_link("Watch a deck", "#w-decks")],
         )
@@ -534,6 +549,10 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
 
 
 # -- the page ---------------------------------------------------------------------------------------
+def _no_history(_views: list[dict[str, Any]]) -> None:
+    return None
+
+
 def watchlist_page_html(
     data: dict[str, Any],
     ids: dict[str, str | None],
@@ -543,9 +562,14 @@ def watchlist_page_html(
     ok: str = "",
     err: str = "",
     now: float | None = None,
+    card_history: Callable[[list[dict[str, Any]]], None] = _no_history,
+    deck_history: Callable[[list[dict[str, Any]]], None] = _no_history,
+    defaults: dict[str, Any] | None = None,
 ) -> str:
-    """The page's body from ``PriceService.overview`` (``data``, a year of history) and each
-    watch's Scryfall id (``ids``, for its picture)."""
+    """The page's body from the watch summaries (``data``: PriceService.card_summaries and
+    deck_summaries, no history) and each watch's Scryfall id (``ids``, for its picture).
+    ``card_history`` and ``deck_history`` give the rows on screen their last 30 days.
+    ``defaults``: the Watch form's remembered finish and alert (prefs.WATCH_ADD)."""
     now = time.time() if now is None else now
     today = time.strftime("%Y-%m-%d", time.gmtime(now))
     csrf_in = f"<input type='hidden' name='csrf' value='{esc(csrf or '')}'>"
@@ -555,6 +579,9 @@ def watchlist_page_html(
     if err:
         notice = f"<div class='notice error' role='alert'>{esc(err)}</div>"
     lim = data["limits"]
+    kept = defaults or {}
+    fin = kept.get("finish") if kept.get("finish") in FINISH_WORDS else "nonfoil"
+    pct = f"{kept['alert_pct']:g}" if isinstance(kept.get("alert_pct"), int | float) else ""
     at = data["checked_daily_at_utc"]
     days = [v["day"] for v in data["cards"] + data["decks"] if v.get("day")]
     last = max(days) if days else ""
@@ -562,35 +589,48 @@ def watchlist_page_html(
     intro = (
         "Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros), checked "
         f"once a day at {at} UTC for the cards and decks you watch here. "
-        f"You may watch up to {lim['cards']} cards and {lim['decks']} decks. Your assistant can do the same "
-        "with its watch tools."
+        f"You may watch up to {lim['cards']:,} cards and {lim['decks']:,} decks. Your assistant can do "
+        "the same with its watch tools."
     )
     add = (
         "<form method='post' class='ui-card w-add' id='w-add' aria-labelledby='w-add-h'>"
         f"{csrf_in}<input type='hidden' name='action' value='add_card'>"
         "<h2 id='w-add-h'>Watch a card</h2><div class='w-addrow'>"
-        "<label class='wide' for='w-name'>Card name<input id='w-name' name='name' maxlength='150' "
+        "<label class='wide' for='w-name'>Name<input id='w-name' name='name' maxlength='150' "
         "autocomplete='off' data-suggest='cards'></label>"
         "<label for='w-set'>Set code (optional)<input id='w-set' name='set_code' maxlength='6' "
         "autocomplete='off'></label>"
-        "<label for='w-cn'>Number (optional)<input id='w-cn' name='collector_number' maxlength='10' "
+        "<label for='w-cn'>Collector no. (optional)<input id='w-cn' name='cn' maxlength='10' "
         "autocomplete='off'></label>"
         "<label for='w-fin'>Finish<select id='w-fin' name='finish'>"
-        + "".join(f"<option value='{k}'>{w}</option>" for k, w in FINISH_WORDS.items())
-        + "</select></label><button class='btn-primary' type='submit'>Watch card</button></div>"
+        + "".join(
+            f"<option value='{k}'{' selected' if k == fin else ''}>{w}</option>"
+            for k, w in FINISH_WORDS.items()
+        )
+        + "</select></label>"
+        "<label for='w-pct'>Alert when it moves more than (%)<input id='w-pct' name='alert_pct' "
+        f"inputmode='decimal' maxlength='6' value='{esc(pct)}' placeholder='No price alert'></label>"
+        "<button class='btn-primary' type='submit'>Watch card</button>"
+        "<label class='check wide'><input type='checkbox' name='remember' value='1' checked>"
+        "<span>Use this finish and alert next time, here and in card menus</span></label></div>"
         f"<p class='ui-hint'>{CARD_HINT} {SEARCH_HINT}</p></form>"
     )
     cards = data["cards"]
     shown = shown_cards(cards, query)
     total = len(shown)
-    offset = query.offset if query.offset < max(1, total) else 0
-    page_rows = shown[offset : offset + PAGE]
+    upto = max(PAGE, query.upto)
+    # the open row (a price alert's link) is shown wherever it sits: the list grows to it
+    at = next((i for i, v in enumerate(shown) if str(v["watch_id"]) == query.open), -1) if query.open else -1
+    if at >= upto:
+        upto = (at // PAGE + 1) * PAGE
+    page_rows = shown[:upto]
+    card_history(page_rows)
     chips = ui.chips(
         [
             ui.Chip(
                 word,
                 sum(1 for v in cards if in_chip(v, key)),
-                query.href(show=key, offset=0),
+                query.href(show=key, upto=0),
                 key == query.show,
             )
             for key, word in CHIPS
@@ -599,7 +639,7 @@ def watchlist_page_html(
     tools = ui.toolbar(
         "/watchlist",
         search_label="Search your watchlist",
-        placeholder="Search card name",
+        placeholder="Search by name",
         q=query.q,
         filters=[
             ui.filter_select("finish", "Finish", [("", "Any finish"), *FINISH_WORDS.items()], query.finish),
@@ -614,7 +654,7 @@ def watchlist_page_html(
             ui.Column("Price", "md-hide"),
             ui.Column("Change", "md-hide"),
             ui.Column("30 days", "md-hide"),
-            ui.Column("Alert", "md-hide"),
+            ui.Column("Price alert", "md-hide"),
             ui.Column(""),
         ]
     )
@@ -624,12 +664,20 @@ def watchlist_page_html(
         body = "<p class='ui-empty'>No cards match. Clear the search or the filters to see them all.</p>"
     else:
         body = "<p class='ui-empty'>No cards watched yet.</p>"
-    pager = ui.pager(
-        offset,
-        total,
-        newer_href=query.href(offset=max(0, offset - PAGE)) if offset else None,
-        older_href=query.href(offset=offset + PAGE) if offset + PAGE < total else None,
-    )
+    # Load more, not pages: the list is sorted (by name or price), so it grows in place. Without a
+    # script the link loads the longer list and lands on the first new row.
+    if len(page_rows) < total:
+        nxt = shown[len(page_rows)]["watch_id"]
+        pager = ui.load_more(
+            query.href(upto=len(page_rows) + PAGE, open="") + f"#wr-{nxt}",
+            text="Load more cards",
+            shown=len(page_rows),
+            total=total,
+        )
+    elif total > PAGE:
+        pager = ui.load_more("", done=f"All {total:,} cards shown.")
+    else:
+        pager = ""
     card_list = (
         "<div id='w-cards'>"
         + ui.list_head("Cards", len(cards), f"Last check {checked}" if checked else "")
@@ -655,16 +703,34 @@ def watchlist_page_html(
             ui.Column(""),
         ]
     )
+    dupto = max(PAGE, query.dupto)
+    if query.open.startswith("d"):  # an opened deck is shown wherever it sits
+        at = next((i for i, v in enumerate(decks) if f"d{v['deck_id']}" == query.open), -1)
+        if at >= dupto:
+            dupto = (at // PAGE + 1) * PAGE
+    deck_rows = decks[:dupto]
+    deck_history(deck_rows)
     deck_body = (
-        "".join(deck_row(v, csrf_in, today, query=query) for v in decks)
+        "".join(deck_row(v, csrf_in, today, query=query) for v in deck_rows)
         if decks
         else "<p class='ui-empty'>No decks watched yet.</p>"
     )
+    if len(deck_rows) < len(decks):
+        deck_pager = ui.load_more(
+            query.href(dupto=len(deck_rows) + PAGE, open="") + f"#wr-d{decks[len(deck_rows)]['deck_id']}",
+            text="Load more decks",
+            shown=len(deck_rows),
+            total=len(decks),
+        )
+    elif len(decks) > PAGE:
+        deck_pager = ui.load_more("", done=f"All {len(decks):,} decks shown.")
+    else:
+        deck_pager = ""
     deck_list = (
         f"<div id='w-decks'>{ui.list_head('Decks', len(decks))}</div>"
         f"<form method='post' class='w-deckadd' aria-label='Watch a deck'>{csrf_in}"
         "<input type='hidden' name='action' value='add_deck'>"
-        "<label class='wide' for='w-deck'>Archidekt deck link or number"
+        "<label class='wide' for='w-deck'>Archidekt deck link or ID"
         "<input id='w-deck' name='deck' maxlength='200' autocomplete='off' required></label>"
         "<button class='btn-plain' type='submit'>Watch deck</button></form>"
         f"<p class='ui-hint'>{DECK_HINT}</p>"
@@ -672,11 +738,11 @@ def watchlist_page_html(
         + deck_head
         + deck_body
         + "</div>"
-        + ui.pager(0, len(decks), newer_href=None, older_href=None, per_page=max(PAGE, len(decks)))
+        + deck_pager
     )
     return (
         "<div class='watch-page gb-dash'>"
-        + ui.page_head("Watchlist", intro)
+        + ui.binder_head("/watchlist", "Binder: Watchlist", intro)
         + notice
         + widgets_html(data, checked=checked or "daily")
         + add
@@ -694,7 +760,7 @@ WATCH_PAGE_CSS = (
 .watch-page .w-add{margin:0 0 1.25rem}
 .watch-page .w-add h2{font-size:1.1rem;margin:0 0 .5rem}
 .watch-page .w-addrow{display:grid;gap:.6rem 1rem;align-items:end;
-  grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr)) auto}
+  grid-template-columns:minmax(0,2fr) repeat(4,minmax(0,1fr)) auto}
 .watch-page .w-addrow label,.watch-page .w-deckadd label{display:flex;flex-direction:column;gap:.25rem;
   margin:0;
   min-width:0;font-weight:700}
@@ -704,6 +770,9 @@ WATCH_PAGE_CSS = (
 @media (max-width:899.98px){.watch-page .w-addrow{grid-template-columns:1fr 1fr}
   .watch-page .w-addrow .wide{grid-column:1 / -1}}
 @media (max-width:599.98px){.watch-page .w-addrow{grid-template-columns:1fr}}
+.watch-page .w-addrow label.check{flex-direction:row;align-items:center;gap:.5rem;font-weight:400;
+  min-height:44px;grid-column:1 / -1}
+.watch-page .w-addrow label.check input{width:auto;min-width:22px;min-height:22px}
 .watch-page .w-add .ui-hint{margin:.5rem 0 0}
 .watch-page .w-deckadd{display:flex;flex-wrap:wrap;gap:.6rem 1rem;align-items:end;margin:0 0 .25rem}
 .watch-page .w-deckadd .wide{flex:1 1 18rem}

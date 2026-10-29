@@ -25,39 +25,50 @@ you the exact change first.
    read it before linking.
 2. **Open Decks** to browse them the way Archidekt shows them: text, stacks
    or grid, grouped and sorted how you like.
-3. **Scan** a pile of cards with your phone, add them to a deck or to your
-   collection, and **Search** public decks for ideas.
+3. **Scan** a pile of cards with your phone, add them to a deck or to your binder, and **Search** public decks for ideas.
 4. Optional: **connect an assistant** from the home page and ask it to
-   research, simulate or edit for you. Every edit still comes back to you
+   research, test or edit for you. Every edit still comes back to you
    as a proposal.
 
-On a phone the tabs at the bottom are Home, Decks, Binder (your
-collection), Assistant and More. Assistant opens Proposals, with a switch at
-the top to History and Reports, and shows how many proposals are waiting.
-More opens Search, Precons, Scan, Watchlist (when watchlists are on) and My
-lists; Search is also the magnifier in the top bar. On a wider touch screen,
-such as an unfolded foldable or a tablet, and in the Android app from 600 px,
-the same places are on a rail down the left edge, with Alerts. A desktop
-browser shows them in the top bar, with More as a drop-down and a search box
-that fills the free space. The layout follows the window as you fold, rotate
-or split the screen. Your profile picture (or your initials) at the top right
-opens the Account page: Account details, My activity, Forum, Theme and
-Layout, the Guide, the assistant skill and the apps, and Sign out. Large text works too: the
+<!-- nav:start -->
+
+On a phone the tabs at the bottom are Home, Decks, Binder and Assistant, then
+More. Binder holds Cards, Wants and Watchlist, switched at its top; Assistant
+holds Proposals, History and Reports the same way, and shows how many
+proposals are waiting. More opens Search decks and cards, Precons, Scan, Card models and Forum; the magnifier at the top opens the search box for cards
+and decks. On a wider touch screen, such as an unfolded foldable or a tablet,
+and in the Android app from 600 px, the same places are on a rail down the
+left edge, with Forum and Alerts. A computer's browser shows them in the top
+bar, with More as a drop-down and a search box beside them. Your picture at
+the top right opens the Account page: Account details, My lists, My activity,
+the look, the Guide, the assistant skill and the apps, and Sign out.
+
+<!-- nav:end -->
+
+Large text works too: the
 pages follow the phone's font size (the Android app included) and a
 browser's text zoom up to 200%, wrapping rather than running off the screen.
 
 ## Home
 
-Your newest decks with their cover art, a deck search box, and one tile per
-section: Decks, Search, Precons, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
-assistant** at the end holds the connector URL and the guided setup.
+What needs you, then your newest decks. **Needs you** has one row for each
+thing waiting, and only while there is one: proposals waiting for your press
+(Review them), Forge tests running, new alerts on Archidekt, and watched
+cards past one of your alert lines. Under it, **My decks** shows your newest
+decks with their cover art (a row to swipe on a phone) and All decks. The
+search box at the top suggests your own decks first, then cards and public
+decks. **Connect an AI assistant**, with the connector URL and the guided
+setup, shows until an assistant is connected; after that it is on Account
+details under Connected apps. The navigation is not repeated on the page: the
+tabs, More and your picture are the same here as everywhere.
 
 ## Your decks
 
 **My decks** lists the decks of your linked Archidekt account with their cover
 art (the image you chose on Archidekt, else the commander), folder by folder.
 Filter by name, colors or format, sort by last updated, created, name or
-format in either direction, and show a grid or a list in three card sizes.
+format in either direction, and show a grid or a list in three card sizes
+(each page, and the printings dialog, keeps its own size).
 **New deck** creates one from a name, a pasted list, a CSV export, the
 gateway's own .json export, a file you choose (.txt, .csv or .json) or a scan.
 **New folder** makes an Archidekt folder.
@@ -68,8 +79,9 @@ renames, moves, exports, compares, clones or deletes it; a folder's menu makes
 a folder inside it, renames, moves or deletes it. Deleting a folder deletes
 everything inside it on Archidekt: the box lists how many decks, card packages
 and folders that is and asks you to type the folder's name. The gateway first
-makes a snapshot of every deck (and a copy in your backup folder when backups
-are on) and stops if any of them fails; card packages get no snapshot or copy.
+makes a snapshot of every deck (no copy is made on Archidekt, and a snapshot
+can't be restored onto a deleted deck) and stops if any of them fails; card
+packages get no snapshot or copy.
 The backup folder can't be moved or deleted, and a folder holding it can't be
 moved or deleted. The assistant can't move or delete folders.
 
@@ -88,7 +100,7 @@ One deck:
   power and toughness or loyalty, flavour text, the printing, rarity,
   artist, price, salt score and the formats it is legal in; from there open
   it on Scryfall, mark it as owned, or move it to another category. The same
-  viewer opens from a thumbnail in the editor and in the collection.
+  viewer opens from a thumbnail in the editor and in the binder.
 - On your own deck, **drag a card** onto another category: with a mouse, or
   press and hold on a touch screen and slide. The move goes to Archidekt
   when you let go, with a snapshot taken first, as a change from the card
@@ -141,8 +153,9 @@ One deck:
   Commander deck starts with its commander in the command zone; other decks
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
-- **Run full test** runs the statistics, the legality check and the
-  solo test (300 games, no opponents) and opens the result, filed under
+- **Run test** runs the statistics, the legality check and the
+  solo test (300 games, no opponents; with nobody to interact, its numbers
+  usually look faster than the deck plays at a table) and opens the result, filed under
   History. It is the same run your assistant makes when you ask it for a
   deck report, so the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with
@@ -158,7 +171,7 @@ One deck:
   enough precons of that bracket, the nearest bracket fills in, and an older
   version of Forge without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
-  4 games per report by default (your gateway's operator can change this)
+  5 games per report by default (your gateway's operator can change this)
   and shows each win rate with its 95% interval. Once they have finished,
   **Play more games** on the report page plays that many more against the
   same opponents and adds them to the results, up to 50 games a report
@@ -171,8 +184,22 @@ One deck:
   use the Compare page's Forge button (or your assistant asks for the same
   opponents), each deck meets precons picked for its own bracket (or
   Archidekt's estimate when none is set), so two decks' Forge
-  win rates are not a like-for-like comparison; the paired goldfish A/B, which
-  your assistant can run for the two decks, is.
+  win rates are not a like-for-like comparison; the paired solo test (A/B) on
+  the Compare page, which your assistant can run too, is.
+- Until Forge has played enough games for its win rate to mean something (its
+  95% interval at most 30 points wide), a report leads with the solo test and
+  the Forge widget says **Too few games to tell yet**; the Reports list shows
+  the number of games instead of a win rate.
+- Each report keeps the exact list it played (**Tested list**, with Copy).
+  When the deck has changed since, the report says what moved, and **Put this
+  list back (review first)** makes an ordinary proposal that puts the deck back
+  to that list: you review and confirm it on its page. **Since your last
+  test** compares the report's solo test numbers with the deck's test before
+  it and lists the cards that moved between them.
+- A waiting proposal's page has **Test this change**: the deck after the change
+  is played against the deck as it is now, game for game under the same seeds
+  (a paired solo test), and the page then shows what got better or worse and
+  whether each difference is clear or could be chance.
 - A report without Forge games (Forge not set up, a 60-card deck, a deck
   with no commander marked, Forge left out of the report, or too many of
   your reports already waiting for Forge) is labelled **Preflight only (no rules engine)**
@@ -182,21 +209,25 @@ One deck:
   early**, and the report is partial. Each report shows its status: queued,
   running, complete, partial (some parts did not run or did not finish) or
   failed.
-- A deck's report trends on its History page compare a simulation number
+- A deck's report trends on its History page compare a solo test number
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.
 - **Compare with another deck…** (More menu) pits the deck against a
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what
   it put in, changed counts, basic lands, and the statistics' differences.
-  Tap a card name for the whole card. Your assistant makes the same
-  comparison when you ask it to compare two decks.
+  Tap a card name for the whole card. Your own decks and this deck's
+  snapshots are listed under the box to pick from. **Solo test both (A/B)**
+  plays the two decks game for game and keeps the result as a report. Your
+  assistant makes the same comparison when you ask it to compare two decks.
 - The **More** menu in the banner holds **Solo test only** (when the gateway
   runs Forge: the same run without the Forge games), Deck settings, Export
   deck, History and snapshots, **Delete deck**, Compare with another deck,
   Deck stats and Open on Archidekt. Deleting asks you to type the deck's name; a snapshot is
-  kept under History and, when backups are on, a copy in your backup folder
-  on Archidekt. Archidekt itself has no undo for a deleted deck.
+  kept under History, but no copy is made on Archidekt, and a snapshot can't be
+  restored onto a deleted deck; History's **Make a new deck from this** proposes
+  a new deck from it, with its name, format, cards and categories, which you
+  review and apply like any new deck. Archidekt itself has no undo for a deleted deck.
 - **Deck settings** holds the name, format, bracket, description and
   privacy, and also the **cover image** (any card of the deck, or Archidekt's
   automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
@@ -253,7 +284,9 @@ it into any of your decks with the copies and category you choose. The add
 is saved exactly like an edit made on the deck page (a snapshot first; the
 same confirmation when a change is large; kept for review while writes are
 off), so nothing skips your approval settings. Without a linked Archidekt
-account the button is disabled and says why.
+account the button is disabled and says why. A card's menu (right-click, or
+press and hold) also has **Pin card**, which pins it on Archidekt: it then
+shows under **Pinned** in My lists.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,
@@ -279,11 +312,13 @@ the gateway.
 1. **Camera.** Hold a card in the frame with its title in the dashed box
    and tap the shutter, or switch on **Auto** and show cards one after
    another: sure matches are added on their own (with Undo), doubtful ones
-   wait for your tap.
+   wait for your tap. A running count of the scan shows in the corner of
+   the viewfinder. In the Android app the shutter and **Auto** use the
+   phone's own camera.
 2. **Check the list.** Fix a wrong match from the suggestions, pick the
    exact printing or foil, adjust quantities. Cards the camera could not
    read are kept with a picture of the title so you can type them.
-3. **Choose what to do with it:** save the cards to your collection (on
+3. **Choose what to do with it:** save the cards to your binder (on
    Archidekt), add them to one of your decks, start a new deck from them, or
    keep the scan for later (your assistant can pick it up too). A saved scan
    is a draft: it stays until you send its cards somewhere or delete it.
@@ -292,20 +327,32 @@ You can also type or paste names instead of using the camera, and earlier
 scans are listed under **Sessions**. The details are in
 [SCANNING.md](SCANNING.md).
 
-## Collection
+## Binder
 
-**Collection** is the list of cards you own. It is your Collection on
-Archidekt, shown and edited here through the account you linked: nothing
-about your cards is stored on the gateway, and what you add here appears on
-archidekt.com at once. Scan a pile and save it, add cards by name, or mark a
+**Binder** is the list of cards you own (your Archidekt collection), shown and edited here through the account you linked, and what
+you add here appears on archidekt.com at once. With watchlists on, the
+gateway keeps a copy of it as last read whole, to work out its value (below). Scan a pile and save it, add cards by name, or mark a
 card as owned from any deck page. Each card keeps its printing, finish,
 condition and count.
 
-- Filter by name, show it as a grid or a list, sort by newest or by set
-  release, and page through it. Plus and minus change the count; the cross
+- Filter by name, show it as a grid or a list, sort by newest, by set
+  release or by price, and page through it. Plus and minus change the count; the cross
   removes a card; the dots open the card's details: finish, condition,
   language and the price you paid, saved to Archidekt on **Save** (its tags
   are shown as Archidekt holds them).
+- **Add cards** asks the name, copies, finish, condition and language. The
+  copies join an entry you already have only when its printing, finish,
+  condition and language all match; anything else becomes a new entry, and
+  the page says which one they went to. Ticked, **Use this finish, condition
+  and language next time** keeps your choices for the box and for a card
+  menu's **Add to binder**.
+- **Value** (with watchlists on): what the binder is worth at today's
+  Scryfall prices, each entry in its finish, with each row's price. Opening
+  the Binder puts it in the daily price check, which reads it whole once a
+  day while you open it at least every 60 days; **Work it out now** does the
+  first read at once. Entries Scryfall has no dollar price for are counted,
+  not guessed. **Price history** in the card viewer shows the daily prices
+  of a printing you own, in your Binder or a deck of yours you opened.
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
 - **Export CSV** downloads the whole collection. Archidekt's import does not
@@ -321,20 +368,18 @@ condition and count.
   names the lines it could not take as given: a language Archidekt's
   collection doesn't store (such as Phyrexian) is kept as English, a
   condition Archidekt's collection doesn't store (such as EX) is kept as
-  Near Mint, copies of a card you already own in another language are added
-  to that copy, and
+  Near Mint, lines whose copies joined an entry you already had are named, and
   cards Archidekt cannot find are left out. When the text itself cannot be
   read, nothing is imported and the page says which line is wrong.
 - A scan is a draft that stays as long as you like, up to a whole deck:
-  fix misread cards, printings and quantities first, then send it to your
-  collection or a deck, which removes the draft. Nothing expires by age.
+  fix misread cards, printings and quantities first, then send it to your binder or a deck, which removes the draft. Nothing expires by age.
 
-Your assistant can read and add to the collection too (an addition is a
+Your assistant can read and add to the binder too (an addition is a
 proposal you approve on the card in the chat or the review page, like a deck
 edit), for questions like "which cards in
-this deck do I not own yet?". After a collection change is applied, the
-gateway reads the collection back to check every card landed. Adding takes about a second a card,
-because each one is written to Archidekt.
+this deck do I not own yet?". After a binder change is applied, the
+gateway reads the binder back to check every card landed. Each card is written to Archidekt
+on its own.
 
 ## Likes, bookmarks, follows and comments
 
@@ -355,12 +400,12 @@ deck, clone or settings) goes to Archidekt at once: pressing Save is your
 approval, and a snapshot is taken first so History can undo it. Only a big
 removal or a change to the commander zone asks you to confirm, and a restore
 from History opens its review first. An **assistant's** edit, new deck, clone,
-settings change, restore or collection change is first saved as a
-**proposal**: the exact list of what would change. Approve it on the card
+settings change, restore or binder change is first saved as a
+**proposal**: the exact list of what would change. Apply it on the card
 in the chat or on the review page (deleting a deck, and any edit of a
 description or comment that has formatting: on the review page only), or
 pick an approval mode on your Account page (Manual, shown as "Ask me every
-time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or collection edits and copies of a deck; Full auto, shown as "Apply changes without asking") and the
+time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or binder edits and copies of a deck; Full auto, shown as "Apply changes without asking") and the
 assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
@@ -383,18 +428,29 @@ assistant applies what that mode allows, with a snapshot first for a change to o
   Apply sends nothing: ask your assistant to update it, or reject it. The
   check never changes a deck, a snapshot or your undo history, and it waits
   while you or your assistant are working.
-- **History** shows proposals, snapshots and deck reports over time.
+- **History** is your decks' timeline: the changes applied to them (restores
+  among them), their snapshots and their tests, with chips for each. Your own
+  edits on the deck page, each within 10 minutes of the last with nothing else
+  changing the deck, share the snapshot taken before the first and are one
+  entry; their snapshots count apart from the others, so they never push out
+  the one from before an assistant's change. A test
+  opens its report page, its one home; **Reports** is the list of every test
+  run. A snapshot's details have **Test this version**, which tests the deck
+  as the snapshot recorded it.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
-- **Reports** (under More) list your stored deck reports, newest first (the
+- **Reports** (Assistant › Reports) list your stored deck reports, newest first (the
   gateway keeps the newest 200), with what Forge has going for you now. Each holds
   the deck's statistics, a legality check, and the solo test, the Forge games
-  or both, so you can follow how a deck develops.
+  or both, so you can follow how a deck develops. **Test a pasted list**
+  at the foot of the page tests a list that is not one of your decks.
 - **Compare** has **Test both in Forge against the same opponents** when
   Forge is on and both decks have a commander: both decks play Forge games
   against the same three precons, picked for the higher of the two decks'
-  brackets, so it doesn't matter which deck you compare from.
+  brackets, so it doesn't matter which deck you compare from. The two then
+  open **Head to head**: both win rates side by side against the same table.
+  These games stay out of each deck's own trend.
 - The **Goldfish** page's **How to play** guide walks a first game step by
   step; you can hide it.
 
@@ -404,12 +460,14 @@ Watchlists are on unless the operator turns them off; then the page, the
 card viewer's price buttons and your assistant's watchlist abilities are not
 there.
 
-The **Watchlist** page (under More)
-keeps the price of cards and decks you choose, once a day:
+The **Watchlist** page (Binder › Watchlist; Binder's switch holds Cards, Wants
+and Watchlist) keeps the price of cards and decks you choose, once a day:
 
 - **Watch a card** by name, or one printing by its set code and number, in
-  non-foil, foil or etched. A name alone follows the printing Scryfall gives
-  for that name. The card viewer has the same: **Price history** shows the
+  non-foil, foil or etched, and optionally an alert. A name alone follows the
+  card's cheapest printing, checked daily, and says which printing that is.
+  Ticked, **Use this finish and alert next time** keeps them for the form and
+  for the Watch in card menus. The card viewer has the same: **Price history** shows the
   prices kept for that card, and **Watch this card** adds it.
 - **Watch a deck** by its Archidekt link or number (your own or a public
   one). The gateway reads it again once a day, so its value follows the
@@ -418,45 +476,56 @@ keeps the price of cards and decks you choose, once a day:
   30 days, a small chart of its price over time, and the same numbers as a
   table under **Price history table**.
 - **Price alert**: a move of more than a percentage from one day to the
-  next, or a price it rises above or falls below. Alerts reach you through
-  notifications (below).
+  next, or a price it rises above or falls below. Price alerts reach you through
+  push notifications (below).
 
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
 are checked once a day; the operator sets how many cards and decks you may
-watch and how long prices are kept (a year unless they changed it). Your
+watch (up to 5,000 cards and 100 decks) and how long prices are kept (a year unless they changed it). Your
 assistant can do the same: watch a card or a deck, stop watching, list your
-watchlist and read a card's price history. Watching changes nothing on
+watchlist and read a card's price history. The watchlist changes nothing on
 Archidekt, so it needs no proposal.
 
-## Notifications and summaries
+## Push notifications and summaries
 
-The **Notifications** card on your Account page can send you a short message
+The **Push notifications** card on your Account page can send you a short message
 in the gateway's Android app when an assistant leaves changes waiting for
 your press (one message per deck, such as "2 changes to Atraxa are waiting
 for you"), a deck report finishes (Forge runs that waited in the queue
-included), or a watched card crosses your price alert. There are no
-notifications on iPhone. Open your Account page in the app, tick **Send me
-notifications**, choose which of these you want, and save, then press
-**Get notifications on this phone**. On Android 13 and later the app asks
-you to allow notifications, and it asks once to run in the background.
+included), a watched card crosses your price alert, or something new
+arrives in your Archidekt alerts (a comment, a reply, a new follower). There are no
+push notifications on iPhone. Open your Account page in the app, tick **Send me
+push notifications**, choose which of these you want, and save, then press
+**Get push notifications on this phone**. On Android 13 and later the app asks
+you to allow push notifications, and it asks once to run in the background.
 Android then shows a quiet "Always connected" notification while the app
 listens. **Send test** checks it, and
 **Disconnect my phones** stops every phone you connected. Messages say only
 what happened and link to the page here; they never list a deck's cards.
 
-The summary is part of the **Notifications** card, so it is there only when
+**A new alert on Archidekt** is ticked unless you untick it, and works once
+your Archidekt account is linked. Archidekt can't tell the gateway when
+something new arrives, so while a phone of yours is connected the gateway
+looks at your Archidekt alert count now and then, in the background and
+after everyone's own pages. Each new alert comes once, in Archidekt's own
+words; pressing it opens the deck, forum thread or profile here, or the
+Alerts list for news and contests. Several at once come as one message.
+Alerts that were already there when you turned this on, and ones you have
+read in the gateway's Alerts, are not sent.
+
+The summary is part of the **Push notifications** card, so it is there only when
 the gateway has a notification server set up (without one, the card only
 says so). Choose **Every day** or **Every week
 (Mondays)** and the card shows a plain summary of today or the last 7 days
 (watched prices that moved and your watched decks' values when watchlists
 are on, deck reports finished, and proposals waiting and applied), and it is
-also sent to you as a notification when notifications are on. The gateway writes it with fixed sentences from its
+also sent to you as a notification when push notifications are on. The gateway writes it with fixed sentences from its
 own data. It does not write an AI summary itself: that would need a paid AI
 model service, and the gateway uses only free ones.
 
 For a summary in your assistant's own words, use the assistant you already
 have. It can read the same summary, for a day or a week, with or without
-notifications, and reading it changes nothing. Claude and ChatGPT can both
+push notifications, and reading it changes nothing. Claude and ChatGPT can both
 run a prompt on a schedule (check your app for scheduled tasks); a prompt
 such as "Every Monday morning, get my weekly summary from my MTG gateway and
 tell me in a few lines what changed and what needs me" does it.
@@ -468,11 +537,11 @@ You sign in with the same account as here, and the assistant acts as you:
 it can read your decks but never change one without a proposal you approve.
 Things to ask it: show my decks; open a deck and tell me its mana curve;
 search for decks with a commander; look up a card, its rulings, prices,
-combos; goldfish a deck; swap cards or build a new deck from a list (each a
+combos; test a deck; swap cards or build a new deck from a list (each a
 proposal with a review link); read my card photos or use my last scan;
 which cards in this deck do I own. In Claude on the web, desktop and
 phones (and ChatGPT, as reported), the things you have to pick or press come
-as cards in the chat: a proposal with Approve and Reject, the changes waiting
+as cards in the chat: a proposal with Apply and Reject, the changes waiting
 for you with Apply all, the printings of a card as pictures to tap, and the
 cards read from your photos to keep or drop. Everything else, such as a deck
 or its statistics, comes as the assistant's own words, which keeps a long chat
@@ -542,27 +611,29 @@ mentioned at the end.
 *What it uses the session for*
 
 - Only when you, or an assistant you connected, ask for something. A big change you approved may finish in the background.
+- Once a day while watchlists are on: reading the decks you watch and, while you open your Binder at least every 60 days, your whole collection, to keep their prices.
 - Reading your decks (private ones included), folders, tags and collection.
 - Reading, as you, other people's decks and comment threads you or your assistant look at and the list of people you follow, and looking up the cards in the changes you make.
-- Making the deck, folder, tag and collection changes you make yourself, approve, or let your assistant make through your approval mode, including deleting a deck when you ask. It may first save a copy of the deck in a backup folder on your Archidekt account (the person who runs the server can turn that off).
+- Making the deck, folder, tag and binder changes you make yourself, approve, or let your assistant make through your approval mode, including deleting a deck when you ask. Before it changes a deck it may first save a copy of the deck in a backup folder on your Archidekt account (the person who runs the server can turn that off); deleting a deck makes no copy.
 - The likes, bookmarks, follows and comments you make yourself on these pages. No assistant can do those.
 
 *What is stored*
 
 - Encrypted: the session (an access token and the refresh token that renews it).
 - Plain text: your Archidekt username and user number (if Archidekt sends no username, what you typed to sign in, which may be your email); when you linked and when the session was last renewed and used; activity-log entries for each link, unlink, renewal and failed attempt.
+- Plain text, while watchlists are on: your binder as last read whole and the card lists of your own decks you opened, so they can be priced. Each goes once you have not opened it for 60 days.
 - Never stored: your password.
 - After an unlink, your Archidekt username and user number stay until you or an admin delete your data. Activity-log entries, including the Archidekt username noted when you linked, are kept for a year, even after your data is deleted.
 
 *What the person who runs this server can do*
 
 - The key that opens the session is on the same server. Anyone with access to the server, including the person who runs it, can use the session to act as you on Archidekt until it expires: read, change or delete your decks and collection, or anything else your sign-in allows. If Archidekt lets a session change your email or password (not known), they could use that to keep your account. They cannot get your password from the session.
-- They can read everything else the gateway keeps about you, unencrypted: your name, email, username, user ID and groups at the sign-in service, profile picture (if sent), sign-in and last-seen times, approval mode, Archidekt username and user number, proposed and applied deck and collection changes, deck snapshots, reports and covers, scans, connected apps, usage counts and the activity log. The sign-in service's tokens the gateway keeps to check your groups use the same key, so they can open those too.
+- They can read everything else the gateway keeps about you, unencrypted: your name, email, username, user ID and groups at the sign-in service, profile picture (if sent), sign-in and last-seen times, approval mode, Archidekt username and user number, proposed and applied deck and binder changes, deck snapshots, reports and covers, scans, connected apps, usage counts and the activity log. The sign-in service's tokens the gateway keeps to check your groups use the same key, so they can open those too.
 - They control the code this server runs. This gateway's code never keeps your password, but changed code could.
 
 *What admins on this site can do*
 
-- On the admin pages they see your name, email, username, groups and user ID at the sign-in service, your Archidekt username, first sign-in and last seen, connected apps, how many app tokens and browser sessions you have open, whether and when you were disabled, and the activity log: what you did, when and with which app (links, unlinks, proposals, deck and collection changes, scans, likes, bookmarks, follows and comments, with deck, proposal and comment numbers).
+- On the admin pages they see your name, email, username, groups and user ID at the sign-in service, your Archidekt username, first sign-in and last seen, connected apps, how many app tokens and browser sessions you have open, whether and when you were disabled, and the activity log: what you did, when and with which app (links, unlinks, proposals, deck and binder changes, scans, likes, bookmarks, follows and comments, with deck, proposal and comment numbers).
 - They can unlink your Archidekt account, disable and enable your account, sign you out everywhere and delete your data.
 - They cannot see your password or session, cannot open your proposals, and have no button that uses your link. An admin who also has server access can do everything in the section above.
 

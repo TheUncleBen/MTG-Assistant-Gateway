@@ -44,6 +44,14 @@ _NUMERIC_STATS = (
 )
 
 
+# Where price_total comes from (archidekt._card_price), said beside it: the watchlist's deck value
+# is Scryfall's, so the two can differ.
+PRICE_SOURCE = (
+    "Archidekt's prices: Card Kingdom's for each card (TCGplayer's when Card Kingdom has none), the "
+    "normal finish, in US dollars"
+)
+
+
 def colour_letter(value: str) -> str | None:
     """'Blue' or 'U' -> 'U'; anything else -> None."""
     return COLOR_LETTERS.get(value.strip().casefold())
@@ -150,7 +158,7 @@ def outside_pips(card: DeckCard, identity: set[str]) -> dict[str, float]:
 
 def out_of_identity(cards: list[DeckCard], commanders: list[DeckCard]) -> dict[str, Any] | None:
     """Mana-cost pips outside the commanders' colour identity: ``identity`` (WUBRG letters),
-    ``pips`` per outside colour (times the copies), ``cards`` with the outside ``colours`` per
+    ``pips`` per outside colour (times the copies), ``cards`` with the outside ``colors`` per
     card. None when the deck has no commander."""
     if not commanders:
         return None
@@ -161,7 +169,7 @@ def out_of_identity(cards: list[DeckCard], commanders: list[DeckCard]) -> dict[s
         out = outside_pips(c, identity)  # type: ignore[arg-type]
         if not out:
             continue
-        rows.append({"name": c.name, "colours": [k for k in WUBRG if k in out]})
+        rows.append({"name": c.name, "colors": [k for k in WUBRG if k in out]})
         for k, v in out.items():
             pips[k] = pips.get(k, 0.0) + v * c.quantity
     return {
@@ -324,7 +332,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "nonland_count": sum(c.quantity for c in nonlands),
         "average_mana_value": _round(mv_total / mv_count) if mv_count else None,
         "mana_curve": dict(curve),
-        "colour_pips": {k: _round(v) for k, v in pips.items() if k in WUBRG and v},
+        "color_pips": {k: _round(v) for k, v in pips.items() if k in WUBRG and v},
         "mana_sources": dict(sorted(sources.items(), key=order)),
         "mana_sources_lands": dict(sorted(land_sources.items(), key=order)),
         "mana_curve_by_type": curve_by(cards, primary_type),
@@ -335,8 +343,8 @@ def compute(deck: Deck) -> dict[str, Any]:
         "keyword_counts": counts_of(cards, "keywords"),
         "price_total": _round(price_total),
         "priced_cards": len(priced),
+        "price_source": PRICE_SOURCE,
         "format": deck.format,
-        "legality_problems": card_legality_problems(checks),
         "legality_unknown": int((checks.get("legality") or {}).get("unknown") or 0),
         "game_changers": sorted({c.name for c in cards if c.game_changer}),
         "tutors": sum(c.quantity for c in cards if c.tutor),
@@ -344,7 +352,10 @@ def compute(deck: Deck) -> dict[str, Any]:
         "mass_land_denial": sum(c.quantity for c in cards if c.mass_land_denial),
         "salt_total": _round(sum(c.salt * c.quantity for c in cards if c.salt is not None)),
         "commanders": [c.name for c in commanders],
-        "colour_identity": colour_identity(cards),
+        # a Commander deck's identity is its commander's; the cards' own colors are said apart, so a
+        # card outside the identity never widens it (out_of_identity lists such cards)
+        "color_identity": colour_identity(commanders) if commanders else colour_identity(cards),
+        "cards_color_identity": colour_identity(cards),
         "out_of_identity": out_of_identity(cards, commanders),
         "bracket_estimate": bracket_estimate(cards, deck.format, sideboard_rows(deck)),
         "archidekt_bracket": deck.edh_bracket,
@@ -940,7 +951,7 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
         "format_family": family,
         "deck_size": size,
         "commander_zone": zone,
-        "colour_identity_violations": identity,
+        "color_identity_violations": identity,
         "singleton_violations": singleton,
         "copy_limit_violations": copies,
         "legality": legality,
@@ -988,8 +999,9 @@ def _zone_count_problem(count: int) -> str | None:
 def card_legality_problems(checks: dict[str, Any] | None) -> list[dict[str, str]]:
     """The cards deck_checks finds not legal in the format, as ``{name, status}`` rows (status
     "banned", "not_legal", or "restricted" for a restricted card held in more than one copy).
-    This is what ``compute``'s ``legality_problems`` holds, so every reader of it (the report's
-    stats strip, the deck page's edit answers) gives the deck page's verdict."""
+    Statistics stored before 0.7.46 held this as ``legality_problems``; it is read from
+    ``checks`` now, so every reader of it (the report's stats strip, the deck page's edit
+    answers) gives the deck page's verdict."""
     legality = (checks or {}).get("legality") or {}
     return (
         [{"name": str(n), "status": "banned"} for n in legality.get("banned") or []]
@@ -1000,6 +1012,56 @@ def card_legality_problems(checks: dict[str, Any] | None) -> list[dict[str, str]
             if isinstance(r, dict)
         ]
     )
+
+
+def brief(stats: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The few numbers get_deck's text and cards views carry instead of the whole statistics
+    (AT-31: deck_stats gives the rest): size, lands, average mana value, colors, price, the
+    format's verdict with its problems, and the bracket set and estimated."""
+    if not isinstance(stats, dict):
+        return None
+    checks = stats.get("checks") if isinstance(stats.get("checks"), dict) else {}
+    out = {
+        "card_count": stats.get("card_count"),
+        "commanders": stats.get("commanders") or [],
+        "land_count": stats.get("land_count"),
+        "average_mana_value": stats.get("average_mana_value"),
+        "color_identity": stats.get("color_identity"),
+        "price_total": stats.get("price_total"),
+        "priced_cards": stats.get("priced_cards"),
+        "legal": checks.get("legal"),
+        "problems": list(checks.get("problems") or []),
+        "bracket": (checks.get("bracket") or {}).get("set"),
+        "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
+        "more": "deck_stats has the curve, mana sources, type counts and every check",
+    }
+    if stats.get("card_data"):  # a pasted list read without card data says so
+        out["card_data"] = stats["card_data"]
+    return out
+
+
+# 0.7.46 (AT-30): one spelling in every tool. Statistics stored before keep their old keys; they
+# are read under the new ones (``stored``).
+RENAMED_KEYS = {"colour_pips": "color_pips", "colour_identity": "color_identity"}
+RENAMED_KEYS["cards_colour_identity"] = "cards_color_identity"
+RENAMED_CHECK_KEYS = {"colour_identity_violations": "color_identity_violations"}
+
+
+def stored(stats: Any) -> Any:
+    """Statistics as stored (a report's), with the keys renamed in 0.7.46 under their new names."""
+    if not isinstance(stats, dict):
+        return stats
+    out = {RENAMED_KEYS.get(k, k): v for k, v in stats.items()}
+    if isinstance(out.get("checks"), dict):
+        out["checks"] = {RENAMED_CHECK_KEYS.get(k, k): v for k, v in out["checks"].items()}
+    ooi = out.get("out_of_identity")
+    if isinstance(ooi, dict) and isinstance(ooi.get("cards"), list):
+        cards = [
+            {("colors" if k == "colours" else k): v for k, v in r.items()} if isinstance(r, dict) else r
+            for r in ooi["cards"]
+        ]
+        out["out_of_identity"] = {**ooi, "cards": cards}
+    return out
 
 
 def legality_problems_of(stats: dict[str, Any] | None) -> list[Any]:

@@ -18,6 +18,7 @@ from mtg_gateway import report_page as rp
 from mtg_gateway import report_view as rv
 
 from .test_history_page import store_report
+from .test_report_page import forge_enough_games
 from .test_report_view import report
 from .test_reports_browser import FORGE_DONE
 from .test_social_browser import Server
@@ -54,7 +55,7 @@ FORGE_SOLO = {
 
 
 def _page(solo=FORGE_SOLO, **over) -> str:
-    r = report(forge=json.loads(json.dumps(FORGE_DONE)), status="complete", **over)
+    r = report(forge=forge_enough_games(), status="complete", **over)
     if solo is not None:
         r["forge_solo"] = json.loads(json.dumps(solo))
     return rp.report_page_html(r, card_types={"Pernicious Deed": "Enchantment"})
@@ -84,7 +85,7 @@ def test_the_section_is_a_heading_over_a_divider_with_its_label_and_jump_chip() 
     sec = _section(html)
     assert sec.startswith("<section class='rv-sec rv-flat solo-forge' id='rv-solo-forge'")
     assert "ui-card" not in sec.split("<div class='rv-sh'>")[0]
-    assert "<h2 id='rv-solo-forge-h'>Full-rules solo test by Forge (300 games)</h2>" in sec
+    assert "<h2 id='rv-solo-forge-h'>Forge solo test (300 games)</h2>" in sec
     assert "<span class='ui-lbl green'>" in sec and ">300 of 300 played</span>" in sec
     assert (
         "Against opponents that do nothing, up to turn 10: how fast the deck works on its own, not how it "
@@ -93,7 +94,7 @@ def test_the_section_is_a_heading_over_a_divider_with_its_label_and_jump_chip() 
     # the first section link, before Forge games; the section itself sits before them
     chips = html.split("aria-label='Sections of this report'>")[1].split("</nav>")[0]
     assert chips.index("#rv-solo-forge'") < chips.index("#rv-forge'") < chips.index("#rv-solo'")
-    assert ">Full-rules solo test</a>" in chips
+    assert ">Forge solo test</a>" in chips
     assert html.index("id='rv-solo-forge'") < html.index("id='rv-forge'") < html.index("id='rv-solo'")
     # the Mystic Forge solo test keeps its own section, now flat too
     assert "<section class='rv-sec rv-flat' id='rv-solo'" in html

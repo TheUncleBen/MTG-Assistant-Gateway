@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from types import SimpleNamespace
@@ -11,10 +12,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import card_models_view, deck_stats, prefs, ui
-from .archidekt import Deck
+from .archidekt import Deck, parse_deck
 from .busy import _headers, busy_body, busy_json_response, busy_plan, busy_response, busy_text_response
-from .cardsearch_view import watched_names
-from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _filename, _json_for_html
+from .cardsearch_view import watched_name_list, watched_names
+from .companion import (
+    DECK_CSP,
+    DECK_ERR_MESSAGES,
+    DECKS_JSON_TIMEOUT,
+    EDITOR_CSP,
+    TEXT_PLAIN,
+    _filename,
+    _json_for_html,
+)
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     COMPARE_CSS,
@@ -26,7 +35,8 @@ from .deckpage import (
     goldfish_page_html,
     precon_by_label,
 )
-from .decks import DeckError, current_client, is_outside_category
+from .decks import DeckError, current_client, is_outside_category, split_label
+from .history_view import DELETED_NOTICES
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -45,6 +55,7 @@ from .reports_page import matches as reports_matches
 from .theme import (
     card_size_control,
     icon,
+    time_text,
 )
 from .theme import (
     esc as _esc,
@@ -190,10 +201,10 @@ def add_deck_tool_routes(
         }
         side_name = _esc(deck.side_category())
         # Each suggestion in the add box has the card menu (static/cardmenu.js); with
-        # watchlists on also a Watch button, "Watching" for the names the member watches already
+        # watchlists on also a Watch button, "On your watchlist" for the names the member watches already
         watch_attr = " data-suggest-menu"
         if state.prices is not None:
-            watched = sorted(watched_names(state.prices.watched_cards(sub)))[:200]
+            watched = watched_name_list(watched_names(state.prices.watched_cards(sub)))[:200]
             watch_attr = f" data-suggest-watch='{_esc(json.dumps(watched))}'"
         body = (
             f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
@@ -251,9 +262,9 @@ def add_deck_tool_routes(
             + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false' "
             f"aria-label='{side_name} zone' title='The {side_name} zone: kept outside the deck'>"
             f"{side_name}</button></div>"
-            "<div class='field grow'><label for='addname'>Card name</label>"
-            "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
-            f"data-suggest-rich data-suggest-qty{watch_attr} placeholder='Type a card name; Enter adds one, "
+            "<div class='field grow'><label for='addname'>Name</label>"
+            "<input id='addname' type='text' name='name' data-suggest='cards' data-suggest-submit "
+            f"data-suggest-rich data-suggest-qty{watch_attr} placeholder='Type a name; Enter adds one, "
             "“3 sol ring” adds three' autocomplete='off' required>"
             "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
             f"<div class='field go'><button>{icon('plus')} Add</button>"
@@ -314,16 +325,11 @@ def add_deck_tool_routes(
 
     @server.custom_route("/decks/{deck_id}/export.txt", methods=["GET"], include_in_schema=False)
     async def export_txt(request: Request) -> Response:
-        from .decks import deck_to_text
+        """The plain list (export_formats.to_plain): names under Commander, Deck and Sideboard,
+        no Archidekt marks. The Archidekt .txt is the one that keeps printings and categories."""
+        from .export_formats import to_plain
 
-        def make(deck: Deck) -> str:
-            text = deck_to_text(deck)
-            side = deck_to_text(deck, zone="side")
-            if side:
-                text += "\n\n// Sideboard\n" + side
-            return text + "\n"
-
-        return await _download(request, ".txt", make, TEXT_PLAIN)
+        return await _download(request, ".txt", to_plain, TEXT_PLAIN)
 
     async def _download(request: Request, ext: str, make: Any, media_type: str) -> Response:
         """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
@@ -479,7 +485,9 @@ def add_deck_tool_routes(
                         c.collector_number,
                         cell(c.categories[0]) if c.categories else "",
                         cell(",".join(cell(x) for x in c.categories[1:])),
-                        cell(c.label),
+                        # the tag's name only, as Archidekt's own export writes it ("Have", not
+                        # "Have,#37d67a"); an untagged row (",#656565") is blank
+                        cell(split_label(c.label)[0]),
                         "" if c.cmc is None else (int(c.cmc) if float(c.cmc).is_integer() else c.cmc),
                         cell(c.mana_cost),
                         cell(" ".join(c.supertypes + c.types)),
@@ -511,7 +519,8 @@ def add_deck_tool_routes(
         # forge=0 runs the report without Forge games (a quick goldfish-only run)
         no_forge = str(data.get("forge", "")).strip().lower() in ("0", "false", "off", "no")
         try:
-            report = await reports.run(sub, deck_id, forge=False if no_forge else None)
+            # answered once the report is stored: its page opens and fills in while the run goes on
+            report = await reports.start(sub, deck_id, forge=False if no_forge else None)
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
@@ -544,6 +553,8 @@ def add_deck_tool_routes(
         # the newest three decks tested: the lethal turn of each one's newest report and the one before
         two: dict[str, list[dict[str, Any]]] = {}
         for r in index:
+            if r.get("source_label"):  # a list's, a proposal's or a comparison's report: no deck trend
+                continue
             if r["deck_id"] in two or len(two) < 3:
                 two.setdefault(r["deck_id"], [])
                 if len(two[r["deck_id"]]) < 2:
@@ -571,6 +582,9 @@ def add_deck_tool_routes(
             latest=latest,
             trends=trends,
             now=now,
+            # the address names what went; the words are the page's own
+            notice=DELETED_NOTICES.get(request.query_params.get("deleted") or "", ""),
+            csrf=_csrf(s, sid) or "",
         )
         return page(
             "Reports",
@@ -581,6 +595,7 @@ def add_deck_tool_routes(
             heading=False,
             main_class="ui-wide",
             extra_css=REPORTS_PAGE_CSS,
+            extra_scripts=("reports.js",),
         )
 
     @server.custom_route("/decks/{deck_id}/goldfish", methods=["GET"], include_in_schema=False)
@@ -756,14 +771,17 @@ def add_deck_tool_routes(
             )
         finally:
             reports.release_pair(sub, hold)
-        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}", status_code=303)
+        # the pair side by side (owner decision C7); each report links to it
+        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}/head-to-head", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
         """This deck against another: a preconstructed deck (the picker lists Archidekt's), any
-        deck id or link, or a pasted list. The same comparison the assistant's compare_decks
-        makes: what was taken out of the other deck, what was put in, what changed count, and
-        the statistics' differences."""
+        deck id or link, one of the member's decks or this deck's snapshots (listed under the box,
+        ``with=snap_<id>`` for a snapshot), or a pasted list. The same comparison the assistant's
+        compare_decks makes: what was taken out of the other deck, what was put in, what changed
+        count, and the statistics' differences; then the paired solo test of both (kept as a
+        report) and, for two Commander decks, Forge games against the same opponents."""
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
@@ -790,6 +808,14 @@ def add_deck_tool_routes(
                 other_name = "the pasted list"
             except DecklistError as exc:
                 error, status = f"The pasted list could not be read: {_esc(exc)}", 400
+        elif other_ref.startswith("snap_"):
+            # one of the member's snapshots (the picker under the box): the deck as it stood then
+            snap = state.db.get_snapshot(other_ref[5:], sub)
+            if snap:
+                other = parse_deck(snap["deck"])
+                other_name = f"{other.name or 'this deck'} (snapshot, {time_text(snap['taken_at'])})"
+            else:
+                error, status = "That snapshot isn't in your history. It may have been deleted.", 404
         elif other_ref:
             try:
                 # a precon picked by name (the suggestion list) is looked up in the precon listing
@@ -802,6 +828,15 @@ def add_deck_tool_routes(
                     400 if exc.kind != "not_found" else 404,
                 )
         result = deck_stats.compare(other, deck) if other is not None else None
+        try:  # the member's decks for the picker, as cached: the page never waits on Archidekt for it
+            mine = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), DECKS_JSON_TIMEOUT)
+        except (DeckError, TimeoutError):
+            mine = None
+        if mine is None:  # cold or Archidekt unavailable: the list as last read, if any
+            try:
+                mine = decks.last_deck_list(sub)
+            except DeckError:
+                mine = None
         body = compare_page_html(
             deck,
             other=other,
@@ -813,6 +848,9 @@ def add_deck_tool_routes(
             error=error,
             csrf=_csrf(s, sid),
             forge_on=reports.forge is not None,
+            mine=mine,
+            snapshots=decks.list_snapshots(sub, deck_id=str(deck.id), limit=8),
+            ab_on=reports.mf is not None,
         )
         return page(
             f"Compare: {deck_title(deck)}",

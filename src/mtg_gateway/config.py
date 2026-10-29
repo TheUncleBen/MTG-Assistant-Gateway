@@ -137,6 +137,19 @@ def _sync_minutes_env(name: str) -> int:
     return value
 
 
+def _text_env(name: str, key: str) -> str:
+    """A text setting the Settings page manages, set in the stack: the page's own rules (spaces
+    tidied, its length limit); empty = the code default."""
+    spec = MANAGED_SETTINGS[key]
+    raw = _env(name)
+    if raw is None:
+        return spec.default
+    try:
+        return spec.parse(raw)
+    except SettingError as exc:
+        raise ConfigError(f"{name} {exc.message}") from exc
+
+
 def _float_env(name: str, default: float, *, lo: float, hi: float, seconds: bool = False) -> float:
     raw = _env(name, str(default)) or str(default)
     try:
@@ -181,9 +194,9 @@ class Settings:
     # The Forge simulation service (docker/forge/); unset, reports run the goldfish only.
     forge_url: str | None = None
     # Games per Forge run: four-player Commander games are slow on a Pi, so runs stay short.
-    forge_games: int = 4
+    forge_games: int = 5
     # Forge games a report asks to play at the same time (1 to 16); the Forge service plays as many as
-    # its machine has places for. The default asks for as many as a report has games by default.
+    # its machine has places for. The default is the most the older Forge image plays at once.
     forge_parallel_games: int = 4
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
@@ -223,9 +236,10 @@ class Settings:
     archidekt_user_agent: str = (
         "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
     )
-    # Gentle on Archidekt (docs/DEPLOY.md "Archidekt request limits"): every request, whoever
-    # asks, waits at least archidekt_min_interval after the previous one, and no more than
-    # archidekt_max_per_minute go out in any 60 seconds.
+    # Gentle on Archidekt: every request, whoever asks, starts at least archidekt_min_interval
+    # after the previous one started, at most two are out at once, and no more than
+    # archidekt_max_per_minute start in any 60 seconds, a sixth of them kept for members' pages
+    # (archidekt.Pacer).
     archidekt_min_interval: float = 1.0
     archidekt_max_per_minute: int = 30
     # GETs that time out or get a 5xx are retried this many times, after a random wait of up to
@@ -257,7 +271,12 @@ class Settings:
     scan_art_max_galleries: int = 500
     scan_art_gallery_idle_days: int = 180
     proposal_ttl: int = 24 * 3600
-    browser_session_ttl: int = 2 * 3600
+    # How long a browser or Android app sign-in lasts unused; use renews it, up to
+    # browser_session_max_age (30 days by default) after the sign-in (app.SessionRenewalMiddleware).
+    # The four sign-in times are rows of the Settings page ("Sign-in"), read per sign-in and per
+    # token through LiveSettings.seconds; the longest time has no stack variable.
+    browser_session_ttl: int = 7 * 24 * 3600
+    browser_session_max_age: int = 30 * 24 * 3600
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
     reauth_interval: int = 7 * 24 * 3600
@@ -284,8 +303,8 @@ class Settings:
     # decks one member may watch, how many days of daily prices are kept, and the hour (UTC) the
     # daily price check and the members' summaries run. Nothing is fetched while nobody watches.
     watchlists_enabled: bool = True
-    watch_max_cards: int = 200
-    watch_max_decks: int = 10
+    watch_max_cards: int = 5000
+    watch_max_decks: int = 100
     price_history_days: int = 365
     price_hour_utc: int = 6
     # Optional notifications through an ntfy server (notify.py): its address and an access token
@@ -437,7 +456,7 @@ def load_settings() -> Settings:
         ],
         apply_in_chat=_bool_env("MTG_APPLY_IN_CHAT", True),
         update_check=_bool_env("MTG_UPDATE_CHECK", True),
-        browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 2 * 3600, lo=300, hi=86400),
+        browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 7 * 24 * 3600, lo=300, hi=30 * 24 * 3600),
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", True),
         deck_sync_minutes=_sync_minutes_env("MTG_DECK_SYNC_MINUTES"),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
@@ -454,6 +473,7 @@ def load_settings() -> Settings:
         ntfy_url=_ntfy_url_env("MTG_NTFY_URL"),
         ntfy_token=ntfy_token,
         scan_art_enabled=_bool_env("MTG_SCAN_ART_ENABLED", True),
+        server_name=_text_env("MTG_SERVER_NAME", "server_name"),
         # set = a value other than blanks; a blank (or only spaces) leaves it to the page
         env_set=frozenset(
             key
@@ -498,6 +518,10 @@ class SettingSpec:
     labels: tuple[str, ...] = ()
     # True when the gateway reads it only when it starts (the page says it applies after a restart)
     restart: bool = False
+    # Seconds in one ``unit`` when the Settings field it sets counts seconds (the sign-in times):
+    # the page and LiveSettings.get count in the unit, the Settings field and LiveSettings.seconds
+    # in seconds. 1: the same number.
+    scale: int = 1
 
     def parse(self, raw: Any) -> Any:
         """The value ``raw`` (from a form: text; or already typed) as this setting's type, within
@@ -637,14 +661,14 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec("backup_hour_utc", "int", 3, "backups", "B", lo=0, hi=23, restart=True),
         _spec("backup_keep_days", "int", 14, "backups", "B", lo=1, hi=3650, restart=True),
         # simulation
-        _spec("forge_games", "int", 4, "simulation", "C", lo=1, hi=50),
+        _spec("forge_games", "int", 5, "simulation", "C", lo=1, hi=50),
         _spec("forge_parallel_games", "int", 4, "simulation", "C", lo=1, hi=16),
         # watchlists and prices
         _spec(
             "watchlists_enabled", "bool", True, "watchlists", "B", restart=True, env="MTG_WATCHLISTS_ENABLED"
         ),
-        _spec("watch_max_cards", "int", 200, "watchlists", "B", lo=0, hi=200),
-        _spec("watch_max_decks", "int", 10, "watchlists", "B", lo=0, hi=10),
+        _spec("watch_max_cards", "int", 5000, "watchlists", "B", lo=0, hi=5000),
+        _spec("watch_max_decks", "int", 100, "watchlists", "B", lo=0, hi=100),
         _spec(
             "price_history_days",
             "int",
@@ -665,9 +689,38 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             "B",
             max_len=100,
             restart=True,
+            env="MTG_SERVER_NAME",
         ),
         _spec("update_check", "bool", True, "general", "B", restart=True, env="MTG_UPDATE_CHECK"),
         _spec("log_level", "choice", "INFO", "general", "B", choices=_LOG_LEVELS, restart=True),
+        # sign-in times (read per sign-in and per token: no restart). The stack ranges stay as they
+        # were (load_settings); the page's sit inside them, in days and hours.
+        _spec(
+            "browser_session_ttl",
+            "int",
+            7,
+            "signin",
+            "B",
+            lo=1,
+            hi=30,
+            scale=86400,
+            env="MTG_BROWSER_SESSION_TTL",
+        ),
+        _spec("browser_session_max_age", "int", 30, "signin", "B", lo=1, hi=365, scale=86400),
+        _spec(
+            "access_token_ttl", "int", 1, "signin", "B", lo=1, hi=24, scale=3600, env="MTG_ACCESS_TOKEN_TTL"
+        ),
+        _spec(
+            "refresh_token_ttl",
+            "int",
+            30,
+            "signin",
+            "B",
+            lo=1,
+            hi=365,
+            scale=86400,
+            env="MTG_REFRESH_TOKEN_TTL",
+        ),
         # Archidekt and Scryfall pacing
         _spec(
             "archidekt_calls_per_10_min",
@@ -892,6 +945,10 @@ _UNITS = {
     "backup_keep_days": "days",
     "price_history_days": "days",
     "scan_art_gallery_idle_days": "days",
+    "browser_session_ttl": "days",
+    "browser_session_max_age": "days",
+    "access_token_ttl": "hours",
+    "refresh_token_ttl": "days",
     "archidekt_min_interval": "seconds",
     "archidekt_backoff_base": "seconds",
     "archidekt_cache_seconds": "seconds",
@@ -904,6 +961,10 @@ MANAGED_SETTINGS = {k: replace(s, unit=_UNITS[k]) if k in _UNITS else s for k, s
 
 def _deployment_value(settings: Settings, spec: SettingSpec) -> Any:
     value = getattr(settings, spec.key)
+    if spec.scale != 1:
+        # a stack value counts seconds; the page counts in the unit (7200 seconds: 0.08 days)
+        days = value / spec.scale
+        return int(days) if float(days).is_integer() else round(days, 2)
     return value
 
 
@@ -925,7 +986,7 @@ def with_stored(settings: Settings, db: Any) -> Settings:
         except SettingError:
             logger.warning("stored setting %s is out of bounds; the default applies", key)
             continue
-        changes[key] = value
+        changes[key] = value * spec.scale
     return replace(settings, **changes) if changes else settings
 
 
@@ -983,6 +1044,14 @@ class LiveSettings:
             # a stored value the current bounds refuse (bounds tightened in a later version)
             logger.warning("stored setting %s is out of bounds; the default applies", key)
             return None
+
+    def seconds(self, key: str) -> int:
+        """A sign-in time (a setting with a ``scale``) in seconds, as it is now: the stack's own
+        number of seconds when it set one."""
+        spec = self.spec(key)
+        if key in self.settings.env_set:
+            return int(getattr(self.settings, key))
+        return int(self.get(key) * spec.scale)
 
     def get(self, key: str) -> Any:
         spec = self.spec(key)

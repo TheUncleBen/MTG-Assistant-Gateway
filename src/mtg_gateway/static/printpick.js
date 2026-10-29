@@ -28,14 +28,33 @@
     return e;
   }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  // a failed answer carries its HTTP status and the gateway's error kind (busy, rate_limited,
+  // not_found...) so the picker can wait and ask again, or say plainly what went wrong
   function getJSON(url) {
     return fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (d) {
-          if (!r.ok || !d || d.ok === false) throw new Error((d && d.message) || (r.status === 401 ? "you are signed out" : "the gateway did not answer"));
+          if (!r.ok || !d || d.ok === false) {
+            var err = new Error((d && d.message) || (r.status === 401 ? "you are signed out" : "the gateway did not answer"));
+            err.status = r.status;
+            err.kind = (d && d.error) || "";
+            err.wait = parseInt(r.headers.get("Retry-After") || "", 10) || 0;
+            throw err;
+          }
           return d;
         });
       });
+  }
+  // the account's other lookups (a deck page starts several) or Scryfall's own limit: wait a
+  // little and ask again, a few times, before saying so
+  function busy(err) { return !!err && (err.status === 429 || err.kind === "busy" || err.kind === "rate_limited"); }
+  function getPatient(url, tries) {
+    tries = tries || 0;
+    return getJSON(url).catch(function (err) {
+      if (!busy(err) || tries >= 3) throw err;
+      var ms = Math.min(5000, err.wait ? err.wait * 1000 : 800 * (tries + 1));
+      return new Promise(function (ok) { setTimeout(ok, ms); }).then(function () { return getPatient(url, tries + 1); });
+    });
   }
 
   // -- finishes: the deck's words (Normal, Foil, Etched) and Scryfall's (nonfoil, foil, etched) --
@@ -70,19 +89,41 @@
   function english(p) { return !p.lang || p.lang === "en"; }
   function flagText(p) { return preview(p) ? "Preview" : digital(p) ? "Digital only" : ""; }
 
-  // -- the data: a card's oracle id by name (once), and its printings a page at a time ----------
+  // -- the data: a card's oracle id (once), and its printings a page at a time -----------------
+  /* The row's own printing (set and number) names its card exactly: a token named "Goblin" is
+     that token, never a card whose name starts the same. Without one (or when Scryfall has no
+     such printing) the name must match exactly, a card's front face at least. */
   var oracleIds = Object.create(null);
   var pages = Object.create(null);
-  function oracleFor(name) {
+  function oracleFor(name, ref) {
+    if (ref && ref.set && ref.number) {
+      var pk = "print:" + String(ref.set).toLowerCase() + "#" + ref.number;
+      if (!oracleIds[pk]) {
+        oracleIds[pk] = getPatient("/scan/api/printing?set=" + encodeURIComponent(ref.set) + "&number=" + encodeURIComponent(ref.number))
+          .then(function (d) {
+            if (!d.card || !d.card.oracle_id) throw new Error("Scryfall does not know " + name);
+            return d.card.oracle_id;
+          });
+        oracleIds[pk].catch(function () { delete oracleIds[pk]; });
+      }
+      return oracleIds[pk].catch(function (err) {
+        if (err && (err.kind === "not_found" || err.kind === "invalid")) return oracleFor(name, null);
+        throw err;
+      });
+    }
     var key = name.toLowerCase();
     if (!oracleIds[key]) {
-      oracleIds[key] = getJSON("/scan/api/peek?names=" + encodeURIComponent(name)).then(function (d) {
+      oracleIds[key] = getPatient("/scan/api/peek?names=" + encodeURIComponent(name)).then(function (d) {
         var face = key.split(" // ")[0];
         var hit = (d.cards || []).filter(function (c) {
           var n = String(c.name || "").toLowerCase();
           return n === key || n.split(" // ")[0] === face;
-        })[0] || (d.cards || [])[0];
-        if (!hit || !hit.oracle_id) throw new Error("Scryfall does not know " + name);
+        })[0];
+        if (!hit || !hit.oracle_id) {
+          var err = new Error("Scryfall does not know a card named \u201c" + name + "\u201d");
+          err.kind = "not_found";
+          throw err;
+        }
         return hit.oracle_id;
       });
       oracleIds[key].catch(function () { delete oracleIds[key]; });
@@ -95,7 +136,7 @@
       if (params && params[k] && !(k === "order" && params[k] === "newest")) q += "&" + k + "=" + encodeURIComponent(params[k]);
     });
     if (!pages[q]) {
-      pages[q] = getJSON("/scan/api/prints?" + q);
+      pages[q] = getPatient("/scan/api/prints?" + q);
       pages[q].catch(function () { delete pages[q]; });
     }
     return pages[q];
@@ -105,7 +146,7 @@
   function oneFor(oid, ref) {
     var q = "oracle_id=" + encodeURIComponent(oid) + "&set=" + encodeURIComponent(ref.set) + "&number=" + encodeURIComponent(ref.number);
     if (!pages[q]) {
-      pages[q] = getJSON("/scan/api/prints?" + q);
+      pages[q] = getPatient("/scan/api/prints?" + q);
       pages[q].catch(function () { delete pages[q]; });
     }
     return pages[q];
@@ -242,7 +283,9 @@
      {set, number} | null (a pick not saved yet, marked Picked), finish: the card's finish
      ("normal" / "foil" / "etched", or Archidekt's Normal...), pickLabel, onPick(printing, info),
      onWatch(printing, finish) returning a promise (browse mode; onPick may then be left out)}
-     info: {finish: "normal" | "foil" | "etched", changed: bool, from: the finish it had} */
+     info: {finish: "normal" | "foil" | "etched", changed: bool, from: the finish it had, chosen:
+     the finish was picked by hand in the detail, onlyFinish: the card's own printing, so only
+     its finish changes} */
   function open(opts) {
     if (!opts || !opts.name || (typeof opts.onPick !== "function" && typeof opts.onWatch !== "function")) return;
     ensure();
@@ -252,9 +295,10 @@
     st = {
       opts: opts, oid: null, list: [], page: 0, hasMore: false, total: 0, complete: false, loading: false,
       params: { finish: "", frame: "", border: "", order: "newest" }, q: "", all: false, pinned: null, seq: 0,
-      mine: Object.create(null), mineAsked: false,
+      mine: Object.create(null), mineAsked: false, watched: Object.create(null),
       finish: scryFinish(opts.finish)
     };
+    if (typeof opts.onWatch === "function") askWatched(st);
     var box = el("div", "ppbox");
     st.box = box;
     // head: the card's name and the close button
@@ -274,13 +318,18 @@
     var search = el("input");
     search.type = "search";
     search.id = "pp-q";
-    search.placeholder = "Search set name or code";
-    search.setAttribute("aria-label", "Search set name or code");
+    // it narrows this card's printings by set (name or code); a card's name finds nothing here,
+    // so the box says what it filters and the empty list offers the card search instead
+    search.placeholder = "Filter by set";
+    search.setAttribute("aria-label", "Filter these printings by set");
     search.autocomplete = "off";
     search.setAttribute("enterkeyhint", "search");
     search.addEventListener("input", function () { st.q = search.value.trim().toLowerCase(); draw(); });
     var searchRow = el("div", "ppsearch");
-    searchRow.appendChild(search);
+    var qbox = el("span", "ppq");
+    qbox.innerHTML = "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'><path d='M3 5h18l-7 8v6l-4-2v-4z'/></svg>";
+    qbox.appendChild(search);
+    searchRow.appendChild(qbox);
     var filtBtn = el("button", "ppfiltbtn", "Filters");
     filtBtn.type = "button";
     filtBtn.setAttribute("aria-expanded", "false");
@@ -288,10 +337,13 @@
     searchRow.appendChild(filtBtn);
     // card size S / M / L (0.7.29): the same switch as next to "View as"; static/prefs.js applies
     // and saves it
+    // and keeps its own size (card.size.printings): a change here leaves the page's as it is
     var sizes = el("span", "sizeseg");
     sizes.setAttribute("role", "group");
     sizes.setAttribute("aria-label", "Card size");
-    var now = document.documentElement.getAttribute("data-card-size") || "m";
+    sizes.setAttribute("data-card-size-page", "printings");
+    var now = document.documentElement.getAttribute("data-card-size-printings") || "m";
+    dlg.setAttribute("data-card-size", now);
     [["s", "Small"], ["m", "Medium"], ["l", "Large"]].forEach(function (pair) {
       var b = el("button", "", pair[0].toUpperCase());
       b.type = "button";
@@ -365,10 +417,10 @@
     document.documentElement.classList.add("printpick-open");
     if (window.MtgSelect && window.MtgSelect.enhance) window.MtgSelect.enhance(filters);
     closeBtn.focus();
-    status.textContent = "Looking up printings…";
+    looking();
     var seq = ++st.seq;
     var mine = st;
-    (opts.oracleId ? Promise.resolve(opts.oracleId) : oracleFor(opts.name)).then(function (oid) {
+    (opts.oracleId ? Promise.resolve(opts.oracleId) : oracleFor(opts.name, opts.current)).then(function (oid) {
       if (st !== mine || seq !== st.seq) return;
       st.oid = oid;
       load(true);
@@ -392,7 +444,7 @@
     st.more.disabled = true;
     st.more.setAttribute("aria-busy", "true");
     st.more.textContent = "Loading…";
-    if (reset) st.status.textContent = "Looking up printings…";
+    if (reset) looking();
     pageFor(st.oid, params, page).then(function (d) {
       if (st !== mine || seq !== st.seq) return;
       st.loading = false;
@@ -417,11 +469,31 @@
       failed(err);
     });
   }
+  // the status line while printings are looked up (busy answers asked again included): the
+  // theme's progress ring until the tiles or an error replace it
+  function looking() {
+    st.status.className = "ppstatus";
+    st.status.textContent = "";
+    var ring = el("span", "ui-spin");
+    ring.setAttribute("aria-hidden", "true");
+    st.status.appendChild(ring);
+    st.status.appendChild(document.createTextNode(" Looking up printings…"));
+  }
+  // what went wrong, in plain words
+  function why(err) {
+    if (!err) return "The gateway did not answer.";
+    if (err.status === 401) return "You are signed out. Sign in again, then retry.";
+    if (busy(err)) return "Your other card lookups are still running. Retry when you’re ready.";
+    if (err.kind === "not_found") return (err.message || "Scryfall does not know this card") + ".";
+    if (err.kind === "unavailable") return "Scryfall is not answering right now.";
+    if (!err.status) return "The gateway did not answer. Check the connection, then retry.";
+    return (err.message || "The gateway did not answer") + ".";
+  }
   function failed(err) {
     st.status.textContent = "";
     st.status.className = "ppstatus notice error";
-    st.status.appendChild(document.createTextNode("Printings could not be loaded: " + ((err && err.message) || "no connection") + ". "));
-    var again = el("button", "btn small", "Try again");
+    st.status.appendChild(document.createTextNode("Printings could not be loaded. " + why(err) + " "));
+    var again = el("button", "btn small", "Retry");
     again.type = "button";
     again.addEventListener("click", function () {
       st.status.className = "ppstatus";
@@ -570,6 +642,13 @@
       clear.type = "button";
       clear.addEventListener("click", clearFilters);
       st.empty.appendChild(clear);
+      // typed text that is no set code (a card's name, most likely): the card search finds it
+      var typed = st.search.value.trim();
+      if (st.q && !/^[a-z0-9]{2,6}$/.test(st.q)) {
+        var all = el("a", "btn", "Search all cards for \u201c" + typed + "\u201d");
+        all.href = "/cards?q=" + encodeURIComponent(typed);
+        st.empty.appendChild(all);
+      }
     }
     st.moreRow.hidden = !st.hasMore;
     st.more.disabled = false;
@@ -621,6 +700,21 @@
     if (use && !use.disabled) use.focus();
     else { var back = st.pv.querySelector(".ppback"); if (back && !wide()) back.focus(); }
   }
+  // browse mode: the printings of this card the member watches (set, number and finish), so the
+  // preview says "On your watchlist" for one instead of offering it again
+  function watchKey(set, number, finish) { return String(set || "").toLowerCase() + "#" + number + "#" + finish; }
+  function askWatched(mine) {
+    getJSON("/watchlist/api/card?name=" + encodeURIComponent(mine.opts.name)).then(function (d) {
+      if (st !== mine) return;
+      (d.watches || []).forEach(function (w) {
+        if (w.set && w.collector_number) mine.watched[watchKey(w.set, w.collector_number, w.finish)] = true;
+      });
+      if (st.pv && st.pv.querySelector(".ppwatch") && !st.pv.contains(document.activeElement)) {
+        st.pv.dataset.shows = "";
+        showPreview(st.pvShown || null);
+      }
+    }).catch(function () { /* Watch stays offered; the server keeps one watch a printing */ });
+  }
   function hidePreview() {
     st.box.classList.remove("previewing");
     st.tools.inert = false;
@@ -628,6 +722,7 @@
     if (st.pinnedTile && st.pinnedTile.isConnected) st.pinnedTile.focus();
   }
   function showPreview(p) {
+    if (st) st.pvShown = p;
     var pv = st.pv;
     if (pv.dataset.shows === (p ? p.set + "#" + p.collector_number : "") && pv.childNodes.length) return;
     pv.dataset.shows = p ? p.set + "#" + p.collector_number : "";
@@ -660,33 +755,78 @@
     });
     info.appendChild(prices);
     var same = samePrint(p, o.pending || o.current);
+    var chosen = fit.finish;  // the finish the card will be in: the fitting one, or one picked below
+    var note = null;
     if (fit.changed && !same) {
-      info.appendChild(el("p", "ppnote", "Not made in a " + FINISH_NAMES[st.finish].toLowerCase() + " finish: the card becomes " +
-        FINISH_NAMES[fit.finish].toLowerCase() + " with this printing."));
+      note = el("p", "ppnote", "Not made in a " + FINISH_NAMES[st.finish].toLowerCase() + " finish: the card becomes " +
+        FINISH_NAMES[fit.finish].toLowerCase() + " with this printing.");
+      info.appendChild(note);
     }
     var acts = el("div", "ppacts");
     if (typeof o.onPick === "function") {
-      var use = el("button", "btn-primary ppuse", same ? (samePrint(p, o.pending) ? "Already picked" : "Already in the deck") : (o.pickLabel || "Use this printing"));
+      var use = el("button", "btn-primary ppuse", "");
       use.type = "button";
-      use.disabled = same;
+      // Use this printing: off only for the printing the card has, in the finish it has
+      var word = function () {
+        var had = same && chosen === st.finish;
+        use.disabled = had;
+        use.textContent = had ? (samePrint(p, o.pending) ? "Already picked" : "Already in the deck") : (o.pickLabel || "Use this printing");
+        if (note) note.hidden = chosen !== fit.finish;
+      };
+      // the finishes this printing is made in (owner decision C4): one to pick, the fitting one first
+      var made = p.finishes && p.finishes.length ? p.finishes : ["nonfoil"];
+      if (made.length > 1) {
+        var fs = el("fieldset", "ppfinish");
+        fs.appendChild(el("legend", "", "Finish"));
+        made.forEach(function (f) {
+          var lab = el("label", "ppfin", "");
+          var r = el("input", "");
+          r.type = "radio"; r.name = "ppfinish"; r.value = f; r.checked = f === chosen;
+          r.addEventListener("change", function () { if (r.checked) { chosen = f; word(); } });
+          lab.appendChild(r);
+          lab.appendChild(document.createTextNode(FINISH_NAMES[f] || f));
+          fs.appendChild(lab);
+        });
+        info.appendChild(fs);
+      }
+      word();
       use.addEventListener("click", function () {
-        var opts = st.opts, from = deckFinish(st.finish);
-        close();
-        opts.onPick(p, { finish: deckFinish(fit.finish), changed: fit.changed, from: from });
+        var opts = st.opts, had = st.finish, from = deckFinish(had);
+        close();  // (st is gone after this)
+        opts.onPick(p, {
+          finish: deckFinish(chosen), changed: chosen !== had, from: from,
+          chosen: chosen !== fit.finish,  // picked by hand, not forced by the printing
+          onlyFinish: same && chosen !== had  // the card's own printing in another finish
+        });
       });
       acts.appendChild(use);
     }
     if (typeof o.onWatch === "function") {
-      // browse mode: watch this printing's price (in the finish shown), the dialog stays open
+      // browse mode: watch this printing's price (in the finish shown), the dialog stays open; a
+      // printing watched already says so, with its watchlist entry a tap away
+      var key = watchKey(p.set, p.collector_number, fit.finish);
       var watch = el("button", (typeof o.onPick === "function" ? "btn" : "btn-primary") + " ppwatch", "Watch this printing");
       watch.type = "button";
+      var onList = el("a", "btn ppwatched", "Open the watchlist");
+      onList.href = "/watchlist?q=" + encodeURIComponent(p.name || o.name);
+      var watched = function () {
+        watch.textContent = "On your watchlist";
+        watch.disabled = true;
+        watch.className = "btn ppwatch";
+        if (!onList.parentNode) acts.insertBefore(onList, watch.nextSibling);
+      };
       watch.addEventListener("click", function () {
         watch.disabled = true;
+        var mine = st;
         Promise.resolve(o.onWatch(p, fit.finish)).then(function () {
-          watch.textContent = "Watching";
+          mine.watched[key] = true;
+          var had = document.activeElement === watch || document.activeElement === document.body;
+          watched();
+          if (had) onList.focus();  // the button it was on is disabled now
         }, function () { watch.disabled = false; });
       });
       acts.appendChild(watch);
+      if (st.watched[key]) watched();
     }
     var back = el("button", "btn ppback", "Back to printings");
     back.type = "button";

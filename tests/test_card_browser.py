@@ -16,6 +16,10 @@ from .test_cards_browser import HOST as SIZED_HOST
 from .test_cards_browser import PNG
 from .test_consent_browser import _chromium_or_skip, _launch
 
+# the proposal card's way to the review page: a grey capsule under the status line
+OPEN_CAP = "#status + .open-row a.cap"
+OPEN_WORDS = "Open in the app or browser"
+
 pytest.importorskip("playwright")
 
 PROPOSAL = {
@@ -182,7 +186,8 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             assert _confirms(page) == []  # nothing was confirmed by itself
             reads = _calls(page, "tools/call")  # one read-only look at the proposal's state, at most
             assert len(reads) <= 1 and all(
-                m["params"] == {"name": "get_proposal", "arguments": {"proposal_id": "p-1"}} for m in reads
+                m["params"] == {"name": "get_proposal", "arguments": {"proposal_id": "p-1", "rows_limit": 8}}
+                for m in reads
             )
             assert _calls(page, "ui/notifications/size-changed"), "the card reports its size"
             # Press Approve: one confirm_proposal call with the proposal id, the code and the
@@ -210,7 +215,7 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             assert card.locator("a.link", has_text="Open the deck on Archidekt").count() == 1
             # The model is told what happened, in words, through the host.
             ctx = _calls(page, "ui/update-model-context")
-            assert ctx and "pressed Approve" in ctx[0]["params"]["content"][0]["text"]
+            assert ctx and "pressed Apply" in ctx[0]["params"]["content"][0]["text"]
             # A host request to tear down gets an answer.
             page.evaluate("() => window.teardown()")
             page.wait_for_function("() => window.log.some(m => m.id === 999 && 'result' in m)", timeout=5_000)
@@ -245,7 +250,8 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             assert "12 rows" in card.locator("#summary").inner_text()
             assert card.locator("#risk").inner_text().lower() == "high"  # the risk word
             assert "needs your approval" in card.locator("#note").inner_text()
-            assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 8
+            # COLLAPSE_AT rows since 0.7.46
+            assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 6
             assert card.locator("ul.changes li.group").first.inner_text().lower().startswith("added (9)")
             more = card.locator("#more")
             assert more.inner_text() == "Show all 12 changes"
@@ -262,7 +268,15 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             page.wait_for_timeout(900)
             assert "lets your assistant apply this itself" in card.locator("#note").inner_text()
             assert card.locator("button:visible").count() == 0
-            assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
+            assert card.locator(OPEN_CAP, has_text=OPEN_WORDS).count() == 1
+            # a grey capsule, not a bare blue link, with a 44 px target
+            cap = card.locator(".open-row a.cap")
+            look = cap.evaluate(
+                "e => { const s = getComputedStyle(e), b = getComputedStyle(document.body);"
+                " return [s.color === b.color, parseFloat(s.borderTopLeftRadius) >= 18,"
+                " s.textDecorationLine, e.getBoundingClientRect().height]; }"
+            )
+            assert look[:3] == [True, True, "none"] and look[3] >= 44, look
             assert not errors, errors
         finally:
             browser.close()
@@ -280,7 +294,7 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             card.locator("#title").wait_for()
             page.wait_for_timeout(900)
             assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
-            button = card.locator("button", has_text="Approve on the review page")
+            button = card.locator("button", has_text="Apply on the review page")
             assert button.count() == 1
             button.click()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/open-link')", timeout=5_000)
@@ -767,10 +781,7 @@ def test_locked_buttons_read_at_full_strength(theme: str) -> None:
             browser.close()
 
 
-NUDGE = "Approved, go on"
-
-
-def _nudges(page) -> list[dict]:
+def _posted_as_user(page) -> list[dict]:
     """What the card posted in the chat as the person: ui/message, or ChatGPT's follow-up call."""
     return [
         m
@@ -790,59 +801,34 @@ def _press(page, card, button: str) -> None:
     )
 
 
-def test_approve_nudges_the_assistant_only_where_the_host_takes_a_message() -> None:
-    """Ben, 0.7.31 test round: after he pressed Approve the assistant sat still until he wrote
-    again. Where the host lets a card post a message (MCP Apps' ui/message, or ChatGPT's
-    sendFollowUpMessage), Approve now also posts "Approved, go on", after the card has told the
-    model what happened; Reject posts nothing, and a host with neither gets nothing."""
+def test_approve_tells_the_assistant_and_never_posts_as_the_user() -> None:
+    """Owner decision 0.7.46: the card no longer posts "Approved, go on" as the person's own message
+    after Approve (it started a turn they did not ask for and put words in their mouth). The card
+    still tells the assistant the outcome through the model context, in every host, and posts
+    nothing in the chat, even where the host would take a message."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()
     applied = {**PROPOSAL, "state": "applied", "result": {"deck_url": "https://archidekt.com/decks/42"}}
     rejected = {**PROPOSAL, "state": "rejected"}
     start = {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "code-123"}}
+    caps = {"openLinks": {}, "serverTools": {}, "message": {"text": {}}}
     with sync_playwright() as p:
         browser = _launch(p, exe)
         try:
-            # 1. An MCP Apps host that takes messages: one ui/message, after the model context.
-            page = browser.new_page()
-            card = _open(
-                page, start, applied, host_caps={"openLinks": {}, "serverTools": {}, "message": {"text": {}}}
-            )
-            _press(page, card, "approve")
-            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')", timeout=5_000)
-            log = page.evaluate("() => window.log")
-            sent = [m for m in log if m.get("method") == "ui/message"]
-            assert len(sent) == 1 and sent[0]["params"] == {
-                "role": "user",
-                "content": [{"type": "text", "text": NUDGE}],
-            }
-            told = next(i for i, m in enumerate(log) if m.get("method") == "ui/update-model-context")
-            assert told < log.index(sent[0])
-            page.close()
-            # 2. ChatGPT's own follow-up call, where the host doesn't list ui/message.
-            page = browser.new_page()
-            card = _open(page, start, applied, openai=True)
-            _press(page, card, "approve")
-            page.wait_for_function(
-                "() => window.log.some(m => m.method === 'openai/sendFollowUpMessage')", timeout=5_000
-            )
-            assert [m["params"] for m in _nudges(page)] == [{"prompt": NUDGE}]
-            page.close()
-            # 3. A host with neither: nothing is posted, as before.
-            page = browser.new_page()
-            card = _open(page, start, applied)
-            _press(page, card, "approve")
-            page.wait_for_timeout(300)
-            assert _nudges(page) == []
-            page.close()
-            # 4. Reject never nudges, even where the host would take it.
-            page = browser.new_page()
-            card = _open(page, start, rejected, host_caps={"message": {"text": {}}}, openai=True)
-            _press(page, card, "reject")
-            page.wait_for_timeout(300)
-            assert _nudges(page) == []
-            page.close()
+            for end, button in ((applied, "approve"), (rejected, "reject")):
+                page = browser.new_page()
+                card = _open(page, start, end, host_caps=caps, openai=True)
+                _press(page, card, button)
+                page.wait_for_timeout(400)
+                told = [
+                    m
+                    for m in page.evaluate("() => window.log")
+                    if m.get("method") == "ui/update-model-context"
+                ]
+                assert told, button
+                assert _posted_as_user(page) == [], button
+                page.close()
         finally:
             browser.close()
 

@@ -14,6 +14,10 @@ from mtg_gateway.cards import card_html as cards_html
 
 from .test_consent_browser import _chromium_or_skip, _launch
 
+# the proposal card's way to the review page: a grey capsule under the status line
+OPEN_CAP = "#status + .open-row a.cap"
+OPEN_WORDS = "Open in the app or browser"
+
 pytest.importorskip("playwright")
 
 NOW = int(time.time())
@@ -281,21 +285,24 @@ PROPOSAL = {
         "other_apps": [{"app": "ChatGPT", "count": 1}],
         "review_all_url": "https://gateway.example.com/proposals#deck-42",
         "this_app": "app: Claude (c1)",
-        "set_lines": [
-            {
-                "proposal_id": "p1",
-                "board_no": 1,
-                "summary": "+1 Opt",
-                "status": "held",
-                "status_reason": "#3 it depends on was rejected.",
-                "version": 2,
-                "changed_by": "app: ChatGPT (c2)",
-                "what_changed": "Opt instead of Ponder",
-            },
-            {"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "version": 1},
-        ],
     },
 }
+
+
+# what Apply all applies, one line each: card-only, so in _meta with the set's code (standard 16)
+SET_LINES = [
+    {
+        "proposal_id": "p1",
+        "board_no": 1,
+        "summary": "+1 Opt",
+        "status": "held",
+        "status_reason": "#3 it depends on was rejected.",
+        "version": 2,
+        "changed_by": "app: ChatGPT (c2)",
+        "what_changed": "Opt instead of Ponder",
+    },
+    {"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "version": 1},
+]
 
 
 @pytest.mark.parametrize("width,theme", [(360, "dark"), (1280, "light")])
@@ -312,7 +319,7 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             page.route("https://api.scryfall.com/**", lambda r: r.abort())
             meta = {
                 APPROVAL_META_KEY: "code-2",
-                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code", "lines": SET_LINES},
             }
             applied = {**PROPOSAL, "state": "applied", "applied_at": NOW}
             card = _open(
@@ -414,7 +421,7 @@ def test_the_card_quotes_the_comment_and_offers_no_undo_for_an_account_action(wi
             text = card.locator("#rows").inner_text()
             assert "Delete your comment on the deck by amy: “Cut the second Sol Ring.”" in text, text
             assert card.locator("a.link", has_text="Undo on the review page").count() == 0
-            assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
+            assert card.locator(OPEN_CAP, has_text=OPEN_WORDS).count() == 1
             _shot(page, f"proposal-card-comment-delete-{width}-{theme}")
         finally:
             browser.close()
@@ -443,7 +450,7 @@ def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(wi
                 (amended, "Changed by ChatGPT. Last change: Added Delver of Secrets."),
                 (
                     other,
-                    "Claude made this change, so this card can't approve it. Approve it on Claude's card "
+                    "Claude made this change, so this card can't apply it. Apply it on Claude's card "
                     "or in your browser.",
                 ),
             ):
@@ -561,7 +568,7 @@ def test_approve_reads_the_change_again_and_shows_a_new_wait_first(width: int, t
             card.locator("#status.err").wait_for()
             assert card.locator("#status").inner_text() == (
                 "This change has changed status since the card was drawn. Read the note above, then "
-                "press Approve again if you still want it."
+                "press Apply again if you still want it."
             )
             note = card.locator("#note").inner_text()
             # the Held line says why, once; the next line says what it means
@@ -618,8 +625,8 @@ def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> 
             card.locator("#approve:not([disabled])").click()
             card.locator("#status.err").wait_for()
             assert card.locator("#status").inner_text() == (
-                "This card could not check the change again, so nothing was approved yet. Press "
-                "Approve again to approve it as shown here, or use the review page."
+                "This card could not check the change again, so nothing was applied yet. Press "
+                "Apply again to apply it as shown here, or use the review page."
             )
             assert not _tool_calls(page, "confirm_proposal")
             card.locator("#approve:not([disabled])").click()
@@ -636,7 +643,7 @@ def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> 
 
 
 NOW_HELD_TEXT = (
-    "This change is now held, so nothing was approved. Read the note above, then press Approve "
+    "This change is now held, so nothing was applied. Read the note above, then press Apply "
     "again if you still want it."
 )
 
@@ -705,7 +712,7 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
             # said once: the Held line says why, the next line only what it means
             assert "It needs your press." in body and "This one would replace" not in body, body
             # no line the hold made untrue stays on the card
-            assert "still waits" not in body and "Low-risk change" not in body, body
+            assert "still waits" not in body and "Low risk (" not in body, body
             assert _tool_calls(page, "confirm_proposal") == [
                 {"proposal_id": "p2", "approval": "code-2", "decision": "approve", "shown_status": ""}
             ]
@@ -738,7 +745,7 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
 
 
 WAITING_NOW_HELD_TEXT = (
-    "This change is now held, so nothing was approved. Read why on its row, then press Approve "
+    "This change is now held, so nothing was applied. Read why on its row, then press Apply "
     "again if you still want it."
 )
 
@@ -851,7 +858,7 @@ def test_apply_all_on_the_proposal_card_lists_what_it_did_not_send_and_why(width
             page.route("https://api.scryfall.com/**", lambda r: r.abort())
             meta = {
                 APPROVAL_META_KEY: "code-2",
-                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code", "lines": SET_LINES},
             }
             card = _open(
                 page,
@@ -914,7 +921,7 @@ def test_the_proposal_cards_not_sent_list_goes_when_its_own_change_is_decided(de
             page.route("https://api.scryfall.com/**", lambda r: r.abort())
             meta = {
                 APPROVAL_META_KEY: "code-2",
-                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+                APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code", "lines": SET_LINES},
             }
             card = _open(
                 page,
@@ -1085,7 +1092,7 @@ def test_the_no_press_badge_fits_a_phone_at_any_text_size(width: int, text: str)
 
 @pytest.mark.parametrize("width,theme", [(380, "light"), (380, "dark"), (700, "light"), (700, "dark")])
 def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) -> None:
-    """A private copy of a deck that Semi-auto may apply reads "Low-risk change (copies a deck …)":
+    """A private copy of a deck that Semi-auto may apply reads "Low risk (copies a deck …)":
     a copy edits nothing, so "edit" was wrong. The note stays inside the card."""
     from playwright.sync_api import sync_playwright
 
@@ -1110,8 +1117,8 @@ def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) 
             card.locator("#note:not(.hidden)").wait_for()
             note = card.locator("#note").inner_text()
             assert (
-                "Low-risk change (copies a deck and changes nothing that exists): your approval mode lets "
-                "your assistant apply it without asking." in note
+                "Low risk (copies a deck and changes nothing that exists): your assistant may apply this "
+                "without asking." in note
             ), note
             assert "Low-risk edit" not in note
             frame = page.frames[1]
@@ -1127,12 +1134,11 @@ def test_a_low_risk_copy_is_called_a_change_not_an_edit(width: int, theme: str) 
             browser.close()
 
 
-def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_it_did() -> None:
-    """Ben, 0.7.31 test round: after an approval the assistant sat still. Where the host takes a
-    message from a card, Apply all posts "Approved, go on" once for the whole batch (as soon as it is
-    under way); a row's own
-    Approve posts none, so approving rows one by one doesn't start a turn each. The row's result
-    is the gateway's own words for what it did (a like is not a deck that matches)."""
+def test_apply_all_on_the_waiting_card_posts_nothing_as_the_user_and_a_row_approve_says_what_it_did() -> None:
+    """Owner decision 0.7.46: no card posts "Approved, go on" as the person's message any more,
+    neither after a row's Approve nor after Apply all (done or still applying); the assistant is
+    told the outcome through the model context. The row's result is the gateway's own words for
+    what it did (a like is not a deck that matches)."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()
@@ -1175,18 +1181,13 @@ def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_i
             card.locator("#apply-all:not([disabled])").click()
             card.locator("#go:not([disabled])").click()
             card.locator("#result:not(.hidden)").wait_for()
-            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')")
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/update-model-context')")
             page.wait_for_timeout(300)
             log = page.evaluate("() => window.log")
-            sent = [m for m in log if m.get("method") == "ui/message"]
-            assert [m["params"] for m in sent] == [
-                {"role": "user", "content": [{"type": "text", "text": "Approved, go on"}]}
-            ]
-            told = [i for i, m in enumerate(log) if m.get("method") == "ui/update-model-context"]
-            assert told and told[-1] < log.index(sent[0])
+            assert not [m for m in log if m.get("method") == "ui/message"]
             page.close()
-            # a large batch still applying: the one nudge goes as soon as it is under way, as on the
-            # proposal card, and the end of the batch sends no second one
+            # a large batch still applying: the assistant is told while it runs and when it ends,
+            # and nothing is posted as the user either time
             page = browser.new_page(viewport={"width": 390, "height": 900})
             page.on("pageerror", lambda e: errors.append(str(e)))
             running = {**DONE, "state": "applying", "summary": "Applying 1.", "applied": [], "not_sent": []}
@@ -1199,11 +1200,11 @@ def test_apply_all_on_the_waiting_card_nudges_once_and_a_row_approve_says_what_i
             )
             card.locator("#apply-all:not([disabled])").click()
             card.locator("#go:not([disabled])").click()
-            page.wait_for_function("() => window.log.some(m => m.method === 'ui/message')")
             card.locator("#status", has_text="Applied 1.").wait_for(timeout=8000)
             page.wait_for_timeout(300)
-            sent = [m for m in page.evaluate("() => window.log") if m.get("method") == "ui/message"]
-            assert len(sent) == 1, sent
+            log = page.evaluate("() => window.log")
+            assert len([m for m in log if m.get("method") == "ui/update-model-context"]) == 2, log
+            assert not [m for m in log if m.get("method") == "ui/message"]
         finally:
             browser.close()
     assert not errors, errors

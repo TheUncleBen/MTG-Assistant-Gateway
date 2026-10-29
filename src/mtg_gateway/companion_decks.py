@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_extras, deck_stats, prefs, ui
 from .archidekt import format_label
-from .busy import busy_response
+from .busy import busy_plan, busy_response, same_url
 from .companion import (
     DECK_CSP,
     DECK_ERR_MESSAGES,
@@ -27,12 +27,16 @@ from .companion import (
 from .deckpage import (
     DECK_BOXES,
     VIEWS,
+    compare_mine_html,
     covers_for,
     deck_boxes_html,
+    deck_check_html,
     deck_count_text,
+    deck_held_html,
     deck_list_controls_html,
     deck_list_held_html,
     deck_page_html,
+    deck_saving_html,
     deck_title,
     decks_unreadable_html,
     featured,
@@ -48,11 +52,12 @@ from .pages import (
     login_redirect,
 )
 from .theme import (
-    esc as _esc,
-)
-from .theme import (
+    SPINNER,
     hub_switch,
     icon,
+)
+from .theme import (
+    esc as _esc,
 )
 from .waiting_strip import waiting_changes
 
@@ -377,14 +382,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 ],
                 filters["show"],
             )
-            # New deck first, the one orange button, then New folder and New package (Ben,
-            # 2026-10-25: "New deck / New folder / New package")
+            # New deck first, then New folder and New package (Ben, 2026-10-25: "New deck / New
+            # folder / New package"); the one orange button is the page's own: New deck on My
+            # Decks, New package on Packages (0.7.46 audit D-25)
             + "<span class='acts'>"
-            f"<a class='btn btn-primary' href='/decks/new' {ui.box_open_attr('newdeck')}>"
-            f"{icon('plus')} New deck</a>"
+            f"<a class='btn{'' if packages else ' btn-primary'}' href='/decks/new' "
+            f"{ui.box_open_attr('newdeck')}>{icon('plus')} New deck</a>"
             f"<button type='button' class='btn' data-new-folder>{icon('plus')} New folder</button>"
-            f"<a class='btn' href='/decks/new-package' {ui.box_open_attr('newpkg')}>"
-            f"{icon('package')} New package</a>"
+            f"<a class='btn{' btn-primary' if packages else ''}' href='/decks/new-package' "
+            f"{ui.box_open_attr('newpkg')}>{icon('package')} New package</a>"
             "</span></div>"
         )
         notice = ""
@@ -463,7 +469,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 f"<p class='muted small backups-note'>{hidden} backup "
                 f"{'copy' if hidden == 1 else 'copies'} made before changes "
                 "are kept out of this list (a deck named like a copy counts as one): "
-                "<a href='/history#backups'>see them under History</a>.</p>"
+                + ui.cap_link("See them under History", "/history#backups")
+                + "</p>"
                 if hidden
                 else ""
             )
@@ -507,8 +514,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def my_decks_json(request: Request) -> Response:
         """The signed-in member's deck list for the pages' placeholders (decks.js): the rows, plus
         the HTML the page itself would have rendered (``shape=list`` with the /decks controls'
-        q, order, view and folder; ``shape=recent`` for the home panel) so there is one renderer.
-        Browser session only; a GET that changes nothing needs no CSRF token."""
+        q, order, view and folder; ``shape=recent`` for the home panel; ``shape=pick`` the Compare
+        page's My decks chips for ``deck``, compare.js) so there is one renderer. Browser session
+        only; a GET that changes nothing needs no CSRF token."""
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse(
@@ -519,7 +527,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 {"ok": False, "error": "cross_site"}, 403, headers={"Cache-Control": "no-store"}
             )
         qp = request.query_params
-        shape = "recent" if qp.get("shape") == "recent" else "list"
+        shape = qp.get("shape") if qp.get("shape") in ("recent", "pick") else "list"
         q, order, view, folder = list_query(qp)
         filters = read_filters(qp)
         try:
@@ -548,7 +556,16 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         }
         if problem is not None:
             out["error"], out["message"] = problem
-        if shape == "recent":
+        if shape == "pick":
+            # the Compare page's other decks: no folder tree, so no second read
+            deck_id = re.sub(r"[^0-9]", "", qp.get("deck") or "")[:12]
+            out["html"] = (
+                compare_mine_html(deck_id, rows, other_ref=(qp.get("with") or "").strip()[:2000])
+                if rows is not None and deck_id
+                else ""
+            )
+            out["count"] = sum(1 for d in rows or [] if str(d.get("id")) != deck_id)
+        elif shape == "recent":
             from .home import recent_panel_inner
 
             recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
@@ -597,6 +614,28 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             # page's own address would remember it
             return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure)
         return resp
+
+    @server.custom_route("/api/decks/names", methods=["GET"], include_in_schema=False)
+    async def my_deck_names(request: Request) -> Response:
+        """The member's own decks (id and name) for the site search's "Your decks" rows
+        (static/suggest.js; decision C8): the list as the cache holds it, never a wait for
+        Archidekt (a cold list is read in the background and answers on the next ask), and
+        nothing for a member without a link."""
+        sub, _sid = browser_session(state, request)
+        headers = {"Cache-Control": "no-store"}
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        rows: list[dict[str, Any]] | None = None
+        try:
+            if state.db.get_link(sub):
+                rows = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), 5.0)
+        except (DeckError, TimeoutError):
+            rows = None
+        names = [
+            {"id": str(d["id"]), "name": str(d.get("name") or "Unnamed deck")}
+            for d in sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
+        ]
+        return JSONResponse({"ok": True, "decks": names}, headers=headers)
 
     @server.custom_route("/decks/open", methods=["GET"], include_in_schema=False)
     async def open_deck(request: Request) -> Response:
@@ -769,11 +808,24 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
         reload = re.search(r"max-age=0|no-cache", request.headers.get("cache-control", "")) is not None
         try:
-            deck = await decks.page_deck(sub, deck_id, fresh=reload)
+            deck, how = await decks.page_deck_view(sub, deck_id, fresh=reload)
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         link = state.db.get_link(sub)
         own = bool(link) and owns_deck(deck, link) is True
+        held_at = how.get("held_at")
+        if held_at is not None:  # Archidekt can't be asked: the last read, read-only and dated
+            plan = busy_plan(how["refused"])
+            held = deck_held_html(
+                held_at, plan.title if plan else "Archidekt can't be asked", same_url(request)
+            )
+            own, box = False, ""
+        else:
+            held = (
+                deck_check_html(deck.id, how.get("read_at"), reload=bool(how.get("reload")))
+                if how.get("checking")
+                else ""
+            )
         if box == "delete" and not own:
             box, box_error = "", ""
         stats = deck_stats.compute(deck)
@@ -790,8 +842,20 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        notice = held + notice
+        # an apply still running on the deck (a slow save, this tab's or another's): the strip
+        # says so until it ends, then the page loads again (static/deck.js)
+        saving = decks.deck_saving(sub, deck.id) if own else 0
+        if saving:
+            notice = deck_saving_html(deck.id, saving) + notice
         if deck.link_notice:  # the member's link was dropped while reading this deck
             notice = f"<p class='notice error'>{_esc(deck.link_notice)}</p>" + notice
+        being_made = decks.being_made(deck.id, sub)  # the member's new deck whose cards are still going in
+        if being_made:  # with the progress ring, until static/deck.js sees it done and reloads
+            notice = (
+                f"<p class='notice making' role='status' data-made-poll='/decks/{_esc(deck.id)}/made'>"
+                f"{SPINNER} {_esc(being_made)} Changes wait until it is done.</p>" + notice
+            )
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
@@ -807,7 +871,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             stats,
             own=own,
             csrf=csrf,
-            writes_enabled=s.writes_enabled,
+            writes_enabled=s.writes_enabled and held_at is None,
             forge_on=bool(s.forge_url),
             owned=owned or None,
             view=view,
@@ -815,6 +879,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
+            making=bool(being_made),
             waiting=waiting_changes(
                 state.db, sub, deck.id, own=own, risk_of=decks.proposal_risk
             ),  # waiting_strip.py
@@ -889,6 +954,39 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect(f"/decks/{deck_id}")
         return await deck_page_response(request, sub, sid, deck_id)
+
+    @server.custom_route("/decks/{deck_id}/check", methods=["GET"], include_in_schema=False)
+    async def deck_check(request: Request) -> Response:
+        """What the read made behind a deck page shown as last read found (decks.page_check):
+        ``changed`` (load the page again to see it), ``failed`` (Archidekt could not be asked)."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"signed_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
+        found = await decks.page_check(sub, request.path_params["deck_id"], wait=25.0)
+        return JSONResponse(
+            found or {"changed": False, "failed": False}, headers={"Cache-Control": "no-store"}
+        )
+
+    @server.custom_route("/decks/{deck_id}/busy", methods=["GET"], include_in_schema=False)
+    async def deck_busy(request: Request) -> Response:
+        """Whether an apply on the member's deck is still running, and how many changes it
+        carries (decks.deck_saving): the deck page's Saving strip asks now and then and loads the
+        page again once it ends."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"busy": False, "signed_in": False}, status_code=401)
+        changes = decks.deck_saving(sub, request.path_params["deck_id"])
+        return JSONResponse({"busy": changes > 0, "changes": changes}, headers={"Cache-Control": "no-store"})
+
+    @server.custom_route("/decks/{deck_id}/made", methods=["GET"], include_in_schema=False)
+    async def deck_made(request: Request) -> Response:
+        """Whether a new deck's cards are all in (decks.being_made): the deck page asks now and
+        then while its notice says it is still being made, and reloads once it is."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"made": False, "signed_in": False}, status_code=401)
+        made = decks.being_made(request.path_params["deck_id"], sub) is None
+        return JSONResponse({"made": made}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:

@@ -27,9 +27,12 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Archidekt card packages, most imported first, 50 a page, as Archidekt's Packages page "
             "lists them. whose: mine (default, the user's own), followed (ones the user bookmarked) "
-            "or all (everyone's public packages). Filters: name_contains, intended_format (a format "
+            "or all (everyone's public packages). Filters: name_contains (the package's name only), "
+            "intended_format (a format "
             "name such as commander) and budget (1 to 4, $ to $$$$). Each package: id, name, owner, "
-            "keywords, budget, formats and how many times it was added to a deck. Changes nothing."
+            "keywords, budget, formats and how many times it was added to a deck. limit (default "
+            "20, at most 50) caps the rows; left_out says how many of the page's rows it cut. "
+            "Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -39,7 +42,10 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         intended_format: str | None = None,
         budget: int | None = None,
         page: int = 1,
+        limit: Annotated[int, Field(description="Rows to return from the page: 1 to 50.")] = 20,
     ) -> dict[str, object]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= packages.PAGE_ROWS:
+            return _tool_error(packages._err(f"limit must be a number from 1 to {packages.PAGE_ROWS}"))
         try:
             got = await packages.listing(
                 state.decks,
@@ -53,7 +59,10 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _tool_error(exc)
         rows = [{k: v for k, v in r.items() if k not in ("block", "size")} for r in got["rows"]]
-        return {"ok": True, "packages": rows, "page": page, "more": got["more"]}
+        out: dict[str, object] = {"ok": True, "packages": rows[:limit], "page": page, "more": got["more"]}
+        if len(rows) > limit:
+            out["left_out"] = len(rows) - limit
+        return out
 
     @server.tool(
         name="propose_add_package",
@@ -97,6 +106,6 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
                 color_tag=color_tag,
                 color=color,
             )
-            return _proposal({"ok": True, **out})
+            return h._proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))

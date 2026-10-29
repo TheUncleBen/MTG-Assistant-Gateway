@@ -203,9 +203,9 @@
       box.setTitle("Delete “" + name + "”?");
       var body = el("div", "stack");
       var n = info.cards || 0;
+      // no copy on Archidekt for a delete: the words of decks.DELETE_KEPT_NOTE
       body.appendChild(el("p", null, "This deletes the deck (" + n + " card" + (n === 1 ? "" : "s") + ") from your Archidekt account. "
-        + "A snapshot of the deck is kept under History" + (info.backups ? ", and a private copy is made in your backup folder on Archidekt first" : "")
-        + ". Archidekt itself has no undo for a deleted deck."));
+        + "A snapshot of the deck is kept under History, but no copy is made on Archidekt, and a snapshot can't be restored onto a deleted deck; History can make a new deck from it. Archidekt itself has no undo for a deleted deck."));
       var input = textInput("", { maxlength: 200, placeholder: name });
       body.appendChild(field("Type the deck's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete this deck", "danger", function () {
@@ -375,7 +375,7 @@
     items.push(sep());
     if (!d.own) items.push(item("Clone into my decks", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
     items.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
-    items.push(item("Run full test", "stats", function () { submitForm("/decks/" + id + "/report", {}); }));
+    items.push(item("Run test", "stats", function () { submitForm("/decks/" + id + "/report", {}); }));
     if (d.own) {
       items.push(item("Clone", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
       items.push(item("Rename…", "edit", function () { renameDeck(d); }));
@@ -500,12 +500,12 @@
       if (said) body.appendChild(el("p", "notice warn", said));
       body.appendChild(el("p", null, "This deletes, on Archidekt:"));
       var ul = el("ul");
-      ul.appendChild(el("li", null, plural(c.decks, "deck") + ": each gets a snapshot under History first"
-        + (c.backups ? ", and a private copy in your backup folder when backups are on" : "")));
+      ul.appendChild(el("li", null, plural(c.decks, "deck")
+        + ": each gets a snapshot under History first (no copy on Archidekt, and a snapshot can't be restored onto a deleted deck)"));
       ul.appendChild(el("li", null, plural(c.packages, "card package") + ": no snapshot or copy, " + (c.packages === 1 ? "it is" : "they are") + " lost"));
       ul.appendChild(el("li", null, plural(c.folders, "folder") + " inside it, and the folder itself"));
       body.appendChild(ul);
-      body.appendChild(el("p", null, "The gateway makes the snapshots and copies first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
+      body.appendChild(el("p", null, "The gateway makes the snapshots first and stops if any of them fails. Then Archidekt deletes everything in one step, which can't be undone."));
       var input = textInput("", { maxlength: 100, placeholder: name });
       body.appendChild(field("Type the folder's name to confirm", input, "mb-typed"));
       var ok = Box.button("Delete folder", "danger", function () {
@@ -640,7 +640,7 @@
       if (f) f.focus();
     }));
     var after = [];
-    if (rm) { after.push(sep()); after.push(item("Remove from collection", "x", function () { rm.click(); }, { danger: true })); }
+    if (rm) { after.push(sep()); after.push(item("Remove from binder", "x", function () { rm.click(); }, { danger: true })); }
     Card.open(cardMenuBase(name, {
       onOpen: thumb ? function () { thumb.click(); } : null, noCollect: true, before: before, after: after, focus: thumb || li
     }), x, y);
@@ -668,7 +668,7 @@
     var hint = $(".ui-hint", inRow);
     if (hint) stack.appendChild(el("p", "ui-hint", hint.textContent));
     form.appendChild(stack);
-    var save = Box.button("Save alert", "primary", function () {
+    var save = Box.button("Save price alert", "primary", function () {
       if (form.requestSubmit) form.requestSubmit(); else form.submit();
     }, { icon: "bell" });
     Box.open({ title: "Price alert: " + name, body: form, actions: [Box.button("Cancel", "btn", null, { cancel: true }), save], returnFocus: focusBack });
@@ -681,7 +681,7 @@
     var key = tr.id.slice(3);
     var wx = document.getElementById("wx-" + key);
     var more = $(".act .more", tr);
-    var alert = item("Price alert…", "bell", function () {
+    var alert = item("Price alert…", "tag", function () {
       // a card row: its alert form as a box (M16), posting as the in-row form does; a row that is
       // already open, or a deck row (no alert fields), opens the row's details instead
       var inRow = wx ? $("form.wx-alert", wx) : null;
@@ -718,8 +718,38 @@
   }
   function openCardLinkMenu(b, x, y) {
     var name = b.getAttribute("data-card");
-    Card.open(cardMenuBase(name, { onOpen: function () { b.click(); }, focus: b }), x, y);
+    // once the menu has closed (its Back step would close a viewer opened before)
+    var open = function () { Menu.whenClosed(function () { b.click(); }); };
+    Card.open(cardMenuBase(name, { onOpen: open, focus: b }), x, y);
   }
+  // A card name drawn as a button opens the card when clicked (Ben, 2026-10-28: the report's names
+  // did nothing): in the card viewer when the page has it (static/cardview.js), its text and
+  // picture read by name, else on Card search. A page with its own use for the click (the
+  // Compare page, My card models' link to Card search) handles it first.
+  function openCardLink(b) {
+    var name = b.getAttribute("data-card") || "";
+    var View = window.MtgCardView;
+    if (!View || !View.open) { Menu.whenClosed(function () { location.href = "/cards?q=" + enc(name); }); return; }
+    var search = el("a", "btn", "Search cards");
+    search.href = "/cards?q=" + enc(name);
+    var base = View.fromElement(b);
+    base.loading = !!View.text;
+    View.open(base, [search]);
+    if (View.text) View.text(name).then(function (t) {
+      var card = {};
+      Object.keys(base).forEach(function (k) { card[k] = base[k]; });
+      if (t) Object.keys(t).forEach(function (k) { if (t[k] || k === "faces") card[k] = t[k]; });
+      delete card.loading;
+      View.update(card, [search]);
+    });
+  }
+  window.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button) return;
+    var b = e.target && e.target.closest ? e.target.closest("button.cardlink[data-card]") : null;
+    if (!b || b.hasAttribute("data-href") || b.closest(".ctxmenu, .cardview")) return;
+    e.preventDefault();
+    openCardLink(b);
+  });
 
   // -- the list pages' rows: Proposals, History, Reports ------------------------------------------
   function proposalRowOf(node) {
@@ -757,12 +787,17 @@
   function openHistoryMenu(tr, x, y) {
     var name = $(".title .t", tr) ? $(".title .t", tr).textContent.trim() : "";
     var details = $(".act a[href*='open=']", tr), restore = $("form.hy-restore button", tr);
+    var remake = $("form.hy-new-deck button", tr);  // a deleted deck's snapshot
     var report = $("a[href^='/history/reports/']", tr), deck = $(".title a.t[href^='/decks/']", tr);
     var items = [];
     if (details) items.push(link("Details", "eye", details.getAttribute("href")));
     if (restore) items.push(item("Restore (review first)", "undo", function () { restore.click(); }));
+    if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
     if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", deck.getAttribute("href"))); }
+    // a report or a snapshot: its Details with the confirm box open (restores are proposals)
+    var chev = $("a.chev[href*='open=']", tr), dh = (details || chev) ? (details || chev).getAttribute("href") : "";
+    if (/[?&]open=[sr]-/.test(dh)) { items.push(sep()); items.push(link("Delete…", "trash", dh + "&box=delete", { danger: true })); }
     Menu.open({ head: name, label: "History: " + name, items: items, focusBack: details || report || tr }, x, y);
   }
   function reportRowOf(node) {
@@ -783,6 +818,8 @@
       })
     ];
     if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", "/decks/" + enc(deck))); }
+    items.push(sep());
+    items.push(link("Delete…", "trash", href + "?box=delete", { danger: true }));
     Menu.open({ head: name, label: "Report: " + name, items: items, focusBack: open }, x, y);
   }
 
@@ -826,7 +863,7 @@
       if (act && act.tagName !== "A") { act.appendChild(k); return; }
       if (!t) return;
       k.classList.add("inline");
-      t.parentNode.insertBefore(k, t.nextSibling);
+      t.parentNode.insertBefore(k, t);  // before the name: the float sits on its first line
     });
     $$(".home .recent a[data-deck-id]").forEach(function (a) {
       if (a.parentNode.classList.contains("rd")) return;
@@ -841,6 +878,7 @@
   }
   decorate();
   document.addEventListener("decks:loaded", decorate);
+  document.addEventListener("rows:loaded", decorate);  // Load more brought rows (reports.js)
 
   // -- My decks' heading: + New folder -----------------------------------------------------------
   document.addEventListener("click", function (e) {
@@ -925,10 +963,10 @@
           extra = el("div");
           extra.appendChild(el("p", null, "“" + name + "” still has " + n + " card" + (n === 1 ? "" : "s") +
             ". Archidekt only deletes an empty category: pick a category to move " + (n === 1 ? "it" : "them") + " to first."));
-          var lab = el("label", null, "Move its cards to");
-          lab.setAttribute("for", "move_cards_box");
+          var lab = el("label", null, "Move " + (n === 1 ? "it" : "them") + " to");
+          lab.setAttribute("for", "move_to_box");
           var sel = el("select");
-          sel.id = "move_cards_box";
+          sel.id = "move_to_box";
           // nothing picked to start with (the first category is often Commander): Delete waits for a pick
           var none = el("option", null, "Pick a category…");
           none.value = ""; none.disabled = true; none.hidden = true; none.selected = true;

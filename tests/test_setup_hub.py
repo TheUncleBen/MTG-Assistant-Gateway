@@ -110,10 +110,13 @@ async def test_no_section_reads_like_research_notes(harness: Harness) -> None:
 
 
 async def test_old_addresses_keep_working(harness: Harness) -> None:
-    # signed out: the same sign-in as before
-    for path, back in (("/skill", "/skill"), ("/app", "/app"), ("/skill/mtg-gateway.zip", "/skill")):
+    # signed out: the downloads ask for the same sign-in as before; the pages read signed out (C2)
+    for path, back in (("/skill/mtg-gateway.zip", "/skill"), ("/app/mtg-assistant-gateway.apk", "/app")):
         r = await harness.http.get(path)
         assert r.status_code == 302 and r.headers["location"] == f"/login?next={back}", path
+    for path, section in (("/skill", "skill"), ("/app", "android")):
+        r = await harness.http.get(path)
+        assert r.status_code == 302 and r.headers["location"] == f"/install?for={section}", path
     assert (await harness.http.get("/install.md")).status_code == 200
     assert (await harness.http.get("/plugin/mtg-gateway.zip")).status_code == 200
     b = Browser(harness)
@@ -165,7 +168,9 @@ async def test_the_app_list_sits_beside_the_steps_and_marks_the_picked_app(harne
         assert "Other sections:" not in hub and "btn-primary' href='/install?for=" not in hub
         assert ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}" in hub
         # the first screen: the intro, the phone note and the Connector URL; its address is a link
-        assert f"<a class='nb' href='{GATEWAY}/install.md'><code>{GATEWAY}/<wbr>install.md</code></a>" in hub
+        assert (
+            f"<a class='mdaddr' href='{GATEWAY}/install.md'><code>{GATEWAY}/<wbr>install.md</code></a>" in hub
+        )
         assert f"<p>{setup_hub.INTRO}</p>" in hub.replace("&#x27;", "'")
         assert "data-copy='mcp-url'" in hub and "On a phone?" in hub
         # a picked app: tinted in the list (aria-current), named in the drop-down, no orange button
@@ -179,7 +184,7 @@ async def test_the_app_list_sits_beside_the_steps_and_marks_the_picked_app(harne
             "<span class='sfk'>Steps for:</span><span class='v'>Claude: web, desktop, iPhone and Android"
             "</span>" in claude
         )
-        assert f"<a class='nb' href='{GATEWAY}/install.md?for=claude'>" in claude
+        assert f"<a class='mdaddr' href='{GATEWAY}/install.md?for=claude'>" in claude
     finally:
         await b.aclose()
 

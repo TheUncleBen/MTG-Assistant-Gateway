@@ -22,9 +22,10 @@ from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from .fake_archidekt_account import AccountFake
 
 
-def _now_iso() -> str:
-    """The time now as Archidekt writes it: UTC, with microseconds and a "Z"."""
-    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+def _now_iso(ago: float = 0.0) -> str:
+    """The time now (less ``ago`` seconds) as Archidekt writes it: UTC, with microseconds and a "Z"."""
+    then = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=ago)
+    return then.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_deck.csv"
@@ -125,11 +126,19 @@ class FakeArchidekt:
         self.patches: list[dict[str, Any]] = []
         self.fail_patch_silently = False
         self.fail_card_writes = False  # PATCH modifyCards answers 503
+        # this many PATCH modifyCards are saved but answered 200 with a body that is not JSON
+        self.garble_card_writes = 0
         # set to an unset threading.Event: PATCH modifyCards waits for it (a slow save, held open)
+        # without holding up the gateway's other requests (_after)
         self.hold_card_writes: Any = None
+        # PATCH modifyCards is saved but never answered: the write landed and the gateway times out
+        self.timeout_card_writes = False
         # the same for a folder delete (deleteItems), waited for without holding up the gateway's
         # other requests (_after)
         self.hold_folder_deletes: Any = None
+        # the same for the whole-Binder read's pages (pageSize 200, binder_prices.BINDER_PAGE_SIZE),
+        # so the page's own first rows still answer
+        self.hold_whole_binder_reads: Any = None
         # Faults a verify must catch: added rows stored without their finish, or with another
         # printing of the same card (card id -> card id to store instead).
         self.add_rows_lose_finish = False
@@ -145,6 +154,7 @@ class FakeArchidekt:
         self.create_honours_folder = False
         self.last_create_body: dict[str, Any] = {}
         self.fail_deck_reads = False  # signed-in deck reads answer 503
+        self.fail_collection_reads = False  # collection listings answer 503
         # a fault the custom card apply must catch: an add of a custom card answers 200 and
         # leaves the deck as it was
         self.custom_adds_dropped = False
@@ -567,7 +577,9 @@ class FakeArchidekt:
                     # N" from it and loads children while fewer are held)
                     "childrenCount": len([c for c in self.comments.get(tid, []) if c["parent"] == tid]),
                     "points": 3,
-                    "recentPost": {"createdAt": "2026-10-20T10:00:00Z", "owner": {"username": t["owner"]}},
+                    # two hours before now, so the list reads "2 h ago" whatever the day (a fixed date
+                    # turned into a plain date a week later)
+                    "recentPost": {"createdAt": _now_iso(ago=7200), "owner": {"username": t["owner"]}},
                 }
                 for tid, t in self.forum_threads.items()
                 if t["section"] == parts[2] and params.get("q", "").lower() in t["title"].lower()
@@ -1008,6 +1020,12 @@ class FakeArchidekt:
                 return httpx.Response(400, json=["No public collection found."])
             rows = list(self.collections.get(who, {}).values())
             self.collection_queries.append(dict(request.url.params))
+            if self.fail_collection_reads:
+                return httpx.Response(503, text="unavailable")
+            held = self.hold_whole_binder_reads
+            if held is not None and not held.is_set() and request.url.params.get("pageSize") == "200":
+                self.collection_queries.pop()  # counted once, when answered
+                return self._after(held, request)
             name = request.url.params.get("cardName", "").lower()
             if name:
                 rows = [r for r in rows if name in r["card"]["oracleCard"]["name"].lower()]
@@ -1300,8 +1318,9 @@ class FakeArchidekt:
                 deck["updatedAt"] = _now_iso() if deck["id"] in self.timed else "2026-10-03T00:00:00Z"
                 return httpx.Response(200, json={"id": deck["id"], "name": deck["name"]})
             if parts[3:] == ["modifyCards", "v2"] and request.method == "PATCH":
-                if self.hold_card_writes is not None:
-                    self.hold_card_writes.wait(15)
+                held = self.hold_card_writes
+                if held is not None and not held.is_set():
+                    return self._after(held, request)
                 if self.fail_card_writes:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
@@ -1314,6 +1333,11 @@ class FakeArchidekt:
                 if not self.fail_patch_silently:
                     self.apply_custom_patch(deck, customs, who)
                     self.apply_patch(deck, plain)
+                if self.garble_card_writes > 0:
+                    self.garble_card_writes -= 1
+                    return httpx.Response(200, text="<html>Saved</html>")
+                if self.timeout_card_writes:
+                    raise httpx.ReadTimeout("no answer", request=request)
                 return httpx.Response(200, json={"ok": True})
         return httpx.Response(404, json={"detail": "Not found."})
 

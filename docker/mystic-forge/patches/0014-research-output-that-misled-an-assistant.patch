@@ -1,0 +1,389 @@
+Subject: Research output that misled an assistant
+
+Found in the assistant tool review of the live gateway (2026-10-28):
+
+- edhrec_commander wrote "8 sorcerys": the plural is now spelled per type.
+- edhrec_recommendations: EDHREC scored all ten suggestions 100, so the
+  score ranked nothing; it suggested "Mountain"; and with four cards given,
+  "Consider Cutting" listed all four, Sol Ring and Goblin Warchief among
+  them, which an assistant read as advice to cut staples. Basic lands are
+  now left out (and counted), a score is shown only when the scores differ,
+  and with fewer than 20 cards given no cut list is shown (a sentence says
+  why); a longer cut list says to check each card first.
+- spellbook_combos and spellbook_card_combos printed Commander Spellbook's
+  steps as one run of text while its own text says "Repeat step 4": the
+  steps are numbered now. Mana needed and Prerequisites are always listed,
+  "none" when Spellbook sends none, so every combo has the same lines.
+- edhrec_combos lists the most played combos first (EDHREC's page order is
+  not by deck count).
+- edhrec_top_cards sorts a section by deck count when every card carries
+  one (the lands page sent Forest before Mountain), and says "Period
+  ignored" only when a period was passed with a color.
+- edhrec_precon_upgrade lists the first 10 commanders (and the one shown)
+  and says how many more, and explains that each card's share is of the
+  decks that could play it, so the totals differ from card to card.
+- precon_search says "1 result" and gives each deck's release year.
+
+tests/test_research_wording.py; tests/test_research_output_fixes.py gives a
+whole deck's worth of cards to its cut-list test.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 has none of these. Needs
+patches 0001-0013 applied first.
+
+diff --git a/server.py b/server.py
+index 38dd702..20b0a02 100644
+--- a/server.py
++++ b/server.py
+@@ -1316,8 +1316,11 @@ async def edhrec_commander(params: CommanderInput) -> str:
+     parts.append(line)
+     parts.append("")
+ 
+-    types = ["creature", "instant", "sorcery", "artifact", "enchantment", "planeswalker", "land"]
+-    breakdown = [f"{data.get(t, 0)} {t}s" for t in types if data.get(t, 0) > 0]
++    types = {"creature": "creatures", "instant": "instants", "sorcery": "sorceries",
++             "artifact": "artifacts", "enchantment": "enchantments",
++             "planeswalker": "planeswalkers", "land": "lands"}
++    breakdown = [f"{data.get(t, 0)} {plural if data.get(t, 0) != 1 else t}"
++                 for t, plural in types.items() if data.get(t, 0) > 0]
+     if breakdown:
+         parts.append(f"Typical breakdown: {', '.join(breakdown)}")
+         parts.append("")
+@@ -1413,10 +1416,17 @@ async def edhrec_combos(params: CommanderInput) -> str:
+     parts.append("")
+ 
+     cardlists = data.get("container", {}).get("json_dict", {}).get("cardlists", [])
++
++    def decks_of(cl: dict) -> Optional[int]:
++        found = re.search(r"\((\d+)decks?\)", cl.get("tag", ""))
++        return int(found.group(1)) if found else None
++
++    # Most played first (EDHREC's page order is not by deck count); a combo
++    # with no count goes last.
++    cardlists = sorted(cardlists, key=lambda cl: -(decks_of(cl) or -1))
+     for i, cl in enumerate(cardlists[:params.limit], 1):
+-        tag = cl.get("tag", "")
+-        deck_match = re.search(r"\((\d+)decks?\)", tag)
+-        deck_count = deck_match.group(1) if deck_match else "?"
++        count = decks_of(cl)
++        deck_count = count if count is not None else "?"
+         cards = [cv.get("name", "?") for cv in cl.get("cardviews", [])]
+         if cards:
+             parts.append(f"**Combo {i}** ({deck_count} decks)")
+@@ -1443,9 +1453,14 @@ async def edhrec_top_cards(params: TopCardsInput) -> str:
+     parts.append(f"# {data.get('header', f'Top Cards — {params.period.value}')}")
+     if params.color:
+         # A colour page (pages/top/<colour>.json) has no time period: its counts
+-        # are over all of EDHREC's decks, so period cannot apply.
+-        parts.append(f"Period ignored: EDHREC's {params.color.value} page counts "
+-                     f"all decks, with no time period.")
++        # are over all of EDHREC's decks, so period cannot apply. Said only
++        # when a period was asked for.
++        if "period" in params.model_fields_set:
++            parts.append(f"Period ignored: EDHREC's {params.color.value} page counts "
++                         f"all decks, with no time period.")
++        else:
++            parts.append(f"Counts are over all of EDHREC's decks (its "
++                         f"{params.color.value} page has no time period).")
+     parts.append(f"Up to {params.limit} cards per section.")
+     parts.append("")
+ 
+@@ -1457,7 +1472,12 @@ async def edhrec_top_cards(params: TopCardsInput) -> str:
+             if parts[-1] != "":
+                 parts.append("")
+             parts.append(f"## {header}")
+-        for i, cv in enumerate(cl.get("cardviews", [])[:params.limit], 1):
++        views = cl.get("cardviews", [])
++        # Most decks first when every card carries its count (the lands page
++        # sends Forest before Mountain although Mountain is in more decks).
++        if views and all(isinstance(cv.get("num_decks"), int) for cv in views):
++            views = sorted(views, key=lambda cv: -cv["num_decks"])
++        for i, cv in enumerate(views[:params.limit], 1):
+             name = cv.get("name", "?")
+             label = cv.get("label", "")
+             num_decks = cv.get("num_decks", "")
+@@ -1471,6 +1491,11 @@ async def edhrec_top_cards(params: TopCardsInput) -> str:
+     return "\n".join(parts)
+ 
+ 
++# Fewer cards than this given to edhrec_recommendations: no cut list, since
++# EDHREC's outRecs then name every card given (staples included).
++RECS_MIN_CARDS_FOR_CUTS = 20
++
++
+ def _recs_key(name: str) -> str:
+     """A card name compared case-blind and by its front face, so "Fire // Ice"
+     given matches "Fire // Ice" or "Fire" sent back."""
+@@ -1497,29 +1522,52 @@ async def edhrec_recommendations(params: RecsInput) -> str:
+         parts.append(f"Given {len(params.cards)} cards already in deck")
+     parts.append("")
+ 
++    # A basic land is no suggestion for a deck (EDHREC sends "Mountain" for a
++    # red commander); it is left out and counted.
+     in_recs = data.get("inRecs", [])
++    basics = [r for r in in_recs if r.get("name") in BASIC_LANDS]
++    in_recs = [r for r in in_recs if r.get("name") not in BASIC_LANDS]
++    shown = in_recs[:params.limit]
++    # When EDHREC scores every suggestion the same, the score ranks nothing.
++    same_score = len(shown) > 1 and len({r.get("score") for r in shown}) == 1
+     if in_recs:
+         parts.append("## Suggested Additions")
+-        for i, rec in enumerate(in_recs[:params.limit], 1):
++        if same_score:
++            parts.append(f"EDHREC gave every suggestion the same score "
++                         f"({shown[0].get('score')}), so the order says little.")
++        for i, rec in enumerate(shown, 1):
+             name = rec.get("name", "?")
+             score = rec.get("score", 0)
+             card_type = rec.get("primary_type", "")
+             salt = rec.get("salt", 0)
+-            line = f"{i}. **{name}** (score: {score})"
++            line = f"{i}. **{name}**" if same_score else f"{i}. **{name}** (score: {score})"
+             if card_type:
+                 line += f" [{card_type}]"
+             if salt and salt > 1.0:
+                 line += f" salt:{salt:.1f}"
+             parts.append(line)
+ 
++    if basics:
++        parts.append("")
++        parts.append(f"({len(basics)} basic land(s) EDHREC suggested are left out.)")
++
+     # EDHREC's outRecs also name cards that were not given (basic lands, for
+     # one), so a cut is shown only for a card that is in the list given.
+     given = {_recs_key(c) for c in params.cards}
+     cuts = [rec.get("name", "?") for rec in data.get("outRecs", [])
+             if _recs_key(rec.get("name", "")) in given]
+-    if cuts:
++    if cuts and len(params.cards) < RECS_MIN_CARDS_FOR_CUTS:
++        # With a handful of cards given, EDHREC names every one of them, staples
++        # too: that is no advice to cut anything.
++        parts.append("")
++        parts.append(f"(No cuts are listed: with {len(params.cards)} card(s) given, "
++                     f"EDHREC's cut list names them all. Give the whole deck, "
++                     f"{RECS_MIN_CARDS_FOR_CUTS} cards or more, for cut ideas.)")
++    elif cuts:
+         parts.append("")
+         parts.append("## Consider Cutting (from the cards given)")
++        parts.append("The given cards EDHREC's engine fits least with this "
++                     "commander; check each before cutting.")
+         for name in cuts:
+             parts.append(f"- {name}")
+ 
+@@ -1636,6 +1684,10 @@ class PreconUpgradeInput(BaseModel):
+     limit: int = Field(default=20, ge=1, le=50, description="Max cards per section.")
+ 
+ 
++# Commanders listed by edhrec_precon_upgrade before "and N more".
++PRECON_COMMANDERS_SHOWN = 10
++
++
+ @mcp.tool(name="edhrec_precon_upgrade")
+ async def edhrec_precon_upgrade(params: PreconUpgradeInput) -> str:
+     """Get how a preconstructed deck is commonly upgraded, from EDHRec's Precon
+@@ -1728,10 +1780,17 @@ async def edhrec_precon_upgrade(params: PreconUpgradeInput) -> str:
+         if len(commander_counts) > 1:
+             parts.append("**Commanders used by upgraded builds of this precon "
+                          "(EDHREC decks; not all are in the precon):**")
+-            for c in commander_counts:
++            listed = commander_counts[:PRECON_COMMANDERS_SHOWN]
++            active = next((c for c in commander_counts
++                           if c.get("href") == active_href), None)
++            if active is not None and active not in listed:
++                listed.append(active)
++            for c in listed:
+                 mark = "  ← shown below" if c.get("href") == active_href else ""
+                 parts.append(f"- {c.get('value', '?')} "
+                              f"({c.get('count', '?')} decks){mark}")
++            if len(commander_counts) > len(listed):
++                parts.append(f"- and {len(commander_counts) - len(listed)} more")
+             if not params.commander:
+                 parts.append("")
+                 parts.append('_Pass `commander="<name>"` to see another '
+@@ -1745,6 +1804,12 @@ async def edhrec_precon_upgrade(params: PreconUpgradeInput) -> str:
+         cl = cardlists.get(tag)
+         if cl and cl.get("cardviews"):
+             parts.append(f"## {title}")
++            pots = {cv.get("potential_decks") for cv in cl["cardviews"][:params.limit]
++                    if cv.get("potential_decks")}
++            if len(pots) > 1:
++                parts.append("_Each share is of the decks that could play that "
++                             "card (EDHREC's potential decks), so the totals differ "
++                             "from card to card._")
+             for cv in cl["cardviews"][:params.limit]:
+                 # EDHREC's precon pages now send the count as num_decks (Tatyova:
+                 # 969 of 1612 on 2026-10-11) and no "inclusion".
+@@ -3059,20 +3124,20 @@ def _format_combo(variant: dict) -> str:
+     if identity:
+         lines.append(f"Colors: {identity}")
+ 
+-    # Mana needed
++    # Mana needed and prerequisites, "none" when Spellbook gives none, so
++    # every combo has the same lines.
+     mana = variant.get("manaNeeded", "")
+-    if mana:
+-        lines.append(f"Mana needed: {mana}")
+-
+-    # Prerequisites
++    lines.append(f"Mana needed: {mana or 'none'}")
+     prereqs = variant.get("easyPrerequisites", "")
+-    if prereqs:
+-        lines.append(f"Prerequisites: {prereqs}")
++    lines.append(f"Prerequisites: {prereqs or 'none'}")
+ 
+-    # Steps
+-    desc = variant.get("description", "")
+-    if desc:
+-        lines.append(f"Steps: {desc}")
++    # Steps, numbered: Spellbook's own text says "Repeat step 4" and means
++    # its fourth line.
++    steps = [line.strip() for line in str(variant.get("description") or "").splitlines()
++             if line.strip()]
++    if steps:
++        lines.append("Steps:")
++        lines.extend(f"{n}. {step}" for n, step in enumerate(steps, 1))
+ 
+     # Results
+     produces = variant.get("produces", [])
+@@ -3708,7 +3773,8 @@ async def precon_search(params: PreconSearchInput) -> str:
+         return f"No precon decks found matching '{params.query}'."
+ 
+     parts: list[str] = []
+-    parts.append(f"# Precon Search: '{params.query}' ({len(matches)} results)")
++    noun = "result" if len(matches) == 1 else "results"
++    parts.append(f"# Precon Search: '{params.query}' ({len(matches)} {noun})")
+     parts.append("")
+ 
+     for deck in matches[:params.limit]:
+@@ -3716,7 +3782,9 @@ async def precon_search(params: PreconSearchInput) -> str:
+         code = deck.get("code", "?")
+         deck_type = deck.get("type", "?")
+         file_name = deck.get("fileName", "?")
+-        parts.append(f"- **{name}** ({code}) — {deck_type}")
++        released = str(deck.get("releaseDate") or "")[:4]
++        when = f", {released}" if released.isdigit() else ""
++        parts.append(f"- **{name}** ({code}{when}) — {deck_type}")
+         parts.append(f"  fileName: `{file_name}`")
+ 
+     return "\n".join(parts)
+diff --git a/tests/test_research_output_fixes.py b/tests/test_research_output_fixes.py
+index 4058afb..fa138b1 100644
+--- a/tests/test_research_output_fixes.py
++++ b/tests/test_research_output_fixes.py
+@@ -106,8 +106,10 @@ async def test_recommendations_cut_only_cards_that_were_given(monkeypatch):
+         return {"inRecs": [{"name": "Command Tower", "score": 100, "primary_type": "Land"}],
+                 "outRecs": [{"name": "Wastes"}, {"name": "Sol Ring"}, {"name": "Forest"}]}
+     monkeypatch.setattr(server, "_edhrec_post", fake_post)
++    # a whole deck's worth of cards given (with fewer, no cut list is shown: 0014)
++    given = ["sol ring"] + [f"Card {n}" for n in range(server.RECS_MIN_CARDS_FOR_CUTS)]
+     out = await server.edhrec_recommendations(server.RecsInput(
+-        commanders=["Aesi, Tyrant of Gyre Strait"], cards=["sol ring"]))
++        commanders=["Aesi, Tyrant of Gyre Strait"], cards=given))
+     cutting = out.split("## Consider Cutting", 1)[1]
+     assert "- Sol Ring" in cutting and "Wastes" not in cutting and "Forest" not in cutting
+     out = await server.edhrec_recommendations(server.RecsInput(commanders=["Aesi, Tyrant of Gyre Strait"]))
+diff --git a/tests/test_research_wording.py b/tests/test_research_wording.py
+new file mode 100644
+index 0000000..9173796
+--- /dev/null
++++ b/tests/test_research_wording.py
+@@ -0,0 +1,100 @@
++"""Research output that misled an assistant (review of 2026-10-28)."""
++import server
++
++
++async def test_commander_breakdown_spells_plurals(monkeypatch):
++    async def fake_get(path):
++        return {"header": "Krenko", "creature": 30, "sorcery": 8, "instant": 1}
++    monkeypatch.setattr(server, "_edhrec_get", fake_get)
++    out = await server.edhrec_commander(server.CommanderInput(name="Krenko, Mob Boss"))
++    assert "30 creatures, 1 instant, 8 sorceries" in out
++    assert "sorcerys" not in out
++
++
++async def test_recommendations_same_scores_basics_and_small_input(monkeypatch):
++    async def fake_post(path, body):
++        return {"inRecs": [{"name": "Goblin Matron", "score": 100},
++                           {"name": "Mountain", "score": 100},
++                           {"name": "Skirk Prospector", "score": 100}],
++                "outRecs": [{"name": "Sol Ring"}, {"name": "Goblin Warchief"}]}
++    monkeypatch.setattr(server, "_edhrec_post", fake_post)
++    out = await server.edhrec_recommendations(server.RecsInput(
++        commanders=["Krenko, Mob Boss"], cards=["Sol Ring", "Goblin Warchief"]))
++    assert "Mountain" not in out.split("## Suggested Additions", 1)[1].split("(", 1)[0]
++    assert "1 basic land(s) EDHREC suggested are left out" in out
++    assert "same score (100)" in out and "(score: 100)" not in out
++    assert "Consider Cutting" not in out
++    assert "No cuts are listed: with 2 card(s) given" in out
++
++
++async def test_combos_most_played_first(monkeypatch):
++    async def fake_get(path):
++        return {"container": {"json_dict": {"cardlists": [
++            {"tag": "a (17485decks)", "cardviews": [{"name": "A"}]},
++            {"tag": "b (20960decks)", "cardviews": [{"name": "B"}]},
++            {"tag": "c", "cardviews": [{"name": "C"}]},
++        ]}}}
++    monkeypatch.setattr(server, "_edhrec_get", fake_get)
++    out = await server.edhrec_combos(server.CommanderInput(name="Krenko, Mob Boss"))
++    assert out.index("20960 decks") < out.index("17485 decks") < out.index("(? decks)")
++    assert "**Combo 1** (20960 decks)" in out
++
++
++async def test_top_cards_lands_by_count_and_period_note(monkeypatch):
++    async def fake_get(path):
++        return {"header": "Lands", "container": {"json_dict": {"cardlists": [
++            {"header": "Basic", "cardviews": [
++                {"name": "Forest", "num_decks": 4460000},
++                {"name": "Mountain", "num_decks": 4780000},
++                {"name": "Plains", "num_decks": 4480000}]}]}}}
++    monkeypatch.setattr(server, "_edhrec_get", fake_get)
++    out = await server.edhrec_top_cards(server.TopCardsInput(color="lands", limit=3))
++    assert out.index("Mountain") < out.index("Plains") < out.index("Forest")
++    assert "Period ignored" not in out
++    assert "no time period" in out
++    out = await server.edhrec_top_cards(server.TopCardsInput(color="lands", period="month"))
++    assert "Period ignored" in out
++
++
++async def test_spellbook_steps_numbered_and_fields_always_shown(monkeypatch):
++    variant = {"uses": [{"card": {"name": "Krenko, Mob Boss"}}],
++               "description": "Tap Krenko.\nSacrifice goblins.\nRepeat step 1.",
++               "manaNeeded": "", "easyPrerequisites": "", "produces": []}
++
++    async def fake_get(path, params=None):
++        return {"results": [variant], "count": 1}
++    monkeypatch.setattr(server, "_spellbook_get", fake_get)
++    out = await server.spellbook_combos(server.SpellbookCombosInput(cards=["Krenko, Mob Boss"]))
++    assert "Steps:\n1. Tap Krenko.\n2. Sacrifice goblins.\n3. Repeat step 1." in out
++    assert "Mana needed: none" in out and "Prerequisites: none" in out
++
++
++async def test_precon_search_one_result_and_year(monkeypatch):
++    async def fake_list():
++        return [{"name": "Multiverse Reforged", "code": "FRC", "type": "Commander Deck",
++                 "fileName": "MultiverseReforged_FRC", "releaseDate": "2026-08-01"}]
++    monkeypatch.setattr(server, "_get_deck_list", fake_list)
++    out = await server.precon_search(server.PreconSearchInput(query="FRC"))
++    assert "(1 result)" in out
++    assert "(FRC, 2026)" in out
++
++
++async def test_precon_upgrade_explains_denominators_and_caps_commanders(monkeypatch):
++    commanders = [{"value": f"Commander {n}", "count": 100 - n, "href": f"/precon/x/c{n}"}
++                  for n in range(30)]
++    page = {"header": "Elven Council", "precon_commander_counts": commanders,
++            "container": {"json_dict": {"cardlists": [{"tag": "cardstoadd", "cardviews": [
++                {"name": "Thranduil", "num_decks": 142, "potential_decks": 352},
++                {"name": "Llanowar Elves", "num_decks": 736, "potential_decks": 1685}]}]}}}
++
++    async def fake_get(path):
++        return page
++
++    async def fake_resolve(query):
++        return "elven-council", None
++    monkeypatch.setattr(server, "_edhrec_get", fake_get)
++    monkeypatch.setattr(server, "_resolve_precon_slug", fake_resolve)
++    out = await server.edhrec_precon_upgrade(server.PreconUpgradeInput(precon="Elven Council"))
++    assert "potential decks" in out
++    assert "- and 20 more" in out
++    assert "Commander 25" not in out

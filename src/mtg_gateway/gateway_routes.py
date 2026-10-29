@@ -36,7 +36,9 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
     def login_error(exc: LoginError, *, assistant: bool = True) -> Response:
         # An assistant (Claude, ChatGPT, Codex) was connecting: the way forward is back in the app.
         body = smallpage.login_error(exc.kind, str(exc), assistant=assistant)
-        return small(smallpage.login_error_title(exc.kind), body, exc.status)
+        return small(
+            smallpage.login_error_title(exc.kind), body, exc.status, signin_link=exc.kind != "unavailable"
+        )
 
     @server.custom_route(CONSENT_PATH, methods=["GET"], include_in_schema=False)
     async def consent(request: Request) -> Response:
@@ -56,10 +58,10 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
         # The member signs in at the identity provider after this page, so it cannot name their
         # own approval mode yet; it is honest about what the mode may allow.
         able = (
-            "read your decks and your collection, and propose changes on your Archidekt account. "
+            "read your decks and your binder, and propose changes on your Archidekt account. "
             "Nothing reaches Archidekt until you confirm on the proposal card or the review page on "
             "this site, unless the approval mode on your account page lets it apply changes without "
-            "asking (a change to one of your decks keeps a snapshot; a collection change keeps none)."
+            "asking (a change to one of your decks keeps a snapshot; a binder change keeps none)."
         )
         # The app's name in a tinted strip (F8); every sentence at normal size, the click-guard
         # hint the only small print; Deny stays plain (F9), Approve is the page's one orange button.

@@ -244,9 +244,10 @@ async def test_a_thread_that_is_not_there_and_a_bad_number(member: Browser, stac
 
 
 async def test_the_forum_is_in_the_menus_and_needs_a_sign_in(stack: Stack, member: Browser) -> None:
-    # Forum is a row on the Account page (Your account), the same on every screen
-    hub = (await member.http.get("/account")).text
-    assert "<a class='yrow' href='/forum'>" in hub
+    # Forum sits in More's Community group on every screen and on the rail (decision C8)
+    page = (await member.http.get("/decks")).text
+    sheet = page.split("<div class='menu sheet'>")[1].split("</div></details>")[0]
+    assert "href='/forum'" in sheet and "<a href='/forum' class='railonly'>" in page
     anon = Browser(stack.h)
     try:
         r = await anon.http.get("/forum/thread/700001")
@@ -505,15 +506,16 @@ async def test_a_reply_cannot_break_out_of_the_threads_json_block(member: Browse
     assert "<form class='newcomment'" in r.text  # the rest of the page is still there
 
 
-async def test_forum_is_on_the_account_page_and_off_the_bars(member: Browser) -> None:
-    """The navigation is four places and More (Ben, 2026-10-25): Forum is a row on the Account page
-    the picture opens, not a tab, a rail place or a More item."""
+async def test_forum_is_in_more_and_on_the_rail_and_off_the_account_page(member: Browser) -> None:
+    """Decision C8: Forum is a More item (Community) and a rail place on the Fold and a computer,
+    never a phone tab, and no longer a row on the Account page."""
     page = (await member.http.get("/forum")).text
-    header = page[page.index("<header") : page.index("</header>")]
     tabbar = re.search(r"<nav class='tabbar'.*?</details></nav>", page, re.S)
-    assert tabbar and "href='/forum'" not in header + tabbar.group(0)
+    assert tabbar
+    tabs = re.findall(r"<a href='([^']+)'(?: class='([^']*)')?", tabbar.group(0).split("<details")[0])
+    assert ("/forum", "railonly") in tabs and ("/forum", "") not in tabs
     hub = (await member.http.get("/account")).text
-    assert "<a class='yrow' href='/forum'>" in hub
+    assert "<a class='yrow' href='/forum'>" not in hub
 
 
 async def test_a_forum_reply_is_voted_down_and_back_through_the_comment_routes(

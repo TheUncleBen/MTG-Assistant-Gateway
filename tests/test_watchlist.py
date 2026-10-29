@@ -123,7 +123,7 @@ def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkey
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 15
+        assert new.schema_version == db_module.SCHEMA_VERSION == 19
         assert new.get_user("u1") is not None
         tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {
@@ -246,8 +246,11 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
         try:
             r = await _watch(b, name="No Such Card Anywhere")
             assert r.status_code == 404 and "Scryfall knows no card named" in r.text
-            r = await _watch(b, name="Sol Ring", finish="foil")
+            # one printing: its own finishes; by name alone (0.7.46) any printing's
+            r = await _watch(b, name="Sol Ring", set_code="frc", finish="foil")
             assert r.status_code == 400 and "not printed in foil" in r.text
+            r = await _watch(b, name="Sol Ring", finish="etched")
+            assert r.status_code == 400 and "not printed in etched; it comes in foil, nonfoil" in r.text
             r = await _watch(b, name="Sol Ring", collector_number="21")
             assert r.status_code == 400 and "goes with a set code" in r.text
             assert (await _watch(b, name="Sol Ring")).status_code == 303
@@ -313,7 +316,7 @@ async def test_assistant_tools_watch_list_history_and_unwatch(stack: Stack, monk
     await stack.gw.prices.run_daily()
     listed = structured(await call(h, token, "list_watchlist"))
     assert [c["name"] for c in listed["cards"]] == ["Sol Talisman"]
-    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 200, "decks": 10}
+    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 5000, "decks": 100}
     hist = structured(await call(h, token, "card_price_history", {"card": "sol talisman"}))
     assert [p["day"] for p in hist["cards"][0]["history"]] == ["2026-10-12", "2026-10-13"]
     dh = structured(await call(h, token, "card_price_history", {"deck_id": "42"}))
@@ -342,7 +345,8 @@ async def test_old_points_age_out_and_delete_my_data_removes_watches(stack: Stac
         assert (
             db._conn.execute("SELECT COUNT(*) FROM price_points WHERE day = '2000-01-01'").fetchone()[0] == 0
         )
-        assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 1  # today's stays
+        # today's stays (the printing's, and the cheapest printing's of the watch by name, 0.7.46)
+        assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 2
         notify.save_prefs(db, "user-1", ntfy_on=True, ntfy_topic=notify.new_topic(db, "user-1"))
         out = db.delete_member_data("user-1")
         assert out["watch_cards"] == 1 and out["notify_prefs"] == 1
@@ -510,7 +514,8 @@ async def test_price_alerts_reach_the_member(stack: Stack, monkeypatch) -> None:
     stack.sf.prices[sol["id"]] = {"usd": "1.60"}  # +23% and above $1.50
     assert (await stack.gw.prices.run_daily())["alerts"] == 1
     msg = stack.ntfy.messages[-1]
-    assert msg["title"] == "Price alert" and msg["click"] == "https://mtg.test/watchlist"
+    # the alert opens the card's row (test_watchlist_rows)
+    assert msg["title"] == "Price alert" and msg["click"] == f"https://mtg.test/watchlist?open={wid}#wr-{wid}"
     assert msg["message"] == "Sol Ring rose 23.1% and rose above $1.50: $1.30 to $1.60."
 
 
@@ -528,6 +533,7 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
         r = await _post(b, "/account", {"action": "summary_save", "summary_every": "hourly"})
         assert "err=" in r.headers["location"]
         assert (await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")).status_code == 303
+        assert (await _watch(b, name="Command Tower")).status_code == 303  # its price stays put
     finally:
         await b.aclose()
     sol = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "frc")
@@ -542,10 +548,13 @@ async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack,
     assert (
         msg["title"] == "Your weekly summary" and msg["click"] == "https://mtg.test/account/details#summary"
     )
-    assert "1 watched cards, biggest move Sol Ring +25%" in msg["message"]
+    assert "2 watched cards, biggest move Sol Ring +25%" in msg["message"]
     token = await mcp_token(h)
     s = structured(await call(h, token, "get_summary", {"period": "week"}))
     assert s["ok"] and s["cards"][0]["from"] == 1.28 and s["cards"][0]["to"] == 1.6
+    # get_summary lists the cards whose price moved; the others are a count (the text says both)
+    assert [c["name"] for c in s["cards"]] == ["Sol Ring"] and s["cards_unchanged"] == 1, s
+    assert "Watched cards: 2, 1 changed price this week." in s["text"]
     assert "Sol Ring: $1.28 to $1.60 (+25%)" in s["text"] and "no AI" in s["written_by"]
     b = await _browser(stack)
     try:
@@ -591,7 +600,12 @@ def test_settings_default_off_and_the_token_comes_from_a_file(monkeypatch, tmp_p
     _env(monkeypatch, tmp_path)
     s = load_settings()
     assert s.ntfy_url is None and s.ntfy_token is None
-    assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (200, 10, 365, 6)
+    assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (
+        5000,
+        100,
+        365,
+        6,
+    )
     (tmp_path / "ntfy").write_text(TOKEN + "\n")
     monkeypatch.setenv("MTG_NTFY_URL", "https://ntfy.example.com/")
     monkeypatch.setenv("MTG_NTFY_TOKEN_FILE", str(tmp_path / "ntfy"))
@@ -734,7 +748,9 @@ async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
     b = await _browser(stack)
     try:
         page = (await b.http.get("/decks")).text
-        assert "href='/watchlist'" in page and "data-watchlist" in page
+        assert "data-watchlist" in page and "href='/watchlist'" not in page  # not a More item (C8)
+        binder = (await b.http.get("/collection")).text
+        assert "href='/watchlist'" in binder  # Binder's switch: Cards | Wants | Watchlist
         assert (await b.http.get("/watchlist")).status_code == 200
     finally:
         await b.aclose()
@@ -785,3 +801,30 @@ def test_the_deck_limit_says_how_many_to_remove(watched: list[str], remove: str)
         f"{remove} to add another."
     )
     svc._check_deck_limit("user-1", "1")  # a deck already watched is never refused
+
+
+async def test_a_card_watched_by_name_says_which_printing_is_priced(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28): a card watched by name came back with no set and a price
+    none of the printings the assistant had seen matched."""
+    b = await _browser(stack, link=True)
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    out = structured(await call(stack.h, token, "watch_card", {"name": "Sol Talisman", "finish": "foil"}))
+    watch = out["watch"]
+    assert watch["set"] is None and watch["collector_number"] is None  # it follows the name
+    assert watch["printing_now"]["set"] and watch["printing_now"]["collector_number"], watch
+    assert "cheapest printing in this finish" in watch["follows"], watch
+    listed = structured(await call(stack.h, token, "list_watchlist"))
+    assert "cheapest printing in this finish" in listed["cards"][0]["follows"], listed
+
+
+async def test_both_deck_prices_name_their_source(stack: Stack) -> None:
+    """Assistant tool review (2026-10-28): watch_deck and deck_stats gave two prices for one deck
+    with nothing to say why."""
+    b = await _browser(stack, link=True)
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    deck = structured(await call(stack.h, token, "watch_deck", {"deck_id": "42"}))["deck"]
+    stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))
+    found = stats["stats"]
+    assert "Scryfall" in deck["price_source"] and "Archidekt" in found["price_source"], (deck, found)

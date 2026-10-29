@@ -102,17 +102,24 @@ ENV_FILES = ["deploy/stack.env.example", "deploy/compose/.env.example"]
 STACK_FILES = ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"]
 
 
+# The one text setting with a stack variable: commented out in the example files.
+NAME_VAR = "MTG_SERVER_NAME"
+
+
 def _switches() -> list[str]:
     from mtg_gateway.config import MANAGED_SETTINGS
 
-    return [s.env for s in MANAGED_SETTINGS.values() if s.env]
+    return [s.env for s in MANAGED_SETTINGS.values() if s.env and s.env != NAME_VAR]
 
 
 def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
-    """Ben, 2026-10-25: every feature is on by default; an env variable only turns one off."""
+    """Ben, 2026-10-25: every feature is on by default; an env variable only turns one off. Ben,
+    2026-10-28: MTG_SERVER_NAME is back too, for the Gateway name, and the three sign-in times
+    that had a stack variable keep it (their Settings page rows, 0.7.46)."""
     from mtg_gateway.config import MANAGED_SETTINGS, Settings
 
-    on = {s.env: s.default for s in MANAGED_SETTINGS.values() if s.env}
+    assert MANAGED_SETTINGS["server_name"].env == NAME_VAR
+    on = {s.env: s.default for s in MANAGED_SETTINGS.values() if s.env and s.env != NAME_VAR}
     assert set(on) == {
         "MTG_WATCHLISTS_ENABLED",
         "MTG_ARCHIDEKT_BACKUPS",
@@ -120,8 +127,18 @@ def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
         "MTG_SCAN_ART_ENABLED",
         "MTG_UPDATE_CHECK",
         "MTG_DECK_SYNC_MINUTES",
+        "MTG_ACCESS_TOKEN_TTL",
+        "MTG_REFRESH_TOKEN_TTL",
+        "MTG_BROWSER_SESSION_TTL",
     }
-    assert all(v is True for k, v in on.items() if k != "MTG_DECK_SYNC_MINUTES")
+    times = {
+        "MTG_DECK_SYNC_MINUTES",
+        "MTG_ACCESS_TOKEN_TTL",
+        "MTG_REFRESH_TOKEN_TTL",
+        "MTG_BROWSER_SESSION_TTL",
+    }
+    assert all(v is True for k, v in on.items() if k not in times)
+    assert all(on[k] > 0 for k in times)
     assert on["MTG_DECK_SYNC_MINUTES"] > 0
     assert Settings.__dataclass_fields__["writes_enabled"].default is True
 
@@ -133,6 +150,22 @@ def test_example_env_files_leave_each_switch_empty_so_the_page_can_change_it(nam
     for var in _switches():
         assert env.get(var) == "", var
     assert env["MTG_WRITES_ENABLED"] == "true"
+
+
+@pytest.mark.parametrize("name", ENV_FILES)
+def test_example_env_files_have_the_gateway_name_commented_out_with_its_reason(name: str):
+    """Ben, 2026-10-28: MTG_SERVER_NAME is in each example, commented out under a one-line note, so
+    the Settings page keeps the Gateway name until someone sets it in the stack."""
+    lines = (ROOT / name).read_text().splitlines()
+    at = lines.index(f"#{NAME_VAR}=")
+    assert "Gateway name" in lines[at - 1] and lines[at - 1].startswith("# ")
+    assert NAME_VAR not in _env(ROOT / name)
+
+
+@pytest.mark.parametrize("name", STACK_FILES)
+def test_stack_files_pass_the_gateway_name_empty(name: str):
+    text = (ROOT / name).read_text()
+    assert re.findall(rf"^\s*{NAME_VAR}:.*$", text, re.M) == [f"      {NAME_VAR}: ${{{NAME_VAR}:-}}"]
 
 
 @pytest.mark.parametrize("name", STACK_FILES)
@@ -209,7 +242,7 @@ def test_no_removed_variable_is_left_in_the_deploy_files(name: str):
     """Settings that moved to the Settings page, and values the stack fixes, are gone (2026-10-25)."""
     text = (ROOT / name).read_text()
     for gone in (
-        "MTG_SERVER_NAME", "MTG_CHATGPT_NAME", "MTG_LOG_LEVEL", "MTG_APPROVAL_MODE", "MTG_FORGE_GAMES",
+        "MTG_CHATGPT_NAME", "MTG_LOG_LEVEL", "MTG_APPROVAL_MODE", "MTG_FORGE_GAMES",
         "MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG_AUTHENTIK_API_URL", "MTG_ALLOWED_HOSTS", "MTG_IMAGE",
         "MF_NODE", "MF_TAG", "FORGE_TAG", "FORGE_XMX", "FORGE_MAX_PARALLEL", "COMPOSE_PROFILES",
         "MTG_PLUGIN_DIR", "MTG_APP_DIR", "MTG_SCAN_GLARE",

@@ -61,33 +61,98 @@ def overlaps(
     "Sol Ring: #2 changes its printing; this request removes it." ``waiting`` are full proposal
     rows (with ``rows``), oldest first; ``numbers`` maps their ids to board numbers."""
     mine = _cards(rows)
+    my_cats, my_moves = _deck_categories(rows), _filed(rows)
     out: list[str] = []
     for note in waiting:
         theirs = _cards(note.get("rows"))
+        no = numbers.get(note["id"])
+        label = f"#{no}" if no else "another waiting change"
         for key, r in mine.items():
             other = theirs.get(key)
             if other is None:
                 continue
-            no = numbers.get(note["id"])
-            label = f"#{no}" if no else "another waiting change"
             out.append(f"{r.get('name')}: {label} {_verb(other)}; this request {_verb(r)}.")
+        # across kinds: a change to a deck category and a card moved into or out of it
+        their_cats, their_moves = _deck_categories(note.get("rows")), _filed(note.get("rows"))
+        for key, cat in my_cats.items():
+            for card in their_moves.get(key, []):
+                where = f"“{cat.get('name')}”"
+                out.append(f"{where}: this request {_cat_verb(cat)}; {label} moves {card} in or out of it.")
+        for key, cat in their_cats.items():
+            for card in my_moves.get(key, []):
+                where = f"“{cat.get('name')}”"
+                out.append(f"{where}: {label} {_cat_verb(cat)}; this request moves {card} in or out of it.")
     return out
+
+
+def _deck_categories(rows: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    """Deck category name (case-folded) -> the row of a categories change that renames, deletes or
+    switches it."""
+    return {
+        str(r["name"]).casefold(): r
+        for r in rows or []
+        if r.get("kind") == "deck_category" and str(r.get("name") or "").strip()
+    }
+
+
+def _filed(rows: list[dict[str, Any]] | None) -> dict[str, list[str]]:
+    """Deck category name (case-folded) -> the cards a card edit moves into or out of it."""
+    out: dict[str, list[str]] = {}
+    for r in rows or []:
+        if r.get("kind") != "category" or not r.get("name"):
+            continue
+        before = {c.strip() for part in str(r.get("before") or "").split(" / ") for c in part.split(", ")}
+        after = {c.strip() for part in str(r.get("after") or "").split(" / ") for c in part.split(", ")}
+        for cat in (before ^ after) - {""}:
+            cards = out.setdefault(cat.casefold(), [])
+            if r["name"] not in cards:
+                cards.append(str(r["name"]))
+    return out
+
+
+def _cat_verb(r: dict[str, Any]) -> str:
+    if r.get("delete"):
+        return "deletes it"
+    if r.get("rename_to"):
+        return f"renames it to “{r['rename_to']}”"
+    return "changes it"
 
 
 def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str, Any]] | None) -> str:
     """The gateway's own line for an amended note: what the new version does that the
     old one did not, and what it no longer does, from the rows (an assistant's words never appear
-    here, so a note cannot describe itself wrongly)."""
+    here, so a note cannot describe itself wrongly). An add or a removal reads as words
+    ("now also adds Mind Stone", "no longer takes out Opt"); any other row as its diff line."""
     from .decks import row_line
 
-    def clean(rows: list[dict[str, Any]] | None) -> list[str]:
-        return [row_line({k: v for k, v in r.items() if k != "guessed_from"}) for r in rows or []]
+    def clean(rows: list[dict[str, Any]] | None) -> list[tuple[str, str]]:
+        out = []
+        for r in rows or []:
+            r = {k: v for k, v in r.items() if k not in ("guessed_from", "missing", "unchecked")}
+            out.append((row_line(r), _in_words(r)))
+        return out
 
     old, new = clean(old_rows), clean(new_rows)
-    bits = [f"now {line}" for line in new if line not in old]
-    bits += [f"no longer {line}" for line in old if line not in new]
+    was = {line for line, _ in old}
+    now = {line for line, _ in new}
+    gone = [f"no longer {words or line}" for line, words in old if line not in now]
+    also = "" if gone else "also "  # "now also adds" only when the new version keeps all the old did
+    bits = [f"now {also}{words}" if words else f"now {line}" for line, words in new if line not in was]
+    bits += gone
     text = "; ".join(bits) or "the same changes"
     return text if len(text) <= WHAT_CHANGED_MAX else text[: WHAT_CHANGED_MAX - 3] + "..."
+
+
+def _in_words(r: dict[str, Any]) -> str:
+    """'adds Mind Stone', 'takes out 2 Opt' for an add or a removal; '' for any other row."""
+    verb = {"add": "adds", "remove": "takes out"}.get(str(r.get("kind")))
+    if not verb or not r.get("name"):
+        return ""
+    try:
+        qty = int(r.get("qty") or 1)
+    except (TypeError, ValueError):
+        qty = 1
+    return f"{verb} {qty} {r['name']}" if qty > 1 else f"{verb} {r['name']}"
 
 
 # A held note keeps every cause it was held for, newest last, joined by this (each cause is

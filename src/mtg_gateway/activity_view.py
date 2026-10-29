@@ -68,7 +68,7 @@ SIGNIN_EVENTS = (
     "code_reuse_detected",
     "signed_out_everywhere",
 )
-REPORT_EVENTS = ("report_created", "report_more_games")
+REPORT_EVENTS = ("report_created", "report_more_games", "report_deleted", "snapshot_deleted")
 ADMIN_ACTIONS = ("admin_disable", "admin_enable", "admin_revoke", "admin_unlink", "admin_delete_data")
 # admin actions written once (no member copy): the admin page's "Admin actions" counts them too
 ADMIN_ONCE = ("setting_changed", "card_model_removed")
@@ -120,6 +120,8 @@ ICONS = {
     "view_choices_forgotten": "settings",
     "report_created": "report",
     "report_more_games": "report",
+    "report_deleted": "report",
+    "snapshot_deleted": "bookmark",
     "folder_created": "folder",
     "folder_renamed": "folder",
     "folder_moved": "folder",
@@ -683,7 +685,7 @@ def _deck_html(names: Names, sub: str | None, deck_id: Any, *, link: bool, own: 
     if name:
         return f"<a href='{href}'>{esc(name)}</a>" if link else esc(name)
     # the admin page: the deck's id stays in the opened row's details, never in the cell
-    return f"<a href='{href}'>Open the deck</a>" if link else f"<span class='gone'>{GONE_DECK}</span>"
+    return ui.cap_link("Open the deck", href) if link else f"<span class='gone'>{GONE_DECK}</span>"
 
 
 def _member_chip(log: Any, client_id: str | None) -> str:
@@ -724,9 +726,10 @@ def member_detail_html(row: Mapping[str, Any], names: Names) -> str:
     if pid:
         href = f"/proposals/{quote(str(pid), safe='')}"
         text = "Open the proposal to see why" if event == "proposal_failed" else "Open the proposal"
-        bits.append(f"<a href='{href}'>{text}</a>")
-    if event in REPORT_EVENTS and d.get("report_id"):
-        bits.append(f"<a href='/history/reports/{quote(str(d['report_id']), safe='')}'>Open the report</a>")
+        bits.append(ui.cap_link(text, href))
+    # a deleted report has no page to open (its deck, when recorded, is named above)
+    if event in REPORT_EVENTS and event != "report_deleted" and d.get("report_id"):
+        bits.append(ui.cap_link("Open the report", f"/history/reports/{quote(str(d['report_id']), safe='')}"))
     if d.get("via") in VIA_WORDS and d.get("via") not in ("mcp", "app"):  # those: the By column
         bits.append(VIA_WORDS[d["via"]])
     if d.get("by") == "deck sync":
@@ -873,14 +876,18 @@ def _empty(path: str, query: Query, nothing_at_all: str) -> str:
         return f"<div class='ui-card'><p>{nothing_at_all}</p></div>"
     return (
         "<div class='ui-card'><p>Nothing matches these filters. "
-        f"<a href='{path}'>Show all activity</a></p></div>"
+        + ui.cap_link("Show all activity", path)
+        + "</p></div>"
     )
 
 
 def _pager(path: str, query: Query, total: int) -> str:
-    newer = query.href(path, offset=max(0, query.offset - PER_PAGE)) if query.offset > 0 else None
-    older = query.href(path, offset=query.offset + PER_PAGE) if query.offset + PER_PAGE < total else None
-    return ui.pager(query.offset, total, newer_href=newer, older_href=older)
+    """Load more under the list (Standard 13): the next page's link, whose rows the shared
+    static/loadmore.js adds in place."""
+    upto = min(total, query.offset + PER_PAGE)
+    if upto < total:
+        return ui.load_more(query.href(path, offset=upto), shown=upto, total=total, into=".act-table")
+    return ui.load_more("", done=f"All {total:,} shown.") if total > PER_PAGE else ""
 
 
 def _event_options(log: Log, *, admin_page: bool) -> list[tuple[str, str]]:

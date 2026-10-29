@@ -1,5 +1,5 @@
-/* The top bar's search box on small screens. Under 600 px the box is folded away behind the
-   magnifier (an ordinary link to /search without script); a tap opens the box under the bar and
+/* The top bar's search box on small screens. Under 600 px, and from 600 to 899 px with a mouse
+   (where the text links fill the bar), the box is folded away behind the magnifier (an ordinary link to /search without script); a tap opens the box under the bar and
    focuses it, a second tap or Escape in an empty box folds it again. Where the box is already
    in the bar the magnifier is hidden by the stylesheet. The suggestions themselves are
    static/suggest.js (data-suggest-site). Loaded on every page; does nothing when signed out. */

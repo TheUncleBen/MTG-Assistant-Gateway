@@ -18,6 +18,7 @@ import ipaddress
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -51,7 +52,7 @@ from .cimd import (
 )
 from .config import Settings
 from .db import Database, hash_token
-from .membership import Membership, MembershipChecker
+from .membership import SIGN_IN_AGAIN, Membership, MembershipChecker, assistant_holder, login_holder
 from .oidc import Identity, IdPTokens, OIDCClient, OIDCError, pkce_pair
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,8 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self.membership = membership if membership is not None else MembershipChecker(settings, db, oidc)
         self.cimd = cimd if cimd is not None else CimdFetcher(allowed_hosts=settings.cimd_allowed_hosts)
         self.login_limiter = LoginStartLimiter()
+        # the token times in seconds as the Settings page has them now (create_app: LiveSettings.seconds)
+        self.ttl_source: Callable[[str], int] | None = None
         self._source_browsers: dict[str, set[str]] = {}  # source -> browser keys seen (bounded)
         self._warned_sources: set[str] = set()
         self._trusted_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
@@ -219,6 +222,12 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 self._trusted_nets.append(ipaddress.ip_network(entry, strict=False))
             except ValueError:
                 pass  # "*" (trust everyone): no address is then a proxy of its own
+
+    def _ttl(self, key: str) -> int:
+        """access_token_ttl or refresh_token_ttl, in seconds, as it is now."""
+        if self.ttl_source is not None:
+            return int(self.ttl_source(key))
+        return int(getattr(self.settings, key))
 
     # -- clients ------------------------------------------------------------
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -632,12 +641,16 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
 
         if known and known.get("disabled_at"):
             self.db.audit("login_rejected_disabled", sub=identity.sub, client_id=session["client_id"])
-            self.db.delete_browser_sessions_for(identity.sub)
+            self.db.delete_browser_sessions_for(identity.sub, "disabled")
             raise LoginError(DISABLED_MESSAGE, 403, kind="refused")
 
         self._record_user(identity)
-        # The provider's own tokens, so later requests can ask it again (membership.py).
+        # The provider's own tokens, so later requests can ask it again (membership.py). They wait
+        # under this sign-in's own name until the caller hands them to the session or the AI apps
+        # it is for (session["grant_holder"]).
+        session["grant_holder"] = login_holder(state)
         self.membership.store(
+            session["grant_holder"],
             identity.sub,
             IdPTokens(
                 access_token=identity.idp_access_token,
@@ -666,6 +679,8 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 error_description="sign-in was canceled or denied",
                 state=params.state,
             )
+        # this sign-in's provider grant becomes the one the member's AI apps are checked with
+        self.membership.adopt(session["grant_holder"], assistant_holder(identity.sub))
         gw_code = secrets.token_urlsafe(32)
         expires_at = int(time.time()) + self.settings.auth_code_ttl
         auth_code = AuthorizationCode(
@@ -693,11 +708,13 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         return construct_redirect_uri(client_redirect, code=gw_code, state=params.state)
 
     async def start_idp_login(
-        self, client_id: str, params: dict[str, Any], *, force_login: bool = False
+        self, client_id: str, params: dict[str, Any], *, force_login: bool = False, max_age: int | None = None
     ) -> str:
         """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL.
         ``force_login`` asks the provider to make the person enter their credentials again
-        (``prompt=login``), used right after they signed out on this device."""
+        (``prompt=login``), used right after they signed out on this device. ``max_age`` (0 for the
+        app's legs that need proof of a new sign-in, app_signin.py) asks the same in the way more
+        providers enforce, and makes the ID token carry ``auth_time``."""
         try:
             source_hash = self._admit_login()
         except LoginThrottled as exc:
@@ -717,7 +734,11 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         )
         try:
             return await self.oidc.authorization_url(
-                state=login_id, nonce=nonce, code_challenge=challenge, prompt="login" if force_login else None
+                state=login_id,
+                nonce=nonce,
+                code_challenge=challenge,
+                prompt="login" if force_login else None,
+                max_age=max_age,
             )
         except OIDCError as exc:
             raise LoginError(smallpage.UNAVAILABLE, 502, kind="unavailable") from exc
@@ -734,6 +755,11 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         outcome = await self.membership.check(sub)
         if outcome is Membership.UNAVAILABLE:
             raise TokenError("invalid_request", "the identity provider can't be reached; try again later")
+        if outcome is Membership.SIGN_IN:
+            # None of the member's sign-ins is honoured by the provider any more (its refresh
+            # token ran out, say): refused until they sign in on the website again, but not
+            # invalid_grant, so the app keeps its tokens and works again after that (membership.py).
+            raise TokenError("invalid_request", SIGN_IN_AGAIN.format(url=self.settings.public_url))
         if outcome is Membership.REVOKED:
             raise TokenError("invalid_grant", "sign in again to keep using this service")
 
@@ -878,6 +904,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
         resource = resource or self.settings.mcp_url
+        access_ttl = self._ttl("access_token_ttl")
         self.db.save_token(
             access,
             kind="access",
@@ -886,7 +913,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             scopes=scopes,
             resource=resource,
             family=family,
-            expires_at=now + self.settings.access_token_ttl,
+            expires_at=now + access_ttl,
             auth_time=auth_time,
         )
         self.db.save_token(
@@ -897,14 +924,14 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             scopes=scopes,
             resource=resource,
             family=family,
-            expires_at=now + self.settings.refresh_token_ttl,
+            expires_at=now + self._ttl("refresh_token_ttl"),
             auth_time=auth_time,
         )
         self.db.audit("tokens_issued", sub=sub, client_id=client_id)
         return OAuthToken(
             access_token=access,
             token_type="Bearer",
-            expires_in=self.settings.access_token_ttl,
+            expires_in=access_ttl,
             scope=" ".join(scopes) if scopes else None,
             refresh_token=refresh,
         )

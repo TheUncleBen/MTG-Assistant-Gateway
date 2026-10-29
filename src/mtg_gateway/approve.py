@@ -3,11 +3,11 @@ one-time approval code that lets only that card apply or reject a proposal.
 
 How it fits together:
 
-* Every propose_* tool (and get_proposal) is bound to the ``ui://`` card below through the
+* Every propose_* tool (and amend, combine, apply) is bound to the ``ui://`` card below through the
   tool's ``_meta.ui.resourceUri`` (MCP Apps). A host that renders MCP Apps (Claude on web,
-  desktop and phone; ChatGPT on the web) shows the card next to the tool result; a host that
-  does not (Claude Code, older clients) ignores the metadata and shows the text, which still
-  carries the review link.
+  desktop and phone; ChatGPT on the web and in its Android app) shows the card next to the tool
+  result; a host that does not (Claude Code, older clients) ignores the metadata and shows the
+  text, which still carries the review link.
 * The card's buttons call ``confirm_proposal``, a tool whose ``_meta.ui.visibility`` is
   ``["app"]``: hosts offer it to the card, not to the model. It also requires the approval
   code, which travels in the tool result's ``_meta`` (delivered to the card, not part of
@@ -30,6 +30,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from collections.abc import Callable
@@ -52,6 +53,15 @@ APPROVE_DECISIONS = ("approve", "reject")
 # elicitation sent them there, and how often it looks.
 BROWSER_WAIT_SECONDS = 45.0
 BROWSER_POLL_SECONDS = 2.0
+# A proposal result carries at most this many review rows (the card shows the first few and
+# loads the rest on Show all), and its diff at most TEXT_DIFF_LINES lines, so a 100-card deck
+# keeps the chat and the assistant's context light.
+CARD_ROWS = 8
+TEXT_DIFF_LINES = 40
+MORE_TEXT = (
+    "This result lists only the first changes. proposal_status with full true lists them all "
+    "(no card); the user's card and review page show them all too."
+)
 
 # _meta for the tools whose result the card renders. The flat ``ui/resourceUri`` key is the
 # form older hosts read (the MCP Apps server helper writes both).
@@ -63,17 +73,34 @@ CONFIRM_TOOL_META: dict[str, Any] = {
     "openai/visibility": "private",
     "openai/widgetAccessible": True,
 }
+# _meta for get_proposal, the card's own read of its proposal: the card's alone, like
+# confirm_proposal (the model checks a proposal with proposal_status, which draws no card). Not
+# bound to the card, so no host draws one for it.
+CARD_READ_META: dict[str, Any] = dict(CONFIRM_TOOL_META)
 # apply_proposal (the model's own apply, allowed by the member's approval mode): Claude Code
 # shows its permission prompt on every call and offers no "always allow" for it.
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
 
 
-def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> tuple[str | None, bool]:
+def card_seq_of(row: dict[str, Any], client: str | None) -> int:
+    """The number of the newest card drawn for this proposal in ``client``'s chat (0: none)."""
+    try:
+        seqs = json.loads(row.get("card_seqs") or "{}")
+    except ValueError:
+        return 0
+    n = seqs.get(str(client or "")) if isinstance(seqs, dict) else None
+    return int(n) if isinstance(n, int) and not isinstance(n, bool) else 0
+
+
+def card_approval(
+    data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool, reader_seq: int | None = None
+) -> tuple[str | None, bool]:
     """(code, other_app) for a waiting proposal's card: the one-time approval code when the
     member decides it in this chat, and whether it was made in another app (whose card alone can
     approve it, decks.check_approval; this card then sends the member to the review page). A
     deck deletion never has a code (its review page only); since 0.7.29 every other account
-    action has one. A proposal the assistant may apply itself has no buttons to press."""
+    action has one. A proposal the assistant may apply itself (Semi, Full auto) has one too, so its
+    card offers Apply now and Reject should the assistant not apply it (0.7.46)."""
     from .decks import current_client
 
     if not (
@@ -81,7 +108,6 @@ def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) 
         and data.get("state") == "pending"
         and data.get("proposal_id")
         and (data.get("ok") or data.get("error") == "browser_required")
-        and not data.get("assistant_may_apply")
     ):
         return None, False
     row = decks.db.get_proposal(str(data["proposal_id"]), sub)
@@ -90,21 +116,47 @@ def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) 
     creator = row.get("created_by_client")
     if not creator or creator != current_client.get():
         return None, True
+    # an older card's read gets no code: a newer card for this proposal is in the chat (a card
+    # from before card numbers reads as 0, so it gets one only while no card has a number)
+    if reader_seq is not None and reader_seq < card_seq_of(row, creator):
+        return None, False
     # the code of the version this result shows, so a card never carries a code for rows it does
     # not show (an amend between the read and here makes it one the gateway refuses, "changed")
     shown = data.get("version")
     return decks.approval_for(sub, row, version=int(shown) if shown else None), False
 
 
-def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> Any:
+def proposal_tool_result(
+    data: dict[str, Any],
+    *,
+    decks: Any,
+    sub: str,
+    in_chat: bool,
+    drawn: bool = False,
+    rows_limit: int | None = CARD_ROWS,
+    reader_seq: int | None = None,
+) -> Any:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
     out of the text and structured content, so not in the model's context). The code is drawn
     only in the app that made the proposal (the only one whose press check_approval accepts); in
-    another app the card says where to approve it instead (``card_other_app``)."""
+    another app the card says where to approve it instead (``card_other_app``).
+
+    ``drawn``: the result draws a new card in the chat (a model's call of a card tool, not the
+    card's own read), so the proposal's card number for this app goes up and the result carries
+    it (``card_seq``); older cards that read a higher number step aside. ``rows_limit``: how many
+    review rows the result carries (``rows_total`` says how many there are; the card loads the
+    rest when asked); None for all of them. ``reader_seq``: the number of the card that reads
+    (the card's own read), so an older card gets no code."""
     from mcp_types import CallToolResult, TextContent
 
-    approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat)
+    if drawn and data.get("proposal_id") and (data.get("ok") or data.get("error") == "browser_required"):
+        from .decks import current_client
+
+        seq = decks.db.next_card_seq(str(data["proposal_id"]), sub, current_client.get())
+        if seq:
+            data = {**data, "card_seq": seq}
+    approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat, reader_seq=reader_seq)
     if other_app:
         data = {**data, "card_other_app": True}
     meta: dict[str, Any] | None = {APPROVAL_META_KEY: approval} if approval else None
@@ -114,12 +166,66 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
             data = {**data, "deck_waiting": info}
         if apply_all and approval:
             meta = {**(meta or {}), APPROVAL_SET_META_KEY: apply_all}
-    data = with_words_note(data)
+    data = bounded(with_words_note(data), rows_limit)
     return CallToolResult(
         content=[TextContent(type="text", text=proposal_text(data))],
         structured_content=data,
         _meta=meta,
     )
+
+
+def rows_summary(rows: list[Any]) -> dict[str, Any]:
+    """What a proposal's rows add up to, for a card that shows only the first few: cards added,
+    cards taken out, other changes, rows in all, and rows of each kind (``groups``, the card's
+    group headings count them)."""
+    adds = removes = others = 0
+    groups: dict[str, int] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        kind = str(r.get("kind") or "")
+        groups[kind] = groups.get(kind, 0) + 1
+        qty = r.get("qty") if isinstance(r.get("qty"), int) else 0
+        if r.get("kind") == "add":
+            adds += qty
+        elif r.get("kind") == "remove":
+            removes += qty
+        else:
+            others += 1
+    return {"adds": adds, "removes": removes, "others": others, "rows": len(rows), "groups": groups}
+
+
+def bounded(data: dict[str, Any], rows_limit: int | None) -> dict[str, Any]:
+    """A proposal result kept small however big the proposal is: at most ``rows_limit`` review
+    rows (with ``rows_total`` and ``rows_summary``), TEXT_DIFF_LINES diff lines (with
+    ``diff_lines_total``) and, for a new deck, as many cards of its stored list as rows
+    (``cards_total``). proposal_status with full true, and the card's Show all, read the rest.
+    None keeps everything (the card's own read of the whole list)."""
+    if rows_limit is None:
+        return data
+    out = dict(data)
+    rows = out.get("rows")
+    if isinstance(rows, list) and len(rows) > rows_limit:
+        out["rows"] = rows[:rows_limit]
+        out["rows_total"] = len(rows)
+        out["rows_summary"] = rows_summary(rows)
+    diff = [ln for ln in str(out.get("diff") or "").splitlines()]
+    if len(diff) > TEXT_DIFF_LINES:
+        out["diff"] = "\n".join(diff[:TEXT_DIFF_LINES])
+        out["diff_lines_total"] = len(diff)
+    changes = out.get("changes")
+    if isinstance(changes, list) and len(changes) > TEXT_DIFF_LINES:
+        out["changes"] = changes[:TEXT_DIFF_LINES]
+        out["changes_total"] = len(changes)
+    elif isinstance(changes, dict) and isinstance(changes.get("cards"), list):
+        cards = changes["cards"]
+        if len(cards) > rows_limit:
+            out["changes"] = {**changes, "cards": cards[:rows_limit], "cards_total": len(cards)}
+    if any(k in out for k in ("rows_total", "diff_lines_total", "changes_total")) or (
+        isinstance(out.get("changes"), dict) and "cards_total" in out["changes"]
+    ):
+        out["more"] = MORE_TEXT
+    return out
 
 
 # The comment actions whose text is written (actions.py).
@@ -156,7 +262,7 @@ def with_words_note(data: dict[str, Any], note: str | None = None) -> dict[str, 
 
 
 # Left out of the text: the review rows and the stored edit, which the diff lines already say.
-_TEXT_SKIP = ("rows", "changes", "diff")
+_TEXT_SKIP = ("rows", "changes", "diff", "card_seq")
 
 
 def proposal_text(data: dict[str, Any]) -> str:
@@ -196,6 +302,9 @@ def proposal_text(data: dict[str, Any]) -> str:
     diff = [ln for ln in str(data.get("diff") or "").splitlines() if ln.strip()]
     if diff:
         lines += ["", "Changes:", *("  " + ln for ln in diff)]
+        total = data.get("diff_lines_total")
+        if isinstance(total, int) and total > len(diff):
+            lines.append(f"  … and {total - len(diff)} more (proposal_status with full true lists them all)")
     rest = [f"{k}: {one_line(v)}" for k, v in data.items() if k not in skip and v not in (None, "", [], {})]
     if rest:
         lines += ["", "Details:", *rest]
@@ -203,14 +312,24 @@ def proposal_text(data: dict[str, Any]) -> str:
 
 
 def approval_code(
-    secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int, version: int = 1
+    secret: str,
+    *,
+    proposal_id: str,
+    sub: str,
+    client_id: str,
+    created_at: int,
+    version: int = 1,
+    card_seq: int = 0,
 ) -> str:
     """The one-time code for one proposal: 192 bits of HMAC-SHA256 over the proposal, its owner,
-    the app that made it, when, and (from its second version on) its version, keyed with
-    the gateway's session secret. A card drawn for an earlier version no longer matches."""
+    the app that made it, when, (from its second version on) its version and (since 0.7.46) the
+    number of the card it was drawn on, keyed with the gateway's session secret. A card drawn for
+    an earlier version, or an older card of the same version, no longer matches."""
     parts = ["mtg-approval", proposal_id, sub, client_id or "", str(int(created_at))]
     if int(version or 1) > 1:
         parts.append(f"v{int(version)}")
+    if int(card_seq or 0) > 0:
+        parts.append(f"c{int(card_seq)}")
     msg = "\x00".join(parts).encode()
     digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
@@ -285,13 +404,14 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
         "what_changed",
     )
     in_set = {pid for pid, _v in items}
-    info["set_lines"] = [
+    # card-only (standard 16): the assistant's result says how many wait, the card lists them
+    lines = [
         {k: x[k] for k in keys if k in x}
         for x in decks.board_lines(sub, str(deck_id))
         if x["proposal_id"] in in_set
     ]
     code = approval_set_code(decks.settings.session_secret, sub=sub, client_id=client, items=items)
-    return info, {"ids": [i for i, _v in items], "code": code}
+    return info, {"ids": [i for i, _v in items], "code": code, "lines": lines}
 
 
 def approval_matches(expected: str, given: Any) -> bool:
@@ -388,7 +508,7 @@ async def apply_on_review_page(
             "ok": False,
             "error": "browser_pending",
             "message": "The review page was opened but the proposal is still pending. Ask the user "
-            "whether they pressed Apply there, then call get_proposal; nothing was sent yet.",
+            "whether they pressed Apply there, then call proposal_status; nothing was sent yet.",
             **p,
         }
     return {"ok": p["state"] == "applied", **p}

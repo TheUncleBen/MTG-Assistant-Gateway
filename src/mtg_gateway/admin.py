@@ -36,6 +36,7 @@ from .pages import (
     read_limited,
 )
 from .theme import display_name, icon, plural, render
+from .timing import SLOW_REQUEST_SECONDS, speed_log
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -171,7 +172,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             if target == admin_sub:
                 raise AdminError("invalid", "You cannot disable your own account.", code="self_disable")
             state.db.set_user_disabled(target, True)
-            out.update(state.db.revoke_all_for_user(target))
+            out.update(state.db.revoke_all_for_user(target, "disabled"))
             # A disabled account cannot sign in, so its Archidekt session is not kept either.
             state.decks.unlink(target)
         elif action == "enable":
@@ -599,7 +600,7 @@ def system_data(state: Any) -> dict[str, Any]:
 
 # -- HTML -------------------------------------------------------------------------
 USERS_PURPOSE = "Everyone who has signed in. Disabling blocks this gateway only."
-MODELS_PURPOSE = "Each model is used only in its owner's simulations. Only admins see who added it."
+MODELS_PURPOSE = "Each model is used only in its owner's solo tests. Only admins see who added it."
 CURRENT = " aria-current='page'"
 NO_NAME = activity_view.NO_NAME  # a member with neither a username nor an email on record
 PER_PAGE = ui.PER_PAGE
@@ -957,7 +958,7 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         + _row("Newest backup copy", copies)
         + _row("Newest before-upgrade copy", _before_upgrade_text(sysd.get("before_upgrade"), now=now))
         + _row("Research service (Mystic Forge)", _service_label(sysd["mystic_forge"]))
-        + _row("Simulation engine (Forge)", _service_label(sysd["forge"]))
+        + _row("Test engine (Forge)", _service_label(sysd["forge"]))
         + _row("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"], now=now))
         + _archidekt_stats(sysd.get("archidekt"))
         # the live settings; each by its name, with the setting's own word
@@ -990,8 +991,63 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         "<div class='adm ao'>"
         + _head("Admin: overview", "Members, the last 30 days and the system.", "/admin")
         + ui.widgets(widgets)
-        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}{by_day_card}</div></div></div>"
+        + f"<div class='ao-cols'>{system}<div>{_updates_card(u, now=now)}"
+        f"{_speed_card(speed_log.summary(now))}{by_day_card}</div></div></div>"
     )
+
+
+SPEED_ROUTES = 5  # the slowest pages the Speed card lists
+
+
+def _seconds(value: float) -> str:
+    return f"{value:.1f} s" if value < 60 else f"{value / 60:.1f} min"
+
+
+def _speed_why(r: Mapping[str, Any]) -> str:
+    """Why a page was slow, from where its time went (timing.SpeedLog.summary's route row)."""
+    if r["failures"]:
+        n = r["failures"]
+        return f"Archidekt failed or asked to slow down {n} time{'' if n == 1 else 's'}"
+    if r["pacer"] >= 0.5 and r["pacer"] >= r["archidekt"]:
+        return "mostly waiting for a turn with Archidekt (the shared pacing)"
+    if r["archidekt"] >= 0.5:
+        return "mostly Archidekt answering slowly"
+    return "the gateway itself"
+
+
+def _speed_card(d: Mapping[str, Any]) -> str:
+    """Admin's "Speed, last 24 h" card (owner decision, 0.7.46): page views, the slow ones, and
+    where their time went (the shared pacer's waits, Archidekt's answers, Archidekt's failures).
+    Pages by their address pattern only: never a member, a deck or a query."""
+    head = (
+        "<section class='ui-card' id='speed' aria-labelledby='speed-h'><h2 id='speed-h'>Speed, last 24 h</h2>"
+    )
+    since = _dt.datetime.fromtimestamp(d["since"], tz=_dt.UTC).strftime("%d %b %H:%M UTC")
+    foot = (
+        f"<p class='muted small' style='margin:.5rem 0 0'>Since {html.escape(since)}, kept in memory: "
+        "a restart starts it again. A page that drew its frame first counts when its content was there.</p>"
+    )
+    if not d["views"]:
+        return head + "<p class='muted'>No page views yet.</p>" + foot + "</section>"
+    slow = int(d["slow"])
+    rows = _row(
+        "Page views",
+        f"{d['views']:,}, {slow:,} slower than {SLOW_REQUEST_SECONDS:g} s",
+    ) + _row(
+        "Where the time went",
+        f"{_seconds(d['pacer'])} waiting for a turn with Archidekt, {_seconds(d['archidekt'])} "
+        f"Archidekt answering, {d['failures']:,} failed Archidekt call{'' if d['failures'] == 1 else 's'}",
+    )
+    listed = [r for r in d["routes"] if r["max"] >= 1.0][:SPEED_ROUTES]
+    for r in listed:
+        rows += _row(
+            r["route"],
+            f"{_seconds(r['p95'])} for 95 in 100 views, at most {_seconds(r['max'])}; {_speed_why(r)}",
+            note=f"{r['views']:,} view{'' if r['views'] == 1 else 's'}",
+        )
+    if not listed:
+        rows += "<p class='muted'>No page took a second or more.</p>"
+    return head + rows + foot + "</section>"
 
 
 def _update_state_text(u: dict[str, Any]) -> str:
@@ -1131,7 +1187,8 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
     )
     counts = (
         f"{a['requests']} sent, {a['cache_hits']} answered from cache, {a['retries']} retried, "
-        f"{a['rate_limited']} slowed down by Archidekt"
+        f"{a['rate_limited']} slowed down by Archidekt, {a.get('shared', 0)} shared with the same read "
+        "under way"
     )
     return _row("Archidekt request limits", limits) + _row("Archidekt requests since start", counts)
 
@@ -1528,7 +1585,8 @@ def _user_panel(
     apps = (
         "".join(
             f"<div>{ui.app_chip(c['name'], unnamed=True, client_id=c['client_id'])} "
-            f"<code>{html.escape(c['client_id'])}</code></div>"
+            f"<code>{html.escape(c['client_id'])}</code>"
+            f"<div class='muted small'>{ui.client_brand_note(c['client_id'])}</div></div>"
             for c in u["clients"]
         )
         or "none"
@@ -1945,7 +2003,7 @@ def _models_body(
     tools = ui.toolbar(
         path,
         search_label="Search card models",
-        placeholder="Search card name",
+        placeholder="Search by name",
         q=q,
         filters=[ui.filter_select("member", "Member", member_opts, member)],
         keep={"changed": changed},
@@ -2026,8 +2084,8 @@ def _models_body(
                 f"<input type='hidden' name='added_by' value='{html.escape(remove_by)}'>"
                 f"<input type='hidden' name='back' value='{html.escape(list_href)}'>"
                 f"<p>“{html.escape(adder_name)}” added it. "
-                f"The simulator stops using it in {html.escape(adder_name)}'s "
-                "simulations. This can't be undone.</p></form>",
+                f"{html.escape(adder_name)}'s solo tests stop using it. "
+                "This can't be undone.</p></form>",
                 actions=[
                     ui.box_button("Cancel", cancel=True),
                     ui.box_button(

@@ -42,13 +42,13 @@
     <string name="update_confirm_failed">Android wants you to confirm the update. Open the app and tap Update again.</string>
     <string name="update_checking">Checking for app updates…</string>
     <string name="fab_label">Menu</string>
-    <!-- Notifications (NotifyService). -->
+    <!-- Push notifications (NotifyService). -->
     <string name="notify_connected">Always connected</string>
-    <string name="notify_connected_text">The app stays connected to your gateway, so notifications arrive while it is closed.</string>
-    <string name="notify_channel_messages">Notifications from your gateway</string>
+    <string name="notify_connected_text">The app stays connected to your gateway, so push notifications arrive while it is closed.</string>
+    <string name="notify_channel_messages">Push notifications from your gateway</string>
     <string name="notify_channel_connection">Connection to your gateway</string>
-    <string name="notify_channel_connection_text">Android shows this quiet notification while the app listens for your notifications.</string>
-    <string name="notify_permission_denied">Notifications are off for this app. Turn them on in Android\'s settings.</string>
+    <string name="notify_channel_connection_text">Android shows this quiet notification while the app listens for your push notifications.</string>
+    <string name="notify_permission_denied">Push notifications are off for this app. Turn them on in Android\'s settings.</string>
     <!-- Launcher shortcuts, as the web manifest has them (companion_shell.py). -->
     <string name="shortcut_decks">My decks</string>
     <string name="shortcut_scan">Scan page</string>
@@ -68,6 +68,7 @@
     <string name="download_signed_out">Your sign-in has ended. Reload the page, sign in again and retry the download.</string>
     <string name="no_app_for_link">No app can open that link.</string>
     <string name="sign_in_no_browser">No browser is installed to sign in with. Use “Sign in inside the app instead” on the page.</string>
+    <string name="sign_in_finish_in_browser">The browser didn\'t ask you to sign in again, so finish signing in there and tap “Open the MTG Assistant Gateway app”.</string>
     <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
     <string name="camera_permission_settings">The camera is off for this app. Allow Camera under Permissions, then try again.</string>
@@ -115,7 +116,10 @@
     <string name="removed_card">Removed %1$s · %2$s</string>
     <string name="unsure_card">Not sure: %1$s. Tap Done to check it on the page.</string>
     <string name="unidentified_card">Could not place “%1$s”; kept in the unidentified list.</string>
-    <string name="no_card_outline">No card outline found. Use a plain, contrasting background.</string>
+    <string name="no_card_outline">No card outline found. Use a plain, contrasting background (a light one for a black-bordered card).</string>
+    <string name="status_ocr_loading">Getting text recognition ready (first use downloads about 8 MB): %1$d%%</string>
+    <string name="status_ocr_ready">Ready. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_ocr_unavailable">Text recognition could not be loaded, so names cannot be read. Tap Done and type them on the page.</string>
     <string name="scan_failed">Scan failed: %1$s</string>
     <string name="pending_on_page">Found a match. Tap Done to add it on the page; Shoot again replaces it.</string>
     <string name="auto_paused_pending">Auto paused: a read waits on the page. Tap Done to check it.</string>

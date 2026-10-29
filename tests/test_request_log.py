@@ -108,3 +108,34 @@ def _layers(h: Harness) -> list[object]:
         out.append(app)
         app = getattr(app, "app", None)
     return out
+
+
+def test_a_slow_request_logs_a_warning_with_its_time_split(caplog: pytest.LogCaptureFixture) -> None:
+    """A request over SLOW_REQUEST_SECONDS is logged once more at WARNING, with where its time
+    went (total, Archidekt, identity provider), so a slow page shows in a plain log."""
+    from mtg_gateway import timing
+
+    clock = [100.0]
+
+    async def slow(_request):  # noqa: ANN001
+        timing.add_time(timing.archidekt_time, 2.5)
+        timing.add_time(timing.idp_time, 0.25)
+        clock[0] += 3.2
+        return PlainTextResponse("ok")
+
+    async def quick(_request):  # noqa: ANN001
+        clock[0] += 0.4
+        return PlainTextResponse("ok")
+
+    app = Starlette(routes=[Route("/decks/{deck_id}", slow), Route("/home", quick)])
+    app.add_middleware(TimingMiddleware)
+    c = TestClient(app)
+    with pytest.MonkeyPatch.context() as mp, caplog.at_level(logging.INFO, logger="mtg_gateway.requests"):
+        mp.setattr(timing.time, "perf_counter", lambda: clock[0])
+        c.get("/decks/4242")
+        c.get("/home")
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 1, [r.getMessage() for r in caplog.records]
+    text = warned[0].getMessage()
+    assert "/decks/{deck_id}" in text and "4242" not in text
+    assert "total=3200ms" in text and "archidekt=2500ms" in text and "idp=250ms" in text

@@ -2,8 +2,8 @@
 // The Watchlist page: "Details" opens one row in place (the others close; without a script the
 // link opens the row through the address), the range buttons swap the chart between the last 30
 // days and the full history, and a card's name opens the card viewer. A card's full history comes
-// from the existing /watchlist/api/card (a year at most, nothing asked of Scryfall); a deck's is in
-// its row. The chart is drawn as watchlist_page.chart_html draws it on the server.
+// from /watchlist/api/card and a deck's from /watchlist/api/deck (a year at most, nothing asked of
+// Scryfall), read once per row. The chart is drawn as watchlist_page.chart_html draws it on the server.
 (function () {
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -94,8 +94,15 @@
   }
 
   function fullPoints(box) {
-    if (box.hasAttribute("data-full")) {
-      try { return Promise.resolve(JSON.parse(box.getAttribute("data-full"))); } catch (e) { return Promise.reject(e); }
+    if (box.__full) return Promise.resolve(box.__full);
+    var get = function (url) {
+      return fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+    };
+    var keep = function (points) { box.__full = points; return points; };
+    if (box.hasAttribute("data-deck")) {
+      return get("/watchlist/api/deck?deck_id=" + encodeURIComponent(box.getAttribute("data-deck")))
+        .then(function (d) { return keep((d.history || []).map(function (p) { return [p.day, p.price]; })); });
     }
     var name = box.getAttribute("data-card"), wid = box.getAttribute("data-watch");
     return fetch("/watchlist/api/card?name=" + encodeURIComponent(name), {
@@ -105,8 +112,8 @@
       .then(function (d) {
         var w = (d.watches || []).filter(function (x) { return x.watch_id === wid; })[0];
         if (!w) throw new Error("gone");
-        return (w.history || []).filter(function (p) { return p.price !== null && p.price !== undefined; })
-          .map(function (p) { return [p.day, p.price]; });
+        return keep((w.history || []).filter(function (p) { return p.price !== null && p.price !== undefined; })
+          .map(function (p) { return [p.day, p.price]; }));
       });
   }
 

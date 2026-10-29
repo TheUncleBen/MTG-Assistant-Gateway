@@ -44,14 +44,14 @@ async def test_signed_out_and_data_deleted_share_the_panel(gw: Harness) -> None:
     out = await gw.http.get("/signed-out", headers=NAV)
     body = panel(out.text, "Signed out")
     assert "<p>You are signed out of this gateway.</p>" in body
-    assert has_button(body, "Sign in again", "/login?next=/", primary=True) and orange(body) == 1
+    assert has_button(body, "Sign in", "/login?next=/", primary=True) and orange(body) == 1
     assert "<style>" in out.text and ".sio{" in out.text and "/static/pages.js" in out.text
 
     gone = await gw.http.get("/data-deleted", headers=NAV)
     body = panel(gone.text, "Your data was deleted")
     # the list of what was deleted is the Account card's list, word for word
     assert f"deleted from its database: {pages.DELETED_LIST}. You are signed out.</p>" in body
-    assert "your simulator card models" in body and "deck covers" in body and "your watchlist" in body
+    assert "your card models" in body and "deck covers" in body and "your watchlist" in body
     # what was not touched sits in a tinted strip; backups and the security log stay small print
     assert (
         "<div class='notice'><strong>Not touched:</strong> your decks on Archidekt, including any backup "
@@ -72,7 +72,7 @@ async def test_the_account_card_and_the_deleted_page_list_the_same_things() -> N
     )
     for word in ("card_model", "watch", "deck_covers", "scan", "report", "snapshot", "proposal"):
         assert word in deletes, word
-    for named in ("simulator card models", "watchlist", "deck covers", "scan sessions", "test reports"):
+    for named in ("card models", "watchlist", "deck covers", "scan sessions", "test reports"):
         assert named in pages.DELETED_LIST, named
 
 
@@ -378,7 +378,7 @@ async def test_404_500_and_503_pages_are_panels_with_a_way_forward(
             # 503: the sign-in service cannot confirm the member; Try again loads the same page
             checker = h.app.state.gateway.membership
 
-            async def unavailable(_sub: str) -> str:
+            async def unavailable(_sub: str, *_holder: object, **_page: object) -> str:
                 return Membership.UNAVAILABLE
 
             assert checker is not None

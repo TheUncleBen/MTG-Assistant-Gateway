@@ -19,8 +19,8 @@
    add box, the top bar's "Search cards and decks" suggestions (static/suggest.js) and the other
    pages' card rows (static/menus.js): Open card, Add to deck…, Add to collection, Watch this
    card (or "On your watchlist", which opens it) and Art variants… (the shared printing picker,
-   static/printpick.js, in its browse mode) with watchlists on, Copy name, Open on Scryfall, and a
-   page's own items. Watch goes through /watchlist/api/watch; the toast's Undo stops that one
+   static/printpick.js, in its browse mode) with watchlists on, Pin card (Lists, Pinned on
+   Archidekt), Copy name, Open on Scryfall, and a page's own items. Watch goes through /watchlist/api/watch; the toast's Undo stops that one
    watch again through /watchlist/api/unwatch, by its id. Nothing of the watch shows with
    watchlists off (the page's body has no data-watchlist then).
 
@@ -80,7 +80,8 @@
     trophy: "<path d='M7 4h10v5a5 5 0 0 1-10 0z'/><path d='M7 6H4a3 3 0 0 0 3 3M17 6h3a3 3 0 0 1-3 3M12 14v4M8 21h8'/>",
     pdf: "<path d='M6 3h8l4 4v14H6z'/><path d='M14 3v4h4'/><path d='M9 13h6M9 17h6'/>",
     comment: "<path d='M4 5h16v11H9l-5 4z'/>",
-    tag: "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>"
+    tag: "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>",
+    pin: "<path d='M9 3h6l-1 6 4 4H6l4-4z'/><path d='M12 13v8'/>"
   };
   function icon(name) {
     var span = el("span");
@@ -191,7 +192,24 @@
     x.addEventListener("click", dismissToast);
     toastEl.appendChild(x);
     document.body.appendChild(toastEl);
+    placeToast(toastEl);
     if (!opts.error) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
+  }
+  // Two notes never cover each other: the deck page's own (static/deck.js) and this one each
+  // keep one at a time, so a new one that would sit on the other's is lifted above it.
+  function placeToast(t) {
+    var others = Array.prototype.filter.call(document.querySelectorAll(".toast"), function (o) {
+      return o !== t && o.getClientRects().length > 0;
+    });
+    if (!others.length) return;
+    var top = Math.min.apply(null, others.map(function (o) { return o.getBoundingClientRect().top; }));
+    var r = t.getBoundingClientRect();
+    var clear = others.every(function (o) {
+      var b = o.getBoundingClientRect();
+      return r.right <= b.left || b.right <= r.left || r.bottom <= b.top || b.bottom <= r.top;
+    });
+    if (clear) return;
+    t.style.bottom = Math.max(0, window.innerHeight - top + 8) + "px";
   }
   // Copies text: execCommand first, inside the press (the app's WebView may refuse the async
   // clipboard), then the async API. Resolves true when it was copied.
@@ -220,18 +238,41 @@
   function collect(name) {
     return post("/collection/api/add", { items: [{ name: name, quantity: 1 }], source: "manual" }).then(function (d) {
       if (d.ok && d.added && d.added.length) {
-        var a = el("a", null, "Open the collection");
+        var a = el("a", "btn", "Open the binder");
         a.href = "/collection?q=" + enc(name);
-        toast(name + " added to your collection.", { ok: true, actions: [a] });
+        // the gateway says which entry the copy went to (one already there, or a new one)
+        toast(d.message || name + " added to your binder.", { ok: true, actions: [a] });
         return true;
       }
-      toast(d.message || "The card could not be added to your collection.", { error: true });
+      toast(d.message || "The card could not be added to your binder.", { error: true });
       return false;
     }, function () { toast("No connection; the card was not added.", { error: true }); return false; });
   }
 
+  // "Pin card": pins it on Archidekt (the Pinned tab of Lists), one copy, the printing Archidekt
+  // gives the name
+  function pin(name) {
+    var body = "csrf=" + enc(csrf()) + "&action=pin&card=" + enc(name);
+    return fetch("/lists/pins", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: body
+    }).then(function (r) {
+      return r.json().catch(function () { return { ok: false, message: ODD }; });
+    }).then(function (d) {
+      if (d.ok) {
+        var a = el("a", "btn", "Open Wants");
+        a.href = "/collection/wants";
+        toast(d.notice || "Pinned on Archidekt.", { ok: true, actions: [a] });
+        return true;
+      }
+      toast(d.message || "The card could not be pinned.", { error: true });
+      return false;
+    }, function () { toast("No connection; the card was not pinned.", { error: true }); return false; });
+  }
+
   // -- Watch -------------------------------------------------------------------------------------
-  // The Watch button's look for a card: "Watch", or a check and "Watching" when it is watched.
+  // The Watch button's look for a card: "Watch", or a check and "On your watchlist" when it is watched.
   function drawButton(b, name, on) {
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
@@ -239,10 +280,51 @@
     b.title = on ? "On your watchlist" : "Watch " + name;
     b.textContent = "";
     b.appendChild(icon(on ? "check" : "bookmark"));
-    b.appendChild(el("span", null, on ? "Watching" : "Watch"));
+    b.appendChild(el("span", null, on ? "On your watchlist" : "Watch"));
+  }
+  /* The names the member watches (any printing), read once a page from /watchlist/api/names:
+     every page's card menu then says "On your watchlist" for them instead of offering the watch
+     again. A watch or an Undo here keeps the list right. */
+  var watchedNames = null, watchedAsked = false;
+  // kept in this tab for a minute (sessionStorage), so moving between pages does not ask again
+  // (0.7.46 audit SH-23); sign-out clears it with the site's storage
+  var WATCHED_KEY = "mtg-watched", KEEP_MS = 60000;
+  function keptWatched() {
+    try {
+      var kept = JSON.parse(sessionStorage.getItem(WATCHED_KEY) || "null");
+      return kept && Date.now() - kept.at < KEEP_MS && kept.names ? kept.names : null;
+    } catch (e) { return null; }
+  }
+  function keepWatched() {
+    try { sessionStorage.setItem(WATCHED_KEY, JSON.stringify({ at: Date.now(), names: Object.keys(watchedNames || {}) })); } catch (e) { /* storage off */ }
+  }
+  function loadWatched() {
+    if (watchedAsked || !enabled() || !window.fetch) return;
+    watchedAsked = true;
+    var kept = keptWatched();
+    if (kept) {
+      watchedNames = watchedNames || Object.create(null);
+      kept.forEach(function (n) { watchedNames[n] = true; });
+      return;
+    }
+    fetch("/watchlist/api/names", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !d.names) return;
+        watchedNames = watchedNames || Object.create(null);
+        d.names.forEach(function (n) { watchedNames[norm(n)] = true; });
+        keepWatched();
+      })
+      .catch(function () { /* the menus offer Watch; the server keeps one watch a card */ });
+  }
+  function isWatched(name) { return !!(watchedNames && watchedNames[norm(name)]); }
+  function markWatched(name, on) {
+    watchedNames = watchedNames || Object.create(null);
+    if (on) watchedNames[norm(name)] = true; else delete watchedNames[norm(name)];
+    if (keptWatched()) keepWatched();
   }
   function listLink(name) {
-    var a = el("a", null, "Open the watchlist");
+    var a = el("a", "btn", "Open the watchlist");
     a.href = "/watchlist?q=" + enc(name);
     return a;
   }
@@ -265,6 +347,7 @@
       }
       var w = d.watch || {};
       var name = w.name || what.name;
+      markWatched(name, true);
       state(true);
       if (!w.created) { toast(name + " is on your watchlist.", { ok: true, actions: [listLink(name)] }); return w; }
       var undo = el("button", "btn-plain", "Undo");
@@ -273,7 +356,7 @@
         undo.disabled = true;
         post("/watchlist/api/unwatch", { watch_id: w.watch_id }).then(function (u) {
           if (!u.ok && u.status !== 404) { toast(u.message || "The watch could not be undone.", { error: true }); return; }
-          if (!o.was) state(false);
+          if (!o.was) { state(false); markWatched(name, false); }
           toast(name + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
@@ -547,8 +630,8 @@
   window.MtgMenu = {
     open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
-    toast: toast, dismissToast: dismissToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
-    copyText: copyText, copyAndSay: copyAndSay, collect: collect, enabled: enabled, phone: phone, norm: norm,
+    toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
+    copyText: copyText, copyAndSay: copyAndSay, collect: collect, pin: pin, enabled: enabled, phone: phone, norm: norm,
     // true while the menu's own history.back() has not landed yet (static/box.js asks)
     backPending: function () { return ignorePop; },
     // a page change a menu item starts (a form sent, an address opened) goes through this
@@ -577,12 +660,13 @@
     } else if (s.addHref) {
       items.push(link("Add to deck…", "plus", s.addHref));
     }
-    if (s.collect) items.push(item("Add to collection", "collection", function () { collect(name); }));
+    if (s.collect) items.push(item("Add to binder", "collection", function () { collect(name); }));
     if (s.watch) {
-      if (s.watch.watched) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
+      if (s.watch.watched || isWatched(name)) items.push(link("On your watchlist", "check", "/watchlist?q=" + enc(name)));
       else items.push(item("Watch this card", "bookmark", s.watch.onWatch, { focusBack: true }));
-      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Art variants…", "image", s.watch.onArt));
+      if (s.watch.onArt && window.MtgPrintPick) items.push(item("Printings…", "image", s.watch.onArt));
     }
+    if (s.collect) items.push(item("Pin card", "pin", function () { pin(name); }));
     (s.before || []).forEach(function (n) { items.push(n); });
     if (s.copyName !== false) items.push(item("Copy name", "copy", function () { copyAndSay(name, "Name copied."); }));
     items.push(sep());
@@ -713,9 +797,13 @@
     });
   });
 
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", loadWatched);
+  else loadWatched();
+
   window.MtgCardMenu = {
     enabled: enabled, icon: icon, toast: toast, dismissToast: dismissToast, norm: norm,
     drawButton: drawButton, listLink: listLink, watch: watch, artVariants: artVariants, collect: collect,
+    isWatched: isWatched, markWatched: markWatched,
     open: open, close: close, isOpen: function () { return !!menu; }, bind: bind
   };
 })();

@@ -130,7 +130,7 @@ async def test_history_reconciles_with_what_is_still_on_archidekt(stack: Stack) 
         hist = await b.http.get("/history", headers=NAV)
         assert (
             hist.text.split("id='backups'")[1].count("<div class='tr'>") == 1
-            and "backup copy on Archidekt</a>" in hist.text
+            and "Backup copy on Archidekt</a>" in hist.text
         )
         assert restore_form in hist.text
 
@@ -140,7 +140,7 @@ async def test_history_reconciles_with_what_is_still_on_archidekt(stack: Stack) 
         ark.calls.clear()
         hist = await b.http.get("/history", headers=NAV)
         assert (
-            "Backup copies on Archidekt" not in hist.text and "backup copy on Archidekt</a>" not in hist.text
+            "Backup copies on Archidekt" not in hist.text and "Backup copy on Archidekt</a>" not in hist.text
         )
         assert "its backup copy is no longer on Archidekt" in hist.text
         assert restore_form in hist.text  # Restore uses the gateway's snapshot, not the copy

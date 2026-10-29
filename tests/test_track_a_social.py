@@ -11,6 +11,7 @@ from .test_account_actions import _press
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import call, linked_user, structured
 from .test_social_layout import linked, post
+from .track_a_helpers import account_call
 
 ROOT = 300043
 
@@ -109,7 +110,7 @@ async def test_the_assistant_can_vote_on_a_later_page_too(stack: Stack) -> None:
     _thread(stack)
     read = structured(await call(h, token, "get_deck_comments", {"deck_id": "43", "page": 3}))
     assert read["page"] == 3 and [c["id"] for c in read["comments"]] == [555005]
-    res = await call(
+    res = await account_call(
         h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555005, "page": 3}
     )
     p = structured(res)
@@ -300,9 +301,13 @@ async def test_a_bookmark_already_so_says_so(stack: Stack) -> None:
     stack.ark.private.discard(43)
     note = "(already the case; applying changes nothing)"
     stack.ark.bookmarks["alice"] = {43}
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "bookmark"}))
+    p = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "bookmark"})
+    )
     assert p["rows"][0]["text"].endswith(note), p
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "unbookmark"}))
+    p = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "unbookmark"})
+    )
     assert not p["rows"][0]["text"].endswith(note), p
 
 
@@ -450,7 +455,9 @@ async def test_a_follow_the_gateway_could_not_check_says_so(stack: Stack, monkey
         assert (await b.http.get("/social/api/users/9001/follow")).json()["following"] is True
     finally:
         await b.aclose()
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
+    p = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
+    )
     assert p["rows"][0]["text"].endswith("(the gateway could not check whether you already follow them)"), p
     assert ark.follows.get("alice", set()) == set()
 
@@ -479,12 +486,16 @@ async def test_a_followed_person_past_the_first_pages_is_found_by_both_lookups(
     token = await linked_user(stack)
     read = _long_following(stack, monkeypatch, amy_on=8)
     p = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
     )
     assert p.get("ok") is not False and p["rows"][0]["text"].startswith("Let amy edit"), p
     assert read == list(range(1, 9)), read  # stopped at the page that has amy
     stack.ark.private.discard(43)  # amy's deck: its owner is the one followed
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
+    p = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
+    )
     assert p["rows"][0]["text"] == "Follow amy on Archidekt (already the case; applying changes nothing)", p
     assert read == list(range(1, 9)), read  # the remembered pages answered it
 
@@ -496,7 +507,9 @@ async def test_a_lookup_stops_at_its_cap_and_says_so(stack: Stack, monkeypatch) 
     token = await linked_user(stack)
     read = _long_following(stack, monkeypatch, amy_on=None)
     p = structured(
-        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+        await account_call(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
     )
     assert p["ok"] is False and p["error"] == "not_found", p
     assert (
@@ -522,7 +535,7 @@ async def test_a_name_not_followed_is_looked_up_once_until_the_list_expires(
     p = {}
     for _ in range(2):
         p = structured(
-            await call(
+            await account_call(
                 h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
             )
         )
@@ -536,7 +549,9 @@ async def test_a_name_not_followed_is_looked_up_once_until_the_list_expires(
         "which is as far as the gateway reads" in p["message"]
     ) and "if you don't follow them yet, follow them" in p["message"]
     stack.ark.private.discard(43)  # amy's deck: a follow of its owner, whom the list does not hold
-    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"}))
+    p = structured(
+        await account_call(h, token, "propose_deck_social", {"deck_id": "43", "action": "follow_owner"})
+    )
     assert "could not check whether you already follow them" in p["rows"][0]["text"], p
     assert len(read) == FOLLOWING_LOOKUP_PAGES  # answered by the remembered list
     # once it expires, two lookups at once share one read
@@ -620,7 +635,7 @@ async def test_a_name_missing_from_a_list_read_to_its_end_says_follow_them_first
     monkeypatch.setattr(client, "following", pages)
     token = await linked_user(stack)
     p = structured(
-        await call(
+        await account_call(
             stack.h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
         )
     )

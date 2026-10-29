@@ -53,10 +53,7 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
     assert "A JPEG or PNG up to 1 MB." in prof and "Only you can change it" not in prof
     mail = _card(page, "email")
     # the inverted switch reads the right way round: on means notifications
-    assert (
-        "Archidekt notifications</label>" in mail
-        and esc("Shows Archidekt's notifications in the bell.") in mail
-    )
+    assert "Archidekt alerts</label>" in mail and esc("Shows Archidekt's alerts in the bell.") in mail
     assert "Turn off" not in mail and "Turns off" not in mail
     # on means notifications: the switch is checked exactly when Archidekt's "no notifications" is off
     off = bool(stack.ark.account.profile("alice")["accountSettings"].get("noArchidektNotifications"))
@@ -67,7 +64,7 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
     assert "Two shops, in order." not in defaults
     assert ">EDH bracket</option>" in defaults and "EDH Bracket Info" not in defaults
     notes = (await member.http.get("/notifications")).text
-    assert "Your notifications from Archidekt." in notes and "bell holds" not in notes
+    assert "Your alerts from Archidekt." in notes and "bell holds" not in notes
     lists = (await member.http.get("/lists/custom")).text
     assert "Cards you made on Archidekt." in lists and "made up" not in lists
     # the card viewer's note on a custom card (static/cardview.js): no claim about price lists
@@ -197,10 +194,20 @@ async def test_the_package_panels_budget_sits_in_the_controls_column(member: Bro
 
 
 async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None:
+    """Since 0.7.46 (audit SH-03, My lists draws at once) a first visit draws the open tab's count
+    and the tab bar asks the others after the page is there (data-counts, static/lists.js): that
+    answer has a number for every tab's link. The pins are Binder's Wants, not a tab."""
     account_lists.forget_counts("user-1")
-    page = (await member.http.get("/lists/pins")).text
+    page = (await member.http.get("/lists/templates")).text
     tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", page).group(0)
-    assert tabs.count("<span class='n'>") == 5, tabs
+    assert tabs.count("<span class='n'>") == 1 and "data-counts='/lists/api/counts'" in tabs, tabs
+    links = re.findall(r"<a href='/lists/([a-z]+)'", tabs)
+    got = (await member.http.get("/lists/api/counts")).json()
+    assert len(links) == 4 and set(links) <= set(got["counts"]), (links, got)
+    assert all(isinstance(got["counts"][k], int) for k in links), got
+    again = (await member.http.get("/lists/templates")).text
+    tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", again).group(0)
+    assert tabs.count("<span class='n'>") == 4, tabs
 
 
 async def test_the_scripts_carry_the_icons_their_buttons_ask_for(member: Browser) -> None:

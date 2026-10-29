@@ -267,7 +267,7 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     p = structured(low)
     assert p["approval_mode"] == "semi" and p["risk"] == "low" and p["assistant_may_apply"] is True
     assert "call apply_proposal now" in p["next_step"]
-    assert APPROVAL_META_KEY not in (low.get("_meta") or {})  # nothing for a person to press
+    assert low["_meta"][APPROVAL_META_KEY]  # the card offers Apply now too, should the assistant not (0.7.46)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     sent = len(ark.patches)
     assert a["ok"] and a["state"] == "applied" and a["snapshot_id"] and sent >= 1
@@ -279,8 +279,10 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
     assert p["risk"] == "high" and "6 rows" in p["risk_reason"] and p["assistant_may_apply"] is False
     assert "high risk" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
     code = high["_meta"][APPROVAL_META_KEY]  # the card gets its buttons
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    own = await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    out = structured(own)
     assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == "high"
+    assert "_meta" not in own or APPROVAL_META_KEY not in own["_meta"]  # the refusal draws no card (0.7.46)
     assert "semi-automatic" in out["message"] and len(ark.patches) == sent
     refused = [x for x in h.db.audit_for_user("user-1", 50) if x["event"] == "apply_needs_user"]
     assert refused and refused[0]["detail"]["mode"] == "semi" and refused[0]["detail"]["risk"] == "high"
@@ -323,15 +325,18 @@ async def test_every_proposal_kind_has_a_tier(stack: Stack, tool: str, args: dic
 
 
 async def test_semi_mode_note_says_what_it_applies(stack: Stack) -> None:
-    """account_status's note matches the tiers: clones and small deck or collection edits apply
-    without the member's press in semi mode (a clone is low risk by design); a new deck from a list
-    waits."""
+    """The mode's note matches the tiers: clones and small deck or collection edits apply without
+    the member's press in semi mode (a clone is low risk by design); a new deck from a list waits.
+    Since 0.7.46 (A7) account_status gives the assistant the short note and the account page the
+    full one."""
     h = stack.h
     token = await linked_user(stack)
     await _set_mode(h, "semi")
-    note = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    short = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    assert "at most 5 card rows" in short and "a private copy of a deck" in short, short
+    note = modes.mode_help("semi")
     assert "at most 5 card rows" in note and f"{modes.MAX_COPIES_PER_ROW} copies each" in note
-    assert "a private copy of a deck (a clone" in note and "collection" in note
+    assert "a private copy of a deck (a clone" in note and "binder" in note
     assert "A new deck built from a list" in note and "New decks" not in note
     assert "{rows}" not in modes.mode_help("semi", max_rows=3) and "at most 3" in modes.mode_help(
         "semi", max_rows=3
@@ -365,7 +370,7 @@ async def test_auto_mode_applies_everything_with_a_snapshot(stack: Stack) -> Non
     r = structured(await _adds(h, token, 1))
     assert r["assistant_may_apply"] is True
     r = structured(await call(h, token, "reject_proposal", {"proposal_id": r["proposal_id"]}))
-    assert r["state"] == "rejected" and r["assistant_may_apply"] is False and r["risk"] == "low"
+    assert r["state"] == "rejected" and r["assistant_may_apply"] is False
     snaps = structured(await call(h, token, "list_snapshots"))["snapshots"]
     assert [s["snapshot_id"] for s in snaps] == [a["snapshot_id"]]
     # The REST API applies under the same mode (same service path).
@@ -517,7 +522,7 @@ def test_the_low_risk_wording_is_the_list_risk_of_checks() -> None:
         assert modes.risk_of("edit", rows)[0] == "low", kind
         assert modes.risk_of("collection", rows)[0] == "low", kind
     for text in (modes.low_risk_text(), modes.mode_help("semi")):
-        assert "color tag" in text and "custom mana value" in text and "collection" in text
+        assert "color tag" in text and "custom mana value" in text and "binder" in text
 
 
 def test_the_account_actions_wording_names_every_account_action() -> None:
@@ -611,9 +616,9 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
     from mtg_gateway.pages import OK_MESSAGES
 
     assert OK_MESSAGES["mode_semi"] == (
-        "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
+        "Saved: your assistant applies low-risk changes without asking (a small deck or binder edit, "
         "or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-        "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot "
+        "a snapshot you can restore from History; a binder change keeps none. Restoring a snapshot "
         "does not put back a deck's folder, tags, cover or custom cards."
     )
     # and Full auto's names taking custom cards out among what still waits (confirmation C-2)

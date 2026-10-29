@@ -75,6 +75,8 @@ def guarded_form(
     action: str | None = None,
     extra: str = "",
     tab_reachable: bool = False,
+    form_id: str = "",
+    opens: dict[str, str] | None = None,
 ) -> str:
     """HTML for a form whose submit buttons start disabled until ``clickguard.js`` enables them,
     plus a ``<noscript>`` copy with working buttons for browsers without JavaScript.
@@ -84,8 +86,12 @@ def guarded_form(
     ``hidden`` values and labels are escaped here. With ``tab_reachable`` the locked buttons are
     marked ``aria-disabled`` instead of ``disabled``, so a fast keyboard user can still Tab to
     them; the script refuses their press until they unlock, as it does for a disabled one.
+    ``opens`` maps a button's value to the id of a box the page holds (ui.box): with scripts that
+    button opens the box instead of submitting (its label ends in an ellipsis), and the box's own
+    button submits this form by its ``form_id``; the ``<noscript>`` copy keeps the plain submit.
     """
     act = f" action='{html.escape(action)}'" if action else ""
+    fid = f" id='{html.escape(form_id)}'" if form_id else ""
     fields = "".join(
         f"<input type='hidden' name='{html.escape(k)}' value='{html.escape(v)}'>" for k, v in hidden.items()
     )
@@ -93,14 +99,22 @@ def guarded_form(
     def row(disabled: bool) -> str:
         locked = " aria-disabled='true'" if tab_reachable else " disabled"
         attrs = f"{locked} data-guard" if disabled else ""
-        return "".join(
-            f"<button type='submit' name='action' value='{html.escape(value)}' "
-            f"class='{html.escape(cls)}'{attrs}>{html.escape(label)}</button>"
-            for value, label, cls in buttons
-        )
+        out = []
+        for value, label, cls in buttons:
+            if disabled and opens and value in opens:
+                out.append(
+                    f"<button type='button' class='{html.escape(cls)}' "
+                    f"data-box-open='{html.escape(opens[value])}'{attrs}>{html.escape(label)}…</button>"
+                )
+            else:
+                out.append(
+                    f"<button type='submit' name='action' value='{html.escape(value)}' "
+                    f"class='{html.escape(cls)}'{attrs}>{html.escape(label)}</button>"
+                )
+        return "".join(out)
 
     return (
-        f"<form method='post'{act} class='guarded'{' data-tab' if tab_reachable else ''} "
+        f"<form{fid} method='post'{act} class='guarded'{' data-tab' if tab_reachable else ''} "
         f"data-dwell='{GUARD_DWELL_MS}' "
         f"data-settle='{GUARD_SETTLE_MS}'>{fields}"
         f"<div class='choice'>{row(True)}{extra}</div>"

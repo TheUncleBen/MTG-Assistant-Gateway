@@ -26,9 +26,15 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
         "Backups",
         "Copies kept before every edit, and the nightly backup of the gateway's database.",
     ),
-    ("simulation", "Simulation", "Forge games for deck reports."),
+    ("simulation", "Tests", "Forge games for deck tests."),
     ("watchlists", "Watchlists and prices", "Watched cards and decks, and the daily price check."),
     ("general", "General", "The gateway's name and housekeeping."),
+    (
+        "signin",
+        "Sign-in",
+        "How long members stay signed in on the website and in the Android app, and how long an "
+        "assistant's access lasts before it renews it. A change applies to the next sign-in.",
+    ),
     (
         "pacing",
         "Archidekt and Scryfall pacing",
@@ -73,8 +79,26 @@ TEXT: dict[str, tuple[str, str]] = {
         "A change nobody approves in this time expires.",
     ),
     "apply_in_chat": (
-        "Approve buttons in the chat",
-        "Claude and ChatGPT show each change as a card with Approve and Reject buttons.",
+        "Apply buttons in the chat",
+        "Claude and ChatGPT show each change as a card with Apply and Reject buttons.",
+    ),
+    "browser_session_ttl": (
+        "Website sign-in when unused",
+        "A member who doesn't use the website or the Android app for this long signs in again. "
+        "Each use starts the time again.",
+    ),
+    "browser_session_max_age": (
+        "Longest website sign-in",
+        "However much it is used, a website or Android app sign-in ends this long after it was made.",
+    ),
+    "access_token_ttl": (
+        "Assistant access",
+        "How long an assistant can use the gateway before it asks for new access. It does that by "
+        "itself, without the member.",
+    ),
+    "refresh_token_ttl": (
+        "Assistant refresh",
+        "How long an assistant can keep asking for new access. After this, the member connects it again.",
     ),
     "deck_sync_minutes": (
         "Check Archidekt for deck changes every",
@@ -105,8 +129,9 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "snapshots_per_deck": (
         "Restore points kept per deck",
-        "Kept on the gateway, newest first, for History > Restore. Restore points that record a backup "
-        "copy the gateway may still delete are kept too.",
+        "Kept on the gateway, newest first, for History > Restore. Your own edits on the deck page count "
+        "apart, with the same number, so they never push out the one from before an assistant's change. "
+        "Restore points that record a backup copy the gateway may still delete are kept too.",
     ),
     "backup_hour_utc": ("Nightly backup hour (UTC)", "When the gateway backs up its own database, 0 to 23."),
     "backup_keep_days": (
@@ -387,6 +412,9 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
             what = "turning this off" if CONFIRM[reset][0] == "off" else "lowering this"
             out.errors[reset] = f"Tick the box below to confirm {what}."
             return out
+        _unused_within_longest(live, [(reset, before, spec.default)], out)
+        if out.errors:
+            return out
         live.reset(reset, by=by)
         after = live.get(reset)
         if after != before:
@@ -412,12 +440,33 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
                 out.errors[key] = f"Tick the box below to confirm {what}."
                 continue
             pending.append((key, before, value))
+    _unused_within_longest(live, pending, out)
     if out.errors:
         return out
     for key, before, value in pending:
         live.set(key, value, by=by)
         out.changes.append((key, before, value))
     return out
+
+
+def _unused_within_longest(live: LiveSettings, pending: list[tuple[str, Any, Any]], out: Outcome) -> None:
+    """A website sign-in may not last longer unused than it may last at all: refuse a change that
+    would make "Website sign-in when unused" longer than "Longest website sign-in"."""
+    new = {key: value for key, _before, value in pending}
+    unused_key, longest_key = "browser_session_ttl", "browser_session_max_age"
+    if unused_key not in new and longest_key not in new:
+        return
+    unused_spec, longest_spec = MANAGED_SETTINGS[unused_key], MANAGED_SETTINGS[longest_key]
+    unused = new[unused_key] * unused_spec.scale if unused_key in new else live.seconds(unused_key)
+    longest = new[longest_key] * longest_spec.scale if longest_key in new else live.seconds(longest_key)
+    if unused <= longest:
+        return
+    if unused_key in new:
+        shown_longest = shown(longest_spec, longest / longest_spec.scale)
+        out.errors[unused_key] = f"Must not be longer than “{label(longest_key)}” ({shown_longest})."
+    else:
+        shown_unused = shown(unused_spec, live.get(unused_key))
+        out.errors[longest_key] = f"Must not be shorter than “{label(unused_key)}” ({shown_unused})."
 
 
 def _keep_unsaved(live: LiveSettings, data: Mapping[str, str], group: str, reset: str, out: Outcome) -> None:

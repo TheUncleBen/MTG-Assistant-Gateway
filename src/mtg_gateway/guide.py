@@ -8,23 +8,27 @@ other page and reads a few facts from the gateway (its name, whether deck writes
 low-risk row limit, whether the backup copy on Archidekt is offered) so it describes this
 gateway and not a generic one.
 
-The page is one long document with a nested contents rail: ``static/guide.js`` adds the search
-box, keeps the rail's current entry in step with the reader's position and shows the
-"Back to top" button; without script the whole guide is simply visible and every link works.
+The guide is one page a topic (``/guide/<topic>``) with a contents page (``/guide``) and a
+search (``/guide/search``, and ``/guide/search.json`` for the live list ``static/guide.js``
+draws under the box); an old link to ``/guide#<topic>`` lands on the topic's page. The
+navigation is described once, from the navigation itself (``nav_description``), so the words
+can't drift from the bars (0.7.46 audit SH-25).
 """
 
 from __future__ import annotations
 
 import html
+import json
 import re
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import modes, tool_labels
-from .pages import _csrf, browser_session, login_redirect
-from .theme import icon, render
+from . import modes, tool_labels, ui
+from .pages import _csrf, browser_session
+from .theme import ASSISTANT_PAGES, NAV_LINKS, RAIL_EXTRA, binder_pages, icon, more_groups, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -33,6 +37,9 @@ if TYPE_CHECKING:
     from .config import LiveSettings
 
 _esc = html.escape
+PAGE = "/guide"
+TITLE = "Guide"
+LEAD = "What you can do here, with or without an assistant."
 
 GUIDE_CSS = """
 .guide{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}
@@ -40,10 +47,34 @@ GUIDE_CSS = """
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
-.gsearch input[type=search]{width:100%}
+.gsearch .gsrow{display:flex;gap:.5rem;align-items:stretch}
+.gsearch .gsrow input[type=search]{flex:1 1 auto;min-width:0;margin:0}
+.gsearch .gsrow .btn{margin:0;flex:none}
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
-.guide .gresults{list-style:none;margin:.35rem 0 0;padding:0}
-.guide .gresults li{margin:0 0 .25rem}
+.gsearch .status:empty{display:none}
+/* the contents page: a card a part, its topics as rows */
+.gcontents{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem;
+  margin-top:1rem}
+.gcontents .gpart{margin:0}
+.gtoc{list-style:none;margin:0;padding:0}
+.gtoc li{margin:0}
+.gtoc a{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:.4rem .5rem;
+  border-radius:var(--radius);color:var(--text);text-decoration:none;font-weight:700}
+.gtoc a svg{color:var(--orange);width:18px;height:18px;flex:none}
+.gtoc a:hover,.gtoc a:focus-visible{background:var(--surface-2)}
+/* a topic page: the way back, the topic, the topics before and after */
+.gcrumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
+.gmain .ui-head h1{display:flex;align-items:center;gap:.5rem}
+.gmain .ui-head h1 svg{color:var(--orange);width:28px;height:28px;flex:none}
+.gturn{display:flex;justify-content:space-between;gap:.75rem;margin:1.5rem 0 0;padding-top:1rem;
+  border-top:1px solid var(--border-soft)}
+.gturn .btn{margin:0;max-width:48%;display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
+.gturn .btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gturn a[rel=prev] svg{transform:rotate(90deg)}
+.gturn a[rel=next] svg{transform:rotate(-90deg)}
+.gresults .where{display:block;color:var(--orange-text);font-size:.8rem;font-weight:700}
+ul.gresults{list-style:none;margin:.35rem 0 0;padding:0}
+.gresults li{margin:0 0 .25rem}
 .gresults a{display:block;padding:.4rem .6rem;border-radius:var(--radius);color:var(--text);
   text-decoration:none;border:1px solid var(--border-soft)}
 .gresults a:hover,.gresults a:focus-visible{background:var(--surface-2);color:var(--text)}
@@ -60,14 +91,18 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .gnav a{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border-radius:var(--radius);
   color:var(--text);text-decoration:none;min-height:2.2rem}
 @media (pointer:coarse){.gnav a{min-height:44px}}
-.gnav a.part{font-weight:800}
-.gnav a.part svg{color:var(--orange)}
+.gnav .part{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;font-weight:800}
+.gnav .part svg{color:var(--orange)}
 .gnav li ul a{font-size:.95rem;color:var(--text-muted)}
 .gnav a:hover{background:var(--surface-2);color:var(--text)}
-.gnav a[aria-current=true]{background:var(--orange-tint);color:var(--text);font-weight:700;
+.gnav a[aria-current=page]{background:var(--orange-tint);color:var(--text);font-weight:700;
   box-shadow:inset 3px 0 0 var(--orange)}
-.gnav a.part.in{color:var(--orange-text)}
 .gmain{min-width:0}
+/* a link inside the guide's sentences (Open Account details, take your first edit): the text's
+   colour, bold and underlined in orange, never blue */
+.gmain a:not([class]){color:var(--text);font-weight:700;text-decoration:underline;
+  text-decoration-color:var(--orange);text-underline-offset:2px}
+.gmain a:not([class]):hover{color:var(--orange-text)}
 .gpart{margin:0 0 1.5rem}
 .gpart > header{margin:0 0 .75rem}
 .gpart > header h2{display:flex;align-items:center;gap:.5rem;font-size:1.6rem;margin:0 0 .15rem}
@@ -114,7 +149,6 @@ details.gnav > summary::-webkit-details-marker{display:none}
   padding:.05rem .3rem}
 .guide kbd{border:1px solid var(--border);font-weight:700;white-space:nowrap}
 .guide .nomatch{margin:1rem 0}
-.guide .gadv{margin:1.5rem 0 0;border-top:1px solid var(--border-soft);padding-top:1rem}
 .guide .gadv > p{color:var(--text-muted)}
 .guide .gadv code{white-space:nowrap}
 .gtop{position:fixed;right:1rem;bottom:1.5rem;z-index:7;display:inline-flex;align-items:center;gap:.4rem;
@@ -125,14 +159,16 @@ details.gnav > summary::-webkit-details-marker{display:none}
 @media (min-width:900px){
   .guide{grid-template-columns:16rem minmax(0,1fr);gap:1.5rem}
   .guide .gside{position:sticky;top:4rem;max-height:calc(100vh - 5rem);overflow:auto;padding-right:.25rem}
+  .gside .gsrow{flex-wrap:wrap}
+  .gside .gsrow input[type=search],.gside .gsrow .btn{flex:1 1 100%}
   details.gnav > summary{display:none}
-  details.gnav:not([open]) > nav{display:block}
 }
 """
 
 # The four parts: id, icon, title and lead, then the sections (id, icon, label) in reading order.
 # A section whose id ends up without a body (the collection on a gateway without one) is dropped
 # from the rail and the page together, so the two never disagree.
+ADVANCED_TITLE = "Advanced: tool names"
 PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
     (
         "tutorials",
@@ -156,13 +192,13 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("how-new-deck", "plus", "Create a deck"),
             ("how-add-cards", "edit", "Add or change cards"),
             ("how-organise", "folder", "Settings, folders, tags and deleting"),
-            ("how-approve", "proposals", "Approve a proposal"),
+            ("how-approve", "proposals", "Apply a proposal"),
             ("how-restore", "undo", "Restore a snapshot"),
             ("how-compare", "swap", "Compare with a precon"),
             ("how-export", "download", "Export and import"),
             ("how-search", "search", "Find public decks and precons"),
             ("how-scan", "camera", "Scan a photo of your cards"),
-            ("how-collection", "collection", "Use your collection"),
+            ("how-collection", "collection", "Use your binder"),
             ("how-playtest", "play", "Playtest a deck"),
             ("how-layout", "sun", "Change the theme or layout"),
             ("how-app", "download", "Use the Android app"),
@@ -181,6 +217,7 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("ref-keys", "menu", "Keyboard shortcuts"),
             ("ref-syntax", "edit", "The editor's search bar and list syntax"),
             ("ref-formats", "download", "Export formats"),
+            ("ref-tools", "list", ADVANCED_TITLE),
         ],
     ),
     (
@@ -200,7 +237,6 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
 
 
 # The closed fold at the end of the guide (Ben, 18:11Z 21 Oct): the one place member text shows a tool name.
-ADVANCED_TITLE = "Advanced: tool names"
 ADVANCED_INTRO = "Your assistant picks these for you. They are listed here in case you need the exact name."
 WATCH_TOOLS = frozenset({"watch_card", "watch_deck", "unwatch", "list_watchlist", "card_price_history"})
 # What each ask does, for the abilities table: a proposal you approve, your own press, applying, a
@@ -221,15 +257,9 @@ _PROPOSES = frozenset(
 )
 _YOUR_PRESS = frozenset(
     {
-        "propose_deck_social",
-        "propose_comment",
-        "propose_create_folder",
-        "propose_collaborator",
+        "propose_account_action",
         "propose_delete_deck",
-        "propose_deck_help",
-        "propose_report",
         "propose_profile_change",
-        "propose_contest_entry",
     }
 )
 _ON_PROPOSALS = frozenset(
@@ -242,6 +272,7 @@ _ON_PROPOSALS = frozenset(
         "withdraw_proposal",
         "combine_proposals",
         "check_deck_changes",
+        "check_new_deck",
     }
 )
 
@@ -298,18 +329,62 @@ def _stackable(page: str) -> str:
     return re.sub(r"<table><thead>(.*?)</thead><tbody>(.*?)</tbody></table>", one, page, flags=re.S)
 
 
-def _nav(parts: list[tuple[str, str, str, str, list[tuple[str, str, str]]]]) -> str:
-    items = []
-    for pid, ic, title, _lead, sections in parts:
-        subs = "".join(f"<li><a href='#{sid}'>{_esc(label)}</a></li>" for sid, _i, label in sections)
-        items.append(f"<li><a class='part' href='#{pid}'>{icon(ic)}{_esc(title)}</a><ul>{subs}</ul></li>")
-    return (
-        f"<details class='gnav' open><summary class='btn'>{icon('menu')} Contents</summary>"
-        f"<nav aria-label='Guide contents'><ul>{''.join(items)}</ul></nav></details>"
+@dataclass(frozen=True)
+class Guide:
+    """The guide as built for this gateway: the parts with their topics (id, icon, label), the
+    topics' bodies, and where each inner anchor lives (its topic)."""
+
+    parts: list[tuple[str, str, str, str, list[tuple[str, str, str]]]]
+    bodies: dict[str, str]
+
+    @property
+    def topics(self) -> list[tuple[str, str, str, str]]:
+        """(topic id, icon, label, part id) in reading order."""
+        return [(sid, ic, label, pid) for pid, _i, _t, _l, secs in self.parts for sid, ic, label in secs]
+
+    def part_of(self, sid: str) -> tuple[str, str, str, str, list[tuple[str, str, str]]] | None:
+        return next((p for p in self.parts if any(x[0] == sid for x in p[4])), None)
+
+    def owner_of(self, anchor: str) -> str | None:
+        """The topic a link target lives in: the topic itself, or the topic whose body holds the
+        heading with that id."""
+        if anchor in self.bodies:
+            return anchor
+        return next((sid for sid, body in self.bodies.items() if f"id='{anchor}'" in body), None)
+
+
+def _plain(label: str) -> str:
+    return f"<strong>{_esc(label)}</strong>"
+
+
+def nav_description(*, html_out: bool = True) -> str:
+    """The navigation in one paragraph, built from the navigation itself (theme.NAV_LINKS,
+    ASSISTANT_PAGES, binder_pages, more_groups, RAIL_EXTRA), so the guide and the bars never
+    disagree. ``html_out`` False gives the plain text docs carry."""
+    b = _plain if html_out else (lambda t: t)
+    places = [label for _h, label, _i in NAV_LINKS]
+    assistant = [label for _h, label, _i in ASSISTANT_PAGES]
+    binder = [label for _h, label, _i in binder_pages()]
+    more = [label for _g, links in more_groups() for _h, label, _i in links]
+    rail = [label for _h, label, _i, _c in RAIL_EXTRA]
+    text = (
+        f"On a phone the tabs at the bottom are {', '.join(b(x) for x in places[:-1])} and "
+        f"{b(places[-1])}, then {b('More')}. {b(places[2])} holds {', '.join(binder[:-1])} and {binder[-1]}, "
+        f"switched at its top; {b(places[3])} holds {', '.join(assistant[:-1])} and {assistant[-1]} the same "
+        f"way, and shows how many proposals are waiting. {b('More')} opens {', '.join(more[:-1])} and "
+        f"{more[-1]}; the magnifier at the top opens the search box for cards and decks. On a wider touch "
+        "screen, such as an unfolded foldable or a tablet, and in the Android app from 600 px, the same "
+        f"places are on a rail down the left edge, with {' and '.join(rail + ['Alerts'])}. A computer's "
+        "browser shows them in the top bar, with More as a drop-down and a search box beside them. Your "
+        "picture at the top right opens the Account page: Account details, My lists, My activity, "
+        "the look, the Guide, the assistant skill and the apps, and Sign out."
     )
+    if html_out:
+        text = text.replace("the Account page", "the <a href='/account'>Account</a> page")
+    return text
 
 
-def guide_body(
+def build(
     *,
     site: str,
     writes_enabled: bool,
@@ -320,7 +395,7 @@ def guide_body(
     backup_folder: str = "MTG Gateway Backups",
     watchlists: bool = False,
     live: LiveSettings | None = None,
-) -> str:
+) -> Guide:
     if live is not None:  # the approval rows as set now (live settings), over the start-up values
         max_rows = int(live.get("auto_apply_max_rows"))
         big_rows = int(live.get("auto_big_edit_rows"))
@@ -346,7 +421,7 @@ def guide_body(
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
     backup_assistant = "Applies made by your assistant always make the copy. " if archidekt_backups else ""
-    backup_delete = "both the snapshot and the backup copy" if archidekt_backups else "the snapshot"
+    backup_delete = "a snapshot (no backup copy on Archidekt)"
     # -- Tutorials --------------------------------------------------------------------------------
     tut_start = (
         f"<p>{_esc(site)} is a private companion to <strong>Archidekt</strong>. Everything you can do on "
@@ -361,19 +436,15 @@ def guide_body(
         "them: text, stacks or grid, grouped and sorted how you like; then make "
         "<a href='#tut-first-edit'>your first edit</a>.</span></li>"
         "<li><span><strong>Scan</strong> a pile of cards with your phone, add them to a deck or to your "
-        "collection, and <strong>search</strong> public decks for ideas (the how-to guides cover "
+        "binder, and <strong>search</strong> public decks for ideas (the how-to guides cover "
         "each).</span></li>"
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
-        "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
+        "page and ask it to research, test or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant and More; "
-        "the magnifier at the top opens the search box for cards and decks. Assistant holds Proposals, "
-        "History and Reports, switched at its top; More opens Search, Precons, Scan, Watchlist and My "
-        "lists. Unfolded or on a tablet the same tabs move to a rail down the left edge, with Alerts. "
-        "Your picture at the top right opens the <a href='/account'>Account</a> page.</p>"
+        f"<p class='tip'>{nav_description()}</p>"
     )
     tut_link = (
-        "<p>Linking gives this site your Archidekt decks, your collection and the right to save for you. "
+        "<p>Linking gives this site your Archidekt decks, your binder and the right to save for you. "
         "It takes a minute and you do it once.</p>"
         "<ol class='steps'>"
         "<li><span>Open <a href='/account/details'>Account details</a> and find <strong>Archidekt</strong>."
@@ -407,20 +478,20 @@ def guide_body(
         "<li><span>Ask it something that only reads: “Show me my decks”, “open my Krenko deck and tell me "
         "its mana curve”.</span></li>"
         "<li><span>Ask for a change: “Swap these three cards”. It comes back as a <strong>proposal</strong> "
-        "with a review link and, in Claude on the web, desktop and phones (and ChatGPT, as its maker "
-        "reports), as a card in the chat with Approve and Reject. <a href='#how-approve'>Approve a "
-        "proposal</a> has the details.</span></li></ol>"
+        "with a review link and, in Claude on the web, desktop and phones (and ChatGPT on the web and "
+        "in its Android app), as a card in the chat with Apply and Reject. "
+        "<a href='#how-approve'>Apply a proposal</a> has the details.</span></li></ol>"
         "<p>Things you can ask it:</p><ul>"
         "<li>“Search for Atraxa decks under bracket 3”, “what does this deck run that mine "
         "doesn't?”.</li>"
         "<li>“Look up this card”, rulings, prices, combos, EDHREC data, the Comprehensive Rules.</li>"
-        "<li>“Goldfish this deck 500 times” (it reports the seed, the settings and what the "
-        "simulation leaves out).</li>"
+        "<li>“Test this deck with 500 games” (it reports the seed, the settings and what the "
+        "solo test leaves out).</li>"
         "<li>“Build a new deck from this list”, “undo yesterday's change”: each comes back as a proposal "
         "with a review link.</li>"
         "<li>“Here are photos of my cards”: it reads the names and matches them; or “use my last scan” to "
         "pick up a scan from the Scan page.</li>"
-        "<li>“Which cards in this deck do I own?” using your collection.</li></ul>"
+        "<li>“Which cards in this deck do I own?” using your binder.</li></ul>"
         "<p>Your assistant's access can be withdrawn at any time from the Account page (the "
         "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "
         "this gateway is set otherwise) unless you sign in "
@@ -453,10 +524,11 @@ def guide_body(
         "<p>The solo test tells you how the deck plays on its own: how fast the commander lands, how "
         "often the mana flows, how much damage it would deal to an opponent who does nothing. A deck "
         "without a commander "
-        "and with 60 or more cards plays a 60-card game instead (20 life, on the play).</p>"
+        "and with 60 or more cards plays a 60-card game instead (20 life, on the play). With nobody to "
+        "interact, its numbers usually look faster than the deck plays at a table.</p>"
         "<ol class='steps'>"
-        "<li><span>Open one of your decks and press <strong>Run full test</strong>. The button says the "
-        "solo test takes up to a minute and shows “Testing…” while it does.</span></li>"
+        "<li><span>Open one of your decks and press <strong>Run test</strong>. The report opens at "
+        "once and fills in by itself as the solo test and the Forge games finish.</span></li>"
         "<li><span>The report opens: the deck, its commander, the games run and when; the headline numbers "
         "as tiles with their 95% intervals (the turn the commander lands, the chance of 40 damage or a "
         "lethal board by the last turn, mulligans, land drops); four small charts (milestones reached by "
@@ -466,9 +538,19 @@ def guide_body(
         "<li><span>Keep it: the buttons download the report as <strong>Markdown</strong> or as a "
         "self-contained <strong>HTML page</strong> (light and dark, no scripts) and <strong>Copy as "
         "Markdown</strong> puts it on the clipboard.</span></li>"
-        "<li><span>Find it again under <a href='/history'>History</a> (the Reports chip). A report "
-        "reused because the deck had not changed says so.</span></li></ol>"
-        "<p>It is the same run the assistant makes for “goldfish this deck”: the statistics, the "
+        "<li><span>Find it again on <a href='/reports'>Reports</a>, or on the deck's timeline under "
+        "<a href='/history'>History</a> (the Tests chip). A report reused because the deck had not "
+        "changed says so.</span></li>"
+        "<li><span>The report keeps the exact list it played. Once the deck changes, the report says "
+        "what moved since, and <strong>Put this list back (review first)</strong> makes a proposal you "
+        "confirm like any other. <strong>Since your last test</strong> sets its numbers beside the "
+        "deck's test before.</span></li></ol>"
+        "<p>The website starts every kind of test an assistant can: a pasted list (<strong>Test a "
+        "pasted list</strong> on Reports), a waiting proposal (<strong>Test this change</strong> on its "
+        "page, played against the deck as it is now), a snapshot (<strong>Test this version</strong> "
+        "under History) and two decks or a deck and its snapshot (<strong>Solo test both (A/B)</strong> "
+        "on Compare). Until Forge has played enough games, a report leads with the solo test.</p>"
+        "<p>It is the same run the assistant makes for “test this deck”: the statistics, the "
         "validation and the solo test (300 games), so the numbers match whichever way it is "
         "started.</p>"
     )
@@ -502,9 +584,11 @@ def guide_body(
         "<kbd>F10</kbd> or the Menu key on a focused card) opens the site's own card menu: open the card, "
         "one more or one fewer copy, move it to a category or the maybeboard, remove it, or jump to the "
         "editor. The card viewer has the same quantity buttons and Remove. Each change is saved at once as "
-        "one proposal with its snapshot (the same path as the editor, with the same “are you sure” for a "
-        "big removal), and the page redraws in place with a toast offering <strong>Undo</strong>. These "
-        "quick edits keep the gateway snapshot only, without the backup copy on Archidekt. On someone "
+        "one proposal (the same path as the editor, with the same “are you sure” for a "
+        "big removal), and the page redraws in place with a toast offering <strong>Undo</strong>. Edits "
+        "each within 10 minutes of the last share the snapshot taken before the first and are one entry "
+        "in History. These quick edits keep the gateway snapshot only, without the backup copy on "
+        "Archidekt. On someone "
         "else's deck the menu offers Open card and Open on Scryfall.</li>"
         "<li><strong>Drag a card</strong> onto another category: with a mouse, or press and hold on a "
         "touch screen and slide. The move is saved to Archidekt when you let go, like a change from the "
@@ -534,15 +618,17 @@ def guide_body(
     )
     how_approve = (
         "<p>Your own saves in the app go to Archidekt at once: pressing Save is your approval. An "
-        "<strong>assistant's</strong> edit, new deck, clone, settings change, restore or collection change "
+        "<strong>assistant's</strong> edit, new deck, clone, settings change, restore or binder change "
         "is first saved as a <strong>proposal</strong>: the exact list of what would change.</p>"
         "<ol class='steps'>"
-        "<li><span>Approve on the card the assistant shows in the chat (Reject can carry a reason), or "
+        "<li><span>Press Apply on the card the assistant shows in the chat (Reject can carry a reason), or "
         "open <a href='/proposals'>Proposals</a>, which lists what is waiting by deck, oldest first. "
         "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or check "
         "several and press <strong>Apply</strong>: the gateway shows the order first, then applies them "
         "one deck at a time. A deck's own page shows its waiting changes at the top, and asking the "
-        "assistant what is waiting shows them as a card with <strong>Apply all</strong>.</span></li>"
+        "assistant what is waiting shows them as a card with <strong>Apply all</strong>. Each app keeps "
+        "one waiting change per deck: when you ask for more, it is added to that change, so the chat "
+        "shows one card for it.</span></li>"
         "<li><span>Before the edit is applied, the gateway checks it still fits the deck, saves a "
         + (
             f"snapshot and puts a backup copy of the deck in a “{folder}” folder on your Archidekt account"
@@ -550,6 +636,10 @@ def guide_body(
             else "snapshot"
         )
         + ", then reads the deck back to confirm.</span></li>"
+        "<li><span>If Archidekt doesn't answer and nothing reached it, the change waits again: press "
+        "<strong>Try again</strong> on its card, its review page or Proposals. If part of an edit reached "
+        "Archidekt before it stopped, <strong>Propose the rest</strong> makes a new proposal of what is "
+        "still missing.</span></li>"
         "<li><span>After an apply, <strong>Undo</strong> puts the deck back as it was just before; it "
         "says first if it would also take back later changes.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "
@@ -571,7 +661,7 @@ def guide_body(
         f"as <strong>{_esc(modes.MODE_LABELS['semi'])}</strong> (the assistant applies low-risk changes "
         "itself, such as a small edit or a private copy of a deck, and asks about the rest) or Full auto, "
         f"shown as <strong>{_esc(modes.MODE_LABELS['auto'])}</strong> (it "
-        "also applies bigger deck and collection edits and changes to a deck's details, except a "
+        "also applies bigger deck and binder edits and changes to a deck's details, except a "
         "restore, a commander or companion change, a new deck, an edit of more than "
         f"{int(big_rows)} rows, making a deck public or unlisted, and any edit of a description that "
         "has formatting, such as bold text, links or pictures). "
@@ -587,18 +677,22 @@ def guide_body(
     )
     how_restore = (
         "<ol class='steps'>"
-        "<li><span>Open <a href='/history'>History</a>: snapshots, restores and deck reports, newest "
-        "first and grouped by day (or by deck, with <strong>Group by</strong>). The chips pick "
-        "Everything, Snapshots, Restores or Reports; the search finds a deck by name, and the filters "
+        "<li><span>Open <a href='/history'>History</a>, your decks' timeline: the changes applied to them, "
+        "their snapshots and their tests, newest first and grouped by day (or by deck, with "
+        "<strong>Group by</strong>). The chips pick Everything, Changes, Snapshots or Tests; the search "
+        "finds a deck by name, and the filters "
         "narrow by deck and when "
-        "(today, the last 7, 30 or 90 days or this year, counted in UTC days), and <strong>Older</strong> "
-        "pages through the rest 25 at a time. Changes your assistants proposed, applied or not, are on "
-        "<a href='/proposals?show=all'>Proposals</a>.</span></li>"
+        "(today, the last 7, 30 or 90 days or this year, counted in UTC days), and "
+        "<strong>Load more</strong> adds the next 25 under the list. Changes waiting for you, and every "
+        "change your assistants proposed, are on <a href='/proposals?show=all'>Proposals</a>.</span></li>"
         "<li><span>A snapshot row links to the change it was taken before and has <strong>Restore (review "
         "first)</strong> (on a phone, under <strong>Details</strong>). Press it to see what would "
         "change.</span></li>"
         "<li><span>Confirm. <strong>Restore</strong> puts the deck back exactly as the snapshot had it, "
         "cards and the deck's own name, description, format, bracket and privacy alike.</span></li></ol>"
+        "<p>A deck deleted since can't be restored onto; its snapshot has <strong>Make a new deck from "
+        "this</strong> instead, a new deck with the snapshot's name, format, cards and categories that "
+        "you review and apply like any new deck.</p>"
         "<p>Or ask your assistant to “undo yesterday's change”: the restore comes to you as a proposal, "
         "and a restore always waits for your press, whatever approval mode you chose.</p>"
     )
@@ -608,7 +702,7 @@ def guide_body(
         "put in, changed counts and the statistics' differences. The precon box suggests as you type. "
         "<a href='/precons'>Precons</a> lists every preconstructed deck Archidekt knows, by set.</p>"
         "<p>Your assistant makes the same comparison when you ask (“what does this deck run that mine "
-        "doesn't?”), and can also compare two versions of a deck in the simulator.</p>"
+        "doesn't?”), and can also compare two versions of a deck in a solo test.</p>"
     )
     how_export = (
         f"{_h4('how-export-deck', 'A deck')}"
@@ -619,8 +713,8 @@ def guide_body(
         ".txt, MTGO .dek and PDF (one-way); the app saves downloads to your Downloads folder. "
         "<strong>New deck</strong> on the Decks page imports a pasted list, a CSV export, the gateway's "
         ".json or a chosen file.</p>"
-        f"{_h4('how-export-collection', 'The collection')}"
-        "<p><strong>Export CSV</strong> downloads the whole collection in the column layout Archidekt's "
+        f"{_h4('how-export-collection', 'The binder')}"
+        "<p><strong>Export CSV</strong> downloads the whole binder in the column layout Archidekt's "
         "own import reads. <strong>Import a list</strong> adds cards from that CSV, from a CSV with "
         "Archidekt's column names or from a plain card list, pasted or chosen as a file, up to 100 rows "
         "at a time.</p>"
@@ -653,25 +747,36 @@ def guide_body(
         "<ol class='steps'>"
         "<li><span><strong>Camera.</strong> Hold a card in the frame with its title in the dashed box and "
         "tap the shutter, or switch on <strong>Auto</strong> and show cards one after another: sure "
-        "matches are added on their own (with Undo), doubtful ones wait for your tap.</span></li>"
+        "matches are added on their own (with Undo), doubtful ones wait for your tap. When Auto can't "
+        "find a card's edges it reads the dashed box and asks you to check what it read. A running count "
+        "of the scan shows in the viewfinder's corner.</span></li>"
         "<li><span><strong>Check the list.</strong> Fix a wrong match from the suggestions, pick the exact "
         "printing or foil, adjust quantities. Cards the camera could not read are kept with a picture of "
         "the title so you can type them.</span></li>"
         "<li><span><strong>Choose what to do with it:</strong> save the cards to your "
-        "<a href='/collection'>collection</a>, add them to one of your decks, start a new deck from them, "
+        "<a href='/collection'>binder</a>, add them to one of your decks, start a new deck from them, "
         "or save the scan for later (your assistant can pick it up too).</span></li></ol>"
         "<p>You can also type or paste names instead of using the camera, and earlier scans are listed "
-        "under <strong>Sessions</strong>. On the Android app the <strong>Scan with the app's camera</strong> "
-        "button on the Scan page and the Account page uses the app's own camera panel.</p>"
+        "under <strong>Sessions</strong>. In the Android app the orange shutter and <strong>Auto</strong> "
+        "on the Scan page, and <strong>Scan with the app's camera</strong> on the Account page, use the "
+        "phone's own camera, with its torch brightness and zoom.</p>"
         "<p>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
-        "printings and quantities first, then send it to your collection or a deck, which removes the "
+        "printings and quantities first, then send it to your binder or a deck, which removes the "
         "draft. Nothing expires; you delete what you do not want.</p>"
     )
     how_collection = (
-        "<p><a href='/collection'>Binder</a> is the list of cards you own. It is your Collection on "
-        "Archidekt, shown and edited here through the account you linked: nothing about your cards is "
-        "stored on this gateway, and what you add here appears on archidekt.com at once. Scan a pile and "
-        "save it, or add cards by name; each card keeps its printing, finish, condition and count.</p><ul>"
+        "<p><a href='/collection'>Binder</a> is the list of cards you own (your Archidekt collection), "
+        "shown and edited here through the account you linked, and what you add here appears "
+        "on archidekt.com at once. Scan a pile and save it, or add cards by name; each card keeps its "
+        "printing, finish, condition, language and count.</p><ul>"
+        "<li>Added copies join an entry you already have only when its printing, finish, condition and "
+        "language all match; anything else becomes a new entry, and the page says which one. "
+        "<strong>Use this finish, condition and language next time</strong> keeps your choices.</li>"
+        "<li>With watchlists on, <strong>Value</strong> shows what the binder is worth at today's "
+        "prices, each row shows its price, and it sorts by price. The gateway keeps a copy of the binder "
+        "for this, read whole once a day while you open it at least every 60 days; "
+        "<strong>Work it out now</strong> does the first read at once. The card viewer's "
+        "<strong>Price history</strong> shows the daily prices of a printing you own.</li>"
         "<li>Filter by name, show it as a grid or a list, sort it, and press Load more for the rest. Plus "
         "and minus change the count. The ⋮ button opens the card's menu: Details… there changes finish, "
         "condition, language and price paid.</li>"
@@ -679,7 +784,7 @@ def guide_body(
         "ones alike, with the number of copies Archidekt knows about.</li>"
         "<li><strong>Export CSV</strong> and <strong>Import a list</strong> are described under "
         "<a href='#how-export'>Export and import</a>.</li></ul>"
-        "<p class='tip'>Your assistant can read the collection too, for questions like “which cards in "
+        "<p class='tip'>Your assistant can read the binder too, for questions like “which cards in "
         "this deck do I not own yet?”, and propose additions or removals that you approve like a deck "
         "edit. It can also propose a like, follow or comment, but each one waits for your own press on "
         "its review page, whatever your approval mode.</p>"
@@ -725,6 +830,12 @@ def guide_body(
         "This app on the <a href='/account'>Account</a> page. A deck's Share opens the phone's own share "
         "sheet. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
         "open in the app.</p>"
+        "<p>The app can also send you <strong>push notifications</strong>: when an assistant leaves "
+        "changes waiting for you, a deck report finishes, a watched price crosses your price alert, or "
+        "something new arrives in your Archidekt Alerts (a comment, a reply, a new follower). Turn them "
+        "on, and choose which, in the Push notifications card on the "
+        "<a href='/account/details#notifications'>Account</a> page inside the app. Pressing one "
+        "opens the right page here.</p>"
         "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
         "to a rail down the left edge, like other Android apps; the layout follows the window, so split "
         "screen and pop-up windows work too. While scanning, half-folding the phone puts the camera on "
@@ -741,7 +852,13 @@ def guide_body(
         "<li><strong>Unlink Archidekt</strong> removes the stored Archidekt session at once.</li>"
         "<li><strong>Delete my data</strong> removes everything this gateway keeps for your account "
         "(proposals, snapshots, reports, scan sessions, your Archidekt link, connected apps and your "
-        "sign-in); your decks on Archidekt are not touched.</li></ul>"
+        "sign-in); your decks on Archidekt are not touched.</li>"
+        "<li>When the gateway signs you out by itself, the page you land on says why: the device wasn't "
+        "used for a while, the sign-in reached the longest time one lasts, the sign-in service asked "
+        "you to sign in again, you signed out on all devices elsewhere, an admin signed you out, or "
+        "your account is no longer in the group that may use the gateway. Only that last one "
+        "disconnects your AI apps. If the sign-in service stops accepting every one of your "
+        "sign-ins, your AI apps wait, still connected, until you sign in on the website again.</li></ul>"
     )
 
     # -- Reference --------------------------------------------------------------------------------
@@ -768,29 +885,28 @@ def guide_body(
         "<strong>The assistant cannot:</strong> rename "
         "folders, link or unlink Archidekt, change your approval mode, or do anything an admin does.</p>"
         "<p><strong>Only the assistant does:</strong> research lookups (Scryfall, EDHREC, combos, rules), "
-        "comparing two versions of a deck in the simulator, reading card photos into names, proposing "
-        "changes it worked out itself. <strong>Both reach:</strong> reading decks and collections, "
+        "comparing two versions of a deck in a solo test, reading card photos into names, proposing "
+        "changes it worked out itself. <strong>Both reach:</strong> reading decks and the binder, "
         "statistics, creating and editing decks, deck settings (folder, tags and cover included), "
-        "cloning, restoring snapshots, collection changes, scan drafts; your path applies at once, the "
+        "cloning, restoring snapshots, binder changes, scan drafts; your path applies at once, the "
         "assistant's is a proposal under your mode. The solo test of one deck and the "
-        "comparison of two are both paths: Run full test and Compare on the deck page for people, "
+        "comparison of two are both paths: Run test and Compare on the deck page for people, "
         "“Run a test report” and “Compare two decks” for the assistant, same engine and settings.</p>"
     )
-    advanced = (
-        "<details class='gadv' id='adv-tools'><summary class='fold-btn'>"
-        f"{_esc(ADVANCED_TITLE)}</summary>"
-        f"<p>{_esc(ADVANCED_INTRO)}</p>"
+    ref_tools = (
+        f"<div class='gadv' id='adv-tools'><p>{_esc(ADVANCED_INTRO)}</p>"
         "<div class='tbl'><table><thead><tr><th>Ask</th><th>Tool name</th></tr></thead><tbody>"
         + "".join(
             f"<tr><td>“{_esc(ask)}”</td><td><code>{_esc(raw)}</code></td></tr>" for raw, ask, _d in asks
         )
-        + "</tbody></table></div></details>"
+        + "</tbody></table></div></div>"
     )
     page_rows = [
         (
             "Home",
             "<code>/</code>",
-            "newest decks with covers, search, tiles to every section, Connect an AI assistant",
+            "what needs you (proposals waiting, tests running, alerts, watched cards), your newest "
+            "decks with covers, Connect an AI assistant until one is",
         ),
         (
             "Decks",
@@ -803,7 +919,7 @@ def guide_body(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run full test, statistics with Probability "
+            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run test, statistics with Probability "
             "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
@@ -847,12 +963,12 @@ def guide_body(
         (
             "Scan",
             "<code>/scan</code>",
-            "camera or photos to a draft; Sessions; save to a deck or the collection",
+            "camera or photos to a draft; Sessions; save to a deck or the binder",
         ),
         (
             "Binder",
             "<code>/collection</code>",
-            "the Archidekt Collection: filter, sort, grid or list, add, quantity, details, remove, CSV "
+            "the cards you own: filter, sort, grid or list, add, quantity, details, remove, CSV "
             "export and import",
         ),
         (
@@ -895,15 +1011,11 @@ def guide_body(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
-        "<p>On a phone the tabs at the bottom are Home, Decks, Binder, Assistant (Proposals, History and "
-        "Reports) and More (Search, Precons, Scan, Watchlist when it is on, and My lists); Search is also "
-        "the magnifier at the top, and your picture opens Account (Guide, and Admin for admins, are "
-        "there). From 600 px on a touch screen the same tabs are on a rail down the left edge, with "
-        "Alerts; a wider browser has them in the top bar, Home first.</p>"
+        f"<p>{nav_description()}</p>"
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
-        "<td>you press Approve on the card or Apply on its review page (deleting a deck, and an edit of a "
+        "<td>you press Apply on the card or on its review page (deleting a deck, and an edit of a "
         "comment that has formatting: on its review page only)</td>"
     )
     ref_approval = (
@@ -913,7 +1025,7 @@ def guide_body(
         "<div class='tbl'><table><thead><tr><th>Mode</th><th>Low-risk proposal</th><th>High-risk proposal"
         "</th><th>Account action or deck deletion</th></tr></thead><tbody>"
         f"<tr><td><strong>Manual</strong> (default): {_esc(modes.MODE_LABELS['manual'])}</td>"
-        "<td>you press Approve or Apply</td><td>you press</td>"
+        "<td>you press Apply</td><td>you press</td>"
         f"{on_review_page}</tr>"
         f"<tr><td><strong>Semi-auto</strong>: {_esc(modes.MODE_LABELS['semi'])}</td>"
         "<td>the assistant applies it</td><td>you press</td>"
@@ -931,7 +1043,7 @@ def guide_body(
         "<strong>In every mode:</strong> a held change, a change waiting for another change first, one "
         "another app had a hand in, one that replaces another app's change, or one that another app's "
         "waiting change would replace waits for your press; its card and review page say why. "
-        "A change to one of your decks keeps a snapshot first, and deck and collection changes are read "
+        "A change to one of your decks keeps a snapshot first, and deck and binder changes are read "
         "back to check them.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
         f"{_h4('ref-approval-hand', 'Your own saves')}"
@@ -1014,7 +1126,7 @@ def guide_body(
         "sideboard list, each with Copy; downloads as Archidekt .txt, plain .txt, .csv and .json</td>"
         "<td>yes: New deck here, or Archidekt's Import dialog</td></tr>"
         "<tr><td>A deck, one-way</td><td>Arena .txt, MTGO .dek, PDF</td><td>no</td></tr>"
-        "<tr><td>The collection</td><td>.csv in the column layout Archidekt's own import reads</td>"
+        "<tr><td>The binder</td><td>.csv in the column layout Archidekt's own import reads</td>"
         "<td>yes: Import a list here, or Archidekt</td></tr>"
         "<tr><td>A deck report</td><td>Markdown (.md), a self-contained HTML page (light and dark, no "
         "scripts), Copy as Markdown</td><td>no (reports are read, not imported)</td></tr>"
@@ -1032,7 +1144,7 @@ def guide_body(
         f"{_h4('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "
-        "with Approve and Reject. Whether the assistant may then apply the proposal itself depends only on "
+        "with Apply and Reject. Whether the assistant may then apply the proposal itself depends only on "
         "your approval mode and the proposal's risk level (<a href='#ref-approval'>the reference</a> has "
         "the rules), except that a held change, a change waiting for another change first, one another "
         "app had a hand in, one that replaces another app's change, or one that another app's waiting "
@@ -1062,8 +1174,8 @@ def guide_body(
         "<li>Every change the gateway sends to Archidekt for you (a new deck, an applied proposal, a "
         "deleted deck, a folder, a tag, a cover) <strong>drops the list first</strong>, so the next view "
         "is live again. A change made on archidekt.com itself shows up when the 90 seconds are up.</li>"
-        "<li>The collection's unfiltered first page is kept for a minute per sort and dropped by every "
-        "collection add, change or removal.</li>"
+        "<li>The binder's unfiltered first page is kept for a minute per sort and dropped by every "
+        "binder add, change or removal.</li>"
         "<li>When the list is cold and Archidekt has not answered within a second and a half, Home and "
         "Decks open at once with a gray <strong>placeholder</strong> that the page fills as soon as the "
         "list arrives; without script a reload shows the list.</li>"
@@ -1072,18 +1184,18 @@ def guide_body(
         "come from Scryfall directly.</li></ul>"
     )
     exp_assistant = (
-        "<p>In Claude on the web, desktop and phones (and ChatGPT, as its maker reports), the things "
-        "you have to pick or press come as <strong>cards in the chat</strong>: a proposal with Approve "
+        "<p>In Claude on the web, desktop and phones (and ChatGPT on the web and in its Android app), "
+        "the things you have to pick or press come as <strong>cards in the chat</strong>: "
+        "a proposal with Apply "
         "and Reject (Reject can carry a reason), the changes waiting for you with <strong>Apply "
         "all</strong>, the printings of a card as pictures to tap, and the cards read from your photos "
         "to keep or drop. Everything else, such as a deck, its statistics, a comparison, a list of "
         "decks or your account's setup, comes as the assistant's own words, which keeps a long chat "
         "light. A tap on a picker is passed to the assistant as text and it carries on from there; "
-        "nothing changes until a proposal you approve. Only the Approve, Reject and Apply all buttons "
-        "change anything, and each uses the card's one-time code. Once a proposal you approved on "
-        "its card, or the changes you sent with Apply all, are applied or under way, the card posts "
-        "a short message, &ldquo;Approved, go on&rdquo;, in the "
-        "chat so the assistant carries on, where the app lets a card do that. Claude Code and older "
+        "nothing changes until a proposal you approve. Only the Apply, Reject and Apply all buttons "
+        "change anything, and each uses the card's one-time code. The card tells the assistant what "
+        "you pressed, and it reads that with your next message; the card never writes in the chat for "
+        "you. Claude Code and older "
         "apps show the text instead and ask about unsure names with a short form.</p>"
         "<p>Every job has exactly one tool, so the assistant never guesses between two ways of doing "
         "the same thing. It can propose moving a deck to another folder, changing its tags or its cover "
@@ -1100,9 +1212,9 @@ def guide_body(
     exp_privacy = (
         "<p>The gateway keeps as little as it can: who you are (from your sign-in), your Archidekt link, "
         "your proposals, snapshots, reports and scan drafts, your approval mode and theme, and an "
-        "activity log of what your account and its apps did. Decks live on Archidekt and your collection "
+        "activity log of what your account and its apps did. Decks live on Archidekt and your binder "
         "is Archidekt's; card data and images come from Scryfall.</p><ul>"
-        "<li>Only you can see your decks, proposals, snapshots, scans and collection; another member "
+        "<li>Only you can see your decks, proposals, snapshots, scans and binder; another member "
         "cannot reach them, and neither can their assistant.</li>"
         "<li>Your Archidekt sign-in is stored encrypted. No page, admin tool, log or backup shows it, and "
         "backups leave it out, so after the site is restored from a backup you sign in again and relink "
@@ -1110,13 +1222,14 @@ def guide_body(
         "to act as you on Archidekt until it expires. The Account page spells out exactly what linking "
         "gives this site, its admins and the person who runs it "
         "(<a href='/account/details#archidekt-disclosure'>What linking gives this gateway</a>).</li>"
-        "<li>Nothing about the cards in your collection is stored on this gateway: it is read from and "
+        "<li>Nothing about the cards in your binder is stored on this gateway: it is read from and "
         "written to Archidekt through your link.</li>"
         "<li>Your assistant's access can be withdrawn at any time from the Account page (the "
         "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "
         "this gateway is set otherwise) unless you sign in "
         "again.</li>"
-        "<li>Nothing here is public or indexed. Links to Archidekt and Scryfall carry no referrer.</li>"
+        "<li>Nothing of yours is public, and nothing here is indexed. Only this guide and the setup "
+        "steps can be read without signing in. Links to Archidekt and Scryfall carry no referrer.</li>"
         "<li><strong>Delete my data</strong> on the Account page removes everything above, your sign-in "
         "included; your decks on Archidekt are not touched.</li></ul>"
     )
@@ -1157,6 +1270,7 @@ def guide_body(
         "ref-keys": ref_keys,
         "ref-syntax": ref_syntax,
         "ref-formats": ref_formats,
+        "ref-tools": ref_tools,
         "exp-approvals": exp_approvals,
         "exp-fresh": exp_fresh,
         "exp-assistant": exp_assistant,
@@ -1164,69 +1278,282 @@ def guide_body(
         "exp-playtest": exp_playtest,
     }
     parts = [
-        (pid, ic, title, lead, [s for s in sections if bodies.get(s[0])])
+        (pid, ic, title, lead, [sec for sec in sections if bodies.get(sec[0])])
         for pid, ic, title, lead, sections in PARTS
     ]
+    return Guide(parts, {k: _stackable(v) for k, v in bodies.items() if v})
 
-    def section(sid: str, ic: str, label: str) -> str:
-        return (
-            f"<section class='panel gsec' id='{sid}' aria-labelledby='{sid}-h' data-title='{_esc(label)}'>"
-            f"<h3 id='{sid}-h'>{icon(ic)}{_esc(label)}{_anchor(sid, label)}</h3>{bodies[sid]}</section>"
-        )
 
-    main = _stackable(
-        "".join(
-            f"<section class='gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
-            f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}{_anchor(pid, title)}</h2><p>{_esc(lead)}</p></header>"
-            + "".join(section(*s) for s in sections)
-            + "</section>"
-            for pid, ic, title, lead, sections in parts
-        )
+def guide_body(**facts: Any) -> str:
+    """The whole guide as one text, topic after topic (what the tests read; the pages serve one
+    topic each)."""
+    g = build(**facts)
+    return "".join(
+        f"<section class='gsec' id='{sid}'><h3>{_esc(label)}</h3>{g.bodies[sid]}</section>"
+        for sid, _ic, label, _pid in g.topics
     )
-    search = (
-        "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
-        "<input id='guide-q' type='search' placeholder='Search the guide' "
-        "autocomplete='off' spellcheck='false' aria-describedby='guide-status'>"
+
+
+def topic_href(sid: str) -> str:
+    return f"{PAGE}/{sid}"
+
+
+_INNER_LINK = re.compile(r"href='#([a-z0-9-]+)'")
+
+
+def relink(g: Guide, body: str, sid: str) -> str:
+    """The links inside a topic's sentences, written for the one-page guide as ``#target``: a
+    topic's goes to its page; a heading inside another topic goes to that page at the heading;
+    one inside this topic stays an anchor."""
+
+    def one(m: re.Match[str]) -> str:
+        target = m.group(1)
+        if target == "top":
+            return m.group(0)
+        owner = g.owner_of(target)
+        if owner is None or owner == sid:
+            return m.group(0)
+        return f"href='{topic_href(owner)}'" if owner == target else f"href='{topic_href(owner)}#{target}'"
+
+    return _INNER_LINK.sub(one, body)
+
+
+def search_form_html(q: str = "") -> str:
+    """The search box: a plain form to /guide/search; with scripts the list fills under it as
+    you type (static/guide.js asks /guide/search.json)."""
+    return (
+        f"<form class='gsearch' method='get' action='{PAGE}/search' role='search'>"
+        "<label for='guide-q'>Search the guide</label>"
+        "<div class='gsrow'>"
+        f"<input id='guide-q' type='search' name='q' value='{_esc(q)}' placeholder='Search the guide' "
+        "maxlength='100' autocomplete='off' spellcheck='false' aria-describedby='guide-status' "
+        f"data-search='{PAGE}/search.json'>"
+        f"<button type='submit' class='btn btn-plain'>{icon('search')} Search</button></div>"
         "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
-        "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul></div>"
+        "<ul id='guide-results' class='gresults' aria-label='Matching topics' hidden></ul></form>"
+    )
+
+
+def contents_nav(g: Guide, current: str = "") -> str:
+    """The contents: every part with its topics, the current topic marked. Open beside the text on
+    a wide screen; on a phone static/guide.js folds it under its button, so the topic comes first
+    (a closed details element cannot be opened by a style sheet, so the page starts open)."""
+    items = []
+    for _pid, ic, title, _lead, sections in g.parts:
+        subs = "".join(
+            f"<li><a href='{topic_href(sid)}'{' aria-current=page' if sid == current else ''}>"
+            f"{_esc(label)}</a></li>"
+            for sid, _i, label in sections
+        )
+        items.append(f"<li><span class='part'>{icon(ic)}{_esc(title)}</span><ul>{subs}</ul></li>")
+    return (
+        f"<details class='gnav' open><summary class='btn'>{icon('menu')} Contents</summary>"
+        f"<nav aria-label='Guide contents'><ul>{''.join(items)}</ul></nav></details>"
+    )
+
+
+def contents_body(g: Guide, *, anchors_json: str) -> str:
+    """The contents page: the search, then a card a part listing its topics."""
+    cards = []
+    for pid, ic, title, lead, sections in g.parts:
+        links = "".join(
+            f"<li><a href='{topic_href(sid)}'>{icon(i)}{_esc(label)}</a></li>" for sid, i, label in sections
+        )
+        cards.append(
+            f"<section class='panel gpart' id='{pid}' aria-labelledby='{pid}-h'><header>"
+            f"<h2 id='{pid}-h'>{icon(ic)}{_esc(title)}</h2><p>{_esc(lead)}</p></header>"
+            f"<ul class='gtoc'>{links}</ul></section>"
+        )
+    return (
+        ui.page_head(TITLE, LEAD)
+        + search_form_html()
+        # the old one-page addresses (/guide#topic): the script sends them to the topic's page
+        + f"<script type='application/json' id='guide-anchors'>{anchors_json}</script>"
+        + f"<div class='gcontents'>{''.join(cards)}</div>"
+    )
+
+
+def topic_body(g: Guide, sid: str) -> str:
+    """One topic's page: the way back (Guide › part), the heading, the text, then the topics
+    before and after it; the contents beside it on a wide screen, as a drawer on a phone."""
+    part = g.part_of(sid)
+    assert part is not None
+    pid, _pic, ptitle, _lead, _secs = part
+    topics = g.topics
+    at = next(i for i, t in enumerate(topics) if t[0] == sid)
+    _sid, ic, label, _p = topics[at]
+    crumbs = (
+        f"<nav class='crumbs gcrumbs' aria-label='You are in'>{ui.cap_link('Guide', PAGE)}"
+        f"<span aria-hidden='true'>›</span>{ui.cap_link(ptitle, f'{PAGE}#{pid}')}</nav>"
+    )
+    prev_t = topics[at - 1] if at > 0 else None
+    next_t = topics[at + 1] if at + 1 < len(topics) else None
+    turn = (
+        "<nav class='gturn' aria-label='Nearby topics'>"
+        + (
+            f"<a class='btn' href='{topic_href(prev_t[0])}' rel='prev'>{icon('chev')}<span>{_esc(prev_t[2])}"
+            "</span></a>"
+            if prev_t
+            else "<span></span>"
+        )
+        + (
+            f"<a class='btn' href='{topic_href(next_t[0])}' rel='next'><span>{_esc(next_t[2])}</span>"
+            f"{icon('chev')}</a>"
+            if next_t
+            else "<span></span>"
+        )
+        + "</nav>"
+    )
+    main = (
+        f"<article class='gsec' id='{sid}' aria-labelledby='{sid}-h' data-title='{_esc(label)}'>"
+        f"<div class='ui-head'><h1 id='{sid}-h'>{icon(ic)}{_esc(label)}</h1></div>"
+        f"{relink(g, g.bodies[sid], sid)}</article>"
     )
     return (
-        f"<div class='guide' id='top'><div class='gside'>{search}{_nav(parts)}</div>"
-        f"<div class='gmain'>{main}{_stackable(advanced)}"
-        "<p class='nomatch muted' hidden>Nothing in the guide matches that. Clear the search to see "
-        "everything again.</p></div></div>"
+        f"<div class='guide' id='top'><div class='gside'>{search_form_html()}{contents_nav(g, sid)}</div>"
+        f"<div class='gmain'>{crumbs}{main}{turn}</div></div>"
         f"<a class='btn gtop hide' href='#top'>{icon('chev')} Back to top</a>"
+    )
+
+
+_TAGS = re.compile(r"<[^>]+>")
+
+
+def _text_of(body: str) -> str:
+    return " ".join(html.unescape(_TAGS.sub(" ", body)).split())
+
+
+def search(g: Guide, q: str, *, limit: int = 20) -> list[dict[str, str]]:
+    """The topics whose title or text holds every word of ``q``: title matches first, each with
+    a snippet around the first match (the match marked as the script draws it)."""
+    words = [w for w in q.casefold().split() if w]
+    if not words:
+        return []
+    hits = []
+    for sid, _ic, label, pid in g.topics:
+        text = _text_of(g.bodies[sid])
+        hay = f"{label} {text}".casefold()
+        if not all(w in hay for w in words):
+            continue
+        in_title = all(w in label.casefold() for w in words)
+        at = text.casefold().find(words[0])
+        # a topic that brings the word up early is about it: those come first after title matches
+        early = at / max(1, len(text)) if at >= 0 else 1.0
+        if at < 0:
+            snippet = text[:140]
+        else:
+            start = max(0, at - 60)
+            snippet = ("…" if start else "") + text[start : at + 100] + ("…" if at + 100 < len(text) else "")
+        part = next(p[2] for p in g.parts if p[0] == pid)
+        hits.append(
+            {
+                "id": sid,
+                "href": topic_href(sid),
+                "title": label,
+                "part": part,
+                "snippet": snippet,
+                "word": words[0],
+                "_rank": (not in_title, early),
+            }
+        )
+    hits.sort(key=lambda h: h["_rank"])
+    return [{k: v for k, v in h.items() if k != "_rank"} for h in hits[:limit]]
+
+
+def _marked(snippet: str, word: str) -> str:
+    """The snippet escaped, the first match wrapped in <mark>."""
+    at = snippet.casefold().find(word)
+    if at < 0:
+        return _esc(snippet)
+    end = at + len(word)
+    return f"{_esc(snippet[:at])}<mark>{_esc(snippet[at:end])}</mark>{_esc(snippet[end:])}"
+
+
+def results_html(hits: list[dict[str, str]], q: str) -> str:
+    if not hits:
+        return f"<p class='nomatch muted'>Nothing in the guide matches “{_esc(q)}”.</p>"
+    rows = "".join(
+        f"<li><a href='{h['href']}'><span class='t'>{_esc(h['title'])}</span>"
+        f"<span class='where'>{_esc(h['part'])}</span>"
+        f"<span class='snip'>{_marked(h['snippet'], h['word'])}</span></a></li>"
+        for h in hits
+    )
+    n = len(hits)
+    return (
+        f"<div class='gstatic'><p class='muted'>{n} topic{'' if n == 1 else 's'} match.</p>"
+        f"<ul class='gresults' aria-label='Matching topics'>{rows}</ul></div>"
+    )
+
+
+def search_body(g: Guide, q: str) -> str:
+    return (
+        ui.page_head("Search the guide") + search_form_html(q) + (results_html(search(g, q), q) if q else "")
     )
 
 
 def add_guide_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
-    @server.custom_route("/guide", methods=["GET"], include_in_schema=False)
-    async def guide(request: Request) -> Response:
-        sub, sid = browser_session(state, request)
-        if sub is None:
-            return login_redirect("/guide")
-        user = state.db.get_user(sub) or {}
-        admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
-        return render(
-            "Guide",
-            guide_body(
-                site=s.server_name,
-                live=state.decks.live,
-                writes_enabled=bool(s.writes_enabled),
-                has_collection=getattr(state, "collection", None) is not None,
-                max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
-                archidekt_backups=bool(state.live.get("archidekt_backups")),
-                backup_folder=state.decks.backup_folder,
-                watchlists=bool(s.watchlists_enabled),
-            ),
+    def guide_for() -> Guide:
+        return build(
             site=s.server_name,
-            signed_in=True,
+            live=state.decks.live,
+            writes_enabled=bool(s.writes_enabled),
+            has_collection=getattr(state, "collection", None) is not None,
+            max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
+            archidekt_backups=bool(state.live.get("archidekt_backups")),
+            backup_folder=state.decks.backup_folder,
+            watchlists=bool(s.watchlists_enabled),
+        )
+
+    def page(request: Request, title: str, body: str, *, current: str = PAGE) -> Response:
+        """Readable signed out too (owner decision, 0.7.46): the guide describes this gateway and
+        holds nothing of any member's, so someone invited can read what it is before signing in.
+        Signed in, it carries the member's navigation."""
+        sub, sid = browser_session(state, request)
+        user = (state.db.get_user(sub) or {}) if sub else {}
+        admin = bool(sub and s.admin_group and s.admin_group in (user.get("groups") or []))
+        return render(
+            title,
+            body,
+            site=s.server_name,
+            signed_in=sub is not None,
             csrf=_csrf(s, sid),
             admin=admin,
             sub=sub,
             wide=True,
-            current="/guide",
+            current=current,
+            heading=False,
             head_extra=f"<style>{GUIDE_CSS}</style><script src='/static/guide.js' defer></script>",
         )
+
+    @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
+    async def contents(request: Request) -> Response:
+        g = guide_for()
+        # where each topic and each heading inside one lives, for the old /guide#… addresses
+        anchors = {sid: sid for sid in g.bodies} | {
+            m: g.owner_of(m) for body in g.bodies.values() for m in re.findall(r"id='([a-z0-9-]+)'", body)
+        }
+        return page(
+            request, TITLE, contents_body(g, anchors_json=json.dumps(anchors).replace("<", "\\u003c"))
+        )
+
+    @server.custom_route(PAGE + "/search", methods=["GET"], include_in_schema=False)
+    async def search_page(request: Request) -> Response:
+        q = (request.query_params.get("q") or "").strip()[:100]
+        return page(request, "Search the guide", search_body(guide_for(), q))
+
+    @server.custom_route(PAGE + "/search.json", methods=["GET"], include_in_schema=False)
+    async def search_json(request: Request) -> Response:
+        q = (request.query_params.get("q") or "").strip()[:100]
+        hits = search(guide_for(), q)
+        return JSONResponse({"ok": True, "q": q, "hits": hits}, headers={"Cache-Control": "no-store"})
+
+    @server.custom_route(PAGE + "/{topic}", methods=["GET"], include_in_schema=False)
+    async def topic(request: Request) -> Response:
+        sid = str(request.path_params["topic"])[:40]
+        g = guide_for()
+        if sid not in g.bodies:
+            return RedirectResponse(PAGE, status_code=302)
+        label = next(t[2] for t in g.topics if t[0] == sid)
+        return page(request, f"{label}: {TITLE}", topic_body(g, sid))

@@ -16,6 +16,7 @@ from mtg_gateway.deck_stats import (
     compare,
     compute,
     counts_from_text,
+    legality_problems_of,
     mana_pips,
 )
 from mtg_gateway.decklist import ListCard
@@ -159,20 +160,20 @@ def test_compute_blink_deck() -> None:
     assert s["land_count"] == 34 and s["nonland_count"] == 66
     assert s["average_mana_value"] == 2.58
     assert s["mana_curve"] == {"0": 3, "1": 12, "2": 15, "3": 22, "4": 10, "5": 3, "6": 0, "7+": 1}
-    assert s["colour_pips"] == {"U": 53.5, "W": 22.5}  # Turn to Mist's {W/U} counts half each
+    assert s["color_pips"] == {"U": 53.5, "W": 22.5}  # Turn to Mist's {W/U} counts half each
     assert s["mana_sources"]["W"] == 24 and s["mana_sources"]["U"] == 25 and s["mana_sources"]["C"] == 19
     assert s["type_counts"]["Land"] == 34 and s["type_counts"]["Creature"] == 19
     assert s["rarity_counts"] == {"rare": 47, "common": 26, "uncommon": 20, "mythic": 7}
     assert s["price_total"] == 1758.89 and s["priced_cards"] == 91
     assert s["checks"]["deck_size"] == {"actual": 100, "expected": 100, "ok": True}
     assert s["format"] == "commander"
-    assert {p["name"] for p in s["legality_problems"]} == {"Mana Crypt", "Jeweled Lotus", "Hullbreacher"}
-    assert all(p["status"] == "banned" for p in s["legality_problems"])
+    assert {p["name"] for p in legality_problems_of(s)} == {"Mana Crypt", "Jeweled Lotus", "Hullbreacher"}
+    assert all(p["status"] == "banned" for p in legality_problems_of(s))
     assert s["legality_unknown"] == 0
     assert len(s["game_changers"]) == 12 and "Rhystic Study" in s["game_changers"]
     assert s["tutors"] == 11 and s["extra_turns"] == 1 and s["mass_land_denial"] == 0
     assert s["salt_total"] == 66.02
-    assert s["commanders"] == ["Brago, King Eternal"] and s["colour_identity"] == ["W", "U"]
+    assert s["commanders"] == ["Brago, King Eternal"] and s["color_identity"] == ["W", "U"]
     est = s["bracket_estimate"]
     assert est["bracket"] == 4 and est["kind"] == "estimate"
     assert est["basis"][0].startswith("12 game changer(s)")
@@ -183,8 +184,8 @@ def test_compute_blink_deck() -> None:
 def test_compute_precon_deck() -> None:
     s = compute(live("sample"))
     assert s["card_count"] == 100 and s["land_count"] == 44
-    assert s["commanders"] == ["Aesi, Tyrant of Gyre Strait"] and s["colour_identity"] == ["U", "G"]
-    assert s["legality_problems"] == [] and s["game_changers"] == []
+    assert s["commanders"] == ["Aesi, Tyrant of Gyre Strait"] and s["color_identity"] == ["U", "G"]
+    assert legality_problems_of(s) == [] and s["game_changers"] == []
     est = s["bracket_estimate"]
     assert (est["bracket"], est["basis"], est["notes"]) == (2, ["no game changers"], [])
 
@@ -240,7 +241,7 @@ def test_colour_identity_accepts_names_and_letters_in_wubrg_order() -> None:
 def test_compute_empty_deck() -> None:
     s = compute(deck([]))
     assert s["card_count"] == 0 and s["average_mana_value"] is None and s["price_total"] == 0.0
-    assert s["mana_curve"]["7+"] == 0 and s["colour_pips"] == {} and s["mana_sources"] == {}
+    assert s["mana_curve"]["7+"] == 0 and s["color_pips"] == {} and s["mana_sources"] == {}
     assert s["bracket_estimate"]["bracket"] is None and s["bracket_estimate"]["basis"] == ["no cards"]
 
 
@@ -264,12 +265,12 @@ def test_compute_curve_price_and_legality() -> None:
     assert s["land_count"] == 10 and s["nonland_count"] == 5
     assert s["average_mana_value"] == round((9 + 6 + 1 + 2) / 5, 2)
     assert s["mana_curve"] == {"0": 0, "1": 1, "2": 1, "3": 2, "4": 0, "5": 0, "6": 0, "7+": 1}
-    assert s["colour_pips"] == {"U": 5.0}
+    assert s["color_pips"] == {"U": 5.0}
     assert s["mana_sources"] == {"U": 10}
     assert s["type_counts"] == {"Land": 10, "Creature": 3, "Artifact": 2, "Sorcery": 1, "Instant": 1}
     assert s["rarity_counts"] == {"rare": 2, "mythic": 1}
     assert s["price_total"] == 13.5 and s["priced_cards"] == 2
-    assert s["legality_problems"] == [{"name": "Banned", "status": "banned"}]
+    assert legality_problems_of(s) == [{"name": "Banned", "status": "banned"}]
     # Big, Mid (two copies) and Unknown carry no commander entry: counted in copies, as
     # deck_checks (the one legality engine) and the deck page count them
     assert s["legality_unknown"] == 4 == s["checks"]["legality"]["unknown"]
@@ -277,7 +278,7 @@ def test_compute_curve_price_and_legality() -> None:
 
 def test_compute_skips_legality_when_format_unknown() -> None:
     s = compute(deck([card("x", legalities={"commander": "banned"})], format_id=None))
-    assert s["format"] is None and s["legality_problems"] == [] and s["legality_unknown"] == 0
+    assert s["format"] is None and legality_problems_of(s) == [] and s["legality_unknown"] == 0
 
 
 def _filler(n: int) -> list[DeckCard]:
@@ -485,7 +486,7 @@ def test_checks_cover_what_the_archidekt_validator_checked() -> None:
     assert not checks["ok"]
     assert checks["deck_size"]["ok"] is False and "16 cards" in checks["problems"][0]
     assert checks["commander_zone"] == {"count": 2, "ok": False, "cannot_command": ["Opt"]}
-    assert checks["colour_identity_violations"] == [
+    assert checks["color_identity_violations"] == [
         {"name": "Lightning Bolt", "outside": ["R"]},
         {"name": "Relentless Rats", "outside": ["B"]},
     ]
@@ -643,7 +644,7 @@ def test_format_specific_command_zones() -> None:
     good = good_stats["checks"]
     assert good["ok"] is True and good["commander_zone"]["ok"] is True, good
     assert good["legality"]["not_legal"] == []
-    assert good_stats["legality_problems"] == []  # the stats list agrees with the checks
+    assert legality_problems_of(good_stats) == []  # the stats list agrees with the checks
     not_creature = _cmdr("Opt", types=["Instant"], rarity="uncommon", supertypes=[])
     bad = compute(deck([not_creature, commons], format_id=17, categories=cat))["checks"]
     assert bad["commander_zone"]["cannot_command"] == ["Opt"]
@@ -654,7 +655,7 @@ def test_format_specific_command_zones() -> None:
     banned_stats = compute(deck([banned, commons], format_id=17, categories=cat))
     out = banned_stats["checks"]
     assert out["ok"] is False and out["legality"]["banned"] == ["Banned Leader"], out
-    assert banned_stats["legality_problems"] == [{"name": "Banned Leader", "status": "banned"}]
+    assert legality_problems_of(banned_stats) == [{"name": "Banned Leader", "status": "banned"}]
     assert any("banned" in p for p in out["problems"])
 
 
@@ -755,7 +756,7 @@ def test_land_only_sources_and_out_of_identity_pips() -> None:
     assert ooi["identity"] == ["U", "G"]
     # two Bolts (a red pip each) and Fire // Ice's hybrid {R/U}, half of it outside
     assert ooi["pips"] == {"R": 2.5}
-    assert ooi["cards"] == [{"name": "Bolt", "colours": ["R"]}, {"name": "Fire // Ice", "colours": ["R"]}]
+    assert ooi["cards"] == [{"name": "Bolt", "colors": ["R"]}, {"name": "Fire // Ice", "colors": ["R"]}]
 
 
 def test_out_of_identity_is_none_without_a_commander() -> None:
@@ -987,7 +988,6 @@ _SIDE = [{"name": "Sideboard", "isPremier": False, "includedInDeck": False}]
 def test_legality_problems_come_from_deck_checks() -> None:
     """Bug 8: deck_stats' legality_problems (the report strip, the edit API, the deck_stats tool)
     flagged a single restricted card and ignored the sideboard; it is now deck_checks' verdict."""
-    from mtg_gateway.deck_stats import card_legality_problems
 
     lands = card("Island", 59, types=["Land"], supertypes=["Basic"], legalities={"vintage": "legal"})
     one = deck(
@@ -1001,13 +1001,13 @@ def test_legality_problems_come_from_deck_checks() -> None:
     )
     s = compute(one)
     # one restricted copy is legal; the banned card in the sideboard is counted, as on Archidekt
-    assert s["legality_problems"] == [{"name": "Mental Misstep", "status": "banned"}]
-    assert s["legality_problems"] == card_legality_problems(s["checks"])
+    assert legality_problems_of(s) == [{"name": "Mental Misstep", "status": "banned"}]
+    assert "legality_problems" not in s  # 0.7.46: read from checks, said once (AT-30)
     two = deck([card("Black Lotus", 2, legalities={"vintage": "restricted"}), lands], format_id=5)
-    assert compute(two)["legality_problems"] == [{"name": "Black Lotus", "status": "restricted"}]
+    assert legality_problems_of(compute(two)) == [{"name": "Black Lotus", "status": "restricted"}]
     # Archidekt's free format is not checked at all
     free = compute(deck([card("x", legalities={"custom": "banned"})], format_id=7))
-    assert free["legality_problems"] == [] and free["legality_unknown"] == 0
+    assert legality_problems_of(free) == [] and free["legality_unknown"] == 0
 
 
 def test_stored_statistics_are_read_with_the_deck_checks_verdict() -> None:
@@ -1022,7 +1022,7 @@ def test_stored_statistics_are_read_with_the_deck_checks_verdict() -> None:
     assert legality_problems_of(old) == []
     assert "Not legal" not in stats_strip({**old, "card_count": 60})
     older = {"legality_problems": [{"name": "Mana Crypt", "status": "banned"}]}  # no checks stored
-    assert legality_problems_of(older) == older["legality_problems"]
+    assert legality_problems_of(older) == legality_problems_of(older)
     assert "Not legal in this format: Mana Crypt" in stats_strip({**older, "card_count": 100})
 
 
@@ -1125,17 +1125,17 @@ def test_list_rows_come_from_one_builder() -> None:
 
 def test_the_full_test_button_has_the_approved_texts() -> None:
     """The banner's approved texts, word for word: the manual page keeps the name Goldfish; the run
-    is "Run full test"."""
+    is "Run test"."""
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     assert (
         "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no opponents), "
         "a legality check and the deck statistics, plus Forge games against precons when Forge is on and "
-        "the deck has a commander; saved under History. The solo test takes up to a minute; the result "
-        "page opens when the solo test is done.'>" in html
+        "the deck has a commander; saved under History. The report opens at once and fills in as each "
+        "part finishes.'>" in html
     )
-    assert " Run full test</button>" in html
+    assert " Run test</button>" in html
     assert "Run simulation" not in html and "Simulating" not in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest on Archidekt</a>" in html  # names kept
 
@@ -1157,4 +1157,4 @@ def test_the_solo_test_only_run_is_offered_only_when_forge_is_on() -> None:
     signed_out = banner_html(
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
-    assert "Solo test only" not in signed_out and "Run full test" not in signed_out
+    assert "Solo test only" not in signed_out and "Run test" not in signed_out

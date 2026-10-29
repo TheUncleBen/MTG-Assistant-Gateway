@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import logging
 import re
 import secrets
+import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, quote
 
@@ -35,18 +37,22 @@ from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
+from .db import SESSION_END_NOTICE
 from .decks import (
+    ADMIN_CLIENT,
     REVIEW_PAGE,
     DeckError,
     commander_row_texts,
     commander_stays_text,
     current_client,
     custom_card_line,
+    diff_of,
     row_label,
     row_line,
     tag_change_text,
 )
 from .formatting import DOC_CSS, doc_html
+from .membership import session_holder
 from .proposals_view import PROPOSALS_CSS
 from .refusals import WRITES_OFF_KEPT, WRITES_OFF_KEPT_MANY
 from .theme import (
@@ -55,6 +61,7 @@ from .theme import (
     THEME_COOKIE,
     VIEW_COOKIE,
     VIEW_KINDS,
+    card_size_page,
     icon,
     in_app,
     layout_from_cookie,
@@ -70,6 +77,8 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
+
+logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "mtg_session"
 BROWSER_CLIENT_ID = "__browser__"
@@ -92,10 +101,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         current: str | None = None,
         main_class: str = "",
         heading: bool = True,
+        signin_link: bool = True,
     ) -> Response:
         return render(
             title,
             body,
+            signin_link=signin_link,
             site=s.server_name,
             status=status,
             signed_in=sub is not None,
@@ -125,15 +136,37 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def small(
-        title: str, body: str, *, status: int = 200, sub: str | None = None, sid: str | None = None
+        title: str,
+        body: str,
+        *,
+        status: int = 200,
+        sub: str | None = None,
+        sid: str | None = None,
+        signin_link: bool = True,
     ) -> Response:
-        """One of the small pages (smallpage.py): the panel carries its own title."""
-        return page(title, body, status=status, sub=sub, sid=sid, heading=False, head_extra=smallpage.HEAD)
+        """One of the small pages (smallpage.py): the panel carries its own title. ``signin_link``
+        False leaves the top bar's Sign in out (the app sign-in's last page, which says Signed in)."""
+        return page(
+            title,
+            body,
+            status=status,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            head_extra=smallpage.HEAD,
+            signin_link=signin_link,
+        )
 
     def login_failed(exc: LoginError, login_href: str) -> Response:
         """The page for a website sign-in that could not be finished, by the error's kind."""
         body = smallpage.login_error(exc.kind, str(exc), assistant=False, login_href=login_href)
-        return small(smallpage.login_error_title(exc.kind), body, status=exc.status)
+        # the panel's Try again is the way in: no second Sign in in the top bar beside it
+        return small(
+            smallpage.login_error_title(exc.kind),
+            body,
+            status=exc.status,
+            signin_link=exc.kind != "unavailable",
+        )
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
         return csrf_form_ok(s, sid, data)
@@ -152,6 +185,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # app to its browser sign-in; it can only ever ask for more, never less.
         fresh = request.cookies.get(fresh_cookie) == "1" or q.get("fresh") == "1"
         params: dict[str, str] = {"next": nxt}
+        max_age: int | None = None
         challenge = q.get("app_challenge")
         if challenge is not None:
             # The Android app's sign-in, running in the phone's browser (app_signin.py). This
@@ -159,10 +193,37 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if not app_signin.CHALLENGE.fullmatch(challenge):
                 return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
             params["app_challenge"] = challenge
+            # when the leg started: a sign-in it asks for must be made after this (auth_time)
+            params["app_started"] = str(int(time.time()))
+            back = q.get("app_return")
+            if back is not None:
+                # The app's retry, when the verified https Auth Tab can't be used: an Auth Tab on the
+                # app's own scheme (app_signin.py). The identity provider is then asked for a
+                # sign-in of its own, never a silent pass-through: any app can start this leg, and
+                # only a person signing in may finish it. The callback checks auth_time against
+                # when the leg started, so it does not rely on the provider honouring prompt=login.
+                if back != app_signin.SCHEME_RETURN:
+                    return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
+                params["app_return"] = back
+                fresh = True
+            if fresh:
+                # a sign-in of its own, with max_age=0 as well: only a leg that asked for one can
+                # show it was made during the leg (the return page then opens the app by itself)
+                params["app_fresh"] = "1"
+                max_age = 0
         else:
             sub, _sid = current(request)
             if sub:
                 return RedirectResponse(nxt, status_code=302)
+            sid = request.cookies.get(session_cookie)
+            if sid and state.db.session_end_reason(sid):
+                # This browser's sign-in ended for a reason it should hear first (an unused or
+                # longest time, the sign-in service, an admin): the page says why, with Sign in.
+                return RedirectResponse(
+                    f"/signed-out?next={quote(nxt, safe='/?=&')}",
+                    status_code=303,
+                    headers={"Cache-Control": "no-store"},
+                )
             if in_app() and q.get("inapp") != "1":
                 # The fresh cookie stays until a sign-in completes (start_session), so backing out
                 # of the browser and coming back here still asks for credentials again.
@@ -170,7 +231,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 resp.headers["Cache-Control"] = "no-store"
                 return resp
         try:
-            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
+            url = await state.provider.start_idp_login(
+                BROWSER_CLIENT_ID, params, force_login=fresh, max_age=max_age
+            )
         except LoginError as exc:
             return login_failed(exc, f"/login?next={nxt}")
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
@@ -219,9 +282,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
-        # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
-        # cache is what made sign-out take seconds in Chrome.
+        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": clearing
+        # the browser's whole HTTP cache is what made sign-out take seconds in Chrome. Ordinary
+        # pages are "private, no-cache" (owner decision, 0.7.46): asked again before any use, so
+        # after sign-out a kept page can show for a moment until it is asked for again.
         resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
@@ -237,20 +301,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         back = _safe_next(data.get("next"))
+        # static/pages.js sends it with fetch and then redraws the page in place, so the choice adds
+        # no step to the browser's history (Back went to the same page)
+        script = "application/json" in (request.headers.get("accept") or "")
         if not (sub and sid and check_csrf(sid, data)):
+            if script:
+                return JSONResponse({"ok": False}, status_code=403)
             return RedirectResponse(back, status_code=303)
         theme = theme_from_cookie(data.get("theme"))
-        resp = RedirectResponse(back, status_code=303)
+        resp: Response = JSONResponse({"ok": True}) if script else RedirectResponse(back, status_code=303)
         if theme == "system":
             resp.delete_cookie(THEME_COOKIE, path="/")
         else:
+            # readable by the pages' script: a page restored from memory by Back (feedback.js)
+            # checks it against the look it was drawn with
             resp.set_cookie(
                 THEME_COOKIE,
                 theme,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
-                httponly=True,
+                httponly=False,
                 samesite="lax",
             )
         return resp
@@ -265,34 +336,52 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         back = _safe_next(data.get("next"))
+        # static/pages.js sends it with fetch and then redraws the page in place, so the choice adds
+        # no step to the browser's history (Back went to the same page)
+        script = "application/json" in (request.headers.get("accept") or "")
         if not (sub and sid and check_csrf(sid, data)):
+            if script:
+                return JSONResponse({"ok": False}, status_code=403)
             return RedirectResponse(back, status_code=303)
         layout = layout_from_cookie(data.get("layout"))
-        resp = RedirectResponse(back, status_code=303)
+        resp: Response = JSONResponse({"ok": True}) if script else RedirectResponse(back, status_code=303)
         if layout == "auto":
             resp.delete_cookie(LAYOUT_COOKIE, path="/")
         else:
+            # readable by the pages' script: a page restored from memory by Back (feedback.js)
+            # checks it against the look it was drawn with
             resp.set_cookie(
                 LAYOUT_COOKIE,
                 layout,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
-                httponly=True,
+                httponly=False,
                 samesite="lax",
             )
         return resp
 
     @server.custom_route("/signed-out", methods=["GET"], include_in_schema=False)
-    async def signed_out(_request: Request) -> Response:
-        return small(
+    async def signed_out(request: Request) -> Response:
+        """Says why this browser was signed out, when its (ended) session's cookie tells: the
+        cookie outlives its session for that (SESSION_END_NOTICE) and goes here."""
+        sid = request.cookies.get(session_cookie)
+        reason = state.db.session_end_reason(sid) if sid else None
+        nxt = _safe_next(request.query_params.get("next", "/"))
+        resp = small(
             "Signed out",
             smallpage.panel(
                 "Signed out",
-                smallpage.p("You are signed out of this gateway."),
-                smallpage.button("Sign in again", "/login?next=/", primary=True),
+                smallpage.p(signed_out_text(reason, state)),
+                smallpage.button("Sign in", f"/login?next={quote(nxt, safe='/?=&')}", primary=True),
             ),
+            signin_link=False,  # the page's own Sign in is the one way on
         )
+        resp.headers["Cache-Control"] = "no-store"
+        if reason is not None:
+            # told once: the next Sign in goes to the identity provider as usual
+            resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
 
     @server.custom_route("/data-deleted", methods=["GET"], include_in_schema=False)
     async def data_deleted(_request: Request) -> Response:
@@ -496,7 +585,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
             resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-            resp.headers["Clear-Site-Data"] = '"storage"'  # pages are no-store already (see /logout)
+            resp.headers["Clear-Site-Data"] = '"storage"'  # as /logout
             return resp
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()
@@ -571,7 +660,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         data = {k: v[0] for k, v in multi.items()}
         action = data.get("action")
         back = _list_back(data.get("back"))
-        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+        if not check_csrf(sid, data) or action not in ("apply", "reject", "rest"):
             nothing = "Nothing was rejected." if action == "reject" else "Nothing was applied."
             if data.get("box") == "1":
                 return JSONResponse({"ok": False, "message": "This form expired. Reload the page."}, 403)
@@ -854,10 +943,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
         notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
         if not on_top and request.query_params.get("ok") == "applied" and p.get("applied_text"):
-            # an account action or collection change says what it did, not that a deck matches
+            # an account action or binder change says what it did, not that a deck matches
             notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
-            f"New deck: {p['deck_name']}"
+            f"{_new_what(p)}: {p['deck_name']}"
             if p.get("kind") == "create_deck"
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
@@ -872,6 +961,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         )
         if p["state"] == "replaced":
             p["replaced_by"] = _replacement(state, sub, pid)
+        if getattr(state, "reports", None) is not None:  # simulations of its resulting deck
+            p["sim_reports"] = state.reports.for_proposal(sub, pid)
+            p["can_test"] = getattr(state.reports, "mf", None) is not None
         close = proposals_view.panel_close_href(query)
         full = request.query_params.get("full") == "1"
         no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
@@ -879,12 +971,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         panel = ui.side_panel(
             proposal_heading(p),
             notice
-            + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top, others=others)
+            + _proposal_body(
+                p,
+                _csrf(s, sid),
+                stamp,
+                step=not on_top,
+                others=others,
+            )
             + (
                 ""
                 if full
-                else f"<p class='ui-hint panel-only'><a href='/proposals/{quote(pid, safe='')}?full=1'>"
-                "Open as a full page</a></p>"
+                else "<p class='ui-hint panel-only'>"
+                + ui.cap_link("Open as a full page", f"/proposals/{quote(pid, safe='')}?full=1")
+                + "</p>"
             ),
             label=f"Proposal {no}for {where}",
             close_href=close,
@@ -925,7 +1024,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(data, Response):
             return data
         action = data.get("action")
-        if not check_csrf(sid, data) or action not in ("apply", "reject"):
+        if not check_csrf(sid, data) or action not in ("apply", "reject", "rest"):
             return page(
                 "Proposal",
                 _err("This form expired. Reload the page and try again."),
@@ -939,6 +1038,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"/proposals/{pid}", status_code=303)
         current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
         try:
+            if action == "rest":
+                # "Propose the rest" of a change that stopped partway: a new proposal to review
+                made = await state.decks.propose_rest(sub, pid)
+                return RedirectResponse(f"/proposals/{made['proposal_id']}", status_code=303)
             if action == "reject":
                 state.decks.reject(sub, pid, via=REVIEW_PAGE)
             else:
@@ -989,13 +1092,34 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
             # The Android app's sign-in: no session in this browser, a one-time code for the app,
             # handed over at the gateway's own address, where the app's Auth Tab closes by itself.
-            code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
-            return RedirectResponse(
-                f"{app_signin.RETURN_PATH}?code={code}",
-                status_code=303,
-                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+            headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+            scheme = session["params"].get("app_return") == app_signin.SCHEME_RETURN
+            # a sign-in made during this leg, which the leg asked for (prompt=login, max_age=0)
+            fresh_in = session["params"].get("app_fresh") == "1" and app_signin.signed_in_since(
+                identity.raw_claims.get("auth_time"), session["params"].get("app_started")
             )
-        return start_session(identity.sub, nxt, via=None)
+            if scheme and not fresh_in:
+                # Any app can open this leg, and the scheme goes back to whichever did: without
+                # proof of a sign-in made during the leg, no code. The app finishes in a Custom Tab.
+                logger.warning(
+                    "app sign-in on the app's scheme refused: the identity provider's ID token %s",
+                    "has no auth_time" if "auth_time" not in identity.raw_claims else "shows no new sign-in",
+                )
+                return RedirectResponse(app_signin.SCHEME_REFUSED, status_code=303, headers=headers)
+            # Only after a sign-in made during the leg does the return page open the app by itself:
+            # any app can start an https leg too, and a browser still signed in at the provider
+            # passes it straight through, so the page then waits for the member's tap.
+            code = state.app_signins.issue(  # type: ignore[attr-defined]
+                identity.sub, challenge, nxt, fresh=fresh_in, grant=session.get("grant_holder")
+            )
+            return RedirectResponse(
+                # the retry's Auth Tab on the app's own scheme (no Digital Asset Links check); else
+                # the gateway's address: the verified https Auth Tab, or the page with the button
+                app_signin.scheme_url(code) if scheme else f"{app_signin.RETURN_PATH}?code={code}",
+                status_code=303,
+                headers=headers,
+            )
+        return start_session(identity.sub, nxt, via=None, grant=session.get("grant_holder"))
 
     @server.custom_route(app_signin.RETURN_PATH, methods=["GET"], include_in_schema=False)
     async def login_app_return(request: Request) -> Response:
@@ -1006,16 +1130,30 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
         code = request.query_params.get("code", "")
         if app_signin.CODE.fullmatch(code):
-            resp = small("Signed in", app_signin.return_body(code, app_page.app_package()))
+            auto = state.app_signins.fresh(code)  # type: ignore[attr-defined]
+            resp = small(
+                "Signed in",
+                app_signin.return_body(code, app_page.app_package(), auto=auto),
+                signin_link=False,
+            )
         else:
             resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
         resp.headers["Cache-Control"] = "no-store"
         resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
-    def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
+    def start_session(
+        sub: str, nxt: str, *, via: str | None, grant: str | None, status: int = 302
+    ) -> Response:
+        """Sign this browser in as ``sub``, with the provider grant its sign-in left at ``grant``
+        as the session's own (membership.py)."""
         sid = secrets.token_urlsafe(32)
-        state.db.create_browser_session(sid, sub, s.browser_session_ttl)
+        ttl = min(
+            state.live.seconds("browser_session_ttl"), state.db.session_max_age()
+        )  # the Settings page's
+        state.db.create_browser_session(sid, sub, ttl)
+        if grant and state.membership is not None:
+            state.membership.adopt(grant, session_holder(sid))
         state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
         resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
         if via is not None:
@@ -1023,7 +1161,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.set_cookie(
             session_cookie,
             sid,
-            max_age=s.browser_session_ttl,
+            max_age=ttl + SESSION_END_NOTICE,  # kept past the session's end to be told why it ended
             path="/",
             httponly=True,
             secure=secure,
@@ -1054,7 +1192,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp = small("Sign-in failed", app_signin.expired_body("/"), status=400)
             resp.headers["Cache-Control"] = "no-store"
             return resp
-        return start_session(pending.sub, _safe_next(pending.next_path), via="android_app", status=303)
+        return start_session(
+            pending.sub, _safe_next(pending.next_path), via="android_app", grant=pending.grant, status=303
+        )
 
     state.finish_browser_login = finish_browser_login  # type: ignore[attr-defined]
 
@@ -1129,11 +1269,47 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
-    set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
+    page = card_size_page(request.url.path)  # each page keeps its own card size
+    set_card_size(prefs.card_sizes(state.db, sub, page), page)  # drawn on <html> (theme.render)
     # this request is the member's own page: its Archidekt reads go first (archidekt.page_turn);
     # set after sync.opened, so the deck sync's check started above does not take that turn
     page_turn.set(True)
     return sub, sid
+
+
+def _length(seconds: int) -> str:
+    """A sign-in setting's length in words: "7 days", "12 hours", "30 minutes"."""
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        if (seconds >= size and seconds % size == 0) or unit == "minute":
+            return plural(max(1, round(seconds / size)), unit)
+    raise AssertionError  # the loop ends on minutes
+
+
+def signed_out_text(reason: str | None, state: Any) -> str:
+    """What the signed-out page says, by why the session ended (db.SESSION_END_REASONS)."""
+    if reason == "unused":
+        unused = _length(state.live.seconds("browser_session_ttl"))
+        return f"Your sign-in on this device ended because it wasn't used for {unused}."
+    if reason == "longest":
+        longest = _length(state.db.session_max_age())
+        return (
+            f"Your sign-in on this device reached the longest time a sign-in lasts ({longest}), so it ended."
+        )
+    if reason == "idp":
+        return "The sign-in service asked you to sign in again on this device. Your AI apps stay connected."
+    if reason == "removed":
+        return (
+            "Your account is no longer in the group that may use this gateway, so you were signed out "
+            "on every device and your AI apps were disconnected. If that's a mistake, ask the "
+            "gateway's admin."
+        )
+    if reason == "elsewhere":
+        return "You signed out on all your devices from another device."
+    if reason == "admin":
+        return "An admin of this gateway signed you out on every device."
+    if reason == "disabled":
+        return "An admin turned off your account on this gateway. Ask them to turn it back on."
+    return "You are signed out of this gateway."
 
 
 def login_redirect(next_path: str) -> Response:
@@ -1163,9 +1339,9 @@ OK_MESSAGES = {
     "disconnected_all": "All apps were disconnected.",
     "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
-    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or collection "
+    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or binder "
     "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-    "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot does "
+    "a snapshot you can restore from History; a binder change keeps none. Restoring a snapshot does "
     "not put back a deck's folder, tags, cover or custom cards.",
     "mode_auto": "Saved: your assistant applies changes without asking. Restoring a "
     "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
@@ -1176,7 +1352,7 @@ OK_MESSAGES = {
     "in, one that replaces another app's change, or one that another app's waiting change would replace. "
     "When a change waits for "
     "your press, its card and review page say why. A change to one of your decks keeps a snapshot you "
-    "can restore from History; a collection change keeps none. Restoring a snapshot does not put back "
+    "can restore from History; a binder change keeps none. Restoring a snapshot does not put back "
     "a deck's folder, tags, cover or custom cards.",
     # 0.7.29: several waiting changes applied with one press (batch.py), and Undo
     "rejected_some": "Rejected. Nothing was sent to Archidekt.",
@@ -1196,7 +1372,7 @@ ERR_MESSAGES = {
     "not_pending": "This proposal is no longer pending, so nothing was done.",
     "stale": "Not applied: the deck changed on Archidekt, and this change would now do something "
     "different from what you reviewed. Nothing was sent. It is still waiting, marked Needs a look: "
-    "review it again, then apply or reject it, or ask your assistant to amend it.",
+    "it can't be applied as it is. Ask your assistant to update it, or reject it.",
     "changed": "A newer version of this change was made since you opened it. Nothing was sent. Review "
     "the new version below.",
     "now_held": "This change is held for a reason that came up after you opened this page, so nothing "
@@ -1267,8 +1443,8 @@ def _ok(msg: str) -> str:
 # What "Delete my data" deletes, word for word on the Account page's card and on the "Your data
 # was deleted" page (db.py MEMBER_TABLES is the code's list; tests keep the two in step).
 DELETED_LIST = (
-    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your simulator "
-    "card models, your notification and view choices, your Archidekt link, connected apps and your "
+    "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your card "
+    "models, your push notification and view choices, your Archidekt link, connected apps and your "
     "sign-in"
 )
 
@@ -1403,28 +1579,31 @@ def actor_html(label: str | None) -> str:
 
 
 def _lists_card(sub: str) -> str:
-    """Your Archidekt lists: the five account-wide lists with the counts known so far (each count
-    comes from that tab's last read, account_lists.counts), one press from My lists."""
+    """Your Archidekt lists: the account-wide lists that shape decks with the counts known so far
+    (each count comes from that tab's last read, account_lists.counts), one press from My lists;
+    the pinned cards are Binder's Wants (decision C8)."""
     from . import account_lists  # (imports archidekt first: not at the top)
-    from .lists_page import PAGE, TABS
+    from .lists_page import ACCOUNT_TABS, PAGE, WANTS
 
     counts = account_lists.counts(sub)
     words = {
         "templates": ("category template", "category templates"),
         "default_categories": ("card with default categories", "cards with default categories"),
         "color_tags": ("color tag", "color tags"),
-        "pins": ("pinned card", "pinned cards"),
         "custom_cards": ("custom card", "custom cards"),
     }
     parts = []
-    for t in TABS:
+    for t in ACCOUNT_TABS:
         n = counts.get(t.kind)
         one, many = words[t.kind]
         text = many if n is None else f"{n:,} {one if n == 1 else many}"
-        parts.append(f"<a href='{PAGE}/{t.slug}'>{text}</a>")
+        parts.append(ui.cap_link(text, f"{PAGE}/{t.slug}"))
     return (
         "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
-        f"<p>Lists that follow you into every deck, kept on Archidekt: {', '.join(parts)}.</p>"
+        "<p>Lists that shape every deck, kept on Archidekt:</p>"
+        f"<p class='ui-caps'>{''.join(parts)}</p>"
+        f"<p class='muted'>The cards you pin on Archidekt are your wants: "
+        f"{ui.cap_link('Binder › Wants', WANTS, icon_name='bookmark')}</p>"
         f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
     )
 
@@ -1954,7 +2133,7 @@ def _category_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, i
             _li("chg", "Category", html.escape(ln)) for ln in filter(None, map(str.strip, diff.splitlines()))
         ]
         return "".join(items), len(items)
-    items = [_li("chg", "Category", html.escape(row_line(r))) for r in rows]
+    items = [_li("chg", "Category", html.escape(ln)) for ln in diff_of(rows).splitlines()]
     return "".join(items), len(items)
 
 
@@ -2002,14 +2181,59 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
 # The review page's words for a proposal the re-check (recheck.py) marked Needs a look: the deck
 # changed after it was made and the change no longer fits. The reason follows when known.
 OUT_OF_DATE_PAGE = (
-    "Needs a look: the deck changed after this change was made and it no longer fits, so Apply will "
-    "be refused and nothing will be sent. Ask your assistant to update it, or reject it."
+    "Needs a look: the deck changed after this change was made and it no longer fits, so it can't be "
+    "applied as it is. Ask your assistant to update it, or reject it."
 )
 
 
+# A failure that sent nothing: the reason first (_page_step), then this, by who made the change.
+# A change the member made on the website is made again there; there is no assistant to ask.
 FAILED_PLAIN_STEP = (
-    "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+    "Nothing was changed on Archidekt. Ask your assistant for a new proposal if you still want these edits."
 )
+FAILED_PLAIN_STEP_OWN = "Nothing was changed on Archidekt. Make the change again if you still want it."
+
+
+def _deck_after_html(p: dict[str, Any]) -> str:
+    """A waiting deck edit's line under its summary: the deck once applied (decks.deck_after_block,
+    what an assistant is told as ``deck_after``): its size, whether it is legal, and its price with
+    the change, from the prices known. A card with no known price is named, not guessed."""
+    after = p.get("deck_after")
+    if not isinstance(after, dict) or p.get("kind") not in (None, "edit"):
+        return ""
+    parts = []
+    n = after.get("card_count")
+    if isinstance(n, int):
+        parts.append(f"{n:,} card{'' if n == 1 else 's'}")
+    if after.get("legal") is True:
+        parts.append("legal")
+    elif after.get("legal") is False:
+        parts.append("not legal")
+    total, change = after.get("price_total"), after.get("price_change")
+    if isinstance(total, int | float):
+        price = f"${float(total):,.2f}"
+        if isinstance(change, int | float) and round(float(change), 2):
+            price += f" ({'up' if change > 0 else 'down'} ${abs(float(change)):,.2f})"
+        elif isinstance(change, int | float):
+            price += " (no change)"
+        parts.append(price)
+    else:
+        parts.append("no price is known for its cards")
+    line = "Once applied: " + ", ".join(parts) + "."
+    unpriced = [str(x) for x in after.get("unpriced_added") or [] if x]
+    if unpriced:
+        named = ", ".join(f"“{x}”" for x in unpriced[:5]) + (
+            f" and {len(unpriced) - 5} more" if len(unpriced) > 5 else ""
+        )
+        line += (
+            f" No price is known for {named}, so {'it is' if len(unpriced) == 1 else 'they are'} not counted."
+        )
+    return f"<p class='ui-why pr-after'>{html.escape(line)}</p>"
+
+
+def _made_by_member(p: dict[str, Any]) -> bool:
+    """Whether the member made this change on the gateway's own pages (or it predates a maker)."""
+    return p.get("created_by_client") in (None, "", BROWSER_CLIENT_ID, ADMIN_CLIENT)
 
 
 def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
@@ -2023,11 +2247,11 @@ def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
     if p.get("state") == "pending":
         result = p.get("result") if isinstance(p.get("result"), dict) else {}
         return (
-            result.get("error") == "rate_limited"
+            (result.get("error") == "rate_limited" or bool(p.get("try_again")))
             and bool(p.get("writes_enabled"))
             and not p.get("out_of_date")
         )
-    return p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
+    return p.get("state") == "failed"
 
 
 def _page_step(p: dict[str, Any]) -> str:
@@ -2046,6 +2270,11 @@ def _page_step(p: dict[str, Any]) -> str:
         return (
             f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
             "so you can apply it again later."
+        )
+    if state == "pending" and p.get("try_again"):
+        # Archidekt didn't answer the last apply, and nothing changed there (decks.TRY_AGAIN_KINDS)
+        return (
+            "Archidekt didn't answer, so nothing was changed. The change is waiting again: press Try again."
         )
     if state == "pending":
         retry = (
@@ -2071,18 +2300,20 @@ def _page_step(p: dict[str, Any]) -> str:
     if state == "failed" and result.get("error") == "rate_limited":
         return _rate_limited_step(p, result)
     if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
-        return (
-            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
-            "Check it, and delete it from its deck page if you don't want it."
-        )
+        return _made_but(p, result)
     if state == "failed" and p.get("kind") == "lists" and result.get("done"):
         n = int(result["done"])
         return (
             f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
             "Check My lists; the entries as they were just before are under Before, below."
         )
+    if state == "failed" and p.get("rest_offered"):
+        return (
+            "Part of this change reached Archidekt before it stopped. Propose the rest makes a new "
+            "proposal of what is still missing, for you to review."
+        )
     if state == "failed" and result.get("sent_entries"):
-        where = "your collection" if p.get("kind") == "collection" else "the deck"
+        where = "your binder" if p.get("kind") == "collection" else "the deck"
         undo = (
             "; the snapshot taken just before it can be restored from History."
             if result.get("snapshot_id")
@@ -2090,7 +2321,14 @@ def _page_step(p: dict[str, Any]) -> str:
         )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
-        return FAILED_PLAIN_STEP
+        # the reason, in the gateway's words (DeckError messages: no codes), then what is left
+        why = str(result.get("detail") or "").strip()
+        lead = (
+            f"This change could not be applied: {why.rstrip('.')}. "
+            if why
+            else "This change could not be applied. "
+        )
+        return lead + (FAILED_PLAIN_STEP_OWN if _made_by_member(p) else FAILED_PLAIN_STEP)
     if state == "rejected":
         by = {
             "assistant": " by your assistant (its reject_proposal call)",
@@ -2100,27 +2338,49 @@ def _page_step(p: dict[str, Any]) -> str:
             "api": " through the gateway's API",
             "disconnected": " when you disconnected the app that made it",
         }.get(str(p.get("closed_by") or ""), "")
-        return f"This proposal was rejected{by}. Nothing was changed."
+        why = str(p.get("reject_reason") or "").strip()
+        # the member's own words from the card (escaped where the line is drawn, _step_html)
+        said = f" Your reason: “{why}”" if why else ""
+        return f"This proposal was rejected{by}. Nothing was changed.{said}"
     if state == "replaced" and p.get("replace_note"):
         return str(p["replace_note"])  # "Replaced by #5."
     return "This proposal can no longer be applied."
+
+
+def _new_what(p: dict[str, Any]) -> str:
+    """ "New card package" for a proposal that makes one, else "New deck"."""
+    rows = p.get("rows") if isinstance(p.get("rows"), list) else []
+    package = any(isinstance(r, dict) and r.get("kind") == "new_deck" and r.get("package") for r in rows)
+    return "New card package" if package else "New deck"
+
+
+def _made_but(p: dict[str, Any], result: dict[str, Any]) -> str:
+    """A new deck or package made on Archidekt before the apply stopped: what differs, when the
+    check after it said so (the result's detail), and what to do."""
+    what = "card package" if _new_what(p) == "New card package" else "deck"
+    if result.get("error") == "verify_mismatch" and result.get("detail"):
+        return (
+            f"{result['detail']} Check the new {what} on Archidekt, and change it there or delete it from "
+            "its deck page if you don't want it."
+        )
+    return (
+        f"A new {what} was made on Archidekt before this stopped, so it may not match the proposal. "
+        "Check it, and delete it from its deck page if you don't want it."
+    )
 
 
 def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
     """The review page's one message for an apply that stopped because Archidekt asked the gateway
     to wait longer than an apply may: why, how far it got, and to try again later."""
     again = "Try again later: ask your assistant for a new proposal."
-    where = "your collection" if p.get("kind") == "collection" else "the deck"
+    where = "your binder" if p.get("kind") == "collection" else "the deck"
     undo = (
         " The snapshot taken just before it can be restored from History."
         if result.get("snapshot_id") and p.get("kind") != "collection"
         else ""
     )
     if p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
-        got = (
-            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
-            "Check it, and delete it from its deck page if you don't want it."
-        )
+        got = _made_but(p, result)
     elif result.get("sent_entries"):
         sent, of = int(result["sent_entries"]), result.get("of_entries")
         got = (
@@ -2158,8 +2418,14 @@ def _risk_words(p: dict[str, Any]) -> str:
     """ "Low: 2 card rows, no commander change": the status word and the one-line reason."""
     key = ui.ALIASES.get(str(p.get("risk")), str(p.get("risk")))
     word = ui.LABELS[key].word if key in ui.RISK_KEYS else str(p.get("risk"))
-    why = str(p.get("risk_reason") or "").strip()
+    why = _risk_reason(p)
     return f"{word}: {why}" if why else word
+
+
+def _risk_reason(p: dict[str, Any]) -> str:
+    """The risk's one-line reason; a closed change's is the one stored when it closed (none for
+    one closed before 0.7.46)."""
+    return str(p.get("risk_reason") or "").strip()
 
 
 def _future(ts: int | None, now: float) -> str:
@@ -2181,7 +2447,7 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
     if p.get("kind") == "create_deck" and p["deck_id"] == "new":
         return "Deck", "Creates a new deck"
     if p.get("kind") == "collection":
-        return "Target", "Your Archidekt collection"
+        return "Target", "Your binder"
     if p.get("kind") == "action" and p["deck_id"] == "account":
         return "Target", "Your Archidekt account"
     if p.get("kind") == "action" and str(p["deck_id"]).startswith("forum:"):
@@ -2237,7 +2503,7 @@ def proposal_heading(p: dict[str, Any]) -> str:
     """The panel's heading: "#1 +1 Arcane Signet, −1 Counterspell" ("New deck: {name}" for a new
     deck). The number shows while it waits, as on the list."""
     if p.get("kind") == "create_deck":
-        return html.escape(f"New deck: {p['deck_name']}")
+        return html.escape(f"{_new_what(p)}: {p['deck_name']}")
     lines = str(p.get("diff") or "").splitlines()
     text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
     text = text[:300] or str(p.get("deck_name") or "Proposal")
@@ -2263,8 +2529,183 @@ def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str
     href = f"/proposals?deck_id={quote(str(p['deck_id']), safe='')}"
     return (
         f"<p class='ui-hint pr-also'>{html.escape(text)} "
-        f"<a href='{href}'>Review all {len(others) + 1}</a></p>"
+        f"{ui.cap_link(f'Review all {len(others) + 1}', href)}</p>"
     )
+
+
+# The confirm box a destructive approval opens from its Apply button (ui.box, static/box.js): the
+# title names the thing in curly quotes, the body says what happens and that it cannot be undone,
+# Keep it first, the one solid red button last; that button submits the review page's guarded form
+# (``form='applyf'``), so the stamp, version, status and CSRF checks are the same as for one press.
+CONFIRM_BOX = "confirm-delete"
+
+
+def _confirm_box(title: str, body: str, keep: str, final: str) -> str:
+    return ui.box(
+        CONFIRM_BOX,
+        title,
+        body,
+        actions=[
+            ui.box_button(keep, cancel=True),
+            ui.box_button(
+                final, kind="danger-solid", name="action", value="apply", form="applyf", icon_name="trash"
+            ),
+        ],
+        cls="dangerbox",
+    )
+
+
+def _delete_deck_box(p: dict[str, Any]) -> str:
+    """Deleting a deck: the deck and its size, the snapshot kept first (no backup copy on Archidekt,
+    whatever the backups setting: decks.DELETE_KEEPS_NO_COPY)."""
+    name = str(p.get("deck_name") or "this deck")
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    size = f" ({plural(int(changes['cards']), 'card')})" if str(changes.get("cards") or "").isdigit() else ""
+    body = (
+        f"<p>This deletes <strong>“{html.escape(name)}”</strong>{size} from your Archidekt account. "
+        "The gateway keeps a snapshot of it under History first and checks that the deck is unchanged "
+        "since this proposal. No copy is made on Archidekt, and a snapshot can't be restored onto a "
+        "deleted deck. <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Delete this deck.</p>"
+    )
+    return _confirm_box(f"Delete “{name}”?", body, "Keep it", "Delete this deck")
+
+
+def _custom_cards_box(p: dict[str, Any]) -> str:
+    """Taking custom cards out of a deck (modes.custom_cards_risk): each card that ends with
+    fewer copies, by name; a snapshot restore does not put them back."""
+    name = str(p.get("deck_name") or "this deck")
+    fewer = []
+    for r in p.get("rows") or []:
+        try:
+            before, after = int(r.get("before") or 0), int(r.get("after") or 0)
+        except (TypeError, ValueError):
+            continue
+        if after < before:
+            fewer.append((str(r.get("name") or ""), before, after))
+    n = len(fewer) or 1
+
+    def copies(before: int, after: int) -> str:
+        return f" ({before} copies → {after})" if after else ""
+
+    if len(fewer) == 1:
+        card, before, after = fewer[0]
+        what = (
+            f"This takes <strong>“{html.escape(card)}”</strong> out of the deck on Archidekt"
+            f"{copies(before, after)}."
+        )
+    elif fewer:
+        cards = ", ".join(f"<strong>“{html.escape(c)}”</strong>{copies(b, a)}" for c, b, a in fewer)
+        what = f"This takes {n} custom cards out of the deck on Archidekt: {cards}."
+    else:
+        what = "This takes custom cards out of the deck on Archidekt."
+    body = (
+        f"<p>{what} The gateway checks the deck again first and reads it back after. "
+        "<strong>Restoring a snapshot doesn't put custom cards back.</strong> To have one again, add it "
+        "from My lists › Custom cards.</p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Take them out.</p>"
+    )
+    title = f"Take {plural(n, 'custom card')} out of “{name}”?"
+    return _confirm_box(title, body, "Keep them", "Take them out")
+
+
+def _lists_delete_box(p: dict[str, Any]) -> str:
+    """A list change that deletes (account_lists.DELETES): the entries that go, by name; the
+    proposal's other changes are applied with them."""
+    rows = p.get("rows") or []
+    gone = [str(r.get("text") or "") for r in rows if r.get("destructive")]
+    rest = len(rows) - len(gone)
+    items = "".join(f"<li>{html.escape(t)}</li>" for t in gone)
+    others = (
+        " The other change in this proposal is applied with it."
+        if rest == 1
+        else f" The other {rest} changes in this proposal are applied with it."
+        if rest
+        else ""
+    )
+    body = (
+        f"<p>This deletes from your lists on Archidekt:</p><ul>{items}</ul>"
+        f"<p>The gateway reads the list again first and keeps a copy of the entries it changes from just "
+        f"before, then reads the list back.{others} <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        f"you press Delete {plural(len(gone), 'entry', 'entries')}.</p>"
+    )
+    final = f"Delete {plural(len(gone), 'entry', 'entries')}"
+    return _confirm_box("Delete from your Archidekt lists?", body, "Keep them", final)
+
+
+# Proposals the website can test (owner decision C7): a deck edit (paired against the deck as it is)
+# and a new deck's list.
+TESTABLE_KINDS = frozenset({"edit", "create_deck"})
+TEST_THIS_CHANGE = "Test this change"
+
+
+def _proposal_tests(p: dict[str, Any], csrf: str | None, *, now: float) -> str:
+    """The proposal's test reports, newest first, and a Test this change button while it waits."""
+    links = [
+        ui.button_link(
+            f"Report, {ui.when_text(x.get('taken_at'), now=now)}", f"/history/reports/{x['report_id']}"
+        )
+        for x in p.get("sim_reports") or []
+    ]
+    if p.get("state") == "pending" and p.get("can_test") and (p.get("kind") or "edit") in TESTABLE_KINDS:
+        links.insert(
+            0,
+            f"<form method='post' action='/proposals/{html.escape(str(p['proposal_id']))}/test' "
+            "class='inline'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            "<button type='submit' class='btn btn-plain' data-busy-label='Testing…'>"
+            f"{icon('play')}<span class='label'>{TEST_THIS_CHANGE}</span></button></form>",
+        )
+    return f"<span class='ui-actions'>{''.join(links)}</span>" if links else ""
+
+
+PAIRED_RUNNING = "Testing the change against the deck now. This page shows the result once it is in."
+
+
+def _proposal_paired(p: dict[str, Any]) -> str:
+    """The newest test's paired result (the deck after the change against the deck as it is, game for
+    game): its verdict and one row per number, with a way to the full report."""
+    from .report_view import ab_deltas, ab_verdict
+
+    for x in p.get("sim_reports") or []:
+        block = x.get("paired")
+        if not isinstance(block, dict):
+            if x.get("status") == "running":
+                return f"<p class='ui-sub pr-test' role='status'>{html.escape(PAIRED_RUNNING)}</p>"
+            continue
+        rows = ab_deltas(block)
+        if not block.get("ok") or not rows:
+            continue
+        verdict = ab_verdict(rows)
+        meta = [
+            (
+                str(r["label"]),
+                html.escape(str(r["words"]))
+                # better or worse only when the difference is not within chance
+                + (
+                    {"better": " · Better", "worse": " · Worse"}.get(str(r["way"]), "")
+                    if r["clear"] is not False
+                    else ""
+                )
+                + {True: " · Clear difference", False: " · Could be chance"}.get(r["clear"], ""),
+            )
+            for r in rows
+        ]
+        return (
+            "<section class='pr-test' aria-labelledby='pr-test-h'>"
+            "<h3 class='ui-section' id='pr-test-h'>Against the deck now</h3>"
+            "<p class='ui-sub'>The deck after this change against the deck as it is, game for game under "
+            "the same seeds (solo test).</p>"
+            + (f"<p class='b'>{html.escape(verdict)}</p>" if verdict else "")
+            + ui.meta(meta)
+            + "<p class='ui-actions'>"
+            + ui.button_link("Open the test", f"/history/reports/{x['report_id']}")
+            + "</p></section>"
+        )
+    return ""
 
 
 def _proposal_body(
@@ -2338,10 +2779,9 @@ def _proposal_body(
     ]
     if status == "updated":
         pills.append(ui.status_label("updated", title=str(p.get("status_reason") or "")))
+    # a closed one with nothing to judge it by shows no risk label at all (no lone dash)
     if p.get("risk") and ui.ALIASES.get(str(p["risk"]), str(p["risk"])) in ui.RISK_KEYS:
-        pills.append(ui.risk_label(str(p["risk"]), title=str(p.get("risk_reason") or "")))
-    elif not p.get("risk"):  # closed with nothing to judge it by
-        pills.append(ui.no_risk_label())
+        pills.append(ui.risk_label(str(p["risk"]), title=_risk_reason(p)))
     under = []
     if p.get("risk"):
         under.append(f"<p class='ui-why pr-why'>{html.escape(_risk_words(p))}</p>")
@@ -2394,29 +2834,41 @@ def _proposal_body(
         )
     else:
         meta_rows.append(("Version", str(int(p.get("version") or 1))))
+    tested = _proposal_tests(p, csrf, now=now)
+    if tested:
+        meta_rows.append(("Tests", tested))
+    # Needs a look: said once, in the orange box with its reason, not again as the next step (A21)
+    why_stale = str(p.get("status_reason") or "").strip()
     stale = (
-        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
+        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}"
+        + (f" Why: {html.escape(why_stale)}" if why_stale else "")
+        + "</p>"
         if pending and p.get("out_of_date")
         else ""
     )
+    step = step and not (stale and _page_step(p).startswith(OUT_OF_DATE_PAGE))
     body = (
         f"<div class='pills'>{''.join(pills)}</div>"
         + "".join(under)
         + (f"<p class='ui-next'>{_step_html(p)}</p>" if step else "")
         + _progress_html(p)
         + ui.meta(meta_rows)
+        + _proposal_paired(p)
         + stale
         + f"<h3 class='ui-section'>{heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
-        f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
+        + _deck_after_html(p)
+        + f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary class='fold-btn'>Plain-text diff</summary>{raw}</details>"
         + _lists_before(p)
         + _also_waiting(p, others)
     )
-    if pending and p["writes_enabled"]:
+    if pending and p["writes_enabled"] and not p.get("out_of_date"):
         # the member-only tier is shared: deleting a deck, deleting from the lists (below) and
-        # taking custom cards out of a deck each say what they do
+        # taking custom cards out of a deck each say what they do, and each asks once more in the
+        # site's one confirm box (_confirm_box) before the solid red button sends it
         destroy = p.get("risk") == "destructive" and p.get("kind") == "action"
+        box = ""
         if p.get("risk") == "destructive" and p.get("kind") == "custom_cards":
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Take custom cards out of the deck?</h3>"
@@ -2427,6 +2879,7 @@ def _proposal_body(
                 "Take them out on Archidekt.</p>"
             )
             apply_button = ("apply", "Take them out on Archidekt", "btn-outline-danger")
+            box = _custom_cards_box(p)
         elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
@@ -2436,10 +2889,12 @@ def _proposal_body(
                 "keeps a snapshot of it first. Only you can approve this, in every approval mode. "
                 "Nothing happens until you tap Delete.</p>"
             )
-            # a red outline first; static/proposals.js asks once more with the solid red button
-            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger pr-ask")
+            apply_button = ("apply", "Delete this deck on Archidekt", "btn-outline-danger")
+            box = _delete_deck_box(p)
         elif p.get("kind") == "lists":
             deletes = any(r.get("destructive") for r in p.get("rows") or [])
+            if deletes:
+                box = _lists_delete_box(p)
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to your Archidekt lists?</h3>"
                 "<p>Applying writes these changes to your lists on Archidekt. The gateway reads the list "
@@ -2462,7 +2917,7 @@ def _proposal_body(
             )
             apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-primary")
         else:
-            where = "your collection" if p.get("kind") == "collection" else "your deck"
+            where = "your binder" if p.get("kind") == "collection" else "your deck"
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to Archidekt?</h3>"
                 f"<p>Applying writes these changes to {where} on Archidekt. "
@@ -2472,12 +2927,17 @@ def _proposal_body(
                 "you tap Apply.</p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-primary")
+        if p.get("try_again"):  # Archidekt didn't answer the last apply; nothing changed
+            apply_button = ("apply", "Try again", "primary btn-primary")
         body += (
             ask
             # Apply and Reject stay disabled until the click guard sees the page in use: a
             # connected app must not get its own proposal applied by a double-click on a page it
-            # controls that swaps this window in (clickguard.py).
+            # controls that swaps this window in (clickguard.py). A destructive one's Apply opens
+            # the confirm box, whose red button submits this form (CONFIRM_BOX).
             + guarded_form(
+                form_id="applyf",
+                opens={"apply": CONFIRM_BOX} if box else None,
                 # The version shown; an apply of a proposal amended since is refused
                 hidden={
                     "csrf": csrf or "",
@@ -2494,6 +2954,7 @@ def _proposal_body(
                 extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
             )
             + "</div>"
+            + box
         )
     elif pending:
         body += (
@@ -2520,10 +2981,24 @@ def _proposal_body(
             f"<input type='hidden' name='after' value='{int(p.get('applied_at') or 0)}'>"
             "<button class='btn-plain'>Undo this change</button></form>"
         )
+    if p.get("rest_offered") and csrf:
+        # a deck change that stopped partway: the gateway proposes what is still missing
+        actions.append(
+            "<form method='post' class='rest'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
+            f"<input type='hidden' name='shown' value='{html.escape(shown)}'>"
+            "<input type='hidden' name='action' value='rest'>"
+            "<button class='btn'>Propose the rest</button></form>"
+        )
+    elif p.get("rest_proposal_id"):
+        actions.append(
+            f"<a class='btn btn-plain' href='/proposals/{html.escape(str(p['rest_proposal_id']))}'>"
+            "Open the proposal of the rest</a>"
+        )
     # who rejected it (closed_by, said above) is not a result worth a box of its own
     result = p.get("result")
     if isinstance(result, dict):
-        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client")}
+        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client", "reject_reason")}
     url = result.get("deck_url") if isinstance(result, dict) and result else None
     if url:
         actions.append(
@@ -2744,7 +3219,7 @@ def _confirm_body(
             "all.</strong> They run in this order, each checked against the deck just before it is "
             "sent. A snapshot of each deck is kept first, so Undo can put its cards and details back. "
             "Only deck edits, details changes and restores have Undo: account actions (likes, follows, "
-            "comments and the like), collection edits, new decks and copies don't.</p>"
+            "comments and the like), binder edits, new decks and copies don't.</p>"
         )
     for deck in plan["decks"]:
         out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")

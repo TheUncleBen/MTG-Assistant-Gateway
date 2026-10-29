@@ -110,7 +110,7 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
         box = page.locator(".mtgbox[role=dialog]:visible")
         box.wait_for(timeout=3000)
         assert box.locator("h2").inner_text().startswith("Remove “")
-        assert "from your Collection on Archidekt." in box.inner_text()
+        assert "from your binder." in box.inner_text()
         assert box.locator("button.danger", has_text="Remove").count() == 1
         box.locator("[data-cancel]").click()
         page.wait_for_timeout(200)
@@ -122,7 +122,7 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
         page.wait_for_function(f"() => !document.querySelector(\"[data-id='{one_id}']\")")
         assert int(one_id) not in server.ark.collections["alice"]
         strip = page.locator("#col-notes .notice.ok[role=status]")
-        assert strip.inner_text().strip() == "Removed from your Collection on Archidekt."
+        assert strip.inner_text().strip() == "Removed from your binder."
         assert page.locator("#col-count").inner_text() == "2 entries"
         strip.locator("[data-dismiss]").click()
         assert page.locator("#col-notes .notice").count() == 0
@@ -131,7 +131,7 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
         menu = page.locator(".ctxmenu")
         menu.wait_for(timeout=3000)
         items = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-        assert "Details…" in items and items[-1] == "Remove from collection"
+        assert "Details…" in items and items[-1] == "Remove from binder"
         assert menu.locator(".mqty .lbl").inner_text() == "Quantity"
         menu.locator("[role=menuitem]", has_text="Details…").click()
         details = page.locator("#col-details")
@@ -153,8 +153,7 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
         )
         assert "Japanese" in first.locator(".ty").inner_text()
         assert (
-            page.locator("#col-notes .notice.ok").inner_text().strip()
-            == "Card details saved to your Collection on Archidekt."
+            page.locator("#col-notes .notice.ok").inner_text().strip() == "Card details saved to your binder."
         )
         page.wait_for_function("() => document.getElementById('col-details').hidden")
         assert errors == []
@@ -199,10 +198,12 @@ def test_the_add_box_tabs_the_filter_and_load_more(server: Server) -> None:
             )
         )
         page.locator("#col-q").fill("zzzz")
-        assert page.locator(".col-nomatch").is_visible()
+        # "No cards match" once Archidekt's own filter says so (test_binder_filter_browser)
+        page.locator(".col-nomatch").wait_for(state="visible", timeout=3000)
         page.locator("#col-q").fill("")
-        page.wait_for_timeout(100)
-        assert page.locator("#cards > li[data-id]:visible").count() == 24
+        page.wait_for_function(
+            "() => document.querySelectorAll('#cards > li[data-id]:not([hidden])').length === 24"
+        )
         # Load more appends the rest without leaving the page, then says every entry is shown
         more = page.locator(".loadmore [data-load-more]")
         assert more.inner_text().strip() == "Load more cards"

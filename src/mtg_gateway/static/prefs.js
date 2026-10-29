@@ -1,4 +1,4 @@
-/* Choices that follow the account (0.7.29, prefs.py): views, card size, stack orders, the deck
+/* Choices that follow the account (0.7.29, prefs.py): views, card size, the deck
    stats toggles and the dismissed tips are kept on the member's account, so every device shows
    the same. The page hands over the ones its scripts need in <script id="mtg-prefs">, so nothing
    waits for a request; a change is saved with POST /api/v1/prefs.
@@ -58,18 +58,56 @@
   };
 
   // -- card size: the S / M / L switch next to "View as" (theme.card_size_control) and in the
-  // printing picker. It applies at once on <html data-card-size> and follows the account.
+  // printing picker. Each page keeps its own (card.size.<page>, Ben 2026-10-28): the page's
+  // applies at once on <html data-card-size>, the printing picker's on the picker and
+  // <html data-card-size-printings>. It follows the account, with a copy on this device that a
+  // page the account has no size for starts with.
+  var root = document.documentElement;
+  var SIZES = { s: 1, m: 1, l: 1 };
+  function local(page, size) {
+    try {
+      if (size === undefined) return window.localStorage.getItem("mtg.card.size." + page);
+      window.localStorage.setItem("mtg.card.size." + page, size);
+    } catch (e) { /* private window: the account still has it */ }
+    return null;
+  }
+  function showSize(page, size, picker) {
+    var mine = page === "printings";
+    if (mine) {
+      root.setAttribute("data-card-size-printings", size);
+      if (picker) picker.setAttribute("data-card-size", size);
+    } else {
+      root.setAttribute("data-card-size", size);
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-card-size-set]"), function (b) {
+      var own = b.closest("[data-card-size-page]");
+      if (((own && own.getAttribute("data-card-size-page")) === "printings") !== mine) return;
+      b.setAttribute("aria-pressed", b.getAttribute("data-card-size-set") === size ? "true" : "false");
+    });
+  }
   document.addEventListener("click", function (e) {
     var btn = e.target && e.target.closest ? e.target.closest("[data-card-size-set]") : null;
     if (!btn) return;
     var size = btn.getAttribute("data-card-size-set");
-    if (size !== "s" && size !== "m" && size !== "l") return;
-    document.documentElement.setAttribute("data-card-size", size);
-    Array.prototype.forEach.call(document.querySelectorAll("[data-card-size-set]"), function (b) {
-      b.setAttribute("aria-pressed", b.getAttribute("data-card-size-set") === size ? "true" : "false");
-    });
-    window.MtgPrefs.set("card.size", size);
+    if (!SIZES[size]) return;
+    var own = btn.closest("[data-card-size-page]");
+    var page = (own && own.getAttribute("data-card-size-page")) || root.getAttribute("data-card-size-page") || "deck";
+    showSize(page, size, btn.closest(".printpick"));
+    local(page, size);
+    window.MtgPrefs.set("card.size." + page, size);
   });
+  (function () {  // a page the account has no size for: this device's, copied to the account
+    var page = root.getAttribute("data-card-size-page");
+    if (!page || !root.hasAttribute("data-card-size-unset")) return;
+    var size = local(page);
+    if (!SIZES[size]) return;
+    var copy = {};
+    copy["card.size." + page] = size;
+    var apply = function () { showSize(page, size, null); };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply);
+    else apply();
+    post({ copy: copy });
+  })();
 
   // -- the one-time copy of this browser's pre-0.7.29 choices ---------------------------------
   var store;
@@ -87,11 +125,9 @@
   try {
     for (var i = 0; i < store.length; i++) {
       var key = store.key(i);
-      if (key && key.indexOf("mtg-stack-order:") === 0) {
-        var order = JSON.parse(store.getItem(key) || "null");
-        if (Array.isArray(order) && order.length) take(key, "stack:" + key.slice(16), order);
-        else keys.push(key);
-      }
+      // a stack order a device kept before 0.7.29: stacks follow Archidekt's category order
+      // now (0.7.46, owner decision C4), so it is dropped, not copied
+      if (key && key.indexOf("mtg-stack-order:") === 0) keys.push(key);
     }
     if (store.getItem("mtg.edhplay.steps") === "1") take("mtg.edhplay.steps", "edhplay.steps", true);
     if (store.getItem("mtg-scan-intro-seen") === "1") take("mtg-scan-intro-seen", "scan.intro", true);

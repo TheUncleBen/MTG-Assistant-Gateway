@@ -66,9 +66,9 @@ Claude / ChatGPT / Android app / browser
 | Piece | What it does | Can you swap it? |
 | --- | --- | --- |
 | **mtg-gateway** | The product. An MCP server at `/mcp`, its own OAuth 2.1 server for AI clients, the browser pages, the Archidekt connection, card scanning, and the database | No, this is the thing you're deploying |
-| **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, goldfish simulation. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service (in Compose, also the gateway's `depends_on` entry for `mysticforge`); the research tools disappear, deck tools, proposals and scanning still work |
-| **ntfy** | Holds each member's notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: the shipped stack files require it and run it for you |
-| **Forge** | The rules engine for deck simulations: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | On by default in the example files (`FORGE_REPLICAS=1`, or the Compose `forge` profile); it also plays the deck alone for the Forge solo test. Without it reports have the solo test's estimate and no Forge games |
+| **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, solo test. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service (in Compose, also the gateway's `depends_on` entry for `mysticforge`); the research tools disappear, deck tools, proposals and scanning still work |
+| **ntfy** | Holds each member's push notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: the shipped stack files require it and run it for you |
+| **Forge** | The rules engine for deck tests: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | On by default in the example files (`FORGE_REPLICAS=1`, or the Compose `forge` profile); it also plays the deck alone for the Forge solo test. Without it reports have the solo test's estimate and no Forge games |
 | **Reverse proxy** | Gives the gateway an `https://` address on your domain | Any proxy that forwards to an HTTP backend and keeps the `Host` header. See [REVERSE-PROXY.md](REVERSE-PROXY.md) |
 | **Identity provider** | Who may sign in. The gateway never sees passwords | Any OpenID Connect provider that can send group membership in a claim (`MTG_OIDC_GROUPS_CLAIM`), or any provider at all if it already admits only the right people and you set `MTG_ALLOW_ANY_IDP_USER=true`. Authentik is the documented one; see [IDP-OTHERS.md](IDP-OTHERS.md) for the rest |
 | **Docker host** | Runs the containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
@@ -111,7 +111,7 @@ AI client and any identity provider work together:
    with a Client ID Metadata Document), use PKCE, and get the gateway's own
    short-lived tokens. Before anything is granted, every connection shows a
    confirmation page naming the client and where the sign-in returns to,
-   with Approve and Deny.
+   with Approve and sign in, and Deny.
 2. **Gateway → identity provider.** The gateway is one confidential OpenID
    Connect client at your identity provider. When someone connects, the
    gateway sends their browser there to sign in, checks the ID token and the
@@ -152,8 +152,10 @@ browser session or a gateway token, the gateway asks the identity
 provider's userinfo endpoint for the person's current groups (the answer is
 cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default; `0` asks every
 time). Someone taken
-out of the group, or deactivated or deleted at the provider, is cut off on
-their next request. Separately, every assistant has to sign in again after
+out of the group is cut off everywhere on their next request; a sign-in
+the provider no longer honours (an expired refresh token, a deactivated
+account) ends alone, and the member's AI apps keep their tokens but are
+refused until they sign in on the website again. Separately, every assistant has to sign in again after
 `MTG_REAUTH_INTERVAL` (a week by default).
 
 ## How deck edits work
@@ -164,7 +166,7 @@ The assistant never changes a deck directly:
    `propose_*` tool (a deck's settings, folder, tags and cover go through
    `propose_deck_details`). The gateway saves the exact change and returns a
    review link.
-2. The person approves it: with **Approve** on the card the AI app shows
+2. The person approves it: with **Apply** on the card the AI app shows
    next to the proposal (an MCP App, see below) or on the review page with
    **Apply**. A person who chose a looser **approval mode** on their Account
    page (see below) lets the assistant apply low-risk changes, or most changes,
@@ -184,7 +186,7 @@ The assistant never changes a deck directly:
 | Client | Status |
 | --- | --- |
 | Claude: web, desktop app, iOS, Android | Works. Add the gateway as a custom connector on the web or desktop and it follows you to the phone apps; see [CONNECT.md](CONNECT.md) |
-| ChatGPT | Web only (OpenAI says its phone apps don't support custom MCP connectors). Some plans limit it to read tools, which still covers research and proposals; Apply then happens on the review page. See [CONNECT.md](CONNECT.md#chatgpt) |
+| ChatGPT | Add the connector on chatgpt.com in a computer's browser; it then works there and in the ChatGPT Android app (tested; the iPhone app hasn't been tried). Some plans limit it to read tools, which still covers research and proposals; Apply then happens on the review page. See [CONNECT.md](CONNECT.md#chatgpt) |
 | Claude Code, Codex and other MCP clients | Work with any client that supports remote MCP servers with OAuth; the gateway serves a plugin at `/install`. See [PLUGIN.md](PLUGIN.md) |
 | Android app | Available, built, unit-tested and installed on a phone; camera and fold layouts still await a device report. A small app that opens a gateway's pages full screen and adds a native camera for card scanning. It points at any gateway address, so it works with your own deployment; see [ANDROID.md](ANDROID.md) |
 | Any browser | The account, decks, proposal review, history, scan and admin pages work in any modern browser, on a phone or a desktop |
@@ -200,13 +202,21 @@ For the exact devices and plans tested, see
 - **Membership is live.** Before any request with a browser session or a
   gateway token is served, and at every code exchange and refresh, the
   gateway asks the identity provider's userinfo endpoint for the person's
-  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. Removing
-  someone from `MTG_REQUIRED_GROUP`, or deactivating or deleting them at the
-  provider, takes effect on their next request: every gateway token,
-  browser session and stored provider token is revoked, and a removal from
-  the group revokes their Archidekt link too (a deactivated or deleted
-  account, which the provider reports only as a refused token, keeps the
-  stored session until an admin presses Disable or Unlink, or it expires).
+  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. The provider's
+  tokens are kept per sign-in (`idp_grants.holder`: each browser session,
+  and the member's AI apps), so a session is checked with its own and a
+  bearer token with any of the member's. A page being read (GET outside
+  `/admin`) is answered at once and the provider asked in the background
+  whenever the provider let that sign-in in before; writes, admin pages and
+  assistant requests wait for the answer. Removing someone from
+  `MTG_REQUIRED_GROUP` takes effect on their next write, admin page or
+  assistant request, and after one page read: every
+  gateway token, browser session and stored provider token is revoked, and
+  their Archidekt link too. A sign-in whose provider tokens are refused (a
+  deactivated or deleted account looks the same as a refresh token that ran
+  out) ends alone; the member's AI apps keep their tokens, refused with 403
+  `sign_in_again` while no sign-in of theirs is honoured, and the Archidekt
+  link stays until an admin presses Disable or Unlink, or it expires.
   With Authentik, an optional hourly clean-up (`src/mtg_gateway/idp_sweep.py`,
   an API token that may only view the gateway's groups and its own tokens) asks who is in the two groups now and
   deletes the stored session of every linked member who is in neither or is
@@ -226,10 +236,11 @@ For the exact devices and plans tested, see
   only register `https` redirect addresses, or `http` on localhost.
 - **Consent.** Every connection from an AI client, including each weekly
   re-sign-in, shows the gateway's own page naming the client and where it
-  will send the sign-in, with Approve and Deny, before the identity
+  will send the sign-in, with Approve and sign in, and Deny, before the identity
   provider is involved. An identity provider that signs people in silently
   can't skip it. An app can ask for the read-only scope `mtg.read`; its
-  token can then read but never propose, apply or store anything.
+  token can then read but never propose or apply, and stores nothing but
+  its deck comparisons (kept as reports labelled with the app).
 - **Sign-out.** **Sign out on all my devices** (on the `/logout` page)
   ends every browser and Android app session. For an hour after signing out, a sign-in on that
   device asks the identity provider for the password again, so a shared
@@ -269,7 +280,7 @@ For the exact devices and plans tested, see
     time), and the hourly purge deletes sessions past that date.
 - **Deck changes** need the person's own yes, unless they chose otherwise.
   The code enforces it: changes are proposals until applied with the review
-  page's Apply button or the in-chat card's Approve button. Each person has
+  page's Apply button or the in-chat card's Apply button. Each person has
   an **approval mode** (`src/mtg_gateway/modes.py`), set only on their own
   Account page in the browser, never over MCP or the API: `manual` (the
   default: ask every time), `semi` (the assistant may apply a low-risk edit
@@ -278,7 +289,7 @@ For the exact devices and plans tested, see
   value changes of at most four copies each, never a change to which cards
   are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a
   row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; or a
-  clone) or `auto` (the assistant may apply deck and collection changes,
+  clone) or `auto` (the assistant may apply deck and binder changes,
   except those Full auto still leaves to the member, `modes.auto_waits`, and
   those that wait in every mode, `DeckService.press_reason` and
   `rewritten_by_another_app`). No mode lets an assistant apply an Archidekt account action
@@ -291,9 +302,19 @@ For the exact devices and plans tested, see
   admin Settings page. Every apply
   still snapshots the deck first.
   The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
-  `static/cards/proposal-card.html`): every `propose_*` tool and `get_proposal`
-  names it in `_meta.ui.resourceUri`, a host that renders MCP Apps shows it
-  with the result, and its buttons call `confirm_proposal`, a tool marked
+  `static/cards/proposal-card.html`): every `propose_*` tool (and
+  `amend_proposal`, `combine_proposals`, `apply_proposal`) names it in
+  `_meta.ui.resourceUri`, a host that renders MCP Apps shows it with the
+  result, and each card is numbered among its proposal's cards in that app's
+  chat (`card_seqs`, schema 16): a card that reads a higher number steps aside
+  to one line, so only the newest asks for a press, and the gateway holds to
+  it: a card's approval code names its number, so an older card's press is
+  refused (`not_newest_card`, "Use the newest card") and its reads carry no
+  code. The card sent is `cards.shipped()`: the source without its comment
+  lines and indentation. The card follows its
+  proposal with `get_proposal`, which like `confirm_proposal` is the card's
+  own (the model reads a proposal with `proposal_status`, which draws no
+  card). Its buttons call `confirm_proposal`, a tool marked
   `_meta.ui.visibility: ["app"]` (offered to the card, not to the model)
   that also needs a one-time code the tool result carries only in `_meta`
   (handed to the card, kept out of the model's context). The code is an
@@ -304,14 +325,10 @@ For the exact devices and plans tested, see
   assistant does not in a host that follows the standard. `MTG_APPLY_IN_CHAT=false`
   removes the card, the code and the tool.
   The waiting-changes card (`static/cards/waiting-card.html`) works the same
-  way: its buttons call `confirm_proposal` and `confirm_waiting`. Once a
-  proposal approved on its card, or a batch sent with Apply all, is applied
-  or under way (a row's own Approve on the waiting-changes card sends
-  nothing), the card posts the
-  fixed text "Approved, go on" as a user message where the host allows it
-  (`ui/message` when the host declares `message`, else ChatGPT's
-  `sendFollowUpMessage`), so the assistant carries on; it carries no data
-  and nothing in it comes from the page.
+  way: its buttons call `confirm_proposal` and `confirm_waiting`. A card
+  tells the assistant what was pressed through `ui/update-model-context`
+  only; since 0.7.46 no card posts a message in the member's name
+  (`ui/message` or ChatGPT's `sendFollowUpMessage`).
   The two pickers (`src/mtg_gateway/cards.py`, HTML in `static/cards/`:
   printings, picker) only show and relay: a tap sends the
   pick to the assistant as text through the host (`ui/update-model-context`),

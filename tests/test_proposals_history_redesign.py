@@ -127,10 +127,11 @@ def test_the_closers_settle_only_the_rows_they_closed(tmp_path: Path) -> None:
     assert db.settle_risks() == 1 and asked == ["b", "c", "a"]  # the backfill takes the rest
 
 
-async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(stack: Stack) -> None:
-    """A closed proposal shows the tier stored when it closed, with no reason worked out under
-    today's settings (which may contradict it). One with nothing to judge it by (no review rows)
-    shows a dash, not High, and the Risk filter never counts it as High."""
+async def test_a_stored_tier_keeps_its_own_reason_and_an_unjudged_one_is_a_dash(stack: Stack) -> None:
+    """A closed proposal shows the tier stored when it closed with the reason it was judged by
+    then, never one worked out under today's settings (which may contradict it), nor a generic
+    "judged when it closed" (AT-12). One with nothing to judge it by (no review rows) shows a
+    dash, not High, and the Risk filter never counts it as High."""
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
@@ -154,10 +155,16 @@ async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(
             )
             gw.db.finish_proposal(pid, state="applied", result={})
         assert _risk(gw.db, "lo") == "low" and _risk(gw.db, "nr") == UNJUDGED
+        then = gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))[1]
+        assert then and "judged" not in then
         gw.live.set("auto_apply_max_rows", 1, by="admin-1")  # today it would read High
-        assert gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))[0] == "high"
+        now = gw.decks.proposal_risk(sub, gw.db.get_proposal("lo", sub))
+        assert now[0] == "high" and now[1] != then
         shown = gw.decks.describe(sub, "lo")
-        assert (shown["risk"], shown["risk_reason"]) == ("low", "judged when it closed")
+        assert (shown["risk"], shown["risk_reason"]) == ("low", then)
+        assert "_risk_reason" not in (shown["result"] or {})  # kept for this, not shown as a result
+        review = (await b.http.get("/proposals/lo", headers=NAV)).text
+        assert f"Low: {then}" in review.replace("&#x27;", "'"), then
         unjudged = gw.decks.describe(sub, "nr")
         assert unjudged["risk"] is None and unjudged["risk_reason"] == ""
         body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
@@ -169,7 +176,8 @@ async def test_a_stored_tier_keeps_no_live_reason_and_an_unjudged_one_is_a_dash(
         low = (await b.http.get("/proposals?show=all&risk=low", headers=NAV)).text.split("<main")[1]
         assert "/proposals/lo?" in low and "/proposals/nr?" not in low
         page = (await b.http.get("/proposals/nr", headers=NAV)).text.split("<aside")[1]
-        assert "Risk not judged" in page and "High" not in page
+        # the review page shows no risk label at all, not a lone dash (independent review of 0.7.46)
+        assert "Risk not judged" not in page and "ui-none" not in page and "High" not in page
     finally:
         await b.aclose()
 
@@ -207,7 +215,8 @@ async def test_a_risk_nobody_can_judge_is_a_dash_while_waiting_too(stack: Stack)
         for pid in ("wait", "shut"):
             assert "Risk not judged" in rows[pid] and "High" not in rows[pid], pid
         page = (await b.http.get("/proposals/wait", headers=NAV)).text.split("<aside")[1]
-        assert "Risk not judged" in page and "High" not in page
+        # the review page shows no risk label at all, not a lone dash (independent review of 0.7.46)
+        assert "Risk not judged" not in page and "ui-none" not in page and "High" not in page
         # another app changed it after it was made: that is a reason, and it stays High
         gw.db._conn.execute(
             "UPDATE proposals SET version = 2, amended_by_client = 'other-app' WHERE id = 'wait'"
@@ -253,7 +262,7 @@ async def test_waiting_dashboard(stack: Stack) -> None:
         for lab in (
             "Waiting for you",
             "Needs a look",
-            "Always need your press",
+            "Only you can apply",
             "Last 7 days",
             "Waiting by app",
         ):
@@ -324,16 +333,17 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         sub = gw.db._one("SELECT sub FROM users", ())["sub"]
         seed_history(gw.db, sub, now=int(time.time()))
         body = (await b.http.get("/proposals?show=all", headers=NAV)).text.split("<main")[1]
-        assert "To apply or reject several at once, open <a href='/proposals'>Waiting</a>." in body
+        waiting = "<a class='ui-cap' href='/proposals'>Waiting</a>"
+        assert f"To apply or reject several at once, open {waiting}." in body
         assert "name='pick'" not in body  # no tick boxes on All
         ids = re.findall(r"href='/proposals/(p\d\d)\?show=all'", body)
         assert ids[:3] == ["p00", "p01", "p02"] and len(set(ids)) == 25
-        assert "1–25 of 60" in body and "offset=25" in body and "Earlier" not in body
+        assert "25 of 60</p>" in body and "offset=25" in body and "Earlier" not in body
         older = (await b.http.get("/proposals?show=all&offset=25", headers=NAV)).text
-        assert "26–50 of 60" in older and "/proposals/p25?show=all" in older
+        assert "50 of 60</p>" in older and "/proposals/p25?show=all" in older
         assert re.search(r"<span class='ui-lbl grey'>(<svg.*?</svg>)?Rejected</span>", body)
         # a failed one says why; the seeded ones store no error, so Archidekt did not refuse them
-        assert "Could not be applied · <a href='/proposals/p03'>Why</a>" in body
+        assert "Could not be applied · <a class='ui-cap' href='/proposals/p03'>Why</a>" in body
         assert "Archidekt refused it" not in body
         assert "(deck 4" not in body
     finally:
@@ -384,10 +394,13 @@ def test_a_failed_row_says_refused_only_when_archidekt_refused() -> None:
         }
         return _closing_html(it, csrf=None, replaced_by=None, now=0.0)
 
-    for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract", "verify_mismatch"):
-        assert line(refused) == "Archidekt refused it · <a href='/proposals/f1'>Why</a>", refused
+    why = "<a class='ui-cap' href='/proposals/f1'>Why</a>"
+    for refused in ("forbidden", "not_found", "auth", "rate_limited", "contract"):
+        assert line(refused) == f"Archidekt refused it · {why}", refused
+    # taken, but the check after it found something else than asked
+    assert line("verify_mismatch") == f"Archidekt saved it differently · {why}"
     for other in ("interrupted", "unavailable", "internal", "backup_failed", None):
-        assert line(other) == "Could not be applied · <a href='/proposals/f1'>Why</a>", other
+        assert line(other) == f"Could not be applied · {why}", other
 
 
 # -- H1 ------------------------------------------------------------------------------
@@ -405,17 +418,22 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         # the Reports widget: the newest report's stored name, never its deck id; "All reports"
         assert "Latest: an unnamed deck, just now" in body and ">All reports</a>" in body
         assert "Deck 99" not in body and "Open Reports" not in body
-        assert "Everything <span class='n'>18</span>" in body  # 15 snapshots, 1 restore, 2 reports
-        assert "Snapshots <span class='n'>15</span>" in body and "Restores <span class='n'>1</span>" in body
-        # no edit proposal is listed; a snapshot links the change it was taken before
+        # the timeline (owner decision C7): 15 snapshots, 15 applied changes (1 a restore), 2 tests
+        assert "Everything <span class='n'>32</span>" in body
+        assert "Snapshots <span class='n'>15</span>" in body and "Changes <span class='n'>15</span>" in body
+        # no waiting, rejected or failed proposal is listed (deck 43's are never applied); a snapshot
+        # links the change it was taken before
         assert "+1 Counterspell" not in body and "Rejected" not in body
-        rows = body.count("action='/history/restore'")
-        assert rows == 15 and body.count("href='/history?open=s-") >= 30  # Details and the phone chevron
+        snaps = (await b.http.get("/history?type=snapshots", headers=NAV)).text.split("<main")[1]
+        rows = snaps.count("action='/history/restore'")
+        assert rows == 15 and snaps.count("href='/history?type=snapshots&amp;open=s-") >= 30
         assert "title='Snapshots do not record who made them'>—" in body
         assert "Snapshots kept</span>" in body and "Backup copies</span>" in body
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
         drawer = details.split("<aside class='ui-drawer'")[1]
         assert "← Back to History" in drawer and "Restore (review first)" in drawer and "<dd>—</dd>" in drawer
+        # the back link is a grey capsule, not bare blue text (style only: it stays where it was)
+        assert "<p class='page-only'><a class='ui-cap' href='/history'>← Back to History</a></p>" in drawer
     finally:
         await b.aclose()
 

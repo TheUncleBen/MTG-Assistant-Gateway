@@ -258,7 +258,8 @@ def _count_text(decks: int, subfolders: int) -> str:
 
 
 def breadcrumb_html(level: Level, *, order: str) -> str:
-    """Decks › Commander › Precons: every step a link but the last (the open folder)."""
+    """Decks › Commander › Precons: every step a way back (the theme's grey capsule) but the last
+    (the open folder)."""
     if level.current is None:
         return ""
     items = []
@@ -267,7 +268,9 @@ def breadcrumb_html(level: Level, *, order: str) -> str:
         if i == last:
             items.append(f"<li aria-current='page'><span>{esc(name)}</span></li>")
         else:
-            items.append(f"<li><a href='{esc(level_href(fid, order=order))}'>{esc(name)}</a></li>")
+            items.append(
+                f"<li><a class='ui-cap' href='{esc(level_href(fid, order=order))}'>{esc(name)}</a></li>"
+            )
     return f"<nav class='crumbs' aria-label='Folder path'><ol>{''.join(items)}</ol></nav>"
 
 
@@ -366,7 +369,6 @@ ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
 .crumbs li{display:inline-flex;align-items:center;gap:.4rem;min-width:0;max-width:100%}
 .crumbs li + li::before{content:'›';color:var(--text-muted)}
 .crumbs a,.crumbs span{overflow-wrap:anywhere}
-.crumbs a{display:inline-flex;align-items:center;min-height:44px;color:var(--link,var(--text))}
 .crumbs li[aria-current] span{font-weight:700}
 .fv-area{margin:0 0 14px}
 .fv-area > h2{display:flex;align-items:center;gap:.45rem;margin:0 0 8px;font-size:1.05rem;
@@ -379,7 +381,9 @@ ul.folderlist{display:grid;gap:10px;margin:0}
 ul.folderlist.grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))}
 ul.folderlist.list{grid-template-columns:minmax(0,1fr);gap:.5rem}
 ul.folderlist .folder,ul.folderlist .folder a,ul.folderlist .text{min-width:0}
-ul.folderlist .folder a{display:flex;align-items:center;gap:.75rem;min-height:64px;padding:.65rem .85rem;
+/* the right padding keeps the tile's ⋮ (menus.py, absolute at the row's end) off the name */
+ul.folderlist .folder a{display:flex;align-items:center;gap:.75rem;min-height:64px;
+  padding:.65rem calc(var(--ctl) + .85rem) .65rem .85rem;
   border:1px solid var(--border);border-radius:5px;background:var(--surface-2);color:var(--text);
   text-decoration:none}
 ul.folderlist.list .folder a{min-height:52px}

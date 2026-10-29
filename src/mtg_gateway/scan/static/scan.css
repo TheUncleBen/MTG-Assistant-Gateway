@@ -3,9 +3,9 @@
    mouse, 44px on touch) and panels are the shell's flat 3px cards.
 
    Layout: one column at the standard's form width at every size (the shell's main.wrap), the
-   blocks in a fixed order: tabs, the options row (Set, Foil, Auto and, in the Android app, the
-   phone camera), the viewfinder, status, result, then the capture bar (Photo, the round capture
-   button in the middle, Type). The options row and the capture bar are each one row that never
+   blocks in a fixed order: tabs, the options row (Set, Foil, Auto), the viewfinder (in the Android
+   app, a button that opens the phone camera), status, result, then the capture bar (Photo, the
+   round capture button in the middle, Type). The options row and the capture bar are each one row that never
    wraps; on phones the capture bar sticks to the bottom of the screen (thumb reach). */
 .scan{display:flex;flex-direction:column;gap:.75rem;container-type:inline-size}
 .scan .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
@@ -20,6 +20,7 @@
   stroke-linejoin:round;flex:none}
 .scan button svg.i+span,.scan .btn svg.i+span{margin-left:.4rem}
 .scan .snote{text-align:center;margin:0}
+.scan .snote .ui-cap{margin:.25rem 0 0}
 
 /* tabs: one row, the open tab underlined in orange; sticky on phones */
 .scan .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}  /* a second row at large text sizes */
@@ -31,8 +32,7 @@
   color:var(--on-orange);border-color:var(--orange)}
 @media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;background:var(--bg);margin:0 -1rem;padding:0 1rem} }
 
-/* the options row: the Set box with its × inside, the Foil and Auto toggles, and in the app the
-   phone camera button at the end; one row at every width */
+/* the options row: the Set box with its × inside, the Foil and Auto toggles; one row at every width */
 .scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .scan .scan-opts > *{margin:0}
 /* the Set box draws the edge; the label, the field and the × sit inside it side by side */
@@ -57,7 +57,6 @@
 .scan .switch:hover{background:var(--surface-2)}
 .scan .switch[aria-checked=true]{background:var(--orange-tint);border-color:var(--orange);color:var(--orange-text)}
 .scan .scan-opts .switch{flex:1 1 auto;min-width:0}
-.scan .scan-opts #phone-camera{flex:none;width:var(--ctl);padding:0}
 .scan .shutter.live{animation:scan-live 1.2s ease-in-out infinite}
 @keyframes scan-live{0%,100%{outline:3px solid transparent;outline-offset:3px}50%{outline:3px solid var(--orange-select);outline-offset:9px}}
 
@@ -174,7 +173,7 @@ body.picker-open{overflow:hidden}
    Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop
    (and keeps the guide's card name box inside the preview). */
 .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
-.scan .cam-panel.has-result .camera .hint{display:none}
+.scan .cam-panel.has-result .cam-hint{display:none}
 .scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:78%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
   box-shadow:0 0 0 999px var(--scrim);pointer-events:none}
@@ -187,8 +186,7 @@ body.picker-open{overflow:hidden}
 .scan .camera .guide .title::after{content:"card name";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
   text-align:center;color:var(--navbar-text);font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;
   text-shadow:0 1px 2px var(--navbar-bg);opacity:.9}
-.scan .camera .hint{position:absolute;left:0;right:0;top:0;padding:.45rem .75rem;text-align:center;color:var(--navbar-text);
-  font-size:.86rem;font-weight:700;background:linear-gradient(var(--banner-a),transparent);text-shadow:0 1px 2px var(--navbar-bg)}
+.scan .cam-hint{margin:0;text-align:center;font-size:.9rem;font-weight:700}
 .scan .camera.busy video{filter:brightness(.5)}
 .scan .camera.busy::after{content:"Reading…";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   color:var(--navbar-text);font-weight:900;font-size:1.1rem;text-shadow:0 1px 3px var(--navbar-bg)}
@@ -236,7 +234,6 @@ body.picker-open{overflow:hidden}
 .scan .torch[hidden]{display:none}
 .scan .torch:hover{background:var(--navbar-bg);color:var(--navbar-text)}
 .scan .torch[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
-.scan .camera:has(.torch:not([hidden])) .hint{padding-right:6rem}
 /* camera controls: zoom and brightness sliders, 44px rows, only when the camera reports them */
 .scan .cam-ctl{display:flex;flex-direction:column;gap:.35rem}
 .scan .cam-ctl[hidden]{display:none}
@@ -257,15 +254,16 @@ body.picker-open{overflow:hidden}
 /* on phones the sliders must fit between the preview and the sticky capture bar */
 @media (max-width:699px){
   .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
+  .scan .cam-panel:has(.cam-ctl:not([hidden])) .cam-hint{display:none}
   /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
   .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
-  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
+  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .cam-hint{display:none}
 }
 
 /* match result: the confirm or fix step (the status pill carries the colour) */
 .scan .result{display:flex;gap:.9rem;align-items:flex-start}
-.scan .result img{width:6.5rem;border-radius:var(--radius);background:var(--bg);flex:0 0 auto}
+/* the picture takes a third of the card at most, so the name keeps its room at large text */
+.scan .result img{width:min(6.5rem,32%);border-radius:var(--radius);background:var(--bg);flex:0 0 auto}
 .scan .result .meta{flex:1 1 auto;min-width:0;display:block;margin:0}
 .scan .result h3{margin:0 0 .3rem;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere}
 .scan .result .status{display:inline-block;margin:.15rem 0 .35rem;padding:.15rem .6rem;border-radius:22px;
@@ -361,8 +359,12 @@ body.picker-open{overflow:hidden}
 .scan .install.show{display:inline-flex}
 @media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;outline:3px solid var(--orange-select);outline-offset:6px} }
 
-/* first-visit intro and the "what next" block of the list tab */
-.scan .intro h2,.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
+/* the intro (open on the first visit, folded to its title after) and the "what next" block of the list tab */
+.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
+.scan details.intro{padding:.5rem .75rem}
+.scan details.intro > summary h2{margin:0;font-size:1.05rem;font-weight:700}
+.scan details.intro[open] > summary{margin-bottom:.6rem}
+.scan details.intro[open]{padding-bottom:.9rem}
 .scan .intro .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
 .scan .intro .steps li{display:flex;gap:.6rem;align-items:flex-start;line-height:1.4}
 .scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--orange);color:var(--on-orange);
@@ -376,3 +378,24 @@ body.picker-open{overflow:hidden}
 .scan .next select{max-width:100%;margin-top:.25rem}
 .scan .next button{flex:0 0 auto;min-height:var(--ctl)}
 @media (max-width:480px){.scan .next .nextrow{flex-direction:column;align-items:stretch}}
+
+/* inside the Android app the viewfinder opens the phone camera: one big button over the card frame */
+.scan .camera .phone-cam{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:0;
+  background:transparent;color:var(--navbar-text);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.scan .camera .phone-cam .cap{display:inline-flex;align-items:center;gap:.5rem;min-height:var(--ctl);padding:.4rem 1.1rem;
+  font-size:min(1rem,20px);
+  max-width:calc(100% - 2rem);border-radius:22px;border:1px solid var(--navbar-muted);background:var(--banner-a);
+  font-weight:700;text-align:left;box-shadow:var(--shadow)}
+.scan .camera .phone-cam:hover .cap{background:var(--navbar-bg)}
+.scan .camera .phone-cam:focus-visible{outline:3px solid var(--orange-select);outline-offset:-3px}
+/* the running count of the scan, a tab in the viewfinder's top-left corner above the dashed name box:
+   tucked into the corner and its text capped, so even on a narrow phone at large text sizes it ends
+   above the name box (which starts about 46 px down in a 280 px wide viewfinder) */
+.scan .tally{position:absolute;left:0;top:0;z-index:2;min-height:var(--ctl);min-width:var(--ctl);margin:0;padding:0 .8rem;
+  font-size:min(.9rem,18px);line-height:1.2;
+  border-radius:0 0 22px 0;border:1px solid var(--navbar-muted);border-width:0 1px 1px 0;
+  background:var(--banner-a);color:var(--navbar-text);font-weight:700;
+  font-variant-numeric:tabular-nums;max-width:calc(100% - 5rem);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  backdrop-filter:blur(2px);cursor:pointer}
+.scan .tally[hidden]{display:none}
+.scan .tally:hover{background:var(--navbar-bg);color:var(--navbar-text)}

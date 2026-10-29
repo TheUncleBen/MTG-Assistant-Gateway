@@ -81,6 +81,14 @@ button.danger:disabled{color:var(--red)}
 /* What an Apply all did not send, each with why. */
 .notsent{margin:8px 0 0;padding-left:22px;font-size:.8125rem}
 .notsent li{margin:3px 0;overflow-wrap:anywhere}
+/* A card that no longer asks for anything (a newer card below, or a proposal decided, withdrawn,
+   replaced or expired): its heading and one line, no list and no pictures. */
+.card.stub .sum,.card.stub ul.changes,.card.stub .note,.card.stub .foot,.card.stub .also,.card.stub .why,
+.card.stub .notsent{display:none}
+.card.stub .status{margin-top:6px}
+/* Open in the app or browser: a grey capsule (_base.css a.cap) under the status line, on a one-line card too */
+.open-row{margin-top:10px}
+.card.stub .head h1{font-size:1rem}
 </style>
 </head>
 <body>
@@ -102,6 +110,7 @@ button.danger:disabled{color:var(--red)}
     <div class="actions"><button type="button" class="danger" id="reject-go">Reject this proposal</button><button type="button" id="reject-cancel">Keep it open</button></div>
   </div>
   <div class="status hidden" id="status" role="status" aria-live="polite" tabindex="-1"></div>
+  <div class="open-row hidden" id="open-row"></div>
   <ul class="notsent hidden" id="not-sent" aria-label="Not sent"></ul>
 </div>
 <script>
@@ -113,17 +122,25 @@ button.danger:disabled{color:var(--red)}
   var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html
   var APPROVAL_KEY = "mtg/approval";
   var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck
-  var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
-  var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
+  var MAX_IMAGES = 6;    // Scryfall thumbnails at most: the first rows only, the rest is text
+  var COLLAPSE_AT = 6;   // a longer list shows a summary and this many rows until "Show all"
+  var ROWS_READ = 8;     // rows a timed read asks for (Show all reads the whole list once)
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
   // While a waiting proposal's card is on screen it reads the proposal again this often, so it
   // follows an amend, a withdraw or a press elsewhere; at most REFRESH_MAX timed reads each time it
   // comes on screen (Approve reads it once more anyway).
   var REFRESH_EVERY_MS = 30000, REFRESH_MAX = 6;
   var APPLYING_POLL_MS = 5000; // how often a running apply's progress is read
+  // A read that fails is tried again after 2 s, 4 s, 8 s ... (at most a minute apart), up to
+  // RETRY_MAX times, so a card never keeps showing buttons it could not check
+  var RETRY_FIRST_MS = 2000, RETRY_LAST_MS = 60000, RETRY_MAX = 6;
+  // This card's own number among the cards drawn for its proposal in this chat (the result that
+  // drew it says so); a read that names a higher one means a newer card is below
+  var mySeq = 0, stepped = false;
+  var pressedHere = false; // this card's own Approve or Apply all decided it: it keeps the outcome
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
-  var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel, nudge = B.nudge;
+  var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel;
   function openLink(url) { B.openLink(url, function (text) { setStatus(text, ""); }); }
 
   // -- rendering (every value goes through textContent; names are data, never markup) ---------
@@ -132,6 +149,8 @@ button.danger:disabled{color:var(--red)}
     if (r.printing) l += " " + r.printing;
     if (r.category) l += " [" + r.category + "]";
     if (r.guessed_from) l += " (name guessed from '" + r.guessed_from + "'; check it)";
+    if (r.missing) l += " (Archidekt doesn't have this card)";
+    else if (r.unchecked) l += " (not checked)";
     return l;
   }
   function arrow(a, b) { return String(a) + " → " + String(b); }
@@ -199,11 +218,11 @@ button.danger:disabled{color:var(--red)}
   }
   function titleFor(p) {
     var name = p.deck_name || p.deck_id || "";
-    if (p.kind === "create_deck") return "New deck: " + name;
+    if (p.kind === "create_deck") return ((p.rows || []).some(function (r) { return r && r.kind === "new_deck" && r.package; }) ? "New card package: " : "New deck: ") + name;
     if (p.kind === "clone") return "Copy of " + name;
     if (p.kind === "restore") return "Restore " + name;
     if (p.kind === "details") return "Settings of " + name;
-    if (p.kind === "collection") return "Your collection";
+    if (p.kind === "collection") return "Your binder";
     if (p.kind === "action") return p.deck_id === "account" ? "Your Archidekt account" : "Archidekt: " + name;
     return "Change to " + name;
   }
@@ -213,13 +232,27 @@ button.danger:disabled{color:var(--red)}
     ["finish", "Finish"], ["printing", "Printing"], ["label", "Color tag"], ["mana_value", "Mana value"],
     ["companion", "Companion"], ["back_face", "Show back face"], ["commander", "Commander"]
   ];
+  var OTHER_NOUN = { change: "quantity change", category: "move", finish: "finish change", printing: "printing change",
+    label: "color tag change", mana_value: "mana value change", commander: "commander change" };
   function groupOf(kind) {
     for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i][0] === kind) return i;
     return GROUPS.length;
   }
   function summaryFor(p, rows) {
-    var adds = 0, removes = 0, others = 0;
-    rows.forEach(function (r) {
+    var nd = rows.filter(function (r) { return r && r.kind === "new_deck"; })[0];
+    var warn = Array.isArray(p.warnings) ? p.warnings.length : 0;
+    var warnText = warn ? " · " + warn + " warning" + (warn === 1 ? "" : "s") : "";
+    if (nd) {
+      // a new deck: its format and card count, as one line (the list itself starts below)
+      var what = nd.package ? "Card package" : String(nd.format || "") + " deck";
+      return what.charAt(0).toUpperCase() + what.slice(1) + ", " + Number(nd.cards || 0) + " cards" +
+        (nd.side_cards ? " (+" + Number(nd.side_cards) + " sideboard)" : "") + ", " + (nd.private ? "private" : "public") + warnText;
+    }
+    var adds = 0, removes = 0, others = 0, total = rows.length;
+    var sum = p.rows_summary;
+    if (sum && typeof sum.rows === "number") {
+      adds = Number(sum.adds) || 0; removes = Number(sum.removes) || 0; others = Number(sum.others) || 0; total = sum.rows;
+    } else rows.forEach(function (r) {
       if (r.kind === "add") adds += Number(r.qty) || 0;
       else if (r.kind === "remove") removes += Number(r.qty) || 0;
       else others += 1;
@@ -227,10 +260,14 @@ button.danger:disabled{color:var(--red)}
     var bits = [];
     if (adds) bits.push("+" + adds + " card" + (adds === 1 ? "" : "s"));
     if (removes) bits.push("−" + removes + " card" + (removes === 1 ? "" : "s"));
-    if (others) bits.push(others + " other change" + (others === 1 ? "" : "s"));
-    var head = bits.length ? bits.join(", ") : (rows.length + " change" + (rows.length === 1 ? "" : "s"));
-    if (rows.length > 1) head = rows.length + " rows: " + head;
-    return head;
+    // other changes of one kind are named as their group heading names them (A20)
+    var kinds = Object.keys((sum && sum.groups) || rows.reduce(function (o, r) { o[r.kind] = 1; return o; }, {}))
+      .filter(function (k) { return k !== "add" && k !== "remove"; });
+    var noun = kinds.length === 1 ? (OTHER_NOUN[kinds[0]] || "other change") : "other change";
+    if (others) bits.push(others + " " + noun + (others === 1 ? "" : "s"));
+    var head = bits.length ? bits.join(", ") : (total + " change" + (total === 1 ? "" : "s"));
+    if (total > 1) head = total + " rows: " + head;
+    return head + warnText;
   }
   // 0.7.29: a waiting change checked again against the deck as it is now, or held.
   function statusNote(p) {
@@ -241,7 +278,9 @@ button.danger:disabled{color:var(--red)}
   function changeNote(p) {
     if (Number(p.version) <= 1 || !p.changed_by) return "";
     var what = String(p.what_changed || "").trim();
-    // the approved form: "Changed by ChatGPT"
+    // its own app updated it: "Updated: now also adds Mind Stone." (A20); another: "Changed by ChatGPT"
+    var own = (p.changed_by_apps || [p.changed_by]).every(function (a) { return creator(a) === creator(p.created_by); });
+    if (own && what) return "Updated: " + what + (/[.!?]$/.test(what) ? "" : ".");
     return "Changed by " + appNames(p) + (what ? ". Last change: " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
   }
   function modeNote(p) {
@@ -249,8 +288,8 @@ button.danger:disabled{color:var(--red)}
     if (p.card_other_app) {
       var maker = creator(p.created_by);
       return p.created_by === "browser"
-        ? "This change was made in your browser, so this card can't approve it. Approve it in your browser."
-        : maker + " made this change, so this card can't approve it. Approve it on " + maker + "'s card or in your browser.";
+        ? "This change was made in your browser, so this card can't apply it. Apply it in your browser."
+        : maker + " made this change, so this card can't apply it. Apply it on " + maker + "'s card or in your browser.";
     }
     if (p.press_reason && p.status === "held" && /^(would replace .*, which was applied|is held because)/.test(String(p.press_reason))) {
       // the Held line above already says why: say only what it means, once
@@ -270,9 +309,10 @@ button.danger:disabled{color:var(--red)}
     if (loses && !p.assistant_may_apply) return "This removes all the formatting already there, such as bold text, links and pictures. Open it to see what goes, and approve it there.";
     if (keeps && !p.assistant_may_apply) return "This keeps the formatting already there, such as bold text, links or pictures. Open it to see how it will look, and approve it there.";
     if (p.assistant_may_apply) {
-      return p.approval_mode === "auto"
-        ? "Your approval mode lets your assistant apply this itself, without asking."
-        : "Low-risk change (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
+      // its card has Apply now too (0.7.46): a change the assistant leaves waiting is not stuck
+      var here = approval && p.state === "pending";
+      if (p.approval_mode === "auto") return "Your approval mode lets your assistant apply this itself, without asking." + (here ? " You can also apply it here with Apply now." : "");
+      return "Low risk (" + (p.risk_reason || "") + "): your assistant may apply this without asking" + (here ? ", or press Apply now." : ".");
     }
     // one member-only tier, three kinds: each says what it does (a deck deletion: review page only)
     if (p.risk === "destructive" && p.kind === "custom_cards") return "This takes custom cards out of the deck, and restoring a snapshot doesn't put them back. Only you can approve it, every time, in every approval mode.";
@@ -291,7 +331,8 @@ button.danger:disabled{color:var(--red)}
     var meta = result._meta || {};
     approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
     var st0 = meta[SET_KEY];
-    applySet = st0 && Array.isArray(st0.ids) && typeof st0.code === "string" ? { ids: st0.ids.map(String), code: st0.code } : null;
+    // what Apply all applies, one line each (card-only: in _meta, never in the assistant's result)
+    applySet = st0 && Array.isArray(st0.ids) && typeof st0.code === "string" ? { ids: st0.ids.map(String), code: st0.code, lines: Array.isArray(st0.lines) ? st0.lines : [] } : null;
     confirming = false;
     // The assistant's apply_proposal of a change the user must approve answers with the
     // proposal itself (error browser_required), so its card shows the change and the buttons.
@@ -338,22 +379,93 @@ button.danger:disabled{color:var(--red)}
     if (sc.risk === "high" && sc.state === "pending" && sc.assistant_may_apply && sc.approval_mode === "auto") {
       nopress.replaceChildren(B.icon("check"), document.createTextNode("No press needed")); nopress.className = "nopress";
     } else nopress.className = "nopress hidden";
-    var note = [changeNote(sc), statusNote(sc), sc.state === "pending" ? sc.replace_note : "", modeNote(sc)].filter(Boolean).join(" ");
+    var warns = Array.isArray(sc.warnings) && sc.state === "pending" ? sc.warnings.map(String).join(" ") : "";
+    var again = sc.state === "pending" && sc.try_again ? "Archidekt didn't answer, so nothing was changed." : "";
+    var note = [again, changeNote(sc), statusNote(sc), sc.state === "pending" ? sc.replace_note : "", warns, modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
-    renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);
+    var total = Math.max(rows.length, Number(sc.rows_total) || 0);
+    // a card drawn waiting whose change was decided elsewhere (or rejected here) draws no list,
+    // and so loads no pictures: it is one line. A card drawn with an outcome, or whose own
+    // Approve applied it, keeps what was done.
+    var drawnWaiting = !sc0.state || sc0.state === "pending";
+    var compact = sc.state && sc.state !== "pending" && sc.state !== "applying" && drawnWaiting && !pressedHere;
+    $("card").className = "card" + (compact ? " stub" : "");
+    if (compact) { list.replaceChildren(); proposal = slim(sc); release(live(sc)); }
+    else renderRows(list, rows, total > COLLAPSE_AT ? COLLAPSE_AT : rows.length, total, sc.rows_summary);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
     if (Number(sc.version) > 1 && !sc.changed_by) foot.push("Version " + Number(sc.version));
     if (sc.state === "pending" && sc.expires_at) {
       var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
-      foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
+      var days = Math.round(mins / 1440);
+      foot.push("expires in " + (mins >= 2880 ? days + " days" : mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
     }
-    $("foot").textContent = foot.join(" · ");
+    $("foot").textContent = compact ? "" : foot.join(" · ");
     renderActions();
     renderAlso();
     if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
     else setStatus(closedText(sc), "");
+    if (!live(sc) && sc.state !== "applying") stopWatching(); // nothing more can happen to it here
     keepFresh();
+  }
+
+  // A newer card for this proposal is in the chat (the gateway counts the cards each app's chat
+  // draws): this one becomes a line saying so, with no buttons, list or pictures, and stops
+  // reading. Only the newest card asks for a press; a press on an older version would be refused.
+  function stepAside(sc) {
+    stepped = true;
+    stopWatching();
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    askWhy(false);
+    proposal = null; confirming = false;
+    $("card").className = "card stub";
+    $("rows").replaceChildren(); $("actions").replaceChildren();
+    $("also").className = "also hidden"; clearNotSent(); release();
+    var st = $("state");
+    B.label(st, newer(sc0, sc) ? "Replaced" : "Shown below", "replaced", "arrows");
+    $("risk").className = "badge risk hidden"; $("nopress").className = "nopress hidden";
+    setStatus(newer(sc0, sc) ? STEPPED_NEWER_TEXT : STEPPED_AGAIN_TEXT, "");
+    reportSize();
+  }
+  var sc0 = {}; // the proposal as this card was first drawn (for its version)
+  // The card's own read names the card's number, so an older card is handed no approval code.
+  // A card drawn before card numbers names none, and the gateway counts it as 0: older than any
+  // card that has a number.
+  function readArgs(pid, rows) {
+    var args = { proposal_id: pid };
+    if (rows) args.rows_limit = rows;
+    if (mySeq) args.card_seq = mySeq;
+    return args;
+  }
+  // A one-line card holds nothing it no longer shows (ten old cards in a chat cost next to
+  // nothing): no list, pictures, summary, note or footer, no codes, only the few fields of
+  // the proposal its line and links use, and nothing left running (a replaced change, which
+  // can come back, is still read now and then: stillReading).
+  function release(stillReading) {
+    if (!stillReading) stopWatching();
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    approval = null; applySet = null; heldCode = null;
+    $("rows").replaceChildren(); $("also-actions").replaceChildren();
+    $("summary").textContent = ""; $("note").textContent = ""; $("foot").textContent = "";
+    sc0 = { version: sc0.version, card_seq: sc0.card_seq, state: sc0.state };
+  }
+  var SLIM_KEYS = ["proposal_id", "state", "kind", "review_url", "deck_id", "deck_name", "version",
+    "card_seq", "closed_at", "closed_by", "closed_by_app", "applied_at", "expires_at", "created_by"];
+  function slim(p) {
+    var keep = {};
+    SLIM_KEYS.forEach(function (k) { if (p[k] !== undefined) keep[k] = p[k]; });
+    if (p.result && p.result.deck_url) keep.result = { deck_url: p.result.deck_url };
+    return keep;
+  }
+  var STEPPED_NEWER_TEXT = "Replaced by a newer version below. Use the newest card for this change.";
+  var STEPPED_AGAIN_TEXT = "This change is shown again in a newer card below. Use that one.";
+  // No more timed reads, retries or on-screen checks: the card has nothing left to follow.
+  function stopWatching() {
+    watching = false;
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (observer) { observer.disconnect(); observer = null; }
+    document.removeEventListener("visibilitychange", onShown);
   }
 
   // What happened to a proposal that is no longer pending, and who closed it, in one plain line.
@@ -381,6 +493,7 @@ button.danger:disabled{color:var(--red)}
       return "Already rejected" + by + at + "." + again;
     }
     if (p.state === "expired") return "This proposal expired" + when(p.closed_at || p.expires_at) + " without a decision." + again;
+    if (p.state === "failed" && p.rest_offered) return "Part of this change reached Archidekt before it stopped" + at + ". Propose the rest makes a new proposal of what is still missing.";
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
     if (p.state === "applied") return "Already applied" + at + ". " + (p.applied_text || "The deck on Archidekt matches this proposal.");
     if (p.state === "replaced" && p.replace_note) return p.replace_note + " Nothing was sent to Archidekt from this one.";
@@ -403,7 +516,7 @@ button.danger:disabled{color:var(--red)}
   // replaced (it comes back if its replacement is rejected or withdrawn) and has not expired, the
   // card reads it once more with get_proposal (read-only) and redraws it if it changed.
   // If that read fails, the buttons stay: the gateway refuses a press on a closed proposal.
-  var refreshing = false;
+  var refreshing = false, watching = true, failures = 0, retryTimer = null;
   function live(p) {
     if (p && p.state === "pending") return true; // an amend restarts its expiry, so read it anyway
     if (!p || p.state !== "replaced") return false;
@@ -411,14 +524,19 @@ button.danger:disabled{color:var(--red)}
   }
   function refresh() {
     var p = proposal;
-    if (!live(p) || !p.proposal_id || refreshing || busy) return;
+    if (stepped || !live(p) || !p.proposal_id || refreshing || busy) return;
     refreshing = true;
-    request("tools/call", { name: "get_proposal", arguments: { proposal_id: p.proposal_id } })
+    request("tools/call", { name: "get_proposal", arguments: readArgs(p.proposal_id, ROWS_READ) })
       .then(function (res) {
         refreshing = false;
         var sc = (res && res.structuredContent) || {};
-        if (sc.ok === false || (res && res.isError) || !sc.state) return;
+        if (sc.ok === false || (res && res.isError) || !sc.state) { retryLater(); return; }
+        failures = 0;
         if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
+        if (Number(sc.card_seq || 0) > mySeq && (sc.state === "pending" || sc.state === "applying")) {
+          stepAside(sc);
+          return;
+        }
         if (sc.state === "pending" && (p.state !== "pending" || newer(p, sc))) {
           // amended since the card was drawn, or a replaced change back after its replacement
           // was rejected or withdrawn (a withdrawn one never reads again): draw it as it is now,
@@ -441,8 +559,19 @@ button.danger:disabled{color:var(--red)}
         approval = null;
         render({ structuredContent: sc, _meta: {} });
       })
-      .catch(function () { refreshing = false; });
+      .catch(function () { refreshing = false; retryLater(); });
   }
+  // The read did not get through (the host refused it, or the gateway could not be reached):
+  // try again a little later, each wait twice the last. After a few misses the card says it can't
+  // check; Approve still reads the change first, and the gateway refuses an older version.
+  function retryLater() {
+    if (!watching || stepped || retryTimer || failures >= RETRY_MAX) return;
+    failures += 1;
+    if (failures === 3 && !$("status").textContent) setStatus(UNCHECKED_TEXT, "");
+    var wait = Math.min(RETRY_LAST_MS, RETRY_FIRST_MS * Math.pow(2, failures - 1));
+    retryTimer = setTimeout(function () { retryTimer = null; refresh(); }, wait);
+  }
+  var UNCHECKED_TEXT = "This card can't check for a newer version right now, so it keeps trying. Apply checks once more before anything is applied.";
   // only where Apply all is offered, by number
   function leftOutText(nos, n) {
     var list = (nos || []).map(function (x) { return "#" + x; });
@@ -459,39 +588,43 @@ button.danger:disabled{color:var(--red)}
     return Number(sc.version || 1) > Number(p.version || 1);
   }
   function moved(p, sc) {
-    return ["status", "status_reason", "press_reason", "replace_note"].some(function (k) {
+    // assistant_may_apply, approval_mode: the member's approval mode changed since (Apply now or Approve)
+    return ["status", "status_reason", "press_reason", "replace_note", "assistant_may_apply", "approval_mode"].some(function (k) {
       return String(p[k] || "") !== String(sc[k] || "");
     });
   }
   function codesMeta() {
     var meta = {};
     if (approval) meta[APPROVAL_KEY] = approval;
-    if (applySet) meta[SET_KEY] = { ids: applySet.ids, code: applySet.code };
+    if (applySet) meta[SET_KEY] = { ids: applySet.ids, code: applySet.code, lines: applySet.lines };
     return meta;
   }
-  document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") { refreshes = 0; refresh(); keepFresh(); }
-  });
+  function onShown() {
+    if (watching && document.visibilityState === "visible") { refreshes = 0; refresh(); keepFresh(); }
+  }
+  document.addEventListener("visibilitychange", onShown);
   // Read again now and then while the card is on screen (a host that keeps old cards in the chat
   // shows them current); not while it is scrolled away or the chat is in the background.
   var refreshes = 0, refreshTimer = null, onScreen = true;
   function keepFresh() {
-    if (refreshTimer || !onScreen || document.visibilityState === "hidden" || refreshes >= REFRESH_MAX) return;
+    if (!watching || refreshTimer || !onScreen || document.visibilityState === "hidden" || refreshes >= REFRESH_MAX) return;
     if (!live(proposal)) return;
     refreshTimer = setTimeout(function () {
       refreshTimer = null; refreshes += 1;
       refresh(); keepFresh();
     }, REFRESH_EVERY_MS);
   }
+  var observer = null;
   if (typeof IntersectionObserver === "function") {
-    new IntersectionObserver(function (seen) {
+    observer = new IntersectionObserver(function (seen) {
       var now = seen.some(function (e) { return e.isIntersecting; });
       if (now && !onScreen) { onScreen = true; refreshes = 0; refresh(); keepFresh(); }
       else if (!now && onScreen) {
         onScreen = false;
         if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
       }
-    }).observe(document.documentElement);
+    });
+    observer.observe(document.documentElement);
   }
 
   // A large apply keeps running on the gateway after the Approve press answers; the card reads
@@ -508,7 +641,7 @@ button.danger:disabled{color:var(--red)}
     if (pollTimer || polls >= 120) return;
     pollTimer = setTimeout(function () {
       pollTimer = null; polls += 1;
-      request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+      request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
         .then(function (res) {
           var sc = (res && res.structuredContent) || {};
           if (sc.ok === false || (res && res.isError)) {
@@ -544,7 +677,10 @@ button.danger:disabled{color:var(--red)}
     }, APPLYING_POLL_MS);
   }
 
-  function renderRows(list, rows, limit) {
+  function renderRows(list, rows, limit, total, summary) {
+    total = Math.max(rows.length, Number(total) || 0);
+    // a card that holds only the first rows counts each group from the whole proposal's summary
+    var kinds = rows.length < total && summary && summary.groups || null;
     // Grouped by kind (GROUPS order, stable within a group); only the first ``limit`` rows are
     // drawn, then one "Show all" button draws the rest. Thumbnails only for drawn rows.
     var sorted = rows.map(function (r, i) { return [groupOf(r.kind), i, r]; }).sort(function (a, b) {
@@ -555,7 +691,8 @@ button.danger:disabled{color:var(--red)}
     for (var k = 0; k < sorted.length && shown < limit; k++) {
       var r = sorted[k][2], g = sorted[k][0];
       if (rows.length > 1 && g !== lastGroup) {
-        var count = sorted.filter(function (x) { return x[0] === g; }).length;
+        var count = kinds ? Object.keys(kinds).reduce(function (n, k) { return groupOf(k) === g ? n + (+kinds[k] || 0) : n; }, 0)
+          : sorted.filter(function (x) { return x[0] === g; }).length;
         list.appendChild(el("li", "group", (g < GROUPS.length ? GROUPS[g][1] : "Other") + " (" + count + ")"));
         lastGroup = g;
       }
@@ -568,12 +705,39 @@ button.danger:disabled{color:var(--red)}
       li.appendChild(n); li.appendChild(el("span", "qty", d[2])); list.appendChild(li);
       shown++;
     }
-    if (shown < rows.length) {
+    if (shown < total) {
       var more = el("li", "more-row");
-      var btn = el("button", "more", "Show all " + rows.length + " changes"); btn.type = "button"; btn.id = "more";
-      btn.onclick = function () { renderRows(list, rows, rows.length); reportSize(); };
+      var btn = el("button", "more", "Show all " + total + " changes"); btn.type = "button"; btn.id = "more";
+      btn.onclick = function () {
+        if (rows.length >= total) { renderRows(list, rows, rows.length, total, summary); reportSize(); return; }
+        showAll(list, btn);
+      };
       more.appendChild(btn); list.appendChild(more);
     }
+  }
+  // The result that drew the card carries only the first rows: Show all reads the whole list once
+  // (the same read-only get_proposal the card uses to follow its proposal) and draws it as text.
+  function showAll(list, btn) {
+    var p = proposal;
+    if (!p || !p.proposal_id) return;
+    btn.disabled = true; btn.textContent = "Loading every change…";
+    request("tools/call", { name: "get_proposal", arguments: readArgs(p.proposal_id) })
+      .then(function (res) {
+        var sc = (res && res.structuredContent) || {};
+        if (proposal !== p) return;
+        if (sc.ok === false || (res && res.isError) || !Array.isArray(sc.rows) || Number(sc.version || 1) !== Number(p.version || 1)) {
+          btn.disabled = false; btn.textContent = "Show all " + (Number(p.rows_total) || "") + " changes";
+          setStatus(sc.ok !== false && sc.state ? UPDATED_TEXT : "The rest of the list couldn't be loaded here. The review page shows every change.", "err");
+          return;
+        }
+        p.rows = sc.rows; p.rows_total = sc.rows.length;
+        renderRows(list, sc.rows, sc.rows.length, sc.rows.length); reportSize();
+      })
+      .catch(function () {
+        if (proposal !== p) return;
+        btn.disabled = false; btn.textContent = "Show all " + (Number(p.rows_total) || "") + " changes";
+        setStatus("The rest of the list couldn't be loaded here. The review page shows every change.", "err");
+      });
   }
 
   function renderActions() {
@@ -584,7 +748,8 @@ button.danger:disabled{color:var(--red)}
     // action (a like, a comment, a folder...) has one too; a deck deletion never does, so it
     // takes the "review page" branch below.
     if (p.state === "pending" && p.writes_enabled && approval) {
-      var ok = el("button", "primary", "Approve: apply to Archidekt");
+      // a change the assistant may apply itself: the member may apply it first
+      var ok = el("button", "primary", p.try_again ? "Try again" : p.assistant_may_apply ? "Apply now" : "Apply");
       ok.type = "button"; ok.id = "approve";
       var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
       ok.disabled = no.disabled = true; armed = false;
@@ -593,11 +758,16 @@ button.danger:disabled{color:var(--red)}
       a.appendChild(ok); a.appendChild(no);
       setTimeout(function () { armed = true; if (!busy) { ok.disabled = false; no.disabled = false; } }, ARM_DELAY_MS);
     } else if (p.state === "pending" && p.writes_enabled && !p.assistant_may_apply) {
-      var open = el("button", "primary", "Approve on the review page"); open.type = "button";
+      var open = el("button", "primary", "Apply on the review page"); open.type = "button";
       open.onclick = function () { openLink(p.review_url); };
       a.appendChild(open);
     } else if (p.state === "pending" && !p.writes_enabled) {
       a.appendChild(el("span", "foot", "Archidekt writes are switched off on this gateway; this is a preview only."));
+    }
+    if (p.state === "failed" && p.rest_offered) {
+      var rest = el("button", "primary", "Propose the rest"); rest.type = "button"; rest.id = "rest";
+      rest.onclick = function () { proposeRest(rest); };
+      a.appendChild(rest);
     }
     if (p.result && p.result.deck_url) {
       var deck = el("a", "link", "Open the deck on Archidekt"); deck.href = "#";
@@ -610,12 +780,30 @@ button.danger:disabled{color:var(--red)}
       undo.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
       a.appendChild(undo);
     }
+    var openRow = $("open-row"); openRow.replaceChildren();
     if (p.review_url) {
-      var rv = el("a", "link", "Open in the app or browser"); rv.href = "#";
+      var rv = el("a", "cap", "Open in the app or browser"); rv.href = "#";
       rv.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
-      a.appendChild(rv);
+      openRow.appendChild(rv);
     }
+    openRow.className = "open-row" + (p.review_url ? "" : " hidden");
     reportSize();
+  }
+
+  // "Propose the rest" of a change that stopped partway: the gateway works out what is still
+  // missing and proposes it (propose_rest, a tool only this card calls); the assistant is told.
+  function proposeRest(btn) {
+    var pid = proposal.proposal_id;
+    btn.disabled = true; setStatus("Working out what is still missing…", "");
+    request("tools/call", { name: "propose_rest", arguments: { proposal_id: pid } })
+      .then(function (res) {
+        var sc = (res && res.structuredContent) || {};
+        if (sc.ok === false || (res && res.isError)) { btn.disabled = false; setStatus(String(sc.message || "The rest couldn't be proposed."), "err"); return; }
+        btn.remove();
+        setStatus("The rest is proposed as " + (sc.board_no ? "#" + sc.board_no : "a new change") + ". Its card or review page has Apply.", "ok");
+        tellModel("The user pressed Propose the rest on the card of " + pid + ": the gateway proposed what is still missing as " + sc.proposal_id + ". Tell them in one line; it waits for their approval.");
+      })
+      .catch(function () { btn.disabled = false; setStatus("Could not reach the gateway. The review page has Propose the rest too.", "err"); });
   }
 
   // The other changes waiting on this deck, in one line ("1 from ChatGPT also waits"),
@@ -644,7 +832,7 @@ button.danger:disabled{color:var(--red)}
     var ol = $("also-list"); ol.replaceChildren();
     if (confirming && applySet) {
       var byId = {};
-      (w.set_lines || []).forEach(function (x) { byId[String(x.proposal_id)] = x; });
+      (applySet.lines || []).forEach(function (x) { byId[String(x.proposal_id)] = x; });
       applySet.ids.forEach(function (id) {
         var x = byId[id] || {};
         var li = el("li", "", (x.board_no ? "#" + x.board_no + " " : "") + String(x.summary || id));
@@ -690,7 +878,7 @@ button.danger:disabled{color:var(--red)}
     setStatus("Applying to Archidekt…", "");
     $("status").focus();
     // the status each change showed on the confirm: a change held since is not sent
-    var shown = {}, lines = (proposal.deck_waiting && proposal.deck_waiting.set_lines) || [];
+    var shown = {}, lines = set.lines || [];
     lines.forEach(function (x) {
       var id = String(x.proposal_id);
       if (set.ids.indexOf(id) < 0) return;
@@ -710,9 +898,9 @@ button.danger:disabled{color:var(--red)}
           tellModel("The user pressed Apply all on the proposal card, but the gateway answered: " + msg);
           return;
         }
-        applySet = null;
+        applySet = null; pressedHere = true;
         var summary = String(sc.summary || "");
-        request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+        request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
           .then(function (r2) {
             var p2 = (r2 && r2.structuredContent) || {};
             if (p2.state) render({ structuredContent: p2, _meta: (r2 && r2._meta) || {} });
@@ -733,10 +921,9 @@ button.danger:disabled{color:var(--red)}
             $("actions").appendChild(u);
             reportSize();
           }
-          var told = tellModel("The user pressed Apply all on the proposal card. " + summary +
+          tellModel("The user pressed Apply all on the proposal card. " + summary +
             ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
             ((sc.not_sent || []).length ? " Not sent: " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
-          if ((sc.applied || []).length || sc.state === "applying") told.then(nudge);
         }
       })
       .catch(function (err) {
@@ -767,7 +954,7 @@ button.danger:disabled{color:var(--red)}
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = false; if (no) no.disabled = false;
     uncheckedOk = true;
-    setStatus("This card could not check the change again, so nothing was approved yet. Press Approve again to approve it as shown here, or use the review page.", "err");
+    setStatus("This card could not check the change again, so nothing was applied yet. Press Apply again to apply it as shown here, or use the review page.", "err");
   }
   // this change is no longer waiting (decided, failed, expired, or read again so): an earlier
   // Apply all's "not sent" list no longer fits it
@@ -786,7 +973,7 @@ button.danger:disabled{color:var(--red)}
       // the card was drawn is shown, and applies only on a second press
       var shown = proposal;
       setStatus("Checking this change…", "");
-      request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+      request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
         .then(function (res) {
           var sc = (res && res.structuredContent) || {};
           busy = false;
@@ -798,7 +985,7 @@ button.danger:disabled{color:var(--red)}
           }
           if (sc.state === "pending" && proposal === shown && moved(shown, sc) && (sc.status === "held" || sc.press_reason)) {
             render({ structuredContent: Object.assign({}, shown, sc), _meta: codesMeta() });
-            setStatus("This change has changed status since the card was drawn. Read the note above, then press Approve again if you still want it.", "err");
+            setStatus("This change has changed status since the card was drawn. Read the note above, then press Apply again if you still want it.", "err");
             return;
           }
           decide(decision, why, true);
@@ -808,6 +995,8 @@ button.danger:disabled{color:var(--red)}
     }
     setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");
     var args = { proposal_id: pid, approval: approval, decision: decision };
+    // the reason typed under Reject is kept with the rejection, so the Proposals page shows it
+    if (decision === "reject" && why) args.reason = String(why).slice(0, 500);
     // the status this card shows goes with Approve: a change held since is refused, and the
     // answer carries the hold, so it is seen even when the read above could not get through
     if (decision === "approve") {
@@ -821,10 +1010,16 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError)) {
           var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
           busy = false;
+          if (sc.error === "not_newest_card") {
+            // the gateway counts a newer card for this change below: this one steps aside
+            stepAside({ version: sc.version || sc0.version });
+            setStatus(String(msg), "err");
+            return;
+          }
           if (sc.error === "changed") {
             // the code is of an older version: read the change as it is now and draw that
             var drawn = proposal;
-            request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+            request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
               .then(function (r2) {
                 var p2 = (r2 && r2.structuredContent) || {};
                 if (proposal !== drawn) return;
@@ -847,8 +1042,8 @@ button.danger:disabled{color:var(--red)}
               press_reason: sc.press_reason || "", replace_note: sc.replace_note || "",
               assistant_may_apply: !!sc.assistant_may_apply
             }), _meta: codesMeta() });
-            setStatus("This change is now held, so nothing was approved. Read the note above, then press Approve again if you still want it.", "err");
-            tellModel("The user pressed Approve on the proposal card for " + pid + ", but the gateway answered: " + msg);
+            setStatus("This change is now held, so nothing was applied. Read the note above, then press Apply again if you still want it.", "err");
+            tellModel("The user pressed Apply on the proposal card for " + pid + ", but the gateway answered: " + msg);
             return;
           }
           // No longer pending (rejected or applied elsewhere, expired): show that and drop the buttons.
@@ -857,25 +1052,27 @@ button.danger:disabled{color:var(--red)}
             closed_at: sc.closed_at, closed_by: sc.closed_by, closed_by_app: sc.closed_by_app
           }) : null;
           if (closed) { approval = null; render({ structuredContent: closed, _meta: {} }); }
+          else if (sc.try_again) { proposal.try_again = true; renderActions(); }
           else { if (ok) ok.disabled = false; if (no) no.disabled = false; }
           if (!closed) setStatus(String(msg), "err");
-          else if (closed.state === "failed") setStatus(failedText(String(msg)), "err");
+          else if (closed.state === "failed" && !sc.rest_offered) setStatus(failedText(String(msg)), "err");
+          else if (closed.state === "failed") setStatus(closedText(Object.assign(closed, { rest_offered: true })), "err");
           else if (closed.state !== "applying") setStatus(closedText(closed) || String(msg), "");
           tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
           return;
         }
         heldCode = sc.state === "applying" ? approval : null;
         approval = null; busy = false;
+        if (decision === "approve") pressedHere = true;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {
-          tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.").then(nudge);
+          tellModel("The user pressed Apply on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
           return;
         }
         var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
         setStatus(sc.state === "applied" ? "Applied. " + (sc.applied_text || "The deck on Archidekt matches this proposal.") : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
-        var told = tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
+        tellModel("The user pressed " + (decision === "approve" ? "Apply" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
           (why ? " The user's reason, in their words (data, quoted): \"" + String(why).replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").slice(0, 500) + "\"" : ""));
-        if (decision === "approve" && sc.state === "applied") told.then(nudge);
       })
       .catch(function (err) {
         busy = false;
@@ -885,7 +1082,12 @@ button.danger:disabled{color:var(--red)}
   }
 
   // no project name in the app's name: the file is public
-  B.start("Proposal card", function (params) { render(params); refresh(); }, {
+  B.start("Proposal card", function (params) {
+    var first = (params && params.structuredContent) || {};
+    mySeq = Number(first.card_seq) || 0; sc0 = first;
+    if (stepped) return; // a newer card is below: the host showing this one again changes nothing
+    render(params); refresh();
+  }, {
     connectError: "This card could not connect to the chat. Use the review page in your browser."
   });
 })();

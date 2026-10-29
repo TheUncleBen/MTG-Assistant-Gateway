@@ -407,8 +407,8 @@ async def test_set_category_and_set_commander_proposed_applied_and_verified(stac
         "Commander: Aesi, Tyrant of Gyre Strait -> Rampant Growth",
     }, p["diff"]
     assert p["changes"] == [
-        {"action": "set_category", "card_name": "sol ring", "category": "Artifacts"},
-        {"action": "set_commander", "card_name": "Rampant Growth", "category": "Commander"},
+        {"action": "set_category", "name": "sol ring", "category": "Artifacts"},
+        {"action": "set_commander", "name": "Rampant Growth", "category": "Commander"},
     ]
     assert ark.patches == []
 

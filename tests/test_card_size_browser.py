@@ -42,9 +42,13 @@ def _shot(page, name: str) -> None:
 
 
 def _size(server: Server, size: str | None) -> None:
-    if size is None:
-        server.db.delete_pref("user-1", "card.size")
-    else:
+    """The one size every page used before each page kept its own (still read by a page without
+    its own); each page's own size is forgotten."""
+    from mtg_gateway.prefs import CARD_SIZE_NAMES
+
+    for name in CARD_SIZE_NAMES:
+        server.db.delete_pref("user-1", name)
+    if size is not None:
         server.db.set_pref("user-1", "card.size", size)
 
 
@@ -99,7 +103,7 @@ def test_the_switch_applies_at_once_and_follows_the_account(server: Server, widt
         assert page.get_attribute("html", "data-card-size") == "s" and page.url == url  # no reload
         assert page.get_attribute(".toolbar [data-card-size-set=s]", "aria-pressed") == "true"
         assert page.evaluate(COLS, ".deckview.stacks") > before
-        assert server.db.get_pref("user-1", "card.size") == "s"
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
         # as tall as the selects beside it (39 px with its border; 46 px on a touch screen)
         height = page.evaluate(
             "() => document.querySelector('.toolbar .sizeseg').getBoundingClientRect().height"
@@ -162,7 +166,7 @@ def test_quick_size_changes_keep_the_last_one(server: Server) -> None:
                 break
             page.wait_for_timeout(50)
         assert len(answered) == 2 and all(r.ok for r in answered)
-        assert server.db.get_pref("user-1", "card.size") == "s"
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
         browser.close()
     assert errors == []
 
@@ -194,11 +198,11 @@ def test_a_save_with_an_unreadable_answer_does_not_stop_the_next_ones(server: Se
         for size in ("l", "m", "s"):
             page.locator(f".toolbar [data-card-size-set={size}]").click()
         for _ in range(100):
-            if len(sent) >= 3 and server.db.get_pref("user-1", "card.size") == "s":
+            if len(sent) >= 3 and server.db.get_pref("user-1", "card.size.deck") == "s":
                 break
             page.wait_for_timeout(50)
         assert len(sent) == 3, sent
-        assert server.db.get_pref("user-1", "card.size") == "s"
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
         browser.close()
     assert errors == []
 
@@ -229,9 +233,67 @@ def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
             with page.expect_response(SAVED) as saved:
                 page.locator(".printpick [data-card-size-set=m]").click()
             assert saved.value.ok
-            assert server.db.get_pref("user-1", "card.size") == "m"
+            assert server.db.get_pref("user-1", "card.size.printings") == "m"
             browser.close()
             assert errors == []
+
+
+def test_the_printing_pickers_size_leaves_the_deck_pages_as_it_is(server: Server) -> None:
+    """Ben, 2026-10-28: each page keeps its own card size. L in the printings dialog leaves the
+    deck page at M, on this page and the next time it opens, and on the account; the dialog opens
+    at L again. A size chosen once for every page before is where each page starts."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        deck_cols = page.evaluate(COLS, ".deckview.grid .cards")
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        sol = ".deckview .row[data-card='Sol Ring'][data-zone='main']"
+        _open_picker(page, page.locator(sol))
+        before = page.evaluate(COLS, ".printpick .ppgrid")
+        with page.expect_response(SAVED) as saved:
+            page.locator(".printpick [data-card-size-set=l]").click()
+        assert saved.value.ok
+        assert page.evaluate(COLS, ".printpick .ppgrid") < before
+        assert page.get_attribute("html", "data-card-size") == "m"
+        assert server.db.get_pref("user-1", "card.size.printings") == "l"
+        assert server.db.get_pref("user-1", "card.size.deck") is None
+        page.keyboard.press("Escape")
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        assert page.get_attribute("html", "data-card-size") == "m"
+        assert page.get_attribute(".toolbar [data-card-size-set=m]", "aria-pressed") == "true"
+        assert page.evaluate(COLS, ".deckview.grid .cards") == deck_cols
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        _open_picker(page, page.locator(sol))
+        assert page.get_attribute(".printpick", "data-card-size") == "l"
+        assert page.get_attribute(".printpick [data-card-size-set=l]", "aria-pressed") == "true"
+        page.keyboard.press("Escape")
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        # the deck page's own S leaves the picker at L, and another page at M
+        with page.expect_response(SAVED) as saved:
+            page.locator(".toolbar [data-card-size-set=s]").click()
+        assert saved.value.ok and page.get_attribute("html", "data-card-size-printings") == "l"
+        page.goto(f"{server.base}/cards?q=sol&view=grid", wait_until="networkidle")
+        assert page.get_attribute("html", "data-card-size") == "m"
+        browser.close()
+    assert errors == []
+    # this device's copy: a page the account has no size for starts with it, and gives it to the
+    # account
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.goto(f"{server.base}/decks?view=grid", wait_until="networkidle")
+        page.evaluate("() => localStorage.setItem('mtg.card.size.collection', 'l')")
+        with page.expect_response(SAVED) as saved:
+            page.goto(f"{server.base}/collection?view=grid", wait_until="domcontentloaded")
+        assert saved.value.ok
+        assert page.get_attribute("html", "data-card-size") == "l"
+        assert server.db.get_pref("user-1", "card.size.collection") == "l"
+        browser.close()
+    assert errors == []
 
 
 @pytest.mark.parametrize("width,theme", SIZES)
@@ -329,5 +391,41 @@ def test_small_cards_keep_stack_names_and_card_names_readable(server: Server, wi
             assert page.locator(".deckview .c .ph .nm").count() > 0, view
             assert page.evaluate(UNDER_CORNER) == [], view
         _shot(page, f"small-names-{width}.png")
+        browser.close()
+    assert errors == []
+
+
+# Each deck tile's ⋮ against its picture: the gap from the picture's bottom (the colour bar's
+# bottom) to the ⋮'s top, and from the ⋮'s bottom to the info area's.
+KEBAB = """
+() => [...document.querySelectorAll('ul.decklist.grid li.deck')].map(li => {
+  const k = li.querySelector(':scope > .kebab').getBoundingClientRect();
+  const t = li.querySelector('.thumb').getBoundingClientRect();
+  const i = li.querySelector('.info').getBoundingClientRect();
+  return {gap: k.top - t.bottom, below: i.bottom - k.bottom};
+})
+"""
+
+
+@pytest.mark.parametrize("width", [375, 1280])
+def test_the_deck_tiles_menu_button_sits_below_the_colour_bar_at_every_size(
+    server: Server, width: int
+) -> None:
+    """Ben, 2026-10-28: the ⋮ overlapped the colour bar: its place was worked out for the M picture
+    alone. At S, M and L it sits under the picture, in the name's area."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        for size in ("s", "m", "l"):
+            _size(server, size)
+            page.goto(f"{server.base}/decks?view=grid", wait_until="networkidle")
+            tiles = page.evaluate(KEBAB)
+            assert tiles, size
+            for tile in tiles:
+                assert tile["gap"] >= 0, (size, tile)
+                assert tile["below"] >= 0, (size, tile)
         browser.close()
     assert errors == []

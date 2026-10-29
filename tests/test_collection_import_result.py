@@ -1,6 +1,7 @@
 """The Collection page's import says what it did: the parser's own reason when it refuses the
 whole import, the rows kept as English because Archidekt's collection has no code for their
-language, the rows added to a copy already held in another language, and the rows not found. The
+language, the rows added to an entry already held (same printing, finish, condition and language;
+0.7.46: never one in another language), and the rows not found. The
 details cross the redirect by a one-time token, never as text in the URL."""
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from mtg_gateway.collection import (
     parse_collection_import,
 )
 
-from .test_browse_collection import NAV, Stack, linked, stack_options  # noqa: F401  (fixture)
+from .test_browse_collection import NAV, Stack, import_list, linked, stack_options  # noqa: F401  (fixture)
 from .test_decks_and_proxy import Browser
 
 
@@ -67,7 +68,7 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
         "Quantity,Name,Language\n"
         "2,Sol Ring,PH\n"  # line 2: kept as English
         "1,<b>Foo</b>,EN\n"  # line 3: not found
-        "3,Opt,JP\n"  # line 4: added to an English copy
+        "3,Opt,JP\n"  # line 4: added to the Japanese entry already there
         "1,Forest,PH\n"  # line 5: kept as English
         "1,Island,XYZ\n"  # line 6: kept as English, a value with no name
         "1,Mountain,PH\n"  # line 7: not found, so not named as kept
@@ -75,45 +76,43 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
     out = {
         "added": [{"id": 1}],
         "skipped": [{"index": 1}, {"index": 5}],
-        "merged": [{"index": 2, "language": "JA", "existing_language": "EN"}],
     }
+    out["added"] = [{"id": 1, "index": 0, "went_to": "new"}, {"id": 2, "index": 2, "went_to": "existing"}]
     result = import_result(items, out)
     assert result["cards"] == 7
     html = import_result_html(result)
     assert html == (
-        "<div class='notice ok importres' role='status'><p>Imported 7 cards into your Collection on "
-        "Archidekt.</p><ul><li>Kept as English, because Phyrexian is not a language Archidekt stores "
+        "<div class='notice ok importres' role='status'><p>Imported 7 cards into your binder."
+        "</p><ul><li>Kept as English, because Phyrexian is not a language Archidekt stores "
         "for collection cards: "
         "line 2 (Sol Ring), line 5 (Forest).</li>"
         "<li>Kept as English, because “XYZ” is not a language Archidekt stores "
         "for collection cards: line 6 (Island).</li>"
-        "<li>Added to a copy you already had in another language, so it counts as English: line 4 (Opt, "
-        "Japanese added to English).</li>"
+        "<li>Added to an entry you already had, with the same printing, finish, condition and language: "
+        "line 4 (Opt).</li>"
         "<li>Not found, so not imported: line 3 (&lt;b&gt;Foo&lt;/b&gt;), line 7 (Mountain).</li></ul></div>"
     )
 
 
-def test_one_card_two_existing_languages_and_nothing_added() -> None:
+def test_two_rows_into_entries_already_there_and_nothing_added() -> None:
     items = parse_collection_import("1 Opt\n1 Forest\n")
     one = import_result(
         items,
         {
-            "added": [{"id": 1}],
-            "skipped": [],
-            "merged": [
-                {"index": 0, "language": "EN", "existing_language": "ZHT"},
-                {"index": 1, "language": "EN", "existing_language": "KO"},
+            "added": [
+                {"id": 1, "index": 0, "went_to": "existing"},
+                {"id": 2, "index": 1, "went_to": "existing"},
             ],
+            "skipped": [],
         },
     )
     assert import_result_html(one) == (
-        "<div class='notice ok importres' role='status'><p>Imported 2 cards into your Collection on "
-        "Archidekt.</p><ul><li>Added to a copy you already had in another language, so each counts in "
-        "that copy&#x27;s language: row 1 (Opt, English added to Chinese (Traditional)), row 2 (Forest, "
-        "English added to Korean).</li></ul></div>"
+        "<div class='notice ok importres' role='status'><p>Imported 2 cards into your binder."
+        "</p><ul><li>Added to entries you already had, with the same printing, finish, "
+        "condition and language: row 1 (Opt), row 2 (Forest).</li></ul></div>"
     )
     single = import_result(parse_collection_import("1 Opt\n"), {"added": [{"id": 1}]})
-    assert "<p>Imported 1 card into your Collection on Archidekt.</p></div>" in import_result_html(single)
+    assert "<p>Imported 1 card into your binder.</p></div>" in import_result_html(single)
     none = import_result(items, {"added": [], "skipped": [{"index": 0}, {"index": 1}], "merged": []})
     assert import_result_html(none) == (
         "<div class='notice error importres' role='status'><p>Nothing was imported: no card in the list was "
@@ -126,13 +125,12 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
     b = await linked(stack)
     try:
         csrf = await b.csrf("/collection")
-        r = await b.http.post(
-            "/collection",
-            data={"csrf": csrf, "action": "import", "text": "Quantity,Name,Language\n1,Sol Ring,EN\n"},
+        r = await import_list(
+            b, {"csrf": csrf, "action": "import", "text": "Quantity,Name,Language\n1,Sol Ring,EN\n"}
         )
         assert re.fullmatch(r"/collection\?ok=imported&r=[\w-]{16}", r.headers["location"]), r.headers
         text = "Quantity,Name,Language\n2,Sol Ring,JP\n1,Opt,PH\n1,Foo Bar,EN\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
         where = r.headers["location"]
         assert where.startswith("/collection?ok=imported&r=") and "Foo" not in where
         recs = [
@@ -140,31 +138,29 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
             for c in stack.ark.collections["alice"].values()
             if c["card"]["oracleCard"]["name"] == "Sol Ring"
         ]
-        assert [(c["quantity"], c["language"]) for c in recs] == [(3, 1)]  # topped up, still English
+        # Japanese is its own entry; never added to the English one (0.7.46)
+        assert sorted((c["quantity"], c["language"]) for c in recs) == [(1, 1), (2, 6)]
         page = (await b.http.get(where, headers=NAV)).text
-        assert "Imported 3 cards into your Collection on Archidekt." in page
+        assert "Imported 3 cards into your binder." in page
         assert (
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt)." in page
         )
-        assert (
-            "Added to a copy you already had in another language, so it counts as English: line 2 "
-            "(Sol Ring, Japanese added to English)." in page
-        )
+        assert "another language" not in page and "you already had" not in page
         assert "Not found, so not imported: line 4 (Foo Bar)." in page
         assert "aria-labelledby='col-add-title' data-open>" in page
         assert "data-coltab='import' aria-selected='true'" in page
         # read once: the same address falls back to the plain notice
         again = (await b.http.get(where, headers=NAV)).text
-        assert "Imported into your Collection on Archidekt." in again and "Foo Bar" not in again
+        assert "Imported into your binder." in again and "Foo Bar" not in again
         # a refusal names the line
         bad = "Quantity,Name\n1,Opt\nx,Sol Ring\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": bad})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": bad})
         assert r.headers["location"].startswith("/collection?err=unreadable&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert "Nothing was imported: line 3: quantity &#x27;x&#x27; is not a number." in page
         # nothing found: the plain notice, with the rows not found
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "1 Foo Bar\n"})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": "1 Foo Bar\n"})
         assert r.headers["location"].startswith("/collection?err=nothingimported&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert (
@@ -180,7 +176,7 @@ async def test_a_result_token_is_only_read_by_the_member_who_imported(stack: Sta
     try:
         csrf = await alice.csrf("/collection")
         text = "Quantity,Name,Language\n1,Opt,PH\n"
-        r = await alice.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(alice, {"csrf": csrf, "action": "import", "text": text})
         where = r.headers["location"]
     finally:
         await alice.aclose()
@@ -195,7 +191,7 @@ async def test_a_result_token_is_only_read_by_the_member_who_imported(stack: Sta
         await bob.login("/collection")
         assert (await bob.link("amy", "pw-amy")).status_code == 303
         page = (await bob.http.get(where, headers=NAV)).text
-        assert "Phyrexian" not in page and "Imported into your Collection on Archidekt." in page
+        assert "Phyrexian" not in page and "Imported into your binder." in page
     finally:
         await bob.aclose()
 
@@ -241,8 +237,8 @@ def test_an_unknown_condition_is_near_mint_and_named() -> None:
         import_result(parse_collection_import("Quantity,Name,Condition\n1,Opt,EX\n"), {"added": [{"id": 1}]})
     )
     assert one == (
-        "<div class='notice ok importres' role='status'><p>Imported 1 card into your Collection on "
-        "Archidekt.</p><ul><li>Kept as Near Mint, because “EX” is not a condition Archidekt stores "
+        "<div class='notice ok importres' role='status'><p>Imported 1 card into your binder."
+        "</p><ul><li>Kept as Near Mint, because “EX” is not a condition Archidekt stores "
         "for collection cards: line 2 (Opt).</li></ul></div>"
     )
     two = import_result_html(
@@ -302,13 +298,13 @@ async def test_huge_cells_and_an_unknown_condition_through_the_page(stack: Stack
                 "line 2: quantity &#x27;yyyyyyyyyyyyyyyyyyyy…&#x27;",
             ),
         ]:
-            r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+            r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
             assert r.status_code == 303, r.status_code
             assert r.headers["location"].startswith("/collection?err=unreadable&r=")
             page = (await b.http.get(r.headers["location"], headers=NAV)).text
             assert f"Nothing was imported: {said}" in page and "y" * 21 not in page
         text = "Quantity,Name,Condition\n1,Sol Ring,EX\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})
         assert r.headers["location"].startswith("/collection?ok=imported&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert (

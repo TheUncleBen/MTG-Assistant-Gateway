@@ -12,7 +12,7 @@ the live site; **unknown** means we could not establish it.
 | --- | --- | --- |
 | **Archidekt import text** (`1x Name (set) 123 *F* [Category{top}] ^Label,#hex^`, one row per card, sorted by name) | gateway: deck page > More > Export ("Archidekt import text", Copy, Download Archidekt .txt); `get_deck` with `view` `export` (or `full`) as `archidekt_text`; archidekt.com: Export > Text with every option on | archidekt.com: deck > Import (paste, or "Upload exported Archidekt file", .txt up to 1 MB); gateway: New deck > paste a list, editor > Paste a list, `propose_new_deck(decklist_text)`, `parse_decklist`, `compare_decks` |
 | **Plain decklist** (`1 Name`, commander first, no headers, mainboard only; sideboard as a second list) | gateway: Export ("Plain decklist", "Sideboard and maybeboard", Download plain .txt); `decklist_text` and `sideboard_text` in `get_deck`'s default `text` view (and `full`) | gateway (as above); Moxfield, MTGO, Arena and the assistant's research tools (outside this repository: unknown beyond "they take `N Name` lines") |
-| **CSV** with Archidekt's column names (Quantity, Name, Finish, Category, Secondary categories, Edition code, Collector number, …) | gateway: Export > Download .csv; Collection > Export CSV; archidekt.com: Export > CSV with the columns you tick | gateway: New deck > CSV, `propose_new_deck(csv_text)`, `parse_deck_export`. **archidekt.com's deck import does not take CSV** (its CSV import is for the collection only; confirmed from its client code) |
+| **CSV** with Archidekt's column names (Quantity, Name, Finish, Category, Secondary categories, Edition code, Collector number, …) | gateway: Export > Download .csv; Binder > Export CSV; archidekt.com: Export > CSV with the columns you tick | gateway: New deck > CSV, `propose_new_deck(csv_text)`, `parse_deck_export`. **archidekt.com's deck import does not take CSV** (its CSV import is for the binder only; confirmed from its client code) |
 | **JSON**, the gateway's own format (the full deck read: cards with name, quantity, categories, set, collector number and finish, plus statistics) | gateway: Export > .json; every `get_deck` answer; `/api/v1/decks/{id}` | gateway: New deck > "a gateway .json export" (pasted or from a file), `propose_new_deck(json_text)`. Only the six card fields are read back. **archidekt.com has no JSON import** (confirmed from its client code), so this format is for the gateway and for your assistant |
 | **Arena text** (`1 Name (SET) 123` under Commander, Companion, Deck and Sideboard headings; the Maybeboard is left out, Arena has none) | gateway: Export > Arena .txt; archidekt.com: Export > Arena | MTG Arena's import (**reported**: the heading and line shape Arena's own export writes; not exercised in Arena). Export only: the gateway does not read it back |
 | **MTGO .dek** (the `Deck`/`Cards` XML the MTGO client exports, with `Quantity`, `Sideboard` and `Name`; MTGO's catalogue ids `CatID` are not known to the gateway and are left out) | gateway: Export > MTGO .dek; archidekt.com: Export > MTGO | the MTGO client (**unknown**: whether MTGO accepts a .dek without `CatID` was not confirmed; archidekt.com's own .dek was not compared). Export only |
@@ -50,10 +50,10 @@ handles no uploads. **Confirmed** that the page carries the picker and that each
 the same import; the picker itself is browser behaviour, exercised in the headless browser used
 for the screenshots, not on a phone. The Binder page's **Import a list** has the same picker.
 
-## Collection import
+## Binder import
 
-**Collection > Import a list** adds cards to your Archidekt Collection from pasted or uploaded
-text: the gateway's own **Export CSV** (so the collection round-trips, same printings and
+**Binder > Import a list** adds cards to your binder from pasted or uploaded
+text: the gateway's own **Export CSV** (so the binder round-trips, same printings and
 finishes, copies topped up), a CSV with Archidekt's collection column names (`Quantity`, `Name`,
 `Finish` or `Foil`, `Condition`, `Language` or `Lang`, `Edition Code` or `Set Code`, `Collector
 Number`, `Scryfall ID`; headers are matched by name in any order and extra columns are ignored;
@@ -81,7 +81,7 @@ lines is named by the line it starts on). **Confirmed** against the test double
 `tests/test_collection_import_result.py`, and in a browser at phone, Fold and desktop widths in
 `tests/test_collection_import_result_browser.py`).
 Whether archidekt.com's own collection CSV export carries exactly these headers is **reported**
-from its collection import page, not confirmed against a live file.
+from its binder import page, not confirmed against a live file.
 
 The other way, archidekt.com's collection import does not read column names: the person picks each
 column's type (read from its site's import page, 2026-10-14). For the gateway's Export CSV:

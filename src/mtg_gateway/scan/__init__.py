@@ -78,6 +78,9 @@ def add_scan(server: MCPServer, state: AppState, *, scryfall: ScryfallClient | N
     state.decks.guessed_names = service.guessed_names  # type: ignore[attr-defined]
     # a proposal that adds a card no Magic card is called is refused when made (decks.propose)
     state.decks.known_cards = service.are_cards  # type: ignore[attr-defined]
-    add_scan_tools(server, service, links=getattr(state, "cards", None))
+    state.decks.suggest_cards = service.did_you_mean  # type: ignore[attr-defined]
+    # a proposal's added cards, looked up to judge the deck's legality after it (decks._judge_rules)
+    state.decks.card_collection = lambda idents: service.scryfall.collection(idents)  # type: ignore[attr-defined]
+    add_scan_tools(server, service, links=getattr(state, "cards", None), public_url=st.public_url)
     add_scan_routes(server, state, service)
     return service

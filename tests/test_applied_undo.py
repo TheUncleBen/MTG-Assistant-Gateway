@@ -61,7 +61,9 @@ def test_the_result_card_uses_labels_a_strip_and_updates_in_place() -> None:
     body = pages._result_body(_run("applying"), "csrf-1")
     assert body.startswith("<div class='card' id='applied-result' aria-live='polite' data-applied-live>")
     assert re.search(
-        r"<div class='notice'><span class='ui-lbl blue'>(<svg.*?</svg>)?Applying</span> One", body
+        r"<div class='notice'><span class='ui-lbl blue'>"
+        r"(<span class='ui-spin' aria-hidden='true'></span>)Applying</span> One",
+        body,
     )
     assert "it updates by itself.</div>" in body and "refreshes" not in body
     for colour, word in (("green", "Applied"), ("red", "Failed"), ("grey", "Not sent")):

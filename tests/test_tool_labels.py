@@ -95,3 +95,24 @@ def test_metric_labels_read_as_the_metrics_page_wants() -> None:
     assert metric_label("card", "printings") == "Card printings"
     assert tool_labels.recorded_as("get_deck") == "Recorded as get_deck"
     assert tool_ask("nope") == ""
+
+
+def test_the_proposal_and_report_reads_have_the_same_plain_name_in_lists_and_in_the_apps(
+    tmp_path, monkeypatch
+) -> None:
+    """A proposal is called a proposal, and a report a report, in the admin lists and in the
+    tool titles assistant apps show."""
+    servers = []
+    build = app_mod.build_mcp_server
+    monkeypatch.setattr(
+        app_mod, "build_mcp_server", lambda state: servers.append(build(state)) or servers[-1]
+    )
+    app_mod.create_app(make_settings(tmp_path, watchlists_enabled=True))
+    titles = {t.name: t.title for t in servers[-1]._tool_manager.list_tools()}
+    want = {
+        "proposal_status": "Read a proposal",
+        "get_proposal": "Read a proposal from its chat card",
+        "propose_delete_report": "Ask to delete a report",
+    }
+    assert {t: tool_name(t) for t in want} == want
+    assert {t: titles[t] for t in want} == want

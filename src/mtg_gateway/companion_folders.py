@@ -3,8 +3,8 @@ delete, and a deck's rename, move, delete and export. Each is the member's own p
 page (a session cookie and the page's X-CSRF-Token), with the same checks as the pages that did
 these before; none of them is an assistant's tool.
 
-Deleting a folder runs as a job, since it saves every deck inside first (a snapshot and, with
-backups on, a backup copy) at the gateway's Archidekt pace: the box starts it and reads its
+Deleting a folder runs as a job, since it saves every deck inside first (a gateway snapshot; no
+backup copy on Archidekt) at the gateway's Archidekt pace: the box starts it and reads its
 progress until it ends."""
 
 from __future__ import annotations
@@ -282,7 +282,6 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
             decks=len(got["decks"]),
             packages=len(got["packages"]),
             folders=len(got["folders"]),
-            backups=bool(decks.live.get("archidekt_backups")),
         )
 
     @server.custom_route("/decks/api/folders/{fid}/delete", methods=["POST"], include_in_schema=False)
@@ -390,9 +389,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         except DeckError as exc:
             return _from(exc)
         cards = sum(c.quantity for c in deck.cards if deck.in_deck(c))
-        return ok(
-            name=deck.name or "Unnamed deck", cards=cards, backups=bool(decks.live.get("archidekt_backups"))
-        )
+        return ok(name=deck.name or "Unnamed deck", cards=cards)
 
     @server.custom_route("/decks/api/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
     async def deck_delete(request: Request) -> Response:
@@ -412,6 +409,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
     async def deck_export(request: Request) -> Response:
         """The Export box: the texts and files of the deck's Export page."""
         from .decks import deck_to_archidekt_text, deck_to_text
+        from .export_formats import to_plain
 
         sub, refused = await member(request, write=False)
         if refused:
@@ -433,7 +431,7 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         return ok(
             name=deck.name or "Unnamed deck",
             archidekt=deck_to_archidekt_text(deck),
-            plain=deck_to_text(deck),
+            plain=to_plain(deck),
             side=deck_to_text(deck, zone="side"),
             files=[{"label": label, "href": base + ext} for label, ext in files],
         )

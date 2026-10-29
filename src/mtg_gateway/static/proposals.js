@@ -1,9 +1,8 @@
 // The waiting-changes lists: the Proposals page (proposals_view.py) and the deck page's Proposals
 // box (waiting_strip.py). The checked count goes on the bar's buttons ("Apply 3 changes" on the
 // Proposals page, "Apply 3" in the box); the bar's buttons wait until a row is checked; a deck's
-// "all" box checks its rows (the header's box every row); a checked row is tinted. A deck deletion
-// on its review page asks once more, with the solid red button. Without this script every form
-// still works.
+// "all" box checks its rows (the header's box every row); a checked row is tinted. Reject asks
+// once more in the shared box (static/box.js). Without this script every form still works.
 (function () {
   "use strict";
   var forms = document.querySelectorAll("form.wform");
@@ -27,40 +26,6 @@
       else { var said = nb.nextElementSibling; nb.remove(); if (said) said.remove(); }
     }
     if (form) form.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-
-  // A deck deletion: the red outline button first, then "Delete this deck on Archidekt?" with
-  // the solid red one, in place.
-  document.addEventListener("click", function (e) {
-    var ask = e.target instanceof Element ? e.target.closest("button.pr-ask") : null;
-    if (!ask || e.defaultPrevented || ask.disabled || ask.getAttribute("aria-disabled") === "true") return;
-    var form = ask.form;
-    if (!form || form.querySelector(".pr-sure")) return;
-    e.preventDefault();
-    var box = document.createElement("div");
-    box.className = "confirm rejectask pr-sure";
-    box.setAttribute("role", "group");
-    var q = document.createElement("span");
-    q.textContent = "Delete this deck on Archidekt?";
-    box.setAttribute("aria-label", q.textContent);
-    var yes = document.createElement("button");
-    yes.type = "submit";
-    yes.name = "action";
-    yes.value = "apply";
-    yes.className = "danger";
-    yes.textContent = ask.textContent;
-    var no = document.createElement("button");
-    no.type = "button";
-    no.className = "btn-plain";
-    no.textContent = "Cancel";
-    box.appendChild(q);
-    box.appendChild(yes);
-    box.appendChild(no);
-    ask.parentNode.insertBefore(box, ask.parentNode.firstChild);
-    ask.hidden = true;
-    no.addEventListener("click", function () { box.remove(); ask.hidden = false; ask.focus(); });
-    box.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { box.remove(); ask.hidden = false; ask.focus(); } });
-    yes.focus();
   });
 
   function wire(form) {
@@ -182,71 +147,49 @@
       note.textContent = text;
       if (!note.parentNode) bar.appendChild(note);
     }
-    // Reject asks first, in the bar ("Reject 3 changes?"); a rejected change can't
-    // be brought back from the page. Without this script the server asks on a page of its own.
+    // Reject asks first, in the shared box ("Reject 3 changes?", Cancel, solid red Reject 3); a
+    // rejected change can't be brought back from the page. Without the box the server asks on a
+    // page of its own.
     var reject = bar.querySelector("button[name=action][value=reject]");
     var asking = null;
-    function stopAsking(back) {
-      if (!asking) return;
-      asking.remove();
-      asking = null;
-      for (var i = 0; i < acts.length; i++) acts[i].hidden = false;
-      update();
-      if (back && reject) reject.focus();
-    }
-    if (reject) {
+    if (reject && window.MtgBox) {
       reject.addEventListener("click", function (e) {
-        if (form.querySelector("input[name=sure]")) return;
+        if (e.defaultPrevented || reject.disabled || form.querySelector("input[name=sure]")) return;
         e.preventDefault();
         var n = 0, all = picks();
         for (var i = 0; i < all.length; i++) if (all[i].checked) n++;
         if (!n) return;
-        asking = document.createElement("div");
-        asking.className = "confirm rejectask";
-        asking.setAttribute("role", "group");
-        var q = document.createElement("span");
-        q.textContent = n === 1 ? "Reject this change?" : "Reject " + n + " changes?";
-        asking.setAttribute("aria-label", q.textContent); // named as the deck page's confirms are
-        var yes = document.createElement("button");
-        yes.type = "button";
-        yes.className = "danger";
-        yes.textContent = n === 1 ? "Reject" : "Reject " + n;
-        var no = document.createElement("button");
-        no.type = "button";
-        no.className = "btn btn-plain";
-        no.textContent = "Cancel";
-        asking.appendChild(q);
-        asking.appendChild(yes);
-        asking.appendChild(no);
-        for (var j = 0; j < acts.length; j++) acts[j].hidden = true;
-        bar.appendChild(asking);
-        no.addEventListener("click", function () { stopAsking(true); });
-        asking.addEventListener("keydown", function (ev) { if (ev.key === "Escape") stopAsking(true); });
-        yes.addEventListener("click", function () {
-          var sure = document.createElement("input");
-          sure.type = "hidden";
-          sure.name = "sure";
-          sure.value = "1";
-          form.appendChild(sure);
-          var act = document.createElement("input");
-          act.type = "hidden";
-          act.name = "action";
-          act.value = "reject";
-          form.appendChild(act);
-          yes.disabled = true;
-          form.submit();
+        asking = window.MtgBox.confirm({
+          title: n === 1 ? "Reject this change?" : "Reject " + n + " changes?",
+          text: "Nothing is sent to Archidekt. A rejected change can't be brought back: your assistant would have to propose it again.",
+          ok: n === 1 ? "Reject" : "Reject " + n,
+          danger: true,
+          returnFocus: reject,
+          onClose: function () { asking = null; },
+          onOk: function (box) {
+            var sure = document.createElement("input");
+            sure.type = "hidden";
+            sure.name = "sure";
+            sure.value = "1";
+            form.appendChild(sure);
+            var act = document.createElement("input");
+            act.type = "hidden";
+            act.name = "action";
+            act.value = "reject";
+            form.appendChild(act);
+            box.busy(true);
+            form.submit();
+            return true;  // the box stays, busy, while the page leaves
+          }
         });
-        yes.focus();
       });
     }
     // back from the next page (the browser's page cache): ask again next time
     window.addEventListener("pageshow", function () {
       var left = form.querySelectorAll("input[name=sure], input[type=hidden][name=action]");
       for (var i = 0; i < left.length; i++) left[i].remove();
-      stopAsking(false);
+      if (asking) asking.close();
     });
-    // a change of the checked rows while asking: ask again for the new set
-    form.addEventListener("change", function () { stopAsking(false); });
     update();
   }
 })();

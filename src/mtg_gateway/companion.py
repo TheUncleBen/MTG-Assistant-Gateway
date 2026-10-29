@@ -131,7 +131,13 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Cards", _num(stats.get("card_count"), 0)),
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
-        ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
+        # no card priced (or a total of 0 from a report made before priced_cards): "No price", never $0
+        (
+            "Price",
+            money(stats.get("price_total"))
+            if stats.get("price_total") and stats.get("priced_cards") != 0
+            else "No price",
+        ),
         # the bracket set on the deck is the deck's bracket; else Archidekt's estimate
         (
             "Bracket" if stats.get("archidekt_bracket") else "Archidekt's estimate",
@@ -149,7 +155,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
             "<div class='twocol'><div><h3>Mana curve</h3>"
             + _bars(curve, label="Mana curve")
             + "</div><div><h3>Colors</h3>"
-            + _pips(stats.get("colour_pips") or {}, stats.get("mana_sources"))
+            + _pips(stats.get("color_pips") or {}, stats.get("mana_sources"))
             + "</div></div>"
         )
     # the deck page's verdict (deck_checks), also for a report stored before the engines merged
@@ -200,6 +206,7 @@ def deck_problem_title(exc: DeckError) -> str:
 INDENT = "\u2003"  # an em space per folder level in folder pickers
 # Notices the settings page shows after one of its hand actions (?ok=).
 SETTINGS_OK_MESSAGES = {
+    "saved": "Saved to Archidekt. A snapshot from just before is under History.",
     "categories": CATEGORIES_SAVED,
     "category_created": "Category created on Archidekt. A snapshot from just before is under History.",
     "category_deleted": "Category deleted on Archidekt. A snapshot from just before is under History.",
@@ -220,13 +227,11 @@ SETTINGS_OK_MESSAGES = {
 LIST_OK_MESSAGES = {
     "saved": "Deck renamed on Archidekt.",
     "moved": "Deck moved on Archidekt.",
-    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History; when backups are on, a copy "
-    "is in your backup folder.",
+    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History.",
     "folder_created": "Folder created on Archidekt.",
     "folder_renamed": "Folder renamed on Archidekt.",
     "folder_moved": "Folder moved on Archidekt.",
-    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History; when "
-    "backups are on, a copy of each deck is in your backup folder.",
+    "folder_deleted": "Folder deleted on Archidekt. Each deck's last snapshot is under History.",
 }
 DECK_ERR_MESSAGES = {
     "report_failed": "The deck report could not be made. Try again later.",
@@ -549,15 +554,17 @@ EVENT_LABELS = {
     "archidekt_link_failed": "Archidekt link failed",
     "archidekt_link_expired": "Archidekt link expired",
     "archidekt_session_refreshed": "Archidekt sign-in renewed",
-    "collection_added": "Cards added to the collection",
-    "collection_removed": "Cards removed from the collection",
-    "collection_changed": "Collection changed",
+    "collection_added": "Cards added to the binder",
+    "collection_removed": "Cards removed from the binder",
+    "collection_changed": "Binder changed",
     "deck_voted": "Liked a deck",
     "deck_bookmarked": "Bookmarked a deck",
     "deck_commented": "Commented on a deck",
     "user_followed": "Followed a user",
-    "report_created": "Deck simulation run",
+    "report_created": "Deck test run",
     "report_more_games": "Asked for more Forge games for a report",
+    "report_deleted": "Report deleted",
+    "snapshot_deleted": "Snapshot deleted",
     "scan_session_saved": "Scan saved",
     "scan_session_deleted": "Scan deleted",
     "folder_created": "Folder created",
@@ -593,7 +600,7 @@ EVENT_LABELS = {
     "backup_failed": "Backup copy failed",
     "collaborator_added": "Collaborator added to a deck",
     "collaborator_removed": "Collaborator removed from a deck",
-    "collection_updated": "Collection card details changed",
+    "collection_updated": "Binder card details changed",
     "comment_voted": "Voted on a comment",
     "deck_comment_deleted": "Deleted a comment",
     "deck_comment_edited": "Edited a comment",

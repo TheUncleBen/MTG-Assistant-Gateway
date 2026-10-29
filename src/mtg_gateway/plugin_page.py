@@ -62,7 +62,7 @@ CONNECTOR_FILES = (".mcp.json", "mcp.json")
 # install page offers to copy into ChatGPT's description box. It names no project, so it suits an
 # owner's own gateway name.
 SERVER_DESCRIPTION = (
-    "Magic: The Gathering deck research, goldfish testing and safe Archidekt deck edits, "
+    "Magic: The Gathering deck research, deck tests and safe Archidekt deck edits, "
     "from a self-hosted gateway."
 )
 # The icon to upload when adding the connector by hand. OpenAI's docs (read 2026-10-14) say an app
@@ -226,7 +226,7 @@ def marketplace(public_url: str, owner: str, zip_sha256: str) -> dict:
         "plugins": [
             {
                 "name": name,
-                "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt "
+                "description": "Magic: The Gathering research, deck tests and safe Archidekt "
                 f"deck edits through this gateway. Run /{name}:{SETUP_SKILL} after installing.",
                 "version": __version__,
                 "category": "productivity",

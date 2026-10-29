@@ -45,8 +45,14 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         assert r.status_code == 200
         page = r.text
         # the head: the purpose line, Export CSV plain, + Add cards the one orange button (opens the box)
-        assert "<h1>Binder</h1>" in page
-        assert "<p class='ui-sub'>The cards you own: your collection on Archidekt.</p>" in page
+        # Binder's switch (Cards | Wants | Watchlist, decision C8) names the page; the h1 is for
+        # screen readers
+        assert "<h1 class='sr-only'>Binder: Cards</h1>" in page
+        assert "<a href='/collection' aria-current=page>Cards</a>" in page
+        assert (
+            "<p class='ui-sub'>The cards you own, kept in your Archidekt account "
+            "(your Archidekt collection).</p>"
+        ) in page
         assert page.count("btn-primary") == 1
         assert re.search(
             r"<a class='btn btn-primary' href='/collection\?add=1' data-box-open='col-add'>", page
@@ -54,17 +60,19 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         assert "href='/collection/export.csv'" in page and "Export CSV" in page
         # the widgets, from what Archidekt already sends
         widgets = page.split("aria-label='At a glance'>")[1].split("</section>")[0]
-        for label in ("Entries", "Copies", "Added this week", "Foils"):
+        # 0.7.46: Value (the binder's worth, from the daily price check) took the place of Copies;
+        # the copies are under Entries
+        for label in ("Entries", "Value", "Added this week", "Foils"):
             assert f"{label}</span>" in widgets, label
         assert "<span class='big'>3</span>" in widgets  # entries
-        assert "<span class='big'>6</span>" in widgets  # copies, counted: the whole collection fits a page
-        assert "All 3 entries counted" in widgets
+        assert "6 copies" in widgets  # counted: the whole collection fits a page
+        assert "Work it out now" in widgets  # no whole read yet
         assert "Open on Archidekt" in widgets and "Scan cards" in widgets and "Import a list" in widgets
         assert "Price paid" not in widgets
         # the shared search panel with the results bar at its foot
         assert "class='panel spanel'" in page
-        assert "<label for='col-q'>Filter by card name</label>" in page
-        assert "placeholder='Card name'" in page
+        assert "<label for='col-q'>Filter by name</label>" in page
+        assert "placeholder='Name'" in page
         assert "aria-label='Filter'" in page
         assert "id='col-count' aria-live='polite'>3 entries</h2>" in page
         assert "<option value='added' selected>Recently added</option>" in page
@@ -170,14 +178,15 @@ async def test_the_add_cards_box_has_two_tabs_and_opens_from_the_old_address(sta
         page = r.text
         box = page.split("id='col-add'")[1].split("</form></div></div>")[0]
         assert "role='tab'" in box and ">Add a card</button>" in box and ">Import a list</button>" in box
-        assert "<option value='nonfoil'>Normal</option>" in box and "Non-foil" not in page
+        assert "<option value='nonfoil' selected>Normal</option>" in box and "Non-foil" not in page
         assert "<option value='NM' selected>Near Mint (NM)</option>" in box
         assert "<option value='DMG'>Damaged (DMG)</option>" in box
-        assert "placeholder='Card name, or “name (SET) 123” for one printing'" in box
+        assert "placeholder='Name, or “name (SET) 123” for one printing'" in box
         assert "Scanning a pile is quicker" in box
         assert (
             "A collection CSV or a card list, one card per line, up to 100 rows at a time. "
-            "Copies of a printing you already own in that finish are added to it." in box
+            "Copies join an entry you already have only when its printing, finish, condition and "
+            "language all match." in box
         )
         assert "id='col-add' role='dialog' aria-modal='true' aria-labelledby='col-add-title' hidden>" in page
         # the old address: the box comes open; a result opens the matching tab
@@ -203,11 +212,8 @@ async def test_notices_are_strips_with_a_close_button_and_the_words_are_kept(sta
     try:
         r = await b.http.get("/collection?ok=added", headers=NAV)
         assert "<div class='notice ok' role='status'>" in r.text
-        assert "Added to your Collection on Archidekt." in r.text
-        assert (
-            "aria-label='Close' title='Close'"
-            in r.text.split("Added to your Collection on Archidekt.")[0][-300:]
-        )
+        assert "Added to your binder." in r.text
+        assert "aria-label='Close' title='Close'" in r.text.split("Added to your binder.")[0][-300:]
         r = await b.http.get("/collection?err=lookup", headers=NAV)
         assert "<div class='notice error' role='alert'>" in r.text
         assert "Archidekt is not answering right now. Try again later." in r.text
@@ -253,10 +259,10 @@ async def test_not_linked_and_a_load_error_show_their_words(stack: Stack) -> Non
     try:
         await b.login("/collection")
         r = await b.http.get("/collection", headers=NAV)
-        assert "<h2>Your collection lives on Archidekt</h2>" in r.text
+        assert "<h2>Your binder lives on Archidekt</h2>" in r.text
         assert (
-            "<p>Link your Archidekt account to see it here. Nothing about your cards is stored on this "
-            "gateway.</p>" in r.text
+            "<p>Link your Archidekt account to see it here. Your cards stay on Archidekt (your "
+            "Archidekt collection).</p>" in r.text
         )
         assert "Link Archidekt" in r.text and r.text.count("btn-primary") == 1
     finally:

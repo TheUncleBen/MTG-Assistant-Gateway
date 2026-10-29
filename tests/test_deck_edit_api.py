@@ -6,9 +6,12 @@ refused; a big removal asks first and the follow-up names the proposal."""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mtg_gateway import api as api_module
+from mtg_gateway import decks as decks_mod
 
 from .conftest import COLLECTION, Stack, stack_with
 from .test_browse_collection import api, linked
@@ -63,7 +66,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "label": ",#656565",  # archidekt.com's empty tag, sent with every modify
                 "mana_value": None,
                 "notes": "",
-                # the row's printing, so a printing change redraws the picture (Change printing…)
+                # the row's printing, so a printing change redraws the picture (Printings…)
                 "set_code": d["rows"][0]["set_code"],
                 "collector_number": d["rows"][0]["collector_number"],
                 "image": d["rows"][0]["image"],
@@ -117,7 +120,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "label": ",#656565",
                 "mana_value": None,
                 "notes": "",
-                # the row's printing, so a printing change redraws the picture (Change printing…)
+                # the row's printing, so a printing change redraws the picture (Printings…)
                 "set_code": d["rows"][0]["set_code"],
                 "collector_number": d["rows"][0]["collector_number"],
                 "image": d["rows"][0]["image"],
@@ -368,23 +371,35 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         # switches asks Archidekt once); the browser's Reload reads it again at once
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 100" in page.text
-        # ... and once those seconds are over, a plain view reads it again
+        # ... and once those seconds are over, a plain view still shows it at once (0.7.46) but
+        # reads it again behind it, so the view after shows the deck as it is now
         decks = stack.h.app.state.gateway.decks
         decks._page_decks = {k: (t - decks.page_deck_seconds, d) for k, (t, d) in decks._page_decks.items()}
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
+        assert "Size: 100" in page.text
+        await asyncio.gather(*decks._page_refreshing.values())
 
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 101" in page.text and "class='legal ok'" not in page.text
         assert "class='legal bad'" in page.text and "deck has 101 cards; commander wants 100" in page.text
         assert "Not legal in Commander" in page.text and "101 of 100" in page.text
         after = (await b.http.get("/api/v1/decks/42/stats")).json()["stats"]
-        assert after["card_count"] == 101 and after["legality_problems"] == []
+        assert after["card_count"] == 101 and "legality_problems" not in after
+        assert after["checks"]["legality"]["banned"] == []
         assert after["checks"]["legal"] is False and after["checks"]["ok"] is False
         assert after["checks"]["legal_problems"] == ["deck has 101 cards; commander wants 100"]
 
-        # the browser's Reload (max-age=0) never waits those seconds out
+        # the browser's Reload (max-age=0) of a read older than PAGE_DECK_RELOAD shows it at once
+        # and reads it again behind it (owner decision, 0.7.46); the next view shows the change
         _deck_card(stack, "Forest")[0]["quantity"] += 1
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 101" in page.text
+        decks._page_decks = {
+            k: (t - decks_mod.PAGE_DECK_RELOAD - 1, d) for k, (t, d) in decks._page_decks.items()
+        }
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html", "Cache-Control": "max-age=0"})
+        assert "Size: 101" in page.text and "data-reload='1'" in page.text
+        await asyncio.gather(*decks._page_refreshing.values())
         page = await b.http.get("/decks/42", headers={"Accept": "text/html", "Cache-Control": "max-age=0"})
         assert "Size: 102" in page.text
     finally:
@@ -778,8 +793,9 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
     stack: Stack,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When Archidekt's read after the write still shows the old rows, the endpoint waits and reads
-    once more; if it still lags, the answer says ``stale`` so the page can refetch."""
+    """The page is answered from the apply's own verify read (0.7.46 audit D-01), which has seen
+    the change (an apply whose verify read lags fails as verify_mismatch): no read of the
+    endpoint's own, so a later read that lags cannot make the answer stale."""
     monkeypatch.setattr(api_module, "EDIT_REREAD_DELAY", 0.01)
     b = await linked(stack)
     try:
@@ -790,9 +806,9 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         async def lagging(sub: str, deck_id: str):
             deck = await real(sub, deck_id)
             reads.append(deck_id)
-            # the propose and the apply read the deck three times; the endpoint's own re-reads
-            # (the fourth and fifth) see the old count
-            if len(reads) >= 4:
+            # the propose and the check before the write read the deck; any read after them
+            # would see the old count
+            if len(reads) >= 3:
                 for c in deck.cards:
                     if c.name == "Cultivate":
                         c.quantity = 1
@@ -807,8 +823,8 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         )
         assert r.status_code == 201, r.text
         d = r.json()
-        assert d["applied"] is True and d["stale"] is True, d
-        assert d["rows"][0]["qty"] == 1 and len(reads) == 5, reads
+        assert d["applied"] is True and d["stale"] is False, d
+        assert d["rows"][0]["qty"] == 2 and len(reads) == 2, reads
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2  # the write itself landed
     finally:
         await b.aclose()
@@ -859,3 +875,107 @@ async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: 
         assert r.status_code == 400 and "applied" in r.json()["message"], r.text
     finally:
         await b.aclose()
+
+
+async def test_a_one_click_edit_costs_four_archidekt_calls(stack: Stack) -> None:  # noqa: F811
+    """0.7.46 audit D-01: a "+1" from the deck page cost six Archidekt calls (three reads before
+    the write, the verify, then two reads for the page). Now: the proposal's read (reused by the
+    apply), the check right before the write, the write and the verify, which the page draws from."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")  # the form token, read before the count starts
+        stack.ark.calls.clear()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+            csrf=csrf,
+        )
+        assert r.status_code == 201 and r.json()["applied"] is True, r.text
+        deck_calls = [(m, p) for m, p in stack.ark.calls if p.startswith("/api/decks/42/")]
+        assert [m for m, _p in deck_calls] == ["GET", "GET", "PATCH", "GET"], deck_calls
+        assert len(stack.ark.calls) <= 4, stack.ark.calls
+        # the page is answered from the verify read: it shows the new count
+        assert r.json()["rows"][0]["qty"] == 2 and r.json()["stale"] is False
+    finally:
+        await b.aclose()
+
+
+async def test_a_read_too_old_to_reuse_is_made_again(stack: Stack, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 0.0)
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")  # the form token, read before the count starts
+        stack.ark.calls.clear()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+            csrf=csrf,
+        )
+        assert r.status_code == 201, r.text
+        gets = [m for m, p in stack.ark.calls if p == "/api/decks/42/" and m == "GET"]
+        assert len(gets) == 4  # propose, apply, check before the write, verify
+    finally:
+        await b.aclose()
+
+
+async def test_a_save_that_breaks_the_rules_says_so_and_an_unpriced_deck_has_no_price(stack: Stack) -> None:  # noqa: F811
+    """Independent review of 0.7.46: a Quick add of a second copy in a Commander deck said only
+    "Added", while the same change as a proposal is high risk for breaking the singleton rule. The
+    page's answer names the rules the save broke (``warnings``), and says how many cards have a
+    price (``priced_cards``), so a deck with none shows "–", not "$0.00"."""
+    _legal_commander_deck(stack)
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "add", "card_name": "Cultivate", "quantity": 1}]},
+        )
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["applied"] is True
+        assert any(
+            w.startswith("The deck now breaks its format's rules:")
+            and "more than one copy" in w
+            and "Cultivate" in w
+            for w in d["warnings"]
+        ), d.get("warnings")
+        assert d["stats"]["priced_cards"] == 0 and d["stats"]["price_total"] in (0, 0.0, None)
+        # a save that breaks nothing new carries no warning
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 1}]},
+        )
+        assert r.status_code == 201, r.text
+        assert not r.json().get("warnings")
+    finally:
+        await b.aclose()
+
+
+def test_deck_after_has_no_price_total_when_nothing_is_priced() -> None:
+    from mtg_gateway.archidekt import Deck
+    from mtg_gateway.decks import deck_after_block
+
+    after = Deck(
+        id="1", name="d", owner="o", updated_at="", cards=[], categories=[], raw={}, format="commander"
+    )
+    out = deck_after_block(
+        {"price_total": 0.0, "priced_cards": 0}, {"price_total": 0.0, "priced_cards": 0}, after
+    )
+    assert out["price_total"] is None and out["price_change"] is None
+    out = deck_after_block(
+        {"price_total": 1.0, "priced_cards": 1}, {"price_total": 3.5, "priced_cards": 2}, after
+    )
+    assert out["price_total"] == 3.5 and out["price_change"] == 2.5
+    # the only priced card removed: no total now, but the change is known
+    out = deck_after_block(
+        {"price_total": 1.0, "priced_cards": 1}, {"price_total": 0.0, "priced_cards": 0}, after
+    )
+    assert out["price_total"] is None and out["price_change"] == -1.0

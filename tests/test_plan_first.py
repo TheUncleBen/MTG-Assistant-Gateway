@@ -8,6 +8,7 @@ from .conftest import Stack
 from .test_decks_and_proxy import call, linked_user, mcp_token, structured
 from .test_in_chat_approve import _tools
 from .test_track_a_board import SUB, _change, _mode, _propose
+from .track_a_helpers import card_read
 
 
 async def _check(h, token: str, changes: list, deck: str = "42") -> dict:
@@ -35,25 +36,32 @@ async def test_the_check_draws_no_card_and_saves_and_asks_nothing(stack: Stack) 
     assert await _pending(h, token) == []  # nothing saved
 
 
-async def test_a_plan_touching_the_apps_own_waiting_proposal_is_told_to_amend_it(stack: Stack) -> None:
+async def test_a_plan_touching_the_apps_own_waiting_proposal_is_added_to_it(stack: Stack) -> None:
+    """One waiting draft per deck per app (0.7.46): a plan for a deck where this app's change
+    waits is proposed in one call and added to it, so the check says so instead of an amend."""
     h = stack.h
     token = await linked_user(stack)
     await _mode(h, "manual")
     first = await _propose(h, token, _change("Opt"))
     out = await _check(h, token, [*_change("Opt"), *_change("Ponder")])
-    assert out["suggest"] == "amend"
-    assert out["amend"]["proposal_id"] == first["proposal_id"] and out["amend"]["version"] == 1
+    assert out["suggest"] == "propose" and "amend" not in out
+    assert out["adds_to"] == {
+        "proposal_id": first["proposal_id"],
+        "board_no": first["board_no"],
+        "version": 1,
+    }
     assert out["waiting_on_deck"][0]["shares_cards"] == ["Opt"]
-    assert out["overlaps"] == [f"Opt: #{first['board_no']} changes it too."]
-    assert "amend_proposal" in out["next_step"]
+    assert "overlaps" not in out  # the draft it joins is not an overlap
+    assert f"it is added to #{first['board_no']}" in out["next_step"]
     # an exact repeat: already waiting, nothing to do
     same = await _check(h, token, _change("Opt"))
     assert same["suggest"] == "already_waiting" and same["duplicate_of"] == first["proposal_id"]
-    # another app's waiting proposal is listed, never offered to amend
+    # another app's waiting proposal is listed, never offered to add to
     other = await mcp_token(h)
     theirs = await _check(h, other, [*_change("Opt"), *_change("Brainstorm")])
-    assert theirs["suggest"] == "propose" and "amend" not in theirs
+    assert theirs["suggest"] == "propose" and "adds_to" not in theirs
     assert theirs["waiting_on_deck"][0]["own"] is False
+    assert theirs["overlaps"] == [f"Opt: #{first['board_no']} changes it too."]
 
 
 async def test_a_plan_a_proposal_would_refuse_comes_back_as_problems(stack: Stack) -> None:
@@ -77,7 +85,7 @@ async def test_the_cards_read_after_an_amend_carries_the_new_versions_code(stack
     amend = {"proposal_id": pid, "version": 1, "changes": _change("Ponder")}
     amended = structured(await call(h, token, "amend_proposal", amend))
     assert amended["ok"] and amended["version"] == 2
-    read = await call(h, token, "get_proposal", {"proposal_id": pid})
+    read = await card_read(h, token, pid)
     assert structured(read)["version"] == 2
     new = read["_meta"][APPROVAL_META_KEY]
     assert new != old
@@ -133,25 +141,21 @@ def test_a_cards_code_is_for_the_version_the_result_shows() -> None:
     assert asked == [1]
 
 
-async def test_the_amend_suggestion_carries_the_whole_list_and_prefers_the_one_sharing_cards(
-    stack: Stack,
-) -> None:
-    """amend_proposal replaces the whole list, so the suggestion hands back the waiting one's own
-    changes (in the spelling the tool takes), and it picks the own waiting edit that shares cards."""
+async def test_a_plan_is_added_to_the_newest_own_draft_in_one_call(stack: Stack) -> None:
+    """The check names the draft a propose adds to; following it takes one propose call, which
+    adds the plan to that draft (same proposal, next version) instead of making another."""
     h = stack.h
     token = await linked_user(stack)
     await _mode(h, "manual")
     await _propose(h, token, _change("Brainstorm"))
     second = await _propose(h, token, [*_change("Opt"), *_change("Ponder")])
-    out = await _check(h, token, _change("Opt", action="remove"))
-    assert out["suggest"] == "amend" and out["amend"]["proposal_id"] == second["proposal_id"]
-    assert [c["name"] for c in out["amend"]["changes"]] == ["Opt", "Ponder"]
-    assert "card_name" not in out["amend"]["changes"][0]
-    # following it: the list and the plan together, in one amend
-    plan = [*out["amend"]["changes"], {"action": "add", "name": "Preordain"}]
-    amend = {"proposal_id": second["proposal_id"], "version": out["amend"]["version"], "changes": plan}
-    done = structured(await call(h, token, "amend_proposal", amend))
-    assert done["ok"] and {r["name"] for r in done["rows"]} == {"Opt", "Ponder", "Preordain"}
+    out = await _check(h, token, _change("Preordain"))
+    assert out["suggest"] == "propose" and out["adds_to"]["proposal_id"] == second["proposal_id"]
+    done = structured(
+        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": _change("Preordain")})
+    )
+    assert done["ok"] and done["proposal_id"] == second["proposal_id"] and done["version"] == 2, done
+    assert {r["name"] for r in done["rows"]} == {"Opt", "Ponder", "Preordain"}
 
 
 async def test_a_held_proposal_is_never_offered_to_amend(stack: Stack) -> None:
@@ -165,10 +169,10 @@ async def test_a_held_proposal_is_never_offered_to_amend(stack: Stack) -> None:
     assert "other waiting changes share cards" in out["next_step"]  # not "nothing found"
 
 
-async def test_at_the_waiting_limit_an_amend_or_a_repeat_is_still_suggested(
+async def test_at_the_waiting_limit_adding_to_the_draft_or_a_repeat_is_still_suggested(
     stack: Stack, monkeypatch
 ) -> None:
-    """The limit stops a new proposal only: an amend and an exact repeat are not refused by it."""
+    """The limit stops a new proposal only: adding to the draft and an exact repeat are not refused by it."""
     from mtg_gateway import decks as decks_mod
 
     h = stack.h
@@ -177,8 +181,7 @@ async def test_at_the_waiting_limit_an_amend_or_a_repeat_is_still_suggested(
     await _propose(h, token, _change("Opt"))
     monkeypatch.setattr(decks_mod, "MAX_PENDING_PROPOSALS", 1)
     out = await _check(h, token, [*_change("Opt"), *_change("Ponder")])
-    assert out["suggest"] == "amend" and out["problems"] == []
-    assert out["next_step"].endswith("The waiting limit is reached, so only an amend is possible now.")
+    assert out["suggest"] == "propose" and out["problems"] == [] and out["adds_to"]
     assert (await _check(h, token, _change("Opt")))["suggest"] == "already_waiting"
     other = await mcp_token(h)  # another app: only a new proposal would do, and it has no room
     full = await _check(h, other, _change("Ponder"))

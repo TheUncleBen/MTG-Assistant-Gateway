@@ -167,8 +167,10 @@ def test_no_match_and_escape(server: Server) -> None:
         ctx = browser.new_context(viewport={"width": 390, "height": 800}, is_mobile=True, has_touch=True)
         ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
         page = ctx.new_page()
-        page.goto(f"{server.base}/", wait_until="networkidle")
-        box = page.locator("#home-c")
+        page.goto(f"{server.base}/search", wait_until="networkidle")
+        page.locator(".sp-open").click()  # a phone keeps the filters (the Commander box too) in a sheet
+        box = page.locator("#s-cmd")
+        box.wait_for(state="visible")
         box.click()
         box.press_sequentially("zzqx", delay=20)
         none = page.locator(".suggest-list li.none")

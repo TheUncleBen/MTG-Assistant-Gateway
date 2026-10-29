@@ -93,4 +93,17 @@ class AppUpdateTest {
         assertFalse(AppUpdate.due(now - AppUpdate.MIN_GAP_MS, now))
         assertTrue(AppUpdate.MIN_GAP_MS >= 3600_000L)
     }
+
+    @Test fun laterKeepsThatVersionQuietForThreeDays() {
+        // "Later" on the update bar puts that version off for three days; a newer one is offered at once.
+        val now = 1_800_000_000_000L
+        val code = 7_046
+        assertTrue(AppUpdate.snoozed(code, code, now - 60_000, now))
+        assertTrue(AppUpdate.snoozed(code, code, now - AppUpdate.SNOOZE_MS + 1, now))
+        assertFalse(AppUpdate.snoozed(code, code, now - AppUpdate.SNOOZE_MS, now))
+        assertFalse(AppUpdate.snoozed(code + 1, code, now - 60_000, now))
+        assertFalse(AppUpdate.snoozed(code, 0, 0, now)) // never put off
+        assertFalse(AppUpdate.snoozed(code, code, now + 60_000, now)) // the clock went back
+        assertTrue(AppUpdate.SNOOZE_MS == 3L * 24 * 3600 * 1000)
+    }
 }

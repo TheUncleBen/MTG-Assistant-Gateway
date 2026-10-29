@@ -11,10 +11,11 @@ host of their own, and ntfy's cache gives a phone that was offline what it misse
 
 What is sent: changes an assistant left waiting for the member's press, grouped per deck (one
 message per deck, replaced as the count changes and removed when nothing waits), a deck report
-that finished (Forge runs that waited in the queue included), a price alert they set, and their
-scheduled summary. Each message carries the least that is useful: a short title and line, and a
-link to the gateway page. Deck contents are never sent. The token is sent only in the
-Authorization header and never logged; a failed publish is logged with the HTTP status alone.
+that finished (Forge runs that waited in the queue included), a price alert they set, a new alert
+on Archidekt (alerts_push.py) and their scheduled summary. Each message carries the least that
+is useful: a short title and line, and a link to the gateway page. Deck contents are never sent.
+The token is sent only in the Authorization header and never logged;
+a failed publish is logged with the HTTP status alone.
 
 The Account page's Notifications card is here too (``account_card_html``, ``account_action``):
 the opt-in (one switch for the whole account), the events, Send test, the app's connect button,
@@ -53,29 +54,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-EVENTS = ("proposals", "reports", "prices")  # the kinds a member can switch off one by one
+EVENTS = ("proposals", "reports", "prices", "alerts")  # the kinds a member can switch off one by one
+# "New alerts on Archidekt" (alerts_push.py) is kept on the account (account_prefs), not in
+# notify_prefs, so it needed no database upgrade; on unless the member unticked it.
+ALERTS_PREF = "notify.alerts"
 SUMMARY_CHOICES = ("off", "daily", "weekly")
 # The Account page's notices for the Notifications card and its summary (pages.py shows them).
 ACCOUNT_OK = {
-    "notify_saved": "Notifications saved.",
-    "notify_off": "Notifications are off.",
+    "notify_saved": "Push notifications saved.",
+    "notify_off": "Push notifications are off.",
     "notify_topic": "Your phones are disconnected. To connect a phone again, open the Account page in the "
-    "gateway's app on that phone and press Get notifications on this phone.",
+    "gateway's app on that phone and press Get push notifications on this phone.",
     "notify_test_sent": "The test message is sent. Each phone you connected should show it.",
     "summary_saved": "Summary choice saved.",
     "summary_sent": "The summary is sent. Each phone you connected should show it.",
 }
 ACCOUNT_ERR = {
-    "notify_test_failed": "The test could not be sent. Check that notifications are on; if they are, the "
-    "notification server did not accept it (the operator can see why in the gateway's log).",
+    "notify_test_failed": "The test could not be sent. Check that push notifications are on; if they "
+    "are, the notification server did not accept it (the operator can see why in the gateway's log).",
     "notify_test_wait": "A test was just sent. The gateway sends one test a minute, so wait before sending "
     "another.",
     "summary_invalid": "Choose Off, Every day or Every week.",
-    "summary_off": "Summaries are sent through notifications, and this gateway has no notification server.",
+    "summary_off": "Summaries are sent through push notifications, and this gateway has no notification "
+    "server.",
     "summary_send_wait": "A summary was just sent. The gateway sends one a minute, so wait before sending "
     "another.",
-    "summary_send_failed": "The summary could not be sent. Check that notifications are on; if they are, "
-    "the notification server did not accept it (the operator can see why in the gateway's log).",
+    "summary_send_failed": "The summary could not be sent. Check that push notifications are on; if "
+    "they are, the notification server did not accept it (the operator can see why in the gateway's log).",
 }
 # Members' topics all start with mtg-, so an operator's ntfy grant can be limited to 'mtg-*' and
 # a member can never make the gateway publish to the operator's other topics.
@@ -204,19 +209,33 @@ def prefs(db: Database, sub: str) -> dict[str, Any]:
             "on_proposals": True,
             "on_reports": True,
             "on_prices": True,
+            "on_alerts": db.get_pref(sub, ALERTS_PREF) is not False,
             "summary_every": "off",
             "summary_sent_day": None,
         }
     out = dict(row)
     for k in ("ntfy_on", "on_proposals", "on_reports", "on_prices"):
         out[k] = bool(out[k])
+    out["on_alerts"] = db.get_pref(sub, ALERTS_PREF) is not False
     return out
+
+
+def push_members(db: Database) -> list[tuple[str, str]]:
+    """(member, topic) of every member whose notifications are on."""
+    with db._lock:
+        rows = db._conn.execute(
+            "SELECT sub, ntfy_topic FROM notify_prefs WHERE ntfy_on = 1 AND ntfy_topic IS NOT NULL "
+            "ORDER BY sub"
+        ).fetchall()
+    return [(r["sub"], r["ntfy_topic"]) for r in rows]
 
 
 def save_prefs(db: Database, sub: str, **values: Any) -> None:
     """Store some of the member's choices; the others keep their value. A topic another member
     already has is refused (ValueError)."""
     allowed = {"ntfy_on", "ntfy_topic", "on_proposals", "on_reports", "on_prices", "summary_every"}
+    if "on_alerts" in values:
+        db.set_pref(sub, ALERTS_PREF, bool(values["on_alerts"]))
     values = {k: v for k, v in values.items() if k in allowed}
     if "summary_every" in values and values["summary_every"] not in SUMMARY_CHOICES:
         raise ValueError("summary_every must be off, daily or weekly")
@@ -276,6 +295,7 @@ TAGS = {
     "reports": "bar_chart",
     "prices": "chart_with_upwards_trend",
     "summary": "calendar",
+    "alerts": "bell",
 }
 
 
@@ -329,6 +349,7 @@ class Notifier:
         self._waiting: dict[tuple[str, str], int] = {}  # the count each deck's message last said
         self._cleared: set[tuple[str, str]] = set()  # decks whose message this process withdrew
         self._streams: dict[str, int] = {}  # open app connections per key
+        self._phone_seen: dict[str, float] = {}  # when each key's last connection opened or ended
         self._kicks: dict[str, asyncio.Event] = {}  # set to end a key's connections now
         self._closing: asyncio.Event | None = None  # set when the gateway stops
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -669,6 +690,7 @@ class Notifier:
         if self._streams.get(topic, 0) >= STREAM_MAX_PER_KEY:
             return False
         self._streams[topic] = self._streams.get(topic, 0) + 1
+        self._phone_seen[topic] = time.monotonic()
         return True
 
     def full(self) -> bool:
@@ -676,6 +698,10 @@ class Notifier:
         return sum(self._streams.values()) >= STREAM_MAX_TOTAL
 
     def release(self, topic: str) -> None:
+        self._phone_seen[topic] = time.monotonic()
+        if len(self._phone_seen) > 5000:  # keys gone for good: forget the oldest
+            for k in sorted(self._phone_seen, key=self._phone_seen.__getitem__)[:1000]:
+                self._phone_seen.pop(k, None)
         left = self._streams.get(topic, 1) - 1
         if left > 0:
             self._streams[topic] = left
@@ -693,6 +719,14 @@ class Notifier:
     def streams(self, topic: str) -> int:
         """App connections open with ``topic`` now."""
         return self._streams.get(topic, 0)
+
+    def phone_recent(self, topic: str, within: float) -> bool:
+        """Whether a phone is connected with ``topic`` now, or was in the last ``within`` seconds
+        (since this process started: phones reconnect at once after a restart)."""
+        if self._streams.get(topic, 0) > 0:
+            return True
+        seen = self._phone_seen.get(topic)
+        return seen is not None and time.monotonic() - seen <= within
 
 
 def _bearer(request: Request) -> str:
@@ -730,13 +764,19 @@ def add_stream_route(state: AppState, server: Any) -> None:
             return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
         sub, on = owner
         if not on:
-            return _refuse(403, "off", "Notifications are off for this account.")
+            return _refuse(403, "off", "Push notifications are off for this account.")
         if state.membership is not None:
             outcome = await state.membership.check(sub)
             if outcome is Membership.REVOKED:
                 return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
             if outcome is Membership.UNAVAILABLE:
                 return _refuse(503, "unavailable", "The sign-in service isn't answering. Try again later.")
+            if outcome is Membership.SIGN_IN:
+                # none of the member's sign-ins is honoured: the key is kept, and the phone tries
+                # again later (any refusal but its three stop codes) until they sign in again
+                return _refuse(
+                    403, "sign_in_again", "Sign in to the gateway again to keep getting push notifications."
+                )
         if n.full():  # the app tries again later, like any refusal but these three
             return _refuse(503, "busy", "The gateway has too many phones connected. Try again later.")
         if not n.claim(key):
@@ -766,7 +806,8 @@ def add_stream_route(state: AppState, server: Any) -> None:
             if topic_owner(state.db, key) != (sub, True):
                 return False
             if state.membership is not None:
-                return await state.membership.check(sub) is not Membership.REVOKED
+                outcome = await state.membership.check(sub)
+                return outcome is Membership.ALLOWED or outcome is Membership.UNAVAILABLE
             return True
 
         return _Stream(
@@ -796,7 +837,7 @@ class _Stream(StreamingResponse):
 # -- Account page: the Notifications card, with the summary ----------------------------------------
 
 ACCOUNT_CSS = """<style>
-/* the Account page's Notifications and Summary cards */
+/* the Account page's Push notifications and Summary cards */
 .nf-card .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .35rem}
 .nf-card .gh h2{margin:0}
 .nf-card .intro{margin:0 0 .75rem;line-height:1.45}
@@ -809,6 +850,8 @@ ACCOUNT_CSS = """<style>
 .nf-card .nf-when{margin:.35rem 0 0;padding:0 0 0 1.85rem;border:0;min-width:0}
 .nf-card .nf-when legend{padding:0;margin:0 0 .15rem;font-weight:700;color:var(--text-muted);font-size:.86rem;
   text-transform:uppercase;letter-spacing:.03em}
+/* a choice's hint, under its words (past the 20 px box and the label's gap) */
+.nf-card .nf-sub{margin:-.2rem 0 .25rem;padding-left:calc(20px + .6rem);font-size:.86rem;line-height:1.45}
 .nf-card .part{margin:1rem 0 0;padding:1rem 0 0;border-top:1px solid var(--border-soft)}
 .nf-card .part .ui-hint{font-size:.86rem;line-height:1.45;margin:.25rem 0 .5rem}
 .nf-card .part p{line-height:1.45}
@@ -890,8 +933,8 @@ def _summary_html(
         )
         if not on:
             hint = (
-                "Notifications are off, so there is nowhere to send it. Tick Send me notifications and "
-                "press Save notifications first."
+                "Push notifications are off, so there is nowhere to send it. Tick Send me push "
+                "notifications and press Save push notifications first."
             )
         latest = (
             f"<div class='part'><h3>{'Today' if period == 'day' else 'The last 7 days'}</h3>"
@@ -906,7 +949,7 @@ def _summary_html(
         "<section class='card nf-card' id='summary' aria-labelledby='s-h'>"
         "<div class='gh'><h2 id='s-h'>Summary</h2></div>"
         f"<p class='intro'>A plain summary of {what}, written by the gateway from its own data (no AI) and "
-        "sent through your notifications when they are on. Your assistant can read it too and write you "
+        "sent through your push notifications when they are on. Your assistant can read it too and write you "
         "its own version on a schedule.</p>"
         f"{notice}"
         f"<form method='post' class='sum-row'>{csrf_in}"
@@ -924,9 +967,9 @@ def strong_topic(db: Database, sub: str, topic: str | None) -> bool:
 
 def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     """The card's part about this phone, inside the Android app: whether it is connected, and the
-    button that connects it (which asks Android for the notification permission and for the
-    app to keep running in the background). The app says which part applies (feedback.js).
-    The button is plain: Save notifications stays the card's one orange button."""
+        button that connects it (which asks Android for the notification permission and for the
+        app to keep running in the background). The app says which part applies (feedback.js).
+    The button is plain: Save push notifications stays the card's one orange button."""
     topic = p["ntfy_topic"]
     if not strong_topic(state.db, sub, topic):  # none yet, or not one new_topic made: give one now
         topic = new_topic(state.db, sub)
@@ -936,18 +979,20 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
         f"<div class='phone' data-native-state='notificationsState' data-native-arg='{key}'>"
         "<h3>This phone</h3>"
         "<p data-native-show='connected' hidden><span class='badge ok'>Connected</span> This phone gets your "
-        "notifications, also while the app is closed. While it is connected, Android shows a quiet "
+        "push notifications, also while the app is closed. While it is connected, Android shows a quiet "
         "notification called Always connected.</p>"
-        "<p data-native-show='blocked' hidden>Android has notifications turned off for this app. Turn "
-        "them on in Android's settings for the app, then press Get notifications on this phone.</p>"
-        "<p data-native-show='off' hidden>This phone doesn't get your notifications yet. Press Get "
-        "notifications on this phone. Android may ask you to allow notifications and to let the app run "
-        "in the background. Allow both so notifications arrive while the app is closed.</p>"
+        "<p data-native-show='blocked' hidden>Android has push notifications turned off for this app. "
+        "Turn them on in Android's settings for the app, then press Get push notifications on this "
+        "phone.</p>"
+        "<p data-native-show='off' hidden>This phone doesn't get your push notifications yet. Press Get "
+        "push notifications on this phone. Android may ask you to allow push notifications and to let "
+        "the app run in the background. Allow both so push notifications arrive while the app is "
+        "closed.</p>"
         "<div class='form-actions' data-native-show='off blocked' hidden>"
         f"<button type='button' class='btn-plain' data-native='startNotifications' data-native-arg='{key}' "
-        f"data-native-auto>{icon('bell')}Get notifications on this phone</button></div>"
-        "<p class='ui-hint' data-native-show='' hidden>Update the app to get notifications on this "
-        "phone.</p>"
+        f"data-native-auto>{icon('bell')}Get push notifications on this phone</button></div>"
+        "<p class='ui-hint' data-native-show='' hidden>Update the app to get push notifications on "
+        "this phone.</p>"
         "</div>"
     )
 
@@ -964,16 +1009,19 @@ def account_card_html(
     if n is None or not n.enabled:
         watched = ", a watched card crosses your alert" if state.prices is not None else ""
         return (
-            "<div class='card' id='notifications'><h2>Notifications</h2><p class='muted'>This gateway has no "
-            "notification server set up, so the Android app can't get notifications. The person who runs "
+            "<div class='card' id='notifications'><h2>Push notifications</h2><p class='muted'>This gateway "
+            "has no notification server set up, so the Android app can't get push notifications. The "
+            "person who runs "
             "this gateway can turn them on. The app then tells you when an assistant leaves changes waiting "
-            f"for your press, a deck report finishes{watched} or your summary is ready.</p></div>"
+            f"for your press, a deck report finishes{watched}, something new arrives in your Archidekt "
+            "alerts or your summary is ready.</p></div>"
         )
     p = prefs(state.db, sub)
 
-    def box(name: str, label: str) -> str:
+    def box(name: str, label: str, hint: str = "") -> str:
+        described = f" aria-describedby='{hint}'" if hint else ""
         return (
-            f"<label><input type='checkbox' name='{name}' value='1'"
+            f"<label><input type='checkbox' name='{name}' value='1'{described}"
             f"{' checked' if p[name] else ''}><span>{_esc(label)}</span></label>"
         )
 
@@ -982,10 +1030,10 @@ def account_card_html(
         phone = _phone_html(state, sub, p) if on else ""
     else:
         phone = (
-            "<p class='ui-hint'>Notifications arrive in the gateway's Android app, also while it is "
+            "<p class='ui-hint'>Push notifications arrive in the gateway's Android app, also while it is "
             "closed. To get them, install the app from the <a href='/install?for=android'>Android app</a> "
-            "page and sign in. Then open this page in the app, tick Send me notifications and press Save "
-            "notifications.</p>"
+            "page and sign in. Then open this page in the app, tick Send me push notifications and press "
+            "Save push notifications.</p>"
         )
     test = (
         "<div class='ui-actions'>"
@@ -993,10 +1041,21 @@ def account_card_html(
         "<button class='btn-plain'>Send test</button></form>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_new_topic'>"
         "<button class='btn-plain' aria-describedby='n-disc'>Disconnect my phones</button></form></div>"
-        "<p class='ui-hint' id='n-disc'>Disconnect my phones: your phones stop getting notifications until "
-        "each one is connected again.</p>"
+        "<p class='ui-hint' id='n-disc'>Disconnect my phones: your phones stop getting push notifications "
+        "until each one is connected again.</p>"
         if on
         else ""
+    )
+    # Archidekt's own alerts (alerts_push.py): only a linked account has any to look at.
+    alerts_hint = (
+        "The gateway looks at Archidekt for you now and then while a phone is connected, so these come "
+        "a little after the site shows them."
+        if state.db.get_link(sub) is not None
+        else "Link your Archidekt account to get these."
+    )
+    alerts_box = (
+        f"{box('on_alerts', 'A new alert on Archidekt (a comment, a reply, a new follower)', 'n-alerts')}"
+        f"<p class='ui-hint nf-sub' id='n-alerts'>{alerts_hint}</p>"
     )
     # With watchlists off there is no price alert to choose; a choice made earlier is kept as it was.
     prices_box = (
@@ -1009,19 +1068,19 @@ def account_card_html(
     phones = f"<div class='part'>{head}{phone}{test}</div>" if phone or test else ""
     return (
         f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' aria-labelledby='n-h'>"
-        "<div class='gh'><h2 id='n-h'>Notifications</h2>"
+        "<div class='gh'><h2 id='n-h'>Push notifications</h2>"
         f"{label('On', 'green', 'check') if on else ''}</div>"
         "<p class='intro'>The gateway's Android app can show you a short message when something happens. "
         "Each message says only what happened and links to the right page on this gateway. It never lists "
         "your deck's cards. The choices below apply to your whole account and to every phone you connect.</p>"
         f"{_card_notice(ok, err, NOTIFY_NOTICES)}"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
-        f"<div class='ui-checks master'>{box('ntfy_on', 'Send me notifications')}</div>"
+        f"<div class='ui-checks master'>{box('ntfy_on', 'Send me push notifications')}</div>"
         "<fieldset class='nf-when'><legend>When</legend><div class='ui-checks'>"
         f"{box('on_proposals', 'An assistant left changes waiting for my press (one message per deck)')}"
         f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
-        f"{prices_box}</div></fieldset>"
-        "<div class='ui-actions'><button class='primary'>Save notifications</button></div></form>"
+        f"{prices_box}{alerts_box}</div></fieldset>"
+        "<div class='ui-actions'><button class='primary'>Save push notifications</button></div></form>"
         f"{phones}</section>"
         f"{_summary_html(state, sub, p, csrf_in, on=on, notice=_card_notice(ok, err, SUMMARY_NOTICES))}"
     )
@@ -1034,8 +1093,14 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
     Get notifications on this phone for the member (feedback.js)."""
     if action == "notify_save":
         on = data.get("ntfy_on") == "1"
+        alerts = data.get("on_alerts") == "1"
         before = prefs(state.db, sub)
         current = before["ntfy_topic"]
+        if on and alerts and not (before["ntfy_on"] and before["on_alerts"]):
+            # turned (back) on: Archidekt alerts are pushed from now, not what came meanwhile
+            from .alerts_push import forget
+
+            forget(state.db, sub)
         topic = (
             current if strong_topic(state.db, sub, current) else (new_topic(state.db, sub) if on else None)
         )
@@ -1046,6 +1111,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             on_proposals=data.get("on_proposals") == "1",
             on_reports=data.get("on_reports") == "1",
             on_prices=data.get("on_prices") == "1",
+            on_alerts=alerts,
             **({"ntfy_topic": topic} if topic else {}),
         )
         if not on:
@@ -1072,7 +1138,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             sub,
             "test",
             "Test from your MTG gateway",
-            "Notifications work. This is the only test message.",
+            "Push notifications work. This is the only test message.",
             "/account/details#notifications",
         )
         return "ok=notify_test_sent" if ok else "err=notify_test_failed"

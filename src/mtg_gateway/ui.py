@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import ASSISTANT_PAGES, card_size_control, esc, hub_switch, icon
+from .theme import ASSISTANT_PAGES, SPINNER, binder_pages, card_size_control, esc, hub_switch, icon
 
 __all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
 
@@ -56,7 +56,7 @@ LABELS: dict[str, Label] = {
     "expired": Label("Expired", "grey", "hourglass", "Not approved in time."),
     "failed": Label("Failed", "red", "alert", "Archidekt refused it, or something broke."),
     # risk
-    "low": Label("Low", "green", "shield", "A small deck or collection change."),
+    "low": Label("Low", "green", "shield", "A small deck or binder change."),
     "high": Label("High", "orange", "triangle", "Bigger, or touches commanders or deck details."),
     "your_press": Label("Your press", "blue", "hand", "An account action. It always waits for you."),
     "delete": Label(
@@ -99,7 +99,9 @@ def label(word: str, colour: str, icon_name: str, *, title: str = "", cls: str =
         raise ValueError(f"unknown label colour {colour!r}")
     extra = f" {esc(cls)}" if cls else ""
     tip = f" title='{esc(title)}'" if title else ""
-    return f"<span class='ui-lbl {colour}{extra}'{tip}>{icon(icon_name)}{esc(word)}</span>"
+    # a run in progress draws the theme's one animated spinner, not a still icon
+    mark = SPINNER if icon_name == "spinner" else icon(icon_name)
+    return f"<span class='ui-lbl {colour}{extra}'{tip}>{mark}{esc(word)}</span>"
 
 
 def label_for(key: str, *, title: str = "", cls: str = "", word: str = "") -> str:
@@ -218,6 +220,47 @@ def client_brand(client_id: str | None, info: Mapping[str, object] | None = None
         return None
     brands = {_brand_of_url(u) for u in uris}
     return brands.pop() if len(brands) == 1 and None not in brands else None
+
+
+_BRAND_NAMES = {"claude": "Claude’s", "openai": "OpenAI’s"}
+
+
+def _host_of(url: object) -> str:
+    try:
+        return (urlsplit(url).hostname or "").casefold() if isinstance(url, str) else ""
+    except ValueError:
+        return ""
+
+
+def client_brand_note(client_id: str | None) -> str:
+    """Why an app's chip shows its logo or the neutral icon, for the admin's member panel: the
+    hosts it sends members back to (never a path or a query), read as ``client_brand`` reads them."""
+    if not client_id:
+        return "No logo: no app is recorded."
+    brand = client_brand(client_id)
+    if client_id.startswith("https://"):
+        where = _host_of(client_id) or "no host"
+        return f"{_BRAND_NAMES.get(brand or '', 'No')} logo: its address is on {esc(where)}."
+    try:
+        info = _client_info(client_id)
+    except Exception:  # a note never breaks a page
+        info = None
+    if not isinstance(info, Mapping):
+        return "No logo: no registration is kept for it."
+    uris = info.get("redirect_uris")
+    hosts = (
+        sorted({_host_of(u) or "an address that is not a web address" for u in uris or []})
+        if isinstance(uris, list)
+        else []
+    )
+    if not hosts:
+        return "No logo: its registration names no address to send members back to."
+    listed = " and ".join(hosts) if len(hosts) < 3 else ", ".join(hosts[:-1]) + " and " + hosts[-1]
+    if brand:
+        return f"{_BRAND_NAMES[brand]} logo: it sends members back only to {esc(listed)}."
+    if any(not str(u).startswith("https://") for u in uris):
+        return f"No logo: it sends members back to {esc(listed)}, and not every address is https."
+    return f"No logo: it sends members back to {esc(listed)}, not only to one company’s addresses."
 
 
 def app_logo(brand: str | None) -> str:
@@ -354,6 +397,19 @@ def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "
     line = f"<p class='ui-sub'>{sub_html}</p>" if sub_html else ""
     switch = hub_switch("Assistant", [(href, text, href) for href, text, _ic in ASSISTANT_PAGES], current)
     return f"<div class='hubbar'><h1 class='sr-only'>{esc(title)}</h1>{switch}</div>{line}"
+
+
+def binder_head(current: str, title: str, sub: str = "", *, actions_html: str = "") -> str:
+    """The head of the Binder place's pages (Cards, Wants, Watchlist; decision C8): their switch,
+    which names the page, so the page's heading is for screen readers only, the page's actions at
+    the row's end (the one orange button among them), then the purpose line. ``current``: the
+    page's path (theme.BINDER_PAGES)."""
+    line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
+    acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
+    switch = hub_switch("Binder", [(href, text, href) for href, text, _ic in binder_pages()], current)
+    return (
+        f"<div class='ui-head phead hubhead'><h1 class='sr-only'>{esc(title)}</h1>{switch}{acts}</div>{line}"
+    )
 
 
 def list_head(title: str, total: int | None = None, note: str = "") -> str:
@@ -521,10 +577,18 @@ def day_row(text: str) -> str:
     return f"<div class='tr daygroup'>{esc(text)}</div>"
 
 
+def cap_link(text: str, href: str, *, icon_name: str = "", attrs: str = "") -> str:
+    """A small action or way to go inside a line of text or a row (Why, Group by deck, Open as a
+    full page): the theme's grey capsule, 36 px inside a 44 px tap area, never bare blue text."""
+    ic = icon(icon_name) if icon_name else ""
+    extra = f" {attrs}" if attrs else ""
+    return f"<a class='ui-cap' href='{esc(href)}'{extra}>{ic}{esc(text)}</a>"
+
+
 def open_link(href: str, text: str) -> str:
-    """The row's open action: the word from 600 px, a 44 px chevron on phones."""
+    """The row's open action: the word in a capsule from 600 px, a 44 px chevron on phones."""
     return (
-        f"<a class='act linkbtn' href='{esc(href)}' aria-label='{esc(text)}'>"
+        f"<a class='act ui-cap' href='{esc(href)}' aria-label='{esc(text)}'>"
         f"<span class='sm-hide'>{esc(text)}</span><span class='sm-only chev' aria-hidden='true'>›</span></a>"
     )
 
@@ -566,21 +630,30 @@ def pager(
 
 
 def load_more(
-    href: str, *, text: str = "Load more", shown: int | None = None, total: int | None = None, done: str = ""
+    href: str,
+    *,
+    text: str = "Load more",
+    shown: int | None = None,
+    total: int | None = None,
+    done: str = "",
+    into: str = "",
 ) -> str:
     """ "Load more" under a list that grows in place (the standard's Load more button; Ben: a button,
     never endless scrolling). ``href`` is the next page's address (the link works without scripts;
     a page's script may fetch it and append the rows). ``shown`` of ``total`` gives the line under
     it ("25 of 112"); ``done`` is the line shown instead when there is no more ("That is every
-    card.")."""
+    card."). ``into``: the selector of the table whose rows the next page adds to, for the shared
+    static/loadmore.js (a page with its own script leaves it out)."""
     if done:
         return f"<div class='loadmore'><p class='muted'>{esc(done)}</p></div>"
     line = ""
     if shown is not None and total is not None:
         line = f"<p class='muted'>{shown:,} of {total:,}</p>"
+    target = f" data-into='{esc(into)}'" if into else ""
+    script = "<script src='/static/loadmore.js' defer></script>" if into else ""
     return (
-        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' data-load-more>"
-        f"{esc(text)}</a>{line}</div>"
+        f"<div class='loadmore'><a class='btn btn-plain' href='{esc(href)}' rel='next' "
+        f"data-load-more{target}>{esc(text)}</a>{line}</div>{script}"
     )
 
 
@@ -607,7 +680,7 @@ def side_panel(
     × and the back link both go to ``close_href`` (the list); put the result in ``split``."""
     return (
         f"<aside class='ui-drawer' aria-label='{esc(label)}'>"
-        f"<p class='page-only'><a href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
+        f"<p class='page-only'><a class='ui-cap' href='{esc(close_href)}'>← {esc(back_text)}</a></p>"
         f"<div class='dh'><h2>{heading_html}</h2><a class='close btn panel-only' href='{esc(close_href)}'"
         f" aria-label='Close' title='Close'>{icon('x')}</a></div>{body_html}</aside>"
     )

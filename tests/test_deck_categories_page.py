@@ -5,6 +5,7 @@ and the backend's own words (decks.category_line, decks.CATEGORIES_SAVED) everyw
 
 from __future__ import annotations
 
+import html
 import re
 
 from mtg_gateway import modes
@@ -141,6 +142,42 @@ async def test_a_category_without_a_record_is_edited_like_any_other(stack: Stack
         await b.aclose()
 
 
+async def test_a_new_deck_shows_archidekts_default_maybeboard_and_sideboard(stack: Stack) -> None:
+    """Ben, 2026-10-28: a new deck's Categories said "No categories yet." though every Archidekt
+    deck has a Maybeboard and a Sideboard. Missing from the deck's answer, they show as rows
+    without a record (Not in deck on), edited like any other: the save gives one its record."""
+    deck = stack.ark.decks[42]
+    deck["categories"] = []
+    for row in deck["cards"]:
+        row["categories"] = []
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        assert "No categories yet." not in page
+        rows = dict(re.findall(r"<li data-cat='(d\d)' data-name='([^']+)'>", page))
+        assert sorted(rows.values()) == ["Maybeboard", "Sideboard"], rows
+        for cid in rows:
+            row = page.split(f"<li data-cat='{cid}'")[1].split("</li>")[0]
+            assert f"name='not_in_deck_{cid}' value='1' checked" in row and "name='delete'" not in row
+        side = next(k for k, v in rows.items() if v == "Sideboard")
+        data = dict(re.findall(r"<input type='hidden' name='(was_[a-z_]+_d\d)' value='([^']*)'>", page))
+        for cid, name in rows.items():
+            data[f"name_{cid}"] = name
+            for flag in ("not_in_deck", "not_in_price"):
+                if f"name='{flag}_{cid}' value='1' checked" in page:
+                    data[f"{flag}_{cid}"] = "1"
+        data[f"name_{side}"] = "Side"
+        r = await b.http.post(
+            POST, data={"csrf": csrf, "action": "save", "confirmed": "1", **data}, headers=NAV
+        )
+        assert r.status_code == 303, r.text
+        assert [c["name"] for c in stack.ark.category_creates] == ["Sideboard"]
+        assert stack.ark.category_creates[0]["includedInDeck"] is False
+        assert [p["name"] for p in stack.ark.category_patches] == ["Side"]
+    finally:
+        await b.aclose()
+
+
 async def test_create_a_category_from_the_panel(stack: Stack) -> None:
     _give_categories(stack.ark)
     b = await linked_browser(stack)
@@ -245,7 +282,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         assert "muted small" not in form.split("</form>")[0]
         # nothing is picked in advance (the first category is often Commander)
         assert (
-            "<select id='move_cards_to' name='move_cards_to' required>"
+            "<select id='move_to' name='move_to' required>"
             "<option value='' disabled selected hidden>Pick a category…</option><option value='Commander'>"
         ) in r.text
         assert "<option value='Ramp'>" not in r.text
@@ -257,7 +294,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         )
         assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
         assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<select id='move_to' name='move_to' required>" in r.text
         # a forged yes without a pick gets the same page, not a bare refusal
         r = await b.http.post(
             POST,
@@ -266,7 +303,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
         )
         assert r.status_code == 400 and stack.ark.category_deletes == [ids["Maybeboard"]], r.text
         assert "<p class='notice error' role='alert'>Pick the category its cards move to.</p>" in r.text
-        assert "<select id='move_cards_to' name='move_cards_to' required>" in r.text
+        assert "<select id='move_to' name='move_to' required>" in r.text
         r = await b.http.post(
             POST,
             data={
@@ -345,7 +382,7 @@ async def test_save_applies_at_once_and_the_panel_says_so(stack: Stack) -> None:
         assert "Net " not in review and ">2 changes<" not in review
         assert "Undo this change</button>" in review
         history = (await b.http.get("/history", headers=NAV)).text  # the snapshot, linking the change
-        assert f"<a href='/proposals/{pid}'>the change</a>" in history
+        assert f"<a class='ui-cap' href='/proposals/{pid}'>The change</a>" in history
     finally:
         await b.aclose()
 
@@ -403,9 +440,13 @@ async def test_a_change_to_which_cards_count_asks_first_then_saves(stack: Stack)
     try:
         page, csrf = await _csrf(b)
         ids = _ids(page)
+        # Archidekt's default Sideboard is there without a record: a rename onto it is refused
+        data = _form(page, ids, **{f"name_{ids['Ramp']}": "Sideboard"})
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)
+        assert r.status_code == 400 and "already has a category named" in html.unescape(r.text)
         for change in (
             {f"not_in_deck_{ids['Maybeboard']}": None},
-            {f"name_{ids['Ramp']}": "Sideboard"},
+            {f"name_{ids['Maybeboard']}": "Maybe"},
         ):
             data = _form(page, ids, **change)
             r = await b.http.post(POST, data={"csrf": csrf, "action": "save", **data}, headers=NAV)

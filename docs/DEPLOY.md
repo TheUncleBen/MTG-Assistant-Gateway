@@ -6,9 +6,9 @@ This gets you one Swarm stack with these services:
 - `mtg-assistant-mysticforge`, an internal research service the gateway talks to (more
   on it [near the end](#mystic-forge-internal-research-service));
 - `mtg-assistant-ntfy`, an internal notification server for the members' Android app
-  ([Notifications on members' phones](#notifications-on-members-phones)); and
-- `mtg-assistant-forge`, the simulation engine, on by default in the example files
-  ([Forge simulations](#forge-simulations-on-by-default)).
+  ([Push notifications on members' phones](#push-notifications-on-members-phones)); and
+- `mtg-assistant-forge`, the rules engine for Forge games, on by default in the example files
+  ([Forge games](#forge-games-on-by-default)).
 
 Not running a Swarm? [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md) does the same on
 one machine with plain Docker Compose. How the pieces fit together is in
@@ -314,11 +314,11 @@ name and tag: a version's tag exists only once its release is published
    | `MTG_WRITES_ENABLED` | `true` (the default) lets approved proposals change Archidekt; `false` keeps everything review-only. Make your first edit on a deck you don't care about |
 
    Everything else can stay at its default. The feature switches (watchlists,
-   backup copies on Archidekt, Approve buttons in the chat, and others) are
+   backup copies on Archidekt, Apply buttons in the chat, and others) are
    all on; an admin turns them on or off on the Settings page
    (`/admin/settings`), along with the gateway's name and every other
    setting. Approvals start safe: a member who hasn't chosen an approval mode
-   has every change wait for their own press, on the Approve button of the
+   has every change wait for their own press, on the Apply button of the
    card in the chat or on Apply on the review page. Each member picks their
    own mode on their Account page; the Settings page sets the mode for new
    members and the highest one allowed. The full list of variables is in the
@@ -380,7 +380,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag6`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag7`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it from
 the base image `main` pins. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -530,12 +530,12 @@ The same stack runs `mtg-assistant-mysticforge`, which is
 licence, from upstream). It's built from upstream commit
 `dd82cd1449645862a2e309ae70df2fb7c3a2a839` into
 `ghcr.io/theuncleben/mtg-assistant-mysticforge`. It provides the card search, EDHREC,
-rules, precon and goldfish tools, and the gateway relays an allowlisted set
+rules, precon and solo test tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from eleven patches in
-`docker/mystic-forge/patches/`, which is where the `-mag6` in the image tag
-`1.3.2-mag6` comes from:
+Upstream code is unchanged apart from fourteen patches in
+`docker/mystic-forge/patches/`, which is where the `-mag7` in the image tag
+`1.3.2-mag7` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -559,26 +559,26 @@ Upstream code is unchanged apart from eleven patches in
   (`edhrec_precon_upgrade` showed "?%", `edhrec_salt` no scores,
   `edhrec_top_cards` no section headings); recommendations no longer suggest
   cutting cards that were not given; double-faced cards given by their full
-  name are found by the goldfish tools; precon lists add up split basic land
-  lines; and the simulation's honesty report no longer files played lands
+  name are found by the solo test tools; precon lists add up split basic land
+  lines; and the solo test's honesty report no longer files played lands
   and mana rocks as low-impact.
 - `0005-scryfall-default-printing-and-finish.patch`: a card given without a
   set used Scryfall's newest printing, which can be a preview that is not out
   yet (no paper, no prices). Price lists and `format_archidekt` now use the
   newest printing already out on paper, in the finish asked for, and say when
   a card does not come in that finish.
-- `0007-goldfish-constructed-games.patch`: the goldfish simulator modelled
+- `0007-goldfish-constructed-games.patch`: the solo test engine modelled
   Commander games only and took a list's first line as the commander. The
   patch adds `constructed` to `goldfish_run`, `goldfish_ab` and
   `goldfish_annotate`: no commander, 20 life, no free mulligan and on the
   play (no draw on turn 1). The gateway sets it for a deck without a
   commander and with 60 or more cards. Commander games are unchanged.
-- `0008-goldfish-skipped-copies-and-named-printing.patch`: the simulation's
+- `0008-goldfish-skipped-copies-and-named-printing.patch`: the solo test's
   "not recognized by Scryfall, skipped" warning says how many copies of each
   card were left out ("2 Foo"), and `scryfall_named` without a set shows the
   same printing as the other lookups (the newest out on paper) and says which
   one it is.
-- `0009-goldfish-rules-text-templates.patch`: the goldfish simulator reads
+- `0009-goldfish-rules-text-templates.patch`: the solo test engine reads
   common rules text (drawing, ramp, tokens, damage and drain, +1/+1 counters,
   anthems, cost reducers, extra combats and more), so far more cards play
   with their effect. Removal, board wipes and counterspells are counted as
@@ -600,6 +600,20 @@ Upstream code is unchanged apart from eleven patches in
   (votes, mass bounce, "bite" spells, Auras that shut a creature down) as
   needing opponents, instead of listing them as played without their
   effect, and it reads more card wording.
+- `0013-card-names-front-face-for-every-collection-lookup.patch`: split,
+  adventure and two-faced cards given by their full name ("Fire // Ice") were
+  "not found" in card text, price lists and `format_archidekt`, and
+  `validate_decklist` let such a card outside the commander's colors pass
+  without a word. Every lookup now finds a card by its full name or any face,
+  and `validate_decklist` lists any card it could not check.
+- `0014-research-output-that-misled-an-assistant.patch`: wording and order
+  fixes in EDHREC, Commander Spellbook and precon output: no cut list from a
+  handful of cards, no basic lands or meaningless scores in recommendations,
+  numbered combo steps, combos and top cards by deck count, "sorceries".
+- `0015-rules-search-counts-and-annotate-heading.patch`: `rules_search` says
+  its count is of entries with at least one of the terms, and
+  `goldfish_annotate` no longer says permanents in its Out of scope section
+  are never cast.
 
 What to know about it:
 
@@ -613,7 +627,7 @@ What to know about it:
 - **No extra setup.** No secrets, no host folders. Its `/data` lives inside the container and resets on
   redeploy, which is fine because the gateway keeps nothing of its own
   there.
-- **Price downloads and notifications are off.** The stack sets
+- **Price downloads and push notifications are off.** The stack sets
   `MYSTIC_FORGE_NO_INGEST=1` (skips a roughly 141 MB MTGJSON download and the
   nightly price job) and `MYSTIC_FORGE_NTFY_OFF=1` (no pushes to ntfy.sh).
   Both are fixed in the stack file on purpose, not stack variables.
@@ -621,7 +635,7 @@ What to know about it:
   Commander Spellbook and Archidekt's public deck API (never logged in to
   Archidekt). The rules tools check Wizards of the Coast for a newer
   Comprehensive Rules at most once a day.
-- **Where and how big.** The stack file fixes its image, `1.3.2-mag6`, and Swarm may run it on
+- **Where and how big.** The stack file fixes its image, `1.3.2-mag7`, and Swarm may run it on
   any node. Memory is capped at 512 MB. After loading
   the rules index it used about 115 MB on an amd64 test machine, and about
   170 MB as an arm64 container under emulation in CI (emulation adds
@@ -637,7 +651,7 @@ docker service logs mtg_mtg-assistant-mysticforge
 Healthy looks like `Running`, with the logs ending on Uvicorn listening on
 `0.0.0.0:8000`.
 
-## Forge simulations (on by default)
+## Forge games (on by default)
 
 Forge ([Card-Forge/forge](https://github.com/Card-Forge/forge), GPL-3.0) is an open-source Magic rules
 engine. The `mtg-assistant-forge` image runs it unmodified behind a small job service, so
@@ -650,7 +664,7 @@ have the solo test's estimate and no Forge games.
   spare memory. Docker Compose uses the same `FORGE_REPLICAS` line.
 - **Turn it off:** set `FORGE_REPLICAS=0` and update the stack (with Compose, `docker compose up -d`).
   The gateway follows it. On a Swarm `FORGE_NODE` still needs a node name.
-- **The Forge solo test:** with every report that simulates, Forge also plays the deck alone
+- **The Forge solo test:** with every report that tests, Forge also plays the deck alone
   against opponents who do nothing (three for a Commander deck, one for a 60-card deck),
   as many games as **Forge games per report** on the Settings page, counted up to turn 10, and the report shows how often and on which turn
   it won, beside the solo test's estimate. It starts after the report's games against precons,
@@ -674,7 +688,7 @@ have the solo test's estimate and no Forge games.
   publish its port, don't proxy it, and don't attach other containers to that network.
 - **Load:** Java starts only while Forge plays, limited by `FORGE_MEMORY_LIMIT` (default 1536M) and
   `FORGE_CPUS` (default 2); where Docker can't cap memory, see the memory note below. **Forge games
-  per report** on the Settings page (default 4) sets the games per report; **Play more games** on a finished report plays that many again against the same
+  per report** on the Settings page (default 5) sets the games per report; **Play more games** on a finished report plays that many again against the same
   opponents and adds them to the results (50 games a report at most; on a comparison, the same
   number to both decks). An idle Forge service holds
   no Java memory.
@@ -727,13 +741,13 @@ have the solo test's estimate and no Forge games.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
   them. Which cards those are: [CAPABILITIES.md](CAPABILITIES.md#cards-forge-cannot-play).
 
-## Notifications on members' phones
+## Push notifications on members' phones
 
 Members can get a short message on their phone when an assistant leaves changes waiting for their
 press (one message per deck, such as "2 changes to Atraxa are waiting for you", updated as the count changes
 and removed when nothing waits), a deck report finishes (Forge runs that waited in the queue
-included), a watched card crosses a price alert they set, or their daily or weekly summary is
-ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
+included), a watched card crosses a price alert they set, something new arrives in their
+Archidekt alerts, or their daily or weekly summary is ready. They come in the gateway's own Android app. There is no iPhone version, no Firebase or
 Google push service, and no separate notification app.
 
 How it works: the stack runs its own [ntfy](https://ntfy.sh/) server (`mtg-assistant-ntfy`, free
@@ -743,7 +757,7 @@ member's own topic (`mtg-`, 16 random characters and a 6-character mark made wit
 gateway's database), and ntfy refuses everything else. The gateway refuses an app connection whose
 topic has no valid mark, and at every start it gives a new topic to each member whose topic has none
 (after the update to 0.7.30, and after a rollback and a new update). The key is not one of the
-stack's secrets, so changing a secret doesn't disconnect any phone from its notifications. Debug
+stack's secrets, so changing a secret doesn't disconnect any phone from its push notifications. Debug
 logs show a topic only as `mtg-…`. The app
 holds one long request open to the gateway's own address (`/app/notifications/stream`), and the
 gateway passes the member's messages along it. ntfy keeps messages for 12 hours, in memory, so a
@@ -759,12 +773,12 @@ yet picked up.
   alert names the watched card and its old and new price; a summary gives counts and totals and
   the card that moved most. The token is read from the secret file, sent only in the
   `Authorization` header and never written to the log.
-- **Members** turn notifications on in the **Notifications** card of their Account page, in the
-  app: they tick **Send me notifications** and press **Save notifications**, which in the app
-  also presses **Get notifications on this phone** for them. That asks once to let the app run in the background, and on
-  Android 13 and later it first asks to allow notifications. Android then shows a quiet "Always
+- **Members** turn push notifications on in the **Push notifications** card of their Account page, in the
+  app: they tick **Send me push notifications** and press **Save push notifications**, which in the app
+  also presses **Get push notifications on this phone** for them. That asks once to let the app run in the background, and on
+  Android 13 and later it first asks to allow push notifications. Android then shows a quiet "Always
   connected" notification while the app listens. The app is built to reconnect after the phone restarts and after an app update; that is tested on an emulator, not yet on a real phone. **Disconnect my phones** gives
-  the member a new topic, which signs out every phone; turning notifications off ends the stream
+  the member a new topic, which signs out every phone; turning push notifications off ends the stream
   too. **Send test** sends one message to check it, at most once a minute.
 - **Memory:** ntfy is limited to 128 MB, a fixed line in the stack files.
 - **Connections:** every phone reaches ntfy through the gateway, so ntfy counts them all as one
@@ -776,6 +790,22 @@ yet picked up.
   stack files, and the gateway's limits, the 25-second keepalive and the 12 hours ntfy keeps
   messages are fixed too. ntfy's subscription limit (250) is set above the gateway's 200
   connections on purpose.
+
+### Archidekt alerts on members' phones
+
+Archidekt has no push or webhooks, so the gateway asks it (from 0.7.46, no setting to add). Every
+15 minutes it reads the alert count of each member whose push notifications are on, who left **A new
+alert on Archidekt** ticked (the default) and whose phone is connected now or was in the last 12
+hours (the time ntfy keeps a message). That is one request per member a round, plus one read of the
+alert list in a round where the count went up: at most 4 requests an hour per such member, so 10
+of them add about 40 an hour, around 2 % of the shared pace of 30 a minute. A count a member's own
+page read in the last minute is used instead of asking again. The reads are background ones, like
+the deck sync's: they wait for members' own work, never use the share of the pace kept for pages,
+are sent once without retries, stop while the breaker or a Retry-After pause is on, and spend from
+the member's own Archidekt budget only while a quarter of it is left. What was last seen (the
+count and a short fingerprint per alert, never its words) is kept on the account, so a restart
+never sends an alert twice. Whether Archidekt marks alerts as seen when its list is read is not
+known; the gateway's own Alerts list has always read it the same way.
 
 ## Environment reference
 
@@ -813,10 +843,11 @@ without touching the stack.
 | --- | --- | --- |
 | `MTG_TAG` | `latest` | Gateway image tag. A version such as `0.7.45` stays on it |
 | `TIMEZONE` | `UTC` | Passed to the containers as `TZ` |
+| `MTG_SERVER_NAME` | empty (the Settings page's **Gateway name**, `MTG Assistant Gateway` until changed there) | Commented out in the example files. The name in the top bar, on sign-in and in the assistants' connector lists, up to 100 characters. A name here locks the Settings page's **Gateway name** row, which then shows it is set in your stack |
 | `MTG_BACKUP_COPY_DIR` | empty (no second copy) | A host folder (another disk, or shared storage) every backup is also copied to and pruned the same way. It must already exist. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |
 | `MTG_MEMORY_LIMIT` | `256M` | The gateway's memory cap |
 
-**Forge simulations**
+**Forge games**
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -834,7 +865,7 @@ Settings page row, which then shows it is set in your stack.
 | `MTG_WRITES_ENABLED` | `true` | Deck edits reach Archidekt. `false` keeps proposals but applies nothing. Not on the Settings page |
 | `MTG_WATCHLISTS_ENABLED` | on | Watchlists and prices: the Watchlist page and its links, the card viewer's price buttons, the watch tools and the daily price check. Off keeps members' stored watches and prices |
 | `MTG_ARCHIDEKT_BACKUPS` | on | Before an applied edit or restore, a private backup copy of the deck in the member's backup folder on Archidekt. If the copy fails, nothing changes and the proposal stays waiting |
-| `MTG_APPLY_IN_CHAT` | on | The Approve and Reject card next to a proposal in apps that show MCP Apps, with the waiting-changes card and the two pickers. Off leaves the review page |
+| `MTG_APPLY_IN_CHAT` | on | The Apply and Reject card next to a proposal in apps that show MCP Apps, with the waiting-changes card and the two pickers. Off leaves the review page |
 | `MTG_SCAN_ART_ENABLED` | on | The card scanner's artwork check, which picks the printing |
 | `MTG_UPDATE_CHECK` | on | Twice a day, one anonymous request to GitHub for this project's newest release; admins see a notice when it is newer. The gateway never pulls an image itself |
 | `MTG_DECK_SYNC_MINUTES` | `30` | Minutes between background checks of Archidekt for members with changes waiting, 30 to 1440; `0` turns it off |
@@ -846,11 +877,11 @@ Settings page row, which then shows it is set in your stack.
 | `MTG_TRUSTED_PROXIES` | private networks (`10/8`, `172.16/12`, `192.168/16`, loopback) | Comma-separated IPs or CIDR ranges whose `X-Forwarded-*` headers are trusted. Recommended: narrow it to your proxy's address or the overlay subnet (see [step 7](#7-reverse-proxy)) |
 | `MTG_CIMD_ENABLED` | `true` | Accept clients that identify by a published metadata address (Claude's "Use Claude's published identity" and, reportedly, ChatGPT). `false` leaves only automatic registration |
 | `MTG_CIMD_ALLOWED_HOSTS` | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
-| `MTG_ACCESS_TOKEN_TTL` | `3600` | Assistant access token lifetime, seconds (60 to 86400) |
-| `MTG_REFRESH_TOKEN_TTL` | `2592000` | Assistant refresh token lifetime, seconds (3600 to 31536000) |
-| `MTG_BROWSER_SESSION_TTL` | `7200` | Browser session lifetime, seconds (300 to 86400) |
+| `MTG_ACCESS_TOKEN_TTL` | empty (the Settings page: 1 hour) | Assistant access token lifetime, seconds (60 to 86400). Usually set on the Settings page instead (**Sign-in → Assistant access**); a value here locks that row |
+| `MTG_REFRESH_TOKEN_TTL` | empty (the Settings page: 30 days) | Assistant refresh token lifetime, seconds (3600 to 31536000). Usually set on the Settings page instead (**Sign-in → Assistant refresh**); a value here locks that row |
+| `MTG_BROWSER_SESSION_TTL` | empty (the Settings page: 7 days) | How long a sign-in in a browser or the Android app lasts while it is not used, seconds (300 to 2592000). Using the gateway renews it, at most once per half of this time. Whatever the use, a sign-in ends after the Settings page's **Longest website sign-in** (30 days by default; it has no stack variable). Usually set on the Settings page instead (**Sign-in → Website sign-in when unused**); a value here locks that row. Before 0.7.46 this was the whole lifetime (2 hours by default): a stack file that still sets `7200` keeps sign-ins to 2 hours unused |
 | `MTG_REAUTH_INTERVAL` | `604800` | How long after signing in an assistant can keep refreshing its tokens before the person signs in again, seconds (3600 to 31536000). Group membership doesn't wait for this: it is checked live |
-| `MTG_MEMBERSHIP_CHECK_TTL` | `5` | Seconds a group-membership answer from the identity provider is reused, the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
+| `MTG_MEMBERSHIP_CHECK_TTL` | `5` | Seconds a group-membership answer from the identity provider is reused. After that, a page being read (outside `/admin`) is answered at once and the provider asked in the background, so the first page after a pause never waits; writes, admin pages and assistant requests wait for the answer, so a removed member is refused on their next one and can read their own pages only for the moment the background check takes. `0` makes every request wait for the provider's answer; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
 | `MTG_ALLOW_ANY_IDP_USER` | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
 
 **Other identity providers** ([IDP-OTHERS.md](IDP-OTHERS.md))

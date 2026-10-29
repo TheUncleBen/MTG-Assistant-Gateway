@@ -137,7 +137,7 @@ async def test_the_delete_box_counts_decks_packages_and_folders_inside(stack: St
         assert r.status_code == 200, r.text
         got = r.json()
         assert (got["name"], got["decks"], got["packages"], got["folders"]) == ("Commander", 3, 1, 2)
-        assert got["backups"] is True
+        assert "backups" not in got  # a delete makes no backup copy on Archidekt (decks.DELETE_KEEPS_NO_COPY)
     finally:
         await b.aclose()
 
@@ -208,9 +208,9 @@ async def test_a_folder_delete_saves_every_deck_then_deletes_once_and_checks(sta
     for did in (42, 201, 202):
         assert did not in stack.ark.decks
         assert gw.db.list_snapshots(SUB, deck_id=str(did)), did  # a snapshot of each deck first
-    # a backup copy of each, in the backup folder, made before the delete
+    # no backup copy of any on Archidekt: a delete leaves no new deck (assistant tool review, 2026-10-28)
     copies = [d for d, f in stack.ark.deck_folder.items() if f == ids["backup"]]
-    assert len(copies) == 3
+    assert copies == []
     assert ids["archive"] in {f["id"] for f in stack.ark.folders["alice"]}
     audit = [e for e in gw.db.audit_for_user(SUB) if e["event"] == "folder_deleted"]
     assert audit and audit[-1]["detail"]["verified"] is True
@@ -234,26 +234,26 @@ async def test_a_wrong_name_or_changed_counts_delete_nothing(stack: Stack) -> No
     assert stack.ark.folder_deletes == [] and 42 in stack.ark.decks
 
 
-async def test_a_failed_backup_copy_stops_the_delete_before_anything_is_deleted(stack: Stack) -> None:
+async def test_a_deck_that_cannot_be_saved_stops_the_delete_before_anything_is_deleted(stack: Stack) -> None:
     await linked_user(stack)
     ids = _setup(stack)
     decks = stack.h.app.state.gateway.decks
-    real = decks._backup_copy
-    made: list[str] = []
+    real = decks.get_own_deck
+    read: list[str] = []
 
-    async def second_fails(sub, deck, snapshot_id, *, reason):  # type: ignore[no-untyped-def]
-        if made:
+    async def second_fails(sub, deck_id, *a, **k):  # type: ignore[no-untyped-def]
+        if read:
             raise DeckError("unavailable", "Archidekt is unavailable right now.")
-        made.append(deck.id)
-        return await real(sub, deck, snapshot_id, reason=reason)
+        read.append(str(deck_id))
+        return await real(sub, deck_id, *a, **k)
 
-    decks._backup_copy = second_fails  # type: ignore[method-assign]
+    decks.get_own_deck = second_fails  # type: ignore[method-assign]
     with pytest.raises(DeckError) as exc:
         await decks.delete_folder(
             SUB, ids["commander"], "Commander", {"decks": 3, "packages": 1, "folders": 2}
         )
     assert exc.value.kind == "backup_failed"
-    assert "Nothing was deleted; the snapshots and backup copies already made are kept." in str(exc.value)
+    assert "Nothing was deleted; the snapshots already made are kept." in str(exc.value)
     assert stack.ark.folder_deletes == [] and {42, 201, 202} <= set(stack.ark.decks)
 
 
@@ -348,15 +348,15 @@ async def test_a_delete_of_one_of_each_says_each_in_the_singular(stack: Stack) -
     )
 
 
-async def test_a_backup_failure_names_the_deck_in_plain_words(stack: Stack) -> None:
+async def test_a_save_failure_names_the_deck_in_plain_words(stack: Stack) -> None:
     await linked_user(stack)
     ids = _setup(stack)
     decks = stack.h.app.state.gateway.decks
 
-    async def fails(sub, deck, snapshot_id, *, reason):  # type: ignore[no-untyped-def]
+    async def fails(sub, deck_id, *a, **k):  # type: ignore[no-untyped-def]
         raise DeckError("unavailable", "Archidekt can't be reached right now.")
 
-    decks._backup_copy = fails  # type: ignore[method-assign]
+    decks.get_own_deck = fails  # type: ignore[method-assign]
     with pytest.raises(DeckError) as exc:
         await decks.delete_folder(SUB, ids["precons"], "Precons", {"decks": 1, "packages": 1, "folders": 0})
     assert str(exc.value) == (
@@ -472,7 +472,7 @@ async def test_the_deck_boxes_rename_move_delete_and_export(stack: Stack) -> Non
         assert r.status_code == 200 and r.json()["notice"] == "moved"
         assert stack.ark.deck_folder[42] == ids["archive"]
         info = (await b.http.get("/decks/api/decks/42/delete-info")).json()
-        assert info["name"] == "Renamed deck" and info["cards"] > 0 and info["backups"] is True
+        assert info["name"] == "Renamed deck" and info["cards"] > 0 and "backups" not in info
         exp = (await b.http.get("/decks/api/decks/42/export")).json()
         assert exp["name"] == "Renamed deck" and "Sol Ring" in exp["plain"]
         assert [f["label"] for f in exp["files"]] == [
@@ -740,24 +740,22 @@ def _spy(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]
     return calls
 
 
-async def test_a_delete_after_its_box_sends_four_archidekt_calls_not_six(
+async def test_a_delete_after_its_box_sends_two_archidekt_calls(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Speed (Ben, 25 Oct): the delete box reads the deck, and finds the backup folder while the
-    member types the name, so pressing Delete waits for four Archidekt calls (the copy, its
-    description, the delete and the read-back), each at least a second apart, instead of six.
-    The backup copy is still made from the deck as it is on Archidekt (the site's own copy)."""
+    """Speed (Ben, 25 Oct): the delete box reads the deck, so pressing Delete waits only for the
+    delete and the read-back. No backup copy is made for a delete (assistant tool review,
+    2026-10-28), so no folder look-up either."""
     await linked_user(stack)
-    ids = _setup(stack)
+    _setup(stack)
     b, csrf = await _browser(stack)
     calls = _spy(stack, monkeypatch)
+    before = set(stack.ark.decks)
     try:
         info = (await b.http.get("/decks/api/decks/201/delete-info")).json()
         assert info["name"] == "Precon deck"
-        for _ in range(50):  # the folder look-up runs after the box's answer
-            if ("GET", "/decks/folderTree/") in calls:
-                break
-            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+        assert ("GET", "/decks/folderTree/") not in calls
         opened = len(calls)
         r = await b.http.post(
             "/decks/api/decks/201/delete", json={"typed_name": "Precon deck"}, headers={"X-CSRF-Token": csrf}
@@ -766,17 +764,15 @@ async def test_a_delete_after_its_box_sends_four_archidekt_calls_not_six(
     finally:
         await b.aclose()
     pressed = [c for c in calls[opened:]]
-    assert [m for m, _p in pressed] == ["POST", "PATCH", "DELETE", "GET"], pressed
-    assert 201 not in stack.ark.decks
-    copy = max(d for d in stack.ark.decks if d not in (42, 202))
-    assert stack.ark.deck_folder.get(copy) == ids["backup"]
+    assert [m for m, _p in pressed] == ["DELETE", "GET"], pressed
+    assert set(stack.ark.decks) == before - {201}
 
 
 async def test_the_box_creates_nothing_and_an_old_box_reads_again(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Opening the box never makes the backup folder (only a delete does), and a box open longer
-    than the reuse window reads the deck and the folders again when Delete is pressed."""
+    """Opening the box makes nothing on Archidekt, and a box open longer than the reuse window
+    reads the deck again when Delete is pressed. Neither makes the backup folder."""
     from mtg_gateway import decks as decks_mod
 
     await linked_user(stack)
@@ -797,8 +793,8 @@ async def test_the_box_creates_nothing_and_an_old_box_reads_again(
     finally:
         await b.aclose()
     pressed = calls[opened:]
-    assert pressed[0] == ("GET", "/decks/201/") and ("GET", "/decks/folderTree/") in pressed
-    assert ("POST", "/decks/folders/") in pressed  # the folder is made at the delete, as before
+    assert pressed[0] == ("GET", "/decks/201/")
+    assert ("POST", "/decks/folders/") not in pressed  # no backup folder: a delete makes no copy
 
 
 async def test_a_gateway_write_or_another_link_makes_the_delete_read_again(

@@ -44,11 +44,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__, smallpage, theme, ui
 from .admin import add_admin_routes
+from .alerts_push import AlertWatch
 from .api import add_api_routes
 from .app_page import PROJECT_URL, add_app_routes
 from .app_signin import AppSignins
 from .approve import (
     APPROVAL_META_KEY,
+    CARD_ROWS,
     CARD_TOOL_META,
     apps_extension,
     proposal_text,
@@ -76,7 +78,7 @@ from .collection import add_collection
 from .companion import add_companion_routes
 from .compress import PageGzip
 from .config import LiveSettings, Settings, with_stored
-from .db import Database
+from .db import SESSION_END_NOTICE, Database
 from .decks import (
     FULL_SCOPE,
     DeckError,
@@ -88,7 +90,8 @@ from .forge import ForgeClient
 from .guide import add_guide_routes
 from .home import add_home_routes
 from .idp_sweep import AuthentikSweep
-from .membership import Membership, MembershipChecker
+from .latepage import LatePageMiddleware, LateStore, add_late_routes
+from .membership import SIGN_IN_AGAIN, Membership, MembershipChecker, session_holder
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
 from .notify import Notifier, add_stream_route, replace_old_topics
@@ -100,6 +103,7 @@ from .prices import DailyJobs, PriceService
 from .reports import ReportService
 from .scan import add_scan
 from .schemas import (
+    changes_for_assistant,
     compact_schema,
     inline_refs,
 )
@@ -109,6 +113,7 @@ from .social import add_social_routes
 from .summary import Summaries, add_summary_tool
 from .sync import DeckSync
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
+from .tidy import tidy_text, tidy_value
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .upgrade_backup import folder_for
@@ -141,7 +146,9 @@ class AppState:
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
     sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
+    alerts: AlertWatch | None = None  # Archidekt alerts pushed to members' phones (alerts_push.py)
     folder_jobs: Any = None  # folder deletes from My decks (companion_folders.py)
+    late_pages: LateStore = field(default_factory=LateStore)  # pages drawn before Archidekt answered
 
     @property
     def live(self) -> LiveSettings:
@@ -196,6 +203,9 @@ ERROR_CODES = {
     "interrupted": "INTERNAL",
 }
 RETRYABLE_CODES = frozenset({"BUSY", "RATE_LIMITED", "UNAVAILABLE"})
+# Refusals that are the expected answer, not a failure (A22): the member decides this change
+# themselves. A host shows them as an ordinary result, not a failed tool.
+EXPECTED_REFUSALS = frozenset({"browser_required", "browser_pending"})
 
 
 def error_code(kind: Any) -> str:
@@ -214,7 +224,7 @@ def _card_result(data: dict[str, object], approval: str | None) -> CallToolResul
     the card and keep out of the model's context. Never in the text or structured content."""
     meta = {APPROVAL_META_KEY: approval} if approval else None
     return CallToolResult(
-        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str).decode())],
         structured_content=data,
         _meta=meta,
     )
@@ -234,21 +244,20 @@ WRITE_TOOLS = frozenset(
         "propose_list_change",  # the member's account-wide lists (account_lists.py)
         "propose_add_package",  # a card package's cards into a deck (packages.py)
         # the Archidekt account actions (actions.py): proposals too, even though none of them is
-        # ever applied by an assistant
-        "propose_deck_social",
-        "propose_comment",
+        # ever applied by an assistant (0.7.46: seven tools in one, propose_account_action)
+        "propose_account_action",
         "propose_delete_deck",
-        "propose_create_folder",
-        "propose_collaborator",
-        "propose_deck_help",  # 0.7.43: public, the member's own press only (actions.py)
-        "propose_report",
         "propose_profile_change",
-        "propose_contest_entry",
+        # 0.7.46: they delete nothing (the member presses Delete), but a read-only app has no say
+        "propose_delete_report",
+        "propose_delete_snapshot",
+        "propose_delete_scan_session",
         # sends the typed name, DCI number and event to Archidekt in the member's name (security
         # review 0.7.43)
         "get_registration_pdf",
         "apply_proposal",
         "confirm_proposal",
+        "propose_rest",  # the card's "Propose the rest" (0.7.46)
         "reject_proposal",
         # 0.7.29: tidying the waiting changes and "Apply all" on a card
         "amend_proposal",
@@ -283,8 +292,9 @@ def scope_guard_middleware():
             token = get_access_token()
             if name in WRITE_TOOLS and token is not None and not scopes_allow_writes(token.scopes):
                 message = (
-                    "This app was connected read-only (scope mtg.read), so it cannot propose, apply or "
-                    "store anything. Reconnect it with the mtg scope to make changes."
+                    "This app was connected read-only (scope mtg.read), so it cannot propose or apply "
+                    "changes or run tests (its deck comparisons are kept as reports). Reconnect it with "
+                    "the mtg scope to make changes."
                 )
                 return types.CallToolResult(
                     content=[types.TextContent(type="text", text=message)],
@@ -319,6 +329,41 @@ def _schema_problems(text: str) -> str | None:
     return "; ".join(problems)[:1500] or None
 
 
+def _compact_text(data: dict[str, Any], structured: dict[str, Any]) -> dict[str, Any] | None:
+    """The result with its text as compact JSON (A7), when the text is the same JSON as the
+    structured content: the library writes a dict result indented, which only adds spaces the
+    model reads. None when the text is anything else (plain text, a proposal's sentences)."""
+    content = list(data.get("content") or [])
+    if not content or not isinstance(content[0], dict) or not isinstance(content[0].get("text"), str):
+        return None
+    text = content[0]["text"]
+    if "\n" not in text or not text.startswith("{"):
+        return None
+    try:
+        if json.loads(text) != structured:
+            return None
+    except ValueError:
+        return None
+    content[0] = {**content[0], "text": pydantic_core.to_json(structured, fallback=str).decode()}
+    return {**data, "content": content}
+
+
+def _tidy_numbers(data: dict[str, Any], structured: dict[str, Any]) -> dict[str, Any]:
+    """The result with its long floats at three significant digits (tidy.py, AT-34), in the
+    structured content and in each text block alike, so both say the same number."""
+    tidied = tidy_value(structured)
+    content = list(data.get("content") or [])
+    changed = tidied != structured
+    for i, block in enumerate(content):
+        if isinstance(block, dict) and isinstance(block.get("text"), str):
+            text = tidy_text(block["text"])
+            if text != block["text"]:
+                content[i], changed = {**block, "text": text}, True
+    if not changed:
+        return data
+    return {**data, "content": content, "structuredContent": tidied}
+
+
 def schema_error_middleware():
     """MCP middleware for tool errors. Arguments the input schema refused get the same answer as
     any other refusal: ok false, error invalid, and a message naming each field and what it takes.
@@ -347,11 +392,19 @@ def schema_error_middleware():
                 except ValueError:
                     same = False
                 if same:  # the text is the same JSON, so clients that read only the text get the code too
-                    text = pydantic_core.to_json(coded, fallback=str, indent=2).decode()
+                    text = pydantic_core.to_json(coded, fallback=str).decode()
                     content[0] = {**content[0], "text": text}
                 elif content[0]["text"] == proposal_text(structured):  # a proposal tool's plain text
                     content[0] = {**content[0], "text": proposal_text(coded)}
-            return {**data, "content": content, "structuredContent": coded, "isError": True}
+            failed = coded.get("error") not in EXPECTED_REFUSALS
+            return {**data, "content": content, "structuredContent": coded, "isError": failed}
+        if isinstance(structured, dict) and not data.get("isError"):
+            data = _tidy_numbers(data, structured)
+            structured = data["structuredContent"]
+        if isinstance(structured, dict):
+            compact = _compact_text(data, structured)
+            if compact is not None:
+                return compact
         if not data.get("isError") or structured:
             return result
         content = data.get("content") or []
@@ -366,7 +419,7 @@ def schema_error_middleware():
             {"ok": False, "error": "invalid", "message": f"the arguments do not fit the tool: {problems}"}
         )
         return types.CallToolResult(
-            content=[types.TextContent(type="text", text=pydantic_core.to_json(out, indent=2).decode())],
+            content=[types.TextContent(type="text", text=pydantic_core.to_json(out).decode())],
             structuredContent=out,
             isError=True,
         ).model_dump(by_alias=True, exclude_none=True, mode="json")
@@ -531,23 +584,28 @@ def server_instructions(public_url: str) -> str:
         "review page. Never argue with or work around that answer. "
         "Call whoami to confirm which account you are "
         "signed in as, and account_status to see whether an Archidekt account is linked. Research tools "
-        "(scryfall_*, edhrec_*, goldfish_odds, goldfish_annotate, rules_*) are read-only. Each job has "
+        "(scryfall_*, edhrec_*, goldfish_odds, goldfish_annotate, rules_*) are read-only. They and the "
+        "other reading and test tools (get_deck, deck_stats, compare_decks, run_deck_report) never "
+        "need the user's approval, in any approval mode: keep using them while a proposal waits. "
+        "Each job has "
         "one tool: get_deck reads any deck, list_my_decks lists the member's, deck_stats checks legality "
-        "and structure, compare_decks diffs decks and precons, run_deck_report runs goldfish games, "
-        "resolve_cards turns names into exact printings. Deck edits are two "
+        "and structure, compare_decks diffs decks and precons, run_deck_report runs a test (solo test "
+        "games, and Forge games where the gateway has Forge), resolve_cards turns names into exact "
+        "printings. Deck edits are two "
         "steps: propose_deck_changes or propose_new_deck, then the user confirms (on the proposal card "
         "your app may show with the result, or on the review page), then it is applied. Finish your "
         "review before proposing: one proposal with every change, and amend_proposal to change one "
         "that is still waiting. Where your app shows cards, each propose, amend or combine call puts "
         "a card in the chat, a refused one too, so check a deck edit with check_deck_changes first and "
-        "follow its suggest. "
-        "When the user presses Approve on a proposal card or Apply all, you are "
-        'told the outcome, and where the app allows it the card then posts "Approved, go on" as the user\'s '
-        "message: carry on from that outcome, and call get_proposal only when it is unclear (still "
-        "applying). "
+        "follow its suggest, and a new deck with check_new_deck; then propose once. Never propose again "
+        "to change a waiting proposal (amend it; a new deck with amend_proposal's new_deck) or to see "
+        "where it stands (proposal_status, which draws no card). "
+        "When the user presses Apply on a proposal card or Apply all, the card tells you the outcome "
+        "with their next message; nothing is posted in their name. Carry on from that outcome, and call "
+        "proposal_status only when it is unclear (still applying). "
         "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
-        "the simulation tools. deck_stats answers "
+        "the test tools. deck_stats answers "
         "curve, colors, price, legality and bracket questions from one read; run_deck_report stores a "
         "test run the user can see later on the gateway's History page. "
         "If your app refuses, hides or blocks a tool (rather than the gateway returning an error), do "
@@ -592,24 +650,25 @@ class MembershipMiddleware:
         self.app = app
         self.state = state
 
-    def _subjects(self, scope: Scope) -> set[str]:
-        """Everyone this request could act as: the bearer token's person and the session
-        cookie's person. Both are checked, so a removed member can't ride on someone else's
-        token while the route reads their own cookie (or the other way round)."""
+    def _subjects(self, scope: Scope) -> list[tuple[str, str | None]]:
+        """Everyone this request could act as, each with the sign-in it uses: the bearer token's
+        person (any sign-in of theirs answers, None) and the session cookie's person (that
+        session's own). Both are checked, so a removed member can't ride on someone else's token
+        while the route reads their own cookie (or the other way round)."""
         headers = Headers(scope=scope)
         db = self.state.db
-        subs: set[str] = set()
+        out: list[tuple[str, str | None]] = []
         auth = headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             row = db.get_token(auth[7:].strip(), "access")
             if row is not None and row["expires_at"] >= int(time.time()):
-                subs.add(row["sub"])
+                out.append((row["sub"], None))
         sid = Request(scope).cookies.get(cookie_name(SESSION_COOKIE, self.state.settings))
         if sid:
             sub = db.get_browser_session(sid)
             if sub:
-                subs.add(sub)
-        return subs
+                out.append((sub, session_holder(sid)))
+        return out
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         checker = self.state.membership
@@ -617,7 +676,21 @@ class MembershipMiddleware:
         if checker is None or scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
             await self.app(scope, receive, send)
             return
-        outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
+        # A page being read never waits for the provider when it let this sign-in in before
+        # (membership.py); a write, an admin page and an assistant's request do.
+        reading = scope.get("method") in ("GET", "HEAD") and not path.startswith("/admin")
+        outcomes: list[Membership] = []
+        for sub, holder in self._subjects(scope):
+            outcome = await checker.check(sub, holder, page=reading and holder is not None)
+            outcomes.append(outcome)
+            if outcome is Membership.SIGN_IN and holder is None:
+                # A bearer token while none of the member's sign-ins is honoured: refused, and
+                # kept (membership.py). A session that signs in again ended in the check itself,
+                # so its route answers as for anyone signed out.
+                message = SIGN_IN_AGAIN.format(url=self.state.settings.public_url)
+                resp = JSONResponse({"ok": False, "error": "sign_in_again", "message": message}, 403)
+                await resp(scope, receive, send)
+                return
         if Membership.UNAVAILABLE in outcomes:
             request = Request(scope)
             message = smallpage.IDP_UNREACHABLE
@@ -644,6 +717,57 @@ class MembershipMiddleware:
             await resp(scope, receive, send)
             return
         await self.app(scope, receive, send)
+
+
+class SessionRenewalMiddleware:
+    """Sliding browser sessions: a request with a live session cookie, once more than half of
+    MTG_BROWSER_SESSION_TTL has passed since the session was made or last renewed, moves its end to
+    a full window from now (never past the longest sign-in time after the sign-in) and sets the
+    cookie again with the time left. Inside MembershipMiddleware, so a removed member's session is
+    gone before it could be renewed; sign-in and sign-out set or clear the cookie themselves, and a
+    response that sets it already is left alone."""
+
+    EXEMPT_PREFIXES = MembershipMiddleware.EXEMPT_PREFIXES
+
+    def __init__(self, app: ASGIApp, state: AppState):
+        self.app = app
+        self.state = state
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        settings = self.state.settings
+        name = cookie_name(SESSION_COOKIE, settings)
+        sid = Request(scope).cookies.get(name)
+        ttl = self.state.live.seconds("browser_session_ttl")  # the Settings page's, at once
+        left = self.state.db.renew_browser_session(sid, ttl) if sid else None
+        if left is None:
+            await self.app(scope, receive, send)
+            return
+        holder = Response()
+        holder.set_cookie(
+            name,
+            sid or "",
+            max_age=left + SESSION_END_NOTICE,  # kept past the end to be told why (pages.signed_out)
+            path="/",
+            httponly=True,
+            secure=settings.public_url.startswith("https://"),
+            samesite="lax",
+        )
+        cookie = next(v for k, v in holder.raw_headers if k == b"set-cookie")
+        prefix = name.encode() + b"="
+
+        async def send_renewed(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                if not any(k.lower() == b"set-cookie" and v.startswith(prefix) for k, v in headers):
+                    headers.append((b"set-cookie", cookie))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_renewed)
 
 
 class BodyLimitMiddleware:
@@ -735,6 +859,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             )
         if state.sync is not None and state.sync.enabled:
             tasks.append(asyncio.create_task(state.sync.loop()))
+        if state.alerts is not None and state.alerts.enabled:
+            tasks.append(asyncio.create_task(state.alerts.loop(), context=contextvars.Context()))
         # unused backup copies whose delete Archidekt refused for a while, one at a time,
         # in a context of its own (never inside a member's apply or slot)
         tasks.append(asyncio.create_task(state.decks.backup_delete_loop(), context=contextvars.Context()))
@@ -846,9 +972,28 @@ def build_mcp_server(state: AppState) -> MCPServer:
             p = {**p, "closed_at": p.get("applied_at"), "applied_at": None}
         return p
 
-    def _proposal(data: dict[str, object]) -> CallToolResult:
+    def _proposal(
+        data: dict[str, object],
+        *,
+        read: bool = False,
+        rows_limit: int | None = CARD_ROWS,
+        reader_seq: int | None = None,
+    ) -> CallToolResult:
+        """A card tool's result. ``read``: the card's own read of its proposal, which draws no
+        new card (every other call of a card tool does, where the app shows cards);
+        ``reader_seq``: that card's number, so an older card gets no approval code."""
         in_chat = s.apply_in_chat and token_may_write()
-        return proposal_tool_result(data, decks=state.decks, sub=_sub(), in_chat=in_chat)
+        if isinstance(data.get("changes"), list):  # in the spelling the tools take (name)
+            data = {**data, "changes": changes_for_assistant(data["changes"])}
+        return proposal_tool_result(
+            data,
+            decks=state.decks,
+            sub=_sub(),
+            in_chat=in_chat,
+            drawn=s.apply_in_chat and not read,
+            rows_limit=rows_limit,
+            reader_seq=reader_seq,
+        )
 
     # The tool and route modules import this module, so they are imported here, not at the top.
     from .gateway_routes import add_gateway_routes
@@ -878,6 +1023,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_package_tools(state, h)
 
     add_browser_routes(server, state)
+    add_late_routes(server, state)  # /late/{key}: a page drawn before Archidekt answered (latepage.py)
     add_skill_routes(server, state)
     add_app_routes(server, state)
     add_plugin_routes(server, state)
@@ -920,7 +1066,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
             lambda: state.scan.scryfall if state.scan is not None else None,
             state.notifier,
         )
+        # the Binder's daily whole read and the member's own decks' printings (binder_prices.py)
+        if state.collection is not None:
+            state.prices.read_binder = state.collection.read_whole
+        state.decks.read_hooks.append(state.prices.note_deck)
     state.summaries = Summaries(state.db, state.prices, state.notifier, s.public_url)
+    state.alerts = AlertWatch(state.decks, state.notifier)
     state.db.price_days = s.price_history_days
     _notify_events(state)
     add_watchlist_routes(server, state)
@@ -931,11 +1082,50 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # and without the generated titles and null branches, which only cost tokens.
     for tool in server._tool_manager.list_tools():
         tool.parameters = compact_schema(inline_refs(tool.parameters))
+        if tool.name in PROPOSAL_TOOLS:
+            tool.annotations = _proposal_hints(tool.annotations)
 
     add_gateway_routes(state, h)
     add_stream_route(state, server)  # the Android app's notifications (notify.py)
 
     return server
+
+
+# One hint for every tool that records, changes or closes a proposal (A9): each is read only, as
+# it changes only the gateway's own proposal records and never Archidekt (owner decision 0.7.46: no
+# propose applies in the same call; apply_proposal is the one write), so a host treats them alike.
+PROPOSAL_TOOLS: frozenset[str] = frozenset(
+    {
+        "propose_new_deck",
+        "propose_clone_deck",
+        "propose_add_package",
+        "propose_deck_changes",
+        "propose_restore_snapshot",
+        "propose_deck_details",
+        "propose_deck_categories",
+        "propose_custom_card_changes",
+        "propose_list_change",
+        "propose_collection_changes",
+        "propose_account_action",
+        "propose_delete_deck",
+        "propose_profile_change",
+        "propose_delete_report",
+        "propose_delete_snapshot",
+        "propose_delete_scan_session",
+        "propose_rest",  # the card's own Propose the rest
+        "amend_proposal",
+        "combine_proposals",
+        "withdraw_proposal",
+    }
+)
+
+
+def _proposal_hints(annotations: Any) -> Any:
+    """A proposal tool's annotations: readOnlyHint true, and no destructiveHint (it only applies
+    to a tool that is not read only)."""
+    if annotations is None:
+        return types.ToolAnnotations(read_only_hint=True)
+    return annotations.model_copy(update={"read_only_hint": True, "destructive_hint": None})
 
 
 # The admin settings DeckService.waiting_by_deck reads (decks.py mode_of, _assistant_policy).
@@ -1059,16 +1249,23 @@ def create_app(
     )
     _refuse_mcp_get(app)
     _friendly_errors(app, state)
+    # inside the theme's context and the membership check: a slow page is drawn at once
+    app.add_middleware(LatePageMiddleware, state=state)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
     # Restore points kept per deck follow the admin Settings page at once (0.7.29).
     db.snapshots_source = lambda: state.live.get("snapshots_per_deck")
+    # The sign-in times follow the Settings page at once too (0.7.46): the longest a sign-in lasts
+    # here, the others where a sign-in or a token is made.
+    db.session_max_age_source = lambda: state.live.seconds("browser_session_max_age")
+    provider.ttl_source = state.live.seconds
     _use_hashed_client_secrets(app, provider)
     if settings.cimd_enabled:
         _advertise_cimd(app, server)
     app.add_middleware(
         LoginCookieMiddleware, provider=provider, secure=settings.public_url.startswith("https://")
     )
+    app.add_middleware(SessionRenewalMiddleware, state=state)  # inside the membership check
     app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
     app.add_middleware(PageGzip)

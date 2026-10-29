@@ -16,7 +16,7 @@ from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import Browser, call, linked_user, structured
 from .test_round4_data import _app_token
 from .test_track_a_card_hold import _add, _press, _propose, _qty
-from .track_a_helpers import card_code
+from .track_a_helpers import card_code, card_read
 
 SUB = "user-1"
 HELD = "It would replace #1, which was applied."
@@ -88,11 +88,12 @@ async def test_apply_all_leaves_out_a_change_held_since_and_applies_the_rest(sta
 
 async def test_apply_all_from_the_proposal_card_leaves_out_a_change_held_since(stack: Stack) -> None:
     h, a, b, theirs, pid, other = await _replacement(stack)
-    res = await call(h, a, "get_proposal", {"proposal_id": other})
+    res = await card_read(h, a, other)
     card = structured(res)
-    lines = card["deck_waiting"]["set_lines"]
-    assert {x["proposal_id"] for x in lines} == {pid, other}
     s = res["_meta"][APPROVAL_SET_META_KEY]
+    lines = s["lines"]  # card-only: in _meta, not in what the assistant reads
+    assert "set_lines" not in card["deck_waiting"]
+    assert {x["proposal_id"] for x in lines} == {pid, other}
     shown = {x["proposal_id"]: {"status": x.get("status") or ""} for x in lines}
     await _apply_theirs(h, b, theirs, pid)
     got = structured(

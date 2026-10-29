@@ -10,10 +10,12 @@ MENUS_CSS = """
   background:transparent;color:var(--text-muted);box-shadow:none;cursor:pointer}
 .kebab:hover,.kebab:focus-visible,button.kebab:hover{background:var(--surface-2);color:var(--text)}
 .kebab svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-/* a deck tile: the ⋮ at the end of the title line, outside the tile's link; a press and hold on
-   the tile opens the same menu, so nothing is selected or called out under the finger */
+/* a deck tile: the ⋮ at the end of the title line, under the picture at every card size (its height
+   is --deck-thumb), outside the tile's link; a press and hold on the tile opens the same menu, so
+   nothing is selected or called out under the finger */
 ul.decklist .deck{position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-ul.decklist .deck > .kebab{position:absolute;right:.4rem;top:calc(175px + .5rem + (75px - var(--ctl)) / 2)}
+ul.decklist .deck > .kebab{position:absolute;right:.4rem;
+  top:calc(var(--deck-thumb,175px) + .5rem + (75px - var(--ctl)) / 2)}
 ul.decklist .deck .info{padding-right:calc(var(--ctl) + .75rem)}
 ul.decklist.list .deck > .kebab{top:50%;transform:translateY(-50%)}
 ul.decklist.list .deck a{padding-right:calc(var(--ctl) + .5rem)}
@@ -32,7 +34,10 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 @media (pointer:coarse){.cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:44px;height:44px}}
 /* a table row's ⋮ sits with its open action; in a proposal row, after the title's words */
 .ui-table .tr .act + .kebab,.ui-table .tr .kebab{flex:none;align-self:center}
-.ui-table .title .kebab.inline{vertical-align:middle;margin-left:.25rem;width:34px;height:34px}
+/* a title cell holding the row's ⋮ (the open action is the title's own link): the ⋮ floats at the
+   cell's right on the title's first line, never on a line of its own under the status, and the
+   lines below it keep the cell's full width */
+.ui-table .title > .kebab.inline{float:right;margin:-6px 0 0 .25rem;width:34px;height:34px}
 @media (pointer:coarse){.ui-table .title .kebab.inline{width:44px;height:44px}}
 /* the My decks heading: + New folder and New deck at its end (New deck the one orange button) */
 .ui-head.phead{align-items:center;justify-content:space-between;margin:0 0 12px}

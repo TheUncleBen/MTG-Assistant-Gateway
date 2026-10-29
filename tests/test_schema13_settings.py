@@ -127,7 +127,7 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 15
+        assert new.schema_version == db_module.SCHEMA_VERSION == 19
         c = new._conn
         (count,) = c.execute("SELECT COUNT(*) FROM snapshots").fetchone()
         assert count == db_module._STEP_13_BATCH * 5 + 38
@@ -481,7 +481,8 @@ def test_every_registered_setting_is_a_deployment_setting_with_sane_bounds() -> 
         assert key in fields, key
         assert spec.env == "" or spec.env.startswith("MTG_"), key
         # the code default is the page's default, so a value the page never stored reads the same
-        assert fields[key].default == spec.default, key
+        # (a sign-in time counts seconds in Settings and days or hours on the page: ``scale``)
+        assert fields[key].default == spec.default * spec.scale, key
         assert spec.parse(spec.default) == spec.default, key
         if spec.lo is not None:
             assert spec.lo <= spec.default <= spec.hi, key
@@ -923,8 +924,8 @@ def test_settings_refusals_read_as_the_pages_do() -> None:
         MANAGED_SETTINGS["backup_keep_days"].parse(5000)
     with pytest.raises(SettingError, match="^archidekt_min_interval must be between 1 and 10 seconds$"):
         MANAGED_SETTINGS["archidekt_min_interval"].parse(0.5)
-    with pytest.raises(SettingError, match="^watch_max_cards must be between 0 and 200$"):
-        MANAGED_SETTINGS["watch_max_cards"].parse(201)
+    with pytest.raises(SettingError, match="^watch_max_cards must be between 0 and 5,000$"):
+        MANAGED_SETTINGS["watch_max_cards"].parse(5001)
     with pytest.raises(SettingError) as refused:
         MANAGED_SETTINGS["approval_mode_default"].parse("yolo")
     assert refused.value.message == (
@@ -944,3 +945,31 @@ def test_the_stack_keeps_the_deck_checks_floor(tmp_path: Path, monkeypatch: pyte
         monkeypatch.setenv("MTG_DECK_SYNC_MINUTES", bad)
         with pytest.raises(ConfigError, match=r"MTG_DECK_SYNC_MINUTES must be 0 \(off\), or between 30"):
             load_settings()
+
+
+def test_mtg_server_name_locks_the_gateway_name_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ben, 2026-10-28: MTG_SERVER_NAME is back. Empty leaves the Gateway name to the Settings page;
+    a name locks that row with the stack's value."""
+    _env(tmp_path, monkeypatch)
+    assert MANAGED_SETTINGS["server_name"].env == "MTG_SERVER_NAME"
+    monkeypatch.setenv("MTG_SERVER_NAME", "")
+    s = load_settings()
+    assert s.server_name == "MTG Assistant Gateway" and "server_name" not in s.env_set
+    monkeypatch.setenv("MTG_SERVER_NAME", "  Kitchen Table Magic ")
+    s = load_settings()
+    assert s.server_name == "Kitchen Table Magic" and s.env_set == {"server_name"}
+    db = Database(tmp_path / "x.sqlite")
+    try:
+        live = LiveSettings(s, db)
+        assert live.locked("server_name") and live.get("server_name") == "Kitchen Table Magic"
+        with pytest.raises(SettingError, match=r"\(MTG_SERVER_NAME\)"):
+            live.set("server_name", "Other", by="admin-1")
+    finally:
+        db.close()
+
+
+def test_a_report_plays_five_forge_games_by_default() -> None:
+    from mtg_gateway.config import Settings
+
+    assert MANAGED_SETTINGS["forge_games"].default == 5
+    assert Settings.__dataclass_fields__["forge_games"].default == 5

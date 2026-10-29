@@ -57,7 +57,7 @@ def _words(page: str) -> str:
 
 
 def _table(page: str) -> str:
-    return page.split("<div class='ui-table act-table'", 1)[1].split("<nav class='ui-pager'", 1)[0]
+    return page.split("<div class='ui-table act-table'", 1)[1].split("<div class='loadmore'", 1)[0]
 
 
 def _row(page: str, event: str) -> str:
@@ -79,7 +79,7 @@ async def member_browser(h: Harness, sub: str = "user-2") -> Browser:
 
 
 async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -> None:
-    """Today's 200-row cap goes; 25 a page, "1–25 of N", Newer and Older."""
+    """Today's 200-row cap goes; 25 a page, then Load more ("25 of N"), to the last row."""
     b = await admin_browser(gw)
     _members(gw)
     _rows(gw, [(i * 60, "user-2", BROWSER, "browser_login", None) for i in range(230)])
@@ -90,11 +90,11 @@ async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -
             "SELECT COUNT(*) FROM audit_log WHERE client_id IS NOT '__admin__'"
         ).fetchone()[0]
         assert total > 230
-        assert f"1–25 of {total:,}" in r.text and _table(r.text).count("<div class='tr ev") == 25
-        assert "rel='next'" in r.text and "← Newer</button>" in r.text  # nothing newer on page 1
+        assert f"25 of {total:,}</p>" in r.text and _table(r.text).count("<div class='tr ev") == 25
+        assert "rel='next' data-load-more" in r.text and "ui-pager" not in r.text
         last = (total - 1) // 25 * 25
         r = await b.http.get(f"/admin/activity?offset={last}", headers=NAVIGATE)
-        assert f"{last + 1}–{total} of {total:,}" in r.text and "Older →</button>" in r.text
+        assert f"All {total:,} shown." in r.text and "data-load-more" not in r.text
         assert "<h1>Admin: activity</h1>" in r.text and "Kept for a year." in r.text
     finally:
         await b.aclose()
@@ -272,7 +272,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
     try:
         page = (await b.http.get("/activity", headers=NAVIGATE)).text
         total = gw.db._conn.execute("SELECT COUNT(*) FROM audit_log WHERE sub = 'user-2'").fetchone()[0]
-        assert total > 100 and f"1–25 of {total:,}" in page
+        assert total > 100 and f"25 of {total:,}</p>" in page
         assert "Kept for a year." in page
         table = _table(page)
         words = _words(table)
@@ -296,7 +296,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "Refused or failed" in widgets and "Your assistants" in widgets
         assert "href='/account/details#apps'>Connected apps</a>" in widgets
         older = (await b.http.get("/activity?offset=125", headers=NAVIGATE)).text
-        assert f"126–{total} of {total:,}" in older
+        assert f"{min(150, total)} of {total:,}</p>" in older or f"All {total:,} shown." in older
         byadmin = (await b.http.get("/activity?kind=byadmin", headers=NAVIGATE)).text
         assert _table(byadmin).count("<div class='tr ev") == 1
         found = (await b.http.get("/activity?q=Meren", headers=NAVIGATE)).text

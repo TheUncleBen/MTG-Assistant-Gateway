@@ -458,7 +458,10 @@ async def test_resolve_caps_names_per_call(stack: Stack) -> None:
 
 
 async def test_one_resolve_in_flight_per_user(stack: Stack) -> None:
-    """A second concurrent call from the same account is rejected, not queued; other users are unaffected."""
+    """One resolve call per account runs at a time; other users are unaffected. A second one from
+    the same account waits its turn for a short, bounded time (AT-38: assistants send calls in
+    parallel), says it waited, and is refused busy only past that wait, with a suggested wait (no
+    end time is known for the call that holds the place)."""
     from mtg_gateway.scan.service import CardInput, ScanError
 
     sf = stack.sf
@@ -476,16 +479,64 @@ async def test_one_resolve_in_flight_per_user(stack: Stack) -> None:
     )
     first = asyncio.create_task(service.resolve([CardInput("Sol Ring")], owner="alice"))
     await asyncio.sleep(0.05)
+    service.queue_wait = 0.2
     with pytest.raises(ScanError) as exc:
         await service.resolve([CardInput("Sol Ring")], owner="alice")
-    assert exc.value.kind == "busy"
+    assert exc.value.kind == "busy" and "after a short wait" in str(exc.value)
+    assert exc.value.extra == {"suggested_wait": scan_service.SUGGESTED_WAIT_SECONDS}
+    service.queue_wait = 10.0
+    waited: list[float] = []
+    queued = asyncio.create_task(service.resolve([CardInput("Sol Ring")], owner="alice", waited=waited))
     other = asyncio.create_task(service.resolve([CardInput("Sol Ring")], owner="bob"))
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(1.1)
+    assert not queued.done()  # still waiting its turn
     gate.set()
     assert (await first)[0].status == "exact"
     assert (await other)[0].status == "exact"
-    # Once the first call finishes, the account may resolve again.
-    assert (await service.resolve([CardInput("Sol Ring")], owner="alice"))[0].status == "exact"
+    assert (await queued)[0].status == "exact" and len(waited) == 1 and waited[0] >= 1.0
+    # Once the calls finish, the account may resolve again, at once.
+    again: list[float] = []
+    assert (await service.resolve([CardInput("Sol Ring")], owner="alice", waited=again))[0].status == "exact"
+    assert again == [] or again[0] < 0.1
+    # Security review 2, R2-06: with MAX_RESOLVE_WAITERS_PER_USER of the account's calls already
+    # waiting, one more is busy at once instead of joining them.
+    service._in_flight.add("alice")
+    service._resolve_waiting["alice"] = scan_service.MAX_RESOLVE_WAITERS_PER_USER
+    try:
+        start = time.monotonic()
+        with pytest.raises(ScanError) as exc:
+            await service.resolve([CardInput("Sol Ring")], owner="alice")
+        assert exc.value.kind == "busy" and time.monotonic() - start < 1.0
+        assert service._resolve_waiting["alice"] == scan_service.MAX_RESOLVE_WAITERS_PER_USER
+    finally:
+        service._in_flight.discard("alice")
+        service._resolve_waiting.pop("alice", None)
+
+
+async def test_resolve_cards_says_when_it_waited_its_turn(stack: Stack, monkeypatch) -> None:
+    """The tool's answer says it waited (waited_seconds), and a busy refusal carries suggested_wait."""
+    from mtg_gateway.scan.service import ScanError
+
+    token = await mcp_token(stack.h)
+    service = stack.h.app.state.gateway.scan
+    real = service.resolve
+
+    async def queued(inputs, *, owner=None, waited=None):
+        if waited is not None:
+            waited.append(2.4)
+        return await real(inputs, owner=owner)
+
+    monkeypatch.setattr(service, "resolve", queued)
+    out = (await call(stack.h, token, "resolve_cards", {"text": "1 Sol Ring"}))["structuredContent"]
+    assert out["ok"] is True and out["waited_seconds"] == 2, out
+
+    async def busy(inputs, *, owner=None, waited=None):
+        raise ScanError("busy", "x", extra={"suggested_wait": 10})
+
+    monkeypatch.setattr(service, "resolve", busy)
+    refused = (await call(stack.h, token, "resolve_cards", {"text": "1 Sol Ring"}))["structuredContent"]
+    assert refused["error"] == "busy" and refused["suggested_wait"] == 10 and refused["retryable"], refused
+    assert "retry_after" not in refused
 
 
 async def test_browser_resolve_reports_busy_as_429(stack: Stack) -> None:
@@ -1186,7 +1237,9 @@ async def test_card_printings_lists_released_paper_first_and_clear_counts(stack:
         ("mdd", True, False),
     ]
     assert out["matching_total"] == 3 and "matching" not in out and out["returned_count"] == 2
-    assert out["truncated"] is True and out["has_more"] is False and out["total_cards"] == 3
+    assert out["truncated"] is True and out["total_cards"] == 3
+    # more printings than the rows returned: has_more says so whatever cut them (the limit here)
+    assert out["has_more"] is True and out["scryfall_more_pages"] is False
     # the limit caps the set list too; the count says how many there are
     assert len(out["sets"]) == 2 and out["sets_total"] == 3 and out["sets_truncated"] is True
     assert "not narrowed" in out["sets_scope"]

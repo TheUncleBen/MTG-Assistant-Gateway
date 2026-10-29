@@ -49,9 +49,9 @@ up.
 | Stable identity | Stores people by `sub`. Linked Archidekt accounts, proposals and tokens all hang off it | Provider → **Subject mode**: `Based on the User's hashed ID` (the default). Change it after people have signed in and everyone becomes a new, empty user |
 | Who gets in, first gate | Nothing. Authentik decides before the gateway ever sees the person | Application → **Policy / Group / User Bindings**: bind `MTG Assistant Gateway Users` |
 | Who gets in, second gate | Anyone whose `groups` claim includes neither `MTG_REQUIRED_GROUP` nor `MTG_ADMIN_GROUP` (exactly) gets HTTP 403, and any gateway browser sessions they had are closed. The gateway won't start with it empty unless `MTG_ALLOW_ANY_IDP_USER=true` | The same group name in `MTG_REQUIRED_GROUP`. Exact, case-sensitive match |
-| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default; `0` asks every time). Someone taken out of the group loses every gateway token and session and their Archidekt link on their next request; someone deactivated or deleted loses every token and session, but their stored Archidekt session stays until an admin presses Disable or Unlink, it expires (about 40 days after linking), or the optional hourly clean-up in section 12 deletes it. If Authentik can't be reached (a dropped connection is tried once more first), requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
+| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default; `0` asks every time); after that, a page being read (outside `/admin`) is answered at once while Authentik is asked in the background, whenever Authentik let that sign-in in before, so the first page after a pause never waits (after a gateway restart, only while Authentik's last yes is under a day old); writes, admin pages and assistant requests wait for the answer. Someone taken out of the group loses every gateway token and session and their Archidekt link on their next request. Someone deactivated or deleted shows up only as refused tokens: each of their sign-ins ends when next used, their AI apps keep their gateway tokens but are refused until a new sign-in (which Authentik won't allow), and their stored Archidekt session stays until an admin presses Disable or Unlink, it expires (about 40 days after linking), or the optional hourly clean-up in section 12 deletes it. If Authentik can't be reached (a dropped connection is tried once more first), requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
 | Sign-out | The gateway's **Sign out** button ends its own browser session (with `Clear-Site-Data`); **Sign out on all my devices** (on the `/logout` page) ends every browser and Android app session of that person. It doesn't call Authentik's end-session endpoint, so the Authentik session stays, but for the next hour a sign-in to the gateway's pages in that browser or app asks Authentik for the password again (`prompt=login`), so the next person on a shared device isn't signed straight back in | Provider → **Invalidation flow**: Authentik requires one, so use the default. Nothing else |
-| Refresh at the provider | Keeps Authentik's access and refresh token from each sign-in, encrypted with the `mtg_fernet_key` secret, and uses them only for the live membership check. AI clients still get the gateway's own tokens, never Authentik's | Provider token lifetimes can stay at their defaults. Keep the refresh token validity at least as long as `MTG_REFRESH_TOKEN_TTL` (both 30 days by default): when Authentik refuses an expired refresh token the gateway can't tell that from a deactivated account, so it signs the person out everywhere (tokens and sessions revoked, Archidekt link kept) and they sign in again |
+| Refresh at the provider | Keeps Authentik's access and refresh token from each sign-in (one set per browser or Android app, one for the member's AI apps), encrypted with the `mtg_fernet_key` secret, and uses them only for the live membership check; while the member is active it renews each set at least once a day. AI clients still get the gateway's own tokens, never Authentik's | Provider token lifetimes can stay at their defaults. Keep the refresh token validity at least as long as the gateway's **Assistant refresh** time (the Settings page's Sign-in rows, or `MTG_REFRESH_TOKEN_TTL`; both 30 days by default): when Authentik refuses an expired refresh token the gateway can't tell that from a deactivated account, so that sign-in ends and the member signs in again there (their other devices, AI apps' tokens and Archidekt link are kept) |
 
 ## 2. Before you start
 
@@ -68,6 +68,11 @@ up.
   `-explicit-consent` one) and `default-provider-invalidation-flow`. A fresh
   Authentik creates them from its default blueprints within a minute of
   first start (**Flows and Stages → Flows**).
+- The gateway's and Authentik's clocks agree, 5 seconds apart at most (both
+  machines set their time over NTP). The Android app's sign-in in the phone's
+  browser checks when the person last signed in at Authentik against when that
+  sign-in started, allowing 5 seconds of difference: with clocks further
+  apart, that sign-in is refused and the app finishes it another way.
 
 ## 3. Create the access group
 
@@ -109,7 +114,7 @@ use the gateway? Make a second group and bind only the first one in section
 | Subject mode | **Based on the User's hashed ID** | A stable, opaque `sub`. Never a username or email mode: people can change those themselves, and whoever picks up an old value inherits that gateway account. Don't change it after the first sign-in |
 | Include claims in id_token | **on** (the default) | At sign-in the gateway reads the ID token first and only falls back to `/userinfo`. The live membership check always asks `/userinfo` |
 | Issuer mode | **Each provider has a different issuer, based on the application slug** (the default, `per_provider`) | Gives you the issuer in section 6 |
-| Access code, access token and refresh token validity | defaults (1 minute, 1 hour, 30 days) | A minute is plenty for the redirect. The gateway renews Authentik's access token with the refresh token when it runs out. Don't make the refresh token validity shorter than `MTG_REFRESH_TOKEN_TTL` (30 days); see *Refresh at the provider* in section 1 |
+| Access code, access token and refresh token validity | defaults (1 minute, 1 hour, 30 days) | A minute is plenty for the redirect. The gateway renews Authentik's access token with the refresh token when it runs out. Don't make the refresh token validity shorter than the gateway's **Assistant refresh** time (30 days by default); see *Refresh at the provider* in section 1 |
 
 Save. If the Signing Key list is empty, make one first under **System →
 Certificates → Generate**.
@@ -274,11 +279,14 @@ cover MFA or Sources.)
 
 **Remove someone.** Take them out of `MTG Assistant Gateway Users`, or
 deactivate or delete the user. That's all. The gateway asks Authentik on
-every request (at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, 5 by
-default), so on their next request it revokes their gateway tokens, browser
-sessions and the Authentik tokens it kept, and they are signed out
-everywhere. Taking them out of the group also revokes their Archidekt link;
-for a deactivated or deleted user the link stays until an admin presses
+every request; so that pages don't wait for Authentik, the identity
+provider is asked again in the background while they read pages (writes,
+admin pages and assistant requests wait for the answer). Taken out of the
+group, they lose their gateway tokens, browser sessions, the Authentik
+tokens it kept and their Archidekt link, and are signed out everywhere. A
+deactivated or deleted user shows up as refused tokens, so each of their
+sign-ins ends when next used and their AI apps are refused (press
+**Revoke tokens and sessions** or **Disable** to end those at once); the link stays until an admin presses
 **Disable**, **Unlink Archidekt** or **Delete data** on the admin page, until
 it expires (about 40 days after they linked; the hourly purge then deletes
 it), or until the optional clean-up in section 12 removes it. Authentik

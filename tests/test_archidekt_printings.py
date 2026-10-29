@@ -129,6 +129,6 @@ async def test_hand_picked_printing_must_exist_and_match_the_card() -> None:
         await client.resolve_card(
             token, "Swamp", set_code="m21", collector_number="999", require_printing=True
         )
-    assert "no printing M21 #999 of 'Swamp'" in str(missing.value)
+    assert "Archidekt doesn't have “Swamp” in that printing (M21 #999)" in str(missing.value)
     with pytest.raises(ArchidektError):
         await client.resolve_card(token, "Swamp", set_code="m21", require_printing=True)

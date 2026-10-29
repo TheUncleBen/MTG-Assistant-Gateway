@@ -37,6 +37,22 @@ async def api(b: Browser, method: str, path: str, body: dict | None = None, *, c
     )
 
 
+async def import_list(b: Browser, data: dict):
+    """POST an import from the page and wait for it: an import runs in the background (0.7.46),
+    so the answer is the page's redirect to its result once it ends (or the refusal at once)."""
+    import asyncio
+
+    r = await b.http.post("/collection", data=data)
+    if not r.headers.get("location", "").startswith("/collection?import="):
+        return r
+    for _ in range(500):
+        done = await b.http.get(r.headers["location"])
+        if done.status_code == 303:
+            return done
+        await asyncio.sleep(0.02)
+    raise AssertionError("the import never ended")
+
+
 # -- home -------------------------------------------------------------------------------------
 async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) -> None:
     b = await linked(stack)
@@ -44,8 +60,9 @@ async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) ->
         r = await b.http.get("/", headers=NAV)
         assert r.status_code == 200
         nav = r.text[r.text.index("<nav class='site'") : r.text.index("</nav>")]
-        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/precons", "/lists"):
+        for href in ("/decks", "/search", "/collection", "/scan", "/proposals", "/precons", "/forum"):
             assert f"href='{href}'" in nav, href
+        assert "href='/lists'" not in nav  # My lists lives under Account (decision C8)
         assert "class='tabbar'" in r.text and re.search(r"<body class='[^']*\bhome\b", r.text)
         assert "Sample Commander Deck" in r.text  # the newest decks with their covers
         assert "href='/guide'" in r.text
@@ -105,7 +122,7 @@ async def test_deck_toolbar_selects_sit_inside_their_own_form(stack: Stack) -> N
 # -- search and user pages --------------------------------------------------------------------
 async def test_search_and_user_pages_are_gated_and_list_public_decks(stack: Stack) -> None:
     anon = stack.h.http
-    for path in ("/search", "/users/alice", "/collection", "/guide"):
+    for path in ("/search", "/users/alice", "/collection"):  # the guide reads signed out (C2)
         r = await anon.get(path, headers=NAV)
         assert r.status_code == 302 and r.headers["location"].startswith("/login?next="), path
     b = Browser(stack.h)
@@ -211,7 +228,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         page = await b.http.get("/collection", headers=NAV)
         assert "Import a list" in page.text and "importfile" in page.text and "filepick.js" in page.text
         plain = "2 Sol Ring (CMR) 436\n1 Opt *F*\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": plain})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": plain})
         assert r.status_code == 303, r.headers
         assert re.fullmatch(r"/collection\?ok=imported&r=[\w-]+", r.headers["location"]), r.headers
         rows = {
@@ -222,7 +239,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         exported = (await b.http.get("/collection/export.csv")).text
         assert exported.splitlines()[0].startswith("Quantity,Name,Finish,Condition")
         # the export imports back: the same printings in the same finishes get their copies topped up
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": exported})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": exported})
         assert r.status_code == 303 and "ok=imported" in r.headers["location"]
         rows = {
             (c["card"]["oracleCard"]["name"], c["modifier"]): c["quantity"]
@@ -231,7 +248,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         assert rows == {("Sol Ring", "Normal"): 4, ("Opt", "Foil"): 2}, rows
         # Archidekt's own column names, extra columns ignored, header order free
         arch = "Name,Set Code,Collector Number,Quantity,Foil,Condition,Price\nSol Ring,cmr,436,3,,NM,1.20\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": arch})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": arch})
         assert "ok=imported" in r.headers["location"]
         assert [
             c["quantity"]
@@ -240,11 +257,11 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         ] == [7]
         # refusals: too many rows, nothing readable
         many = "\n".join(f"1 Card {i}" for i in range(101))
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": many})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": many})
         assert r.headers["location"].startswith("/collection?err=toomany&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
         assert "Nothing was imported: that is 101 rows; an import adds at most 100 at a time" in shown.text
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "   "})
+        r = await import_list(b, {"csrf": csrf, "action": "import", "text": "   "})
         assert r.headers["location"].startswith("/collection?err=unreadable&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
         assert "Nothing was imported: paste or choose a CSV or a card list first." in shown.text
@@ -342,7 +359,7 @@ async def test_collection_tools(stack: Stack) -> None:
         # the review page names the target, and the member's Apply writes to Archidekt
         csrf = await b.csrf("/collection")
         review = await b.http.get(f"/proposals/{p['proposal_id']}", headers=NAV)
-        assert review.status_code == 200 and "Your Archidekt collection" in review.text
+        assert review.status_code == 200 and "Your binder" in review.text
         applied = await b.http.post(
             f"/api/v1/proposals/{p['proposal_id']}/apply",
             headers={"X-CSRF-Token": csrf},
@@ -429,7 +446,7 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
             "Link Archidekt",
             "Your first deck edit",
             "Add or change cards",
-            "Use your collection",
+            "Use your binder",
             "Scan a photo of your cards",
             "What the assistant can do",
             "Advanced: tool names",
@@ -440,7 +457,10 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
             "Use the Android app",
         ):
             assert word in r.text, word
-        assert "<nav aria-label='Guide contents'>" in r.text and "src='/static/guide.js?v=" in r.text
+        # the contents page (one page a topic since decision C8), and a topic with the contents rail
+        assert "<div class='gcontents'>" in r.text and "src='/static/guide.js?v=" in r.text
+        topic = (await b.http.get("/guide/tut-link", headers=NAV)).text
+        assert "<nav aria-label='Guide contents'>" in topic and "<h1 id='tut-link-h'>" in topic
         js = await b.http.get("/static/guide.js")
         assert js.status_code == 200 and "guide-q" in js.text
         for banned in ("docker", "Docker", "MTG_", "Portainer", "compose"):

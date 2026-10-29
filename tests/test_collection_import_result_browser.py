@@ -41,7 +41,7 @@ FITS = """
 
 FIRST = "Quantity,Name,Language\n1,Sol Ring,EN\n"
 MIXED = (
-    "Quantity,Name,Language,Condition\n2,Sol Ring,JP,\n1,Opt,PH,\n1,Foo Bar Not A Card,EN,\n1,Forest,,EX\n"
+    "Quantity,Name,Language,Condition\n2,Sol Ring,EN,\n1,Opt,PH,\n1,Foo Bar Not A Card,EN,\n1,Forest,,EX\n"
 )
 BAD = "Quantity,Name\n1,Opt\nx,Sol Ring\n"
 
@@ -82,24 +82,18 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
         _import(page, server, FIRST)
-        assert (
-            page.locator("#col-notes .notice").inner_text()
-            == "Imported 1 card into your Collection on Archidekt."
-        )
+        assert page.locator("#col-notes .notice").inner_text() == "Imported 1 card into your binder."
         _import(page, server, MIXED)
         assert "&r=" in page.url and "Foo" not in page.url
         lines = page.locator("#col-notes .notice li").all_inner_texts()
-        assert (
-            page.locator("#col-notes .notice p").inner_text()
-            == "Imported 4 cards into your Collection on Archidekt."
-        )
+        assert page.locator("#col-notes .notice p").inner_text() == "Imported 4 cards into your binder."
         assert lines == [
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt).",
             "Kept as Near Mint, because “EX” is not a condition Archidekt stores "
             "for collection cards: line 5 (Forest).",
-            "Added to a copy you already had in another language, so it counts as English: line 2 "
-            "(Sol Ring, Japanese added to English).",
+            "Added to an entry you already had, with the same printing, finish, condition and "
+            "language: line 2 (Sol Ring).",
             "Not found, so not imported: line 4 (Foo Bar Not A Card).",
         ], lines
         _check(page, "import-result", width, theme)

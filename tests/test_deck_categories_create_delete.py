@@ -82,7 +82,7 @@ async def test_a_new_category_reads_as_one_line_and_sends_nothing(stack: Stack) 
         SUB, "42", [{"action": "create", "category": "Removal", "not_in_price": True}]
     )
     assert p["diff"] == "New category “Removal”: Not in price on. " + OPEN_TABS_NOTE
-    assert p["diff"] == category_line(p["rows"][0])
+    assert p["diff"] == category_line(p["rows"][0]) + " " + OPEN_TABS_NOTE  # said once, at the end
     assert stack.ark.category_creates == [] and stack.ark.category_deletes == []
 
 
@@ -415,6 +415,11 @@ async def test_the_assistant_creates_deletes_and_deletes_unused_with_the_same_to
     p = structured(await call(h, token, "propose_deck_categories", {"deck_id": "42", "delete_unused": True}))
     assert p["ok"] and p["assistant_may_apply"] is False, p
     assert "Delete category “Spare”" in p["diff"] and "Delete category “Maybeboard”" in p["diff"]
+    # the default board is named in a warning (assistant tool review, 2026-10-28)
+    assert p["warnings"] == [
+        "“Maybeboard” is Archidekt's default board, deleted here because it is empty. Tell the user, "
+        "or leave it out by naming the categories to delete instead."
+    ], p
     # a delete of a category with cards and nowhere to move them is refused, in the backend's words
     p = structured(
         await call(

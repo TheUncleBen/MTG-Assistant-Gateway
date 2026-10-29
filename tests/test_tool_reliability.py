@@ -381,7 +381,8 @@ async def test_get_deck_views_trade_detail_for_size(stack: Stack) -> None:
         assert ("cards" in out) == (view in ("cards", "full")), view
         assert ("decklist_text" in out) == (view in ("text", "full")), view
         assert ("archidekt_text" in out) == (view in ("export", "full")), view
-    assert sizes["summary"] < sizes["text"] < sizes["full"] and sizes["cards"] < sizes["full"]
+    # text and cards carry the headline statistics only (stats_brief), summary the whole (AT-31)
+    assert sizes["text"] < sizes["summary"] < sizes["full"] and sizes["cards"] < sizes["full"]
     default = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
     assert default["view"] == "text" and "decklist_text" in default
     # rules text needs card rows: asked with a view that has none, it comes with the cards view
@@ -507,7 +508,7 @@ async def test_the_apply_line_names_the_collection_on_a_collection_proposal(manu
     b = Browser(manual.h)
     await b.login(f"/proposals/{col['proposal_id']}")
     page = await b.http.get(f"/proposals/{col['proposal_id']}")
-    assert "writes these changes to your collection on Archidekt" in page.text, page.text[-3000:]
+    assert "writes these changes to your binder on Archidekt" in page.text, page.text[-3000:]
     page = await b.http.get(f"/proposals/{deck['proposal_id']}")
     assert "writes these changes to your deck on Archidekt" in page.text
 
@@ -911,8 +912,13 @@ class SearchInput(BaseModel):
 def test_paper_search_query_only_for_commander_searches_without_a_game() -> None:
     from mtg_gateway.mf_proxy import paper_search_query
 
-    for q in ("t:angel id<=wu", "o:flying commander:wu", "t:dragon f:commander", "is:commander t:angel"):
+    for q in ("t:dragon f:commander", "is:commander t:angel", "t:angel id<=wu legal:brawl"):
         assert paper_search_query(q) == q + " game:paper", q
+    # a color identity with no format named is a Commander deck's search: only Commander-legal
+    # cards (no Un-cards); a format named keeps its own (assistant tool review, 2026-10-28)
+    for q in ("t:angel id<=wu", "o:flying commander:wu"):
+        assert paper_search_query(q) == q + " game:paper f:commander", q
+    assert paper_search_query("t:cat or t:dog id<=r") == "(t:cat or t:dog id<=r) game:paper f:commander"
     for q in (
         "t:angel",
         'o:"commander"',
@@ -935,8 +941,9 @@ async def test_a_commander_search_through_the_proxy_asks_for_paper_cards() -> No
     proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(mf))
     listed = {t["name"]: t for t in await proxy.tools()}
     assert "adds game:paper" in listed["scryfall_search"]["description"]
+    assert "f:commander" in listed["scryfall_search"]["description"]
     out = await proxy.call("scryfall_search", {"query": "t:angel id<=w"})
-    assert out.content[0].text == "query=t:angel id<=w game:paper"
+    assert out.content[0].text == "query=t:angel id<=w game:paper f:commander"
     out = await proxy.call("scryfall_search", {"params": {"query": "t:angel id<=w game:arena"}})
     assert out.content[0].text == "query=t:angel id<=w game:arena"
     out = await proxy.call("scryfall_search", {"query": "t:angel"})

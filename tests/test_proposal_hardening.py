@@ -22,7 +22,9 @@ from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structu
 
 
 async def _propose(h, token: str, changes: list[dict]) -> dict:
-    return structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    return structured(
+        await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes, "separate": True})
+    )
 
 
 def _review_rows(text: str) -> list[str]:
@@ -242,6 +244,9 @@ async def test_deck_edited_during_lookups_is_not_overwritten(stack: Stack) -> No
         return orig(req)
 
     ark.transport.handler = concurrent
+    # the propose already looked Arcane Signet up (0.7.46, A6); forget that answer so the apply
+    # looks it up again, which is when the deck is edited here
+    h.app.state.gateway.decks._printings.clear()
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "stale", out
     assert ark.patches == []

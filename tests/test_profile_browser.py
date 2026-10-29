@@ -94,8 +94,7 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         bell = page.locator(".tabbar a.bell" if rail else ".topbar .bell")
         badge = bell.locator(".n")
         badge.wait_for(state="visible", timeout=4000)
-        name = "Alerts" if rail else "Notifications"
-        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == f"{name}, 3 new"
+        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == "Alerts, 3 new"
         for path in ("/account", "/collection", "/", "/notifications"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert page.evaluate(MEASURE) == [], path
@@ -190,17 +189,18 @@ def test_switches_and_drop_downs_save_in_place_and_the_bell_opens_its_box(server
         page.keyboard.press("Escape")
         page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert not badge.is_visible()
-        # Home's widget shows the count; on a phone the whole tile leads to the Notifications page,
-        # on a desktop its Open button opens the same box
+        # Home's Needs you row: nothing while the count is zero; with new alerts it shows the
+        # count, and its Open alerts opens the same box
         page.goto(f"{server.base}/", wait_until="networkidle")
         page.wait_for_timeout(800)
-        assert page.locator("[data-bell-big]").inner_text() == "0"
-        page.locator("[data-bell-widget] .lab").click()
-        page.wait_for_url("**/notifications")
-        assert page.locator(".bell-row").count() == 4
+        assert page.locator("[data-bell-row]").is_hidden()
+        # a count of one, as the script keeps it for a minute between pages (the gateway keeps
+        # Archidekt's count for a minute too, so a new note would not show yet)
+        page.evaluate("() => sessionStorage.setItem('mtg-bell', JSON.stringify({at: Date.now(), n: 1}))")
         page.set_viewport_size({"width": 1366, "height": 860})
         page.goto(f"{server.base}/", wait_until="networkidle")
-        page.wait_for_timeout(800)
+        page.locator("[data-bell-row]").wait_for(state="visible", timeout=4000)
+        assert page.locator("[data-bell-row] .what").inner_text() == "1 new alert on Archidekt"
         page.locator("[data-bell-open]").click()
         page.locator(".bell-list").wait_for(state="visible", timeout=4000)
         page.keyboard.press("Escape")
@@ -223,7 +223,7 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
         page.locator("[data-box-open='col-vis']").click()
         box = page.locator("#col-vis")
         box.wait_for(state="visible")
-        assert "Make your collection public?" in box.inner_text()
+        assert "Make your binder public?" in box.inner_text()
         final = box.locator(".acts button").last
         assert final.inner_text().strip() == "Make it public" and "primary" in (
             final.get_attribute("class") or ""
@@ -239,7 +239,7 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
         assert me["profile"]["is_collection_public"] is True
         vis = page.locator("#visibility")
         assert "Public · anyone can see it on your Archidekt profile" in vis.inner_text()
-        assert "Your collection is public on Archidekt." in vis.inner_text()
+        assert "Your binder is public on Archidekt." in vis.inner_text()
         vis.locator("button", has_text="Make it private").click()
         page.wait_for_url("**/collection?ok=private*")
         assert me["profile"]["is_collection_public"] is False

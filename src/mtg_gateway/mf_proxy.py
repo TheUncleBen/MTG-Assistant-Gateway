@@ -75,7 +75,7 @@ OWNED_ELSEWHERE: dict[str, str] = {
 }
 # What each owner does, for the refusal an assistant gets when it calls the hidden duplicate.
 OWNER_NOTES: dict[str, str] = {
-    "run_deck_report": "the gateway's simulation: it reads the deck, validates it, runs the goldfish games "
+    "run_deck_report": "the gateway's test: it reads the deck, validates it, runs the solo test games "
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
     "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, include_text for rules text, "
@@ -84,7 +84,7 @@ OWNER_NOTES: dict[str, str] = {
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
     "deck_stats": "legality, structural checks, bracket, curve, colors and price from one read",
     "compare_decks": "the exact adds and cuts between two decks, snapshots or lists, with a precon-style "
-    "summary and an optional paired goldfish A/B",
+    "summary and an optional paired solo test A/B",
 }
 
 # What a simulation's "Full report: goldfish_report(...)" line becomes (see TEXT_REWRITES).
@@ -123,26 +123,40 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
 
 # A scryfall_search in a Commander context (a colour identity or a commander term, or Commander
 # legality) is about paper decks, so it leaves out cards that exist only on Arena or MTGO: the
-# gateway adds game:paper unless the query already names a game. Said in the tool's description.
+# gateway adds game:paper unless the query already names a game. A colour identity with no format
+# named also gets f:commander, so Un-cards and other cards Commander does not allow stay out (an
+# id<=r search listed Goblin Cruciverbalist; assistant tool review, 2026-10-28). Both said in the
+# tool's description.
 _COMMANDER_QUERY = re.compile(
     r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)|\b(?:f|format|legal|is):commander\b",
     re.IGNORECASE,
 )
+_IDENTITY_TERM = re.compile(r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)", re.IGNORECASE)
+_FORMAT_TERM = re.compile(r"(?<![\w])-?(?:f|format|legal|banned|restricted)[:=]", re.IGNORECASE)
 _GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
+_OR_TERM = re.compile(r"(?<![\w])or(?![\w])", re.IGNORECASE)
 SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
 PAPER_SEARCH_NOTE = (
     " In a Commander search (a color identity such as id<=wu, commander:, f:commander or "
     "is:commander in the query) the gateway adds game:paper, so cards that exist only on Arena or "
-    "MTGO are left out; put a game: term in the query (e.g. game:arena) to choose otherwise."
+    "MTGO are left out, and with a color identity and no format named it adds f:commander, so "
+    "cards Commander does not allow (Un-cards) are left out too; put a game: or format term in the "
+    "query (e.g. game:arena, legal:brawl) to choose otherwise."
 )
 
 
 def paper_search_query(query: str) -> str:
-    """``query`` with game:paper added when it is a Commander search that names no game."""
+    """``query`` with game:paper added when it is a Commander search that names no game, and
+    f:commander too when it has a colour identity and names no format."""
     if not _COMMANDER_QUERY.search(query) or _GAME_TERM.search(query):
         return query
-    paper = f"{query.rstrip()} game:paper"
-    return paper if len(paper) <= SEARCH_QUERY_MAX else query
+    base = query.strip()
+    if _OR_TERM.search(base):  # the added terms apply to the whole query, not its last "or" part
+        base = f"({base})"
+    out = f"{base} game:paper"
+    if _IDENTITY_TERM.search(query) and not _FORMAT_TERM.search(query):
+        out += " f:commander"
+    return out if len(out) <= SEARCH_QUERY_MAX else query
 
 
 def rewrite_text(text: str) -> str:
@@ -207,7 +221,7 @@ def research_refusal(result: types.CallToolResult) -> types.CallToolResult:
         return result
     out = {"ok": False, "error": "invalid", "message": f"the research service refused the arguments: {text}"}
     return types.CallToolResult(
-        content=[types.TextContent(type="text", text=json.dumps(out, indent=2))],
+        content=[types.TextContent(type="text", text=json.dumps(out, separators=(",", ":")))],
         structured_content=out,
         isError=True,
     )
@@ -286,9 +300,14 @@ BLOCKED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-# One member may run this many proxied calls at once; another is refused at once ("busy")
-# rather than queued, so one account cannot hold Mystic Forge's simulation slots for everyone.
+# One member may run this many proxied calls at once, so one account cannot hold Mystic Forge's
+# simulation slots for everyone. Another call waits up to QUEUE_WAIT_SECONDS for one of theirs to
+# finish (assistants send tool calls in parallel, AT-38), then is refused ("busy").
 MAX_CALLS_PER_USER = 2
+QUEUE_WAIT_SECONDS = 15.0
+# At most this many of one member's calls wait at once; one more is refused busy without waiting
+# (security review 2, R2-06), so one account can't pile up waiting calls.
+MAX_WAITING_CALLS_PER_USER = 6
 # Every proxied call is cut off after this long (a goldfish run included), so no call holds a
 # slot for hours. Mystic Forge itself may keep working on a cancelled call until it finishes.
 CALL_DEADLINE_SECONDS = 120.0
@@ -335,7 +354,8 @@ def _busy(limit: int = MAX_CALLS_PER_USER, retry_after: int | None = None) -> ty
     structured content, error busy with ``retry_after``: the seconds until their oldest call is
     stopped at the latest (each call's deadline), so a slot is free by then."""
     message = (
-        f"{limit} research calls for your account are still running; wait for one to finish and try again"
+        f"{limit} research calls for your account are still running after a short wait; wait for one "
+        "to finish and try again"
     )
     structured: dict[str, Any] = {"ok": False, "error": "busy", "message": message}
     if retry_after is not None:
@@ -464,6 +484,17 @@ def _front_face_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _waited_note(result: types.CallToolResult, waited: float) -> types.CallToolResult:
+    """``result`` with a first line saying the call waited its turn (``waited`` seconds, a second
+    or more), so the assistant knows it was queued rather than slow."""
+    if waited < 1 or not result.content or not isinstance(result.content[0], types.TextContent):
+        return result
+    note = f"(This call waited {round(waited)} s for your other research calls to finish.)"
+    first = result.content[0]
+    content = [first.model_copy(update={"text": f"{note}\n\n{first.text}"}), *result.content[1:]]
+    return result.model_copy(update={"content": content})
+
+
 def is_busy(result: types.CallToolResult) -> bool:
     """True for the refusal ``call`` gives when the owner already runs their share of calls."""
     if not result.is_error or not result.content:
@@ -485,12 +516,15 @@ class MysticForgeProxy:
         client_factory: Any | None = None,
         max_calls_per_user: int = MAX_CALLS_PER_USER,
         deadline: float = CALL_DEADLINE_SECONDS,
+        queue_wait: float = QUEUE_WAIT_SECONDS,
     ):
         self.url = url
+        self.queue_wait = queue_wait
         self.cache_ttl = cache_ttl
         self.max_calls_per_user = max_calls_per_user
         self.deadline = deadline
         self._in_flight: dict[str, int] = {}
+        self._waiting: dict[str, int] = {}  # a member's calls waiting for a slot (_wait_turn)
         self._started: dict[str, list[float]] = {}  # when each of a member's running calls began
         self._client_factory = client_factory or (lambda: Client(url))
         self._tools: list[dict[str, Any]] = []
@@ -630,11 +664,9 @@ class MysticForgeProxy:
                     except DeckError as exc:
                         return _deck_refusal(exc)
                     arguments = {**arguments, key: text}  # read here: nothing for the budget below
-        if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
-            refused = self.archidekt_budget(owner)
-            if refused:
-                return _refusal(refused)
+        waited = 0.0
         if owner is not None:
+            waited = await self._wait_turn(owner)
             if self._in_flight.get(owner, 0) >= self.max_calls_per_user:
                 return _busy(self.max_calls_per_user, self._retry_after(owner))
             self._in_flight[owner] = self._in_flight.get(owner, 0) + 1
@@ -645,6 +677,11 @@ class MysticForgeProxy:
             # double-faced or split card by its front face only, as reports already send it.
             arguments = _front_face_arguments(arguments)
         try:
+            # spent once the call has its slot, so one refused busy after its wait spends nothing
+            if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
+                refused = self.archidekt_budget(owner)
+                if refused:
+                    return _refusal(refused)
             if isinstance(arguments, dict):
                 if not self._listed:
                     # Learn which tools take a params object. A flat call has no other way to
@@ -660,7 +697,7 @@ class MysticForgeProxy:
             result = research_refusal(_rewrite_result(await self._forward(name, arguments)))
             if name == "validate_decklist":
                 result = _validation_checks(result, arguments)
-            return result
+            return _waited_note(result, waited)
         finally:
             if owner is not None:
                 left = self._in_flight.get(owner, 1) - 1
@@ -673,6 +710,29 @@ class MysticForgeProxy:
                     starts.remove(started)
                 if not starts:
                     self._started.pop(owner, None)
+
+    async def _wait_turn(self, owner: str) -> float:
+        """Wait up to ``queue_wait`` seconds while ``owner`` runs their share of calls; the seconds
+        waited. ``call`` takes the slot right after, with nothing awaited in between. With
+        MAX_WAITING_CALLS_PER_USER of the member's calls already waiting, no wait (``call`` then
+        says busy)."""
+        start = time.monotonic()
+        if self._in_flight.get(owner, 0) < self.max_calls_per_user:
+            return 0.0
+        if self._waiting.get(owner, 0) >= MAX_WAITING_CALLS_PER_USER:
+            return 0.0
+        end = start + self.queue_wait
+        self._waiting[owner] = self._waiting.get(owner, 0) + 1
+        try:
+            while self._in_flight.get(owner, 0) >= self.max_calls_per_user and time.monotonic() < end:
+                await anyio.sleep(0.05)
+        finally:
+            left = self._waiting.get(owner, 1) - 1
+            if left > 0:
+                self._waiting[owner] = left
+            else:
+                self._waiting.pop(owner, None)
+        return time.monotonic() - start
 
     def _retry_after(self, owner: str) -> int | None:
         """Seconds until the member's oldest running call is stopped at the latest: its deadline,

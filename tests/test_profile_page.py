@@ -80,7 +80,7 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
     page = (await member.http.get("/account/details")).text
     for h in (
         "<h2>Archidekt profile</h2>",
-        "<h2>Email and notifications on Archidekt</h2>",
+        "<h2>Email and alerts on Archidekt</h2>",
         "<h2>New device default settings</h2>",
         "<h2>On Archidekt only</h2>",
     ):
@@ -106,7 +106,7 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
         ("Other members can contact me", "Lets members message you through Archidekt."),
         ("Archidekt's newsletter", "Occasional email about the site."),
         ("Email me when someone comments", "On your decks and your forum posts."),
-        ("Archidekt notifications", "Shows Archidekt's notifications in the bell."),
+        ("Archidekt alerts", "Shows Archidekt's alerts in the bell."),
     ):
         assert _said(mail, label) and _said(mail, help_text), label
     # Ben (25 Oct): the switches say what they do; no line telling a member that a switch saves
@@ -163,7 +163,7 @@ async def test_the_cards_are_not_drawn_while_archidekt_is_not_linked(stack: Stac
         assert "data-bell" in page  # the bell is in the bar on every page
         assert (await b.http.get("/notifications/count")).json() == {"ok": True, "unseen": 0}
         page = (await b.http.get("/notifications")).text
-        assert "Link your Archidekt account under Account details to see its notifications here." in page
+        assert "Link your Archidekt account under Account details to see its alerts here." in page
     finally:
         await b.aclose()
 
@@ -178,7 +178,7 @@ async def test_a_switch_and_a_drop_down_save_on_the_members_press(member: Browse
     page = (await member.http.get(r.headers["location"])).text
     assert "<div class='notice ok' role='status'>Saved on Archidekt.</div>" in _card(page, "email")
     assert "id='pr-newsletter' type='checkbox' name='on' value='1' checked" in page
-    # "Archidekt notifications": on means notifications, stored the other way round by Archidekt
+    # "Archidekt alerts": on means notifications, stored the other way round by Archidekt
     r = await _post(member, action="email", switch="site_notifications", on="0")
     assert r.status_code == 303 and me["accountSettings"]["noArchidektNotifications"] is True
     r = await _post(member, action="email", switch="site_notifications", on="1")
@@ -383,9 +383,7 @@ async def test_collection_visibility_public_asks_once_more(member: Browser, stac
     assert "Private</b> <span class='muted'>· only you can see it</span>" in vis
     assert "data-box-open='col-vis'" in vis and "Make it public…" in vis
     assert (
-        "Make your collection public?" in page
-        and "Keep it private" in page
-        and "Make it public</button>" in page
+        "Make your binder public?" in page and "Keep it private" in page and "Make it public</button>" in page
     )
     assert (
         "Anyone can then see every card you own, with finish and condition, on your Archidekt profile."
@@ -408,14 +406,14 @@ async def test_collection_visibility_public_asks_once_more(member: Browser, stac
     page = (await member.http.get(r.headers["location"])).text
     vis = page.split("id='visibility'", 1)[1]
     assert "Public</b> <span class='muted'>· anyone can see it on your Archidekt profile</span>" in vis
-    assert "Make it private</button>" in vis and "Your collection is public on Archidekt." in vis
+    assert "Make it private</button>" in vis and "Your binder is public on Archidekt." in vis
     # private is one press
     r = await _post(member, action="collection_public", on="0", next="/collection")
     assert (
         r.headers["location"] == "/collection?ok=private#visibility"
         and me["profile"]["is_collection_public"] is False
     )
-    assert "Your collection is private on Archidekt." in (await member.http.get(r.headers["location"])).text
+    assert "Your binder is private on Archidekt." in (await member.http.get(r.headers["location"])).text
     # it was the account action with field collection_public, pressed by the member
     rows = stack.h.app.state.gateway.db._conn.execute(
         "SELECT changes_json, created_by_client FROM proposals WHERE kind='action' ORDER BY rowid"
@@ -439,10 +437,12 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     page = (await member.http.get("/")).text
     # the page render asked Archidekt nothing about notifications: the script asks afterwards
     assert not [c for c in stack.ark.calls if "notification" in c[1]]
-    assert "<a class='icon-btn bell' href='/notifications' aria-label='Notifications'" in page
+    assert "<a class='icon-btn bell' href='/notifications' aria-label='Alerts'" in page
     assert "<span class='n' hidden aria-hidden='true'></span>" in page and "/static/bell.js" in page
-    widget = page.split("data-bell-widget", 1)[1].split("</div>", 1)[0]
-    assert "On Archidekt" in widget and "data-bell-big" in widget and "data-bell-open>Open</a>" in widget
+    # Home's Needs you row for the alerts: hidden until the script has the count (decision C8)
+    row = page.split("<li data-bell-row hidden>", 1)[1].split("</li>", 1)[0]
+    assert "<span data-bell-n>0</span> new <span data-bell-word>alerts</span>" in row
+    assert "href='/notifications' data-bell-open>" in row and "Open alerts</a>" in row
     r = await member.http.get("/notifications/count")
     assert r.json() == {"ok": True, "unseen": 2} and r.headers["cache-control"] == "no-store"
     await member.http.get("/notifications/count")
@@ -451,7 +451,9 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     d = r.json()
     assert d["ok"] and d["unseen"] == 2
     assert "<a class='bell-row new' href='/decks/42'>" in d["html"]  # a deck opens here, on the gateway
-    assert "href='https://archidekt.com/forum/thread/7' target='_blank'" in d["html"]
+    # a forum reply opens the gateway's own thread page, in the same tab
+    assert "<a class='bell-row new' href='/forum/thread/7'>" in d["html"]
+    assert "archidekt.com/forum" not in d["html"]
     assert (
         "<div class='bell-row'><i aria-hidden='true'>A</i><span class='t'>x<span class='s'>Archidekt</span>"
         in d["html"]
@@ -462,7 +464,7 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     assert len([c for c in stack.ark.calls if c[1].endswith("notifications/")]) == 1
     # the page without scripts
     page = (await member.http.get("/notifications")).text
-    assert "<title>Notifications" in page and "amy commented on “Meren”" in page
+    assert "<title>Alerts" in page and "amy commented on “Meren”" in page
     assert profile_page.BELL_NOTE in page and "href='/account/details#email'" in page
     assert "aria-current=page" in page.split("class='icon-btn bell'", 1)[1][:160]
 
@@ -480,6 +482,33 @@ async def test_the_bell_stays_quiet_when_archidekt_cannot_be_asked(member: Brows
     page = (await member.http.get("/account/details")).text
     assert _said(page, "Archidekt did not answer, so your profile and settings can't be shown right now.")
     assert (await member.http.get("/collection")).status_code == 200
+
+
+def test_a_notification_opens_the_gateways_own_page_where_it_has_one() -> None:
+    """A deck, a forum thread and a follower's profile open here; Archidekt's news and contests
+    (no page here) stay on Archidekt, in a new tab. A profile link that is a number, not a
+    username, stays on Archidekt too: /users/ takes a username."""
+    rows = [
+        ("ForumThread", {"selfId": 7}, "/forum/thread/7"),
+        ("Global", {"linkId": 8}, "/forum/thread/8"),
+        ("Sticky", {"linkId": 9}, "/forum/thread/9"),
+        ("Features", {"linkId": 10}, "/forum/thread/10"),
+        ("DeckThread", {"linkId": 42}, "/decks/42"),
+        ("Profile", {"linkId": "dave"}, "/users/dave"),
+        ("Profile", {"linkId": "Amy B."}, "/users/Amy%20B."),
+    ]
+    for kind, extra, want in rows:
+        url = profile.notification_url({"notificationType": kind, **extra})
+        out = profile_page.notifications_html(
+            {"notifications": [{"kind": kind, "text": "t", "seen": True, "url": url}]}
+        )
+        assert f"href='{want}'>" in out and "target=" not in out, (kind, out)
+    for kind, extra in (("News", {"linkId": 55}), ("Contest", {"linkId": 12}), ("Profile", {"linkId": 123})):
+        url = profile.notification_url({"notificationType": kind, **extra})
+        out = profile_page.notifications_html(
+            {"notifications": [{"kind": kind, "text": "t", "seen": True, "url": url}]}
+        )
+        assert "href='https://archidekt.com/" in out and "target='_blank'" in out, (kind, out)
 
 
 def test_the_profile_cards_without_a_profile_say_so() -> None:
@@ -500,10 +529,10 @@ async def test_a_link_from_another_site_reads_no_notifications(member: Browser, 
     stack.ark.calls.clear()
     page = (await member.http.get("/notifications", headers={"Sec-Fetch-Site": "cross-site"})).text
     assert not [c for c in stack.ark.calls if "notification" in c[1]]
-    assert "href='/notifications'" in page and "Show my notifications" in page
+    assert "href='/notifications'" in page and "Show my alerts" in page
     page = (await member.http.get("/notifications", headers={"Sec-Fetch-Site": "same-origin"})).text
     assert [c for c in stack.ark.calls if c[1].endswith("notifications/")]
-    assert "Show my notifications" not in page
+    assert "Show my alerts" not in page
 
 
 async def test_unlinking_forgets_the_profile_bell_and_list_counts(member: Browser, stack: Stack) -> None:

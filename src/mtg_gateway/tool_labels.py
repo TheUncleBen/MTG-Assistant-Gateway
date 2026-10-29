@@ -34,6 +34,7 @@ TOOLS: dict[str, ToolWords] = {
     "propose_new_deck": ToolWords("Propose a new deck", "Make me a new deck"),
     "propose_deck_changes": ToolWords("Propose deck changes", "Change my deck"),
     "check_deck_changes": ToolWords("Check deck changes", "Check these changes"),
+    "check_new_deck": ToolWords("Check a new deck", "Check this new deck before you propose it"),
     "list_my_proposals": ToolWords("List my changes", "List my changes"),
     "amend_proposal": ToolWords("Amend a change", "Amend that change"),
     "withdraw_proposal": ToolWords("Withdraw a change", "Take that change back"),
@@ -41,7 +42,8 @@ TOOLS: dict[str, ToolWords] = {
     "show_waiting_changes": ToolWords("Show waiting changes", "What is waiting for my approval?"),
     "confirm_waiting": ToolWords("Apply all from a chat card", "Apply all (a chat card's button)"),
     "get_apply_result": ToolWords("Follow an apply from a chat card", "Is the apply done? (a chat card)"),
-    "get_proposal": ToolWords("Read a change", "Show me that change"),
+    "get_proposal": ToolWords("Read a proposal from its chat card", "Is it still waiting? (a chat card)"),
+    "proposal_status": ToolWords("Read a proposal", "Show me that change"),
     "list_snapshots": ToolWords("List snapshots", "List my deck snapshots"),
     "propose_restore_snapshot": ToolWords("Propose a restore", "Put my deck back to that snapshot"),
     "propose_deck_categories": ToolWords("Propose category changes", "Add, delete or rename a deck category"),
@@ -49,7 +51,8 @@ TOOLS: dict[str, ToolWords] = {
         "Propose custom card changes", "Put one of my custom cards in this deck"
     ),
     "apply_proposal": ToolWords("Apply a change", "Apply that change"),
-    "confirm_proposal": ToolWords("Approve or reject from a chat card", "Approve (a chat card's button)"),
+    "confirm_proposal": ToolWords("Apply or reject from a chat card", "Apply (a chat card's button)"),
+    "propose_rest": ToolWords("Propose the rest of a change", "Propose the rest (a chat card's button)"),
     "reject_proposal": ToolWords("Reject a change", "Reject that change"),
     "get_snapshot": ToolWords("Read a snapshot", "Show me that snapshot"),
     # tools_account.py
@@ -57,18 +60,15 @@ TOOLS: dict[str, ToolWords] = {
     "propose_clone_deck": ToolWords("Propose a copy of a deck", "Copy this deck into my decks"),
     "get_deck_comments": ToolWords("Read deck comments", "Read the comments on this deck"),
     "get_forum": ToolWords("Read the forum", "Read Archidekt's forum"),
-    "propose_deck_social": ToolWords("Propose a like, bookmark or follow", "Bookmark this deck"),
-    "propose_comment": ToolWords("Propose a comment", "Comment on this deck"),
+    "propose_account_action": ToolWords(
+        "Propose an Archidekt account action", "Bookmark this deck, or comment on it"
+    ),
     "propose_delete_deck": ToolWords("Propose deleting a deck", "Delete my deck"),
-    "propose_create_folder": ToolWords("Propose a new folder", "Make me a folder"),
     "get_deck_collaborators": ToolWords("Read deck collaborators", "Who can edit my deck?"),
     # tools_community.py
-    "propose_deck_help": ToolWords("Propose a deck help request", "Ask for help with this deck"),
-    "propose_report": ToolWords("Propose a report to Archidekt", "Report this deck to Archidekt"),
     "get_my_profile": ToolWords("Read my Archidekt profile", "Show my Archidekt profile"),
-    "get_my_notifications": ToolWords("Read my Archidekt notifications", "Any new notifications?"),
+    "get_my_notifications": ToolWords("Read my Archidekt alerts", "Any new alerts?"),
     "propose_profile_change": ToolWords("Propose a profile or settings change", "Change my Archidekt bio"),
-    "propose_contest_entry": ToolWords("Propose a contest entry", "Enter this deck in the contest"),
     "get_registration_pdf": ToolWords("Make a deck registration sheet", "Make a registration PDF"),
     # tools_packages.py
     "list_card_packages": ToolWords("List card packages", "List card packages"),
@@ -76,16 +76,18 @@ TOOLS: dict[str, ToolWords] = {
     # tools_lists.py
     "get_my_lists": ToolWords("Read my Archidekt lists", "List my category templates"),
     "propose_list_change": ToolWords("Propose a change to my lists", "Add a color tag called Cut, red"),
-    "propose_collaborator": ToolWords("Propose a collaborator change", "Let someone edit my deck"),
     "parse_deck_export": ToolWords("Read an Archidekt export", "Read this Archidekt export"),
     # tools_reports.py
     "deck_stats": ToolWords("Deck statistics", "Show my deck's statistics"),
     "compare_decks": ToolWords("Compare two decks", "Compare two decks"),
     "run_deck_report": ToolWords("Run a test report", "Run a test report"),
     "list_deck_reports": ToolWords("List test reports", "List my test reports"),
-    "remove_card_model": ToolWords("Remove a saved description", "Remove my saved description for this card"),
+    "remove_card_model": ToolWords("Remove a card model", "Remove my card model for this card"),
     "get_deck_report": ToolWords("Read a test report", "Show me that test report"),
     "play_more_games": ToolWords("Play more games", "Play more games on that report"),
+    "propose_delete_report": ToolWords("Ask to delete a report", "Delete that test report"),
+    "propose_delete_snapshot": ToolWords("Ask to delete a snapshot", "Delete that snapshot"),
+    "propose_delete_scan_session": ToolWords("Ask to delete a scan", "Delete that scan"),
     # scan/ (the card scanner's tools)
     "resolve_cards": ToolWords("Find exact printings", "Which printing is this card?"),
     "card_printings": ToolWords("List a card's printings", "Show me this card's printings"),
@@ -94,8 +96,8 @@ TOOLS: dict[str, ToolWords] = {
     "get_scan_session": ToolWords("Read a scan", "Show me that scan"),
     # browse.py, collection.py, summary.py
     "search_decks": ToolWords("Search public decks", "Find public decks"),
-    "list_collection": ToolWords("Read my collection", "What is in my collection?"),
-    "propose_collection_changes": ToolWords("Propose collection changes", "Add these cards to my collection"),
+    "list_collection": ToolWords("Read my binder", "What is in my binder?"),
+    "propose_collection_changes": ToolWords("Propose binder changes", "Add these cards to my binder"),
     "get_summary": ToolWords("Daily or weekly summary", "What happened this week?"),
     # watchlist.py (with watchlists on)
     "watch_card": ToolWords("Watch a card", "Watch this card's price"),
@@ -103,6 +105,15 @@ TOOLS: dict[str, ToolWords] = {
     "unwatch": ToolWords("Stop watching", "Stop watching that"),
     "list_watchlist": ToolWords("Read my watchlist", "What is on my watchlist?"),
     "card_price_history": ToolWords("Card price history", "How has this card's price moved?"),
+    # the seven account-action tools merged into propose_account_action in 0.7.46: kept so the
+    # Metrics rows recorded before still read
+    "propose_deck_social": ToolWords("Propose a like, bookmark or follow", "Bookmark this deck"),
+    "propose_comment": ToolWords("Propose a comment", "Comment on this deck"),
+    "propose_create_folder": ToolWords("Propose a new folder", "Make me a folder"),
+    "propose_collaborator": ToolWords("Propose a collaborator change", "Let someone edit my deck"),
+    "propose_deck_help": ToolWords("Propose a deck help request", "Ask for help with this deck"),
+    "propose_report": ToolWords("Propose a report to Archidekt", "Report this deck to Archidekt"),
+    "propose_contest_entry": ToolWords("Propose a contest entry", "Enter this deck in the contest"),
     # Mystic Forge, passed through (mf_proxy.ALLOWED_TOOLS)
     "scryfall_search": ToolWords("Search cards", "Find cards that…"),
     "scryfall_named": ToolWords("Look up a card", "Look up this card"),
@@ -128,7 +139,7 @@ TOOLS: dict[str, ToolWords] = {
     "precon_decklist": ToolWords("A precon's decklist", "What is in this precon?"),
     "precon_export": ToolWords("Export a precon", "Export this precon's list"),
     "goldfish_odds": ToolWords("Draw odds", "What are the odds I draw this by turn 3?"),
-    "goldfish_annotate": ToolWords("Annotate a deck for the simulator", "Annotate my deck for the simulator"),
+    "goldfish_annotate": ToolWords("Annotate a deck for the solo test", "Annotate my deck for the solo test"),
 }
 
 # The JSON API's routes (api.py), recorded as "METHOD /path".

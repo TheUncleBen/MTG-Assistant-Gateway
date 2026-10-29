@@ -68,7 +68,7 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         # everything else the operator can read, and the sign-in service's tokens
         "approval mode",
         "profile picture",
-        "deck and collection changes",
+        "deck and binder changes",
         "connected apps, usage counts",
         "use the same key, so they can open those too",
         # everything admins see and do

@@ -1,6 +1,7 @@
 package local.mtgassistantgateway.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -41,6 +42,56 @@ class BrowserSignInTest {
         assertEquals("code=$code&verifier=$code", String(BrowserSignIn.finishBody(code, code)))
     }
 
+    @Test fun anAuthTabOnTheAppsSchemeIsAskedForInTheStartUrl() {
+        val c = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        assertEquals(
+            "https://g/login?next=%2F&app_challenge=$c&fresh=1&app_return=scheme",
+            BrowserSignIn.startUrl("https://g", "/", c, fresh = true, schemeReturn = true),
+        )
+        assertEquals("https://g/login?next=%2F&app_challenge=$c", BrowserSignIn.startUrl("https://g", "/", c, fresh = false))
+    }
+
+    @Test fun theDefaultBrowserFirstThenAChromeThatCameWithThePhoneAndNothingElse() {
+        val has = setOf("com.android.chrome", "org.other.browser", "evil")
+        val system = setOf("com.android.chrome", "com.sec.android.app.sbrowser")
+        val pick = { default: String?, installed: List<String> ->
+            BrowserSignIn.pickAuthTabBrowser(default, installed, { it in system }) { it in has }
+        }
+        assertEquals("org.other.browser", pick("org.other.browser", listOf("com.android.chrome", "org.other.browser")))
+        // Samsung Internet as the default, without Auth Tabs: Chrome, though listed after another
+        assertEquals("com.android.chrome", pick("com.sec.android.app.sbrowser", listOf("org.other.browser", "com.android.chrome")))
+        assertEquals("com.android.chrome", pick(null, listOf("com.android.chrome")))
+        // never another app that says it has Auth Tabs (security review A-01)
+        assertNull(pick("x", listOf("evil")))
+        assertNull(pick("com.sec.android.app.sbrowser", listOf("com.sec.android.app.sbrowser", "org.other.browser")))
+        assertNull(pick("com.sec.android.app.sbrowser", listOf("com.sec.android.app.sbrowser", "org.firefox")))
+        assertNull(pick(null, emptyList()))
+        // an app that took Chrome's package name without coming with the phone
+        val sideloaded = BrowserSignIn.pickAuthTabBrowser("org.firefox", listOf("com.android.chrome"), { false }) { it == "com.android.chrome" }
+        assertNull(sideloaded)
+    }
+
+    @Test fun onlyTheAppsSchemeWithAWellFormedCodeCountsFromAnAuthTab() {
+        val code = "a".repeat(43)
+        assertEquals(code, BrowserSignIn.codeOfSchemeReturn("mtgassistant-signin://signin?code=$code"))
+        for (bad in listOf(
+            null,
+            "",
+            "https://mtg.example.com/login/app-return?code=$code",
+            "mtgassistant-signin://other?code=$code",
+            "mtgassistant-signin://signin/x?code=$code",
+            "mtgassistant-signin://u@signin?code=$code",
+            "mtgassistant-signin://signin:1?code=$code",
+            "mtgassistant-signin://signin?code=short",
+            "mtgassistant-signin://signin?code=$code&code=$code",
+            "mtgassistant-signin://signin?x=1&code=$code",
+            "mtgassistant-signin://signin?code=$code#f",
+            "evil://signin?code=$code",
+        )) {
+            assertNull(bad, BrowserSignIn.codeOfSchemeReturn(bad))
+        }
+    }
+
     @Test fun anAuthTabReturnsOnlyOnThePlainHttpsGateway() {
         assertEquals("mtg.example.com", BrowserSignIn.authTabHost("https://mtg.example.com"))
         for (bad in listOf("http://mtg.example.com", "https://mtg.example.com:8443", "https://u@mtg.example.com", "https://mtg.example.com/x", "not a url", "")) {
@@ -68,6 +119,15 @@ class BrowserSignInTest {
             assertNull(bad, BrowserSignIn.codeOfReturn(g, bad))
         }
         assertNull(BrowserSignIn.codeOfReturn("https://mtg.example.com:8443", "https://mtg.example.com:8443/login/app-return?code=$code"))
+    }
+
+    @Test fun aRefusedSchemeLegCarriesNoCodeAndIsKnownAsRefused() {
+        assertEquals("mtgassistant-signin://signin?error=sign_in_not_fresh", BrowserSignIn.SCHEME_REFUSED)
+        assertTrue(BrowserSignIn.isSchemeRefusal(BrowserSignIn.SCHEME_REFUSED))
+        assertNull(BrowserSignIn.codeOfSchemeReturn(BrowserSignIn.SCHEME_REFUSED))
+        for (other in listOf(null, "mtgassistant-signin://signin?code=${"a".repeat(43)}", "evil://signin?error=sign_in_not_fresh")) {
+            assertFalse(other.toString(), BrowserSignIn.isSchemeRefusal(other))
+        }
     }
 
     @Test(expected = IllegalArgumentException::class) fun finishBodyRefusesOddValues() {
