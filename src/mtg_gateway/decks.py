@@ -1985,10 +1985,10 @@ def _new_problems(
         how = "" if size_a.get("expected") else "at least "
         problem = f"the deck {'has' if now else 'would have'} {size_a.get('actual')} cards, not {how}{want}"
         out.append({"problem": problem, "cards": []})
-    had = set(names(before, "colour_identity_violations"))
+    had = set(names(before, "color_identity_violations"))
     outside = [
         r
-        for r in after.get("colour_identity_violations") or []
+        for r in after.get("color_identity_violations") or []
         if isinstance(r, dict) and r.get("name") not in had
     ]
     if outside:
@@ -4592,7 +4592,7 @@ class DeckService:
 
     async def _judge_rules(
         self, deck: Deck, changes: list[Change], rows: list[dict[str, Any]]
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
         """The review rows with the format rules the change would break that the deck keeps now
         marked on them (``breaks``, which makes the proposal high risk), and those rules in words.
         The deck as it would be is checked with deck_stats.deck_checks; an added card is looked up

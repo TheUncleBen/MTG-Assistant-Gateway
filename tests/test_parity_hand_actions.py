@@ -545,7 +545,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
     stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
     checks = stats["checks"]
     assert set(checks) == {
-            "deck_size", "commander_zone", "colour_identity_violations", "singleton_violations",
+            "deck_size", "commander_zone", "color_identity_violations", "singleton_violations",
             "copy_limit_violations", "uncategorised", "problems", "ok",
             "format_family", "legality", "companion", "bracket",  # every-format checks (0.7.2)
             "legal", "legal_problems",  # the deck's verdict, as archidekt.com's banner gives it

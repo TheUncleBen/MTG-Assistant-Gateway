@@ -689,7 +689,7 @@ async def test_cmdr_marker_reads_as_the_commander_everywhere(stack: Stack) -> No
     parsed = structured(await call(h, token, "parse_decklist", {"text": text}))
     assert parsed["ok"] and parsed["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait [Commander]\n")
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
-    assert rep["ok"] and rep["stats"]["commanders"] == ["Aesi, Tyrant of Gyre Strait"], rep
+    assert rep["ok"] and rep["stats_brief"]["commanders"] == ["Aesi, Tyrant of Gyre Strait"], rep
     cmp = structured(await call(h, token, "compare_decks", {"a_list": text, "b_list": text}))
     assert cmp["ok"], cmp
     bad = structured(await call(h, token, "parse_decklist", {"text": "1 Sol Ring\n-1 Island"}))
@@ -1840,7 +1840,7 @@ async def test_pasted_lists_are_reported_and_kept_as_pasted_lists(stack: Stack) 
     assert kept["ok"] and kept["goldfish"]["ok"] and kept["source"]["label"] == "Pasted list", kept
     assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
     assert rep["validation"]["ok"] is True, rep["validation"]
-    assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
+    assert rep["stats_brief"]["card_count"] == 100 and rep["stats_brief"]["card_data"] == "unavailable"
     # Double-faced cards reach the simulator by their front face (Archidekt names both faces;
     # Scryfall's collection lookup, which the research service uses, knows only the front).
     faces = (
@@ -1858,7 +1858,9 @@ async def test_pasted_lists_are_reported_and_kept_as_pasted_lists(stack: Stack) 
     # refused as such (60 or more is a 60-card game, see test_sixty_card_decks_...).
     plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n26 Grizzly Bears\n"}))
     assert plain["ok"] is False and plain["error"] == "simulation_failed", plain
-    assert "Commander" in plain["message"] and plain["stats"]["checks"], plain
+    assert "Commander" in plain["message"] and "legal" in plain["stats_brief"], plain
+    kept = structured(await call(h, token, "get_deck_report", {"report_id": plain["report_id"]}))
+    assert kept["stats"]["checks"], kept
     assert plain["goldfish"]["ok"] is False and "at least 60 cards" in plain["goldfish"]["text"], plain
     stats = structured(
         await call(

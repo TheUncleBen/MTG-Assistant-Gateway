@@ -1204,7 +1204,9 @@ class ReportService:
     def _compare_of(self, sub: str, rid: str) -> str | None:
         """The compare_with report that report rid was made as the partner of, or None."""
         row = self.db._one("SELECT stats_json FROM reports WHERE id = ? AND owner_sub = ?", (rid, sub))
-        stats = json.loads(row["stats_json"]) if row is not None and row["stats_json"] else {}
+        stats = (
+            deck_stats.stored(json.loads(row["stats_json"])) if row is not None and row["stats_json"] else {}
+        )
         run = stats.get(RUN_KEY) if isinstance(stats, dict) else None
         claim = run.get("compare_of") if isinstance(run, dict) else None
         return claim if isinstance(claim, str) else None
@@ -2215,7 +2217,9 @@ class ReportService:
             raise DeckError("not_found", "No such report for your account.")
         d = dict(row)
         [out] = self._named([self._summary(d)])
-        out["stats"] = {k: v for k, v in json.loads(d["stats_json"]).items() if k != RUN_KEY}
+        out["stats"] = {
+            k: v for k, v in deck_stats.stored(json.loads(d["stats_json"])).items() if k != RUN_KEY
+        }
         out["goldfish"] = _compact(json.loads(d["goldfish_json"])) if d.get("goldfish_json") else None
         # ahead of the simulation's own text: how much of the deck its numbers stand for
         out["coverage"] = solo_coverage(out["goldfish"], deck_size=_card_count(out["stats"]))
@@ -2254,7 +2258,9 @@ class ReportService:
         if second is not None:
             return rid, second
         row = self.db._one("SELECT stats_json FROM reports WHERE id = ? AND owner_sub = ?", (rid, sub))
-        stats = json.loads(row["stats_json"]) if row is not None and row["stats_json"] else {}
+        stats = (
+            deck_stats.stored(json.loads(row["stats_json"])) if row is not None and row["stats_json"] else {}
+        )
         run = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
         src = run.get("source") if isinstance(run.get("source"), dict) else {}
         other = src.get("with_report") if src.get("kind") == "pair" else None
@@ -2284,7 +2290,7 @@ class ReportService:
         )
         if row is None or not str(row["deck_id"] or ""):
             return None
-        stats = json.loads(row["stats_json"]) if row["stats_json"] else {}
+        stats = deck_stats.stored(json.loads(row["stats_json"])) if row["stats_json"] else {}
         run = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
         if run.get("source"):
             return None
@@ -2302,7 +2308,7 @@ class ReportService:
             ).fetchall()
         for r in rows:
             g = json.loads(r["goldfish_json"]) if r["goldfish_json"] else None
-            st = json.loads(r["stats_json"]) if r["stats_json"] else {}
+            st = deck_stats.stored(json.loads(r["stats_json"])) if r["stats_json"] else {}
             theirs = run_settings(st, g, None)
             if "goldfish" not in theirs["engines"]:
                 continue
@@ -2505,7 +2511,7 @@ class ReportService:
             ).fetchall()
         out = []
         for r in reversed(rows):
-            stats = json.loads(r["stats_json"]) if r["stats_json"] else {}
+            stats = deck_stats.stored(json.loads(r["stats_json"])) if r["stats_json"] else {}
             goldfish = json.loads(r["goldfish_json"]) if r["goldfish_json"] else None
             forge = json.loads(r["forge_json"]) if r["forge_json"] else None
             out.append(
@@ -2599,7 +2605,7 @@ class ReportService:
 
     @staticmethod
     def _summary(d: dict[str, Any]) -> dict[str, Any]:
-        stats = json.loads(d["stats_json"]) if d.get("stats_json") else {}
+        stats = deck_stats.stored(json.loads(d["stats_json"])) if d.get("stats_json") else {}
         metrics = {k: stats.get(k) for k in TREND_KEYS}
         goldfish = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
         validation = json.loads(d["validation_json"]) if d.get("validation_json") else None
@@ -2931,7 +2937,7 @@ MORE_QUEUE_FULL = (
 MORE_REFUSALS = {
     "queue": MORE_QUEUE_FULL,
     "full": MORE_FULL,
-    "ended": MORE_NOT_ENDED,
+    "forge_running": MORE_NOT_ENDED,
     "none": MORE_NOT_THIS_ONE,
     "noforge": MORE_NO_FORGE,
     "pairwait": MORE_PAIR_WAIT,
@@ -3087,7 +3093,7 @@ def headline_numbers(d: dict[str, Any]) -> dict[str, Any]:
     hit = _HEADLINES.get(key)
     if hit is not None:
         return dict(hit)
-    stats = json.loads(d["stats_json"]) if d.get("stats_json") else {}
+    stats = deck_stats.stored(json.loads(d["stats_json"])) if d.get("stats_json") else {}
     goldfish = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
     forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
     forge = forge if isinstance(forge, dict) else {}

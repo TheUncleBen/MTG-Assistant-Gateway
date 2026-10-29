@@ -152,7 +152,8 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       $("note").className = "note";
     } else {
       if (st.mana_curve) drawCurve(st.mana_curve);
-      drawColours(st.colour_pips || {}, st.mana_sources || {}, st.colour_identity);
+      // older chats carry the 0.7.45 names (colour_*)
+      drawColours(st.color_pips || st.colour_pips || {}, st.mana_sources || {}, st.color_identity || st.colour_identity);
       fact(facts, "Lands / nonlands", num(st.land_count) + " / " + num(st.nonland_count));
       if (st.average_mana_value != null) fact(facts, "Average mana value", String(st.average_mana_value));
       fact(facts, "Price", "$" + num(st.price_total).toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));

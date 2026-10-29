@@ -384,7 +384,8 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         assert "class='legal bad'" in page.text and "deck has 101 cards; commander wants 100" in page.text
         assert "Not legal in Commander" in page.text and "101 of 100" in page.text
         after = (await b.http.get("/api/v1/decks/42/stats")).json()["stats"]
-        assert after["card_count"] == 101 and after["legality_problems"] == []
+        assert after["card_count"] == 101 and "legality_problems" not in after
+        assert after["checks"]["legality"]["banned"] == []
         assert after["checks"]["legal"] is False and after["checks"]["ok"] is False
         assert after["checks"]["legal_problems"] == ["deck has 101 cards; commander wants 100"]
 

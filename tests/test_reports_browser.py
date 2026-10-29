@@ -788,7 +788,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
         assert h.post("/history/reports/rep_more/forge/more", data={}).status_code == 403
         csrf = h.get("/history/reports/rep_more").text.split("name='csrf' value='", 1)[1].split("'", 1)[0]
         ended = h.post("/history/reports/rep_more/forge/more", data={"csrf": csrf})
-        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=ended")
+        assert ended.status_code == 303 and ended.headers["location"].endswith("?more=forge_running")
         assert h.post("/history/reports/nope/forge/more", data={"csrf": csrf}).status_code == 404
 
 
