@@ -878,6 +878,13 @@ def _step_18(conn: sqlite3.Connection) -> None:
         _add_column(conn, "watch_cards", column, "TEXT")
 
 
+def _step_19(conn: sqlite3.Connection) -> None:
+    """0.7.46: a deck edit's ``deck_after`` (decks.deck_after_block: the deck's size, verdict and
+    price once applied), kept with the proposal so the review page can say the price change an
+    assistant is told. Set by a propose or an amend that works it out; another amend clears it."""
+    _add_column(conn, "proposals", "deck_after_json", "TEXT")
+
+
 # A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
 # result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
 RISK_REASON_KEY = "_risk_reason"
@@ -902,6 +909,7 @@ MIGRATIONS = [
     _step_16,
     _step_17,
     _step_18,
+    _step_19,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -2410,8 +2418,8 @@ class Database:
             c.execute(
                 f"""INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
                    changes_json, diff_text, state, created_at, expires_at, created_by_client, rows_json,
-                   board_no, archidekt_user_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?,
+                   deck_after_json, board_no, archidekt_user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?,
                      (SELECT COALESCE(MAX(board_no), 0) + 1 FROM proposals
                       WHERE owner_sub = ? AND deck_id = ?
                         AND (state = 'applying' OR (state = 'pending' AND expires_at >= ?))),
@@ -2429,6 +2437,7 @@ class Database:
                     row["expires_at"],
                     row.get("created_by_client"),
                     json.dumps(row["rows"]) if row.get("rows") is not None else None,
+                    json.dumps(row["deck_after"]) if row.get("deck_after") is not None else None,
                     row["owner_sub"],
                     row["deck_id"],
                     now,
@@ -2502,6 +2511,8 @@ class Database:
         d["result"] = json.loads(d["result_json"]) if d.get("result_json") else None
         rows_json = d.pop("rows_json", None)
         d["rows"] = json.loads(rows_json) if rows_json else None
+        after_json = d.pop("deck_after_json", None)
+        d["deck_after"] = json.loads(after_json) if after_json else None
         return d
 
     def list_proposals(
@@ -2896,6 +2907,7 @@ class Database:
         what_changed: str | None = None,
         baseline_fingerprint: str | None = None,
         deck_name: str | None = None,
+        deck_after: dict[str, Any] | None = None,
     ) -> int | None:
         """Replace a waiting proposal's content with a new version, keeping its id, date and board
         number. The version being replaced is kept in ``proposal_versions`` with
@@ -2905,7 +2917,8 @@ class Database:
         stays until the link is gone, so the new version can't apply by itself. Returns the new
         version, or None when it isn't waiting, has expired or is at another version. Raises
         ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions. ``deck_name``:
-        a new deck's new name (a waiting new deck may be renamed)."""
+        a new deck's new name (a waiting new deck may be renamed). ``deck_after``: the new version's
+        deck once applied, when the amend worked it out (cleared otherwise, never left stale)."""
         now = int(time.time())
         with self.tx() as c:
             row = c.execute(
@@ -2944,7 +2957,7 @@ class Database:
                 "amended_at = ?, amended_by_client = ?, version_note = ?, status = ?, "
                 "status_reason = ?, status_at = ?, "
                 "baseline_fingerprint = COALESCE(?, baseline_fingerprint), "
-                "deck_name = COALESCE(?, deck_name) WHERE id = ?",
+                "deck_name = COALESCE(?, deck_name), deck_after_json = ? WHERE id = ?",
                 (
                     json.dumps(changes),
                     json.dumps(rows) if rows is not None else None,
@@ -2958,6 +2971,7 @@ class Database:
                     now,
                     baseline_fingerprint,
                     deck_name,
+                    json.dumps(deck_after) if deck_after is not None else None,
                     proposal_id,
                 ),
             )

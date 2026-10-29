@@ -4655,6 +4655,7 @@ class DeckService:
                 "deck_name": deck.name,
                 "baseline_fingerprint": deck.fingerprint(),
                 "changes": [c.as_dict() for c in changes],
+                "deck_after": after,  # kept for the review page's price line
             },
             rows,
         )
@@ -5330,6 +5331,9 @@ class DeckService:
             # what an applied account action or collection change did (the pages and the card say it)
             **({"applied_text": applied} if applied else {}),
             **({"try_again": True} if try_again else {}),
+            # a waiting deck edit: the deck once applied (size, verdict, price), as worked out when
+            # it was proposed or last amended; the review page says its price change
+            **({"deck_after": row["deck_after"]} if state == "pending" and row.get("deck_after") else {}),
             # a deck edit that stopped partway: "Propose the rest" (propose_rest)
             **({"rest_offered": True} if self.rest_offered(row) else {}),
             **(
@@ -6354,10 +6358,12 @@ class DeckService:
             except DeckError as exc:
                 if exc.kind == "backup_failed":  # nothing was sent; the proposal is pending again
                     raise
-                waits_again = exc.kind in TRY_AGAIN_KINDS and row.get("created_by_client") not in (
-                    None,
-                    BROWSER_CLIENT,
-                    ADMIN_CLIENT,
+                # An app's change waits again, and so does any change the member pressed Apply
+                # for on its review page (a website change too: independent review of 0.7.46).
+                # The deck page's own instant save says so on the page and is made again there.
+                waits_again = exc.kind in TRY_AGAIN_KINDS and (
+                    via == REVIEW_PAGE
+                    or row.get("created_by_client") not in (None, BROWSER_CLIENT, ADMIN_CLIENT)
                 )
                 if (
                     waits_again
@@ -8110,6 +8116,7 @@ class DeckService:
                 by_client=current_client.get(),
                 what_changed=board.what_changed(row.get("rows"), rows),
                 baseline_fingerprint=deck.fingerprint(),
+                deck_after=note.get("deck_after"),
             )
         except ProposalVersionsFull:
             raise DeckError(
@@ -11431,7 +11438,8 @@ def needs_look_error(reason: str | None) -> DeckError:
         "stale",
         f"Not applied: {recheck.reason_text(reason or recheck.REASON_CHANGED)} Nothing was sent to "
         "Archidekt. The change is "
-        "still waiting, marked Needs a look: review it again, then apply, amend or reject it.",
+        "still waiting, marked Needs a look: it can't be applied as it is. Amend it to fit the deck "
+        "now, or reject it.",
         state="pending",
         status="needs_look",
     )
