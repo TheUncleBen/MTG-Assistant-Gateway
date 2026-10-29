@@ -416,6 +416,40 @@ def add_history_routes(
             )
         return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
 
+    @server.custom_route("/history/snapshots/{snap_id}/new-deck", methods=["POST"], include_in_schema=False)
+    async def snapshot_new_deck(request: Request) -> Response:
+        """A deleted deck's snapshot made into a new-deck proposal (Make a new deck from this): the
+        member reviews and applies it on its review page like any new deck."""
+        snap_id = request.path_params["snap_id"]
+        details = "/history" + query_string({"open": f"s-{snap_id}"})
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(details)
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return _expired(sub, sid)
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            p = await decks.propose_deck_from_snapshot(sub, snap_id)
+        except DeckError as exc:
+            if (plan := busy_plan(exc)) is not None:
+                busy = page(plan.title, busy_body(plan, details), sub=sub, sid=sid, status=plan.status)
+                busy.headers.update(busy_headers(plan))
+                return busy
+            buttons = (
+                f"<a class='btn btn-primary' href='{_esc(details)}'>Back to the snapshot</a>"
+                "<a class='btn' href='/history'>Back to History</a>"
+            )
+            return page(
+                "New deck not proposed",
+                f"<div class='card'><p class='notice error'>{_esc(exc)}</p>"
+                f"<p>Nothing was changed on Archidekt.</p><div class='actions'>{buttons}</div></div>",
+                sub=sub,
+                sid=sid,
+                status=400,
+            )
+        return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
+
     def _after_delete(back: Any) -> str:
         """Where a deleted report's member goes: back to the Reports or History page they came from
         (the form's ``back``, a path of this site only), saying it was deleted; else History."""

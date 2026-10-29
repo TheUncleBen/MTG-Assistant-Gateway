@@ -289,11 +289,22 @@ def build_events(
         )
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
-            restore = (
-                "<p class='muted'>This deck is no longer on your Archidekt account (deleted there?), so "
-                "the snapshot cannot be restored onto it. The snapshot stays here.</p>"
+            # The way back is a new deck made from the snapshot, reviewed like any new deck.
+            new_deck_form = (
+                f"<form method='post' action='/history/snapshots/{_esc(x['snapshot_id'])}/new-deck' "
+                "class='hy-new-deck'>"
+                + csrf_input
+                + "<button type='submit' class='btn-plain' data-busy-label='Proposing…'>"
+                "Make a new deck from this</button></form>"
             )
-            action = ""
+            restore = (
+                "<p>This deck is no longer on your Archidekt account (deleted there?), so the snapshot "
+                "cannot be restored onto it. <strong>Make a new deck from this</strong> proposes a new "
+                "deck with the snapshot's name, format, cards and categories; you review and apply it "
+                "before anything is made on Archidekt.</p>"
+                f"<div class='ui-actions'>{new_deck_form}</div>"
+            )
+            action = new_deck_form
         else:
             restore = (
                 "<p>Restoring makes a proposal that puts the deck back to this snapshot; you review and "

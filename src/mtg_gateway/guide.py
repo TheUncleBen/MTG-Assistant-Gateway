@@ -690,6 +690,9 @@ def build(
         "change.</span></li>"
         "<li><span>Confirm. <strong>Restore</strong> puts the deck back exactly as the snapshot had it, "
         "cards and the deck's own name, description, format, bracket and privacy alike.</span></li></ol>"
+        "<p>A deck deleted since can't be restored onto; its snapshot has <strong>Make a new deck from "
+        "this</strong> instead, a new deck with the snapshot's name, format, cards and categories that "
+        "you review and apply like any new deck.</p>"
         "<p>Or ask your assistant to “undo yesterday's change”: the restore comes to you as a proposal, "
         "and a restore always waits for your press, whatever approval mode you chose.</p>"
     )

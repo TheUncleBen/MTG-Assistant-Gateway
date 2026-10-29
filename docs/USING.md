@@ -225,7 +225,9 @@ One deck:
   deck, History and snapshots, **Delete deck**, Compare with another deck,
   Deck stats and Open on Archidekt. Deleting asks you to type the deck's name; a snapshot is
   kept under History, but no copy is made on Archidekt, and a snapshot can't be
-  restored onto a deleted deck. Archidekt itself has no undo for a deleted deck.
+  restored onto a deleted deck; History's **Make a new deck from this** proposes
+  a new deck from it, with its name, format, cards and categories, which you
+  review and apply like any new deck. Archidekt itself has no undo for a deleted deck.
 - **Deck settings** holds the name, format, bracket, description and
   privacy, and also the **cover image** (any card of the deck, or Archidekt's
   automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
