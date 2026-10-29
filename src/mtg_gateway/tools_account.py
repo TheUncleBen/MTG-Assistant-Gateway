@@ -324,7 +324,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Parse the text of an Archidekt CSV deck export (any column selection) into cards with quantity, "
             "name, set, categories, mana cost and price, plus decklist_text (categories kept in [brackets]) "
-            "for the simulation tools. Reads Archidekt's column names (Quantity, Name, Edition code, "
+            "for the test tools. Reads Archidekt's column names (Quantity, Name, Edition code, "
             "Category, Secondary categories, Collector number...) and also Count, Set and Categories. "
             "Columns it does not read are listed in unknown_columns: tell the user. Tolerates the "
             "export's quirks. Does not contact Archidekt."

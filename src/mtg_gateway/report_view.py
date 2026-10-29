@@ -29,7 +29,7 @@ HONESTY_CLASSES = {
     "interaction_counter": "Counterspells",
     "protection": "Protection",
     "political": "Votes and choices for opponents",
-    "unmodeled_other": "Other effects the simulator does not model",
+    "unmodeled_other": "Other effects the solo test does not model",
 }
 # Its standing approximations (the "v1 model shortcuts"), in plain words.
 APPROXIMATIONS = {
@@ -882,14 +882,14 @@ UNMODELED_TEXT = (
 )
 # Said only when the report has a finished Forge solo test (Forge plays nearly every card).
 UNMODELED_FORGE_TEXT = (
-    "Forge's full-rules solo test above played them with their real rules, except any it lists under "
+    "The Forge solo test above played them with their real rules, except any it lists under "
     "“Cards Forge left out”."
 )
 # The other groups' explanations, shared by the signed-in page and the export.
 OUT_OF_SCOPE_TEXT = (
-    "The simulator plays against opponents who do nothing, so removal, board wipes, counterspells and "
+    "The solo test plays against opponents who do nothing, so removal, board wipes, counterspells and "
     "protection have nothing to act on. Spells that only do that stayed in hand. Creatures and other "
-    "permanents among them were still cast, and played the parts of their text the simulator can read."
+    "permanents among them were still cast, and played the parts of their text the solo test can read."
 )
 LOW_IMPACT_HEADING = "Played with their effect but never mattered"
 LOW_IMPACT_TEXT = (
@@ -903,12 +903,12 @@ APPROX_TEXT = (
 )
 UNMODELED_SAVED_TEXT = (
     "The gateway can keep up to 200 of these descriptions for you once they pass its check, and your "
-    "later solo tests then play those cards with them. Your saved descriptions play only in your own "
+    "later solo tests then play those cards with them. Your card models play only in your own "
     "solo tests."
 )
 OUT_OF_SCOPE_HEADING = "Needs opponents"
 MODEL_HEADING = "What the quick solo test leaves out"
-KEPT_HEADING = "Played with saved card descriptions"
+KEPT_HEADING = "Played with your card models"
 KEPT_TEXT = (
     "Your assistant described each of these cards in a form the solo test can play, and the gateway "
     "checked its format and saved it. This run played these cards with those descriptions."
@@ -935,10 +935,10 @@ def _kept_who(u: dict[str, Any]) -> str:
 REMOVE_MODEL_LABEL = "Remove"
 # What the report page says after a Remove (?models=…)
 MODEL_NOTICES = {
-    "removed": "The saved description was removed. Later solo tests play that card without its effect "
+    "removed": "The card model was removed. Later solo tests play that card without its effect "
     "again, until a new description is saved.",
-    "gone": "That saved description was already removed, or an admin removed it.",
-    "error": "The saved description could not be removed. Try again later.",
+    "gone": "That card model was already removed, or an admin removed it.",
+    "error": "The card model could not be removed. Try again later.",
 }
 
 
@@ -998,7 +998,7 @@ def _remove_form(
         f"<form method='post' action='/history/reports/{_esc(report_id)}/models/remove' class='inline'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         f"<input type='hidden' name='card' value='{_esc(u['name'])}'>"
-        f"<button type='submit' class='{button}'{opener} aria-label='Remove the saved description of "
+        f"<button type='submit' class='{button}'{opener} aria-label='Remove the card model of "
         f"{_esc(card)}'>{REMOVE_MODEL_LABEL}</button></form>"
     )
 
@@ -1082,8 +1082,8 @@ def ask_prompt(
         else " and which cards you could not describe."
     )
     return (
-        f'In the solo test (goldfish simulation) of my deck "{deck_name}" ({deck_url}), these cards '
-        f"are played without their effect: {names}. Use the gateway's goldfish annotation tool on the "
+        f'In the solo test of my deck "{deck_name}" ({deck_url}), these cards '
+        f"are played without their effect: {names}. Use the gateway's annotation tool on the "
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
         f"the deck with your models as its annotations, and tell me what changed{told}"
@@ -1982,7 +1982,7 @@ def report_body_html(
         own = ""
         if g.get("summary"):
             own = (
-                "<details class='disclosure'><summary class='fold-btn'>The simulator's own summary</summary>"
+                "<details class='disclosure'><summary class='fold-btn'>The solo test's own summary</summary>"
                 "<ul class='sumlines'>"
                 + "".join(f"<li>{_esc(plain_words(ln))}</li>" for ln in g["summary"])
                 + "</ul></details>"
@@ -2060,7 +2060,7 @@ def report_body_html(
         )
     raw = ""
     if g and g.get("raw"):
-        raw += f"<h3>Simulation output</h3><pre>{_esc(g['raw'])}</pre>"
+        raw += f"<h3>Solo test output</h3><pre>{_esc(g['raw'])}</pre>"
     if v and v.get("raw"):
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:

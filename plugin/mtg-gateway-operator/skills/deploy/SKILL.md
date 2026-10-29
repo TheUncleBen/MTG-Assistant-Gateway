@@ -58,7 +58,7 @@ anything that isn't the default:
 | Overlay network name | `mtg-gateway` | shared with the proxy |
 | Allow Archidekt writes now? | `true` | `MTG_WRITES_ENABLED`, as in the example files; `false` stops all writes (proposals can still be made and reviewed). Recommend making the first edit on a deck the operator doesn't care about |
 | Admin group | empty | `MTG_ADMIN_GROUP`; its members get the admin pages, the Settings page among them. Recommend setting it |
-| Forge simulations on? | `1` | `FORGE_REPLICAS`; `0` turns Forge off |
+| Forge games on? | `1` | `FORGE_REPLICAS`; `0` turns Forge off |
 
 Everything else uses the values in `deploy/stack.env.example`. Leave its
 feature lines empty: the features are on, and an admin manages them on the

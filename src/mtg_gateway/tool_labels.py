@@ -51,7 +51,7 @@ TOOLS: dict[str, ToolWords] = {
         "Propose custom card changes", "Put one of my custom cards in this deck"
     ),
     "apply_proposal": ToolWords("Apply a change", "Apply that change"),
-    "confirm_proposal": ToolWords("Approve or reject from a chat card", "Approve (a chat card's button)"),
+    "confirm_proposal": ToolWords("Apply or reject from a chat card", "Apply (a chat card's button)"),
     "propose_rest": ToolWords("Propose the rest of a change", "Propose the rest (a chat card's button)"),
     "reject_proposal": ToolWords("Reject a change", "Reject that change"),
     "get_snapshot": ToolWords("Read a snapshot", "Show me that snapshot"),
@@ -67,7 +67,7 @@ TOOLS: dict[str, ToolWords] = {
     "get_deck_collaborators": ToolWords("Read deck collaborators", "Who can edit my deck?"),
     # tools_community.py
     "get_my_profile": ToolWords("Read my Archidekt profile", "Show my Archidekt profile"),
-    "get_my_notifications": ToolWords("Read my Archidekt notifications", "Any new notifications?"),
+    "get_my_notifications": ToolWords("Read my Archidekt alerts", "Any new alerts?"),
     "propose_profile_change": ToolWords("Propose a profile or settings change", "Change my Archidekt bio"),
     "get_registration_pdf": ToolWords("Make a deck registration sheet", "Make a registration PDF"),
     # tools_packages.py
@@ -82,7 +82,7 @@ TOOLS: dict[str, ToolWords] = {
     "compare_decks": ToolWords("Compare two decks", "Compare two decks"),
     "run_deck_report": ToolWords("Run a test report", "Run a test report"),
     "list_deck_reports": ToolWords("List test reports", "List my test reports"),
-    "remove_card_model": ToolWords("Remove a saved description", "Remove my saved description for this card"),
+    "remove_card_model": ToolWords("Remove a card model", "Remove my card model for this card"),
     "get_deck_report": ToolWords("Read a test report", "Show me that test report"),
     "play_more_games": ToolWords("Play more games", "Play more games on that report"),
     "propose_delete_report": ToolWords("Ask to delete a report", "Delete that test report"),
@@ -96,8 +96,8 @@ TOOLS: dict[str, ToolWords] = {
     "get_scan_session": ToolWords("Read a scan", "Show me that scan"),
     # browse.py, collection.py, summary.py
     "search_decks": ToolWords("Search public decks", "Find public decks"),
-    "list_collection": ToolWords("Read my collection", "What is in my collection?"),
-    "propose_collection_changes": ToolWords("Propose collection changes", "Add these cards to my collection"),
+    "list_collection": ToolWords("Read my binder", "What is in my binder?"),
+    "propose_collection_changes": ToolWords("Propose binder changes", "Add these cards to my binder"),
     "get_summary": ToolWords("Daily or weekly summary", "What happened this week?"),
     # watchlist.py (with watchlists on)
     "watch_card": ToolWords("Watch a card", "Watch this card's price"),
@@ -139,7 +139,7 @@ TOOLS: dict[str, ToolWords] = {
     "precon_decklist": ToolWords("A precon's decklist", "What is in this precon?"),
     "precon_export": ToolWords("Export a precon", "Export this precon's list"),
     "goldfish_odds": ToolWords("Draw odds", "What are the odds I draw this by turn 3?"),
-    "goldfish_annotate": ToolWords("Annotate a deck for the simulator", "Annotate my deck for the simulator"),
+    "goldfish_annotate": ToolWords("Annotate a deck for the solo test", "Annotate my deck for the solo test"),
 }
 
 # The JSON API's routes (api.py), recorded as "METHOD /path".

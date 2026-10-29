@@ -600,7 +600,7 @@ def system_data(state: Any) -> dict[str, Any]:
 
 # -- HTML -------------------------------------------------------------------------
 USERS_PURPOSE = "Everyone who has signed in. Disabling blocks this gateway only."
-MODELS_PURPOSE = "Each model is used only in its owner's simulations. Only admins see who added it."
+MODELS_PURPOSE = "Each model is used only in its owner's solo tests. Only admins see who added it."
 CURRENT = " aria-current='page'"
 NO_NAME = activity_view.NO_NAME  # a member with neither a username nor an email on record
 PER_PAGE = ui.PER_PAGE
@@ -958,7 +958,7 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         + _row("Newest backup copy", copies)
         + _row("Newest before-upgrade copy", _before_upgrade_text(sysd.get("before_upgrade"), now=now))
         + _row("Research service (Mystic Forge)", _service_label(sysd["mystic_forge"]))
-        + _row("Simulation engine (Forge)", _service_label(sysd["forge"]))
+        + _row("Test engine (Forge)", _service_label(sysd["forge"]))
         + _row("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"], now=now))
         + _archidekt_stats(sysd.get("archidekt"))
         # the live settings; each by its name, with the setting's own word
@@ -2084,8 +2084,8 @@ def _models_body(
                 f"<input type='hidden' name='added_by' value='{html.escape(remove_by)}'>"
                 f"<input type='hidden' name='back' value='{html.escape(list_href)}'>"
                 f"<p>“{html.escape(adder_name)}” added it. "
-                f"The simulator stops using it in {html.escape(adder_name)}'s "
-                "simulations. This can't be undone.</p></form>",
+                f"{html.escape(adder_name)}'s solo tests stop using it. "
+                "This can't be undone.</p></form>",
                 actions=[
                     ui.box_button("Cancel", cancel=True),
                     ui.box_button(

@@ -680,7 +680,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
     fake = FakeForge()
     try:
         empty = await b.http.get("/reports", headers=NAV)
-        assert empty.status_code == 200 and "No reports yet" in empty.text and "Run full test" in empty.text
+        assert empty.status_code == 200 and "No reports yet" in empty.text and "Run test" in empty.text
         assert "Nothing plays or waits now." in empty.text
         csrf = await b.csrf("/account/details")
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
@@ -785,7 +785,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run full test" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run test" in deck.text and "Edit deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404

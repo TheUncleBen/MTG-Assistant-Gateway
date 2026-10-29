@@ -508,7 +508,7 @@ async def test_the_apply_line_names_the_collection_on_a_collection_proposal(manu
     b = Browser(manual.h)
     await b.login(f"/proposals/{col['proposal_id']}")
     page = await b.http.get(f"/proposals/{col['proposal_id']}")
-    assert "writes these changes to your collection on Archidekt" in page.text, page.text[-3000:]
+    assert "writes these changes to your binder on Archidekt" in page.text, page.text[-3000:]
     page = await b.http.get(f"/proposals/{deck['proposal_id']}")
     assert "writes these changes to your deck on Archidekt" in page.text
 

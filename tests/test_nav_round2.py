@@ -203,7 +203,7 @@ def test_test_and_play_holds_the_runs_and_the_other_sites() -> None:
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     test = html.split("<details class='dd decktest'>")[1].split("</details>")[0]
     assert "Test and play</summary>" in html
-    assert " Goldfish</a>" in test and "id='fullf'" in test and "Run full test</button>" in test
+    assert " Goldfish</a>" in test and "id='fullf'" in test and "Run test</button>" in test
     assert "Playtest on Archidekt</a>" in test and "data-edhplay" in test
     # the banner's buttons are not repeated in the no-script More
     more = html.split("<details class='dd deckmore'>")[1].split("</details>")[0]

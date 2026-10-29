@@ -450,7 +450,7 @@ def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(wi
                 (amended, "Changed by ChatGPT. Last change: Added Delver of Secrets."),
                 (
                     other,
-                    "Claude made this change, so this card can't approve it. Approve it on Claude's card "
+                    "Claude made this change, so this card can't apply it. Apply it on Claude's card "
                     "or in your browser.",
                 ),
             ):
@@ -568,7 +568,7 @@ def test_approve_reads_the_change_again_and_shows_a_new_wait_first(width: int, t
             card.locator("#status.err").wait_for()
             assert card.locator("#status").inner_text() == (
                 "This change has changed status since the card was drawn. Read the note above, then "
-                "press Approve again if you still want it."
+                "press Apply again if you still want it."
             )
             note = card.locator("#note").inner_text()
             # the Held line says why, once; the next line says what it means
@@ -625,8 +625,8 @@ def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> 
             card.locator("#approve:not([disabled])").click()
             card.locator("#status.err").wait_for()
             assert card.locator("#status").inner_text() == (
-                "This card could not check the change again, so nothing was approved yet. Press "
-                "Approve again to approve it as shown here, or use the review page."
+                "This card could not check the change again, so nothing was applied yet. Press "
+                "Apply again to apply it as shown here, or use the review page."
             )
             assert not _tool_calls(page, "confirm_proposal")
             card.locator("#approve:not([disabled])").click()
@@ -643,7 +643,7 @@ def test_approve_says_when_it_could_not_check_and_waits_for_a_second_press() -> 
 
 
 NOW_HELD_TEXT = (
-    "This change is now held, so nothing was approved. Read the note above, then press Approve "
+    "This change is now held, so nothing was applied. Read the note above, then press Apply "
     "again if you still want it."
 )
 
@@ -745,7 +745,7 @@ def test_a_hold_set_after_the_card_was_drawn_is_shown_when_the_card_cannot_check
 
 
 WAITING_NOW_HELD_TEXT = (
-    "This change is now held, so nothing was approved. Read why on its row, then press Approve "
+    "This change is now held, so nothing was applied. Read why on its row, then press Apply "
     "again if you still want it."
 )
 

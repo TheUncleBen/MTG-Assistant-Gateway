@@ -290,7 +290,7 @@ async def test_goldfish_intro_and_forge_solo_line(stack: Stack) -> None:
         assert "class='gf-size'" in page and "data-card-size-set='m'" in page
         assert "Keep this hand, or take a mulligan" not in page
         # no newest_forge_solo on the report service: the plain "No solo test yet." line
-        assert "No solo test yet." in page and "Run full test" in page
+        assert "No solo test yet." in page and "Run test" in page
         reports = stack.h.app.state.gateway.reports
 
         def newest(sub: str, deck_id: str) -> dict:

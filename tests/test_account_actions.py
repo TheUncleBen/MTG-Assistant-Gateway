@@ -1202,7 +1202,7 @@ def test_the_card_has_no_branch_for_an_action_with_a_code() -> None:
     html = card_html()
     for dead in ("Delete this deck on Archidekt", "Approve: do this on Archidekt", "warnline", "destroy"):
         assert dead not in html, dead
-    assert "Approve on the review page" in html
+    assert "Apply on the review page" in html
 
 
 async def test_folders_page_new_folder_takes_one_press_and_a_confirmation(stack: Stack) -> None:

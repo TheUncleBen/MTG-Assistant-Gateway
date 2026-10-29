@@ -282,7 +282,7 @@ async def test_a_collection_add_in_a_finish_its_printing_lacks_is_warned(stack: 
     )
     assert p["ok"], p
     assert p["warnings"] == [
-        "Sol Ring (FRC 21) is not made in foil; Scryfall lists nonfoil. Amend the finish, or the collection "
+        "Sol Ring (FRC 21) is not made in foil; Scryfall lists nonfoil. Amend the finish, or the binder "
         "will hold a printing that does not exist."
     ], p
 

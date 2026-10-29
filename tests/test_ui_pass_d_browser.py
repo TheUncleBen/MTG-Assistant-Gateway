@@ -382,7 +382,7 @@ def test_every_approval_mode_name_keeps_one_row(server: Server, width: int, them
     it means in the fold. "Apply low-risk changes without asking" (Semi-auto) wrapped to two rows
     on a folded Fold (344px) and on a phone (390px); it is one row at every size now: tighter
     gutters, the list to the card's edges on a phone, the name a little smaller there. Full auto's
-    old name ("Apply deck and collection changes without asking", 48 characters) could not fit a
+    old name ("Apply deck and binder changes without asking", 48 characters) could not fit a
     phone, so Ben renamed it "Apply changes without asking" everywhere (2026-10-24)."""
     from playwright.sync_api import sync_playwright
 

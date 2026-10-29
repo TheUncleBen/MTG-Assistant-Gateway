@@ -55,7 +55,7 @@ async def test_a_slow_page_sends_its_frame_at_once_then_the_finished_page(stack:
         assert "Reading this page from Archidekt" in r.text and "class='topbar'" in r.text
         assert r.headers["cache-control"] == "no-store"  # Back never lands on the frame
         key = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", r.text).group(1)
-        assert re.search(r"<title>Notifications ·", r.text)
+        assert re.search(r"<title>Alerts ·", r.text)
         wait = await b.http.get(key)
         assert wait.status_code == 200 and wait.json()["ready"] is True
         sent = len(asked)
@@ -63,7 +63,7 @@ async def test_a_slow_page_sends_its_frame_at_once_then_the_finished_page(stack:
         page = await b.http.get("/notifications", headers=PAGE)
         assert time.monotonic() - t1 < 0.5
         assert page.status_code == 200 and "data-late" not in page.text
-        assert "Notifications" in page.text
+        assert "Alerts" in page.text
         assert len(asked) == sent  # the finished page, not a second read
     finally:
         await b.aclose()

@@ -587,7 +587,7 @@ class PriceService:
         if default_pct is not None and alerts == (None, None, None):
             fresh_alerts = _alerts(default_pct, None, None)
         if self._limit("watch_max_cards") <= 0:
-            raise DeckError("invalid", "Watching cards is switched off on this gateway.")
+            raise DeckError("invalid", "Watchlists are switched off on this gateway.")
         row = {"name": name, "set": set_code, "cn": number}
         card: dict[str, Any] | None = None
         note = ""
@@ -765,7 +765,7 @@ class PriceService:
         today's value."""
         deck_id = _clean_deck_id(deck_ref)
         if self._limit("watch_max_decks") <= 0:
-            raise DeckError("invalid", "Watching decks is switched off on this gateway.")
+            raise DeckError("invalid", "Watchlists are switched off on this gateway.")
         self._check_deck_limit(sub, deck_id)
         deck = await self.decks.get_any_deck(sub, deck_id)
         t = int(now())

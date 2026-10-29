@@ -1,6 +1,6 @@
 """The deck page changes one row of a card that has another row in the same zone (Ben,
 2026-10-28: Sol Ring on the Maybeboard and in "Optional Artwork", both left out of the deck). The
-row's menu offers "Change printing…", and a printing change or a removal sends the row's relation
+row's menu offers "Printings…", and a printing change or a removal sends the row's relation
 id, so that row only changes; a refused removal says the card is back in its own category. In
 headless Chromium; skipped without a Chromium build."""
 

@@ -37,7 +37,7 @@ DECKS
 - Archidekt link or id: get_deck (view cards for rows).
 - "My decks": list_my_decks, then get_deck.
 - Pasted: parse_decklist. CSV: parse_deck_export. Photos: resolve_cards (confirm non-exact). Scans: get_scan_session.
-- Public decks: search_decks (owner: one user's). Collection: list_collection, propose_collection_changes.
+- Public decks: search_decks (owner: one user's). Binder: list_collection, propose_collection_changes.
 - Precon: precon_search/_decklist.
 Counts: card_count, side_count.
 Bracket: archidekt_bracket is THE bracket; bracket_estimate is "Archidekt's estimate from cards", not a second one; quote it with its notes if none is set or checks flag a mismatch.

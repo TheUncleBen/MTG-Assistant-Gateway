@@ -61,25 +61,26 @@ ALERTS_PREF = "notify.alerts"
 SUMMARY_CHOICES = ("off", "daily", "weekly")
 # The Account page's notices for the Notifications card and its summary (pages.py shows them).
 ACCOUNT_OK = {
-    "notify_saved": "Notifications saved.",
-    "notify_off": "Notifications are off.",
+    "notify_saved": "Push notifications saved.",
+    "notify_off": "Push notifications are off.",
     "notify_topic": "Your phones are disconnected. To connect a phone again, open the Account page in the "
-    "gateway's app on that phone and press Get notifications on this phone.",
+    "gateway's app on that phone and press Get push notifications on this phone.",
     "notify_test_sent": "The test message is sent. Each phone you connected should show it.",
     "summary_saved": "Summary choice saved.",
     "summary_sent": "The summary is sent. Each phone you connected should show it.",
 }
 ACCOUNT_ERR = {
-    "notify_test_failed": "The test could not be sent. Check that notifications are on; if they are, the "
-    "notification server did not accept it (the operator can see why in the gateway's log).",
+    "notify_test_failed": "The test could not be sent. Check that push notifications are on; if they "
+    "are, the notification server did not accept it (the operator can see why in the gateway's log).",
     "notify_test_wait": "A test was just sent. The gateway sends one test a minute, so wait before sending "
     "another.",
     "summary_invalid": "Choose Off, Every day or Every week.",
-    "summary_off": "Summaries are sent through notifications, and this gateway has no notification server.",
+    "summary_off": "Summaries are sent through push notifications, and this gateway has no notification "
+    "server.",
     "summary_send_wait": "A summary was just sent. The gateway sends one a minute, so wait before sending "
     "another.",
-    "summary_send_failed": "The summary could not be sent. Check that notifications are on; if they are, "
-    "the notification server did not accept it (the operator can see why in the gateway's log).",
+    "summary_send_failed": "The summary could not be sent. Check that push notifications are on; if "
+    "they are, the notification server did not accept it (the operator can see why in the gateway's log).",
 }
 # Members' topics all start with mtg-, so an operator's ntfy grant can be limited to 'mtg-*' and
 # a member can never make the gateway publish to the operator's other topics.
@@ -763,7 +764,7 @@ def add_stream_route(state: AppState, server: Any) -> None:
             return _refuse(401, "unknown_key", "This phone's notification key is no longer valid.")
         sub, on = owner
         if not on:
-            return _refuse(403, "off", "Notifications are off for this account.")
+            return _refuse(403, "off", "Push notifications are off for this account.")
         if state.membership is not None:
             outcome = await state.membership.check(sub)
             if outcome is Membership.REVOKED:
@@ -836,7 +837,7 @@ class _Stream(StreamingResponse):
 # -- Account page: the Notifications card, with the summary ----------------------------------------
 
 ACCOUNT_CSS = """<style>
-/* the Account page's Notifications and Summary cards */
+/* the Account page's Push notifications and Summary cards */
 .nf-card .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .35rem}
 .nf-card .gh h2{margin:0}
 .nf-card .intro{margin:0 0 .75rem;line-height:1.45}
@@ -932,8 +933,8 @@ def _summary_html(
         )
         if not on:
             hint = (
-                "Notifications are off, so there is nowhere to send it. Tick Send me notifications and "
-                "press Save notifications first."
+                "Push notifications are off, so there is nowhere to send it. Tick Send me push "
+                "notifications and press Save push notifications first."
             )
         latest = (
             f"<div class='part'><h3>{'Today' if period == 'day' else 'The last 7 days'}</h3>"
@@ -948,7 +949,7 @@ def _summary_html(
         "<section class='card nf-card' id='summary' aria-labelledby='s-h'>"
         "<div class='gh'><h2 id='s-h'>Summary</h2></div>"
         f"<p class='intro'>A plain summary of {what}, written by the gateway from its own data (no AI) and "
-        "sent through your notifications when they are on. Your assistant can read it too and write you "
+        "sent through your push notifications when they are on. Your assistant can read it too and write you "
         "its own version on a schedule.</p>"
         f"{notice}"
         f"<form method='post' class='sum-row'>{csrf_in}"
@@ -966,9 +967,9 @@ def strong_topic(db: Database, sub: str, topic: str | None) -> bool:
 
 def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     """The card's part about this phone, inside the Android app: whether it is connected, and the
-    button that connects it (which asks Android for the notification permission and for the
-    app to keep running in the background). The app says which part applies (feedback.js).
-    The button is plain: Save notifications stays the card's one orange button."""
+        button that connects it (which asks Android for the notification permission and for the
+        app to keep running in the background). The app says which part applies (feedback.js).
+    The button is plain: Save push notifications stays the card's one orange button."""
     topic = p["ntfy_topic"]
     if not strong_topic(state.db, sub, topic):  # none yet, or not one new_topic made: give one now
         topic = new_topic(state.db, sub)
@@ -978,18 +979,20 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
         f"<div class='phone' data-native-state='notificationsState' data-native-arg='{key}'>"
         "<h3>This phone</h3>"
         "<p data-native-show='connected' hidden><span class='badge ok'>Connected</span> This phone gets your "
-        "notifications, also while the app is closed. While it is connected, Android shows a quiet "
+        "push notifications, also while the app is closed. While it is connected, Android shows a quiet "
         "notification called Always connected.</p>"
-        "<p data-native-show='blocked' hidden>Android has notifications turned off for this app. Turn "
-        "them on in Android's settings for the app, then press Get notifications on this phone.</p>"
-        "<p data-native-show='off' hidden>This phone doesn't get your notifications yet. Press Get "
-        "notifications on this phone. Android may ask you to allow notifications and to let the app run "
-        "in the background. Allow both so notifications arrive while the app is closed.</p>"
+        "<p data-native-show='blocked' hidden>Android has push notifications turned off for this app. "
+        "Turn them on in Android's settings for the app, then press Get push notifications on this "
+        "phone.</p>"
+        "<p data-native-show='off' hidden>This phone doesn't get your push notifications yet. Press Get "
+        "push notifications on this phone. Android may ask you to allow push notifications and to let "
+        "the app run in the background. Allow both so push notifications arrive while the app is "
+        "closed.</p>"
         "<div class='form-actions' data-native-show='off blocked' hidden>"
         f"<button type='button' class='btn-plain' data-native='startNotifications' data-native-arg='{key}' "
-        f"data-native-auto>{icon('bell')}Get notifications on this phone</button></div>"
-        "<p class='ui-hint' data-native-show='' hidden>Update the app to get notifications on this "
-        "phone.</p>"
+        f"data-native-auto>{icon('bell')}Get push notifications on this phone</button></div>"
+        "<p class='ui-hint' data-native-show='' hidden>Update the app to get push notifications on "
+        "this phone.</p>"
         "</div>"
     )
 
@@ -1006,8 +1009,9 @@ def account_card_html(
     if n is None or not n.enabled:
         watched = ", a watched card crosses your alert" if state.prices is not None else ""
         return (
-            "<div class='card' id='notifications'><h2>Notifications</h2><p class='muted'>This gateway has no "
-            "notification server set up, so the Android app can't get notifications. The person who runs "
+            "<div class='card' id='notifications'><h2>Push notifications</h2><p class='muted'>This gateway "
+            "has no notification server set up, so the Android app can't get push notifications. The "
+            "person who runs "
             "this gateway can turn them on. The app then tells you when an assistant leaves changes waiting "
             f"for your press, a deck report finishes{watched}, something new arrives in your Archidekt "
             "alerts or your summary is ready.</p></div>"
@@ -1026,10 +1030,10 @@ def account_card_html(
         phone = _phone_html(state, sub, p) if on else ""
     else:
         phone = (
-            "<p class='ui-hint'>Notifications arrive in the gateway's Android app, also while it is "
+            "<p class='ui-hint'>Push notifications arrive in the gateway's Android app, also while it is "
             "closed. To get them, install the app from the <a href='/install?for=android'>Android app</a> "
-            "page and sign in. Then open this page in the app, tick Send me notifications and press Save "
-            "notifications.</p>"
+            "page and sign in. Then open this page in the app, tick Send me push notifications and press "
+            "Save push notifications.</p>"
         )
     test = (
         "<div class='ui-actions'>"
@@ -1037,8 +1041,8 @@ def account_card_html(
         "<button class='btn-plain'>Send test</button></form>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_new_topic'>"
         "<button class='btn-plain' aria-describedby='n-disc'>Disconnect my phones</button></form></div>"
-        "<p class='ui-hint' id='n-disc'>Disconnect my phones: your phones stop getting notifications until "
-        "each one is connected again.</p>"
+        "<p class='ui-hint' id='n-disc'>Disconnect my phones: your phones stop getting push notifications "
+        "until each one is connected again.</p>"
         if on
         else ""
     )
@@ -1064,19 +1068,19 @@ def account_card_html(
     phones = f"<div class='part'>{head}{phone}{test}</div>" if phone or test else ""
     return (
         f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' aria-labelledby='n-h'>"
-        "<div class='gh'><h2 id='n-h'>Notifications</h2>"
+        "<div class='gh'><h2 id='n-h'>Push notifications</h2>"
         f"{label('On', 'green', 'check') if on else ''}</div>"
         "<p class='intro'>The gateway's Android app can show you a short message when something happens. "
         "Each message says only what happened and links to the right page on this gateway. It never lists "
         "your deck's cards. The choices below apply to your whole account and to every phone you connect.</p>"
         f"{_card_notice(ok, err, NOTIFY_NOTICES)}"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
-        f"<div class='ui-checks master'>{box('ntfy_on', 'Send me notifications')}</div>"
+        f"<div class='ui-checks master'>{box('ntfy_on', 'Send me push notifications')}</div>"
         "<fieldset class='nf-when'><legend>When</legend><div class='ui-checks'>"
         f"{box('on_proposals', 'An assistant left changes waiting for my press (one message per deck)')}"
         f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
         f"{prices_box}{alerts_box}</div></fieldset>"
-        "<div class='ui-actions'><button class='primary'>Save notifications</button></div></form>"
+        "<div class='ui-actions'><button class='primary'>Save push notifications</button></div></form>"
         f"{phones}</section>"
         f"{_summary_html(state, sub, p, csrf_in, on=on, notice=_card_notice(ok, err, SUMMARY_NOTICES))}"
     )
@@ -1134,7 +1138,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             sub,
             "test",
             "Test from your MTG gateway",
-            "Notifications work. This is the only test message.",
+            "Push notifications work. This is the only test message.",
             "/account/details#notifications",
         )
         return "ok=notify_test_sent" if ok else "err=notify_test_failed"

@@ -366,7 +366,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     w2 = ui.widget(
         "Needs a look", "alert", len(look), detail=det2, actions=acts2, tone="alert" if look else ""
     )
-    # 3. Always need your press
+    # 3. Only you can apply
     press = sum(1 for it in waiting if it["risk"] == "consent")
     delete = sum(1 for it in waiting if it["risk"] == "destructive")
     det3 = (
@@ -383,7 +383,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         if press + delete
         else []
     )
-    w3 = ui.widget("Always need your press", "hand", press + delete, detail_html=det3, actions=acts3)
+    w3 = ui.widget("Only you can apply", "hand", press + delete, detail_html=det3, actions=acts3)
     # 4. Last 7 days
     week = now - 7 * 86400
 

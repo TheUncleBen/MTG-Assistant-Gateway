@@ -179,14 +179,14 @@ def test_card_lists_keep_even_rows_and_name_the_commander() -> None:
 
 
 def test_the_two_buttons_sit_together_under_the_cards() -> None:
-    """The request and My card models: two even buttons in one row under the cards played without
+    """The request and Card models: two even buttons in one row under the cards played without
     their effect (stacked on a phone)."""
     r = report()
     model = rp.solo_section_html(
         r, rv.report_sections(r), removable=frozenset(), csrf="", models_opener=card_models_view.opener()
     )[1]
     actions = model.split("<div class='ig-actions two'>")[1].split("<section")[0]
-    assert actions.index("data-copy='ask-model'") < actions.index("My card models")
+    assert actions.index("data-copy='ask-model'") < actions.index("Card models")
     assert ".rv-page .ig-actions.two{grid-template-columns:repeat(2,minmax(0,1fr))}" in rp.REPORT_PAGE_CSS
 
 
@@ -206,10 +206,10 @@ def test_one_orange_button_and_a_red_outline_remove(monkeypatch: pytest.MonkeyPa
     # without scripts the button still submits its form, as before
     assert (
         "class='btn-outline-danger' data-box-open='rm-model-sol-ring' "
-        "aria-label='Remove the saved description of Sol Ring'" in html
+        "aria-label='Remove the card model of Sol Ring'" in html
     )
     assert "id='rm-model-sol-ring' role='dialog'" in html
-    assert "<h2 id='rm-model-sol-ring-title'>Remove the saved description of “Sol Ring”?</h2>" in html
+    assert "<h2 id='rm-model-sol-ring-title'>Remove the card model of “Sol Ring”?</h2>" in html
     assert "<button type='submit' class='danger' form='rm-model-sol-ring-f'>" in html
     assert html.count("class='danger'") == 1  # the box's final button is the one solid red
 

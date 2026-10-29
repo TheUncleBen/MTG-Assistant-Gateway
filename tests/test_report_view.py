@@ -188,7 +188,7 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
         "Deck statistics",
         "Raw output from the research service",
         "## Metrics",
-        "report is shown instead of running the simulation again",
+        "report is shown instead of testing it again",
     ):
         assert text in html, text
     assert "goldfish_" not in html and "run_deck_report" not in html

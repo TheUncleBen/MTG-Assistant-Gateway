@@ -150,7 +150,7 @@ async def test_an_import_runs_in_the_background_and_waits_for_room(stack: Stack,
         assert done["state"] == "done" and done["done"] == 30, done
         assert _slime(stack) == {1: 33}  # 2, 30 imported and the member's own +1
         landed = await b.http.get(done["next"])
-        assert "Imported 30 cards into your Collection on Archidekt." in landed.text
+        assert "Imported 30 cards into your binder." in landed.text
     finally:
         await b.aclose()
 

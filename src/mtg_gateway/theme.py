@@ -2446,7 +2446,7 @@ RAIL_EXTRA = (("/forum", "Forum", "comment", "railonly"),)
 # Archidekt lists live under Account; Watchlist lives in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
-    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "My card models", "box")]),
+    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),
     ("Community", [("/forum", "Forum", "comment")]),
 ]
 
@@ -2639,7 +2639,7 @@ def render(
         # /notifications page without scripts. Beside the picture on a phone and a computer; the
         # rail has it as Alerts instead.
         bell = (
-            "<a class='icon-btn bell' href='/notifications' aria-label='Notifications' title='Notifications' "
+            "<a class='icon-btn bell' href='/notifications' aria-label='Alerts' title='Alerts' "
             f"data-bell{' aria-current=page' if cur == '/notifications' else ''}>{icon('bell')}"
             "<span class='n' hidden aria-hidden='true'></span></a>"
         )

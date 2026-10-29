@@ -850,7 +850,7 @@ def pin_row(p: dict[str, Any], csrf: str) -> str:
         name,
         [
             ("Open card", "eye", f"/cards?q={quote(name)}", {}),
-            ("Change printing…", "image", f"/cards?q={quote(name)}", {"data-printing": "1"}),
+            ("Printings…", "image", f"/cards?q={quote(name)}", {"data-printing": "1"}),
             ("Add to deck…", "plus", f"/cards?q={quote(name)}", {}),
             None,
             ("Remove pin", "x", tab_href("pins", remove=pid), {"class": "danger", "data-box": "pin-rm"}),

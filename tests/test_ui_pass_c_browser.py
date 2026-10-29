@@ -366,7 +366,7 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         assert "Color tag…" in items and "Mana value…" in items, items
         # ... and no report of the member's own card (kept on another member's deck)
         for gone in (
-            "Change printing…",
+            "Printings…",
             "Edit in deck editor",
             "Open on Scryfall",
             "Add to deck…",

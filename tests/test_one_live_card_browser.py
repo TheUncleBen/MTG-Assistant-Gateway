@@ -383,7 +383,7 @@ def test_a_change_the_assistant_may_apply_has_apply_now_and_follows_its_state() 
                 {**auto, "assistant_may_apply": False, "approval_mode": "manual"},
             )
             _show_again(page)
-            card.locator("#approve", has_text="Approve: apply to Archidekt").wait_for(timeout=5_000)
+            card.locator("#approve", has_text="Apply").wait_for(timeout=5_000)
             # the assistant applied it: the card shows that, with nothing left to press
             page.evaluate(
                 "(r) => { window.getReply = r; }",

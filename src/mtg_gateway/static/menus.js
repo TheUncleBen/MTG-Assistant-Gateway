@@ -375,7 +375,7 @@
     items.push(sep());
     if (!d.own) items.push(item("Clone into my decks", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
     items.push(link("Goldfish", "play", "/decks/" + id + "/goldfish"));
-    items.push(item("Run full test", "stats", function () { submitForm("/decks/" + id + "/report", {}); }));
+    items.push(item("Run test", "stats", function () { submitForm("/decks/" + id + "/report", {}); }));
     if (d.own) {
       items.push(item("Clone", "clone", function () { submitForm("/decks/" + id + "/clone", {}); }));
       items.push(item("Rename…", "edit", function () { renameDeck(d); }));
@@ -640,7 +640,7 @@
       if (f) f.focus();
     }));
     var after = [];
-    if (rm) { after.push(sep()); after.push(item("Remove from collection", "x", function () { rm.click(); }, { danger: true })); }
+    if (rm) { after.push(sep()); after.push(item("Remove from binder", "x", function () { rm.click(); }, { danger: true })); }
     Card.open(cardMenuBase(name, {
       onOpen: thumb ? function () { thumb.click(); } : null, noCollect: true, before: before, after: after, focus: thumb || li
     }), x, y);

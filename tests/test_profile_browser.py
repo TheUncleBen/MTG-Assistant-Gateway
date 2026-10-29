@@ -94,8 +94,7 @@ def test_the_screens_fit_every_width_in_both_themes(server: Server, width: int, 
         bell = page.locator(".tabbar a.bell" if rail else ".topbar .bell")
         badge = bell.locator(".n")
         badge.wait_for(state="visible", timeout=4000)
-        name = "Alerts" if rail else "Notifications"
-        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == f"{name}, 3 new"
+        assert badge.inner_text() == "3" and bell.get_attribute("aria-label") == "Alerts, 3 new"
         for path in ("/account", "/collection", "/", "/notifications"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert page.evaluate(MEASURE) == [], path
@@ -224,7 +223,7 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
         page.locator("[data-box-open='col-vis']").click()
         box = page.locator("#col-vis")
         box.wait_for(state="visible")
-        assert "Make your collection public?" in box.inner_text()
+        assert "Make your binder public?" in box.inner_text()
         final = box.locator(".acts button").last
         assert final.inner_text().strip() == "Make it public" and "primary" in (
             final.get_attribute("class") or ""
@@ -240,7 +239,7 @@ def test_make_it_public_asks_once_more_and_private_is_one_press(server: Server) 
         assert me["profile"]["is_collection_public"] is True
         vis = page.locator("#visibility")
         assert "Public · anyone can see it on your Archidekt profile" in vis.inner_text()
-        assert "Your collection is public on Archidekt." in vis.inner_text()
+        assert "Your binder is public on Archidekt." in vis.inner_text()
         vis.locator("button", has_text="Make it private").click()
         page.wait_for_url("**/collection?ok=private*")
         assert me["profile"]["is_collection_public"] is False

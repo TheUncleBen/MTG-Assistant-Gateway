@@ -336,7 +336,7 @@ async def test_semi_mode_note_says_what_it_applies(stack: Stack) -> None:
     assert "at most 5 card rows" in short and "a private copy of a deck" in short, short
     note = modes.mode_help("semi")
     assert "at most 5 card rows" in note and f"{modes.MAX_COPIES_PER_ROW} copies each" in note
-    assert "a private copy of a deck (a clone" in note and "collection" in note
+    assert "a private copy of a deck (a clone" in note and "binder" in note
     assert "A new deck built from a list" in note and "New decks" not in note
     assert "{rows}" not in modes.mode_help("semi", max_rows=3) and "at most 3" in modes.mode_help(
         "semi", max_rows=3
@@ -522,7 +522,7 @@ def test_the_low_risk_wording_is_the_list_risk_of_checks() -> None:
         assert modes.risk_of("edit", rows)[0] == "low", kind
         assert modes.risk_of("collection", rows)[0] == "low", kind
     for text in (modes.low_risk_text(), modes.mode_help("semi")):
-        assert "color tag" in text and "custom mana value" in text and "collection" in text
+        assert "color tag" in text and "custom mana value" in text and "binder" in text
 
 
 def test_the_account_actions_wording_names_every_account_action() -> None:
@@ -616,9 +616,9 @@ def test_the_semi_auto_notice_names_what_semi_auto_applies() -> None:
     from mtg_gateway.pages import OK_MESSAGES
 
     assert OK_MESSAGES["mode_semi"] == (
-        "Saved: your assistant applies low-risk changes without asking (a small deck or collection edit, "
+        "Saved: your assistant applies low-risk changes without asking (a small deck or binder edit, "
         "or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-        "a snapshot you can restore from History; a collection change keeps none. Restoring a snapshot "
+        "a snapshot you can restore from History; a binder change keeps none. Restoring a snapshot "
         "does not put back a deck's folder, tags, cover or custom cards."
     )
     # and Full auto's names taking custom cards out among what still waits (confirmation C-2)

@@ -127,15 +127,15 @@ button.danger:disabled{color:var(--red)}
       if (x.link_note) what.appendChild(el("span", "why", String(x.link_note)));
       // which row Apply all leaves out
       if (x.not_in_apply_all) what.appendChild(el("span", "why", "Not in Apply all: another app changed it."));
-      if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
+      if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Apply it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
       if (decided[x.proposal_id]) {
         var d = decided[x.proposal_id];
         btns.appendChild(el("span", "done " + (d.kind || ""), d.text));
       } else if (codes[x.proposal_id] && data.writes_enabled) {
-        var ok = el("button", "primary small", "Approve"); ok.type = "button";
-        ok.setAttribute("aria-label", "Approve " + label(x));
+        var ok = el("button", "primary small", "Apply"); ok.type = "button";
+        ok.setAttribute("aria-label", "Apply " + label(x));
         var no = el("button", "danger small", "Reject"); no.type = "button";
         no.setAttribute("aria-label", "Reject " + label(x));
         ok.disabled = no.disabled = !armed || busy;
@@ -153,7 +153,7 @@ button.danger:disabled{color:var(--red)}
     var notes = [];
     if (n > rows.length) notes.push((n - rows.length) + " more on the Proposals page.");
     (data.other_apps || []).forEach(function (o) {
-      notes.push(o.count + " from " + (o.app === "you" ? "your browser" : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Approve " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
+      notes.push(o.count + " from " + (o.app === "you" ? "your browser" : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Apply " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
     });
     // a change another app rewrote is approved on its own
     var out = Number(data.left_out || 0), nos = (data.left_out_nos || []).map(function (x) { return "#" + x; });
@@ -318,7 +318,7 @@ button.danger:disabled{color:var(--red)}
             x.status = "held"; x.status_reason = String(sc.status_reason || ""); delete x.status_text;
             x.link_note = String(sc.replace_note || ""); // as it is now, not as when drawn
             if (typeof sc.status_at === "number") x.status_at = sc.status_at;
-            B.setStatus("This change is now held, so nothing was approved. Read why on its row, then press Approve again if you still want it.", "err");
+            B.setStatus("This change is now held, so nothing was applied. Read why on its row, then press Apply again if you still want it.", "err");
             draw();
             B.tellModel("The user pressed approve for proposal " + x.proposal_id + " on the waiting changes card, but the gateway answered: " + msg);
             return;
@@ -337,7 +337,7 @@ button.danger:disabled{color:var(--red)}
           : { text: "Now " + st, kind: "err" };
         B.setStatus(st === "applied" ? "Applied. " + String(sc.applied_text || "The deck on Archidekt matches this change.") : st === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || ""), st === "applied" ? "ok" : "");
         draw();
-        B.tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the waiting changes card; proposal " + x.proposal_id + " is " + (st || "unchanged") + ".");
+        B.tellModel("The user pressed " + (decision === "approve" ? "Apply" : "Reject") + " on the waiting changes card; proposal " + x.proposal_id + " is " + (st || "unchanged") + ".");
       })
       .catch(function (err) {
         busy = false; draw();
@@ -362,7 +362,7 @@ button.danger:disabled{color:var(--red)}
     setTimeout(function () { armed = true; if (!busy) draw(); }, ARM_DELAY_MS);
   }
   B.start("MTG Assistant Gateway waiting changes card", load, {
-    connectError: "This card could not connect to the chat. Approve or reject on the Proposals page in your browser."
+    connectError: "This card could not connect to the chat. Apply or reject on the Proposals page in your browser."
   });
 })();
 </script>

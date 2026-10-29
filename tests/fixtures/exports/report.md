@@ -66,10 +66,10 @@ Aegis of the Gods, Ajani, Caller of the Pride, Cathars' Crusade, Cathedral Sanct
 
 **Needs opponents: 17 of 98 cards (17% of the deck).**
 
-The simulator plays against opponents who do nothing, so removal, board wipes, counterspells and protection have nothing to act on. Spells that only do that stayed in hand. Creatures and other permanents among them were still cast, and played the parts of their text the simulator can read.
+The solo test plays against opponents who do nothing, so removal, board wipes, counterspells and protection have nothing to act on. Spells that only do that stayed in hand. Creatures and other permanents among them were still cast, and played the parts of their text the solo test can read.
 
 - Removal and other interaction: Avatar of Woe, Banishing Light, Dawnbringer Cleric, Divine Verdict, Doom Blade, Grim Bounty, Keening Apparition, Murder, Ob Nixilis Reignited, Portable Hole, Trapped in the Screen
-- Other effects the simulator does not model: Aetherflux Reservoir, Ascend from Avernus, Minimus Containment, Norn's Annex, Shrine of Loyal Legions, Torment of Hailfire
+- Other effects the solo test does not model: Aetherflux Reservoir, Ascend from Avernus, Minimus Containment, Norn's Annex, Shrine of Loyal Legions, Torment of Hailfire
 
 **Played with their effect but never mattered: 23 of 98 cards (23% of the deck).**
 

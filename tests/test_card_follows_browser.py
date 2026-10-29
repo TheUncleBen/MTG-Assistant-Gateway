@@ -223,7 +223,7 @@ def test_a_newer_version_read_without_a_code_offers_the_review_page_only() -> No
         card.locator("ul.changes li", has_text="Ponder").wait_for(timeout=5_000)
         page.wait_for_timeout(900)  # past the arming delay
         assert card.locator("#approve").count() == 0
-        assert card.locator("#actions button", has_text="Approve on the review page").count() == 1
+        assert card.locator("#actions button", has_text="Apply on the review page").count() == 1
 
     _run(test)
 
@@ -272,7 +272,7 @@ def test_a_changed_answer_with_no_read_leaves_the_review_page_not_locked_buttons
         card = _open(page, [V1, V1, "refuse"], [changed])
         card.locator("#approve:enabled").wait_for(timeout=5_000)
         card.locator("#approve").click()
-        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        card.locator("#actions button", has_text="Apply on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
         assert card.locator("#status").inner_text() == "There is a newer version."
 
@@ -287,7 +287,7 @@ def test_a_changed_answer_whose_read_finds_nothing_leaves_the_review_page() -> N
         card = _open(page, [V1, V1, gone], [changed])
         card.locator("#approve:enabled").wait_for(timeout=5_000)
         card.locator("#approve").click()
-        card.locator("#actions button", has_text="Approve on the review page").wait_for(timeout=5_000)
+        card.locator("#actions button", has_text="Apply on the review page").wait_for(timeout=5_000)
         assert card.locator("#approve").count() == 0
 
     _run(test)

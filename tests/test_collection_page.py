@@ -49,7 +49,10 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         # screen readers
         assert "<h1 class='sr-only'>Binder: Cards</h1>" in page
         assert "<a href='/collection' aria-current=page>Cards</a>" in page
-        assert "<p class='ui-sub'>The cards you own: your collection on Archidekt.</p>" in page
+        assert (
+            "<p class='ui-sub'>The cards you own, kept in your Archidekt account "
+            "(your Archidekt collection).</p>"
+        ) in page
         assert page.count("btn-primary") == 1
         assert re.search(
             r"<a class='btn btn-primary' href='/collection\?add=1' data-box-open='col-add'>", page
@@ -209,11 +212,8 @@ async def test_notices_are_strips_with_a_close_button_and_the_words_are_kept(sta
     try:
         r = await b.http.get("/collection?ok=added", headers=NAV)
         assert "<div class='notice ok' role='status'>" in r.text
-        assert "Added to your Collection on Archidekt." in r.text
-        assert (
-            "aria-label='Close' title='Close'"
-            in r.text.split("Added to your Collection on Archidekt.")[0][-300:]
-        )
+        assert "Added to your binder." in r.text
+        assert "aria-label='Close' title='Close'" in r.text.split("Added to your binder.")[0][-300:]
         r = await b.http.get("/collection?err=lookup", headers=NAV)
         assert "<div class='notice error' role='alert'>" in r.text
         assert "Archidekt is not answering right now. Try again later." in r.text
@@ -259,10 +259,10 @@ async def test_not_linked_and_a_load_error_show_their_words(stack: Stack) -> Non
     try:
         await b.login("/collection")
         r = await b.http.get("/collection", headers=NAV)
-        assert "<h2>Your collection lives on Archidekt</h2>" in r.text
+        assert "<h2>Your binder lives on Archidekt</h2>" in r.text
         assert (
-            "<p>Link your Archidekt account to see it here. Your cards stay in your Collection on "
-            "Archidekt.</p>" in r.text
+            "<p>Link your Archidekt account to see it here. Your cards stay on Archidekt (your "
+            "Archidekt collection).</p>" in r.text
         )
         assert "Link Archidekt" in r.text and r.text.count("btn-primary") == 1
     finally:

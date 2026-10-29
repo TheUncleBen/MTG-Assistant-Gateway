@@ -5801,7 +5801,7 @@ class DeckService:
             raise DeckError(
                 "invalid_approval",
                 "This approval code does not belong to this proposal, this app and this account. "
-                "Nothing was sent to Archidekt. Only the Approve button on the proposal card or the "
+                "Nothing was sent to Archidekt. Only the Apply button on the proposal card or the "
                 "review page can apply it.",
                 review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
             )
@@ -7481,7 +7481,7 @@ class DeckService:
         return backup
 
     COLLECTION_TARGET = "collection"
-    COLLECTION_NAME = "Your Archidekt collection"
+    COLLECTION_NAME = "Your binder"
 
     @_dedupe
     async def propose_collection(
@@ -7536,7 +7536,7 @@ class DeckService:
         self, sub: str, row: dict[str, Any], progress: dict[str, Any]
     ) -> dict[str, Any]:
         if self.collection_apply is None:
-            raise DeckError("unavailable", "the collection pages are not loaded on this gateway")
+            raise DeckError("unavailable", "the binder pages are not loaded on this gateway")
         changes = row.get("changes") or {}
         applied = await self.collection_apply(sub, changes, progress)
         # verified comes from collection_apply's read-back of the records it touched
@@ -11459,7 +11459,7 @@ def _rate_limited_note(
         note = _partial_note(progress, collection=collection)
         return f"{note} Try the rest again later with a new proposal."
     if progress.get("deck_written"):
-        where = "your collection" if collection else "the deck"
+        where = "your binder" if collection else "the deck"
         return (
             f"Part of this change had already reached Archidekt, so check {where}. Try the rest again "
             "later with a new proposal."
@@ -11533,8 +11533,8 @@ def _partial_note(progress: dict[str, Any], *, collection: bool = False, clone: 
         if not sent:
             return "No collection records were changed."
         return (
-            f"{sent} of {progress.get('of_entries', '?')} collection changes had already been sent, "
-            "so your collection is partly changed."
+            f"{sent} of {progress.get('of_entries', '?')} binder changes had already been sent, "
+            "so your binder is partly changed."
         )
     if not sent:
         return "No deck rows were changed."
@@ -11738,7 +11738,7 @@ def applied_text(
                 "Sent to Archidekt, but the read-back didn't confirm every change. See Result on the "
                 "review page."
             )
-        return "Your collection on Archidekt has these changes now."
+        return "Your binder has these changes now."
     if kind == "lists":
         from .account_lists import applied_text as lists_text
 

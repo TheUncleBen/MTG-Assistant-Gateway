@@ -56,7 +56,7 @@ LABELS: dict[str, Label] = {
     "expired": Label("Expired", "grey", "hourglass", "Not approved in time."),
     "failed": Label("Failed", "red", "alert", "Archidekt refused it, or something broke."),
     # risk
-    "low": Label("Low", "green", "shield", "A small deck or collection change."),
+    "low": Label("Low", "green", "shield", "A small deck or binder change."),
     "high": Label("High", "orange", "triangle", "Bigger, or touches commanders or deck details."),
     "your_press": Label("Your press", "blue", "hand", "An account action. It always waits for you."),
     "delete": Label(

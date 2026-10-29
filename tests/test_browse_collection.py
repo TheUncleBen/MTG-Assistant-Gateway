@@ -359,7 +359,7 @@ async def test_collection_tools(stack: Stack) -> None:
         # the review page names the target, and the member's Apply writes to Archidekt
         csrf = await b.csrf("/collection")
         review = await b.http.get(f"/proposals/{p['proposal_id']}", headers=NAV)
-        assert review.status_code == 200 and "Your Archidekt collection" in review.text
+        assert review.status_code == 200 and "Your binder" in review.text
         applied = await b.http.post(
             f"/api/v1/proposals/{p['proposal_id']}/apply",
             headers={"X-CSRF-Token": csrf},
@@ -446,7 +446,7 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
             "Link Archidekt",
             "Your first deck edit",
             "Add or change cards",
-            "Use your collection",
+            "Use your binder",
             "Scan a photo of your cards",
             "What the assistant can do",
             "Advanced: tool names",

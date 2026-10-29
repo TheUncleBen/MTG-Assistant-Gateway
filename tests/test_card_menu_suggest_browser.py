@@ -121,7 +121,7 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             box.click()
             page.locator("[role=option][data-name='Sol Talisman']").wait_for(timeout=3000)
             _open_menu(page, page.locator("[role=option][data-name='Sol Talisman']"), width)
-            assert _menu_items(page) == ["Open card", "Watch this card", "Art variants…", "Open on Scryfall"]
+            assert _menu_items(page) == ["Open card", "Watch this card", "Printings…", "Open on Scryfall"]
             mb = page.locator(".ctxmenu.cs-menu").bounding_box()
             assert mb and mb["x"] >= 0 and mb["x"] + mb["width"] <= width + 1
             page.keyboard.press("Escape")
@@ -133,9 +133,9 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             box.press("ArrowDown")
             box.press("Shift+F10")
             items = _menu_items(page)
-            assert items == ["Open card", "On your watchlist", "Art variants…", "Open on Scryfall"]
-            # Art variants…: the picker's browse mode, with this deck's own pick
-            page.locator(".ctxmenu.cs-menu button", has_text="Art variants…").click()
+            assert items == ["Open card", "On your watchlist", "Printings…", "Open on Scryfall"]
+            # Printings…: the picker's browse mode, with this deck's own pick
+            page.locator(".ctxmenu.cs-menu button", has_text="Printings…").click()
             page.locator(".printpick.open").wait_for(timeout=3000)
             page.locator(".printpick .pptile").first.click()
             page.locator(".printpick .ppwatch:visible").wait_for(timeout=3000)

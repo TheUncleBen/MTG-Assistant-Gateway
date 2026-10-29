@@ -476,7 +476,7 @@ def section(key: str, ctx: Context) -> Section:
                 Block(
                     "If ChatGPT blocks write tools",
                     paras=(
-                        "This may happen on Plus and Pro. Research, simulation, "
+                        "This may happen on Plus and Pro. Research, tests, "
                         "reading decks, scanning and deck proposals still work. To apply a proposal, open "
                         "its review "
                         f"link or your [proposals]({pub}/proposals) and press Apply. To save scans, use "
@@ -514,7 +514,7 @@ def section(key: str, ctx: Context) -> Section:
                 Block(
                     paras=(
                         "The MTG skill teaches your assistant to use this gateway well: which tool to "
-                        "use, how to report simulations honestly, and to show you every deck change "
+                        "use, how to report tests honestly, and to show you every deck change "
                         "before making it. It is optional but recommended.",
                     )
                 ),
@@ -724,7 +724,7 @@ AGENT_RULES = """## If you are an AI agent doing this install
 BLOCKED_TOOLS = """## If a tool is blocked
 
 Some apps or plans allow only tools that read. Everything except four tools is
-marked read-only, so research, goldfish simulation, reading decks, scanning
+marked read-only, so research, deck tests, reading decks, scanning
 and making deck proposals keep working. The four write tools have browser
 fallbacks:
 

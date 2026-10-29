@@ -187,9 +187,9 @@ upgrade, stop the gateway as above, and with the same `sudo -u '#1000' sh -c '..
 The update steps above bring every stack, variable and secret change up to now. A few changes
 reach past the stack, so if your old version is older than the one named, also:
 
-- **0.7.29 or older:** members' notifications come in the gateway's Android app, not the ntfy
-  app. Each member who wants them ticks **Send me notifications** on their Account page in the
-  app and presses **Save notifications**. Members on an app older than 0.7.12 install the new app
+- **0.7.29 or older:** members' push notifications come in the gateway's Android app, not the ntfy
+  app. Each member who wants them ticks **Send me push notifications** on their Account page in the
+  app and presses **Save push notifications**. Members on an app older than 0.7.12 install the new app
   from the gateway's Install page (uninstalling the old one first). If you ran an ntfy server of
   your own for the gateway, you can stop it, and revoke the old token there.
 - **0.7.32 or older:** the gateway sends at most 30 Archidekt requests a minute by default
@@ -308,7 +308,7 @@ said to add a line under `environment:` in the stack file for these.
 #### Swarm or Portainer stack
 
 0.7.30 brings its own notification server (ntfy) into the stack, and the
-gateway's Android app gets the members' notifications from it through the
+gateway's Android app gets the members' push notifications from it through the
 gateway's own address.
 
 1. **Before you update the stack**, create the `mtg_ntfy_token` secret
@@ -339,13 +339,13 @@ gateway's own address.
    Settings page; delete it for the new default of 4.
 4. Update the stack with the new file, as in the 0.7.29 steps below (your
    old `mtg_ntfy_token` lines, if you had them, are already in it).
-5. Tell the members: notifications now come in the gateway's own Android
+5. Tell the members: push notifications now come in the gateway's own Android
    app, not the ntfy app, and members need app 0.7.30 to get them. Each
    member who wants them opens their Account page in the app, ticks **Send
-   me notifications** and presses **Save notifications**, which also connects
-   that phone (**Get notifications on this phone** stays on the card while
+   me push notifications** and presses **Save push notifications**, which also connects
+   that phone (**Get push notifications on this phone** stays on the card while
    a phone isn't connected). Their old subscriptions in the ntfy
-   app stop getting messages and can be deleted. There are no notifications
+   app stop getting messages and can be deleted. There are no push notifications
    on iPhone.
 6. **Members on an app older than 0.7.12 must update the app:** in those
    apps, sign-in no longer starts by itself. They install the new app from the
@@ -367,8 +367,8 @@ an ntfy server you ran for the gateway can go, with its proxy host.
 If Forge is on, the new file pulls Forge image `2.0.15-mag3`. Then follow
 the 0.7.29 steps below, but skip the
 `mtg_ntfy_token` edits: the new file already has those lines.
-Notifications now come in the gateway's Android app (members tick **Send
-me notifications** and press **Save notifications** on their Account page in the app), not the
+Push notifications now come in the gateway's Android app (members tick **Send
+me push notifications** and press **Save push notifications** on their Account page in the app), not the
 ntfy app, and members need app 0.7.30 to get them. **Members on an app older than 0.7.12 must
 update the app.**
 

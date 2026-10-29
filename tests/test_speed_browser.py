@@ -82,7 +82,7 @@ def test_a_slow_page_draws_its_frame_then_the_page(server: Server, width: int) -
         assert page.locator("[data-late] .late-note").inner_text() == "Reading this page from Archidekt…"
         assert page.locator("header.topbar").count() == 1
         _until(page, "document.readyState !== 'loading' && !document.querySelector('[data-late]')", 30)
-        assert page.locator("main h1").first.inner_text().startswith("Notifications")
+        assert page.locator("main h1").first.inner_text().startswith("Alerts")
         assert errors == []
         browser.close()
 

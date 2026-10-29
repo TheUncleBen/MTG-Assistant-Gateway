@@ -192,13 +192,13 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
             ("how-new-deck", "plus", "Create a deck"),
             ("how-add-cards", "edit", "Add or change cards"),
             ("how-organise", "folder", "Settings, folders, tags and deleting"),
-            ("how-approve", "proposals", "Approve a proposal"),
+            ("how-approve", "proposals", "Apply a proposal"),
             ("how-restore", "undo", "Restore a snapshot"),
             ("how-compare", "swap", "Compare with a precon"),
             ("how-export", "download", "Export and import"),
             ("how-search", "search", "Find public decks and precons"),
             ("how-scan", "camera", "Scan a photo of your cards"),
-            ("how-collection", "collection", "Use your collection"),
+            ("how-collection", "collection", "Use your binder"),
             ("how-playtest", "play", "Playtest a deck"),
             ("how-layout", "sun", "Change the theme or layout"),
             ("how-app", "download", "Use the Android app"),
@@ -436,15 +436,15 @@ def build(
         "them: text, stacks or grid, grouped and sorted how you like; then make "
         "<a href='#tut-first-edit'>your first edit</a>.</span></li>"
         "<li><span><strong>Scan</strong> a pile of cards with your phone, add them to a deck or to your "
-        "collection, and <strong>search</strong> public decks for ideas (the how-to guides cover "
+        "binder, and <strong>search</strong> public decks for ideas (the how-to guides cover "
         "each).</span></li>"
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
-        "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
+        "page and ask it to research, test or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
         f"<p class='tip'>{nav_description()}</p>"
     )
     tut_link = (
-        "<p>Linking gives this site your Archidekt decks, your collection and the right to save for you. "
+        "<p>Linking gives this site your Archidekt decks, your binder and the right to save for you. "
         "It takes a minute and you do it once.</p>"
         "<ol class='steps'>"
         "<li><span>Open <a href='/account/details'>Account details</a> and find <strong>Archidekt</strong>."
@@ -479,19 +479,19 @@ def build(
         "its mana curve”.</span></li>"
         "<li><span>Ask for a change: “Swap these three cards”. It comes back as a <strong>proposal</strong> "
         "with a review link and, in Claude on the web, desktop and phones (and ChatGPT on the web and "
-        "in its Android app), as a card in the chat with Approve and Reject. "
-        "<a href='#how-approve'>Approve a proposal</a> has the details.</span></li></ol>"
+        "in its Android app), as a card in the chat with Apply and Reject. "
+        "<a href='#how-approve'>Apply a proposal</a> has the details.</span></li></ol>"
         "<p>Things you can ask it:</p><ul>"
         "<li>“Search for Atraxa decks under bracket 3”, “what does this deck run that mine "
         "doesn't?”.</li>"
         "<li>“Look up this card”, rulings, prices, combos, EDHREC data, the Comprehensive Rules.</li>"
-        "<li>“Goldfish this deck 500 times” (it reports the seed, the settings and what the "
-        "simulation leaves out).</li>"
+        "<li>“Test this deck with 500 games” (it reports the seed, the settings and what the "
+        "solo test leaves out).</li>"
         "<li>“Build a new deck from this list”, “undo yesterday's change”: each comes back as a proposal "
         "with a review link.</li>"
         "<li>“Here are photos of my cards”: it reads the names and matches them; or “use my last scan” to "
         "pick up a scan from the Scan page.</li>"
-        "<li>“Which cards in this deck do I own?” using your collection.</li></ul>"
+        "<li>“Which cards in this deck do I own?” using your binder.</li></ul>"
         "<p>Your assistant's access can be withdrawn at any time from the Account page (the "
         "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "
         "this gateway is set otherwise) unless you sign in "
@@ -526,7 +526,7 @@ def build(
         "without a commander "
         "and with 60 or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
-        "<li><span>Open one of your decks and press <strong>Run full test</strong>. The report opens at "
+        "<li><span>Open one of your decks and press <strong>Run test</strong>. The report opens at "
         "once and fills in by itself as the solo test and the Forge games finish.</span></li>"
         "<li><span>The report opens: the deck, its commander, the games run and when; the headline numbers "
         "as tiles with their 95% intervals (the turn the commander lands, the chance of 40 damage or a "
@@ -549,7 +549,7 @@ def build(
         "page, played against the deck as it is now), a snapshot (<strong>Test this version</strong> "
         "under History) and two decks or a deck and its snapshot (<strong>Solo test both (A/B)</strong> "
         "on Compare). Until Forge has played enough games, a report leads with the solo test.</p>"
-        "<p>It is the same run the assistant makes for “goldfish this deck”: the statistics, the "
+        "<p>It is the same run the assistant makes for “test this deck”: the statistics, the "
         "validation and the solo test (300 games), so the numbers match whichever way it is "
         "started.</p>"
     )
@@ -615,10 +615,10 @@ def build(
     )
     how_approve = (
         "<p>Your own saves in the app go to Archidekt at once: pressing Save is your approval. An "
-        "<strong>assistant's</strong> edit, new deck, clone, settings change, restore or collection change "
+        "<strong>assistant's</strong> edit, new deck, clone, settings change, restore or binder change "
         "is first saved as a <strong>proposal</strong>: the exact list of what would change.</p>"
         "<ol class='steps'>"
-        "<li><span>Approve on the card the assistant shows in the chat (Reject can carry a reason), or "
+        "<li><span>Press Apply on the card the assistant shows in the chat (Reject can carry a reason), or "
         "open <a href='/proposals'>Proposals</a>, which lists what is waiting by deck, oldest first. "
         "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or check "
         "several and press <strong>Apply</strong>: the gateway shows the order first, then applies them "
@@ -658,7 +658,7 @@ def build(
         f"as <strong>{_esc(modes.MODE_LABELS['semi'])}</strong> (the assistant applies low-risk changes "
         "itself, such as a small edit or a private copy of a deck, and asks about the rest) or Full auto, "
         f"shown as <strong>{_esc(modes.MODE_LABELS['auto'])}</strong> (it "
-        "also applies bigger deck and collection edits and changes to a deck's details, except a "
+        "also applies bigger deck and binder edits and changes to a deck's details, except a "
         "restore, a commander or companion change, a new deck, an edit of more than "
         f"{int(big_rows)} rows, making a deck public or unlisted, and any edit of a description that "
         "has formatting, such as bold text, links or pictures). "
@@ -696,7 +696,7 @@ def build(
         "put in, changed counts and the statistics' differences. The precon box suggests as you type. "
         "<a href='/precons'>Precons</a> lists every preconstructed deck Archidekt knows, by set.</p>"
         "<p>Your assistant makes the same comparison when you ask (“what does this deck run that mine "
-        "doesn't?”), and can also compare two versions of a deck in the simulator.</p>"
+        "doesn't?”), and can also compare two versions of a deck in a solo test.</p>"
     )
     how_export = (
         f"{_h4('how-export-deck', 'A deck')}"
@@ -707,8 +707,8 @@ def build(
         ".txt, MTGO .dek and PDF (one-way); the app saves downloads to your Downloads folder. "
         "<strong>New deck</strong> on the Decks page imports a pasted list, a CSV export, the gateway's "
         ".json or a chosen file.</p>"
-        f"{_h4('how-export-collection', 'The collection')}"
-        "<p><strong>Export CSV</strong> downloads the whole collection in the column layout Archidekt's "
+        f"{_h4('how-export-collection', 'The binder')}"
+        "<p><strong>Export CSV</strong> downloads the whole binder in the column layout Archidekt's "
         "own import reads. <strong>Import a list</strong> adds cards from that CSV, from a CSV with "
         "Archidekt's column names or from a plain card list, pasted or chosen as a file, up to 100 rows "
         "at a time.</p>"
@@ -748,19 +748,19 @@ def build(
         "printing or foil, adjust quantities. Cards the camera could not read are kept with a picture of "
         "the title so you can type them.</span></li>"
         "<li><span><strong>Choose what to do with it:</strong> save the cards to your "
-        "<a href='/collection'>collection</a>, add them to one of your decks, start a new deck from them, "
+        "<a href='/collection'>binder</a>, add them to one of your decks, start a new deck from them, "
         "or save the scan for later (your assistant can pick it up too).</span></li></ol>"
         "<p>You can also type or paste names instead of using the camera, and earlier scans are listed "
         "under <strong>Sessions</strong>. In the Android app the orange shutter and <strong>Auto</strong> "
         "on the Scan page, and <strong>Scan with the app's camera</strong> on the Account page, use the "
         "phone's own camera, with its torch brightness and zoom.</p>"
         "<p>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
-        "printings and quantities first, then send it to your collection or a deck, which removes the "
+        "printings and quantities first, then send it to your binder or a deck, which removes the "
         "draft. Nothing expires; you delete what you do not want.</p>"
     )
     how_collection = (
-        "<p><a href='/collection'>Binder</a> is the list of cards you own. It is your Collection on "
-        "Archidekt, shown and edited here through the account you linked, and what you add here appears "
+        "<p><a href='/collection'>Binder</a> is the list of cards you own (your Archidekt collection), "
+        "shown and edited here through the account you linked, and what you add here appears "
         "on archidekt.com at once. Scan a pile and save it, or add cards by name; each card keeps its "
         "printing, finish, condition, language and count.</p><ul>"
         "<li>Added copies join an entry you already have only when its printing, finish, condition and "
@@ -778,7 +778,7 @@ def build(
         "ones alike, with the number of copies Archidekt knows about.</li>"
         "<li><strong>Export CSV</strong> and <strong>Import a list</strong> are described under "
         "<a href='#how-export'>Export and import</a>.</li></ul>"
-        "<p class='tip'>Your assistant can read the collection too, for questions like “which cards in "
+        "<p class='tip'>Your assistant can read the binder too, for questions like “which cards in "
         "this deck do I not own yet?”, and propose additions or removals that you approve like a deck "
         "edit. It can also propose a like, follow or comment, but each one waits for your own press on "
         "its review page, whatever your approval mode.</p>"
@@ -827,8 +827,9 @@ def build(
         "<p>The app can also send you <strong>push notifications</strong>: when an assistant leaves "
         "changes waiting for you, a deck report finishes, a watched price crosses your alert, or something "
         "new arrives in your Archidekt Alerts (a comment, a reply, a new follower). Turn them on, and choose "
-        "which, in the Notifications card on the <a href='/account/details#notifications'>Account</a> page "
-        "inside the app. Pressing one opens the right page here.</p>"
+        "which, in the Push notifications card on the "
+        "<a href='/account/details#notifications'>Account</a> page inside the app. Pressing one "
+        "opens the right page here.</p>"
         "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
         "to a rail down the left edge, like other Android apps; the layout follows the window, so split "
         "screen and pop-up windows work too. While scanning, half-folding the phone puts the camera on "
@@ -878,12 +879,12 @@ def build(
         "<strong>The assistant cannot:</strong> rename "
         "folders, link or unlink Archidekt, change your approval mode, or do anything an admin does.</p>"
         "<p><strong>Only the assistant does:</strong> research lookups (Scryfall, EDHREC, combos, rules), "
-        "comparing two versions of a deck in the simulator, reading card photos into names, proposing "
-        "changes it worked out itself. <strong>Both reach:</strong> reading decks and collections, "
+        "comparing two versions of a deck in a solo test, reading card photos into names, proposing "
+        "changes it worked out itself. <strong>Both reach:</strong> reading decks and the binder, "
         "statistics, creating and editing decks, deck settings (folder, tags and cover included), "
-        "cloning, restoring snapshots, collection changes, scan drafts; your path applies at once, the "
+        "cloning, restoring snapshots, binder changes, scan drafts; your path applies at once, the "
         "assistant's is a proposal under your mode. The solo test of one deck and the "
-        "comparison of two are both paths: Run full test and Compare on the deck page for people, "
+        "comparison of two are both paths: Run test and Compare on the deck page for people, "
         "“Run a test report” and “Compare two decks” for the assistant, same engine and settings.</p>"
     )
     ref_tools = (
@@ -912,7 +913,7 @@ def build(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run full test, statistics with Probability "
+            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run test, statistics with Probability "
             "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
@@ -956,12 +957,12 @@ def build(
         (
             "Scan",
             "<code>/scan</code>",
-            "camera or photos to a draft; Sessions; save to a deck or the collection",
+            "camera or photos to a draft; Sessions; save to a deck or the binder",
         ),
         (
             "Binder",
             "<code>/collection</code>",
-            "the Archidekt Collection: filter, sort, grid or list, add, quantity, details, remove, CSV "
+            "the cards you own: filter, sort, grid or list, add, quantity, details, remove, CSV "
             "export and import",
         ),
         (
@@ -1008,7 +1009,7 @@ def build(
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
-        "<td>you press Approve on the card or Apply on its review page (deleting a deck, and an edit of a "
+        "<td>you press Apply on the card or on its review page (deleting a deck, and an edit of a "
         "comment that has formatting: on its review page only)</td>"
     )
     ref_approval = (
@@ -1018,7 +1019,7 @@ def build(
         "<div class='tbl'><table><thead><tr><th>Mode</th><th>Low-risk proposal</th><th>High-risk proposal"
         "</th><th>Account action or deck deletion</th></tr></thead><tbody>"
         f"<tr><td><strong>Manual</strong> (default): {_esc(modes.MODE_LABELS['manual'])}</td>"
-        "<td>you press Approve or Apply</td><td>you press</td>"
+        "<td>you press Apply</td><td>you press</td>"
         f"{on_review_page}</tr>"
         f"<tr><td><strong>Semi-auto</strong>: {_esc(modes.MODE_LABELS['semi'])}</td>"
         "<td>the assistant applies it</td><td>you press</td>"
@@ -1036,7 +1037,7 @@ def build(
         "<strong>In every mode:</strong> a held change, a change waiting for another change first, one "
         "another app had a hand in, one that replaces another app's change, or one that another app's "
         "waiting change would replace waits for your press; its card and review page say why. "
-        "A change to one of your decks keeps a snapshot first, and deck and collection changes are read "
+        "A change to one of your decks keeps a snapshot first, and deck and binder changes are read "
         "back to check them.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
         f"{_h4('ref-approval-hand', 'Your own saves')}"
@@ -1119,7 +1120,7 @@ def build(
         "sideboard list, each with Copy; downloads as Archidekt .txt, plain .txt, .csv and .json</td>"
         "<td>yes: New deck here, or Archidekt's Import dialog</td></tr>"
         "<tr><td>A deck, one-way</td><td>Arena .txt, MTGO .dek, PDF</td><td>no</td></tr>"
-        "<tr><td>The collection</td><td>.csv in the column layout Archidekt's own import reads</td>"
+        "<tr><td>The binder</td><td>.csv in the column layout Archidekt's own import reads</td>"
         "<td>yes: Import a list here, or Archidekt</td></tr>"
         "<tr><td>A deck report</td><td>Markdown (.md), a self-contained HTML page (light and dark, no "
         "scripts), Copy as Markdown</td><td>no (reports are read, not imported)</td></tr>"
@@ -1137,7 +1138,7 @@ def build(
         f"{_h4('exp-approvals-proposal', 'Proposals')}"
         "<p>An assistant never writes to Archidekt directly. It proposes: the exact list of rows that "
         "would change, stored on the gateway with a review page and, in a chat that shows cards, a card "
-        "with Approve and Reject. Whether the assistant may then apply the proposal itself depends only on "
+        "with Apply and Reject. Whether the assistant may then apply the proposal itself depends only on "
         "your approval mode and the proposal's risk level (<a href='#ref-approval'>the reference</a> has "
         "the rules), except that a held change, a change waiting for another change first, one another "
         "app had a hand in, one that replaces another app's change, or one that another app's waiting "
@@ -1167,8 +1168,8 @@ def build(
         "<li>Every change the gateway sends to Archidekt for you (a new deck, an applied proposal, a "
         "deleted deck, a folder, a tag, a cover) <strong>drops the list first</strong>, so the next view "
         "is live again. A change made on archidekt.com itself shows up when the 90 seconds are up.</li>"
-        "<li>The collection's unfiltered first page is kept for a minute per sort and dropped by every "
-        "collection add, change or removal.</li>"
+        "<li>The binder's unfiltered first page is kept for a minute per sort and dropped by every "
+        "binder add, change or removal.</li>"
         "<li>When the list is cold and Archidekt has not answered within a second and a half, Home and "
         "Decks open at once with a gray <strong>placeholder</strong> that the page fills as soon as the "
         "list arrives; without script a reload shows the list.</li>"
@@ -1179,13 +1180,13 @@ def build(
     exp_assistant = (
         "<p>In Claude on the web, desktop and phones (and ChatGPT on the web and in its Android app), "
         "the things you have to pick or press come as <strong>cards in the chat</strong>: "
-        "a proposal with Approve "
+        "a proposal with Apply "
         "and Reject (Reject can carry a reason), the changes waiting for you with <strong>Apply "
         "all</strong>, the printings of a card as pictures to tap, and the cards read from your photos "
         "to keep or drop. Everything else, such as a deck, its statistics, a comparison, a list of "
         "decks or your account's setup, comes as the assistant's own words, which keeps a long chat "
         "light. A tap on a picker is passed to the assistant as text and it carries on from there; "
-        "nothing changes until a proposal you approve. Only the Approve, Reject and Apply all buttons "
+        "nothing changes until a proposal you approve. Only the Apply, Reject and Apply all buttons "
         "change anything, and each uses the card's one-time code. The card tells the assistant what "
         "you pressed, and it reads that with your next message; the card never writes in the chat for "
         "you. Claude Code and older "
@@ -1205,9 +1206,9 @@ def build(
     exp_privacy = (
         "<p>The gateway keeps as little as it can: who you are (from your sign-in), your Archidekt link, "
         "your proposals, snapshots, reports and scan drafts, your approval mode and theme, and an "
-        "activity log of what your account and its apps did. Decks live on Archidekt and your collection "
+        "activity log of what your account and its apps did. Decks live on Archidekt and your binder "
         "is Archidekt's; card data and images come from Scryfall.</p><ul>"
-        "<li>Only you can see your decks, proposals, snapshots, scans and collection; another member "
+        "<li>Only you can see your decks, proposals, snapshots, scans and binder; another member "
         "cannot reach them, and neither can their assistant.</li>"
         "<li>Your Archidekt sign-in is stored encrypted. No page, admin tool, log or backup shows it, and "
         "backups leave it out, so after the site is restored from a backup you sign in again and relink "
@@ -1215,7 +1216,7 @@ def build(
         "to act as you on Archidekt until it expires. The Account page spells out exactly what linking "
         "gives this site, its admins and the person who runs it "
         "(<a href='/account/details#archidekt-disclosure'>What linking gives this gateway</a>).</li>"
-        "<li>Nothing about the cards in your collection is stored on this gateway: it is read from and "
+        "<li>Nothing about the cards in your binder is stored on this gateway: it is read from and "
         "written to Archidekt through your link.</li>"
         "<li>Your assistant's access can be withdrawn at any time from the Account page (the "
         "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "

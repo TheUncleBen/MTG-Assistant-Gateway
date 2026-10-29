@@ -51,7 +51,7 @@ async def test_signed_out_and_data_deleted_share_the_panel(gw: Harness) -> None:
     body = panel(gone.text, "Your data was deleted")
     # the list of what was deleted is the Account card's list, word for word
     assert f"deleted from its database: {pages.DELETED_LIST}. You are signed out.</p>" in body
-    assert "your simulator card models" in body and "deck covers" in body and "your watchlist" in body
+    assert "your card models" in body and "deck covers" in body and "your watchlist" in body
     # what was not touched sits in a tinted strip; backups and the security log stay small print
     assert (
         "<div class='notice'><strong>Not touched:</strong> your decks on Archidekt, including any backup "
@@ -72,7 +72,7 @@ async def test_the_account_card_and_the_deleted_page_list_the_same_things() -> N
     )
     for word in ("card_model", "watch", "deck_covers", "scan", "report", "snapshot", "proposal"):
         assert word in deletes, word
-    for named in ("simulator card models", "watchlist", "deck covers", "scan sessions", "test reports"):
+    for named in ("card models", "watchlist", "deck covers", "scan sessions", "test reports"):
         assert named in pages.DELETED_LIST, named
 
 

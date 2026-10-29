@@ -66,9 +66,9 @@ Claude / ChatGPT / Android app / browser
 | Piece | What it does | Can you swap it? |
 | --- | --- | --- |
 | **mtg-gateway** | The product. An MCP server at `/mcp`, its own OAuth 2.1 server for AI clients, the browser pages, the Archidekt connection, card scanning, and the database | No, this is the thing you're deploying |
-| **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, goldfish simulation. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service (in Compose, also the gateway's `depends_on` entry for `mysticforge`); the research tools disappear, deck tools, proposals and scanning still work |
-| **ntfy** | Holds each member's notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: the shipped stack files require it and run it for you |
-| **Forge** | The rules engine for deck simulations: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | On by default in the example files (`FORGE_REPLICAS=1`, or the Compose `forge` profile); it also plays the deck alone for the Forge solo test. Without it reports have the solo test's estimate and no Forge games |
+| **Mystic Forge** | Card search, prices, rules, EDHREC, Commander Spellbook, precons, solo test. Upstream open-source project, built from a pinned commit with small patches | Optional. Set `MTG_MYSTIC_FORGE_URL` to an empty value and remove the Mystic Forge service (in Compose, also the gateway's `depends_on` entry for `mysticforge`); the research tools disappear, deck tools, proposals and scanning still work |
+| **ntfy** | Holds each member's push notifications, for up to 12 hours, until the gateway's Android app picks them up through the gateway's own address. Upstream open-source server, on a private network with no published port | Not separately: the shipped stack files require it and run it for you |
+| **Forge** | The rules engine for deck tests: plays real games of a deck against precons. Upstream open-source engine, unmodified, behind a small job service | On by default in the example files (`FORGE_REPLICAS=1`, or the Compose `forge` profile); it also plays the deck alone for the Forge solo test. Without it reports have the solo test's estimate and no Forge games |
 | **Reverse proxy** | Gives the gateway an `https://` address on your domain | Any proxy that forwards to an HTTP backend and keeps the `Host` header. See [REVERSE-PROXY.md](REVERSE-PROXY.md) |
 | **Identity provider** | Who may sign in. The gateway never sees passwords | Any OpenID Connect provider that can send group membership in a claim (`MTG_OIDC_GROUPS_CLAIM`), or any provider at all if it already admits only the right people and you set `MTG_ALLOW_ANY_IDP_USER=true`. Authentik is the documented one; see [IDP-OTHERS.md](IDP-OTHERS.md) for the rest |
 | **Docker host** | Runs the containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
@@ -111,7 +111,7 @@ AI client and any identity provider work together:
    with a Client ID Metadata Document), use PKCE, and get the gateway's own
    short-lived tokens. Before anything is granted, every connection shows a
    confirmation page naming the client and where the sign-in returns to,
-   with Approve and Deny.
+   with Approve and sign in, and Deny.
 2. **Gateway → identity provider.** The gateway is one confidential OpenID
    Connect client at your identity provider. When someone connects, the
    gateway sends their browser there to sign in, checks the ID token and the
@@ -166,7 +166,7 @@ The assistant never changes a deck directly:
    `propose_*` tool (a deck's settings, folder, tags and cover go through
    `propose_deck_details`). The gateway saves the exact change and returns a
    review link.
-2. The person approves it: with **Approve** on the card the AI app shows
+2. The person approves it: with **Apply** on the card the AI app shows
    next to the proposal (an MCP App, see below) or on the review page with
    **Apply**. A person who chose a looser **approval mode** on their Account
    page (see below) lets the assistant apply low-risk changes, or most changes,
@@ -236,7 +236,7 @@ For the exact devices and plans tested, see
   only register `https` redirect addresses, or `http` on localhost.
 - **Consent.** Every connection from an AI client, including each weekly
   re-sign-in, shows the gateway's own page naming the client and where it
-  will send the sign-in, with Approve and Deny, before the identity
+  will send the sign-in, with Approve and sign in, and Deny, before the identity
   provider is involved. An identity provider that signs people in silently
   can't skip it. An app can ask for the read-only scope `mtg.read`; its
   token can then read but never propose or apply, and stores nothing but
@@ -280,7 +280,7 @@ For the exact devices and plans tested, see
     time), and the hourly purge deletes sessions past that date.
 - **Deck changes** need the person's own yes, unless they chose otherwise.
   The code enforces it: changes are proposals until applied with the review
-  page's Apply button or the in-chat card's Approve button. Each person has
+  page's Apply button or the in-chat card's Apply button. Each person has
   an **approval mode** (`src/mtg_gateway/modes.py`), set only on their own
   Account page in the browser, never over MCP or the API: `manual` (the
   default: ask every time), `semi` (the assistant may apply a low-risk edit
@@ -289,7 +289,7 @@ For the exact devices and plans tested, see
   value changes of at most four copies each, never a change to which cards
   are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a
   row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; or a
-  clone) or `auto` (the assistant may apply deck and collection changes,
+  clone) or `auto` (the assistant may apply deck and binder changes,
   except those Full auto still leaves to the member, `modes.auto_waits`, and
   those that wait in every mode, `DeckService.press_reason` and
   `rewritten_by_another_app`). No mode lets an assistant apply an Archidekt account action

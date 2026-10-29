@@ -26,7 +26,7 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
         "Backups",
         "Copies kept before every edit, and the nightly backup of the gateway's database.",
     ),
-    ("simulation", "Simulation", "Forge games for deck reports."),
+    ("simulation", "Tests", "Forge games for deck tests."),
     ("watchlists", "Watchlists and prices", "Watched cards and decks, and the daily price check."),
     ("general", "General", "The gateway's name and housekeeping."),
     (
@@ -79,8 +79,8 @@ TEXT: dict[str, tuple[str, str]] = {
         "A change nobody approves in this time expires.",
     ),
     "apply_in_chat": (
-        "Approve buttons in the chat",
-        "Claude and ChatGPT show each change as a card with Approve and Reject buttons.",
+        "Apply buttons in the chat",
+        "Claude and ChatGPT show each change as a card with Apply and Reject buttons.",
     ),
     "browser_session_ttl": (
         "Website sign-in when unused",

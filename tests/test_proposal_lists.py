@@ -147,9 +147,7 @@ def test_an_applied_collection_change_says_so_only_when_the_read_back_found_it()
     mismatches, so its text says every change is there unless the read-back found otherwise. One
     applied before the read-back arrived has no "verified" and keeps the plain text."""
     for result in ({"verified": True}, {}, None):
-        assert applied_text("collection", {}, result) == (
-            "Your collection on Archidekt has these changes now."
-        )
+        assert applied_text("collection", {}, result) == ("Your binder has these changes now.")
     assert applied_text("collection", {}, {"verified": False, "mismatches": [{"name": "Sol Ring"}]}) == (
         "Sent to Archidekt, but the read-back didn't confirm every change. See Result on the review page."
     )

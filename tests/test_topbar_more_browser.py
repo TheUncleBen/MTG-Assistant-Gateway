@@ -1,6 +1,6 @@
 """The top bar on a computer (navigation round 2, Ben 2026-10-25): the four places (Home, Decks,
 Binder, Assistant) at every width and text size, then "More ▾" with its three groups (Find: Search
-and Precons; Your cards: Scan and My card models; Community: Forum). History and Reports mark
+and Precons; Your cards: Scan and Card models; Community: Forum). History and Reports mark
 Assistant; a page under More marks More. Phones and the touch rail have no More ▾ in the bar."""
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def test_the_bar_marks_the_place_and_a_page_under_more(server: Server) -> None:
         "Search decks and cards",
         "Precons",
         "Scan",
-        "My card models",
+        "Card models",
         "Forum",
     ]
     nav = h.get("/scan").text.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]

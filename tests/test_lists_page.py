@@ -460,8 +460,8 @@ async def test_the_account_page_links_to_my_lists_and_more_does_not(member: Brow
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # My lists lives under Account (decision C8): More's Your cards group has Scan and My card models
-    assert labels[-3:] == ["Scan", "My card models", "Forum"]
+    # My lists lives under Account (decision C8): More's Your cards group has Scan and Card models
+    assert labels[-3:] == ["Scan", "Card models", "Forum"]
     assert "href='/lists'" not in page
     hub = (await member.http.get("/account")).text
     assert "href='/lists'" in hub and "My lists" in hub

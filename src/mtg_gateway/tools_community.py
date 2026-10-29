@@ -73,7 +73,7 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Read my Archidekt profile and settings",
         description=(
             "The user's own Archidekt profile and account settings as they are now: username, bio "
-            "(its words), whether their collection is public, their email and notification switches "
+            "(its words), whether their binder is public, their email and alert switches "
             "and their New Device Default Settings. Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
@@ -89,9 +89,9 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
 
     @server.tool(
         name="get_my_notifications",
-        title="Read my Archidekt notifications",
+        title="Read my Archidekt alerts",
         description=(
-            "The user's Archidekt notifications (the bell): kind, text, whether it was seen, and the "
+            "The user's Archidekt alerts (the bell): kind, text, whether it was seen, and the "
             "page it points to. Nothing here marks them read. Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},

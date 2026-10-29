@@ -1921,7 +1921,7 @@
       }
     }
     if (isCustom(card)) { CardView.open(CardView.fromElement(card), acts); return; }  // no collection or Scryfall row for a custom card
-    var ownBtn = el("button", "btn", "I own this card");
+    var ownBtn = el("button", "btn", "Add to binder");
     ownBtn.type = "button";
     ownBtn.addEventListener("click", function () {
       ownBtn.disabled = true;
@@ -1931,7 +1931,7 @@
         headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
         body: JSON.stringify({ items: [{ name: name, quantity: 1 }], source: "manual" })
       }).then(function (r) { return r.json(); }).then(function (d) {
-        ownBtn.textContent = d.ok && d.added && d.added.length ? "Added to your collection" : "Could not add (" + ((d && d.message) || "lookup failed") + ")";
+        ownBtn.textContent = d.ok && d.added && d.added.length ? "Added to your binder" : "Could not add (" + ((d && d.message) || "lookup failed") + ")";
       }).catch(function () { ownBtn.textContent = "Could not add: no connection"; });
     });
     acts.push(ownBtn);
@@ -2016,11 +2016,13 @@
       } else {
         m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
       }
-      if (window.MtgPrintPick) m.appendChild(menuItem("Art variants…", "image", function () { closeMenu(); artVariants(card); }));
+      // the one Printings… item: browse and watch a printing, and on the member's own deck also
+      // put it in the deck (artVariants); the row's edits below then have none of their own
+      if (window.MtgPrintPick) m.appendChild(menuItem("Printings…", "image", function () { closeMenu(); artVariants(card); }));
     }
     // one copy into the collection, as the viewer's "I own this card" (the shared layer's call)
     var Shared = window.MtgMenu;
-    if (Shared) m.appendChild(menuItem("Add to collection", "collection", function () { closeMenu(); Shared.collect(name); }));
+    if (Shared) m.appendChild(menuItem("Add to binder", "collection", function () { closeMenu(); Shared.collect(name); }));
     if (Shared && Shared.pin) m.appendChild(menuItem("Pin card", "pin", function () { closeMenu(); Shared.pin(name); }));
     if (own && deckId) {
       var row = el("div", "item qtyrow");
@@ -2109,7 +2111,8 @@
         m.appendChild(finSub);
       }
       // every row: a row of a card that has other rows (a maybeboard row, say) changes on its own
-      if (window.MtgPrintPick) m.appendChild(menuItem("Change printing…", "image", function () { closeMenu(); changePrinting(card); }));
+      // (with watchlists on, Printings… is already above, with the watch items)
+      if (window.MtgPrintPick && !document.body.hasAttribute("data-watchlist")) m.appendChild(menuItem("Printings…", "image", function () { closeMenu(); changePrinting(card); }));
       if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
       // Archidekt's card menu switches: on shows a check, as the Move to list's current category
@@ -3163,7 +3166,7 @@
     testDd.parentNode.insertBefore(testBtn, testDd);
     testBtn.addEventListener("click", function () {
       var id = enc(d.id), t = [head("On the gateway"), link("Goldfish", "layers", "/decks/" + id + "/goldfish")];
-      if (d.can) t.push(item("Run full test", "stats", submit("#fullf")));
+      if (d.can) t.push(item("Run test", "stats", submit("#fullf")));
       if (d.forge) t.push(item("Solo test only", "stats", submit("#solof")));
       t.push(sep());
       t.push(head("On other sites"));

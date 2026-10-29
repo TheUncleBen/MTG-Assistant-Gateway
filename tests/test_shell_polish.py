@@ -1,5 +1,5 @@
 """The shell's small fixes of 0.7.46 without a browser: Home greets the member by name, Theme and
-Layout answer a script without a redirect, More lists My card models, the in-chat cards' links are
+Layout answer a script without a redirect, More lists Card models, the in-chat cards' links are
 capsules, and the pages' remaining blue links are capsules or text-coloured."""
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ async def test_theme_and_layout_answer_a_script_without_a_redirect(member: Brows
 
 def test_more_lists_my_card_models_while_they_are_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     groups = dict(theme.more_groups())
-    assert ("/history/models", "My card models", "box") in groups["Your cards"]
+    assert ("/history/models", "Card models", "box") in groups["Your cards"]
     monkeypatch.setattr(card_models, "SWITCHED_ON", False)
     assert "/history/models" not in [h for _g, links in theme.more_groups() for h, _l, _i in links]
 
@@ -70,7 +70,7 @@ def test_more_lists_my_card_models_while_they_are_kept(monkeypatch: pytest.Monke
 async def test_the_more_menu_opens_my_card_models(member: Browser) -> None:
     page = (await member.http.get("/decks")).text
     more = page.split("<details class='dd navmore'>", 1)[1].split("</details>", 1)[0]
-    assert "href='/history/models'" in more and "My card models" in more
+    assert "href='/history/models'" in more and "Card models" in more
     assert (await member.http.get("/history/models")).status_code == 200
 
 

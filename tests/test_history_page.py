@@ -448,7 +448,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             "<span class='k'>Solo test games</span> 300, through turn 10 (seed 42)",
             "<a href='/reports'>All reports</a>",
             "Played with their effect",
-            "report is shown instead of running the simulation again",
+            "report is shown instead of testing it again",
             "class='tiles wide rv-stats'",
             "class='ci'",
             "class='charts rv-charts'",
@@ -572,7 +572,7 @@ async def test_report_trends_on_a_decks_history(stack: Stack) -> None:
         # the text table: one row per report, oldest first, a dash where a report has no number
         table = body.split("<table>")[1].split("</table>")[0]
         assert table.index("rep_t1") < table.index("rep_t2") < table.index("rep_t3")
-        assert "<td>–</td>" in table and "<th scope='col'>Turns simulated</th>" in table
+        assert "<td>–</td>" in table and "<th scope='col'>Turns played</th>" in table
         # one report: no trend section; nor on the all-decks page
         assert "Report trends" not in (await b.http.get("/history?deck_id=43", headers=NAV)).text
         assert "Report trends" not in (await b.http.get("/history", headers=NAV)).text
@@ -761,7 +761,7 @@ def test_deck_filter_groups_use_live_names_and_set_gone_decks_apart() -> None:
     live = [{"id": "42", "name": "New name"}, {"id": "44", "name": ""}]
     own = {"42", "43", "44"}
     current, gone = deck_filter_groups(seen, live, listed={"42", "44"}, own=own)
-    assert current == {"42": "New name", "collection": "Your Archidekt collection", "44": "Kept"}
+    assert current == {"42": "New name", "collection": "Your binder", "44": "Kept"}
     assert gone == {"43": "Deleted deck"}
     # an incomplete or unreadable list can't tell a deck is gone: it stays with the current ones
     current, gone = deck_filter_groups(seen, live, listed=None, own=own)
