@@ -40,6 +40,8 @@ NOT_TOOLS = {
     "apply_needs_user",
     "apply_if_allowed",
     "price_total",
+    "price_change",
+    "price_note",
     "price_source_1",
     "price_source_2",
     "watchlist_url",

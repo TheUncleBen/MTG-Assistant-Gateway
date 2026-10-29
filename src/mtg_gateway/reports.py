@@ -2286,6 +2286,11 @@ class ReportService:
         paired = json.loads(d["paired_json"]) if d.get("paired_json") else None
         # a proposal's paired solo test against the deck as it is (run_proposal)
         out["paired"] = _compact(paired) if isinstance(paired, dict) else None
+        both = side_by_side(
+            out["goldfish"], out["forge"], out["forge_solo"], deck_size=_card_count(out["stats"])
+        )
+        if both is not None:
+            out["side_by_side"] = both
         rows = unpack_rows(d.get("tested_list"))
         # the list the report tested, as decklist text (None for a report made before 0.7.46)
         out["tested_list"] = rows_text(rows) if rows else None
@@ -2445,6 +2450,8 @@ class ReportService:
         out["forge_result"] = (
             {k: forge[k] for k in FORGE_RESULT_KEYS if k in forge} if _done_games(forge) else None
         )
+        if full.get("side_by_side"):
+            out["side_by_side"] = full["side_by_side"]
         return out
 
     def decks_seen(self, sub: str) -> dict[str, str]:
@@ -3505,6 +3512,69 @@ def solo_coverage(goldfish: Any, *, deck_size: int | None = None) -> dict[str, A
         "saved_models": models,
         "note": " ".join(parts),
     }
+
+
+SIDE_BY_SIDE_NOTE = (
+    "The engines answer different questions. The solo test is the gateway's fast simulator: it "
+    "plays only the cards it models (its coverage), so with much of the deck played without effect "
+    "its kill numbers are a floor. Forge solo plays every card by the full rules against opponents "
+    "who do nothing: how fast the deck can win when nobody stops it. Forge against precons is real "
+    "games against other decks, the closest to a table. When they disagree, the Forge numbers say "
+    "more about the deck as it is; the solo test says more about its speed, read with its coverage."
+)
+FEW_GAMES_NOTE = " Forge against precons has too few games for its win rate to say much yet."
+
+
+def side_by_side(
+    goldfish: Any, forge: Any, forge_solo: Any, *, deck_size: int | None = None
+) -> dict[str, Any] | None:
+    """A report's engines next to each other (assistant tool review C-7): the solo test's kill
+    rate by its last turn with its coverage, Forge solo's win rate and turn, and Forge against
+    precons' win rate with whether it has enough games to lead with, plus how to read them
+    together. Only engines with results; None unless at least two have one."""
+    out: dict[str, Any] = {}
+    speed = speed_numbers(goldfish) if isinstance(goldfish, dict) and goldfish.get("ok") else {}
+    cov = solo_coverage(goldfish, deck_size=deck_size)
+    if speed.get("kill_pct") is not None or cov is not None:
+        out["solo_test"] = {
+            "plays": "the gateway's simulator, the cards it models",
+            "kill_pct": speed.get("kill_pct"),
+            "until_turn": speed.get("until_turn"),
+            "kill_median_turn": speed.get("kill_median_turn"),
+            **(
+                {
+                    "modeled": cov["modeled"],
+                    "played_with_effect": f"{cov['modeled']} of {cov['deck_size']} cards",
+                    "coverage_pct": cov["pct"],
+                }
+                if cov
+                else {}
+            ),
+        }
+    solo = forge_solo.get("result") if isinstance(forge_solo, dict) else None
+    if isinstance(solo, dict) and solo.get("games"):
+        out["forge_solo"] = {
+            "plays": "Forge, every card by the full rules, against opponents who do nothing",
+            **{k: solo.get(k) for k in ("games", "won_rate", "won_rate_95", "median_won_turn", "until_turn")},
+        }
+    res = forge.get("result") if isinstance(forge, dict) else None
+    seats = (
+        [x for x in (res or {}).get("seats") or [] if isinstance(x, dict)] if isinstance(res, dict) else []
+    )
+    if seats and isinstance(res, dict) and res.get("games"):
+        out["forge_vs_precons"] = {
+            "plays": "Forge, every card by the full rules, against Commander precons",
+            "games": res.get("games"),
+            "win_rate": seats[0].get("win_rate"),
+            "win_rate_95": seats[0].get("win_rate_95"),
+            "opponents": len(seats) - 1,
+            "enough": forge_enough(forge),
+        }
+    if len(out) < 2:
+        return None
+    few = "forge_vs_precons" in out and not out["forge_vs_precons"]["enough"]
+    out["note"] = SIDE_BY_SIDE_NOTE + (FEW_GAMES_NOTE if few else "")
+    return out
 
 
 def _list_commander(text: str) -> str | None:

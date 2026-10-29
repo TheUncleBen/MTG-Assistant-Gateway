@@ -160,6 +160,23 @@ ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover", "package")
 # The OAuth client (or "__browser__") acting on the current request, recorded in the audit log.
 # Set by the MCP tool layer and the browser pages; None when the actor is not known.
 current_client: ContextVar[str | None] = ContextVar("current_client", default=None)
+
+# The plan-first hint (DeckService.propose_linked): from the PLAN_FIRST_AFTER-th deck edit one app
+# sends for one deck within PLAN_WINDOW_SECONDS.
+PLAN_FIRST_AFTER = 3
+PLAN_WINDOW_SECONDS = 300
+PLAN_FIRST_TEXT = (
+    "Your app has sent {n} changes to this deck in the last {minutes} minutes. Finish the review "
+    "first and send one proposal with every change: check_deck_changes checks a plan without a "
+    "card in the chat, and amend_proposal changes a proposal that is still waiting. Many small "
+    "proposals leave the deck half changed, often not legal, between them."
+)
+
+
+def _plan_clock() -> float:
+    return time.monotonic()
+
+
 MAX_CHANGES = 40
 MAX_PACKAGE_PAGES = 4  # the member's own card packages read for My decks, 50 a page
 # How long an apply call waits for the apply to finish before it answers "applying". The apply
@@ -1964,7 +1981,46 @@ def _with_card_facts(card: DeckCard, facts: dict[str, Any] | None, words: bool) 
         subtypes=tail.split(),
         legalities={str(k): str(v) for k, v in legal.items() if isinstance(v, str)},
         oracle_text=str(facts.get("oracle_text") or ""),
+        price=card.price if card.price is not None else _scryfall_price(facts, card.modifier),
     )
+
+
+def _scryfall_price(facts: dict[str, Any], modifier: str) -> float | None:
+    """Scryfall's USD price of an added card in its finish (foil, etched, else nonfoil), None
+    when Scryfall has none: the deck_after budget names such a card rather than guess."""
+    prices = facts.get("prices") if isinstance(facts.get("prices"), dict) else {}
+    key = {"foil": "usd_foil", "etched": "usd_etched"}.get(str(modifier or "").lower(), "usd")
+    try:
+        value = float(prices.get(key) or "")
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+PRICE_NOTE = (
+    "From the prices known: the deck's own (Archidekt's) and Scryfall's USD price for an added "
+    "card in its finish."
+)
+UNPRICED_NOTE = " An added card with no price (unpriced_added) is not counted."
+
+
+def deck_after_block(now: dict[str, Any], then: dict[str, Any], after: Deck) -> dict[str, Any]:
+    """What a deck edit result says about the deck once applied (assistant tool review C-2/C-3):
+    its card count, its format's verdict with every problem (not only the new ones, which
+    legality_after lists), its price total and the change from now, and the added cards no price
+    is known for, named rather than guessed."""
+    checks = then.get("checks") or {}
+    unpriced = sorted({c.name for c in after.main_cards if c.relation_id is None and c.price is None})
+    change = round(float(then.get("price_total") or 0) - float(now.get("price_total") or 0), 2)
+    return {
+        "card_count": then.get("card_count"),
+        "legal": checks.get("legal") if after.format else None,
+        "problems": list(checks.get("problems") or []),
+        "price_total": then.get("price_total"),
+        "price_change": change,
+        "unpriced_added": unpriced,
+        "price_note": PRICE_NOTE + (UNPRICED_NOTE if unpriced else ""),
+    }
 
 
 def _new_problems(
@@ -3287,6 +3343,8 @@ class DeckService:
         self._deleting: dict[str, set[int]] = {}
         # Applies running in the background (proposal id -> task) and what each got done so far.
         self._running: dict[str, asyncio.Task[Any]] = {}
+        # (member, app, deck) -> when that app's recent deck edits came (the plan-first hint)
+        self._plan_calls: dict[tuple[str, str, str], list[float]] = {}
         self._progress: dict[str, dict[str, Any]] = {}
         # Selections applied with one press (batch.py) and their result panels.
         self.batches = batch.Batches()
@@ -4571,7 +4629,7 @@ class DeckService:
             self.recheck_waiting(sub, deck)  # the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         rows, names_note = await self._check_names(sub, deck, changes, rows)
-        rows, legality = await self._judge_rules(deck, changes, rows)
+        rows, legality, after = await self._judge_rules(deck, changes, rows)
         if source_row is not None:
             rows = [source_row, *rows]
         pid = secrets.token_urlsafe(12)
@@ -4588,7 +4646,8 @@ class DeckService:
         )
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id})
         out = self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
-        return {**out, **_with_warnings(self._rules_note(changes, rows, legality), names_note)}
+        note = _with_warnings(self._rules_note(changes, rows, legality), names_note)
+        return {**out, **note, "deck_after": after}
 
     async def _judge_rules(
         self, deck: Deck, changes: list[Change], rows: list[dict[str, Any]]
@@ -4596,16 +4655,18 @@ class DeckService:
         """The review rows with the format rules the change would break that the deck keeps now
         marked on them (``breaks``, which makes the proposal high risk), and those rules in words.
         The deck as it would be is checked with deck_stats.deck_checks; an added card is looked up
-        on Scryfall first (one request) for what its legality turns on. A lookup that fails judges
-        the added cards by name only: their colors and legality are then not checked."""
+        on Scryfall first (one request) for what its legality turns on and its price. A lookup that
+        fails judges the added cards by name only: their colors and legality are then not checked.
+        The third value is ``deck_after`` (deck_after_block): the deck's size, verdict and price as
+        it would be (C-2/C-3)."""
         from . import deck_stats
         from .reports import deck_after
 
-        if not deck.format:
-            return rows, []
         after = deck_after(deck, changes)
         new = {c.name for c in after.cards if c.relation_id is None}
-        if new and self.card_collection is not None:
+        # a deck with no format has no rules to judge: its added cards are not looked up (their
+        # prices are then unknown, and deck_after names them)
+        if new and deck.format and self.card_collection is not None:
             try:
                 found, _missing = await self.card_collection([{"name": n} for n in sorted(new)][:75])
             except Exception:
@@ -4624,10 +4685,14 @@ class DeckService:
                     for c in after.cards
                 ],
             )
-        problems = _new_problems(deck_stats.compute(deck)["checks"], deck_stats.compute(after)["checks"])
+        now, then = deck_stats.compute(deck), deck_stats.compute(after)
+        block = deck_after_block(now, then, after)
+        if not deck.format:
+            return rows, [], block
+        problems = _new_problems(now["checks"], then["checks"])
         if not problems:
-            return rows, []
-        return mark_breaks(rows, problems), [p["problem"] for p in problems]
+            return rows, [], block
+        return mark_breaks(rows, problems), [p["problem"] for p in problems], block
 
     @staticmethod
     def _rules_note(changes: list[Change], rows: list[dict[str, Any]], legality: list[str]) -> dict[str, Any]:
@@ -7984,8 +8049,11 @@ class DeckService:
             changes = parse_changes(raw_changes)
             _before, _after, rows = plan_rows(deck, changes)
             rows, names_note = await self._check_names(sub, deck, changes, rows)
-            rows, legality = await self._judge_rules(deck, changes, rows)
-            note = _with_warnings(self._rules_note(changes, rows, legality), names_note)
+            rows, legality, after = await self._judge_rules(deck, changes, rows)
+            note = {
+                **_with_warnings(self._rules_note(changes, rows, legality), names_note),
+                "deck_after": after,
+            }
             stored: Any = [c.as_dict() for c in changes]
             # a card package's line stays first while any of its cards is still added: its import
             # is counted at apply, and its risk rule holds (security review 0.7.43)
@@ -8174,6 +8242,40 @@ class DeckService:
         return out
 
     async def propose_linked(
+        self,
+        sub: str,
+        deck_id: str,
+        raw_changes: Any,
+        *,
+        replaces: Any = None,
+        depends_on: Any = None,
+        separate: bool = False,
+    ) -> dict[str, Any]:
+        """``_propose_linked``, with the plan-first hint (``plan_first``) once an app has sent
+        PLAN_FIRST_AFTER deck edits for one deck within PLAN_WINDOW_SECONDS (assistant tool review
+        C-1: many small proposals in a row instead of one planned one)."""
+        out = await self._propose_linked(
+            sub, deck_id, raw_changes, replaces=replaces, depends_on=depends_on, separate=separate
+        )
+        client = current_client.get()
+        if not out.get("ok", True) or client in (None, BROWSER_CLIENT, ADMIN_CLIENT):
+            return out
+        key = (sub, client, _clean_deck_id(deck_id))
+        now = _plan_clock()
+        recent = [t for t in self._plan_calls.get(key, []) if now - t <= PLAN_WINDOW_SECONDS] + [now]
+        self._plan_calls[key] = recent
+        if len(self._plan_calls) > 1000:  # a bound on what the hint keeps in memory
+            self._plan_calls = {
+                k: v for k, v in self._plan_calls.items() if now - v[-1] <= PLAN_WINDOW_SECONDS
+            }
+        if len(recent) >= PLAN_FIRST_AFTER:
+            out = {
+                **out,
+                "plan_first": PLAN_FIRST_TEXT.format(n=len(recent), minutes=PLAN_WINDOW_SECONDS // 60),
+            }
+        return out
+
+    async def _propose_linked(
         self,
         sub: str,
         deck_id: str,
