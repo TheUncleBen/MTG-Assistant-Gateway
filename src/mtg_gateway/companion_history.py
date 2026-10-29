@@ -213,24 +213,27 @@ def add_history_routes(
         )
         if shown:
             listing = events_html(shown, group=query["group"], query=query, now=int(now))
-            newer = (
-                "/history" + query_string(query, offset=max(0, query["offset"] - PAGE), open="")
-                if query["offset"]
-                else None
+            # Load more (Standard 13): the next page's link, whose rows static/loadmore.js adds
+            upto = query["offset"] + len(shown)
+            whole = max(total, upto)
+            listing += (
+                ui.load_more(
+                    "/history" + query_string(query, offset=upto, open=""),
+                    text="Load more",
+                    shown=upto,
+                    total=whole,
+                    into=".hy-table",
+                )
+                if upto < total and upto <= MAX_OFFSET
+                else ui.load_more("", done=f"All {whole:,} shown.")
+                if query["offset"] or whole > PAGE
+                else ""
             )
-            older = (
-                "/history" + query_string(query, offset=query["offset"] + PAGE, open="")
-                if query["offset"] + PAGE < total and query["offset"] + PAGE <= MAX_OFFSET
-                else None
-            )
-            listing += ui.pager(query["offset"], max(total, len(shown)), newer_href=newer, older_href=older)
         elif query["offset"]:
-            listing = "<div class='ui-card hy-empty'><p>No older entries.</p></div>" + ui.pager(
-                0, 0, newer_href=None, older_href=None
-            )
+            listing = "<div class='ui-card hy-empty'><p>No more entries.</p></div>"
             listing += (
                 f"<p><a class='btn btn-plain' href='/history{_esc(query_string(query, offset=0))}'>"
-                f"{ui.NEWER}</a></p>"
+                "Back to the newest</a></p>"
             )
         elif is_filtered(query):
             listing = "<div class='ui-card hy-empty'><p>Nothing matches these filters.</p></div>"

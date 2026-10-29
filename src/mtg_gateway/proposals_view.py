@@ -940,17 +940,18 @@ def list_html(
                     qs=qs,
                 )
             )
-            newer = (
-                "/proposals" + query_string(query, offset=max(0, offset - ui.PER_PAGE))
-                if offset > 0
-                else None
+            # Load more (Standard 13): the next page's link, whose rows static/loadmore.js adds
+            upto = offset + len(page)
+            parts.append(
+                ui.load_more(
+                    "/proposals" + query_string(query, offset=upto),
+                    shown=upto,
+                    total=total,
+                    into=".pr-table",
+                )
+                if upto < total
+                else ui.load_more("", done=f"All {total:,} shown. {PAGER_NOTE[:1].upper()}{PAGER_NOTE[1:]}.")
             )
-            older = (
-                "/proposals" + query_string(query, offset=offset + ui.PER_PAGE)
-                if offset + ui.PER_PAGE < total
-                else None
-            )
-            parts.append(ui.pager(offset, total, newer_href=newer, older_href=older, note=PAGER_NOTE))
         else:
             parts.append(
                 "<div class='ui-card pr-empty'><p>"
