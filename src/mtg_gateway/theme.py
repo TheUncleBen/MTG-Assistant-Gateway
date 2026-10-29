@@ -1305,6 +1305,14 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%;
   overflow-x:auto;scrollbar-width:none}
 .hubseg::-webkit-scrollbar{display:none}
+/* more parts that way (static/topbar.js): the edge fades out */
+.hubseg.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
+.hubseg.more-start{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent)}
+.hubseg.more-start.more-end{
+  -webkit-mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent)}
 .hubseg a{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;flex:1 1 0;min-height:38px;
   padding:0 1.1rem;border-radius:9px;color:var(--text);text-decoration:none;font-weight:700}
 .hubseg a{white-space:nowrap}
