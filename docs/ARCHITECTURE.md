@@ -205,12 +205,12 @@ For the exact devices and plans tested, see
   groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. The provider's
   tokens are kept per sign-in (`idp_grants.holder`: each browser session,
   and the member's AI apps), so a session is checked with its own and a
-  bearer token with any of the member's. For up to 60 seconds after the
-  provider last let a sign-in in, a request is answered at once and the
-  provider is asked in the background; a page being read (GET outside
-  `/admin`) is answered that way whenever the provider let it in before.
-  Removing someone from `MTG_REQUIRED_GROUP` takes effect within those 60
-  seconds for writes and admin pages, and after one page read: every
+  bearer token with any of the member's. A page being read (GET outside
+  `/admin`) is answered at once and the provider asked in the background
+  whenever the provider let that sign-in in before; writes, admin pages and
+  assistant requests wait for the answer. Removing someone from
+  `MTG_REQUIRED_GROUP` takes effect on their next write, admin page or
+  assistant request, and after one page read: every
   gateway token, browser session and stored provider token is revoked, and
   their Archidekt link too. A sign-in whose provider tokens are refused (a
   deactivated or deleted account looks the same as a refresh token that ran

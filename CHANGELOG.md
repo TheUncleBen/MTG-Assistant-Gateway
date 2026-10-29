@@ -165,9 +165,9 @@ the whole gateway uses one name per thing.
   you out everywhere.
 - If none of your sign-ins is accepted any more, your AI apps wait, still connected, and work again
   once you sign in on the website.
-- Pages no longer wait for the identity provider while you use the gateway. For someone removed
-  from the group, the identity provider is asked again in the background, and writes and admin
-  pages wait once 60 seconds have passed since it last let them in.
+- Pages you read no longer wait for the identity provider: it is asked again in the background.
+  Changes, admin pages and assistant requests still wait for its answer, so someone removed from
+  the group is refused on their next one.
 - The Guide and the Guided setup page can be read without signing in; downloads and the ChatGPT
   instructions still need a sign-in.
 - **Faster pages**: a slow page shows its frame at once and fills in when Archidekt answers;
