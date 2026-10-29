@@ -12,6 +12,21 @@ from . import deck_stats
 from .archidekt import Deck, DeckCard, rich_text
 from .decks import deck_to_archidekt_text, deck_to_text
 
+# Archidekt's finish words and colour words, as the tools write them everywhere else.
+_FINISHES = {"normal": "nonfoil", "nonfoil": "nonfoil", "foil": "foil", "etched": "etched"}
+_COLOR_LETTERS = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G", "colorless": "C"}
+
+
+def finish_of(modifier: Any) -> str:
+    """nonfoil, foil or etched for Archidekt's modifier (Normal, Foil, Etched)."""
+    word = str(modifier or "").strip().lower()
+    return _FINISHES.get(word, word or "nonfoil")
+
+
+def color_letters(colors: list[Any]) -> list[str]:
+    """W, U, B, R, G (and C) for Archidekt's colour words; a letter already given stays."""
+    return [_COLOR_LETTERS.get(str(c).strip().lower(), str(c)) for c in colors]
+
 
 def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
     out: dict[str, Any] = {
@@ -20,7 +35,8 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
         "categories": c.categories,
         "set": c.set_code,
         "collector_number": c.collector_number,
-        "finish": c.modifier,
+        # the write tools' finish values (nonfoil, foil, etched), not Archidekt's Normal, Foil, Etched
+        "finish": finish_of(c.modifier),
         "in_deck": deck.in_deck(c),
     }
     if not c.categories:
@@ -47,6 +63,8 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
         "scryfall_uid",
     ):
         value = getattr(c, key, None)
+        if key in ("colors", "color_identity") and isinstance(value, list):
+            value = color_letters(value)  # letters, as deck_stats and resolve_cards give them
         if value not in (None, [], "", False):
             out[key] = value
     if getattr(c, "custom_cmc", None) is not None:  # 0 is a real override
@@ -58,7 +76,16 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
 DECK_VIEWS = ("summary", "text", "cards", "export", "full")
 # Card fields an assistant rarely needs (images, ids, the label colour, ranking numbers): left out
 # of the compact "cards" view, kept in "full" for the web pages and the API.
-_FULL_ONLY_CARD_FIELDS = ("image_hash", "scryfall_uid", "label", "edhrec_rank", "salt", "colors")
+_FULL_ONLY_CARD_FIELDS = (
+    "image_hash",
+    "scryfall_uid",
+    "label",
+    "edhrec_rank",
+    "salt",
+    "colors",
+    "types",
+    "subtypes",
+)
 
 
 def deck_out(
@@ -70,10 +97,11 @@ def deck_out(
     view: str = "full",
 ) -> dict[str, Any]:
     """The deck as the tools and API return it. ``view`` picks the body: ``summary`` (statistics
-    only), ``text`` (statistics plus the plain decklist_text and sideboard_text), ``cards``
-    (statistics plus one compact row per card), ``export`` (archidekt_text, Archidekt's own import
-    syntax) or ``full`` (all of them, every card field). ``include_text`` adds each card's rules
-    text (``oracle_text``) and so needs card rows: with ``summary``, ``text`` or ``export`` it
+    only), ``text`` (the headline statistics, stats_brief, plus the plain decklist_text and
+    sideboard_text), ``cards`` (the headline statistics plus one compact row per card),
+    ``export`` (archidekt_text, Archidekt's own import syntax) or ``full`` (all of them, the whole
+    statistics and every card field). ``include_text`` adds each card's rules text
+    (``oracle_text``) and so needs card rows: with ``summary``, ``text`` or ``export`` it
     switches to ``cards``."""
     if view not in DECK_VIEWS:
         view = "full"
@@ -123,9 +151,10 @@ def deck_out(
                 row["oracle_text"] = c.oracle_text
                 if c.faces:
                     row["faces"] = c.faces
-                if c.flavor:
+                # flavor text and the artist only in the full view: an assistant rarely needs them
+                if c.flavor and view == "full":
                     row["flavor_text"] = c.flavor
-                if c.artist:
+                if c.artist and view == "full":
                     row["artist"] = c.artist
         if view == "cards":
             cards = [{k: v for k, v in row.items() if k not in _FULL_ONLY_CARD_FIELDS} for row in cards]
@@ -137,9 +166,15 @@ def deck_out(
         out["archidekt_text"] = deck_to_archidekt_text(deck)
     if with_stats and view != "export":
         try:
-            out["stats"] = deck_stats.compute(deck)
+            stats = deck_stats.compute(deck)
         except Exception:  # pragma: no cover - statistics must never break a deck read
-            out["stats"] = None
+            stats = None
+        # the text and cards views carry the headline numbers only; deck_stats (and the summary
+        # and full views) give the whole statistics (AT-31)
+        if view in ("text", "cards"):
+            out["stats_brief"] = deck_stats.brief(stats)
+        else:
+            out["stats"] = stats
     return out
 
 

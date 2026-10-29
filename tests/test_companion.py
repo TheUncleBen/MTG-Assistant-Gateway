@@ -732,7 +732,7 @@ async def test_new_tools_are_listed_and_work(stack: Stack) -> None:
         stats = structured(await call(h, token, "deck_stats", {"deck_ref": "42"}))
         assert stats["ok"] and stats["deck"]["id"] == "42" and "mana_curve" in stats["stats"]
         deck = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
-        assert deck["ok"] and "stats" in deck and "commanders" in deck
+        assert deck["ok"] and "stats_brief" in deck and "commanders" in deck
         listed = structured(await call(h, token, "list_my_decks", {"name_contains": "zzz-no-such"}))
         assert listed["ok"] and listed["decks"] == []
         p = structured(
@@ -1007,8 +1007,9 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
 
         source = structured(await call(h, token, "get_deck", {"deck_ref": "42", "view": "cards"}))
         want = shape(source)
-        assert ("Sol Ring", 1, "Etched", False, True) in want and ("Swamp", 2, "Foil", False, True) in want
-        assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "Normal", False, False) in want
+        # get_deck says the finish as the write tools take it (nonfoil, foil, etched: AT-30)
+        assert ("Sol Ring", 1, "etched", False, True) in want and ("Swamp", 2, "foil", False, True) in want
+        assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "nonfoil", False, False) in want
         exports = {
             "archidekt .txt": ("decklist_text", (await b.http.get("/decks/42/export.archidekt.txt")).text),
             ".csv": ("csv_text", (await b.http.get("/decks/42/export.csv")).text),

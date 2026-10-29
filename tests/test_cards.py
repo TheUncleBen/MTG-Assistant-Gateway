@@ -571,11 +571,11 @@ async def test_resolve_cards_asks_a_form_for_ambiguous_names_where_it_can(stack:
     monkeypatch.setattr(service, "resolve", real)
     calls = {"n": 0}
 
-    async def second_fails(inputs, *, owner=None):
+    async def second_fails(inputs, *, owner=None, waited=None):
         calls["n"] += 1
         if calls["n"] == 2:
             return await boom(inputs, owner=owner)
-        return await real(inputs, owner=owner)
+        return await real(inputs, owner=owner, waited=waited)
 
     monkeypatch.setattr(service, "resolve", second_fails)
     out = structured(await call(h, token, "resolve_cards", {"cards": [{"name": "Cultivatz"}]}))

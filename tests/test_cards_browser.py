@@ -770,7 +770,7 @@ STATS = {
         "nonland_count": 63,
         "average_mana_value": 3.12,
         "mana_curve": {"0": 1, "1": 8, "2": 14, "3": 15, "4": 11, "5": 7, "6": 4, "7+": 3},
-        "colour_pips": {"G": 30, "U": 22},
+        "color_pips": {"G": 30, "U": 22},
         "mana_sources": {"G": 20, "U": 16, "C": 3},
         "price_total": 412.5,
         "priced_cards": 64,
@@ -781,7 +781,7 @@ STATS = {
         "mass_land_denial": 0,
         "salt_total": 12.4,
         "commanders": ["Aesi " + HOSTILE],
-        "colour_identity": ["G", "U"],
+        "color_identity": ["G", "U"],
         "bracket_estimate": {"bracket": 3, "kind": "estimate", "basis": ["1 game changer"]},
         "archidekt_bracket": 2,
         "checks": {

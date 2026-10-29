@@ -155,7 +155,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
             "<div class='twocol'><div><h3>Mana curve</h3>"
             + _bars(curve, label="Mana curve")
             + "</div><div><h3>Colors</h3>"
-            + _pips(stats.get("colour_pips") or {}, stats.get("mana_sources"))
+            + _pips(stats.get("color_pips") or {}, stats.get("mana_sources"))
             + "</div></div>"
         )
     # the deck page's verdict (deck_checks), also for a report stored before the engines merged

@@ -381,7 +381,8 @@ async def test_get_deck_views_trade_detail_for_size(stack: Stack) -> None:
         assert ("cards" in out) == (view in ("cards", "full")), view
         assert ("decklist_text" in out) == (view in ("text", "full")), view
         assert ("archidekt_text" in out) == (view in ("export", "full")), view
-    assert sizes["summary"] < sizes["text"] < sizes["full"] and sizes["cards"] < sizes["full"]
+    # text and cards carry the headline statistics only (stats_brief), summary the whole (AT-31)
+    assert sizes["text"] < sizes["summary"] < sizes["full"] and sizes["cards"] < sizes["full"]
     default = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
     assert default["view"] == "text" and "decklist_text" in default
     # rules text needs card rows: asked with a view that has none, it comes with the cards view

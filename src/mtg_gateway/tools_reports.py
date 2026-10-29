@@ -51,6 +51,35 @@ NOT_DECK_OR_SNAPSHOT = (
 )
 
 
+_METRICS_BLOCK = re.compile(r"## Metrics\s*```json.*?```", re.DOTALL)
+METRICS_LEFT_OUT = "## Metrics\n(The metrics JSON is in get_deck_report.)"
+
+
+def run_answer(report: dict[str, Any]) -> dict[str, Any]:
+    """run_deck_report's answer: the report without what only repeats itself (AT-33). The
+    statistics as stats_brief (deck_stats and get_deck_report have them whole), the simulation's
+    text without its Metrics JSON and without the copies map the report page uses, and no forge
+    section when Forge did not start (forge_status says so, with the reason)."""
+    out = dict(report)
+    if "stats" in out:
+        out["stats_brief"] = deck_stats.brief(out.pop("stats"))
+    gold = out.get("goldfish")
+    if isinstance(gold, dict):
+        gold = {k: v for k, v in gold.items() if k != "quantities"}
+        if isinstance(gold.get("text"), str):
+            gold["text"] = _METRICS_BLOCK.sub(METRICS_LEFT_OUT, gold["text"])
+        out["goldfish"] = gold
+    forge = out.get("forge")
+    if isinstance(forge, dict) and forge.get("state") == "skipped" and out.get("forge_status"):
+        out["forge"] = None
+    if out.get("report_id"):
+        out["full_report"] = (
+            f"get_deck_report report_id {out['report_id']} has the whole report: every statistic, "
+            "the simulation's metrics and the Forge games"
+        )
+    return out
+
+
 def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
     """Register the statistics, compare and deck report tools."""
     _sub = h._sub
@@ -500,13 +529,13 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 # the simulation was asked for and did not run: the result says so at the top
                 logger.warning("run_deck_report: the simulation did not run: %s", failed)
                 return {
-                    **report,
+                    **run_answer(report),
                     "ok": False,
                     "error": "simulation_failed",
                     "message": f"The simulation did not run: {failed}. {_KEPT}",
                     **_input_code(report.get("goldfish")),
                 }
-            return {"ok": True, **report}
+            return {"ok": True, **run_answer(report)}
         except DeckError as exc:
             return _tool_error(exc)
 

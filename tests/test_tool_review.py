@@ -356,8 +356,8 @@ async def test_deck_stats_identity_is_the_commanders(stack: Stack) -> None:
     deck["cards"].append(bolt)
     token = await linked_user(stack)
     stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
-    assert stats["colour_identity"] == ["U", "G"], stats["colour_identity"]
-    assert "R" in stats["cards_colour_identity"], stats["cards_colour_identity"]
+    assert stats["color_identity"] == ["U", "G"], stats["color_identity"]
+    assert "R" in stats["cards_color_identity"], stats["cards_color_identity"]
     assert stats["out_of_identity"]["identity"] == ["U", "G"]
 
 

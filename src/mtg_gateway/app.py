@@ -113,6 +113,7 @@ from .social import add_social_routes
 from .summary import Summaries, add_summary_tool
 from .sync import DeckSync
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
+from .tidy import tidy_text, tidy_value
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .upgrade_backup import folder_for
@@ -347,6 +348,22 @@ def _compact_text(data: dict[str, Any], structured: dict[str, Any]) -> dict[str,
     return {**data, "content": content}
 
 
+def _tidy_numbers(data: dict[str, Any], structured: dict[str, Any]) -> dict[str, Any]:
+    """The result with its long floats at three significant digits (tidy.py, AT-34), in the
+    structured content and in each text block alike, so both say the same number."""
+    tidied = tidy_value(structured)
+    content = list(data.get("content") or [])
+    changed = tidied != structured
+    for i, block in enumerate(content):
+        if isinstance(block, dict) and isinstance(block.get("text"), str):
+            text = tidy_text(block["text"])
+            if text != block["text"]:
+                content[i], changed = {**block, "text": text}, True
+    if not changed:
+        return data
+    return {**data, "content": content, "structuredContent": tidied}
+
+
 def schema_error_middleware():
     """MCP middleware for tool errors. Arguments the input schema refused get the same answer as
     any other refusal: ok false, error invalid, and a message naming each field and what it takes.
@@ -381,6 +398,9 @@ def schema_error_middleware():
                     content[0] = {**content[0], "text": proposal_text(coded)}
             failed = coded.get("error") not in EXPECTED_REFUSALS
             return {**data, "content": content, "structuredContent": coded, "isError": failed}
+        if isinstance(structured, dict) and not data.get("isError"):
+            data = _tidy_numbers(data, structured)
+            structured = data["structuredContent"]
         if isinstance(structured, dict):
             compact = _compact_text(data, structured)
             if compact is not None:

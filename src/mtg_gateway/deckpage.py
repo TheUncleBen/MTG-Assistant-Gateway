@@ -1600,7 +1600,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                     zone.get("ok", True),
                 )
             )
-            outside = checks.get("colour_identity_violations") or []
+            outside = checks.get("color_identity_violations") or []
             rows.append(
                 ("Color identity", "all cards inside" if not outside else names(outside), not outside)
             )
@@ -1887,7 +1887,7 @@ def colours_html(deck: Deck, stats: dict[str, Any]) -> str:
     """The colour panel with Archidekt's toggles: Bar or Pie, Lands only (production counted from
     the lands alone), and the mana-cost pips outside the commander's colour identity."""
     cards = deck.main_cards
-    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
+    pips = {k: float(v) for k, v in (stats.get("color_pips") or {}).items()}
     cost_members: dict[str, list[DeckCard]] = {}
     cost_cards: Counter[str] = Counter()
     for c in cards:
