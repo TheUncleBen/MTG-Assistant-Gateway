@@ -89,3 +89,38 @@
   var a = seg.getBoundingClientRect(), b = cur.getBoundingClientRect();
   seg.scrollLeft += b.left - a.left - (a.width - b.width) / 2;
 })();
+
+/* A place's switch (theme.hub_switch: Binder, Assistant) wider than the screen, as with large text
+   on a phone, scrolls inside. The part naming this page is scrolled into full view, and a faded
+   edge (.more-start, .more-end) shows that more parts lie that way. */
+(function () {
+  "use strict";
+  var navs = document.querySelectorAll(".hubseg");
+  if (!navs.length) return;
+  function edges(n) {
+    var over = n.scrollWidth > n.clientWidth + 1;
+    n.classList.toggle("more-start", over && n.scrollLeft > 1);
+    n.classList.toggle("more-end", over && n.scrollLeft + n.clientWidth < n.scrollWidth - 1);
+  }
+  function show(n) {
+    var cur = n.querySelector("[aria-current=page]");
+    if (cur && n.scrollWidth > n.clientWidth + 1) {
+      var r = n.getBoundingClientRect(), c = cur.getBoundingClientRect();
+      if (c.right > r.right) n.scrollLeft += c.right - r.right + 8;
+      else if (c.left < r.left) n.scrollLeft -= r.left - c.left + 8;
+    }
+    edges(n);
+  }
+  Array.prototype.forEach.call(navs, function (n) {
+    n.addEventListener("scroll", function () { edges(n); }, { passive: true });
+    show(n);
+    // the phone's text size can change after this runs: follow the parts' own size
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { show(n); });
+      ro.observe(n);
+      Array.prototype.forEach.call(n.children, function (k) { ro.observe(k); });
+    }
+  });
+  window.addEventListener("resize", function () { Array.prototype.forEach.call(navs, show); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { Array.prototype.forEach.call(navs, show); });
+})();
