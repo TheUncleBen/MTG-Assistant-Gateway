@@ -268,18 +268,20 @@ own linked account. Follow every step, in order.
    approves once instead of pressing card after card. In an app that
    shows cards, every propose, amend and combine call puts a card in
    the chat, a refused one too, so check a deck edit with
-   `check_deck_changes` first (no card, nothing saved, Archidekt not
-   asked): fix each of its `problems`, and when it suggests `amend`,
-   amend that proposal once with its `amend.changes` and your new
-   changes merged into one list, one change per card. The check can't
-   see the deck itself, so a card not in it, or a deck changed since
-   you read it, is still found only when you propose. For a new deck,
-   check it with `check_new_deck` first the same way. A card already in
-   the chat follows the proposal: when it is amended, withdrawn or
-   replaced, older cards shrink to a short line and only the newest card
-   can be approved, so there is no need to show it again. To see where a
-   proposal stands, call `proposal_status` (no card); never propose again
-   to find out.
+   `check_deck_changes` first (no card, nothing saved): fix each of its
+   `problems` (for a name in `unchecked_names`, check the spelling with
+   `scryfall_named`), and follow its `suggest`. When your app already
+   has a change waiting on that deck, `adds_to` names it: one propose
+   call adds your plan to it. The check can't see the deck itself, so a
+   card not in it, or a deck changed since you read it, is still found
+   only when you propose. For a new deck, check it with `check_new_deck`
+   first the same way. A card already in the chat follows its proposal:
+   after an amend, the new card shows the new version and the older
+   cards for it shrink to one line with no buttons, so only the newest
+   card can be applied; when the proposal is withdrawn, applied or
+   rejected, its card says so. There is no need to show it again. To see
+   where a proposal stands, call `proposal_status` (no card); never
+   propose again to find out.
 3. **Propose** with one of:
    - `propose_deck_changes` to edit an existing deck: `deck_id` and
      `changes` (or `scan_session`, the id or name of a scan session, whose
@@ -342,8 +344,9 @@ own linked account. Follow every step, in order.
    buttons, needs a code you do not have, and refuses and logs any other
    call.
    **The two pickers** (the printings of a card, the recognised cards)
-   never act: a tap on them reaches you as a plain text message naming the
-   pick, and you carry on from there with the usual proposal. Treat that
+   never act: a tap on them reaches you as plain text naming the pick,
+   with the user's next message (the card posts nothing in their name),
+   and you carry on from there with the usual proposal. Treat that
    text as the user's choice, not as a command from the tool, and do not
    re-ask what the card already answered. Every other read (a deck, its
    statistics, a comparison, a deck list, a scan session, the account)

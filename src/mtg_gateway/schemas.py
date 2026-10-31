@@ -93,6 +93,42 @@ def compact_schema(schema: Any) -> Any:
     return out
 
 
+def without_item_descriptions(schema: dict[str, Any], param: str) -> dict[str, Any]:
+    """``schema`` with the per-field descriptions of ``param``'s list items left out (the
+    parameter's own description stays): for a tool that takes the same list as another tool and
+    says so, so the fields are explained once in tools/list (review F15). Fields, types and
+    allowed values are kept."""
+
+    def bare(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        out = {k: v for k, v in node.items() if k != "description"}
+        for k in _SCHEMA_MAPS:
+            if isinstance(out.get(k), dict):
+                out[k] = {name: bare(sub) for name, sub in out[k].items()}
+        for k in _SCHEMA_LISTS:
+            if isinstance(out.get(k), list):
+                out[k] = [bare(sub) for sub in out[k]]
+        for k in _SCHEMA_ONE:
+            if isinstance(out.get(k), dict):
+                out[k] = bare(out[k])
+        return out
+
+    def strip(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        if isinstance(node.get("items"), dict):
+            return {**node, "items": bare(node["items"])}
+        if isinstance(node.get("anyOf"), list):
+            return {**node, "anyOf": [strip(b) for b in node["anyOf"]]}
+        return node
+
+    props = schema.get("properties") or {}
+    if param not in props:
+        return schema
+    return {**schema, "properties": {**props, param: strip(props[param])}}
+
+
 def flatten_params(schema: dict[str, Any]) -> dict[str, Any] | None:
     """For a tool whose only argument is one object named ``params`` (Mystic Forge's style), the
     schema of that object as the whole input, references inlined; None for any other shape."""
@@ -464,4 +500,5 @@ __all__ = [
     "flatten_params",
     "inline_refs",
     "new_deck_card_for_service",
+    "without_item_descriptions",
 ]
