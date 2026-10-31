@@ -44,7 +44,7 @@ from urllib.parse import quote
 from .binder_prices import BINDER_PAGE_SIZE, PRICED_FOR_DAYS, BinderStore
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, owns_deck
-from .theme import plural
+from .theme import natural_key, plural
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -77,7 +77,10 @@ _PRICED_IN = {
     "foil": "coalesce(usd_foil, eur_foil)",
     "etched": "usd_etched",
 }
-_POINT_JSON = "json_array(day, usd, usd_foil, usd_etched, eur, eur_foil)"
+# a point's price in a row's finish, in dollars and in euros (FINISH_KEYS, as SQL)
+_USD_IN = "CASE {w}.finish WHEN 'foil' THEN {p}.usd_foil WHEN 'etched' THEN {p}.usd_etched ELSE {p}.usd END"
+_EUR_IN = "CASE {w}.finish WHEN 'foil' THEN {p}.eur_foil WHEN 'etched' THEN NULL ELSE {p}.eur END"
+SUMMARIES_KEPT = 16  # members whose watchlist rows are kept worked out (card_summaries)
 
 
 def now() -> float:
@@ -201,14 +204,6 @@ def series_key(w: dict[str, Any]) -> str | None:
     return w.get("scryfall_id") or None
 
 
-def _decode(raw: str | None) -> dict[str, Any] | None:
-    """A point read as ``json_array(day, usd, ...)``."""
-    if not raw:
-        return None
-    day, *values = json.loads(raw)
-    return {"day": day, **dict(zip(PRICE_KEYS, values, strict=True))}
-
-
 def _oracle(card: dict[str, Any]) -> str:
     faces = card.get("card_faces") if isinstance(card.get("card_faces"), list) else []
     oid = card.get("oracle_id") or (faces[0].get("oracle_id") if faces and isinstance(faces[0], dict) else "")
@@ -253,6 +248,8 @@ class PriceService:
         self.notifier = notifier
         self._run_lock = asyncio.Lock()
         self.binder = BinderStore(db)
+        # each member's watchlist rows as last worked out (card_summaries): (stamp, rows)
+        self._summaries: dict[str, tuple[tuple[int, str], list[dict[str, Any]]]] = {}
         # Reads a member's whole Binder from Archidekt (collection.CollectionService.read_whole,
         # set by app.py): (rows, complete). None: Binders are not read (no collection service).
         self.read_binder: Callable[[str], Awaitable[tuple[list[dict[str, Any]], bool]]] | None = None
@@ -330,6 +327,12 @@ class PriceService:
     def watched_cards(self, sub: str) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM watch_cards WHERE sub = ? ORDER BY name, set_code, finish", (sub,))
 
+    def watched_names(self, sub: str) -> list[str]:
+        """The names of the cards a member watches (any printing), each once, in their natural
+        order (a 2 before a 10)."""
+        rows = self._rows("SELECT DISTINCT name FROM watch_cards WHERE sub = ?", (sub,))
+        return sorted((r["name"] for r in rows), key=natural_key)
+
     def watched_decks(self, sub: str) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM watch_decks WHERE sub = ? ORDER BY deck_name, deck_id", (sub,))
 
@@ -365,41 +368,69 @@ class PriceService:
         """Every watched card's row without its history: the latest price and its day, and the
         change over 1, 7 and 30 days, as card_view works them out, in one query (each point is an
         index lookup), so a list of thousands draws, filters and sorts without reading a year of
-        prices per card."""
+        prices per card. The rows are kept until anything is written to the database (a watch, an
+        alert, the day's prices, or a change by another writer: the connection's change count) or
+        the day turns, so a list at the cap costs the query once, not on every view."""
+        stamp = (self.db._conn.total_changes, day_of(now()))
+        kept = self._summaries.get(sub)
+        if kept is not None and kept[0] == stamp:
+            return [dict(v) for v in kept[1]]
+        out = self._card_summaries(sub)
+        while len(self._summaries) >= SUMMARIES_KEPT:
+            self._summaries.pop(next(iter(self._summaries)))
+        self._summaries[sub] = (stamp, out)
+        return [dict(v) for v in out]
+
+    def _card_summaries(self, sub: str) -> list[dict[str, Any]]:
         span = self._since(366)
 
         def nth(n: int) -> str:
+            # the day of the newest priced point at or before n days before the latest one
             return (
-                f"(SELECT {_POINT_JSON} FROM price_points p WHERE p.scryfall_id = k.pkey AND p.day <= "
-                f"date(json_extract(k.p0, '$[0]'), '-{n} day') AND p.day >= ? AND (CASE k.finish "
+                f"(SELECT p.day FROM price_points p WHERE p.scryfall_id = m.pkey AND p.day <= "
+                f"date(m.d0, '-{n} day') AND p.day >= ? AND (CASE m.finish "
                 + " ".join(f"WHEN '{f}' THEN {col}" for f, col in _PRICED_IN.items())
                 + " END) IS NOT NULL ORDER BY p.day DESC LIMIT 1)"
             )
 
         newest = (
-            f"(SELECT {_POINT_JSON} FROM price_points p WHERE p.scryfall_id = w.pkey AND p.day >= ? AND "
+            "(SELECT p.day FROM price_points p WHERE p.scryfall_id = w.pkey AND p.day >= ? AND "
             "(CASE w.finish "
             + " ".join(f"WHEN '{f}' THEN {col}" for f, col in _PRICED_IN.items())
             + " END) IS NOT NULL ORDER BY p.day DESC LIMIT 1)"
         )
+        # the four days first, then each day's point by its key: plain columns, nothing to decode
+        prices_of = ", ".join(
+            f"{_USD_IN.format(w='k', p=f'q{n}')} AS u{n}, {_EUR_IN.format(w='k', p=f'q{n}')} AS e{n}"
+            for n in (0, *CHANGE_DAYS)
+        )
+        joins = " ".join(
+            f"LEFT JOIN price_points q{n} ON q{n}.scryfall_id = k.pkey AND q{n}.day = k.d{n}"
+            for n in (0, *CHANGE_DAYS)
+        )
+        # each step is MATERIALIZED, or SQLite works the newest day out again inside each of the
+        # three lookups that use it (eight index searches a row instead of four)
         rows = self._rows(
-            f"SELECT k.*, {nth(1)} AS p1, {nth(7)} AS p7, {nth(30)} AS p30 FROM ("
-            f"SELECT w.*, {newest} AS p0 FROM (SELECT watch_cards.*, CASE WHEN set_code = '' AND "
-            f"oracle_id IS NOT NULL THEN '{CHEAPEST}' || oracle_id ELSE scryfall_id END AS pkey "
-            "FROM watch_cards WHERE sub = ?) w) k ORDER BY k.name, k.set_code, k.finish",
-            (span, span, span, span, sub),
+            "WITH w AS MATERIALIZED (SELECT watch_cards.*, CASE WHEN set_code = '' AND oracle_id IS "
+            f"NOT NULL THEN '{CHEAPEST}' || oracle_id ELSE scryfall_id END AS pkey FROM watch_cards "
+            "WHERE sub = ?), "
+            f"m AS MATERIALIZED (SELECT w.*, {newest} AS d0 FROM w), "
+            f"k AS MATERIALIZED (SELECT m.*, {nth(1)} AS d1, {nth(7)} AS d7, {nth(30)} AS d30 FROM m) "
+            f"SELECT k.*, {prices_of} FROM k {joins} ORDER BY k.name, k.set_code, k.finish",
+            (sub, span, span, span, span),
         )
         out = []
         for r in rows:
-            p0 = _decode(r["p0"])
             view = {**self._card_head(r), "currency": "usd", "price": None, "day": None, "key": r["pkey"]}
             view["scryfall_id"] = r.get("scryfall_id")
-            if p0 is not None:
-                price, cur = headline(p0, r["finish"])
-                view.update(currency=cur, price=price, day=p0["day"])
+            if r["d0"] is not None:
+                # dollars, or euros when the point has no dollar price (as headline)
+                cur = "usd" if r["u0"] is not None else "eur"
+                price = r["u0"] if cur == "usd" else r["e0"]
+                view.update(currency=cur, price=price, day=r["d0"])
                 for n in CHANGE_DAYS:
-                    before = _decode(r[f"p{n}"])
-                    view[f"change_{n}d_pct"] = pct_change(price_for(before, r["finish"], cur), price)
+                    before = r[f"u{n}"] if cur == "usd" else r[f"e{n}"]
+                    view[f"change_{n}d_pct"] = pct_change(before, price)
             out.append(view)
         return out
 
@@ -840,6 +871,10 @@ class PriceService:
         for sub, title, message, path in alerts:
             if self.notifier is not None:
                 await self.notifier.send(sub, "prices", title, message, path)
+        # each member's Watchlist rows worked out now, in the background, so the first view after
+        # today's prices is as quick as the rest
+        for row in self._rows("SELECT DISTINCT sub FROM watch_cards"):
+            await asyncio.to_thread(self.card_summaries, row["sub"])
         return {
             "day": day,
             "watched": True,

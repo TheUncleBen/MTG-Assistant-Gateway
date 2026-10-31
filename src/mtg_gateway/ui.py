@@ -17,9 +17,20 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import ASSISTANT_PAGES, SPINNER, binder_pages, card_size_control, esc, hub_switch, icon
+from .theme import (
+    ASSISTANT_PAGES,
+    SPINNER,
+    binder_pages,
+    card_size_control,
+    esc,
+    hub_switch,
+    icon,
+    natural_key,
+)
 
-__all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
+# re-exported: the one card size switch (R-175) and the names' sort key, theme.card_size_control
+# and theme.natural_key
+__all__ = ["card_size_control", "natural_key"]
 
 # --- status labels: a word, a colour and an icon -------------------------------------------------
 

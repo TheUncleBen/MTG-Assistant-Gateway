@@ -11,6 +11,7 @@ Notifications card (with the summary) is notify.py's, and ``get_summary`` is sum
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -19,13 +20,13 @@ from urllib.parse import parse_qs
 
 from pydantic import Field
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import prefs, prices
 from .decks import DeckError
 from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
 from .theme import render
-from .watchlist_page import WATCH_PAGE_CSS, Query, watchlist_page_html
+from .watchlist_page import WATCH_PAGE_CSS, Query, watchlist_fragment_html, watchlist_page_html
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -40,10 +41,20 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 
 def watchlist_body(
-    state: AppState, sub: str, csrf: str | None, query: Query | None = None, *, ok: str = "", err: str = ""
+    state: AppState,
+    sub: str,
+    csrf: str | None,
+    query: Query | None = None,
+    *,
+    ok: str = "",
+    err: str = "",
+    part: str = "",
+    start: int = 0,
 ) -> str:
     """The page's body (watchlist_page.py): every watch's latest price and changes (a fixed number
-    of queries, whatever the list's size), and 30 days of prices for the rows on screen only."""
+    of queries, whatever the list's size), and 30 days of prices for the rows on screen only.
+    ``part`` ("cards" or "decks") with ``start`` gives Load more's fragment instead: the rows from
+    ``start`` and the Load more after them."""
     svc = state.prices
     cards = svc.card_summaries(sub)
     data = {
@@ -53,6 +64,18 @@ def watchlist_body(
         "checked_daily_at_utc": f"{state.settings.price_hour_utc:02d}:00",
     }
     ids = {v["watch_id"]: v.get("scryfall_id") for v in cards}
+    if part:
+        return watchlist_fragment_html(
+            data,
+            ids,
+            csrf,
+            query or Query(),
+            part=part,
+            start=start,
+            now=prices.now(),
+            card_history=lambda views: svc.card_histories(views, 30),
+            deck_history=lambda views: svc.deck_histories(sub, views, 30),
+        )
     return watchlist_page_html(
         data,
         ids,
@@ -98,8 +121,18 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/watchlist")
-        ok = request.query_params.get("ok", "")
-        query = Query.parse(request.query_params)
+        qp = request.query_params
+        ok = qp.get("ok", "")
+        query = Query.parse(qp)
+        part = qp.get("part") or ""
+        if part in ("cards", "decks"):
+            # Load more (static/watchlist.js): only the rows from ``from``, the rows on screen
+            try:
+                start = max(0, min(int(qp.get("from") or 0), 10_000))
+            except ValueError:
+                start = 0
+            body = watchlist_body(state, sub, _csrf(s, sid), query, part=part, start=start)
+            return HTMLResponse(body, headers=NO_STORE)
         return page(watchlist_body(state, sub, _csrf(s, sid), query, ok=ok), sub=sub, sid=sid)
 
     def remember_watch(sub: str, finish: str, pct: str) -> None:
@@ -175,8 +208,14 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
-        names = sorted({w["name"] for w in state.prices.watched_cards(sub)}, key=str.casefold)
-        return JSONResponse({"ok": True, "names": names}, headers=NO_STORE)
+        names = state.prices.watched_names(sub)
+        # asked once a minute by every page: an unchanged list is a 304 (private, revalidated
+        # each time, never served stale)
+        tag = '"' + hashlib.sha256("\n".join(names).encode()).hexdigest()[:32] + '"'
+        headers = {"Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff", "ETag": tag}
+        if request.headers.get("if-none-match") == tag:
+            return Response(status_code=304, headers=headers)
+        return JSONResponse({"ok": True, "names": names}, headers=headers)
 
     @server.custom_route("/watchlist/api/card", methods=["GET"], include_in_schema=False)
     async def card_api(request: Request) -> Response:
