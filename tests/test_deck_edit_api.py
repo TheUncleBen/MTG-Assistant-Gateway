@@ -7,11 +7,13 @@ refused; a big removal asks first and the follow-up names the proposal."""
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
 from mtg_gateway import api as api_module
 from mtg_gateway import decks as decks_mod
+from mtg_gateway.archidekt import Pacer
 
 from .conftest import COLLECTION, Stack, stack_with
 from .test_browse_collection import api, linked
@@ -806,9 +808,9 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         async def lagging(sub: str, deck_id: str):
             deck = await real(sub, deck_id)
             reads.append(deck_id)
-            # the propose and the check before the write read the deck; any read after them
-            # would see the old count
-            if len(reads) >= 3:
+            # the propose reads the deck (its read is also the check before the write, review
+            # F1); any read after it would see the old count
+            if len(reads) >= 2:
                 for c in deck.cards:
                     if c.name == "Cultivate":
                         c.quantity = 1
@@ -824,7 +826,7 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         assert r.status_code == 201, r.text
         d = r.json()
         assert d["applied"] is True and d["stale"] is False, d
-        assert d["rows"][0]["qty"] == 2 and len(reads) == 2, reads
+        assert d["rows"][0]["qty"] == 2 and len(reads) == 1, reads
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2  # the write itself landed
     finally:
         await b.aclose()
@@ -877,10 +879,12 @@ async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: 
         await b.aclose()
 
 
-async def test_a_one_click_edit_costs_four_archidekt_calls(stack: Stack) -> None:  # noqa: F811
+async def test_a_one_click_edit_costs_three_archidekt_calls(stack: Stack) -> None:  # noqa: F811
     """0.7.46 audit D-01: a "+1" from the deck page cost six Archidekt calls (three reads before
-    the write, the verify, then two reads for the page). Now: the proposal's read (reused by the
-    apply), the check right before the write, the write and the verify, which the page draws from."""
+    the write, the verify, then two reads for the page). Review F1: four were left. Now: the
+    proposal's read (reused by the apply as its snapshot and as the check before the write, as it
+    is a moment old), the write and the verify, which the page draws from. A permanent guard: any
+    one-click edit that sends more than three calls fails here."""
     b = await linked(stack)
     try:
         csrf = await b.csrf("/account/details")  # the form token, read before the count starts
@@ -894,8 +898,8 @@ async def test_a_one_click_edit_costs_four_archidekt_calls(stack: Stack) -> None
         )
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
         deck_calls = [(m, p) for m, p in stack.ark.calls if p.startswith("/api/decks/42/")]
-        assert [m for m, _p in deck_calls] == ["GET", "GET", "PATCH", "GET"], deck_calls
-        assert len(stack.ark.calls) <= 4, stack.ark.calls
+        assert [m for m, _p in deck_calls] == ["GET", "PATCH", "GET"], deck_calls
+        assert len(stack.ark.calls) <= 3, stack.ark.calls
         # the page is answered from the verify read: it shows the new count
         assert r.json()["rows"][0]["qty"] == 2 and r.json()["stale"] is False
     finally:
@@ -918,6 +922,106 @@ async def test_a_read_too_old_to_reuse_is_made_again(stack: Stack, monkeypatch) 
         assert r.status_code == 201, r.text
         gets = [m for m, p in stack.ark.calls if p == "/api/decks/42/" and m == "GET"]
         assert len(gets) == 4  # propose, apply, check before the write, verify
+    finally:
+        await b.aclose()
+
+
+async def test_a_second_edit_of_a_sitting_is_not_judged_stale(stack: Stack, monkeypatch) -> None:  # noqa: F811
+    """Review F2: the edits of a sitting share one snapshot (the deck before the first of them), and
+    the page's answer was compared with it: from the second edit on, every answer was "not caught
+    up", read the deck once more after a pause and redrew the rows. It is compared with the deck
+    the write was worked out on: no extra read, no pause, not stale."""
+    slept: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def sleep(delay: float, *a, **k):  # noqa: ANN002, ANN003, ANN202
+        if delay == api_module.EDIT_REREAD_DELAY:
+            slept.append(delay)
+            delay = 0
+        return await real_sleep(delay, *a, **k)
+
+    monkeypatch.setattr(api_module.asyncio, "sleep", sleep)
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")
+        snapshots, stale, calls = set(), [], []
+        for name in ("Cultivate", "Forest", "Island"):
+            stack.ark.calls.clear()
+            r = await api(
+                b,
+                "POST",
+                "/api/v1/decks/42/edit",
+                {"changes": [{"action": "set_quantity", "card_name": name, "quantity": 7}]},
+                csrf=csrf,
+            )
+            assert r.status_code == 201 and r.json()["applied"] is True, r.text
+            stale.append(r.json()["stale"])
+            calls.append([m for m, _p in stack.ark.calls if _p == "/api/decks/42/" and m == "GET"])
+            snapshots.add(r.json()["snapshot_id"])
+        assert len(snapshots) == 1  # one sitting, one snapshot
+        assert stale == [False, False, False]
+        assert slept == []
+        assert [len(gets) for gets in calls] == [len(calls[0])] * 3  # no extra read after the first
+    finally:
+        await b.aclose()
+
+
+async def test_a_change_made_while_a_slow_save_ran_is_still_caught_before_the_write(
+    stack: Stack,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review F1: the one-click save's own read is the check before its write only while it is a
+    moment old (ONE_CLICK_REUSE). A save slowed down between its read and its write reads the deck
+    again before writing, and a card changed meanwhile (on archidekt.com) stops it unsent."""
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 0.2)
+    b = await linked(stack)
+    try:
+        decks = stack.h.app.state.gateway.decks
+        real = decks._backup_shared
+
+        async def slow(*a, **k):  # noqa: ANN002, ANN003, ANN202
+            out = await real(*a, **k)
+            await asyncio.sleep(0.3)
+            _deck_card(stack, "Forest")[0]["quantity"] += 1  # changed in another tab meanwhile
+            return out
+
+        monkeypatch.setattr(decks, "_backup_shared", slow)
+        patches = len(stack.ark.patches)
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+        )
+        assert r.status_code >= 400 and r.json()["ok"] is False, r.text
+        assert len(stack.ark.patches) == patches
+        assert _deck_card(stack, "Cultivate")[0]["quantity"] == 1
+    finally:
+        await b.aclose()
+
+
+async def test_the_members_own_edit_starts_its_calls_from_the_page_burst(stack: Stack) -> None:  # noqa: F811
+    """Review F1: at the shipped pacing (one start a second, 30 a minute) a one-click edit waited
+    the full gap before its write and before its read back: three seconds with an instant
+    Archidekt. Its calls now start from the page burst, as a page's reads do; the per-minute cap
+    still counts each of them."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/account/details")
+        pacer = Pacer(1.0, 30)
+        stack.gw.decks.client.pacer = pacer
+        start = time.perf_counter()
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+            csrf=csrf,
+        )
+        took = time.perf_counter() - start
+        assert r.status_code == 201 and r.json()["applied"] is True, r.text
+        assert took < 1.0, took
+        assert len(pacer._sent) == 3  # every call still counts towards the per-minute cap
     finally:
         await b.aclose()
 

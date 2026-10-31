@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ from .archidekt import (
     Deck,
     featured_scryfall_id,
     format_label,
+    hand_save,
     rich_text,
 )
 from .busy import busy_response
@@ -37,6 +39,7 @@ from .decks import (
     category_line,
     current_client,
     deck_categories,
+    one_click,
     parse_category_changes,
     unused_category_changes,
 )
@@ -1156,7 +1159,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             out: dict[str, Any] = {"ok": True, "message": SETTINGS_OK_MESSAGES.get(code, "Saved.")}
             if anchor == "categories":
                 try:
-                    deck = await decks.get_own_deck(sub, deck_id)
+                    # the save's own read back (decks.one_click), else the deck read now
+                    kept = one_click.get() or {}
+                    deck = kept.get("verified") or await decks.get_own_deck(sub, deck_id)
                     out["html"] = categories_section(deck, _csrf(s, sid))
                 except DeckError:
                     pass  # the page keeps what it has
@@ -1253,7 +1258,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
+            # the member's one-click save: this read serves the proposal, its apply and the check
+            # before the write, and the read back draws the panel (decks.one_click); its calls
+            # start from the page burst (archidekt.hand_save)
+            one_click.set({})
+            hand_save.set(True)
             deck = await decks.get_own_deck(sub, deck_id)
+            read_at = time.monotonic()
             action = data.get("action") or "save"
             unused = action == "unused"
             move_field = pick_error = title_name = ""
@@ -1393,7 +1404,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     deck_css=True,
                     status=400 if pick_error else 200,
                 )
-            p = await decks.propose_categories(sub, deck.id, changes, delete_unused=unused)
+            p = await decks.propose_categories(
+                sub, deck.id, changes, delete_unused=unused, read=deck, read_at=read_at
+            )
+            # the member's own save keeps the gateway's snapshot but makes no backup copy on
+            # Archidekt, as the deck page's quick edits (review F1): a copy costs several paced calls
+            decks.keep_no_backup(sub, p["proposal_id"])
             if wants_json(data):
                 # the page's own instant save: applied here, so a refusal is answered in words
                 # (hand_action) and the page draws the panel again from the answer

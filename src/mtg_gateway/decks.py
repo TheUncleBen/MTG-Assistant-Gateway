@@ -283,11 +283,16 @@ _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
 # The member whose Archidekt session the current ``_call_unslotted`` runs with: how a write
 # the client is about to send is tied back to the member whose caches it makes stale.
 _acting_sub: ContextVar[str | None] = ContextVar("_acting_sub", default=None)
-# Set by the deck page's one-click save (api.edit_deck) around its propose and apply (0.7.46 audit
-# D-01): the proposal's own read of the deck is kept here and the apply works on it when it is
-# under ONE_CLICK_REUSE seconds old, instead of reading the deck again (the read right before the
-# write, _rows_unchanged, is still made); the apply's verify read is kept here too, and the page
-# draws from it. A +1 then costs a read, the check before the write, the write and the verify.
+# Set by the member's one-click saves (api.edit_deck, the Deck settings category save) around their
+# propose and apply (0.7.46 audit D-01, review F1): the proposal's own read of the deck is kept here
+# and the apply works on it when it is under ONE_CLICK_REUSE seconds old, instead of reading the
+# deck again. That read is also the check that the deck did not change before the write
+# (_unchanged_since_read): when the write starts under ONE_CLICK_REUSE seconds after it and no
+# backup copy was made in between, it is as recent as a read made just for the check would be (that
+# read and the write were a pacer gap apart), so no second read is sent; otherwise the deck is read
+# again. The snapshot is taken from the same read. The deck the apply worked from is kept as
+# ``base`` (what the page compares its answer with), and the apply's verify read as ``verified``,
+# which the page draws from. A +1 then costs a read, the write and the verify.
 one_click: ContextVar[dict[str, Any] | None] = ContextVar("one_click", default=None)
 ONE_CLICK_REUSE = 2.0
 # A member's deck list is kept in memory for this long after Archidekt answered (fresh), and
@@ -6565,7 +6570,10 @@ class DeckService:
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
-        await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+        if not self._unchanged_since_read(backup):
+            await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+        if (kept := one_click.get()) is not None:
+            kept["base"] = pickle.dumps(deck)  # the deck the write was worked out on (api.edit_deck)
         for r in row.get("rows") or []:
             if r.get("kind") == "package":
                 # the site reads a package it adds with this one read, which counts one import of
@@ -6899,6 +6907,7 @@ class DeckService:
             and time.monotonic() - read[0] < ONE_CLICK_REUSE
         ):
             deck = pickle.loads(read[2])  # the one-click save's own read, owned, a moment ago
+            kept["read_at"] = read[0]  # type: ignore[index]  # _unchanged_since_read: when it was read
         else:
             deck = await self.get_own_deck(sub, row["deck_id"])  # ownership re-checked at apply time
         status, reason = recheck.check(self, sub, row, deck)
@@ -6914,6 +6923,20 @@ class DeckService:
         now = await self.get_own_deck(sub, deck.id)
         if now.rows_fingerprint() != deck.rows_fingerprint():
             raise needs_look_error(recheck.REASON_DURING_APPLY)
+
+    @staticmethod
+    def _unchanged_since_read(backup: dict[str, Any]) -> bool:
+        """Whether a one-click save's own read of the deck (one_click) still serves as the check
+        right before its write: the apply works on that read, it was made under ONE_CLICK_REUSE
+        seconds ago, and no backup copy was made since (a copy takes several paced calls)."""
+        kept = one_click.get()
+        read_at = kept.get("read_at") if kept is not None else None
+        return (
+            read_at is not None
+            and not backup.get("backup_deck_id")
+            and not backup.get("backup_url")
+            and time.monotonic() - read_at < ONE_CLICK_REUSE
+        )
 
     def recheck_waiting(
         self, sub: str, deck: Deck, *, renamed: dict[str, str] | None = None
@@ -9042,7 +9065,14 @@ class DeckService:
     # -- the deck's own categories: rename and flags (kind "categories") -------------------------
     @_dedupe
     async def propose_categories(
-        self, sub: str, deck_id: str, changes: Any, *, delete_unused: bool = False
+        self,
+        sub: str,
+        deck_id: str,
+        changes: Any,
+        *,
+        delete_unused: bool = False,
+        read: Deck | None = None,
+        read_at: float | None = None,
     ) -> dict[str, Any]:
         """A proposal (kind ``categories``) that renames categories of the member's own deck and
         sets their flags (Premier, Not in deck, Not in price), one review row per category. The
@@ -9061,15 +9091,23 @@ class DeckService:
         and nowhere to move them, and a change that changes nothing. Moving single cards between
         categories stays a card edit (``propose_deck_changes``).
 
-        Applied (``_apply_categories``) with a backup copy first when backups are on, a snapshot,
-        the deck checked again just before writing, one category write at a time through the
-        pacer, and the deck read back to check every name, flag and card. A change touching the
-        commander, or which cards count in the deck, is high risk and waits for the member's press
-        in every approval mode (modes.auto_waits)."""
+        Applied (``_apply_categories``) with a backup copy first when backups are on (not for the
+        settings page's own one-click save, as for the deck page's), a snapshot, the deck checked
+        again just before writing (the save's own read when it is a moment old, one_click), one
+        category write at a time through the pacer, and the deck read back to check every name,
+        flag and card. A change touching the commander, or which cards count in the deck, is high
+        risk and waits for the member's press in every approval mode (modes.auto_waits)."""
         deck_id = _clean_deck_id(deck_id)
         wanted = parse_category_changes(changes) if changes or not delete_unused else []
         self._room_for_proposal(sub)
-        deck = await self.get_own_deck(sub, deck_id)
+        # ``read``: the deck as this request (the member's own settings page) read it at ``read_at``
+        # (time.monotonic())
+        if read is None or read.id != deck_id or read_at is None:
+            deck, read_at = await self.get_own_deck(sub, deck_id), time.monotonic()
+        else:
+            deck = read
+        if (kept := one_click.get()) is not None:  # for the apply that follows at once
+            kept["read"] = (read_at, deck.id, pickle.dumps(deck))
         self.recheck_waiting(sub, deck)
         boards: list[str] = []  # Archidekt's default boards among the unused ones deleted
         if delete_unused:
@@ -9199,8 +9237,8 @@ class DeckService:
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         # The backup takes a while: read again and resolve each category's name to its record id
-        # on the deck of now, just before writing
-        now = await self._categories_unchanged(sub, deck)
+        # on the deck of now, just before writing (a one-click save's own read a moment ago serves)
+        now = deck if self._unchanged_since_read(backup) else await self._categories_unchanged(sub, deck)
         states = category_states(now)
         ids = {s["name"]: s["id"] for s in states}
         for p in plan:
@@ -9261,6 +9299,8 @@ class DeckService:
             progress,
         )
         verified = await self.get_deck(sub, deck.id)
+        if (kept_click := one_click.get()) is not None:
+            kept_click["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it
         updates = [b for b in first if b.get("op", "update") == "update"]
         self.recheck_waiting(sub, verified, renamed=_renames(updates, category_states(deck)))
         mismatches = category_mismatches(deck, plan, verified)
@@ -9326,6 +9366,8 @@ class DeckService:
         wanted = parse_custom_card_changes(changes)
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
+        if (kept := one_click.get()) is not None:  # for the apply that follows at once
+            kept["read"] = (time.monotonic(), deck.id, pickle.dumps(deck))
         self.recheck_waiting(sub, deck)
         adds = [w["custom_card_id"] for w in wanted if w["action"] == "add"]
         names = await self.own_custom_cards(sub, adds) if adds else {}
@@ -9378,8 +9420,9 @@ class DeckService:
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
-        # the backup takes a while: read again just before writing
-        now = await self.get_own_deck(sub, deck.id)
+        # the backup takes a while: read again just before writing (a one-click save's own read a
+        # moment ago serves, one_click)
+        now = deck if self._unchanged_since_read(backup) else await self.get_own_deck(sub, deck.id)
         if now.rows_fingerprint() != deck.rows_fingerprint():
             raise needs_look_error(recheck.REASON_DURING_APPLY)
         plan = plan_on(now, recheck.REASON_DURING_APPLY)
@@ -9387,6 +9430,8 @@ class DeckService:
         payload = [custom_card_entry(p, rows_by_id.get(p["custom_card_id"])) for p in plan]
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
+        if (kept := one_click.get()) is not None:
+            kept["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it
         self.recheck_waiting(sub, verified)
         mismatches = custom_card_mismatches(plan, names, verified)
         result = {
