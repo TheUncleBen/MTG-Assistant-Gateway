@@ -4356,12 +4356,14 @@ class DeckService:
 
     def stored_risk(self, row: dict[str, Any]) -> tuple[str, str]:
         """The risk tier stored on a proposal when it closes, with the reason it was judged by
-        (Database.risk_source). A closed edit with no review rows (stored before they existed) has
-        nothing to judge it by: it keeps no tier (``modes.UNJUDGED``) rather than reading High for
-        want of evidence."""
+        (Database.risk_source): the tier and reason it showed while it waited (_assistant_policy,
+        review F12: Full auto's reason for waiting is the one the member and the assistant saw).
+        A closed edit with no review rows (stored before they existed) has nothing to judge it by:
+        it keeps no tier (``modes.UNJUDGED``) rather than reading High for want of evidence."""
         if self.unjudged(row):
             return modes.UNJUDGED, ""
-        return self.proposal_risk(str(row.get("owner_sub") or ""), row)
+        risk, why, _mode, _allowed = self._assistant_policy(str(row.get("owner_sub") or ""), row)
+        return risk, why
 
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
         """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval

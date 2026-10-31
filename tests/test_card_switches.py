@@ -105,6 +105,46 @@ async def test_back_face_on_a_two_faced_card_only(stack: Stack) -> None:
     assert not one_face["ok"] and "has no back face" in one_face["message"], one_face
 
 
+@pytest.mark.parametrize("mode", ["auto", "semi", "manual"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"action": "set_companion", "name": "Sol Ring", "companion": True},
+        {"action": "set_back_face", "name": DELVER, "back_face": True, "zone": "side"},
+    ],
+)
+async def test_a_switch_keeps_the_risk_reason_it_was_judged_by_once_applied(
+    stack: Stack, mode: str, change: dict
+) -> None:
+    """Review F12: a companion change was proposed as "changes the deck's companion", and once
+    applied read "contains a change that is not a card add, remove, quantity, …": the reason
+    stored when it closed was worked out another way than the one shown while it waited. Each
+    switch has a plain reason, and a closed proposal keeps the reason it waited with."""
+    from .test_approval_modes import _set_mode
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, mode)
+    ark.add_side_row(42, DELVER, category="Sideboard")
+    p = await _propose(h, token, change)
+    assert p["ok"], p
+    shown = p["risk_reason"]
+    assert "is not a card add" not in shown and shown, p
+    a = await apply_any(h, token, p["proposal_id"])
+    assert a["ok"] and a["state"] == "applied", a
+    closed = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert closed["risk"] == p["risk"] and closed["risk_reason"] == shown, (p, closed)
+
+
+def test_each_switch_has_a_plain_risk_reason() -> None:
+    assert modes.risk_of("edit", [{"kind": "companion", "name": "Sol Ring"}]) == (
+        "high",
+        modes.COMPANION_REASON,
+    )
+    assert modes.risk_of("edit", [{"kind": "back_face", "name": DELVER}]) == ("high", modes.BACK_FACE_REASON)
+    assert "not a card add" not in modes.risk_of("edit", [{"kind": "something new", "name": "X"}])[1]
+
+
 async def test_a_switch_archidekt_ignores_is_not_reported_verified(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
