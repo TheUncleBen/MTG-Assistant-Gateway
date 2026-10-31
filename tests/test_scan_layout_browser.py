@@ -586,7 +586,7 @@ def _intro_round(p, exe: str | None, server: Server, sid: str, scheme: str) -> N
 
 @pytest.mark.parametrize("width", [344, 390, 840])
 def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, width: int) -> None:  # noqa: F811
-    """With text at twice its size the "Fit the card…" hint stays readable and off the dashed
+    """With text at twice its size the "Hold the phone about 12 cm…" hint stays readable and off the dashed
     name box (it covered it, inside the viewfinder)."""
     from playwright.sync_api import sync_playwright
 
@@ -595,7 +595,10 @@ def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, 
         browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
         page.evaluate("() => { document.documentElement.style.fontSize = '32px'; }")
         page.evaluate("() => window.__scan.showTab('camera')")
-        hint = page.get_by_text("Fit the card in the frame, name in the dashed box")
+        hint = page.get_by_text(
+            "Hold the phone about 12 cm (5 in) from the card, the card in the frame and its name in the "
+            "dashed box"
+        )
         assert hint.is_visible()
         h, box = hint.bounding_box(), page.locator("#camera .guide .title").bounding_box()
         apart = (
