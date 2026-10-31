@@ -1411,9 +1411,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
 def package_formats(block: dict[str, Any]) -> str:
     """A package's intended formats as 'Commander, Modern' ("" when any)."""
-    return ", ".join(
-        format_label(FORMAT_NAMES.get(f)) for f in block.get("intendedFormats") or [] if f in FORMAT_NAMES
-    )
+    return ", ".join(format_label(FORMAT_NAMES[f]) for f in packages.format_ids(block.get("intendedFormats")))
 
 
 def package_line(owner: str, size: Any, block: dict[str, Any]) -> str:

@@ -7960,6 +7960,7 @@ class DeckService:
         if want_folder is not None and verified.parent_folder != want_folder:
             mismatches.append("the folder")
         saved_otherwise: list[str] = []  # a package's settings as Archidekt saved them
+        package_read: dict[str, Any] = {}
         if spec.get("package"):
             from . import packages
 
@@ -7967,15 +7968,24 @@ class DeckService:
             if block is None:  # not in the first read of a package just made: read it once more
                 block = packages.block_of(await self.get_deck(sub, created.id))
             saved_otherwise = packages.differences(block, spec["package"])
+            if saved_otherwise:
+                # The package is made: it is never Failed for its settings (review F5). Applied,
+                # with what Archidekt saved in words and the block as it came back (for the next
+                # live run to show the cause); the member puts it right under Deck settings.
+                package_read = {
+                    "package_saved_as": saved_otherwise,
+                    "package_block": json.loads(json.dumps(block, default=str)),
+                }
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
             "printing_notes": printing_notes,
             "sent_entries": len(entries),
-            "verified": not (mismatches or saved_otherwise),
-            "mismatched_cards": mismatches + saved_otherwise,
+            "verified": not mismatches,
+            "mismatched_cards": mismatches,
+            **package_read,
         }
-        if mismatches or saved_otherwise:
+        if mismatches:
             progress.update(result)  # apply() records it with the error
             differently = f"Archidekt saved it differently: {'; '.join(saved_otherwise)}."
             raise DeckError(
@@ -11919,6 +11929,12 @@ def applied_text(
         from .account_lists import applied_text as lists_text
 
         return lists_text(c, r)
+    if kind == "create_deck" and r.get("package_saved_as"):  # a package made, its settings otherwise
+        return (
+            "The package is made on Archidekt, but Archidekt saved its settings differently: "
+            + "; ".join(str(x) for x in r["package_saved_as"])
+            + ". Change them under Deck settings › Package."
+        )
     if kind == "edit" and r.get("left_out"):  # DeckService._left_out
         names = [str(x.get("name") or "") for x in r["left_out"] if isinstance(x, dict)]
         return (
