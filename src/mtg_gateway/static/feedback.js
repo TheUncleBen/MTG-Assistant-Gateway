@@ -201,6 +201,9 @@
         if (parts[p].getAttribute("data-native-show").split(" ").indexOf(now) < 0) parts[p].setAttribute("hidden", "");
         else parts[p].removeAttribute("hidden");
       }
+      // A row drawn hidden (data-native-row) shows once the app answered: an older app, without
+      // the method, leaves it out rather than show an empty row.
+      if (box.hasAttribute("data-native-row") && now) box.removeAttribute("hidden");
       // Just saved with notifications on (?connect=1): press the connect button once for the person.
       var auto = box.querySelector("[data-native-auto]");
       if (auto && !auto.closest("[hidden]") && /[?&]connect=1(&|$)/.test(location.search)) {
