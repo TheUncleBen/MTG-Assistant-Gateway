@@ -13,7 +13,10 @@
   --blue:var(--color-text-info,#2b5a9c);--blue-bg:var(--color-background-info,#d6e4f6);
   --btn-bg:var(--color-background-inverse,#141413);--btn-text:var(--color-text-inverse,#ffffff);
   --font:var(--font-sans,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);
-  --pad:12px;--inset-top:0px;--inset-right:0px;--inset-bottom:0px;--inset-left:0px;--max-h:70vh;
+  /* --max-h: a list's own scroll height until the host says what it can show (containerDimensions,
+     _bridge.js). A fixed size, not vh: in a frame the host sizes to the card, vh is the frame's own
+     height, and a cap that grew with every report made the card grow again and again. */
+  --pad:12px;--inset-top:0px;--inset-right:0px;--inset-bottom:0px;--inset-left:0px;--max-h:560px;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
@@ -82,7 +85,9 @@ a.link:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 input[type=search],input[type=text],textarea,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);
   border-radius:var(--radius);min-height:44px;padding:8px 10px;width:100%}
 textarea{min-height:72px;resize:vertical}
-.pic{width:34px;height:48px;border-radius:3px;background:var(--bg2);object-fit:cover;display:block;flex:none}
+/* a row's thumbnail: a whole card at 48x67, its box reserved before the picture arrives (no shift
+   on load); it opens the big picture where the card has one (.detail) */
+.pic{width:48px;height:auto;aspect-ratio:5/7;border-radius:3px;background:var(--bg2);object-fit:cover;display:block;flex:none}
 .pic.none{visibility:hidden}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}
 .toolbar>*{flex:1 1 160px}
@@ -90,10 +95,14 @@ textarea{min-height:72px;resize:vertical}
 .toolbar>.chips.finish{flex:1 1 auto;margin:0}
 .scroll{max-height:var(--max-h);overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:var(--radius)}
 :root[data-display=fullscreen] .scroll{max-height:none;border:0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;padding:8px}
+/* Picture tiles: never narrower than a readable card (120px), at most three across (28vw), two
+   across when a phone host shrinks a wide layout to the screen (data-narrow, _bridge.js) */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(max(120px,28vw),1fr));gap:8px;padding:8px}
+:root[data-narrow] .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .tile{position:relative;border:2px solid transparent;border-radius:8px;background:var(--bg2);padding:4px;cursor:pointer;text-align:left;
   min-height:44px;font-weight:500;color:var(--text);display:flex;flex-direction:column;gap:4px}
-.tile img{width:100%;aspect-ratio:5/7;object-fit:cover;border-radius:5px;background:var(--bg2);display:block}
+/* a whole card, its box reserved from its width before the picture arrives (no shift on load) */
+.tile img{width:100%;height:auto;aspect-ratio:5/7;object-fit:cover;border-radius:5px;background:var(--bg2);display:block}
 .tile img.none{visibility:visible;opacity:.2}
 .tile .cap{font-size:.6875rem;line-height:1.25;color:var(--muted);overflow-wrap:anywhere}
 .tile .cap b{color:var(--text);font-weight:600}
@@ -110,7 +119,8 @@ textarea{min-height:72px;resize:vertical}
 .row.group{display:flex;justify-content:space-between;padding:6px 10px;font-size:.6875rem;font-weight:700;text-transform:uppercase;
   letter-spacing:.05em;color:var(--muted);background:var(--bg2);cursor:pointer;min-height:40px;align-items:center}
 .row.group .n{font-weight:600}
-.row.dim{opacity:.5}
+/* an unticked row fades its own name and picture only: its suggestions, the thing to press, never */
+.row.dim .name,.row.dim .sub,.row.dim .pic,.row.dim .qty{opacity:.5}
 .row.dim .name{text-decoration:line-through}
 .check{width:22px;height:22px;flex:none;accent-color:var(--blue)}
 .pill{display:inline-block;font-size:.6875rem;border-radius:999px;padding:1px 7px;background:var(--bg2);border:1px solid var(--border);color:var(--muted);margin-left:6px;vertical-align:middle}
