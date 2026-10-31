@@ -4,6 +4,9 @@
 // days and the full history, and a card's name opens the card viewer. A card's full history comes
 // from /watchlist/api/card and a deck's from /watchlist/api/deck (a year at most, nothing asked of
 // Scryfall), read once per row. The chart is drawn as watchlist_page.chart_html draws it on the server.
+// Load more asks the page for just the rows it lacks (the button's own link with part= and from=,
+// watchlist_page.watchlist_fragment_html) and adds them under the ones shown; without a script
+// the link is the longer page.
 (function () {
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -165,10 +168,51 @@
     return true;
   }
 
+  // -- Load more: the rows the list lacks, added in place ------------------------------------------
+  var loading = false;
+  function loadMore(link) {
+    var wrap = link.closest(".loadmore");
+    var table = wrap && wrap.previousElementSibling;
+    if (!table || !table.classList.contains("w-t") || typeof fetch !== "function") return false;
+    if (loading) return true;
+    var part = /decks/i.test(table.getAttribute("aria-label") || "") ? "decks" : "cards";
+    var shown = table.querySelectorAll(".tr:not(.th)").length;
+    var url = link.href.split("#")[0] + (link.href.indexOf("?") < 0 ? "?" : "&") +
+      "part=" + part + "&from=" + shown;
+    loading = true;
+    link.setAttribute("aria-busy", "true");
+    link.setAttribute("aria-disabled", "true");
+    fetch(url, { credentials: "same-origin", headers: { Accept: "text/html" } })
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+      .then(function (html) {
+        var box = document.createElement("div");
+        box.innerHTML = html;
+        var rows = box.querySelector(".w-rows"), next = box.querySelector(".loadmore");
+        if (!rows || !next) throw new Error("no rows");
+        var first = rows.firstElementChild;
+        while (rows.firstChild) table.appendChild(rows.firstChild);
+        wrap.replaceWith(next);
+        document.dispatchEvent(new CustomEvent("rows:loaded", { bubbles: true }));  // the rows' ⋮
+        var focus = first && first.querySelector(".more");
+        if (focus) focus.focus({ preventScroll: true });
+        if (first) first.scrollIntoView({ block: "nearest" });
+      })
+      .catch(function () {
+        link.removeAttribute("aria-busy");
+        link.removeAttribute("aria-disabled");
+        var Menu = window.MtgMenu;
+        if (Menu && Menu.toast) Menu.toast("No connection; nothing more could be read. Try again.", { error: true });
+      })
+      .then(function () { loading = false; });
+    return true;
+  }
+
   document.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     var more = e.target.closest(".watch-page .w-t .more");
     if (more) { if (toggle(more)) e.preventDefault(); return; }
+    var grow = e.target.closest(".watch-page .loadmore a[data-load-more]");
+    if (grow) { if (loadMore(grow)) e.preventDefault(); return; }
     var range = e.target.closest(".watch-page .seg button[data-range]");
     if (range) { setRange(range); return; }
     var name = e.target.closest(".watch-page a.wcard");

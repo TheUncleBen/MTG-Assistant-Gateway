@@ -2295,6 +2295,16 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
     return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
 
 
+_NUMBERS = re.compile(r"(\d+)")
+
+
+def natural_key(text: str | None) -> tuple[str | int, ...]:
+    """A sort key for names: the numbers in them sort as numbers ("Card 2" before "Card 10"),
+    the rest without regard to case. Every key alternates text and numbers from the first
+    character, so any two compare."""
+    return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
+
+
 def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
     """'1 card', '2 cards': a real plural instead of 'card(s)'. ``plural_word`` for irregular
     nouns (``plural(2, "copy", "copies")``)."""

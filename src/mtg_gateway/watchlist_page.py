@@ -10,16 +10,19 @@ card" and a red-outline "Remove".
 
 The rows come from ``PriceService.card_summaries`` and ``deck_summaries`` (0.7.46): each watch's
 latest price and its changes, in one query each whatever the list's size (up to 5,000 cards and
-100 decks); the chips, search, filter and sort work on those. Only the rows on screen get their
-30 days of prices (``card_histories``, ``deck_histories``: two queries each). Load more shows 25
-more cards, or 25 more decks. static/watchlist.js opens the rows in place and draws the full
-history from ``/watchlist/api/card`` (cards) or ``/watchlist/api/deck`` (decks)."""
+100 decks), kept until something changes; the chips, search, filter and sort work on those, with
+names in their natural order (a 2 before a 10). Only the rows on screen get their 30 days of
+prices (``card_histories``, ``deck_histories``: two queries each). Load more shows 25 more cards,
+or 25 more decks: static/watchlist.js asks for just those rows (``watchlist_fragment_html``) and
+adds them in place; without a script its link is the longer page. The script also opens the rows
+in place and draws the full history from ``/watchlist/api/card`` (cards) or ``/watchlist/api/deck``
+(decks)."""
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -447,12 +450,19 @@ def shown_cards(cards: list[dict[str, Any]], query: Query) -> list[dict[str, Any
         and (not q or q in str(v.get("name") or "").casefold())
         and (not query.finish or v.get("finish") == query.finish)
     ]
+    # by name with its numbers as numbers ("Filler Card 2" before "Filler Card 10"), then a
+    # printing's set and finish; the other sorts keep that order among equals
+    out.sort(key=lambda v: (ui.natural_key(v.get("name")), v.get("set") or "", v.get("finish") or ""))
     if query.sort == "price":
         out.sort(key=lambda v: -(v.get("price") or 0))
     elif query.sort in ("d1", "d7", "d30"):
         key = f"change_{query.sort[1:]}d_pct"
         out.sort(key=lambda v: -abs(v.get(key) or 0))
     return out
+
+
+def shown_decks(decks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(decks, key=lambda d: (ui.natural_key(d.get("name")), str(d.get("deck_id") or "")))
 
 
 # -- widgets -------------------------------------------------------------------------------------
@@ -548,9 +558,126 @@ def widgets_html(data: dict[str, Any], *, checked: str) -> str:
     return ui.widgets(out)
 
 
-# -- the page ---------------------------------------------------------------------------------------
+# -- the rows on screen, and Load more -------------------------------------------------------------
 def _no_history(_views: list[dict[str, Any]]) -> None:
     return None
+
+
+def card_rows_html(
+    cards: list[dict[str, Any]],
+    ids: dict[str, str | None],
+    csrf_in: str,
+    today: str,
+    query: Query,
+    card_history: Callable[[list[dict[str, Any]]], None],
+    *,
+    start: int = 0,
+) -> tuple[Query, list[dict[str, Any]], str, str]:
+    """The card rows from ``start`` up to the query's ``upto`` (the first screenful at least) and
+    the Load more under them; only those rows get their 30 days of prices. An open row (a price
+    alert's link) past the first screenful is found by searching the list for its name, never by
+    drawing every row before it. Returns the query as drawn, the whole list as sorted and
+    filtered, the rows and the Load more."""
+    shown = shown_cards(cards, query)
+    upto = max(PAGE, query.upto)
+    if query.open and not query.open.startswith("d") and not query.q:
+        at = next((i for i, v in enumerate(shown) if str(v["watch_id"]) == query.open), -1)
+        if at >= upto:
+            query = replace(query, q=str(shown[at]["name"]), upto=0)
+            shown = shown_cards(cards, query)
+    total = len(shown)
+    page_rows = shown[start:upto]
+    card_history(page_rows)
+    if page_rows:
+        body = "".join(card_row(v, ids.get(v["watch_id"]), csrf_in, today, query=query) for v in page_rows)
+    elif start:
+        body = ""
+    elif cards:
+        body = "<p class='ui-empty'>No cards match. Clear the search or the filters to see them all.</p>"
+    else:
+        body = "<p class='ui-empty'>No cards watched yet.</p>"
+    # Load more, not pages: the list is sorted (by name or price), so it grows in place. Without a
+    # script the link loads the longer list and lands on the first new row.
+    end = min(upto, total)
+    if end < total:
+        pager = ui.load_more(
+            query.href(upto=end + PAGE, open="") + f"#wr-{shown[end]['watch_id']}",
+            text="Load more cards",
+            shown=end,
+            total=total,
+        )
+    elif total > PAGE:
+        pager = ui.load_more("", done=f"All {total:,} cards shown.")
+    else:
+        pager = ""
+    return query, shown, body, pager
+
+
+def deck_rows_html(
+    decks: list[dict[str, Any]],
+    csrf_in: str,
+    today: str,
+    query: Query,
+    deck_history: Callable[[list[dict[str, Any]]], None],
+    *,
+    start: int = 0,
+) -> tuple[str, str]:
+    """The deck rows from ``start`` up to ``dupto`` and their Load more, as card_rows_html."""
+    decks = shown_decks(decks)
+    dupto = max(PAGE, query.dupto)
+    if query.open.startswith("d"):  # an opened deck is shown wherever it sits (100 at most)
+        at = next((i for i, v in enumerate(decks) if f"d{v['deck_id']}" == query.open), -1)
+        if at >= dupto:
+            dupto = (at // PAGE + 1) * PAGE
+    deck_rows = decks[start:dupto]
+    deck_history(deck_rows)
+    if deck_rows or start:
+        body = "".join(deck_row(v, csrf_in, today, query=query) for v in deck_rows)
+    else:
+        body = "<p class='ui-empty'>No decks watched yet.</p>"
+    end = min(dupto, len(decks))
+    if end < len(decks):
+        pager = ui.load_more(
+            query.href(dupto=end + PAGE, open="") + f"#wr-d{decks[end]['deck_id']}",
+            text="Load more decks",
+            shown=end,
+            total=len(decks),
+        )
+    elif len(decks) > PAGE:
+        pager = ui.load_more("", done=f"All {len(decks):,} decks shown.")
+    else:
+        pager = ""
+    return body, pager
+
+
+def watchlist_fragment_html(
+    data: dict[str, Any],
+    ids: dict[str, str | None],
+    csrf: str | None,
+    query: Query,
+    *,
+    part: str,
+    start: int,
+    now: float | None = None,
+    card_history: Callable[[list[dict[str, Any]]], None] = _no_history,
+    deck_history: Callable[[list[dict[str, Any]]], None] = _no_history,
+) -> str:
+    """What Load more (static/watchlist.js) adds in place: the card (``part`` "cards") or deck
+    ("decks") rows from ``start``, the rows already on screen, up to the query's ``upto`` or
+    ``dupto``, then the Load more that follows them."""
+    now = time.time() if now is None else now
+    today = time.strftime("%Y-%m-%d", time.gmtime(now))
+    csrf_in = f"<input type='hidden' name='csrf' value='{esc(csrf or '')}'>"
+    if part == "decks":
+        rows, pager = deck_rows_html(data["decks"], csrf_in, today, query, deck_history, start=start)
+    else:
+        _q, _shown, rows, pager = card_rows_html(
+            data["cards"], ids, csrf_in, today, query, card_history, start=start
+        )
+    return f"<div class='w-rows' data-part='{esc(part)}'>{rows}</div>{pager}"
+
+
+# -- the page ---------------------------------------------------------------------------------------
 
 
 def watchlist_page_html(
@@ -616,15 +743,7 @@ def watchlist_page_html(
         f"<p class='ui-hint'>{CARD_HINT} {SEARCH_HINT}</p></form>"
     )
     cards = data["cards"]
-    shown = shown_cards(cards, query)
-    total = len(shown)
-    upto = max(PAGE, query.upto)
-    # the open row (a price alert's link) is shown wherever it sits: the list grows to it
-    at = next((i for i, v in enumerate(shown) if str(v["watch_id"]) == query.open), -1) if query.open else -1
-    if at >= upto:
-        upto = (at // PAGE + 1) * PAGE
-    page_rows = shown[:upto]
-    card_history(page_rows)
+    query, _shown, body, pager = card_rows_html(cards, ids, csrf_in, today, query, card_history)
     chips = ui.chips(
         [
             ui.Chip(
@@ -658,26 +777,6 @@ def watchlist_page_html(
             ui.Column(""),
         ]
     )
-    if page_rows:
-        body = "".join(card_row(v, ids.get(v["watch_id"]), csrf_in, today, query=query) for v in page_rows)
-    elif cards:
-        body = "<p class='ui-empty'>No cards match. Clear the search or the filters to see them all.</p>"
-    else:
-        body = "<p class='ui-empty'>No cards watched yet.</p>"
-    # Load more, not pages: the list is sorted (by name or price), so it grows in place. Without a
-    # script the link loads the longer list and lands on the first new row.
-    if len(page_rows) < total:
-        nxt = shown[len(page_rows)]["watch_id"]
-        pager = ui.load_more(
-            query.href(upto=len(page_rows) + PAGE, open="") + f"#wr-{nxt}",
-            text="Load more cards",
-            shown=len(page_rows),
-            total=total,
-        )
-    elif total > PAGE:
-        pager = ui.load_more("", done=f"All {total:,} cards shown.")
-    else:
-        pager = ""
     card_list = (
         "<div id='w-cards'>"
         + ui.list_head("Cards", len(cards), f"Last check {checked}" if checked else "")
@@ -703,29 +802,7 @@ def watchlist_page_html(
             ui.Column(""),
         ]
     )
-    dupto = max(PAGE, query.dupto)
-    if query.open.startswith("d"):  # an opened deck is shown wherever it sits
-        at = next((i for i, v in enumerate(decks) if f"d{v['deck_id']}" == query.open), -1)
-        if at >= dupto:
-            dupto = (at // PAGE + 1) * PAGE
-    deck_rows = decks[:dupto]
-    deck_history(deck_rows)
-    deck_body = (
-        "".join(deck_row(v, csrf_in, today, query=query) for v in deck_rows)
-        if decks
-        else "<p class='ui-empty'>No decks watched yet.</p>"
-    )
-    if len(deck_rows) < len(decks):
-        deck_pager = ui.load_more(
-            query.href(dupto=len(deck_rows) + PAGE, open="") + f"#wr-d{decks[len(deck_rows)]['deck_id']}",
-            text="Load more decks",
-            shown=len(deck_rows),
-            total=len(decks),
-        )
-    elif len(decks) > PAGE:
-        deck_pager = ui.load_more("", done=f"All {len(decks):,} decks shown.")
-    else:
-        deck_pager = ""
+    deck_body, deck_pager = deck_rows_html(decks, csrf_in, today, query, deck_history)
     deck_list = (
         f"<div id='w-decks'>{ui.list_head('Decks', len(decks))}</div>"
         f"<form method='post' class='w-deckadd' aria-label='Watch a deck'>{csrf_in}"
