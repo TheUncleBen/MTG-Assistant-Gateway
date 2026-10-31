@@ -879,12 +879,15 @@ async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: 
         await b.aclose()
 
 
-async def test_a_one_click_edit_costs_three_archidekt_calls(stack: Stack) -> None:  # noqa: F811
+async def test_a_one_click_edit_costs_three_archidekt_calls(stack: Stack, monkeypatch) -> None:  # noqa: F811
     """0.7.46 audit D-01: a "+1" from the deck page cost six Archidekt calls (three reads before
     the write, the verify, then two reads for the page). Review F1: four were left. Now: the
     proposal's read (reused by the apply as its snapshot and as the check before the write, as it
     is a moment old), the write and the verify, which the page draws from. A permanent guard: any
     one-click edit that sends more than three calls fails here."""
+    # a busy test machine may take longer than ONE_CLICK_REUSE between the read and the write
+    # (the save then reads again, as it should); the window itself is tested on its own
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 60.0)
     b = await linked(stack)
     try:
         csrf = await b.csrf("/account/details")  # the form token, read before the count starts
@@ -941,6 +944,9 @@ async def test_a_second_edit_of_a_sitting_is_not_judged_stale(stack: Stack, monk
         return await real_sleep(delay, *a, **k)
 
     monkeypatch.setattr(api_module.asyncio, "sleep", sleep)
+    # a busy test machine may take longer than ONE_CLICK_REUSE between the read and the write
+    # (the save then reads again, as it should); the window itself is tested on its own
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 60.0)
     b = await linked(stack)
     try:
         csrf = await b.csrf("/account/details")
@@ -1000,15 +1006,21 @@ async def test_a_change_made_while_a_slow_save_ran_is_still_caught_before_the_wr
         await b.aclose()
 
 
-async def test_the_members_own_edit_starts_its_calls_from_the_page_burst(stack: Stack) -> None:  # noqa: F811
+async def test_the_members_own_edit_starts_its_calls_from_the_page_burst(
+    stack: Stack,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Review F1: at the shipped pacing (one start a second, 30 a minute) a one-click edit waited
     the full gap before its write and before its read back: three seconds with an instant
     Archidekt. Its calls now start from the page burst, as a page's reads do; the per-minute cap
-    still counts each of them."""
+    still counts each of them. Here the gap is five seconds, so a wait for it shows plainly."""
+    # a busy test machine may take longer than ONE_CLICK_REUSE between the read and the write
+    # (the save then reads again, as it should); the window itself is tested on its own
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 60.0)
     b = await linked(stack)
     try:
         csrf = await b.csrf("/account/details")
-        pacer = Pacer(1.0, 30)
+        pacer = Pacer(5.0, 30)
         stack.gw.decks.client.pacer = pacer
         start = time.perf_counter()
         r = await api(
@@ -1020,7 +1032,7 @@ async def test_the_members_own_edit_starts_its_calls_from_the_page_burst(stack: 
         )
         took = time.perf_counter() - start
         assert r.status_code == 201 and r.json()["applied"] is True, r.text
-        assert took < 1.0, took
+        assert took < 4.0, took  # waiting the gap twice would take ten
         assert len(pacer._sent) == 3  # every call still counts towards the per-minute cap
     finally:
         await b.aclose()

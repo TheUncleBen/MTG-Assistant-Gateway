@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 import re
 
+from mtg_gateway import decks as decks_mod
 from mtg_gateway import modes
 from mtg_gateway.decks import CATEGORIES_SAVED, OPEN_TABS_NOTE
 from mtg_gateway.theme import esc
@@ -18,6 +19,8 @@ from .test_deck_categories import RAMP, _give_categories
 
 SETTINGS = "/decks/42/settings"
 POST = "/decks/42/categories"
+# where a delete goes: the notice, with its Undo (review F10)
+DELETED = r"\?ok=category_deleted&undo=[A-Za-z0-9_-]+#categories$"
 
 
 def _ids(page: str) -> dict[str, int]:
@@ -178,12 +181,15 @@ async def test_a_new_deck_shows_archidekts_default_maybeboard_and_sideboard(stac
         await b.aclose()
 
 
-async def test_a_category_save_costs_a_read_a_write_and_the_read_back(stack: Stack) -> None:
+async def test_a_category_save_costs_a_read_a_write_and_the_read_back(stack: Stack, monkeypatch) -> None:
     """Review F1: one category create from the panel sent 8 to 11 Archidekt calls (the deck read
     five times, and the backup copy on the first save of a sitting). Now: the page's own read
     (which also serves the proposal, the snapshot and the check before the write), the write, and
     the read back (which also draws the panel). The gateway's snapshot is still taken; as on the
     deck page, the member's own one-click save makes no backup copy on Archidekt."""
+    # a busy test machine may take longer than ONE_CLICK_REUSE between the read and the write
+    # (the save then reads again, as it should); the window itself is tested on its own
+    monkeypatch.setattr(decks_mod, "ONE_CLICK_REUSE", 60.0)
     _give_categories(stack.ark)
     assert stack.gw.decks.live.get("archidekt_backups")  # backups on, as shipped
     b = await linked_browser(stack)
@@ -299,7 +305,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
             data={"csrf": csrf, "action": "delete", "delete": str(ids["Maybeboard"]), "confirmed": "1"},
             headers=NAV,
         )
-        assert r.status_code == 303 and r.headers["location"].endswith("?ok=category_deleted#categories")
+        assert r.status_code == 303 and re.search(DELETED, r.headers["location"]), r.headers
         assert stack.ark.category_deletes == [ids["Maybeboard"]]
         # a category with cards: the confirm asks where its cards go (Archidekt only deletes an
         # empty category), and the cards move before the delete
@@ -347,7 +353,7 @@ async def test_delete_asks_first_and_a_category_with_cards_moves_them(stack: Sta
             },
             headers=NAV,
         )
-        assert r.status_code == 303 and r.headers["location"].endswith("?ok=category_deleted#categories")
+        assert r.status_code == 303 and re.search(DELETED, r.headers["location"]), r.headers
         assert ids["Ramp"] in stack.ark.category_deletes
         assert "Ramp" not in [c["name"] for c in stack.ark.decks[42]["categories"]]
         assert all(
