@@ -47,6 +47,7 @@ from .history_view import _taken as _taken_text
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
+    _lists_before,
     browser_session,
     login_redirect,
 )
@@ -141,6 +142,9 @@ def add_history_routes(
                 fold_sessions=True,  # one entry per sitting on the deck page
             )
             for r in restores:  # when the snapshot it put back was taken (its first review row)
+                if r.get("kind") == "lists":  # the list as it was just before (review F7)
+                    r["before_html"] = _lists_before(state.db.get_proposal(r["id"], sub) or {})
+                    continue
                 if r.get("kind") != "restore":
                     if r.get("created_by_client") == BROWSER_CLIENT_ID and r.get("snapshot_id"):
                         r["session"] = state.db.page_session(sub, str(r["snapshot_id"]))

@@ -247,6 +247,34 @@ async def test_the_review_page_and_history_show_a_lists_change(stack: Stack) -> 
         await b.aclose()
 
 
+async def test_history_lists_a_lists_change_with_the_copy_from_just_before(stack: Stack) -> None:
+    """My lists says a copy from just before each change is kept under History (review F7): the
+    applied change is a History entry, under Your Archidekt lists, and its Details show the list
+    as it was."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    ark.account.tags["alice"] = [{"id": 1, "name": "Cut", "color": "#ff0000"}]
+    p = await _propose(h, token, "color_tags", [{"op": "edit", "name": "Cut", "color": "#00ff00"}])
+    await _apply(h, token, p)
+    b = Browser(h)
+    try:
+        await b.login()
+        history = (await b.http.get("/history")).text
+        assert "Changed your Archidekt lists: Color tag “Cut”: color #ff0000 -&gt; #00ff00" in history
+        assert "<a class='t' href='/lists'>Your Archidekt lists</a>" in history
+        assert "href='/decks/lists'" not in history
+        details = (await b.http.get(f"/history?open=p-{p['proposal_id']}")).text
+        assert "Before: your list as it was just before" in details and "Cut: #ff0000" in details
+        assert f"/proposals/{p['proposal_id']}" in details
+        # narrowed to the lists, it is the one entry; the chips count it
+        mine = (await b.http.get("/history?deck_id=lists")).text
+        assert "Changed your Archidekt lists" in mine
+        assert "the changes applied to them and to your Archidekt lists" in history
+    finally:
+        await b.aclose()
+
+
 def _picture(fmt: str, size: tuple[int, int] = (800, 1000)) -> bytes:
     import io
 
