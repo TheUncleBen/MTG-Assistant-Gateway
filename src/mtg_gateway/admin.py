@@ -817,10 +817,10 @@ def _spark(values: list[int], *, label: str) -> str:
 
 
 def _mode_name(mode: object) -> str:
-    """An approval mode as the Guide names it, with the word its setting takes: "Semi-auto (semi)"."""
-    from .modes import MODE_NAMES
+    """An approval mode as the Account and Settings pages name it ("Ask me every time")."""
+    from .modes import MODE_LABELS
 
-    return f"{MODE_NAMES.get(str(mode), str(mode))} ({mode})"
+    return MODE_LABELS.get(str(mode), str(mode))
 
 
 def _service_label(status: str) -> _Html:
@@ -961,7 +961,7 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         + _row("Test engine (Forge)", _service_label(sysd["forge"]))
         + _row("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"], now=now))
         + _archidekt_stats(sysd.get("archidekt"))
-        # the live settings; each by its name, with the setting's own word
+        # the live settings, each by the name members see
         + _row("Default approval mode", _mode_name(state.decks.live.get("approval_mode_default")))
         + _row("Highest approval mode allowed", _mode_name(state.decks.live.get("approval_mode_max")))
         + (
@@ -1195,7 +1195,7 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
 
 def _cleanup_text(c: dict[str, Any], *, now: float | None = None) -> str:
     """The removed-member clean-up's state in one line that ends with what to do next
-    (idp_sweep.AuthentikSweep.status). docs/IDP-AUTHENTIK.md section 12 explains each one."""
+    (idp_sweep.AuthentikSweep.status). docs/IDP-AUTHENTIK.md, section 12, explains each one."""
     st = c.get("state")
     setup = idp_sweep.SETUP
     if st == "off":
