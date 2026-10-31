@@ -101,10 +101,11 @@
     <string name="camera_none">No back camera found.</string>
     <!-- The CameraX error code goes to the log (CameraPanel), not into the message. -->
     <string name="camera_error">The camera stopped working. Close it and try again.</string>
-    <string name="status_no_flash">Fill the dashed box with the card, then tap Shoot.</string>
-    <string name="status_strength">Torch brightness is adjustable on this phone. Fill the dashed box with the card, then tap Shoot.</string>
-    <string name="status_no_strength_old">Torch brightness control needs Android 15. Fill the dashed box with the card, then tap Shoot.</string>
-    <string name="status_no_strength_device">This camera does not report adjustable torch brightness. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_no_flash">Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_strength">Torch brightness is adjustable on this phone. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_no_strength_old">Torch brightness control needs Android 15. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_no_strength_device">This camera does not report adjustable torch brightness. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
+    <string name="status_focusing">Focusing…</string>
     <string name="status_capturing">Taking the picture…</string>
     <string name="status_reading">Reading the card…</string>
     <string name="status_next">Next card.</string>
@@ -118,11 +119,18 @@
     <string name="unidentified_card">Could not place “%1$s”; kept in the unidentified list.</string>
     <string name="no_card_outline">No card outline found. Use a plain, contrasting background (a light one for a black-bordered card).</string>
     <string name="status_ocr_loading">Getting text recognition ready (first use downloads about 8 MB): %1$d%%</string>
-    <string name="status_ocr_ready">Ready. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_ocr_ready">Ready. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
     <string name="status_ocr_unavailable">Text recognition could not be loaded, so names cannot be read. Tap Done and type them on the page.</string>
     <string name="scan_failed">Scan failed: %1$s</string>
-    <string name="pending_on_page">Found a match. Tap Done to add it on the page; Shoot again replaces it.</string>
-    <string name="auto_paused_pending">Auto paused: a read waits on the page. Tap Done to check it.</string>
+    <!-- What one shot came to (ShotLine): %1$s is the card's name, %2$s its set and number as " (FRC 21)" or empty. -->
+    <string name="shot_found">Found “%1$s”%2$s. Tap Done to add it on the page; Shoot again replaces it.</string>
+    <string name="shot_found_paused">Found “%1$s”%2$s. Auto paused: tap Done to check it on the page.</string>
+    <!-- %1$s is the name as read. -->
+    <string name="shot_no_match">No match for “%1$s”. Tap Done to pick from the suggestions or type the name, or shoot again.</string>
+    <string name="shot_no_match_paused">No match for “%1$s”. Auto paused: tap Done to pick from the suggestions or type the name.</string>
+    <string name="shot_blurred">No match: the picture is blurred. Hold the phone still, about 15 cm (6 in) from the card, and shoot again.</string>
+    <!-- %1$s is the page's own reason, such as “Found the card but could not read its name. …” -->
+    <string name="shot_unreadable">Couldn’t read this one. %1$s</string>
     <plurals name="cards">
         <item quantity="one">%d card</item>
         <item quantity="other">%d cards</item>
