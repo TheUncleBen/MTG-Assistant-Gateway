@@ -6,9 +6,10 @@ widths in light and dark."""
 
 from __future__ import annotations
 
-import base64
 import json
 import os
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -21,10 +22,26 @@ from .test_consent_browser import _chromium_or_skip, _launch
 pytest.importorskip("playwright")
 
 LINK = "https://mtg.test/cards/data/tok-1"
+
+
+def png(width: int, height: int) -> bytes:
+    """A grey PNG of the given size, made here so a picture has a real size without any network
+    (the one this file carried before was cut short, so every picture quietly failed to load)."""
+    raw = b"".join(b"\x00" + b"\x80" * (3 * width) for _ in range(height))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
 # A 5x7 grey PNG, so pictures have a size without any network.
-PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAUAAAAHCAIAAAAbd2raAAAAFElEQVR4nGNgYGD4z8DAwMDAwMAAAAwAA/8BpYQAAAAASUVORK5CYII="
-)
+PNG = png(5, 7)
 
 HOST = """<!DOCTYPE html><html><body style="margin:0;background:%s">
 <iframe id="f" sandbox="allow-scripts" style="width:%dpx;height:10px;border:0"></iframe>
@@ -322,8 +339,10 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             assert card.locator(".tile").count() == 1
             card.locator("#finish button[data-finish='']").click()
             assert card.locator(".tile").count() == 3
-            # Tap one: it is marked, the status says so, and the assistant hears the pick.
+            # Tap one: it shows big, and Use this printing picks it; it is marked, the status says
+            # so, and the assistant hears the pick (test_cards_pickers_browser has the detail view).
             card.locator(".tile").nth(0).click()
+            card.locator("#use").click()
             card.locator("#status.ok").wait_for()
             assert "Picked: Sol Ring" in card.locator("#status").inner_text()
             assert card.locator(".tile.picked").count() == 1
@@ -334,8 +353,10 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             assert (
                 'set_code "cmm"' in told and 'collector_number "411"' in told and "Commander Masters" in told
             )
-            assert card.locator("a.link", has_text="Open the picked printing on Scryfall").count() == 1
-            card.locator("a.link").first.click()
+            assert (
+                card.locator("#actions a.link", has_text="Open the picked printing on Scryfall").count() == 1
+            )
+            card.locator("#actions a.link").click()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/open-link')", timeout=5_000)
             assert _calls(page, "ui/open-link")[0]["params"] == {"url": "https://scryfall.com/card/cmm/411"}
             # A host that offers fullscreen gets an Expand button that asks for it.

@@ -71,11 +71,19 @@ def test_an_older_card_steps_aside_for_the_newest_and_stops_reading() -> None:
                 page, {"structuredContent": NEW_DECK, "_meta": {APPROVAL_META_KEY: "c1"}}, get_reply=newer
             )
             card.locator("#card.stub").wait_for(timeout=5_000)
-            assert "Replaced by a newer version below" in card.locator("#status").inner_text()
-            assert card.locator("#state").inner_text().lower() == "replaced"
+            # "Older card", not "Replaced": a replaced proposal is its own state (another change took
+            # its place); this card's change was updated, and lives on in the newer card
+            assert "This change was updated; the newest card is below" in card.locator("#status").inner_text()
+            assert card.locator("#state").inner_text().lower() == "older card"
+            assert "replaced" not in card.locator("#state").inner_text().lower()
             assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
             assert card.locator("ul.changes li").count() == 0 and card.locator("img").count() == 0
             assert card.locator("#summary").is_hidden()
+            # the one-line card reports its own small height, so the chat keeps no blank band under
+            # it (that a card's report also drops is proved in test_cards_pickers_browser)
+            page.wait_for_timeout(300)
+            heights = [m["params"]["height"] for m in _calls(page, "ui/notifications/size-changed")]
+            assert heights and heights[-1] < 200, heights
             # it reads nothing more: shown again, or the chat coming back, changes nothing
             n = len(_reads(page))
             page.frames[1].evaluate(
