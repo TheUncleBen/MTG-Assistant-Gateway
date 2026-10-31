@@ -854,11 +854,12 @@
   }
 
   /* A photo as a working copy with its long side at most PHOTO_MAX px, which holds every detail
-     the OCR can use. Phone photos run to 200 MP (16,320 x 12,240): decoded whole that is about
-     800 MB, more than a phone's browser tab may have. So the browser is asked to decode it straight
-     to the smaller size (createImageBitmap with a resize). Its size comes first from an <img>, which
-     reads the file's header and its EXIF orientation without decoding the pixels. A browser without
-     the resize options draws the <img> as before. Null when the picture cannot be opened. */
+     the OCR can use. Phone photos run to 200 MP (16,320 x 12,240), about 800 MB decoded whole. An
+     <img> reads only the file's header (and its EXIF orientation) when it loads, and drawing it
+     smaller decodes it straight to a reduced size: in Chromium a 200 MP JPEG drawn this way raised
+     the browser's memory by about 75 MB. createImageBitmap with resize options looks like the tool
+     for this but decodes the whole picture first (over 1 GB more for the same photo, and four
+     times slower), so it is not used. Null when the picture cannot be opened. */
   async function photoCanvas(file, url) {
     const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; })
       .catch(() => null);
@@ -866,16 +867,7 @@
     const k = Math.min(1, PHOTO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
-    const ctx = c.getContext('2d');
-    if (k < 1 && typeof createImageBitmap === 'function') {
-      try {
-        const bmp = await createImageBitmap(file, { resizeWidth: c.width, resizeHeight: c.height, resizeQuality: 'high', imageOrientation: 'from-image' });
-        ctx.drawImage(bmp, 0, 0, c.width, c.height);
-        if (bmp.close) bmp.close();
-        return c;
-      } catch (e) { /* no resize options here: draw the <img> */ }
-    }
-    ctx.drawImage(img, 0, 0, c.width, c.height);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     return c;
   }
 
@@ -963,8 +955,11 @@
       const strip = preprocess(src, r || region);
       const ocr = await recognize(strip, 'title');
       const text = cleanOcr(ocr.text);
-      const weak = text.length < 3 || (ocr.confidence != null && ocr.confidence < T.min_ocr_confidence);
-      return { source: src, strip, ocr, weak, score: (text.length >= 3 ? 1000 : 0) + (ocr.confidence || 0) };
+      // A run of more than 20 letters is no word of a card name (the longest are about 17, such as
+      // Indestructibility): it is the texture of the art or the text box read as letters.
+      const name = text.length >= 3 && !/[A-Za-z]{21}/.test(text);
+      const weak = !name || (ocr.confidence != null && ocr.confidence < T.min_ocr_confidence);
+      return { source: src, strip, ocr, weak, score: (name ? 1000 : 0) + (ocr.confidence || 0) };
     };
     const first = await once(source);
     if (!flat || !(flat.sideways || first.weak)) return first;
