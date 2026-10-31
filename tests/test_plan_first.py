@@ -17,6 +17,12 @@ async def _check(h, token: str, changes: list, deck: str = "42") -> dict:
     return out
 
 
+def _catalog(h) -> None:
+    """The card-name catalog knows the names these tests add, as on a running gateway, so the
+    check judges them without asking Archidekt (a name it can't judge is asked: F5 below)."""
+    h.app.state.gateway.scan.names.set_names(["Opt", "Ponder", "Brainstorm", "Preordain", "Swamp", "Island"])
+
+
 async def _pending(h, token: str) -> list[dict]:
     return structured(await call(h, token, "list_my_proposals", {"pending_only": True}))["proposals"]
 
@@ -24,6 +30,7 @@ async def _pending(h, token: str) -> list[dict]:
 async def test_the_check_draws_no_card_and_saves_and_asks_nothing(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
+    _catalog(h)
     await _mode(h, "manual")
     tools = await _tools(h, token)
     assert "ui" not in (tools["check_deck_changes"].get("_meta") or {})  # never a card
@@ -41,6 +48,7 @@ async def test_a_plan_touching_the_apps_own_waiting_proposal_is_added_to_it(stac
     waits is proposed in one call and added to it, so the check says so instead of an amend."""
     h = stack.h
     token = await linked_user(stack)
+    _catalog(h)
     await _mode(h, "manual")
     first = await _propose(h, token, _change("Opt"))
     out = await _check(h, token, [*_change("Opt"), *_change("Ponder")])
@@ -146,6 +154,7 @@ async def test_a_plan_is_added_to_the_newest_own_draft_in_one_call(stack: Stack)
     adds the plan to that draft (same proposal, next version) instead of making another."""
     h = stack.h
     token = await linked_user(stack)
+    _catalog(h)
     await _mode(h, "manual")
     await _propose(h, token, _change("Brainstorm"))
     second = await _propose(h, token, [*_change("Opt"), *_change("Ponder")])
@@ -161,6 +170,7 @@ async def test_a_plan_is_added_to_the_newest_own_draft_in_one_call(stack: Stack)
 async def test_a_held_proposal_is_never_offered_to_amend(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
+    _catalog(h)
     await _mode(h, "manual")
     mine = await _propose(h, token, _change("Opt"))
     assert h.db.set_hold(mine["proposal_id"], SUB, "depends:x")
@@ -177,6 +187,7 @@ async def test_at_the_waiting_limit_adding_to_the_draft_or_a_repeat_is_still_sug
 
     h = stack.h
     token = await linked_user(stack)
+    _catalog(h)
     await _mode(h, "manual")
     await _propose(h, token, _change("Opt"))
     monkeypatch.setattr(decks_mod, "MAX_PENDING_PROPOSALS", 1)
@@ -202,6 +213,7 @@ async def test_a_name_no_magic_card_has_is_a_problem(stack: Stack) -> None:
 async def test_another_apps_change_on_the_same_cards_is_named_in_the_next_step(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
+    _catalog(h)
     await _mode(h, "manual")
     await _propose(h, token, _change("Opt"))
     other = await mcp_token(h)
@@ -218,3 +230,55 @@ def test_the_in_app_guide_lists_the_check() -> None:
 
     page = guide_body(site="Gateway", writes_enabled=True, has_collection=True)
     assert "<code>check_deck_changes</code>" in page
+
+
+# -- a name nothing could judge (0.7.46 full review F5) --------------------------------------------
+
+
+async def test_a_name_the_catalog_cannot_judge_is_looked_up_and_one_archidekt_lacks_is_a_problem(
+    stack: Stack,
+) -> None:
+    """With no card-name catalog, "Ponderr Xyzzy" passed the check ("Nothing found against it"),
+    then the proposal came out high risk because Archidekt doesn't have it: the card the check is
+    meant to save was drawn. The check now asks Archidekt about such a name, as the proposal does,
+    and the proposal uses that answer again."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    out = await _check(h, token, [*_change("Ponderr Xyzzy"), *_change("Opt")])
+    assert out["suggest"] == "fix", out
+    missing = next(p for p in out["problems"] if p["error"] == "missing_on_archidekt")
+    assert missing["missing_on_archidekt"] == ["Ponderr Xyzzy"], missing
+    assert "Archidekt doesn't have “Ponderr Xyzzy”" in missing["message"]
+    assert "Nothing found against it" not in out["next_step"]
+    looked = len([c for c in ark.calls if "/cards/" in c[1]])
+    assert looked >= 2  # both names were asked
+    # the proposal says the same, and asks Archidekt nothing more about those names
+    p = await _propose(h, token, [*_change("Ponderr Xyzzy"), *_change("Opt")])
+    assert p["risk"] == "high" and p["missing_on_archidekt"] == ["Ponderr Xyzzy"], p
+    assert len([c for c in ark.calls if "/cards/" in c[1]]) == looked
+    # a name Archidekt has passes
+    ok = await _check(h, token, _change("Swamp"))
+    assert ok["suggest"] == "propose" and ok["problems"] == [], ok
+
+
+async def test_a_name_nothing_could_check_is_said_and_never_passed(stack: Stack) -> None:
+    from .test_assistant_flow import _card_search_fails
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    _card_search_fails(stack.ark)
+    out = await _check(h, token, _change("Islend"))
+    assert out["suggest"] == "fix", out
+    assert out["problems"] == [
+        {
+            "error": "unchecked_names",
+            "message": "Couldn't check that “Islend” is a card.",
+            "unchecked_names": ["Islend"],
+        }
+    ], out
+    assert "Nothing found against it" not in out["next_step"]
+    assert "scryfall_named" in out["next_step"] and "high risk" in out["next_step"], out["next_step"]
+    p = await _propose(h, token, _change("Islend"))
+    assert p["risk"] == "high" and p["unchecked_names"] == ["Islend"], p
