@@ -202,7 +202,7 @@ def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> Non
         == f"<span class='ui-app'>{claude}<span class='nm'>Claude</span></span>"
     )
     assert ui.app_chip("ChatGPT", client_id="https://chatgpt.com/oauth/c.json").startswith(
-        "<span class='ui-app'><img class='logo on-light' src='/static/logos/"
+        "<span class='ui-app'><span class='logo-box'><img class='logo on-light' src='/static/logos/"
     )
     assert ui.app_chip("Codex").endswith("<span class='nm'>Codex</span></span>")
     # any other app keeps the gateway's own neutral icon; never initials
