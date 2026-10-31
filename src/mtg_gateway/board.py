@@ -118,6 +118,12 @@ def _cat_verb(r: dict[str, Any]) -> str:
     return "changes it"
 
 
+def member_arrows(text: Any) -> str:
+    """A diff line as a member reads it on a card or page: "1 → 2 Sol Ring", the arrow the cards
+    draw, never the diff's "1 -> 2" (0.7.46 review F10). Older stored lines are read the same way."""
+    return str(text or "").replace(" -> ", " → ")
+
+
 def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str, Any]] | None) -> str:
     """The gateway's own line for an amended note: what the new version does that the
     old one did not, and what it no longer does, from the rows (an assistant's words never appear
@@ -139,7 +145,7 @@ def what_changed(old_rows: list[dict[str, Any]] | None, new_rows: list[dict[str,
     also = "" if gone else "also "  # "now also adds" only when the new version keeps all the old did
     bits = [f"now {also}{words}" if words else f"now {line}" for line, words in new if line not in was]
     bits += gone
-    text = "; ".join(bits) or "the same changes"
+    text = member_arrows("; ".join(bits)) or "the same changes"
     return text if len(text) <= WHAT_CHANGED_MAX else text[: WHAT_CHANGED_MAX - 3] + "..."
 
 

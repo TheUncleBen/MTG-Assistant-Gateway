@@ -5447,7 +5447,7 @@ class DeckService:
                 {
                     "changed_by": self._creator_label(row["amended_by_client"]),
                     "changed_by_apps": self.changed_by_apps(sub, row),
-                    "what_changed": str(row.get("version_note") or ""),
+                    "what_changed": board.member_arrows(row.get("version_note")),
                 }
                 if int(row.get("version") or 1) > 1 and row.get("amended_by_client")
                 else {}
@@ -8008,7 +8008,9 @@ class DeckService:
         for line in lines_:
             row = self.db.get_proposal(line["id"], sub) or {}
             lines = str(line.get("diff_text") or "").splitlines()
-            summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+            summary = board.member_arrows("; ".join(lines[:3])) + (
+                f" (+{len(lines) - 3} more)" if len(lines) > 3 else ""
+            )
             amender = line.get("amended_by_client")
             out.append(
                 {
@@ -8030,7 +8032,7 @@ class DeckService:
                             "changed_by": self._creator_label(amender),
                             "changed_by_apps": self.changed_by_apps(sub, row or line),
                             "changed_at": line.get("amended_at"),
-                            "what_changed": line.get("version_note"),
+                            "what_changed": board.member_arrows(line.get("version_note")) or None,
                         }
                         if amender
                         else {}
@@ -8595,9 +8597,10 @@ class DeckService:
         for c in names_of:
             if c.action == "add" and found.get(c.card_name) is None:
                 unjudged.setdefault(c.card_name, c)
-        missing, unchecked = (
-            await self._look_up_unjudged(sub, list(unjudged.values())) if unjudged and not problems else ([], [])
-        )
+        missing: list[str] = []
+        unchecked: list[str] = []
+        if unjudged and not problems:
+            missing, unchecked = await self._look_up_unjudged(sub, list(unjudged.values()))
         if unknown:
             meant: dict[str, str] = {}
             if self.suggest_cards is not None:

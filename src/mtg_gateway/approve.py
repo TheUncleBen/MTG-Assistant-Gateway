@@ -311,6 +311,57 @@ def proposal_text(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _maker(label: Any) -> str:
+    """Who made a waiting change, as the card says it: the app's name without its client id."""
+    s = str(label or "")
+    if s.startswith("app: "):
+        return s[5:].rsplit(" (", 1)[0] or "an assistant"
+    return {"browser": "the user, in their browser", "admin": "the administrator"}.get(s, s or "unknown")
+
+
+def waiting_text(data: dict[str, Any]) -> str:
+    """show_waiting_changes as plain text for the model, as proposal_text is for a proposal (the
+    structured content is the card's): one line per waiting change, never an app's client id."""
+    if data.get("ok") is False:
+        return proposal_text(data)
+
+    def one(v: Any) -> str:
+        return " ".join(str(v).split()).rstrip(".")
+
+    rows = [x for x in data.get("waiting") or [] if isinstance(x, dict)]
+    where = f"on {one(data['deck_name'] or data['deck_id'])}" if data.get("deck_id") else "across all decks"
+    if not rows:
+        return f"Nothing waits for the user's approval {where}."
+    n, own = len(rows), int(data.get("own_count") or 0)
+    lines = [
+        f"{n} change{'s' if n != 1 else ''} wait{'s' if n == 1 else ''} for the user's approval {where} "
+        f"({own} yours), oldest first:"
+    ]
+    for x in rows:
+        head = f"#{x['board_no']}" if x.get("board_no") else "-"
+        bits = [one(x.get("deck_name") or x.get("deck_id"))] if not data.get("deck_id") else []
+        bits.append(f"version {x.get('version') or 1}")
+        if x.get("risk"):
+            bits.append(f"{one(x['risk'])} risk")
+        bits.append("yours" if x.get("own") else f"by {_maker(x.get('created_by'))}")
+        line = f"{head} ({', '.join(bits)}): {one(x.get('summary') or '')}"
+        if x.get("what_changed"):
+            line += f". Last change: {one(x['what_changed'])}"
+        if x.get("status_reason"):
+            line += f". {one(x['status_reason'])}"
+        if x.get("link_note"):
+            line += f". {one(x['link_note'])}"
+        if x.get("review_page_only"):
+            line += ". Only on its review page"
+        if x.get("not_in_apply_all"):
+            line += ". Not in Apply all"
+        lines.append(f"{line}. proposal_id {x['proposal_id']}, review_url {x['review_url']}")
+    lines.append(f"review_all_url: {data.get('review_all_url')}")
+    if data.get("writes_enabled") is False:
+        lines.append("Archidekt writes are switched off on this gateway: nothing can be applied now.")
+    return "\n".join(lines)
+
+
 def approval_code(
     secret: str,
     *,

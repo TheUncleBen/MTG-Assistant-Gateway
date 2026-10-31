@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context
-from mcp_types import CallToolResult
+from mcp_types import CallToolResult, TextContent
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import deck_stats, modes
@@ -21,6 +21,7 @@ from .approve import (
     CONFIRM_TOOL_META,
     apply_on_review_page,
     bounded,
+    waiting_text,
     with_words_note,
 )
 from .archidekt import parse_deck
@@ -956,6 +957,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _card_result(_tool_error(exc), None)
         res = _card_result(data, None)
+        # the model reads it as text, like a proposal; the card reads the structured content
+        res.content = [TextContent(type="text", text=waiting_text(data))]
         if meta:
             res.meta = meta
         return res
@@ -1335,7 +1338,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 # the reason the member typed on the card, kept with the rejection
                 why = str(reason)[:REJECT_REASON_MAX] if isinstance(reason, str) else None
                 return _card_result(
-                    {"ok": True, **state.decks.reject(sub, proposal_id, via="app", reason=why)}, None
+                    _closed_at({"ok": True, **state.decks.reject(sub, proposal_id, via="app", reason=why)}),
+                    None,
                 )
             shown = None if shown_status is None else str(shown_status)[:20]
             applied = await state.decks.apply(
