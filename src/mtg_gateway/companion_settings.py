@@ -39,6 +39,7 @@ from .decks import (
     category_line,
     current_client,
     deck_categories,
+    deletes_categories,
     one_click,
     parse_category_changes,
     unused_category_changes,
@@ -361,8 +362,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         pkg_values: dict[str, str] | None = None,
         templates: list[dict[str, Any]] | None = None,
         template_error: str = "",
+        undo: str = "",
     ) -> str:
-        """The settings page on the shared form rows (F7). ``templates``: the member's category
+        """The settings page on the shared form rows (F7). ``undo``: the Undo button drawn with the
+        notice after a category delete (undo_form). ``templates``: the member's category
         templates, read for the Add template box drawn open (its old address, or a refusal).
         ``error`` shows in the main panel (the main settings form's own refusal) or, with
         ``error_in``, inside that section next to its form, as the ?ok= notices of the section
@@ -373,7 +376,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if error and error_in == section:
                 return ui.notice(error, "error", role="alert", cls="ds-note", id=f"{section}-msg")
             if not error and ok in SETTINGS_OK_MESSAGES and OK_SECTIONS.get(ok) == section:
-                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note")
+                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note") + undo
             return ""
 
         fmt_current = v.get("deck_format", deck.format or "")
@@ -1063,6 +1066,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         except DeckError as exc:
             return settings_problem(request, deck_id, exc, sub, sid)
         ok = request.query_params.get("ok") or ""
+        undo = ""
+        if ok == "category_deleted":
+            undo = undo_form(sub, sid, deck, request.query_params.get("undo") or "")
         templates = None
         if request.query_params.get("templates"):
             try:
@@ -1078,9 +1084,36 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 following=await following_or_none(sub),
                 ok=ok,
                 templates=templates,
+                undo=undo,
             ),
             sub,
             sid,
+        )
+
+    def undo_form(sub: str, sid: str | None, deck: Deck, pid: str) -> str:
+        """Undo of the member's category delete (review F10), drawn with its notice: the review
+        page's Undo (POST /proposals/undo, in its box when scripts run), a restore of the snapshot
+        the delete took just before it (decks.deletes_categories), which re-creates the category
+        and moves its cards back. Only the member's own applied delete on this deck has one."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pid):
+            return ""
+        row = state.db.get_proposal(pid, sub)
+        if (
+            row is None
+            or row.get("state") != "applied"
+            or str(row.get("deck_id")) != str(deck.id)
+            or not deletes_categories(row)
+            or not row.get("snapshot_id")
+        ):
+            return ""
+        return (
+            "<form method='post' action='/proposals/undo' class='undo' data-undo-box>"
+            f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid) or '')}'>"
+            "<input type='hidden' name='action' value='preview'>"
+            f"<input type='hidden' name='snapshot' value='{_esc(str(row['snapshot_id']))}'>"
+            f"<input type='hidden' name='applied' value='{_esc(pid)}'>"
+            f"<input type='hidden' name='after' value='{int(row.get('applied_at') or 0)}'>"
+            "<button class='btn'>Undo</button></form>"
         )
 
     def settings_response(body: str, sub: str, sid: str | None, status: int = 200) -> Response:
@@ -1095,7 +1128,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             deck_css=True,
             heading=False,
             extra_css=SETTINGS_CSS + deck_extras.PACKAGE_FIELDS_CSS,
-            extra_scripts=("decksettings.js",),
+            extra_scripts=("decksettings.js", "undo-box.js"),
         )
 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
@@ -1419,7 +1452,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 return ok
             done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
             if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":
-                return RedirectResponse(f"/decks/{deck.id}/settings?ok={ok}#categories", status_code=303)
+                # a delete's notice offers its Undo (review F10)
+                undo = f"&undo={p['proposal_id']}" if action == "delete" else ""
+                return RedirectResponse(
+                    f"/decks/{deck.id}/settings?ok={ok}{undo}#categories", status_code=303
+                )
             return done  # Archidekt refused or writes are off: the review page says why
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")

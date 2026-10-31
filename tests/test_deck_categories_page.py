@@ -12,7 +12,7 @@ from mtg_gateway import modes
 from mtg_gateway.decks import CATEGORIES_SAVED, OPEN_TABS_NOTE
 from mtg_gateway.theme import esc
 
-from .conftest import Stack
+from .conftest import Stack, aged_stamp
 from .test_companion import NAV, linked_browser
 from .test_deck_categories import RAMP, _give_categories
 
@@ -760,3 +760,62 @@ def test_the_category_words_fill_in_names_and_counts() -> None:
     )
     for text in modes.CATEGORY_WORDS.values():
         assert "—" not in text and "verify" not in text.lower() and '"' not in text
+
+
+async def test_a_category_delete_has_its_own_snapshot_and_an_undo_that_puts_it_back(stack: Stack) -> None:
+    """Review F10 (T-190 step 7): the settings page's saves of a sitting shared one snapshot, so
+    there was no snapshot from just before a category delete, and a delete that moved the cards had
+    no Undo. A delete starts a snapshot of its own; the notice after it offers Undo, which re-creates
+    the category and moves its cards back (a restore of that snapshot, the member's own press)."""
+    _give_categories(stack.ark)
+    stack.ark.decks[42]["categories"].append(
+        {"name": "Removal", "isPremier": False, "includedInDeck": True, "includedInPrice": True}
+    )
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _csrf(b)
+        ids = _ids(page)
+        # an earlier save of the sitting: its snapshot holds the deck before the create
+        r = await b.http.post(POST, data={"csrf": csrf, "action": "create", "category": "Draw"}, headers=NAV)
+        assert r.status_code == 303, r.text
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ids["Ramp"]),
+                "move_cards_to": "Removal",
+                "move_ok": "1",
+            },
+            headers=NAV,
+        )
+        assert r.status_code == 303, r.text
+        assert "Ramp" not in [c["name"] for c in stack.ark.decks[42]["categories"]]
+        history = (await b.http.get("/api/v1/decks/42/history")).json()
+        rows = [stack.gw.decks.db.get_proposal(p["id"], "user-1") for p in history["proposals"]]
+        (delete,) = [p for p in rows if any(c.get("op") == "delete" for c in p["changes"]["categories"])]
+        (create,) = [p for p in rows if p is not delete]
+        assert create["snapshot_id"] != delete["snapshot_id"]  # a snapshot from just before the delete
+        page = (await b.http.get(r.headers["location"], headers=NAV)).text
+        m = re.search(
+            r"<form method='post' action='/proposals/undo' class='undo' data-undo-box>(.*?)</form>", page
+        )
+        assert m and ">Undo</button>" in m.group(1), page
+        fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", m.group(1)))
+        assert fields["snapshot"] == delete["snapshot_id"] and fields["applied"] == delete["id"]
+        r = await b.http.post("/proposals/undo", data=fields)  # what Undo puts back
+        assert r.status_code == 200 and "name='action' value='undo'" in r.text, r.text
+        confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.text))
+        confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
+        r = await b.http.post("/proposals/undo", data=confirm)
+        assert r.status_code == 303 and r.headers["location"].endswith("?ok=undone"), r.text
+        names = [c["name"] for c in stack.ark.decks[42]["categories"]]
+        assert "Ramp" in names and "Draw" in names  # the earlier save stays
+        filed = {
+            c["card"]["oracleCard"]["name"]
+            for c in stack.ark.decks[42]["cards"]
+            if c["categories"] == ["Ramp"]
+        }
+        assert filed == set(RAMP)
+    finally:
+        await b.aclose()

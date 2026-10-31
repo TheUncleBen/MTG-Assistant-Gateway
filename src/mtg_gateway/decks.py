@@ -7004,6 +7004,7 @@ class DeckService:
             shared is None
             and row.get("created_by_client") == BROWSER_CLIENT
             and row.get("kind") in PAGE_SESSION_KINDS
+            and not deletes_categories(row)
         ):
             # The member's own edits on the deck page, one after another (db.PAGE_SESSION_SECONDS):
             # they share the snapshot from before the first, while the deck is as the last left it.
@@ -10578,6 +10579,16 @@ OPEN_TABS_NOTE = "Archidekt tabs already open on this deck show the old categori
 CATEGORIES_SAVED = "Categories saved to Archidekt. A snapshot from just before is under History."
 CATEGORY_GONE = "The deck has no category “{name}”."
 CATEGORY_TAKEN = "The deck already has a category named “{name}”. Pick another name."
+
+
+def deletes_categories(row: dict[str, Any]) -> bool:
+    """Whether a proposal deletes a category. Such a save starts a snapshot of its own instead of
+    sharing the sitting's (review F10): "the snapshot from just before the delete" is then there to
+    restore, and the delete's Undo puts back the category and its cards and nothing earlier."""
+    changes = row.get("changes")
+    if row.get("kind") != "categories" or not isinstance(changes, dict):
+        return False
+    return any(isinstance(p, dict) and p.get("op") == "delete" for p in changes.get("categories") or [])
 
 
 def category_state(c: dict[str, Any]) -> dict[str, Any]:
