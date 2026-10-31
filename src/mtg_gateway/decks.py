@@ -11082,6 +11082,8 @@ def category_line(r: dict[str, Any]) -> str:
         cards = f" (its {n} card{'s go' if n != 1 else ' goes'} with it)" if n else ""
         bits.append(f"rename to “{r['rename_to']}”{cards}")
     bits += flags
+    if not bits and r.get("record"):  # a default board's record made again, its switches as they are
+        return f"Category “{name}” is kept on the deck again, as it was in the snapshot."
     return f"Category “{name}”: " + ", ".join(bits) + "."
 
 
@@ -11118,9 +11120,10 @@ def category_restore_plan(snapshot: Deck, current: Deck) -> tuple[list[dict[str,
                 cur = same
                 was = {**was, "id": same["id"], "name": same["name"]}
                 if same["id"] is None:
+                    # Archidekt's default board without its record (deleted since, as Delete unused
+                    # does): the record is made again, even with the switches it reads with now,
+                    # so the deck has it as the snapshot did (review F17)
                     body = {"op": "create", **{k: v for k, v in was.items() if k != "id"}, "id": None}
-                    if {k: same[k] for k in same if k != "id"} == {k: was[k] for k in was if k != "id"}:
-                        continue
                     bodies.append(body)
                     row = _row("deck_category", name=same["name"], record=True, cards=None)
                     _flag_rows(row, same, was)
