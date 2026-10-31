@@ -18,7 +18,7 @@ from typing import Any
 
 from . import card_models, ui
 from .deck_stats import is_basic_land
-from .theme import ICON_DATA_URL, icon, time_html, time_text
+from .theme import ICON_DATA_URL, icon, plural, time_html, time_text
 from .theme import esc as _esc
 from .tool_labels import TOOLS
 
@@ -106,7 +106,12 @@ def plain_words(text: str) -> str:
     # the gateway's own tool names: a pointer for an assistant ("(get_deck_report)") is dropped,
     # "deck_stats on the deck" points to the deck page's Deck stats, any other becomes its words
     text = _TOOL_NOTE.sub("", text).replace("deck_stats on the deck", "Deck stats, on the deck's page")
+    # the research service's "2 card(s)": a real plural, as every page of the gateway
+    text = _COUNT_S.sub(lambda m: plural(int(m.group(1)), m.group(2)), text)
     return _TOOL_WORD.sub(lambda m: "“" + TOOLS[m.group(1)].name + "”", text)
+
+
+_COUNT_S = re.compile(r"\b(\d+) ([a-z]+)\(s\)")
 
 
 _TOOL_WORD = re.compile(r"\b(" + "|".join(map(re.escape, sorted(TOOLS, key=len, reverse=True))) + r")\b")
@@ -822,8 +827,9 @@ def _names(cards: list[dict[str, Any]], *, menu: bool = False) -> str:
 
 
 def _md_name(c: dict[str, Any]) -> str:
+    """A card in a Markdown list, the commander marked as the page marks it."""
     copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
-    return copies + front_face(c["name"])
+    return copies + front_face(c["name"]) + (" (commander)" if c.get("commander") else "")
 
 
 def _copies(cards: list[dict[str, Any]]) -> int:
@@ -1617,9 +1623,10 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     if f.get("not_played"):
         parts.append(
             f"<div class='honesty'><h3>Cards Forge left out <small>{len(f['not_played'])}</small></h3>"
-            "<p class='muted small'>Not counted above.</p><p>"
-            + ", ".join(_esc(front_face(n)) for n in f["not_played"])
-            + "</p></div>"
+            "<p class='muted small'>Not counted above.</p>"
+            # one card per capsule, as the solo test's groups, never a comma-joined line
+            + _names([{"name": n} for n in f["not_played"]])
+            + "</div>"
         )
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
     if live and pending and ahead and ahead.get("report_id"):
@@ -1727,8 +1734,11 @@ def forge_solo_lines(f: dict[str, Any]) -> list[str]:
             f"stopped before turn {until} or a win."
         )
     if f.get("not_played"):
-        lines.append("Cards Forge could not play: " + ", ".join(str(n) for n in f["not_played"]))
+        lines.append(NOT_PLAYED_LEAD + ", ".join(str(n) for n in f["not_played"]))
     return [ln for ln in lines if ln]
+
+
+NOT_PLAYED_LEAD = "Cards Forge could not play: "
 
 
 def forge_stopped_text(f: dict[str, Any]) -> str:
@@ -2006,10 +2016,16 @@ def report_body_html(
     body += engine_html(r)
     solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
     if solo and forge_solo_lines(solo):
+        items = ""
+        for ln in forge_solo_lines(solo):
+            if ln.startswith(NOT_PLAYED_LEAD) and solo.get("not_played"):
+                # a capsule per card, never a comma-joined line
+                left_out = _names([{"name": n} for n in solo["not_played"]])
+                items += f"<li>{_esc(NOT_PLAYED_LEAD.rstrip())}{left_out}</li>"
+            else:
+                items += f"<li>{_esc(ln)}</li>"
         body += (
-            f"<div class='card'><h2>{_esc(FORGE_SOLO_HEADING)}</h2><ul class='sumlines'>"
-            + "".join(f"<li>{_esc(ln)}</li>" for ln in forge_solo_lines(solo))
-            + "</ul></div>"
+            f"<div class='card'><h2>{_esc(FORGE_SOLO_HEADING)}</h2><ul class='sumlines'>{items}</ul></div>"
         )
     if g and s["honesty"]:
         body += (
@@ -2066,8 +2082,9 @@ def report_body_html(
         raw += f"<h3>Validation output</h3><pre>{_esc(v['raw'])}</pre>"
     if raw:
         body += (
-            f"<details class='card raw disclosure'><summary class='fold-btn'>{RAW_HEADING} from the research "
-            "service</summary>" + raw + "</details>"
+            f"<details class='card raw disclosure'><summary class='fold-btn'>{RAW_HEADING}</summary>"
+            + raw
+            + "</details>"
         )
     return f"<div class='report'>{body}</div>"
 
@@ -2076,7 +2093,7 @@ def report_body_html(
 # Both downloads follow one outline: the title, what was tested (a table), Summary, the solo
 # test, Forge, what the test leaves out, Validation, Deck statistics, and the research service's
 # raw output last (a fold in the HTML file, a link to the report in the Markdown).
-RAW_HEADING = "Raw output"
+RAW_HEADING = "Research service output"
 
 
 def export_meta(r: dict[str, Any], s: dict[str, Any], report_url: str = "") -> list[tuple[str, str, str]]:
@@ -2199,10 +2216,9 @@ def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
         lines += [f"## {solo_heading(g)}", "", g["message"], ""]
     if kept_models(r):
         used = sorted(kept_models(r), key=lambda u: u["name"].casefold())
-        named = ", ".join(
-            front_face(u["name"]) + (f" ({_kept_who(u)})" if _kept_who(u) else "") for u in used
-        )
-        lines += [f"**{KEPT_HEADING}:** {named}", ""]
+        lines += [f"**{KEPT_HEADING}:**", ""]
+        lines += [f"- {front_face(u['name'])}" + (f" ({_kept_who(u)})" if _kept_who(u) else "") for u in used]
+        lines.append("")
     forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
     if forge is None or forge.get("state") == "skipped":
         why = (
@@ -2222,12 +2238,19 @@ def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
             lines += [forge_stopped_text(forge), ""]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
-            lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
+            lines.append("- Cards Forge could not play:")
+            lines += [f"  - {front_face(n)}" for n in forge["not_played"]]
         lines.append("")
     solo = r.get("forge_solo") if isinstance(r.get("forge_solo"), dict) else None
     if solo and forge_solo_lines(solo):  # a heading with nothing under it is left out
         lines += [f"## {FORGE_SOLO_HEADING}", ""]
-        lines += [f"- {ln}" for ln in forge_solo_lines(solo)]
+        for ln in forge_solo_lines(solo):
+            if ln.startswith(NOT_PLAYED_LEAD) and solo.get("not_played"):
+                # one card per line, so a name with a comma in it is never read as two
+                lines.append(f"- {NOT_PLAYED_LEAD.rstrip()}")
+                lines += [f"  - {front_face(n)}" for n in solo["not_played"]]
+            else:
+                lines.append(f"- {ln}")
         lines.append("")
     if g:
         h = g["honesty"]
@@ -2238,25 +2261,29 @@ def report_markdown(r: dict[str, Any], *, report_url: str = "") -> str:
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         # each group is its own paragraphs: its count in bold, what it means, then its cards
+        # one card per line in every group: a name with a comma in it ("Ajani, Caller of the
+        # Pride") is never mistaken for two
         if h["unrecognized"]:
             lines += [f"**{UNMODELED_HEADING}: {_share(_copies(h['unrecognized']), size)}.**", ""]
             lines += [UNMODELED_TEXT, ""]
-            lines.append(", ".join(_md_name(c) for c in h["unrecognized"]))
+            lines += [f"- {_md_name(c)}" for c in h["unrecognized"]]
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
             lines += [f"**{OUT_OF_SCOPE_HEADING}: {_share(total, size)}.**", ""]
             lines += [OUT_OF_SCOPE_TEXT, ""]
             for grp in h["out_of_scope"]:
-                lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
+                lines.append(f"- {grp['label']}:")
+                lines += [f"  - {_md_name(c)}" for c in grp["cards"]]
             lines.append("")
         if h["low_impact"]:
             lines += [f"**{LOW_IMPACT_HEADING}: {_share(len(h['low_impact']), size)}.**", ""]
             lines += [LOW_IMPACT_TEXT, ""]
-            lines.append(", ".join(front_face(n) for n in h["low_impact"]))
+            lines += [f"- {front_face(n)}" for n in h["low_impact"]]
             lines.append("")
         if approx:
             lines += [f"**{APPROX_HEADING}: {len(approx)}.**", "", APPROX_TEXT, ""]
+            # each shortcut's names are the research service's own comma-joined line
             lines += [f"- {a['label']}: {a['cards']}" for a in approx]
             lines.append("")
     if s["constructed"]:
@@ -2352,8 +2379,12 @@ EXPORT_CSS = """
 html{font-size:14px;-webkit-text-size-adjust:100%;line-height:1.15;
   font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif}
 body{margin:0;padding:1rem;background:var(--bg);color:var(--text);font-size:1rem;line-height:1.35}
-.report{max-width:52rem;margin:0 auto;overflow-wrap:break-word} a{color:var(--link)}
-a:hover{color:var(--orange-text)} :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.report{max-width:52rem;margin:0 auto;overflow-wrap:break-word}
+/* a link (the deck on Archidekt, the report on the gateway) is the text's own colour with a quiet
+   underline, as the site's pages: never bare blue text */
+a{color:var(--text);text-decoration:underline;text-decoration-color:var(--text-muted);text-underline-offset:.18em}
+a:hover{color:var(--orange-text);text-decoration-color:currentColor}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
 h1{font-size:2rem;margin:.25rem 0 .75rem;overflow-wrap:anywhere} h2{font-size:1.5rem;margin:0 0 .6rem}
