@@ -423,6 +423,10 @@ def category_wait(rows: list[dict[str, Any]] | None) -> str | None:
 BREAKS_RULES_REASON = "would make the deck break its format's rules ({rules})"
 COMMANDER_COPIES_REASON = "changes the commander's copies"
 COMPANION_REASON = "changes the deck's companion"
+# risk_of's reasons for the other row kinds a low-risk edit may not have (review F12: one plain
+# reason each, never a list of the kinds that are low risk)
+BACK_FACE_REASON = "changes which face of a two-faced card the deck shows"
+OTHER_ROW_REASON = "changes more than the cards, their counts and how they are filed"
 COMMANDER_ZONE_REASON = "adds or changes a row with a commander-zone category"
 # Fewer copies of a card whose commander-zone row is in the maybeboard or sideboard, with another
 # row there: no commander (its row is not in the deck), but the write folds its rows like a
@@ -489,14 +493,12 @@ def risk_of(
     unchecked = [str(r.get("name")) for r in rows if r.get("unchecked")]
     if unchecked:
         return "high", "adds a card name that couldn't be checked: " + ", ".join(unchecked)
-    if any(r.get("companion_card") for r in rows):
+    if any(r.get("companion_card") for r in rows) or "companion" in kinds:
         return "high", COMPANION_REASON
+    if "back_face" in kinds:
+        return "high", BACK_FACE_REASON
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
-        return (
-            "high",
-            "contains a change that is not a card add, remove, quantity, category, finish, printing, "
-            "color tag or custom mana value",
-        )
+        return "high", OTHER_ROW_REASON
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"
     cards = sum(_copies_moved(r) for r in rows)
