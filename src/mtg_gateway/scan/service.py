@@ -900,9 +900,16 @@ class ScanService:
         """
         name = inp.name
         spend = budget.spend
+        # The name as read, then without a stray letter the title bar's edge put in front of it
+        # ("fSolRing", "l Sol Ring"). Every match is still guarded against the name as read.
+        bases = [name, *trimmed_starts(name)]
 
-        # 1. Common OCR confusions ("S0l Ring", "Sol Rlng", "Cultlvate", "Rarnpant Growth").
-        for variant in ocr_variants(name, MAX_VARIANT_LOOKUPS):
+        # 1. Common OCR confusions ("S0l Ring", "Sol Rlng", "Cultlvate", "Rarnpant Growth"), and the
+        #    trimmed name itself.
+        variants = ocr_variants(name, MAX_VARIANT_LOOKUPS)
+        for base in bases[1:]:
+            variants += [base, *ocr_variants(base, MAX_VARIANT_LOOKUPS)]
+        for variant in dict.fromkeys(variants):
             if not spend():
                 return None
             try:
@@ -918,11 +925,23 @@ class ScanService:
                     summarize(card),
                     f"{note}matched '{card['name']}' from '{name}' after correcting likely scan errors",
                 )
+        for base in bases:
+            found = await self._recover_prefix(inp, base, note, budget)
+            if found is not None:
+                return found
+        return None
+
+    async def _recover_prefix(
+        self, inp: CardInput, base: str, note: str, budget: _Budget
+    ) -> Resolution | None:
+        """[_recover]'s second step on ``base`` (the read, or the read with its start trimmed)."""
+        name = inp.name
+        spend = budget.spend
         # 2. Autocomplete on a shorter and shorter prefix ("Sol R", "Cult").
         tried: set[str] = set()
         lookups = 0
-        for cut in range(len(name) - 1, MIN_PREFIX - 1, -1):
-            prefix = name[:cut].rstrip()
+        for cut in range(len(base) - 1, MIN_PREFIX - 1, -1):
+            prefix = base[:cut].rstrip()
             if len(prefix) < MIN_PREFIX or prefix in tried:
                 continue
             tried.add(prefix)
@@ -1490,6 +1509,20 @@ def ocr_variants(name: str, limit: int) -> list[str]:
             add(folded[:pos] + b + folded[pos + len(a) :])
             start = pos + 1
     return out
+
+
+def trimmed_starts(name: str) -> list[str]:
+    """``name`` without what the title bar's left edge adds in front of a printed name: a lone
+    lower-case letter ("l Sol Ring"), a lower-case first letter ("fSolRing"; printed names start
+    with a capital or a digit) or an I, l or 1 glued to a capital ("ISolRing"). Empty when the name
+    starts as a printed name can ("A Little Chat", "I Know All, I See All", "Island")."""
+    out: list[str] = []
+    first, _, rest = name.partition(" ")
+    if len(first) == 1 and first.islower() and rest.strip():
+        out.append(rest.strip())
+    if len(name) > 2 and (name[0].islower() or (name[0] in "Il1" and name[1].isupper())):
+        out.append(name[1:].lstrip())
+    return [v for v in dict.fromkeys(out) if len(_norm(v)) >= MIN_PREFIX]
 
 
 def _rank_candidates(name: str, names: list[str], min_similarity: float) -> list[tuple[float, str]]:
