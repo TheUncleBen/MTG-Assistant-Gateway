@@ -96,7 +96,8 @@ def add_gateway_routes(state: AppState, h: SimpleNamespace) -> None:
                 buttons=[("approve", "Approve and sign in", "primary"), ("deny", "Deny", "btn-plain")],
             ),
         )
-        return small("Connect an application", body, form_action=info["form_action"])
+        # no Sign in in the top bar: it would leave the connection half done
+        return small("Connect an application", body, form_action=info["form_action"], signin_link=False)
 
     @server.custom_route(CONSENT_PATH, methods=["POST"], include_in_schema=False)
     async def consent_continue(request: Request) -> Response:

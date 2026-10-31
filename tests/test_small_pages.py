@@ -189,6 +189,8 @@ async def test_consent_page_is_the_panel_with_the_app_in_a_strip(gw: Harness) ->
     assert "value='approve' class='primary'" in body and "value='deny' class='btn-plain'" in body
     assert body.count("class='primary'") == 2  # the guarded form and its noscript twin
     assert ".sio{" in page.text  # the shared small-page style
+    # no Sign in in the top bar (review F12): it would leave the connection half done
+    assert "class='btn signin'" not in page.text
 
 
 async def test_a_refused_app_request_keeps_its_code_for_the_log(

@@ -205,6 +205,10 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     out = structured(await call(h, token, "list_my_decks"))
     assert out["ok"] is False and out["error"] == "not_linked"
 
+    # /signed-out while still signed in says nothing false (review F12): it goes on to the page
+    still = await b.http.get("/signed-out", params={"next": "/decks"})
+    assert still.status_code == 303 and still.headers["location"] == "/decks"
+    assert (await b.http.get("/signed-out")).headers["location"] == "/"
     # Logout ends the session and tells the browser to drop cached pages and site storage.
     out_resp = await b.http.post("/logout", data={"csrf": await b.csrf()})
     assert out_resp.status_code == 303

@@ -369,9 +369,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def signed_out(request: Request) -> Response:
         """Says why this browser was signed out, when its (ended) session's cookie tells: the
         cookie outlives its session for that (SESSION_END_NOTICE) and goes here."""
+        nxt = _safe_next(request.query_params.get("next", "/"))
+        if current(request)[0]:
+            # still signed in (an old tab, a bookmark): saying "signed out" would be wrong
+            return RedirectResponse(nxt, status_code=303, headers={"Cache-Control": "no-store"})
         sid = request.cookies.get(session_cookie)
         reason = state.db.session_end_reason(sid) if sid else None
-        nxt = _safe_next(request.query_params.get("next", "/"))
         resp = small(
             "Signed out",
             smallpage.panel(

@@ -179,3 +179,33 @@ def test_the_deck_names_api_answers_the_held_list_only(server: Server) -> None:
     assert r.headers["cache-control"] == "no-store"
     js = c.get("/static/suggest.js").text
     assert '"/api/decks/names"' in js and 'head("Your decks")' in js
+
+
+@pytest.mark.parametrize("ua", ["", " MTGAssistant/0.7.46"])
+def test_the_brand_mark_is_a_whole_touch_target_on_a_phone(server: Server, ua: str) -> None:
+    """Review F12: on a phone the top bar's brand is its 25 px mark alone (the word is hidden), so
+    the link that goes Home was 25 px wide; on a touch screen it is at least 44 px each way."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_scan_browser import _chromium_path
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        try:
+            agent = "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36" + ua
+            ctx = browser.new_context(
+                viewport={"width": 375, "height": 800}, has_touch=True, is_mobile=True, user_agent=agent
+            )
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            page.goto(f"{server.base}/", wait_until="networkidle")
+            box = page.locator(".topbar .brand").bounding_box()
+            assert box and box["width"] >= 44 and box["height"] >= 44, box
+            wide = page.evaluate("() => document.documentElement.scrollWidth > innerWidth")
+            assert not wide
+        finally:
+            browser.close()
