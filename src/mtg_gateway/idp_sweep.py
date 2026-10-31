@@ -115,7 +115,7 @@ def plan(groups: dict[str, list[dict[str, Any]]], linked: list[str], known: list
 
 # What to do about a round that deleted nothing, by a phrase in its SweepRefused text, first match
 # wins (the admin overview shows it after the error). docs/IDP-AUTHENTIK.md section 12 has the same.
-SETUP = "docs/IDP-AUTHENTIK.md section 12"
+SETUP = "“Optional: removed-member clean-up” in docs/IDP-AUTHENTIK.md"  # section 12, by its heading
 NEXT_STEPS = (
     (
         "Authentik could not be reached",

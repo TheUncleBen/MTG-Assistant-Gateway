@@ -167,7 +167,8 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         # Each state says what to do next, in plain words.
         assert (
             "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
-            "longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12." in r.text
+            "longer have access. To turn it on, follow “Optional: removed-member clean-up” "
+            "in docs/IDP-AUTHENTIK.md." in r.text
         )
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"]["state"] == "off"
@@ -206,7 +207,8 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
         (
             {"state": "off", "cause": "no-token", "reason": "x"},
             "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer "
-            "have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.",
+            "have access. To turn it on, follow “Optional: removed-member clean-up” "
+            "in docs/IDP-AUTHENTIK.md.",
         ),
         (
             {
@@ -217,7 +219,7 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             },
             "Off: the Authentik API token can't be read (file is empty). Check the "
             "mtg_authentik_api_token Docker secret, then redeploy "
-            "(docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
+            "(“Optional: removed-member clean-up” in docs/IDP-AUTHENTIK.md, steps 6 and 7).",
         ),
         (
             {
@@ -232,7 +234,8 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             "MTG_AUTHENTIK_API_TOKEN_FILE: [Errno 2] No such file or directory: "
             "'/run/secrets/mtg_authentik_api_token'). The likely cause: the mtg_authentik_api_token "
             "secret isn't attached to the gateway, as with a stack file from before 0.7.37. Use the "
-            "current stack file, then redeploy (docs/IDP-AUTHENTIK.md section 12, steps 6 and 7).",
+            "current stack file, then redeploy (“Optional: removed-member clean-up” "
+            "in docs/IDP-AUTHENTIK.md, steps 6 and 7).",
         ),
         (
             {"state": "off", "cause": "no-group", "reason": "x"},

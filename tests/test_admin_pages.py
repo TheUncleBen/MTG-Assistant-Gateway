@@ -415,6 +415,7 @@ async def test_admin_activity_has_the_page_head_first_and_a_menu_on_every_row(gw
         "tool_call", sub="user-2", client_id="claude-app", detail={"tool": "search_decks", "ok": True}
     )
     gw.db.audit("approval_refused", sub="user-2", client_id="claude-app", detail={"proposal_id": "p1"})
+    gw.db.audit("client_registered", client_id="dcr-4f9a", detail={"redirect_hosts": []})  # no member
     b = await admin_browser(gw)
     try:
         text = await _get(b, "/admin/activity")
@@ -437,6 +438,49 @@ async def test_admin_activity_has_the_page_head_first_and_a_menu_on_every_row(gw
         summaries = "".join(r.split("<div class='more-body'", 1)[0] for r in rows.split("<div class='tr ev"))
         assert "search_decks" not in summaries and "Search public decks" in summaries  # the tool in words
         assert "search_decks" in rows  # its raw name only in the row's details
+    finally:
+        await b.aclose()
+
+
+async def test_admin_activity_names_members_in_plain_text_and_rows_in_words(gw: Harness) -> None:
+    """Review F5 and F11: the member column is the name in plain text (no bare blue link; the row's
+    menu and details keep "Show bob only"), an app's registration says where it signs in, and the
+    one-time "stored sign-ins tied to their owners" upgrade entry stays out of the list unless
+    asked for by name."""
+    gw.db.audit(
+        "tool_call", sub="user-2", client_id="claude-app", detail={"tool": "search_decks", "ok": True}
+    )
+    gw.db.audit(
+        "client_registered",
+        client_id="dcr-4f9a",
+        detail={"client_name": "ChatGPT", "redirect_uri_count": 1, "redirect_hosts": ["chatgpt.com"]},
+    )
+    gw.db.audit("archidekt_sessions_sealed", detail={"resealed": 0})
+    b = await admin_browser(gw)
+    try:
+        text = await _get(b, "/admin/activity")
+        rows = text.split("act-table'", 1)[1]
+        assert "<span class='c-who'>bob</span>" in rows
+        assert not re.search(r"<span class='c-who'><a ", rows)
+        assert "Show bob only</a>" in rows  # the filter stays, as a button in the row's details
+        reg = rows.split("An app registered", 1)[1].split("<div class='more-body'", 1)[0]
+        assert "Signs you back in at chatgpt.com" in reg and "No detail" not in reg
+        assert "Stored Archidekt sign-ins" not in rows and "resealed" not in rows
+        one = await _get(b, "/admin/activity?event=archidekt_sessions_sealed")
+        assert "Stored Archidekt sign-ins tied to their owners" in one.split("act-table'", 1)[1]
+    finally:
+        await b.aclose()
+
+
+async def test_the_overview_names_approval_modes_as_members_see_them(gw: Harness) -> None:
+    """Review F11: the overview names the approval modes as the Account and Settings pages do,
+    with no setting word in brackets, and points at the clean-up steps by their name."""
+    b = await admin_browser(gw)
+    try:
+        text = await _get(b, "/admin")
+        assert "Ask me every time" in text
+        for word in ("(manual)", "(semi)", "(auto)", "section 12"):
+            assert word not in text, word
     finally:
         await b.aclose()
 
