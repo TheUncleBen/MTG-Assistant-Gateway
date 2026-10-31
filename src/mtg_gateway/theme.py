@@ -238,8 +238,9 @@ main:focus{outline:none}
 /* (!important: a row's own img rule, such as .erow .thumb's inline-flex, must not show it again) */
 img.img-broken{display:none !important}
 .img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
-  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
+  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
+/* (the page's text colour, not the muted one: muted was 3.6:1 on the gradient's surface-3 end) */
 /* too small for the name (a row's thumbnail): the plain tile a row without a picture shows */
 .img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;

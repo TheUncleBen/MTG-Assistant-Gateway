@@ -3811,11 +3811,13 @@ ul.decklist .thumb::after{content:'';position:absolute;inset:0;
   background:linear-gradient(to bottom,rgba(0,0,0,0) 55%,var(--surface) 100%)}
 ul.decklist .deck a:hover .thumb{transform:scale(1.02)}
 ul.decklist .thumb .ini{display:none;position:absolute;inset:0;align-items:center;justify-content:center;
-  font-size:4rem;font-weight:900;color:rgba(255,255,255,.25)}
+  font-size:4rem;font-weight:900;color:rgba(255,255,255,.6)}
 ul.decklist .thumb.noart .ini{display:flex}
 ul.decklist .thumb.noart{background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
+/* the initial and the card count read at 4.5:1 or better over both ends of the gradient and over
+   a white picture (0.7.46 full review, D, F11: .25 and .55 were under it) */
 ul.decklist .thumb .views{position:absolute;right:.5rem;top:.5rem;font-size:12px;color:#fff;
-  background:rgba(0,0,0,.55);padding:.1rem .4rem;border-radius:3px;z-index:1}
+  background:rgba(0,0,0,.65);padding:.1rem .4rem;border-radius:3px;z-index:1}
 ul.decklist .thumb .cbar{position:absolute;left:0;right:0;bottom:0;height:15px;border-radius:0;z-index:1;
   gap:0}
 ul.decklist .thumb .cbar.empty{display:none}

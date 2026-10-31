@@ -213,6 +213,15 @@ html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32
 .cardlist .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
 @media (pointer:coarse){html[data-card-size=s] .cardgrid .wbtn{width:44px}}
 @media (max-width:899.98px){.cardlist .acts{grid-area:add}}
+/* two cards a row on a narrow phone at S and M (one at L), as the Binder's grid: at M a 168 px
+   tile fit once across a 375 px phone, each taller than the screen (0.7.46 full review, D, F9).
+   The Watch pill is icon only on those narrow tiles, as at S (its words stay for a screen reader) */
+@media (max-width:420px){
+  html:not([data-card-size=l]) .cardgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  html:not([data-card-size=l]) .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
+    overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  html:not([data-card-size=l]) .cardgrid .wbtn{padding:0;justify-content:center;width:32px}}
+@media (max-width:420px) and (pointer:coarse){html:not([data-card-size=l]) .cardgrid .wbtn{width:44px}}
 /* the card menu on results: theme.CARD_MENU_CSS (static/cardmenu.js) */
 .cardgrid .pic img{-webkit-touch-callout:none}
 """

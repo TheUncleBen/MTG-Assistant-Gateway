@@ -1768,8 +1768,12 @@ def value_widget(
         parts.append(f"{n:,} {'entry has' if n == 1 else 'entries have'} no price")
     if not value.get("complete"):
         parts.append(f"your first {value['entries']:,} entries")
-    # no entry priced: no value to show (as Scan's list value), never "$0.00"
-    big = (money(value["usd"]) or "$0.00") if int(value.get("entries") or 0) > n else "–"
+    # no entry priced: no value to show (as Scan's list value), never "$0.00"; read whole but no
+    # price came yet (Scryfall was not answering, or none of the printings is priced): say so
+    priced = int(value.get("entries") or 0) > n
+    big = (money(value["usd"]) or "$0.00") if priced else "–"
+    if n and not priced and not value.get("day"):
+        parts.append("Prices come with the daily price check.")
     return ui.widget("Value", "stats", big, detail=" · ".join(parts))
 
 
