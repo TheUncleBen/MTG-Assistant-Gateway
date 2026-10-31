@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import modes, tool_labels, ui
 from .pages import _csrf, browser_session
-from .theme import ASSISTANT_PAGES, NAV_LINKS, RAIL_EXTRA, binder_pages, icon, more_groups, render
+from .theme import ASSISTANT_PAGES, NAV_LINKS, binder_pages, icon, more_groups, rail_extra, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -359,14 +359,14 @@ def _plain(label: str) -> str:
 
 def nav_description(*, html_out: bool = True) -> str:
     """The navigation in one paragraph, built from the navigation itself (theme.NAV_LINKS,
-    ASSISTANT_PAGES, binder_pages, more_groups, RAIL_EXTRA), so the guide and the bars never
+    ASSISTANT_PAGES, binder_pages, more_groups, rail_extra), so the guide and the bars never
     disagree. ``html_out`` False gives the plain text docs carry."""
     b = _plain if html_out else (lambda t: t)
     places = [label for _h, label, _i in NAV_LINKS]
     assistant = [label for _h, label, _i in ASSISTANT_PAGES]
     binder = [label for _h, label, _i in binder_pages()]
     more = [label for _g, links in more_groups() for _h, label, _i in links]
-    rail = [label for _h, label, _i, _c in RAIL_EXTRA]
+    rail = [label for _h, label, _i in rail_extra()]
     text = (
         f"On a phone the tabs at the bottom are {', '.join(b(x) for x in places[:-1])} and "
         f"{b(places[-1])}, then {b('More')}. {b(places[2])} holds {', '.join(binder[:-1])} and {binder[-1]}, "
@@ -374,8 +374,9 @@ def nav_description(*, html_out: bool = True) -> str:
         f"way, and shows how many proposals are waiting. {b('More')} opens {', '.join(more[:-1])} and "
         f"{more[-1]}; the magnifier at the top opens the search box for cards and decks. On a wider touch "
         "screen, such as an unfolded foldable or a tablet, and in the Android app from 600 px, the same "
-        f"places are on a rail down the left edge, with {' and '.join(rail + ['Alerts'])}. A computer's "
-        "browser shows them in the top bar, with More as a drop-down and a search box beside them. Your "
+        f"places are on a rail down the left edge, then {', '.join(rail)} and {b('Alerts')}, with no More. "
+        "A computer's browser shows them all in the top bar when it is wide enough, else the four "
+        "places with More as a drop-down, and a search box beside them. Your "
         "picture at the top right opens the Account page: Account details, My lists, My activity, "
         "the look, the Guide, the assistant skill and the apps, and Sign out."
     )

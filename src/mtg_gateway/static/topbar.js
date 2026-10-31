@@ -67,18 +67,6 @@
     for (var i = 0; i < feet.length; i++) watch.observe(feet[i]);
   } else if (window.requestAnimationFrame) requestAnimationFrame(fit); else fit();
   window.addEventListener("resize", fit);
-  // On the rail, More's menu opens beside its tab (the stylesheet alone puts it at the rail's foot,
-  // where it is without this script): its top on the tab's, moved up as far as it must to fit.
-  var more = tabs && tabs.querySelector("details.more");
-  if (more) more.addEventListener("toggle", function () {
-    var sheet = more.querySelector(".menu.sheet");
-    if (!sheet) return;
-    sheet.style.top = sheet.style.bottom = "";
-    if (!more.open || getComputedStyle(tabs).flexDirection !== "column") return;
-    var top = more.getBoundingClientRect().top, h = sheet.getBoundingClientRect().height;
-    sheet.style.bottom = "auto";
-    sheet.style.top = Math.max(8, Math.min(top, window.innerHeight - h - 8)) + "px";
-  });
 })();
 /* A place's switch (theme.hub_switch) scrolls sideways on a narrow phone at large text: it opens
    scrolled to the page's own part. */
@@ -123,4 +111,41 @@
   });
   window.addEventListener("resize", function () { Array.prototype.forEach.call(navs, show); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { Array.prototype.forEach.call(navs, show); });
+})();
+
+/* Pull to refresh in the Android app (0.7.46, screen 9). The app's pull layer knows nothing of the
+   page's layout, so the page says, at each touch, whether that touch may start a pull: not while
+   the page is scrolled, not while a box, sheet, viewer or menu is open, not from a part of the page
+   that scrolls on its own (the deck editor's panes, a printings sheet, a strip of chips), and not
+   from a text field. The app keeps the answer only until the next touch. */
+(function () {
+  "use strict";
+  var app = window.MtgNative;
+  if (!app || typeof app.pullAllowed !== "function") return;
+  function scrollsItself(el) {
+    for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      var s = getComputedStyle(el), y = s.overflowY, x = s.overflowX;
+      if ((y === "auto" || y === "scroll") && el.scrollHeight > el.clientHeight) return true;
+      if ((x === "auto" || x === "scroll") && el.scrollWidth > el.clientWidth) return true;
+    }
+    return false;
+  }
+  function boxOpen() {
+    // every box, sheet, viewer and picker locks the page's scrolling while it is open
+    if (getComputedStyle(document.documentElement).overflow === "hidden") return true;
+    if (getComputedStyle(document.body).overflow === "hidden") return true;
+    return !!document.querySelector(
+      "dialog[open], .ctxmenu, details.dd[open], .msel-list:not([hidden]), .suggest-list:not([hidden])");
+  }
+  function mayPull(target) {
+    if (window.scrollY > 0 || boxOpen()) return false;
+    var el = target && target.nodeType === 1 ? target : null;
+    if (el && el.closest("input, textarea, select, [contenteditable=''], [contenteditable=true]")) return false;
+    return !scrollsItself(el);
+  }
+  window.mtgMayPull = mayPull; // the tests ask it directly
+  document.addEventListener("touchstart", function (e) {
+    var ok = mayPull(e.target);
+    try { app.pullAllowed(ok); } catch (err) { /* an older app without the hook */ }
+  }, { capture: true, passive: true });
 })();

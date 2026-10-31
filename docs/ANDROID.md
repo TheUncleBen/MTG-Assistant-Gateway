@@ -247,9 +247,17 @@ else your gateway serves. A few things are native:
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
   down the left edge with the same places (Home, Decks, Binder, Assistant),
-  Alerts and More, which opens beside the rail. The rules track the live
+  then Scan, Precons, Card models and Forum, and Alerts at its foot; the rail
+  has no More, since every page is on it. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
+- **Pull to refresh.** On a page that shows a list (Home, Decks, a deck page,
+  Binder, Proposals, History, Reports, Alerts, Precons, Card search, Forum),
+  pulling down from the very top shows an orange disc under the top bar;
+  letting go past the threshold reloads the page, as the browser's Reload
+  does, so the deck page reads Archidekt again. It is not offered on forms,
+  the deck editor or the scanner, and a touch that starts inside an open box,
+  a menu, or a part of the page that scrolls on its own never pulls the page.
 - **Back** goes back a page; on the first page it leaves the app.
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the

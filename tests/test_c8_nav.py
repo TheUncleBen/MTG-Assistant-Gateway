@@ -69,13 +69,18 @@ def test_the_rail_has_forum_before_alerts_and_the_phone_bar_keeps_it_in_more(ser
     page = _client(server).get("/decks").text
     bar = page.split("<nav class='tabbar' aria-label='Sections'>")[1].split("<details")[0]
     tabs = re.findall(r"<a href='([^']+)'(?: class='([^']*)')?", bar)
+    # the rail without More (0.7.46 redesign, screen 1): More's pages after the four, Forum last
+    # of them, then Alerts at the foot
     assert tabs == [
         ("/", ""),
         ("/decks", ""),
         ("/collection", ""),
         ("/proposals", ""),
+        ("/scan", "railonly"),
+        ("/precons", "railonly"),
+        ("/history/models", "railonly"),
         ("/forum", "railonly"),
-        ("/notifications", "railonly bell"),
+        ("/notifications", "railonly bell foot"),
     ]
     sheet = page.split("<div class='menu sheet'>")[1].split("</div></details>")[0]
     assert "<div class='head'>Community</div>" in sheet and "href='/forum'" in sheet
