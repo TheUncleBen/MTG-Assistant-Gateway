@@ -61,12 +61,15 @@ def test_the_four_places_and_more_at_every_width_and_large_text(server: Server) 
         pytest.skip("no Chromium available for Playwright")
     sid = server.sign_in()
     bar = ["Home", "Decks", "Binder", "Assistant", "More▾"]
+    # a bar wide enough lists the rail's pages instead of More ▾ (0.7.46 redesign, screen 1);
+    # 200% text brings More ▾ back
+    full = ["Home", "Decks", "Binder", "Assistant", "Scan", "Precons", "Card models", "Forum"]
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         for width, zoom, touch, want in [
-            (1440, False, False, bar),
-            (1280, False, False, bar),
-            (1000, False, False, bar),
+            (1440, False, False, full),
+            (1280, False, False, full),
+            (1000, False, False, full),
             (700, False, False, bar),
             (1280, True, False, bar),
             (390, False, True, []),
@@ -81,12 +84,15 @@ def test_the_four_places_and_more_at_every_width_and_large_text(server: Server) 
                 page.evaluate(ROOT_200)
             assert page.evaluate(SHOWN) == want, (width, zoom, touch)
             assert page.evaluate("document.documentElement.scrollWidth") <= width, (width, zoom)
-            if want:
+            if want is bar:
                 page.locator(".navmore > summary").click()
                 menu = page.locator(".navmore .menu")
                 box = menu.bounding_box()
                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= width
                 menu.locator("a", has_text="Forum").click()
+                page.wait_for_url("**/forum")
+            elif want:
+                page.locator(".topbar nav.site a.xtra", has_text="Forum").click()
                 page.wait_for_url("**/forum")
             ctx.close()
         browser.close()

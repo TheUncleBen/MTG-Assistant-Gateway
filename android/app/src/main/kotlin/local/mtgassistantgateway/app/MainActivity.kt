@@ -24,6 +24,7 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
@@ -51,6 +52,7 @@ import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.browser.customtabs.CustomTabsService
 import androidx.core.util.Consumer
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
@@ -104,6 +106,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var prefs: Prefs
     private lateinit var origin: String
     private lateinit var web: WebView
+    /** Pull to refresh over the page ([PullRefresh]): on for the list pages, off elsewhere. */
+    private lateinit var refresh: SwipeRefreshLayout
+    /**
+     * The page's word on the last touch: whether it may start a pull (static/topbar.js, through
+     * [NativeBridge.pullAllowed]). A page that is scrolled, has a box or menu open, or was touched
+     * on a part that scrolls on its own says no. Read on the UI thread while the pull layer decides.
+     */
+    @Volatile private var pagePull = true
     private lateinit var progress: ProgressBar
     private lateinit var errorBox: View
     private lateinit var errorText: TextView
@@ -188,6 +198,7 @@ class MainActivity : ComponentActivity() {
         root = findViewById(R.id.root)
         Insets.padSystemBars(root)
         web = findViewById(R.id.web)
+        setUpPullRefresh()
         progress = findViewById(R.id.progress)
         errorBox = findViewById(R.id.error_box)
         errorText = findViewById(R.id.error_text)
@@ -317,6 +328,31 @@ class MainActivity : ComponentActivity() {
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             download(url, userAgent, contentDisposition, mimeType)
         }
+    }
+
+    // -- pull to refresh ----------------------------------------------------
+
+    /**
+     * A pull from the top of a list page ([PullRefresh.offered], set per page in
+     * [Client.onPageStarted]) shows the orange disc under the page's own top bar and, let go past
+     * the threshold, reloads the page the way the browser's Reload does; the disc goes when the new
+     * page has drawn or the load failed ([Client]). The layer only pulls when the page is at its top
+     * and the page's own word on the touch ([pagePull]) allows it.
+     */
+    private fun setUpPullRefresh() {
+        refresh = findViewById(R.id.refresh)
+        refresh.setProgressBackgroundColorSchemeResource(R.color.accent)
+        refresh.setColorSchemeResources(R.color.on_accent)
+        val dp = resources.displayMetrics.density
+        refresh.setProgressViewOffset(false, (8 * dp).toInt(), (72 * dp).toInt())
+        refresh.setOnChildScrollUpCallback { _, _ -> !pagePull || web.canScrollVertically(-1) }
+        refresh.setOnRefreshListener { web.reload() }
+        refresh.isEnabled = false // per page, from onPageStarted
+    }
+
+    /** The disc goes: the page has drawn, or its load failed and the error box says so. */
+    private fun pullDone() {
+        if (refresh.isRefreshing) refresh.isRefreshing = false
     }
 
     // -- app updates --------------------------------------------------------
@@ -1076,6 +1112,9 @@ class MainActivity : ComponentActivity() {
             gatewayPage = GatewayUrl.isGateway(origin, url)
             pageGen++
             syncFab()
+            // pull to refresh on the list pages only; a new page starts with the touch allowed
+            pagePull = true
+            refresh.isEnabled = allowed && PullRefresh.offered(origin, url)
             if (!allowed) {
                 // A page from elsewhere that no navigation check saw (WebView does not ask about the
                 // redirect after a form post): it never stays behind the app's chrome. The browser
@@ -1099,6 +1138,7 @@ class MainActivity : ComponentActivity() {
 
         override fun onPageFinished(view: WebView, url: String) {
             progress.visibility = View.GONE
+            pullDone()
             if (url == BLANK) {
                 // Back must not reload the refused page under it; Retry takes the person home.
                 view.clearHistory()
@@ -1151,6 +1191,7 @@ class MainActivity : ComponentActivity() {
             // X-MTG-Offline, which is the offline message, not the gateway's.
             if (GatewayUrl.isGateway(origin, url) && errorResponse.statusCode in 502..504) {
                 progress.visibility = View.GONE
+                pullDone()
                 val offline = errorResponse.responseHeaders?.keys?.any { it.equals(OFFLINE_HEADER, ignoreCase = true) } == true
                 errorText.text = getString(if (offline) R.string.page_offline else R.string.gateway_down)
                 errorBox.visibility = View.VISIBLE
@@ -1171,6 +1212,7 @@ class MainActivity : ComponentActivity() {
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
             progress.visibility = View.GONE
+            pullDone()
             errorText.text = when (error.errorCode) {
                 WebViewClient.ERROR_HOST_LOOKUP, WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_TIMEOUT -> getString(R.string.page_offline)
                 else -> {
@@ -1191,11 +1233,13 @@ class MainActivity : ComponentActivity() {
             if (view !== web) return true // a pop-up's renderer: nothing of ours to rebuild
             val url = view.url?.takeIf { GatewayUrl.isGateway(origin, it) } ?: (origin + "/")
             if (camera != null) closeCamera()
+            pullDone()
             val params = view.layoutParams
-            val index = root.indexOfChild(view)
-            root.removeView(view)
+            val holder = view.parent as ViewGroup // the pull layer
+            val index = holder.indexOfChild(view)
+            holder.removeView(view)
             view.destroy()
-            web = WebView(this@MainActivity).also { root.addView(it, index, params) }
+            web = WebView(this@MainActivity).also { holder.addView(it, index, params) }
             configureWebView()
             web.loadUrl(url)
             Toast.makeText(this@MainActivity, getString(R.string.page_reloaded), Toast.LENGTH_LONG).show()
@@ -1290,6 +1334,16 @@ class MainActivity : ComponentActivity() {
         /** The Account page's This app list: the actions the floating button offers elsewhere. */
         @JavascriptInterface
         fun reload() = onGatewayPage { web.reload() }
+
+        /**
+         * The page's word on the touch that just began (static/topbar.js): whether it may start a
+         * pull to refresh. Kept as a flag the pull layer reads while the finger moves, so a touch
+         * inside a sheet, a menu or a pane that scrolls on its own never pulls the page.
+         */
+        @JavascriptInterface
+        fun pullAllowed(allowed: Boolean) {
+            if (gatewayPage) pagePull = allowed
+        }
 
         /** The deck page's Share: the phone's share sheet ([DeckShare]). */
         @JavascriptInterface
