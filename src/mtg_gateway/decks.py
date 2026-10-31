@@ -295,6 +295,10 @@ _acting_sub: ContextVar[str | None] = ContextVar("_acting_sub", default=None)
 # which the page draws from. A +1 then costs a read, the write and the verify.
 one_click: ContextVar[dict[str, Any] | None] = ContextVar("one_click", default=None)
 ONE_CLICK_REUSE = 2.0
+# Set around a member's own save that offers its Undo where it was made (My lists › a template ›
+# Add to a deck…): its snapshot is its own, not the deck page sitting's, so Undo puts back that
+# save only (review F6).
+own_snapshot: ContextVar[bool] = ContextVar("own_snapshot", default=False)
 # A member's deck list is kept in memory for this long after Archidekt answered (fresh), and
 # served for up to DECK_LIST_STALE seconds more while one refresh runs in the background.
 DECK_LIST_FRESH = 90.0
@@ -7050,6 +7054,7 @@ class DeckService:
             and row.get("created_by_client") == BROWSER_CLIENT
             and row.get("kind") in PAGE_SESSION_KINDS
             and not deletes_categories(row)
+            and not own_snapshot.get()
         ):
             # The member's own edits on the deck page, one after another (db.PAGE_SESSION_SECONDS):
             # they share the snapshot from before the first, while the deck is as the last left it.

@@ -25,12 +25,12 @@ from urllib.parse import parse_qs, quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, custom_pictures, modes, ui
+from . import account_lists, custom_pictures, modes, proposals_view, ui
 from .archidekt import no_retry
 from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, own_snapshot
 from .pages import (
     BROWSER_CLIENT_ID,
     TOO_BIG,
@@ -100,6 +100,7 @@ NOTICES = {
     "card_saved": "Custom card saved on Archidekt and read back.",
     "card_deleted": "Deleted “{name}” on Archidekt.",
     "card_added": "Added “{name}” to the deck on Archidekt and read back.",
+    "template_added": "Added the category “{name}” to the deck on Archidekt and read back.",
     "picture_saved": "Picture saved on Archidekt and read back.",
 }
 UNCONFIRMED = (
@@ -324,8 +325,8 @@ def templates_rows(items: list[dict[str, Any]]) -> str:
 def template_deck_box(csrf: str, st: dict[str, Any]) -> str:
     """Add to a deck… (parity release 2): the deck picked from the member's decks (read when the
     box opens, static/lists.js; the old address ?add= draws it with the list read here), then the
-    deck gets one category made from the template (account_lists.from_templates), proposed as a
-    categories change and sent to its review page."""
+    deck gets one category made from the template (account_lists.from_templates), applied at once
+    as the member's own press (add_template_to_deck)."""
     name = (st.get("values") or {}).get("name", "")
     rows = st.get("decks") or []
     picked = (st.get("values") or {}).get("deck", "")
@@ -341,8 +342,10 @@ def template_deck_box(csrf: str, st: dict[str, Any]) -> str:
         "<div class='field'><label for='tpl-deck-sel'>Deck</label><span class='sel'>"
         f"<select id='tpl-deck-sel' name='deck' required data-src='/api/decks/mine'>{opts}</select></span>"
         "</div></form>"
-        "<p class='muted small'>The deck gets a category with this name and these flags. The same as "
-        "Deck settings › Categories › Add template.</p>" + box_note(st.get("error", ""))
+        "<p class='muted small'>The deck gets a category with this name and these flags at once, "
+        "with Undo, as Deck settings › Categories › Add template does. A Premier or Not in deck "
+        "template opens on its review page first, as it changes which cards count.</p>"
+        + box_note(st.get("error", ""))
     )
     return ui.box(
         "tpl-deck",
@@ -1501,14 +1504,14 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             csp=LISTS_CSP,
             heading=False,
             extra_css=CSS,
-            extra_scripts=("printpick.js", *scripts),
+            extra_scripts=("printpick.js", "undo-box.js", *scripts),
             main_class="ui-wide",
         )
 
     def wants_json(request: Request) -> bool:
         return "application/json" in (request.headers.get("accept") or "")
 
-    def top_notice(q: Any) -> str:
+    def top_notice(q: Any, sub: str = "", csrf: str = "") -> str:
         ok = q.get("ok") or ""
         if ok == "unconfirmed":
             pid = q.get("p") or ""
@@ -1519,7 +1522,17 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             )
             return ui.notice(esc(UNCONFIRMED).replace("review page", link), "warn", html=True, role="status")
         text = notice_text(ok, (q.get("n") or "")[:200])
-        return ui.notice(text, "ok", role="status") if text else ""
+        return (ui.notice(text, "ok", role="status") + undo_of(q, sub, csrf)) if text else ""
+
+    def undo_of(q: Any, sub: str, csrf: str) -> str:
+        """The Undo of a template added to a deck (review F6), for the member's own applied add."""
+        pid = q.get("p") or ""
+        if q.get("ok") != "template_added" or not sub or not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", pid):
+            return ""
+        row = state.db.get_proposal(pid, sub)
+        if row is None or row.get("state") != "applied" or row.get("kind") != "categories":
+            return ""
+        return proposals_view.undo_box_form(csrf, row) if row.get("snapshot_id") else ""
 
     async def read_tab(sub: str, tab: Tab, *, page_no: int = 1, q: str = "") -> dict[str, Any]:
         got = await account_lists.read(
@@ -1725,7 +1738,9 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         box = box_from_query(tab, got, q)
         if box.get("box") in ("tpl-deck", "cc-add"):  # the deck list, for the box drawn open without scripts
             box["decks"] = await decks_or_none(sub)
-        body = page_body(tab, got, _csrf(s, sid) or "", box, search, sub, top_notice(q))
+        body = page_body(
+            tab, got, _csrf(s, sid) or "", box, search, sub, top_notice(q, sub, _csrf(s, sid) or "")
+        )
         return respond(body, sub, sid, tab=tab)
 
     async def decks_or_none(sub: str) -> list[dict[str, Any]]:
@@ -1738,7 +1753,11 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         request: Request, sub: str, sid: str | None, data: dict[str, str]
     ) -> Response:
         """Add to a deck… on a template's row: one category from the template, proposed for the
-        deck (decks.propose_categories) and sent to its review page, where the member applies it."""
+        deck (decks.propose_categories) and applied through this press, as Deck settings › Add
+        template… and a custom card's Add to deck… apply theirs (review F6): back on My lists
+        with a notice and Undo (a snapshot of its own, decks.own_snapshot). A template that asks
+        first there (modes.hand_edit_confirm: Premier, Not in deck) and writes being off send the
+        member to the review page instead, as the box says."""
         tab = BY_SLUG["templates"]
         name = (data.get("was_name") or "").strip()
         deck_id = (data.get("deck") or "").strip()
@@ -1750,6 +1769,15 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 decks, sub, [{"action": "create", "from_template": name}]
             )
             p = await decks.propose_categories(sub, deck_id, changes)
+            pid = p["proposal_id"]
+            decks.keep_no_backup(sub, pid)  # as the settings page's own category saves
+            out: dict[str, Any] = {}
+            if not modes.hand_edit_confirm("categories", p.get("rows")) and s.writes_enabled:
+                alone = own_snapshot.set(True)
+                try:
+                    out = await decks.apply(sub, pid, via="browser")
+                finally:
+                    own_snapshot.reset(alone)
         except DeckError as exc:
             if wants_json(request):
                 return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
@@ -1765,10 +1793,12 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             }
             body = page_body(tab, got, _csrf(s, sid) or "", box, "", sub)
             return respond(body, sub, sid, status=400)
-        where = f"/proposals/{p['proposal_id']}"
-        if wants_json(request):
-            return JSONResponse({"ok": True, "location": where})
-        return RedirectResponse(where, status_code=303)
+        if out.get("state") != "applied":  # asks first, writes off, or still going on Archidekt
+            where = f"/proposals/{pid}"
+            if wants_json(request):
+                return JSONResponse({"ok": True, "location": where})
+            return RedirectResponse(where, status_code=303)
+        return done(request, tab, {"proposal_id": pid, "result": out.get("result")}, "template_added", name)
 
     async def add_custom_to_deck(
         request: Request, sub: str, sid: str | None, data: dict[str, str]
@@ -2008,6 +2038,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             text = UNCONFIRMED
         else:
             params.update(ok=code, n=name[:200] if "{name}" in NOTICES.get(code, "") else "")
+            if code == "template_added":
+                params["p"] = out.get("proposal_id") or ""  # its Undo (top_notice)
             text = notice_text(code, name)
         if wants_json(request):
             return JSONResponse(

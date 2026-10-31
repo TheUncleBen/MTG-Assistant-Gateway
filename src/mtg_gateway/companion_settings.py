@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, deck_extras, modes, packages, prefs, recheck, ui
+from . import account_lists, deck_extras, modes, packages, prefs, proposals_view, recheck, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import (
     FORMAT_IDS,
@@ -1107,15 +1107,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             or not row.get("snapshot_id")
         ):
             return ""
-        return (
-            "<form method='post' action='/proposals/undo' class='undo' data-undo-box>"
-            f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid) or '')}'>"
-            "<input type='hidden' name='action' value='preview'>"
-            f"<input type='hidden' name='snapshot' value='{_esc(str(row['snapshot_id']))}'>"
-            f"<input type='hidden' name='applied' value='{_esc(pid)}'>"
-            f"<input type='hidden' name='after' value='{int(row.get('applied_at') or 0)}'>"
-            "<button class='btn'>Undo</button></form>"
-        )
+        return proposals_view.undo_box_form(_csrf(s, sid), row)
 
     def settings_response(body: str, sub: str, sid: str | None, status: int = 200) -> Response:
         return page(
