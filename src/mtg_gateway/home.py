@@ -178,8 +178,11 @@ def needs_you_html(
         )
     if not rows:
         return ""
+    # only the alerts row, which waits for bell.js's count: the whole section waits with it, so
+    # nothing to do shows no heading over nothing (bell.js shows the section with the row)
+    wait = " data-bell-section hidden" if linked and len(rows) == 1 else ""
     return (
-        "<section class='needs' aria-labelledby='needs-h'><h2 id='needs-h'>Needs you</h2>"
+        f"<section class='needs' aria-labelledby='needs-h'{wait}><h2 id='needs-h'>Needs you</h2>"
         f"<ul>{''.join(rows)}</ul></section>"
     )
 

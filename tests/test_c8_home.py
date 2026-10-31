@@ -63,6 +63,60 @@ def test_needs_you_shows_only_what_waits() -> None:
     assert "data-bell-row" not in home.needs_you_html(
         pending=0, board=[], forge_running=1, watch_hits=[], linked=False, now=NOW
     )
+    # with something else waiting, the section shows from the start
+    assert "<section class='needs' aria-labelledby='needs-h'>" in out
+
+
+def test_no_needs_you_heading_when_nothing_waits() -> None:
+    """Review F8: a linked member with nothing waiting got a "Needs you" heading over nothing (the
+    alerts row is hidden until bell.js counts above zero). With only that row, the whole section
+    starts hidden and bell.js shows it with the row."""
+    only_bell = home.needs_you_html(pending=0, board=[], forge_running=0, watch_hits=[], linked=True, now=NOW)
+    assert only_bell.startswith("<section class='needs' aria-labelledby='needs-h' data-bell-section hidden>")
+    assert "<li data-bell-row hidden>" in only_bell
+    js = (Path(home.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
+    assert "[data-bell-section]" in js
+
+
+def _answer(kind: str, body: str):
+    return lambda route: route.fulfill(content_type=kind, body=body)
+
+
+def test_the_needs_you_section_follows_the_alert_count_in_a_browser() -> None:
+    """The same in Chromium: no count, no heading; a count above zero shows the heading and the row."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway import theme
+
+    from .test_scan_browser import _chromium_path
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    section = home.needs_you_html(pending=0, board=[], forge_running=0, watch_hits=[], linked=True, now=NOW)
+    bell_js = (Path(home.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        try:
+            for n, shown in ((0, False), (3, True)):
+                page = browser.new_page()
+                body = (
+                    f"<!doctype html><style>{theme.CSS}</style><a data-bell href='/notifications'>"
+                    f"<span class='n' hidden></span></a><main class='home'>{section}</main>"
+                    f"<script>{bell_js}</script>"
+                )
+                page.route(
+                    "https://mtg.test/notifications/count",
+                    _answer("application/json", f'{{"ok": true, "unseen": {n}}}'),
+                )
+                page.route("https://mtg.test/", _answer("text/html", body))
+                page.goto("https://mtg.test/")
+                page.wait_for_timeout(300)
+                assert page.locator("#needs-h").is_visible() is shown, n
+                assert page.locator("[data-bell-row]").is_visible() is shown, n
+                page.close()
+        finally:
+            browser.close()
 
 
 def test_home_is_recent_decks_and_needs_you_not_the_navigation_again(server: Server) -> None:
