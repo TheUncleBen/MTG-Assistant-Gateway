@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
 from . import ui
 from .app_page import APK_NAME, RELEASES_URL, android_facts
@@ -36,7 +36,7 @@ from .plugin_page import (
     claude_connect_link,
     plugin_slug,
 )
-from .theme import icon, render
+from .theme import icon, in_app, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -607,7 +607,6 @@ def _android(ctx: Context) -> Section:
                         "The person who runs this gateway hasn't added the app file yet. In the meantime, "
                         f"open **{ctx.public_url}** in your phone's browser and add it to your home screen.",
                     ),
-                    link=Link("Back to decks", "/decks", primary=False),
                 ),
             ),
         )
@@ -830,7 +829,8 @@ def _picker(client: str | None, e) -> tuple[str, str]:
         cur = " aria-current='true'" if key == client else ""
         return f"<a href='/install?for={key}'{cur}>{e(label)}</a>"
 
-    items = [item(k, label) for k, label in SECTIONS.items()]
+    # inside the Android app, no Android app download (Account › This app checks for updates)
+    items = [item(k, label) for k, label in SECTIONS.items() if not (k == "android" and in_app())]
     n = len(CLIENTS)  # the assistants, a divider, then the skill and the app
     nav = (
         f"<nav class='pick' aria-label='Which app'><h2>{PICK}</h2>{''.join(items[:n])}"
@@ -880,6 +880,9 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
     @server.custom_route("/install", methods=["GET"], include_in_schema=False)
     async def install(request: Request) -> Response:
         client = pick_client(request.query_params.get("for"))
+        if client == "android" and in_app():
+            # the app's own updates are under Account › This app (Check for app updates)
+            return RedirectResponse("/account", status_code=303)
         sub, sid = browser_session(state, request)
         if sub is None and request.headers.get("sec-fetch-mode") != "navigate":
             # An AI agent handed this address ("install this plugin") gets the same public steps as
