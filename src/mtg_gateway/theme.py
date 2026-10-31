@@ -1359,8 +1359,11 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-app img.logo{width:16px;height:16px;flex:none;display:inline-block;object-fit:contain}
 .ui-app img.on-light{display:none}
 /* OpenAI's file keeps its clear space inside the picture (the blossom fills its middle half): drawn
-   at twice the size in the same 16 px slot, the mark itself is as big as Claude's (T-201) */
-.ui-app img.on-light,.ui-app img.on-dark{width:32px;height:32px;margin:-8px;pointer-events:none}
+   at twice the size in the same 16 px slot, the mark itself is as big as Claude's (T-201). The
+   pictures sit out of the flow over their slot, so the row is no taller than Claude's (review F7) */
+.ui-app .logo-box{position:relative;flex:none;width:16px;height:16px}
+.ui-app img.on-light,.ui-app img.on-dark{position:absolute;left:-8px;top:-8px;width:32px;height:32px;
+  pointer-events:none}
 @media (prefers-color-scheme: dark){ :root:not([data-theme=light]) .ui-app img.on-light{display:none}
   :root:not([data-theme=light]) .ui-app img.on-dark{display:inline-block} }
 @media (prefers-color-scheme: light){ :root:not([data-theme=dark]) .ui-app img.on-light{display:inline-block}
