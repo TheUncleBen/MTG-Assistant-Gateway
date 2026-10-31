@@ -668,6 +668,33 @@ def _amy_row() -> dict:
     }
 
 
+async def test_someone_followed_a_moment_ago_can_be_added_at_once(stack: Stack) -> None:
+    """Review F11: a collaborator add for someone the member doesn't follow was refused, and
+    after they followed them on Archidekt it was refused again for two minutes, from the list the
+    gateway remembered. A miss reads a short list once more; the settings page's "You don't follow
+    anyone" is read again too."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    ark.users["bob"] = {"password": "pw-bob", "id": 79, "decks": []}
+    ark.follows["alice"] = {79}  # someone else, so the remembered list is not empty
+    args = {"deck_id": "42", "action": "add", "username": "amy"}
+    p = structured(await account_call(h, token, "propose_collaborator", args))
+    assert p["ok"] is False and p["error"] == "not_found", p
+    ark.follows["alice"] = {78, 79}  # followed on archidekt.com just now
+    p = structured(await account_call(h, token, "propose_collaborator", args))
+    assert (
+        p["ok"] is True and p["rows"][0]["text"] == "Let amy edit your deck on Archidekt as a collaborator"
+    ), p
+    # a remembered list of nobody is read again as well
+    social = h.app.state.gateway.social
+    social._forget_following("user-1")
+    ark.follows["alice"] = set()
+    assert await social.following_names("user-1") == {}
+    ark.follows["alice"] = {78}
+    assert list((await social.following_names("user-1")).values()) == ["amy"]
+
+
 async def test_collaborators_are_listed_added_and_removed_on_the_members_press(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
