@@ -178,6 +178,38 @@ async def test_a_new_deck_shows_archidekts_default_maybeboard_and_sideboard(stac
         await b.aclose()
 
 
+async def test_a_category_save_costs_a_read_a_write_and_the_read_back(stack: Stack) -> None:
+    """Review F1: one category create from the panel sent 8 to 11 Archidekt calls (the deck read
+    five times, and the backup copy on the first save of a sitting). Now: the page's own read
+    (which also serves the proposal, the snapshot and the check before the write), the write, and
+    the read back (which also draws the panel). The gateway's snapshot is still taken; as on the
+    deck page, the member's own one-click save makes no backup copy on Archidekt."""
+    _give_categories(stack.ark)
+    assert stack.gw.decks.live.get("archidekt_backups")  # backups on, as shipped
+    b = await linked_browser(stack)
+    try:
+        _page, csrf = await _csrf(b)
+        for name in ("Removal", "Draw"):
+            stack.ark.calls.clear()
+            r = await b.http.post(
+                POST,
+                data={"csrf": csrf, "action": "create", "category": name, "json": "1"},
+                headers={"Accept": "application/json"},
+            )
+            assert r.status_code == 200 and r.json()["ok"] is True, r.text
+            assert name in r.json()["html"]  # the panel drawn from the read back
+            assert [m + " " + p for m, p in stack.ark.calls] == [
+                "GET /api/decks/42/",
+                "POST /api/decks/createCategory/",
+                "GET /api/decks/42/",
+            ], stack.ark.calls
+        history = (await b.http.get("/api/v1/decks/42/history")).json()
+        assert [p["state"] for p in history["proposals"]] == ["applied", "applied"]
+        assert history["snapshots"]  # the gateway's snapshot from before the first save
+    finally:
+        await b.aclose()
+
+
 async def test_create_a_category_from_the_panel(stack: Stack) -> None:
     _give_categories(stack.ark)
     b = await linked_browser(stack)

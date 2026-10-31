@@ -897,6 +897,13 @@ def retry_after_seconds(value: str | None, *, now: float | None = None) -> float
 # assistant's queue. Only the order changes; every request still keeps the gap and the
 # per-minute cap.
 page_turn: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_page_turn", default=False)
+# Set around a member's own one-click save on their page (the deck page's quick edits, a Deck
+# settings category save), with page_turn: its reads and its write start from the page burst
+# (PAGE_BURST) and may use the share of the per-minute cap kept for pages, as a page's reads do,
+# instead of waiting the full gap before each. A save is three calls (read, write, read back), so
+# the bucket that refills one start per gap still holds the rate over time, and the per-minute
+# cap and the member's own budget still count every call.
+hand_save: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_hand_save", default=False)
 
 
 class TurnLock:
@@ -1624,9 +1631,10 @@ class ArchidektClient(AccountRequests):
         upload: tuple[bytes, str] | None = None,
     ) -> Any:
         # A member's page reading is the one kind of call the pacer keeps a slot and a share of the
-        # per-minute cap for; a write, or anything an apply sends, is background work.
+        # per-minute cap for, and the calls of the member's own one-click save (hand_save); any
+        # other write, or anything an apply sends, is background work.
         on_page = page_turn.get()
-        reading = on_page and method == "GET" and patient.get() is None
+        reading = on_page and ((method == "GET" and patient.get() is None) or hand_save.get())
         async with self.pacer.turn(first=on_page, page=reading):
             self.stats["requests"] += 1
             try:
