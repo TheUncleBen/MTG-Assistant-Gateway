@@ -254,11 +254,68 @@ def test_exactly_these_colours_keep_only_decks_of_those_colours(server: Server) 
         assert page.locator("ul.decklist li.deck").count() == 0
         assert "No public decks match" in page.locator("main").inner_text()
         assert page.locator("#s-count").inner_text() == "0 decks"
-        # a pick from the drop-down applies at once (the form sends itself)
+        # a pick from the drop-down applies at once, in place as Card search does (0.7.46 full
+        # review, D, F10): the results and the count change, the address follows, nothing reloads
         page.goto(f"{server.base}/search?format=3&c=U", wait_until="networkidle")
-        with page.expect_navigation():
-            page.locator("select[name=cm]").select_option("exact")
+        assert page.locator("ul.decklist li.deck").count() == 3
+        page.evaluate("() => { window.__same = true; }")
+        page.locator("select[name=cm]").select_option("exact")
+        page.wait_for_function("() => location.search.includes('cm=exact')", timeout=5000)
+        page.wait_for_function("() => !document.querySelector('ul.decklist li.deck')", timeout=5000)
+        assert (
+            page.evaluate("() => window.__same")
+            and "No public decks match" in page.locator("main").inner_text()
+        )
+        assert page.locator("#s-count").inner_text() == "0 decks"
         assert parse_qs(urlparse(page.url).query)["cm"] == ["exact"]
+        # Back brings the earlier results and filters, still in place; a shared link shows the same
+        page.go_back()
+        page.wait_for_function("() => !location.search.includes('cm=exact')", timeout=5000)
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 3", timeout=5000
+        )
+        assert (
+            page.evaluate("() => window.__same") and page.locator("select[name=cm]").input_value() != "exact"
+        )
+        assert page.locator("#s-count").inner_text() == "3 decks"
+        assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_deck_search_filters_apply_in_place_and_keep_the_address(server: Server, width: int) -> None:
+    """Deck search (F10): a format pick, a colour pick in the sheet, the sort and the view each
+    redraw the results in place with the address in step; Load more still works on the new
+    results; a failed fetch falls back to the page itself."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, exe)
+        page.goto(f"{server.base}/search?name=deck", wait_until="networkidle")
+        page.wait_for_selector("ul.decklist li.deck")
+        page.evaluate("() => { window.__same = true; }")
+        if width < 600:
+            page.locator(".sp-open").click()
+            page.locator("#sp-filters.open").wait_for(timeout=3000)
+        page.locator("select[name=format]").select_option("3")
+        page.wait_for_function("() => location.search.includes('format=3')", timeout=5000)
+        page.wait_for_function("() => !document.querySelector('#s-results[aria-busy]')", timeout=5000)
+        assert page.evaluate("() => window.__same")
+        assert server.ark.search_params[-1].get("deckFormat") in (3, "3")
+        if width < 600:
+            page.locator(".sp-show").click()
+            page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
+        else:
+            page.locator("#s-order").select_option("-createdAt")
+            page.wait_for_function("() => location.search.includes('order=-createdAt')", timeout=5000)
+            page.wait_for_function("() => !document.querySelector('#s-results[aria-busy]')", timeout=5000)
+            assert page.evaluate("() => window.__same")
+        # the tiles that came in place carry their ⋮ and the count follows
+        assert page.locator("ul.decklist li.deck .kebab").count() >= 1
+        assert page.locator("#s-count").inner_text().endswith("decks")
+        assert page.evaluate(PANEL)["sw"] <= width
         assert errors == [], errors
         browser.close()
 

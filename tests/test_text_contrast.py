@@ -137,3 +137,46 @@ def test_card_default_text_colours_pass_on_every_card_background() -> None:
             ):
                 for bg in bgs:
                     assert ratio(d[fg], d[bg]) >= 4.5, (fg, d[fg], bg, d[bg])
+
+
+def _rule(css: str, selector: str) -> str:
+    """The declarations of the first rule whose selector list holds ``selector`` exactly."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    for m in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
+        if selector in [s.strip() for s in m.group(1).split(",")]:
+            return m.group(2)
+    raise AssertionError(f"no rule for {selector}")
+
+
+def test_words_on_pictures_and_picture_stand_ins_pass() -> None:
+    """The 0.7.46 full review (D, F11) flagged four texts: the "Image unavailable" stand-in for a
+    picture (text on its gradient), a deck tile's "101 cards" badge and a Binder tile's "NM" badge
+    (white on a translucent black over the picture, which can be white) and a no-art deck tile's
+    initial (translucent white over its dark gradient). Each measured against its real backdrop,
+    worst case, in light and dark."""
+    from mtg_gateway import collection
+
+    light, dark = _theme_tokens()
+    # the stand-in: its text token against both ends of its gradient (surface-3 to surface-2)
+    rule = _rule(theme.CSS, ".img-fallback")
+    token = re.search(r"color:var\(--([a-z-]+)\)", rule).group(1)
+    assert "var(--surface-3)" in rule and "var(--surface-2)" in rule
+    for name, t in (("light", light), ("dark", dark)):
+        for bg in ("surface-3", "surface-2"):
+            assert ratio(t[token], t[bg]) >= 4.5, (name, "img-fallback", token, bg, ratio(t[token], t[bg]))
+    # white on a translucent black over the brightest picture there is
+    for css, selector, what in (
+        (deckpage.DECK_CSS, "ul.decklist .thumb .views", "101 cards"),
+        (collection.COLLECTION_CSS, "ul.collgrid .pic .fin", "NM"),
+    ):
+        rule = _rule(css, selector)
+        alpha = float(re.search(r"background:rgba\(0,0,0,(\.\d+)\)", rule).group(1))
+        assert "color:#fff" in rule
+        assert ratio("#ffffff", _blend("#000000", alpha, "#ffffff")) >= 4.5, (what, alpha)
+    # the initial on a no-art tile: translucent white over both ends of the tile's gradient
+    rule = _rule(deckpage.DECK_CSS, "ul.decklist .thumb .ini")
+    alpha = float(re.search(r"color:rgba\(255,255,255,(\.\d+)\)", rule).group(1))
+    ends = re.findall(r"#[0-9a-f]{6}", _rule(deckpage.DECK_CSS, "ul.decklist .thumb.noart"))
+    assert len(ends) == 2
+    for end in ends:
+        assert ratio(_blend("#ffffff", alpha, end), end) >= 4.5, ("initial", alpha, end)

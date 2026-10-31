@@ -690,3 +690,33 @@ def test_a_binder_with_no_priced_entry_shows_no_value_not_zero() -> None:
         now=0.0,
     )
     assert "$0.00" in one  # a priced entry worth nothing is still a value
+
+
+def test_a_binder_read_whole_with_no_prices_yet_says_so(tmp_path) -> None:
+    """0.7.46 full review (D, F12): a Binder read whole before any price came (Scryfall down, or
+    printings it has no price for) shows no value and says the prices are still to come, never
+    "$0.00" and never a bare dash."""
+    from mtg_gateway.binder_prices import BinderStore
+    from mtg_gateway.collection import value_widget
+    from mtg_gateway.db import Database
+
+    db = Database(tmp_path / "t.sqlite3")
+    db.upsert_user(SUB, email="a@example.test", name="A", preferred_username="a", groups=[])
+    store = BinderStore(db)
+    rows = [
+        {"id": 1, "scryfall_id": "s-1", "name": "Sol Ring", "finish": "nonfoil", "quantity": 2},
+        {"id": 2, "scryfall_id": "s-2", "name": "Opt", "finish": "foil", "quantity": 1},
+        {"id": 3, "scryfall_id": "", "name": "Unknown", "finish": "nonfoil", "quantity": 1},
+    ]
+    store.replace(SUB, rows, complete=True, now=1_700_000_000)
+    value = store.value(SUB)
+    assert value and value["entries"] == 3 and value["unpriced"] == 3 and value["day"] is None
+    out = value_widget(value, reading=False, now=1_700_000_000.0)
+    assert "$0.00" not in out and "<span class='big'>–</span>" in out
+    assert "3 entries have no price" in out
+    assert "Prices come with the daily price check." in out
+    # one priced entry: its value, the others counted as without a price, no hint
+    with db.tx() as c:
+        c.execute("INSERT INTO price_points (scryfall_id, day, usd) VALUES ('s-1', '2023-11-14', 1.5)")
+    out = value_widget(store.value(SUB), reading=False, now=1_700_000_000.0)
+    assert "$3.00" in out and "2 entries have no price" in out and "daily price check" not in out
