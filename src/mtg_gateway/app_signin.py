@@ -20,7 +20,10 @@ and autofill work, and the browser hands the result back to the app.
    follows that link once by itself only after a sign-in made during the leg (see below): any app
    can open ``/login?app_challenge=...`` with a plain link, and a browser still signed in at the
    provider passes it straight through, so otherwise the page waits for the member's tap under its
-   warning.
+   warning. Chrome opens an ``intent:`` link only from a navigation a person started, which that
+   script is not, so when the app says it opened a Custom Tab (``app_return=intent``) the callback
+   itself redirects to the same link after such a sign-in, with the page as the link's fallback.
+   That gives no app more than the scheme leg below already gives under the same proof.
 4. The app posts the code with its verifier to ``/login/app`` from its WebView; only then is the
    browser session created, with its cookie set in the WebView.
 
@@ -73,6 +76,8 @@ SCHEME = "mtgassistant-signin"
 SCRIPT = "/static/app-signin.js"
 RETURN_PATH = "/login/app-return"  # where the Auth Tab hands back; BrowserSignIn.RETURN_PATH in the app
 SCHEME_RETURN = "scheme"  # app_return=scheme: back on SCHEME (BrowserSignIn.SCHEME_RETURN in the app)
+# app_return=intent: the app opened a Custom Tab, not an Auth Tab (BrowserSignIn.INTENT_RETURN)
+INTENT_RETURN = "intent"
 CODE_TTL = 120
 FRESH_SKEW = 5  # seconds of clock difference allowed between the gateway and the identity provider
 # Where a scheme leg ends when the ID token can't show a sign-in made during the leg: no code, so
@@ -94,6 +99,7 @@ class _Pending:
     expires: float
     fresh: bool = False  # signed in during the leg: the return page opens the app by itself
     grant: str | None = None  # where the sign-in's provider grant waits for the app's session
+    shown: bool = False  # the browser drew the return page (recorded once, in the member's activity)
 
 
 class AppSignins:
@@ -132,6 +138,18 @@ class AppSignins:
             pending = self._codes.get(self._key(code))
         return pending is not None and pending.expires > self._clock() and pending.fresh
 
+    def first_view(self, code: str) -> _Pending | None:
+        """The pending sign-in for ``code`` the first time the browser draws its return page, else
+        None (a reload, or no such code). Looking does not use the code up."""
+        if not CODE.fullmatch(code or ""):
+            return None
+        with self._lock:
+            pending = self._codes.get(self._key(code))
+            if pending is None or pending.shown or pending.expires <= self._clock():
+                return None
+            pending.shown = True
+            return pending
+
     def redeem(self, code: str, verifier: str) -> _Pending | None:
         """The pending sign-in for ``code`` if ``verifier`` matches its challenge, else None. A code
         is gone after its first try, right or wrong, so it can't be guessed at."""
@@ -164,9 +182,11 @@ def signed_in_since(auth_time: object, started: object, skew: int = FRESH_SKEW) 
     return auth_time >= start - skew
 
 
-def intent_url(code: str, package: str) -> str:
-    """An ``intent:`` link that opens only the app with ``package``; ``code`` is URL-safe base64."""
-    return f"intent://signin?code={code}#Intent;scheme={SCHEME};package={package};end"
+def intent_url(code: str, package: str, fallback: str | None = None) -> str:
+    """An ``intent:`` link that opens only the app with ``package``; ``code`` is URL-safe base64.
+    ``fallback``: the https address a browser opens instead when it can't open the app."""
+    extra = f"S.browser_fallback_url={quote(fallback, safe='')};" if fallback else ""
+    return f"intent://signin?code={code}#Intent;scheme={SCHEME};package={package};{extra}end"
 
 
 def handoff_body(next_path: str, fresh: bool) -> str:

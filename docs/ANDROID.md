@@ -282,8 +282,11 @@ else your gateway serves. A few things are native:
   Samsung Internet the sign-in opens in Chrome if the phone came with it.
   With neither, the sign-in opens in your default browser as before, and its
   last page has a button: tap **Open the MTG Assistant Gateway app** there.
-  That page opens the app by itself only right after you signed in during
-  that sign-in (after **Sign out**, say). If the browser is already signed in to the sign-in service,
+  Right after you signed in during that sign-in (after **Sign out**, say),
+  the gateway sends the browser straight to the app instead, so you don't see
+  that page where the browser allows it. Account › This app › **Sign-in**
+  says which of the two your phone does, and My activity lists each time the
+  page was shown. If the browser is already signed in to the sign-in service,
   you may not be asked anything. Only when the browser can't confirm the app
   belongs to the gateway does the app try once more in a way where the sign-in
   service asks you to sign in (your passkey, say). The browser itself stays
@@ -757,7 +760,14 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   the page follows the link once by itself (where the browser allows) only
   when that sign-in asked for a new sign-in (`prompt=login`, `max_age=0`,
   after a sign-out on the device) and the ID token shows one made during it;
-  otherwise it waits for your tap under its warning. The link
+  otherwise it waits for your tap under its warning. Chrome opens an
+  `intent:` link only from a navigation a person started, which the page's
+  script is not, so when the app says it opened a Custom Tab
+  (`app_return=intent`) and such a sign-in was made, `/auth/callback`
+  redirects to the same link itself (the end of the navigation your Sign-in
+  press started), with the page as its `browser_fallback_url`. That gives no
+  app anything the scheme leg above doesn't already give under the same
+  proof. The link
   relies on the browser honouring the package in `intent:` links, which
   Chrome does (other browsers not checked). The one-time code is in these
   addresses, so a reverse proxy that logs full addresses (many do by default)

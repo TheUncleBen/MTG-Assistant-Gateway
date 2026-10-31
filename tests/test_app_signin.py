@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 import pytest
@@ -467,3 +467,133 @@ def test_the_app_can_see_the_browsers_that_offer_auth_tabs() -> None:
         for f in filters
         for d in f.iter("data")
     )
+
+
+# -- 0.7.46 review F1/F2: the Custom Tab leg comes back by itself after a fresh sign-in ---------
+async def custom_tab_leg(
+    h: Harness, browser: httpx.AsyncClient, challenge: str, *, fresh: bool
+) -> httpx.Response:
+    """The app's Custom Tab leg (no Auth Tab browser on the phone): it says so with
+    app_return=intent; the answer is the callback's redirect."""
+    params = {"next": "/decks", "app_challenge": challenge, "app_return": "intent"}
+    if fresh:
+        params["fresh"] = "1"
+    r = await browser.get("/login", params=params)
+    assert r.status_code == 302, r.text
+    cb = urlparse(await h.idp_leg(r))
+    return await browser.get(f"{cb.path}?{cb.query}")
+
+
+async def test_fresh_custom_tab_leg_redirects_to_intent_with_fallback(harness: Harness, idp: FakeIdP) -> None:
+    """In a Custom Tab, Chrome opens an intent: link only from a navigation the person started, so
+    the return page's script can't open the app by itself (review F1). After a sign-in made during
+    the leg (the same proof that let the page open the app by itself, security review A-02), the
+    callback itself redirects to the intent: link: the redirect ends the navigation the person's
+    own Sign-in press started. It still names only the app's package, and its fallback is the
+    page with the button, for a browser that won't open the app."""
+    verifier, challenge = pair()
+    async with client(harness) as browser, client(harness) as app:
+        back = await custom_tab_leg(harness, browser, challenge, fresh=True)
+        assert back.status_code == 303, back.text
+        assert back.headers["cache-control"] == "no-store"
+        assert back.headers["referrer-policy"] == "no-referrer"
+        assert "mtg_session=" not in back.headers.get("set-cookie", "")
+        to = back.headers["location"]
+        m = re.fullmatch(
+            r"intent://signin\?code=([A-Za-z0-9_-]{43})#Intent;scheme=mtgassistant-signin;"
+            r"package=local\.mtgassistantgateway\.app;S\.browser_fallback_url=([^;]+);end",
+            to,
+        )
+        assert m, to
+        code = m.group(1)
+        assert m.group(2) == quote(f"{GATEWAY}{RETURN_PATH}?code={code}", safe="")
+        # the fallback is today's page, which still tries the app once by itself (a fresh code)
+        page = await browser.get(f"{RETURN_PATH}?code={code}")
+        assert _opens_by_itself(page) and code_from(page) == code
+        done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
+        assert done.status_code == 303 and "mtg_session=" in done.headers["set-cookie"]
+
+    # no sign-in during the leg (a browser still signed in at the provider): the page and its tap
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        back = await custom_tab_leg(harness, browser, challenge, fresh=False)
+        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+        page = await browser.get(back.headers["location"])
+        assert not _opens_by_itself(page)
+
+    # a fresh sign-in asked for, but the provider passed the browser through (an old auth_time)
+    idp.honours_prompt_login = False
+    idp.auth_time = int(time.time()) - 600
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        back = await custom_tab_leg(harness, browser, challenge, fresh=True)
+        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+
+
+async def test_the_auth_tab_leg_still_returns_on_the_gateways_address(harness: Harness) -> None:
+    """The https Auth Tab closes on RETURN_PATH: a fresh leg that did not say it runs in a Custom
+    Tab must still end there, or the Auth Tab would never see its address."""
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        r = await browser.get("/login", params={"next": "/", "app_challenge": challenge, "fresh": "1"})
+        cb = urlparse(await harness.idp_leg(r))
+        back = await browser.get(f"{cb.path}?{cb.query}")
+        assert back.status_code == 303 and urlparse(back.headers["location"]).path == RETURN_PATH
+        # the Custom Tab leg asks for no new sign-in of its own (only fresh does)
+        r = await browser.get(
+            "/login", params={"next": "/", "app_challenge": challenge, "app_return": "intent"}
+        )
+        assert r.status_code == 302 and "prompt" not in parse_qs(urlparse(r.headers["location"]).query)
+        # an unknown return is still refused, before the provider
+        r = await browser.get(
+            "/login", params={"next": "/", "app_challenge": challenge, "app_return": "Intent"}
+        )
+        assert r.status_code == 400
+
+
+def test_the_app_names_its_custom_tab_and_says_when_android_lost_the_sign_in() -> None:
+    """The app's side (Kotlin, compiled and unit-tested in CI, not here): its Custom Tab leg asks for
+    the intent return, and when Android closed the app while the browser was open (the sign-in it
+    ran is gone, review F3) a failed Auth Tab check says so instead of doing nothing."""
+    android = Path(__file__).resolve().parent.parent / "android/app/src/main"
+    main = (android / "kotlin/local/mtgassistantgateway/app/MainActivity.kt").read_text()
+    assert "BrowserSignIn.startUrl(origin, next, challenge, fresh, customTab = true)" in main
+    branch = main.split(
+        "AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT ->", 1
+    )[1]
+    branch = branch.split("else -> Unit", 1)[0]
+    assert "if (started == null)" in branch and "R.string.sign_in_interrupted" in branch
+    strings = (android / "res/values/strings.xml").read_text()
+    m = re.search(r'<string name="sign_in_interrupted">([^<]+)</string>', strings)
+    assert m and m.group(1) == (
+        "Android closed the app while you were signing in, so that sign-in was lost. Sign in again."
+    )
+
+
+async def test_return_page_render_is_recorded(harness: Harness) -> None:
+    """When the browser shows the page with the button (no Auth Tab, or the browser refused to open
+    the app), the member's activity says so once, so the owner can tell which way the phone
+    signs in (review F2). An Auth Tab never loads the page, so a sign-in without this row came
+    back by itself."""
+    db = harness.app.state.gateway.db
+
+    def shown() -> list[tuple[str, str]]:
+        with db._lock:
+            return db._conn.execute(
+                "SELECT sub, detail_json FROM audit_log WHERE event = 'app_signin_tap_page'"
+            ).fetchall()
+
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)
+        code = code_from(page)
+        await browser.get(f"{RETURN_PATH}?code={code}")  # a reload: still one row
+        rows = shown()
+        assert len(rows) == 1, rows
+        sub, detail = rows[0]
+        assert sub and json.loads(detail) == {"reason": "no new sign-in"}
+        assert (await browser.get(f"{RETURN_PATH}?code={'a' * 43}")).status_code == 200
+        assert len(shown()) == 1  # an unknown code names no member
+    from mtg_gateway.companion import event_label
+
+    assert event_label("app_signin_tap_page") == "App sign-in showed the “Open the app” page in the browser"

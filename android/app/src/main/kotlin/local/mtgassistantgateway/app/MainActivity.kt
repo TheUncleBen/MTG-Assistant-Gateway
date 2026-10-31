@@ -612,7 +612,7 @@ class MainActivity : ComponentActivity() {
                 Log.i(TAG, "sign-in: Auth Tab could not open in $browser; a Custom Tab instead")
             }
         }
-        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh))
+        val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, customTab = true))
         try {
             CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
             Log.i(TAG, "sign-in: Custom Tab opened; it ends on the page that opens the app")
@@ -642,10 +642,17 @@ class MainActivity : ComponentActivity() {
             }
             // The browser could not verify this app for the gateway's address: the same sign-in on
             // this app's scheme; and should that report it too, in a Custom Tab.
-            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT -> started?.let {
-                val nextLeg = if (it.leg == SignInLeg.HTTPS_AUTH_TAB) SignInLeg.SCHEME_AUTH_TAB else SignInLeg.CUSTOM_TAB
-                Log.i(TAG, "sign-in: Auth Tab could not verify the app; trying $nextLeg")
-                startBrowserSignIn(it.next, it.fresh, nextLeg)
+            AuthTabIntent.RESULT_VERIFICATION_FAILED, AuthTabIntent.RESULT_VERIFICATION_TIMED_OUT -> {
+                if (started == null) {
+                    // Android closed the app while the browser was open, so which sign-in this was is
+                    // gone: say so rather than leave the person signed out with no word.
+                    Log.i(TAG, "sign-in: Auth Tab could not verify the app, and the sign-in it ran is gone")
+                    Toast.makeText(this, getString(R.string.sign_in_interrupted), Toast.LENGTH_LONG).show()
+                } else {
+                    val nextLeg = if (started.leg == SignInLeg.HTTPS_AUTH_TAB) SignInLeg.SCHEME_AUTH_TAB else SignInLeg.CUSTOM_TAB
+                    Log.i(TAG, "sign-in: Auth Tab could not verify the app; trying $nextLeg")
+                    startBrowserSignIn(started.next, started.fresh, nextLeg)
+                }
             }
             else -> Unit // closed by the person: nothing to finish
         }
@@ -1321,6 +1328,10 @@ class MainActivity : ComponentActivity() {
         /** The gateway's /login page in the app: sign in through the phone's browser ([BrowserSignIn]). */
         @JavascriptInterface
         fun signInWithBrowser(next: String?, fresh: Boolean) = onGatewayPage { startBrowserSignIn(next, fresh) }
+
+        /** The Account page's Sign-in line: "auto" or "tap" ([BrowserSignIn.returnStatus]). */
+        @JavascriptInterface
+        fun signInReturn(): String = if (gatewayPage) BrowserSignIn.returnStatus(authTabBrowser()) else ""
 
         /** The /scan page reporting what it did with a photo (see [ScanGlue]). */
         @JavascriptInterface

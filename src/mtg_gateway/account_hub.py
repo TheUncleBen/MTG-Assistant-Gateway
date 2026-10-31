@@ -14,18 +14,33 @@ from .theme import app_version, current_layout, current_path, current_theme, dis
 DETAILS = "/account/details"
 
 # What a row is: (label, icon, href or "" for a fold, the value shown at its end, the fold's body,
-# the app method a button row calls).
-Row = tuple[str, str, str, str, str, str]
+# the app method a button row calls, and for a line the app fills in: (its answer, the words) pairs).
+Row = tuple[str, str, str, str, str, str, tuple[tuple[str, str], ...]]
 
 
-def _row(label: str, ic: str, href: str = "", value: str = "", fold: str = "", native: str = "") -> Row:
-    return (label, ic, href, value, fold, native)
+def _row(
+    label: str,
+    ic: str,
+    href: str = "",
+    value: str = "",
+    fold: str = "",
+    native: str = "",
+    states: tuple[tuple[str, str], ...] = (),
+) -> Row:
+    return (label, ic, href, value, fold, native, states)
 
 
 def _row_html(r: Row) -> str:
-    label, ic, href, value, fold, native = r
+    label, ic, href, value, fold, native, states = r
     val = f"<span class='val'>{html.escape(value)}</span>" if value else ""
     inner = f"{icon(ic)}<span class='lbl'>{html.escape(label)}</span>{val}"
+    if states:
+        # a line the app's ``native`` method words (feedback.js): hidden until the app answers, so
+        # an app without that method shows no empty row
+        vals = "".join(
+            f"<span class='val' data-native-show='{k}'>{html.escape(words)}</span>" for k, words in states
+        )
+        return f"<div class='yrow' data-native-state='{native}' data-native-row hidden>{inner}{vals}</div>"
     if fold:
         return (
             f"<details class='yrow'><summary>{inner}<span class='ch'>{icon('chev')}</span></summary>"
@@ -53,6 +68,8 @@ def _choices(action: str, name: str, csrf: str, options: tuple[tuple[str, str], 
 
 
 THEMES = (("light", "Light"), ("dark", "Dark"), ("system", "System"))
+# The app's answer to signInReturn (BrowserSignIn.returnStatus), in words
+SIGN_IN_RETURN = (("auto", "Comes back by itself"), ("tap", "May need a tap in the browser"))
 LAYOUTS = (("auto", "Fit the screen"), ("desktop", "Desktop layout"))
 
 
@@ -106,6 +123,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
                     _row("Reload", "refresh", native="reload"),
                     _row("Open a copied link", "link", native="openCopiedLink"),
                     _row("Change gateway", "swap", native="changeGateway"),
+                    # whether the browser sign-in comes back by itself (an Auth Tab browser on the
+                    # phone) or may wait for a tap on the gateway's page (a Custom Tab)
+                    _row("Sign-in", "login", native="signInReturn", states=SIGN_IN_RETURN),
                     # the installed version, from the app's user agent
                     _row("Check for app updates", "download", value=app_version(), native="checkForUpdates"),
                 ],
@@ -196,6 +216,8 @@ HUB_CSS = """
 .ygrp .yrow .lbl{flex:1 1 auto}
 .ygrp .yrow .val{flex:0 1 auto;text-align:right;color:var(--text-muted);font-size:.92rem}
 .ygrp .ch svg.i{width:16px;height:16px;color:var(--text-muted)}
+.ygrp div.yrow{cursor:default}
+.ygrp .yrow[hidden]{display:none}
 .ygrp details.yrow{display:block;padding:0;min-height:0}
 .ygrp details.yrow > summary{display:flex;align-items:center;gap:.8rem;min-height:50px;padding:0 1rem;
   list-style:none;cursor:pointer}
