@@ -388,45 +388,94 @@ def test_a_blurred_photo_says_it_is_blurred(server, exe, tmp_path: Path, blur: f
 
 
 # ------------------------------------------------------------- F5: big photos decode small
+def _tree_rss_mb(marker: str) -> int:
+    """Resident memory of the browser started with ``marker`` on its command line and of every
+    process under it (renderer, GPU, utilities), in MB. Linux only (reads /proc)."""
+    procs: dict[int, tuple[int, int, bool]] = {}
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            cmd = (d / "cmdline").read_bytes()
+            status = (d / "status").read_text().splitlines()
+        except OSError:
+            continue
+        field = {
+            line.split(":")[0]: line.split()[1] for line in status if line.startswith(("PPid:", "VmRSS:"))
+        }
+        procs[int(d.name)] = (int(field.get("PPid", 0)), int(field.get("VmRSS", 0)), marker.encode() in cmd)
+    mine = {pid for pid, v in procs.items() if v[2]}
+    grew = True
+    while grew:
+        more = {pid for pid, v in procs.items() if pid not in mine and v[0] in mine}
+        mine |= more
+        grew = bool(more)
+    return sum(procs[pid][1] for pid in mine) // 1024
+
+
 @needs_ocr
-def test_a_big_photo_is_decoded_straight_to_the_working_size(server, exe, tmp_path: Path) -> None:  # noqa: F811
-    """F5: a 48 MP photo (6000 x 8000) goes to createImageBitmap with a resize to the working copy
-    (long side 2400), so the browser never needs the full-size bitmap; it is read as before. A
-    browser without the resize options falls back to the picture as it was drawn before. A photo
-    stored sideways with EXIF orientation 6 comes out upright either way."""
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="measures memory through /proc")
+def test_a_big_photo_never_needs_its_full_size_in_memory(server, exe, tmp_path: Path) -> None:  # noqa: F811
+    """F5: a 100 MP phone photo (8,160 x 12,240; about 400 MB decoded whole) chosen with Photo is
+    decoded straight to the working copy (long side 2400) and read: the browser's memory, all its
+    processes together, rises by well under the full-size bitmap while it is read. (createImageBitmap
+    with resize options, the first idea for this, decodes it whole and failed this test.) A photo
+    stored sideways with EXIF orientation 6 comes out upright."""
+    import threading
+
+    from PIL import Image
     from playwright.sync_api import sync_playwright
 
-    big = table_photo(tmp_path / "big.jpg", size=(6000, 8000))
-    turned = table_photo(tmp_path / "turned.jpg", size=(6000, 8000), exif6=True)
+    W, H = 8160, 12240
+    card = printed_card("Sol Ring", ("0021 U", "FRC • EN"), 2520)
+    card = card.resize((round(W * 0.55), round(W * 0.55 * 88 / 63)), Image.Resampling.BILINEAR)
+    im = Image.new("RGB", (W, H), (176, 146, 108))
+    im.paste(card, ((W - card.width) // 2, (H - card.height) // 2))
+    del card
+    big = tmp_path / "big.jpg"
+    im.save(big, "JPEG", quality=85)
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    turned = tmp_path / "turned.jpg"
+    im.transpose(Image.Transpose.ROTATE_90).save(turned, "JPEG", quality=85, exif=exif)
+    del im
+    profile = tmp_path / "profile-f5"
+    marker = f"--user-data-dir={profile}"
     sid = server.sign_in()
     with sync_playwright() as p:
-        browser, page, errors = _open(p, exe, server, sid)
-        page.evaluate(
-            """() => { window.__bitmaps = []; const real = window.createImageBitmap;
-                 window.createImageBitmap = (src, ...rest) => {
-                   const o = rest.length === 1 ? rest[0] : rest[4];
-                   window.__bitmaps.push({blob: src instanceof Blob, opts: o || null});
-                   return window.__noResize ? Promise.reject(new TypeError('no resize'))
-                     : real.call(window, src, ...rest); }; }"""
+        ctx = p.chromium.launch_persistent_context(
+            str(profile), executable_path=exe, args=["--no-sandbox"], viewport={"width": 412, "height": 915}
         )
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/scan")
+        page.wait_for_function("() => window.__scan && window.__scan.flattenCard && window.ScanGeometry")
+        page.evaluate("() => window.__scan.ensureOcr()")
+        page.wait_for_function("() => window.__scan.state.ocrState === 'ready'", timeout=120_000)
+        page.evaluate("() => { window.__reads = 0; }")
         for path in (big, turned):
-            out = photo_scan(page, path)
+            before = _tree_rss_mb(marker)
+            assert before > 0
+            peak, stop = [before], threading.Event()
+
+            def watch(stop: threading.Event = stop, peak: list[int] = peak) -> None:
+                while not stop.is_set():
+                    peak[0] = max(peak[0], _tree_rss_mb(marker))
+                    stop.wait(0.02)
+
+            th = threading.Thread(target=watch)
+            th.start()
+            try:
+                out = photo_scan(page, path)
+            finally:
+                stop.set()
+                th.join()
+            print(f"{path.name}: {before} MB before, {peak[0]} MB at most; {out}")
             assert out["card"] == ["Sol Ring", "frc", "21"], (path.name, out)
-            pic = page.evaluate("() => window.__scan.state.lastPicture")
-            assert pic == {"w": 1800, "h": 2400}, (path.name, pic)
-        calls = page.evaluate("() => window.__bitmaps")
-        assert [c["blob"] for c in calls] == [True, True], calls
-        for c in calls:
-            o = c["opts"]
-            assert (o["resizeWidth"], o["resizeHeight"]) == (1800, 2400), o
-            assert o["resizeQuality"] == "high" and o["imageOrientation"] == "from-image", o
-        # Without the resize options the picture is drawn as before (a copy of the file: the same
-        # file chosen twice in a row is no new choice).
-        again = tmp_path / "again.jpg"
-        again.write_bytes(turned.read_bytes())
-        page.evaluate("() => { window.__noResize = true; }")
-        out = photo_scan(page, again)
-        assert out["card"] == ["Sol Ring", "frc", "21"], out
-        assert page.evaluate("() => window.__scan.state.lastPicture") == {"w": 1800, "h": 2400}
+            assert page.evaluate("() => window.__scan.state.lastPicture") == {"w": 1600, "h": 2400}
+            # Whole, the photo is about 400 MB as a bitmap; read straight to 1600 x 2400 it is 15 MB.
+            assert peak[0] - before < 250, (path.name, before, peak[0])
         assert errors == []
-        browser.close()
+        ctx.close()
