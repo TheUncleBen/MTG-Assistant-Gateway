@@ -3815,7 +3815,10 @@ ul.decklist .thumb .ini{display:none;position:absolute;inset:0;align-items:cente
 ul.decklist .thumb.noart .ini{display:flex}
 ul.decklist .thumb.noart{background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
 /* the initial and the card count read at 4.5:1 or better over both ends of the gradient and over
-   a white picture (0.7.46 full review, D, F11: .25 and .55 were under it) */
+   a white picture (0.7.46 full review, D, F11: .25 and .55 were under it). On a no-art tile the
+   fade to the page starts lower, under the initial: in the light theme it fades to near white,
+   and the initial's lower half sat on it */
+ul.decklist .thumb.noart::after{background:linear-gradient(to bottom,rgba(0,0,0,0) 72%,var(--surface) 100%)}
 ul.decklist .thumb .views{position:absolute;right:.5rem;top:.5rem;font-size:12px;color:#fff;
   background:rgba(0,0,0,.65);padding:.1rem .4rem;border-radius:3px;z-index:1}
 ul.decklist .thumb .cbar{position:absolute;left:0;right:0;bottom:0;height:15px;border-radius:0;z-index:1;

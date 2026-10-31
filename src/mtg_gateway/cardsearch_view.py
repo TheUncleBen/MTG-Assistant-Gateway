@@ -110,8 +110,10 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cardgrid .pic:focus-visible,.cardlist .pic:focus-visible,.cardlist .nmb:focus-visible{outline:3px solid
   var(--orange);outline-offset:2px}
 .cardgrid .pic img,.cardlist .pic img{width:100%;height:100%;display:block;object-fit:cover}
+/* the page's text colour: the stand-in for a picture that failed (theme.CSS .img-fallback) sits on
+   a gradient whose surface-3 end gave the muted colour 3.6:1, and this rule outweighs that one */
 .cardgrid .pic .ph,.cardlist .pic .ph{position:absolute;inset:0;display:flex;align-items:center;
-  justify-content:center;padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);
+  justify-content:center;padding:.5rem;text-align:center;font-weight:700;color:var(--text);
   overflow-wrap:anywhere;font-size:.85rem}
 .cardgrid .meta{display:flex;flex-direction:column;gap:.15rem;min-width:0}
 /* the name and its ⋮ share the first row, the mana cost the second (a row every tile keeps, so

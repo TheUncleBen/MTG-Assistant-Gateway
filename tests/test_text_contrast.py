@@ -157,13 +157,17 @@ def test_words_on_pictures_and_picture_stand_ins_pass() -> None:
     from mtg_gateway import collection
 
     light, dark = _theme_tokens()
-    # the stand-in: its text token against both ends of its gradient (surface-3 to surface-2)
-    rule = _rule(theme.CSS, ".img-fallback")
-    token = re.search(r"color:var\(--([a-z-]+)\)", rule).group(1)
-    assert "var(--surface-3)" in rule and "var(--surface-2)" in rule
-    for name, t in (("light", light), ("dark", dark)):
-        for bg in ("surface-3", "surface-2"):
-            assert ratio(t[token], t[bg]) >= 4.5, (name, "img-fallback", token, bg, ratio(t[token], t[bg]))
+    # the stand-in: its text token against both ends of its gradient (surface-3 to surface-2);
+    # on Card search the tile's own .ph rule outweighs the shared one, so both are measured
+    from mtg_gateway import cardsearch_view
+
+    shared = _rule(theme.CSS, ".img-fallback")
+    assert "var(--surface-3)" in shared and "var(--surface-2)" in shared
+    for rule in (shared, _rule(cardsearch_view.CARDS_CSS, ".cardgrid .pic .ph")):
+        token = re.search(r"color:var\(--([a-z-]+)\)", rule).group(1)
+        for name, t in (("light", light), ("dark", dark)):
+            for bg in ("surface-3", "surface-2"):
+                assert ratio(t[token], t[bg]) >= 4.5, (name, "stand-in", token, bg, ratio(t[token], t[bg]))
     # white on a translucent black over the brightest picture there is
     for css, selector, what in (
         (deckpage.DECK_CSS, "ul.decklist .thumb .views", "101 cards"),
