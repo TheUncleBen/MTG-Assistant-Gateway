@@ -4648,6 +4648,8 @@ class DeckService:
         put first that says where the changes come from (a card package's, propose_package).
         ``read``: the deck as this request already read it (its waiting changes re-checked)."""
         deck_id = _clean_deck_id(deck_id)
+        parse_changes(raw_changes, row_flags=row_flags)  # refused as written before any lookup
+        raw_changes = await self._own_tag_colours(sub, raw_changes, ("set_label",))
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
         deck = read if read is not None and read.id == deck_id else await self.get_own_deck(sub, deck_id)
@@ -6995,6 +6997,47 @@ class DeckService:
                 out[row["id"]] = status
         return out
 
+    async def _own_tag_colours(self, sub: str, raw: Any, actions: tuple[str, ...] | None) -> Any:
+        """The changes with the member's own color for each color tag given by its name alone
+        (review F13): "Cut" is looked up in the member's color tags on Archidekt (My lists, any
+        case) and gets that tag's name and color, as Archidekt's own tag picker gives it. A name
+        they have no tag for, or a list that can't be read, keeps the default grey; a color given
+        with the name is kept as given. ``actions``: the change actions that carry a tag (None:
+        any change with a ``label``). One read of the list, only when a name came without a color."""
+        from . import account_lists
+
+        if not isinstance(raw, list):
+            return raw
+
+        def bare(item: Any) -> bool:
+            if not isinstance(item, dict) or (actions is not None and item.get("action") not in actions):
+                return False
+            label = item.get("label")
+            return (
+                isinstance(label, str)
+                and bool(clean_text(label))
+                and "," not in label
+                and not item.get("color")
+                and not item.get("colour")
+            )
+
+        if not any(bare(item) for item in raw):
+            return raw
+        try:
+            tags = (await account_lists.read(self, sub, "color_tags"))["items"]
+        except DeckError:
+            return raw  # the tag goes on grey, as before
+        own = {
+            str(t["name"]).casefold(): t
+            for t in tags
+            if t.get("name") and LABEL_COLOUR.fullmatch(str(t.get("color") or ""))
+        }
+        out = []
+        for item in raw:
+            tag = own.get(clean_text(item["label"]).casefold()) if bare(item) else None
+            out.append({**item, "label": tag["name"], "color": tag["color"]} if tag else item)
+        return out
+
     def _take_snapshot(self, sub: str, row: dict[str, Any], deck: Deck) -> str:
         shared = batch.shared_snapshots.get()
         if shared is not None and str(deck.id) in shared:
@@ -8118,7 +8161,8 @@ class DeckService:
         kind = row.get("kind") or "edit"
         note: dict[str, Any] = {}
         if kind == "edit":
-            changes = parse_changes(raw_changes)
+            parse_changes(raw_changes)  # refused as written before any lookup
+            changes = parse_changes(await self._own_tag_colours(sub, raw_changes, ("set_label",)))
             _before, _after, rows = plan_rows(deck, changes)
             rows, names_note = await self._check_names(sub, deck, changes, rows)
             rows, legality, after = await self._judge_rules(deck, changes, rows)
@@ -9366,7 +9410,8 @@ class DeckService:
         Restore cover a deck's cards and details, not its custom card rows (a gateway choice): so
         this kind has no Undo."""
         deck_id = _clean_deck_id(deck_id)
-        wanted = parse_custom_card_changes(changes)
+        parse_custom_card_changes(changes)  # refused as written before any lookup
+        wanted = parse_custom_card_changes(await self._own_tag_colours(sub, changes, None))
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
         if (kept := one_click.get()) is not None:  # for the apply that follows at once
