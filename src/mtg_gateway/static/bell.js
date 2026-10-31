@@ -28,6 +28,9 @@
     if (num) num.textContent = String(n);
     if (word) word.textContent = n === 1 ? "alert" : "alerts";
     if (row) row.hidden = !(n > 0);
+    // with nothing else waiting, the section itself waited for the count
+    var section = document.querySelector("[data-bell-section]");
+    if (section) section.hidden = !(n > 0);
   }
   function getJSON(href) {
     if (window.MtgFetch) return window.MtgFetch.json(href);
