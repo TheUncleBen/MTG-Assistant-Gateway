@@ -700,6 +700,10 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
 .notice.info{border-left-color:var(--blue);background:var(--blue-tint);color:var(--text)}
 .notice a{color:inherit;text-decoration:underline}
+/* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
+.notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
+  gap:.35rem .6rem}
+.notice.testing a.ui-cap{text-decoration:none}
 .notice.strong{display:grid;grid-template-columns:auto 1fr;gap:.25rem .75rem;align-items:start;
   border-left:6px solid var(--orange);background:var(--orange-tint);padding:.9rem 1rem;font-size:1.02rem;
   font-weight:400;color:var(--text)}
