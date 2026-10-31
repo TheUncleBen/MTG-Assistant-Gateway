@@ -98,7 +98,7 @@
         setCount(0);
         keep(0);
       }
-      var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Email and alerts.");
+      var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Account details › Email and alerts on Archidekt.");
       wrap.appendChild(note);
       box.setBody(wrap);
       box.focusFirst();
