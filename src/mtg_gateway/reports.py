@@ -61,6 +61,7 @@ from .report_view import (
     parse_goldfish,
     speed_numbers,
 )
+from .theme import plural
 
 logger = logging.getLogger(__name__)
 
@@ -2409,6 +2410,43 @@ class ReportService:
             for rid, name, section in self._member_runs(sub)
         ]
 
+    def running(self, sub: str, deck_id: str | None = None) -> list[dict[str, Any]]:
+        """The member's reports still going (the research service asked for the solo test and
+        validation, Forge games or a Forge solo test queued or playing), newest first, for the
+        running marks on Home and the deck page: the report, its deck and one line on how far it
+        is ("Forge has played 2 of 5 games")."""
+        finals = tuple(FINAL_STATES)
+        marks = ",".join("?" * len(finals))
+        sql = (
+            "SELECT id, deck_id, deck_name, research_state, forge_state, forge_solo_state, forge_json "
+            "FROM reports WHERE owner_sub = ? AND (research_state = 'running' "
+            f"OR (forge_state IS NOT NULL AND forge_state NOT IN ({marks})) "
+            f"OR (forge_solo_state IS NOT NULL AND forge_solo_state NOT IN ({marks})))"
+        )
+        args: list[Any] = [sub, *finals, *finals]
+        if deck_id:
+            sql += " AND deck_id = ?"
+            args.append(str(deck_id))
+        sql += " ORDER BY taken_at DESC, rowid DESC LIMIT 20"
+        with self.db._lock:
+            rows = self.db._conn.execute(sql, args).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                section = json.loads(d["forge_json"]) if d.get("forge_json") else {}
+            except ValueError:
+                section = {}
+            out.append(
+                {
+                    "report_id": str(d["id"]),
+                    "deck_id": str(d["deck_id"] or ""),
+                    "deck_name": str(d["deck_name"] or ""),
+                    "progress": _progress_line(d, section if isinstance(section, dict) else {}),
+                }
+            )
+        return out
+
     def for_proposal(self, sub: str, proposal_id: str) -> list[dict[str, Any]]:
         """The member's reports of one proposal's resulting deck (run_proposal), newest first: id,
         when, overall status and the paired test against the deck as it was (``paired``, None when
@@ -3276,6 +3314,23 @@ def _waiting(section: dict[str, Any]) -> bool:
 def _done_games(section: dict[str, Any]) -> int:
     games = (section.get("result") or {}).get("games")
     return games if isinstance(games, int) else 0
+
+
+def _progress_line(row: dict[str, Any], forge: dict[str, Any]) -> str:
+    """How far a running report is, in one short line for a running mark: the research service's
+    part first (it comes back first), then Forge's games, then its solo test."""
+    if row.get("research_state") == "running":
+        return "the solo test is running on the research service"
+    state = row.get("forge_state")
+    if state is not None and state not in FINAL_STATES:
+        if state == "queued":
+            return "waiting for Forge"
+        asked = forge.get("games_requested")
+        done = _done_games(forge)
+        if isinstance(asked, int) and asked > 0:
+            return f"Forge has played {done} of {plural(asked, 'game')}"
+        return "Forge is playing its games"
+    return "the Forge solo test is running"
 
 
 def _games_left(section: dict[str, Any]) -> int:

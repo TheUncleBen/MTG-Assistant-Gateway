@@ -26,7 +26,7 @@ from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError, is_busy
 from .pages import _csrf, browser_session, login_redirect
-from .theme import icon, render
+from .theme import SPINNER, icon, render
 from .watchlist_page import due_line
 
 if TYPE_CHECKING:
@@ -112,9 +112,34 @@ def need_row(ic: str, text: str, detail: str, button: str, *, accent: bool = Fal
     """One Needs you row: an icon, what waits (``text`` with its count in bold, ``detail`` the
     small line under it) and the button that goes there."""
     det = f"<small>{_esc(detail)}</small>" if detail else ""
+    # ``ic`` "spinner": the theme's one animated ring, for a run still going, never a still icon
+    mark = SPINNER if ic == "spinner" else icon(ic)
     return (
-        f"<li{' class=accent' if accent else ''}{attrs}>{icon(ic)}<span class='what'>{text}{det}</span>"
+        f"<li{' class=accent' if accent else ''}{attrs}>{mark}<span class='what'>{text}{det}</span>"
         f"<span class='go'>{button}</span></li>"
+    )
+
+
+def running_row(running: list[dict[str, Any]]) -> str:
+    """The tests still going (reports.running): one test names its deck and how far it is, with
+    the spinner, and opens that report; several open the Reports list."""
+    if not running:
+        return ""
+    if len(running) == 1:
+        one = running[0]
+        return need_row(
+            "spinner",
+            f"<b>1 test running</b>: {_esc(one['progress'])}.",
+            _esc(one["deck_name"] or "Unnamed deck"),
+            ui.button_link("Open the report", f"/history/reports/{one['report_id']}"),
+        )
+    return need_row(
+        "spinner",
+        f"<b>{len(running)} tests running</b>: "
+        + _esc("; ".join(f"{r['deck_name'] or 'Unnamed deck'}, {r['progress']}" for r in running[:3]))
+        + ".",
+        "",
+        ui.button_link("Open reports", "/reports"),
     )
 
 
@@ -122,14 +147,15 @@ def needs_you_html(
     *,
     pending: int,
     board: list[dict[str, Any]],
-    forge_running: int,
+    running: list[dict[str, Any]],
     watch_hits: list[str],
     linked: bool,
     now: float,
 ) -> str:
     """Needs you: the rows for what waits, each only when there is something; nothing at all
     when nothing waits and no alert can come (the bell's row needs a linked account). With a
-    link, Review it (them) is the page's orange button; without one, Link Archidekt keeps it."""
+    link, Review it (them) is the page's orange button; without one, Link Archidekt keeps it.
+    ``running``: the tests still going (reports.running)."""
     rows = []
     if pending:
         rows.append(
@@ -145,15 +171,8 @@ def needs_you_html(
                 accent=True,
             )
         )
-    if forge_running:
-        rows.append(
-            need_row(
-                "report",
-                f"<b>{_n(forge_running, 'Forge test', 'Forge tests')}</b> running",
-                "The report lands under Reports when the games are done.",
-                ui.button_link("Open reports", "/reports"),
-            )
-        )
+    if running:
+        rows.append(running_row(running))
     if linked:
         # Archidekt's unseen alerts: the count comes after the page has loaded (static/bell.js
         # fills data-bell-n and shows the row when the count is above zero)
@@ -340,7 +359,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
             + "</div>"
         )
-        forge_running = len(state.reports.forge_queue(sub)) if state.reports is not None else 0
+        running = state.reports.running(sub) if state.reports is not None else []
         hits: list[str] = []
         if state.prices is not None:
             data = state.prices.overview(sub, history=False)
@@ -348,7 +367,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         needs = needs_you_html(
             pending=pending,
             board=board,
-            forge_running=forge_running,
+            running=running,
             watch_hits=hits,
             linked=bool(link["linked"]),
             now=now,
