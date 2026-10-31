@@ -67,6 +67,7 @@ OK_SECTIONS = {
     "categories": "categories",
     "category_created": "categories",
     "category_deleted": "categories",
+    "package_differs": "package",
     "categories_unused": "categories",
     "cover": "cover",
     "cover_auto": "cover",
@@ -568,7 +569,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         picked = (
             v.get("formats", "")
             if v
-            else "\n".join(FORMAT_NAMES[i] for i in block.get("intendedFormats") or [] if i in FORMAT_NAMES)
+            else "\n".join(FORMAT_NAMES[i] for i in packages.format_ids(block.get("intendedFormats")))
         )
         return (
             f"<form method='post' action='/decks/{did}/package-settings#package' class='ui-card ds-pkg' "
