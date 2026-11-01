@@ -1884,7 +1884,9 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 /* a delete box (ui.box cls="dangerbox"): the title in red, its final button the solid red one */
 .mtgbox.dangerbox .bh h2{color:var(--danger-text)}
 .mtgbox > h2{margin:0 0 .75rem;font-size:1.25rem}
-.mtgbox .body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain}
+/* overflow-wrap: a long name with no spaces (a category's, a deck's) wraps inside the box instead of
+   running off its right edge, as the title above it already does */
+.mtgbox .body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere}
 .mtgbox .body > .stack{display:flex;flex-direction:column;gap:.75rem}
 .mtgbox .body p{margin:0}
 .mtgbox .body p + p{margin-top:.5rem}
