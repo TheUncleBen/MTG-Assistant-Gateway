@@ -1278,11 +1278,16 @@ class MainActivity : ComponentActivity() {
             // The reverse proxy answers 502/503/504 with its own bare page while the gateway is down or
             // restarting: show the app's own message with Retry instead. The pages' service worker
             // answers a navigation with its own 503 when the phone is offline, marked with
-            // X-MTG-Offline, which is the offline message, not the gateway's.
+            // X-MTG-Offline, which is the offline message, not the gateway's. The gateway's own
+            // busy answer (its database locked for a moment) is a 503 marked X-MTG-Busy, with its
+            // own page whose Try again posts the person's form again: that page stays, as the
+            // box's Retry would reload and lose what was posted.
             if (GatewayUrl.isGateway(origin, url) && errorResponse.statusCode in 502..504) {
                 progress.visibility = View.GONE
                 pullDone()
-                val offline = errorResponse.responseHeaders?.keys?.any { it.equals(OFFLINE_HEADER, ignoreCase = true) } == true
+                val names = errorResponse.responseHeaders?.keys
+                if (names?.any { it.equals(BUSY_HEADER, ignoreCase = true) } == true) return
+                val offline = names?.any { it.equals(OFFLINE_HEADER, ignoreCase = true) } == true
                 errorText.text = getString(if (offline) R.string.page_offline else R.string.gateway_down)
                 errorBox.visibility = View.VISIBLE
                 return
@@ -1482,6 +1487,7 @@ class MainActivity : ComponentActivity() {
         private const val BLANK = "about:blank"
         /** Header the gateway's service worker puts on its own offline page (companion.py, /sw.js). */
         private const val OFFLINE_HEADER = "X-MTG-Offline"
+        private const val BUSY_HEADER = "X-MTG-Busy"
         private const val REQ_FILE = 2
         private const val REQ_PERM_WEB_CAMERA = 3
         private const val REQ_PERM_NATIVE_CAMERA = 4

@@ -116,3 +116,15 @@ def test_the_app_and_the_website_ask_for_one_distance() -> None:
     assert said and set(said) == {"15 cm (6 in)"}, said
     docs = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "docs").glob("*.md"))
     assert set(re.findall(r"\d+ cm \(\d+ in\)", docs)) == {"15 cm (6 in)"}
+
+
+def test_the_gateways_busy_page_shows_in_the_app_not_the_apps_own_error_box() -> None:
+    """A request that waited the limit for the database is answered 503 with the gateway's own
+    page (dbwait.py), whose Try again posts the member's form again. The app's error box for a
+    reverse proxy's 502/503/504 would cover it, and its Retry reloads (a posted form would be
+    lost), so the X-MTG-Busy header keeps the box away, as X-MTG-Offline does for the offline page."""
+    main = _kt("MainActivity.kt")
+    assert 'private const val BUSY_HEADER = "X-MTG-Busy"' in main
+    handler = main.split("override fun onReceivedHttpError")[1].split("override fun")[0]
+    assert "BUSY_HEADER" in handler
+    assert handler.index("BUSY_HEADER") < handler.index("errorBox.visibility = View.VISIBLE")

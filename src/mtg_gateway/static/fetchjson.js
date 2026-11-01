@@ -17,7 +17,15 @@
    .status, or to {ok: false, error: "signed_out" | "no_connection" | "server", message}, with
    .signedOut or .noConnection set, so a script that reads d.ok and d.message shows the right
    words with no code of its own. MtgFetch.problem(x, what) gives the text and the Sign in
-   button for any of those answers or errors, for a toast, a strip or a note. */
+   button for any of those answers or errors, for a toast, a strip or a note.
+
+   The gateway busy (dbwait.py: a request waited the limit for the database's write lock and
+   was turned away with a 503 marked X-MTG-Busy, nothing changed): every request a page's script
+   sends, through MtgFetch or a plain fetch (window.fetch is this script's from here on, loaded
+   before every page script), is held rather than answered, and one note says the gateway is
+   busy, with Try again, which sends the held requests once more, and ×, which hands each script
+   the busy answer as it came (its own words then say the save did not go through). Nothing the
+   member typed is touched, no page is left, and no raw answer reaches the screen. */
 (function () {
   "use strict";
   var NO_CONNECTION = "No connection; nothing was changed.";
@@ -143,10 +151,108 @@
     try { p = typeof work === "function" ? work() : work; } catch (e) { done(); throw e; }
     return Promise.resolve(p).then(function (v) { done(); return v; }, function (e) { done(); throw e; });
   }
+  // -- the gateway busy ------------------------------------------------------------------------
+  var BUSY = "The gateway is busy right now. Nothing was changed; try again.";
+  var nativeFetch = window.fetch;
+  var held = [];  // the requests waiting for Try again: {again, resolve, reject, first, signal, onAbort}
+  var busyNote = null;
+  function isBusy(r) {
+    return !!r && r.status === 503 && !!r.headers && r.headers.get("X-MTG-Busy") === "1";
+  }
+  function abortError() {
+    try { return new DOMException("The request was aborted.", "AbortError"); } catch (e) {
+      var err = new Error("The request was aborted."); err.name = "AbortError"; return err;
+    }
+  }
+  // the gateway's own words for the note (the JSON answer's message), or the one wording here
+  function busyText(r) {
+    return r.clone().json().then(function (d) {
+      return (d && typeof d.message === "string" && d.message) || BUSY;
+    }, function () { return BUSY; });
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text) e.textContent = text;
+    return e;
+  }
+  function showBusy(text) {
+    if (!busyNote) {
+      busyNote = el("div", "toast cards-toast error busy-toast");
+      busyNote.setAttribute("role", "alert");
+      busyNote.appendChild(el("span", "msg", text));
+      var again = el("button", "btn", "Try again");
+      again.type = "button";
+      again.addEventListener("click", retryHeld);
+      busyNote.appendChild(again);
+      var x = el("button", "close icon-only", "×");
+      x.type = "button";
+      x.setAttribute("aria-label", "Dismiss");
+      x.addEventListener("click", dismissHeld);
+      busyNote.appendChild(x);
+      (document.body || document.documentElement).appendChild(busyNote);
+    } else {
+      busyNote.querySelector(".msg").textContent = text;
+    }
+  }
+  function hideBusy() {
+    if (busyNote) busyNote.remove();
+    busyNote = null;
+  }
+  function release(entry) {
+    var i = held.indexOf(entry);
+    if (i >= 0) held.splice(i, 1);
+    if (entry.signal && entry.onAbort) entry.signal.removeEventListener("abort", entry.onAbort);
+    if (!held.length) hideBusy();
+  }
+  function park(entry, r) {
+    entry.first = r;
+    held.push(entry);
+    busyText(r).then(function (text) { if (held.indexOf(entry) >= 0) showBusy(text); });
+  }
+  function resend(entry) {
+    var p;
+    try { p = entry.again(); } catch (e) { release(entry); entry.reject(e); return; }
+    Promise.resolve(p).then(function (r) {
+      if (isBusy(r)) { park(entry, r); return; }
+      release(entry);
+      entry.resolve(r);
+    }, function (err) { release(entry); entry.reject(err); });
+  }
+  function retryHeld() {
+    hideBusy();
+    var waiting = held.slice();
+    held = [];
+    waiting.forEach(resend);
+  }
+  function dismissHeld() {
+    var waiting = held.slice();
+    held = [];
+    hideBusy();
+    waiting.forEach(function (entry) { release(entry); entry.resolve(entry.first); });
+  }
+  function hold(again, signal, r) {
+    return new Promise(function (resolve, reject) {
+      var entry = { again: again, resolve: resolve, reject: reject, first: r, signal: signal || null, onAbort: null };
+      if (signal) {
+        if (signal.aborted) { reject(abortError()); return; }
+        entry.onAbort = function () { release(entry); reject(abortError()); };
+        signal.addEventListener("abort", entry.onAbort);
+      }
+      park(entry, r);
+    });
+  }
+  function busyFetch(input, init) {
+    var again = function () { return nativeFetch.call(window, input, init); };
+    var signal = init && init.signal;
+    return again().then(function (r) { return isBusy(r) ? hold(again, signal, r) : r; });
+  }
+  if (typeof nativeFetch === "function") window.fetch = busyFetch;
+
   window.MtgFetch = {
     json: json, answer: answer, problem: problem, signedOut: signedOut, signInLink: signInLink, signInHref: signInHref,
     isSignedOut: isSignedOut, signedOutError: signedOutError, noConnectionError: noConnectionError,
-    NO_CONNECTION: NO_CONNECTION, SIGNED_OUT: SIGNED_OUT, UNREADABLE: UNREADABLE,
-    press: press
+    NO_CONNECTION: NO_CONNECTION, SIGNED_OUT: SIGNED_OUT, UNREADABLE: UNREADABLE, BUSY: BUSY,
+    press: press, isBusy: isBusy, retryBusy: retryHeld, dismissBusy: dismissHeld
   };
 })();

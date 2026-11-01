@@ -1,8 +1,9 @@
 /* Nothing typed is lost (0.7.46 audit QG-01 to QG-04; QOL-03): a form or a box marked
    data-draft="key" keeps what is typed in it as a draft in this browser's storage, per member,
    and puts it back when the form is next shown empty: after a reload, Back, a page left by
-   mistake, or a sign-in that ended while the form was filled in (the POST is dropped on the way
-   to the sign-in page; the page comes back with ?draft=1 and the draft fills the form again).
+   mistake, a sign-in that ended while the form was filled in (the POST is dropped on the way
+   to the sign-in page; the page comes back with ?draft=1 and the draft fills the form again),
+   or a submit the busy gateway turned away (its page's Go back, static/busy.js).
 
    What is kept: every named text field, textarea, select, checkbox and radio in the form (never
    a password or a file). Saved as it is typed and put back over what the page drew: a draft
@@ -79,7 +80,20 @@
     if (touched) root.dispatchEvent(new Event("input", { bubbles: true }));
     return touched;
   }
-  var cameBack = /[?&]draft=1(&|$)/.test(location.search);
+  // The gateway's busy page sent the member back to this form (static/busy.js): their submit
+  // did not go through, so a draft marked sent is put back as after a sign-in. The note is
+  // this tab's and is used once; a page the browser restored from its cache keeps its fields
+  // itself and the note is dropped unused (pageshow).
+  var BACK = "mtg_draft_back";
+  function sentBack() {
+    var at = 0;
+    try { at = Number(sessionStorage.getItem(BACK)) || 0; sessionStorage.removeItem(BACK); } catch (e) { at = 0; }
+    return at > 0 && Date.now() - at < 2 * 60 * 1000;
+  }
+  var cameBack = /[?&]draft=1(&|$)/.test(location.search) || sentBack();
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted) { try { sessionStorage.removeItem(BACK); } catch (err) { /* storage off */ } }
+  });
   /* keep: the form (or any element holding fields) under ``key``; returns {key, restored, clear}.
      Called again with another key (a box reused for another card), the form is kept under the
      new key from then on, with that key's draft put back. */
