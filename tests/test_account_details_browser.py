@@ -39,6 +39,32 @@ PAGES = (
 )
 
 
+# The words of the list's labels and values split across lines: at 200% text a label wraps between
+# its words (the site's normal wrapping), never inside one that fits its row on its own.
+SPLIT_WORDS = """
+() => {
+  const out = [];
+  document.querySelectorAll('.ygrp .yrow .lbl, .ygrp .yrow .val, .yme b').forEach(box => {
+    const width = box.getBoundingClientRect().width;
+    const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      for (const m of t.textContent.matchAll(/[^\\s]+/g)) {
+        const r = document.createRange();
+        r.setStart(t, m.index);
+        r.setEnd(t, m.index + m[0].length);
+        const rects = [...r.getClientRects()];
+        const tops = new Set(rects.map(q => Math.round(q.top)));
+        // a word wider than its whole box may break (the last resort); any other may not
+        const wide = rects.reduce((w, q) => w + q.width, 0) > width + 0.5;
+        if (tops.size > 1 && !wide) out.push(m[0] + ' in ' + box.textContent.trim().slice(0, 40));
+      }
+    }
+  });
+  return out;
+}
+"""
+
+
 @pytest.fixture
 def server(tmp_path):
     s = Server(tmp_path, ntfy_url="https://ntfy.test", ntfy_token="tok")
@@ -147,6 +173,7 @@ def test_the_list_and_every_page_fit_each_surface(
                 assert page.locator("main h1").count() == 1
                 assert page.locator(".acc .card > h2").count() <= 1, path  # no repeat of the h1
             assert page.evaluate(MEASURE) == [], path
+            assert page.evaluate(SPLIT_WORDS) == [], path
             assert page.evaluate(CONTRAST, TEXT) == [], path
             if width < 900:
                 assert _short(page, TARGETS) == [], path

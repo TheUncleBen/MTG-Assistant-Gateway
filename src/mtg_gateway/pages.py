@@ -1758,9 +1758,14 @@ ACCOUNT_CSS = (
     ".ydetails .yfold{padding:0 1rem .9rem calc(1.8rem + 20px);font-size:.95rem;line-height:1.4}"
     ".ydetails .yfold p{margin:.3rem 0}.ydetails .yfold dl.meta{margin:.2rem 0}"
     ".ydetails .yfold .ui-caps{margin:.4rem 0}"
-    # a row's value keeps its words on one line while it has under half the row, the label wraps
-    ".ydetails .yrow .lbl{min-width:0;overflow-wrap:anywhere}"
-    ".ydetails .yrow .val{flex:0 0 auto;max-width:45%;min-width:0;overflow-wrap:anywhere}"
+    # a row's label and value wrap between their words, never squeezed under their longest word
+    # (as on the Account page): when both do not fit one line (large text on a phone) the value
+    # and the chevron go to a line of their own, at the right. A word breaks inside only when it is
+    # wider than the whole row (break-word, not anywhere: anywhere let the row squeeze the label
+    # until it broke "Approval mode" inside "mode" at 200% text)
+    ".ydetails .ygrp .yrow,.ydetails .ygrp details.yrow > summary{flex-wrap:wrap;row-gap:.1rem}"
+    ".ydetails .yrow .lbl{overflow-wrap:break-word}"
+    ".ydetails .yrow .val{flex:0 1 auto;margin-left:auto;max-width:100%;min-width:0;overflow-wrap:break-word}"
     ".ydetails .yme .sub{overflow-wrap:anywhere}"
     # the one red row: Delete my data…
     ".ygrp .yrow.ydanger,.ygrp .yrow.ydanger > svg.i{color:var(--danger-text)}"
