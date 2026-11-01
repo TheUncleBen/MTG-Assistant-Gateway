@@ -10,6 +10,8 @@ package local.mtgassistantgateway.app
  */
 object ShotLine {
     sealed class Outcome {
+        /** The photo never reached the page at all, by its URL or handed over directly. */
+        object PhotoLost : Outcome()
         /** The photo never reached the page's reader (it would not load, or the page threw). */
         data class Failed(val error: String) : Outcome()
         /** A card was matched; it waits on the page for Done. [where] is " (FRC 21)" or "". */
@@ -35,6 +37,7 @@ object ShotLine {
         blurry: Boolean,
         auto: Boolean,
     ): Outcome = when {
+        error == ScanGlue.PHOTO_LOST -> Outcome.PhotoLost
         error.isNotEmpty() -> Outcome.Failed(error)
         // A read waits on the page for a tap. The page's own continuous mode stops shooting while
         // one does, and shooting on would only replace it, so Auto pauses here too.

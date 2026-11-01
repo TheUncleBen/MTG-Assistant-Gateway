@@ -15,8 +15,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// The Android app hands each phone photo to the page at this path and answers it itself; it is
+// never the worker's: no respondWith, so the request goes on exactly as if there were no worker.
+const APP_PHOTO = '/__mtgassistant/';
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  if (url.pathname.startsWith(APP_PHOTO)) return;
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (!url.pathname.startsWith(SCOPE_STATIC)) return; // network only
   const versioned = url.pathname.startsWith(SCOPE_STATIC + 'vendor/') || url.searchParams.has('v');

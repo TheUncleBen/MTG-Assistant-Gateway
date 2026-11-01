@@ -123,6 +123,7 @@
     <string name="status_ocr_ready">Ready. Hold the phone about 15 cm (6 in) from the card, the card in the dashed box, then tap Shoot.</string>
     <string name="status_ocr_unavailable">Text recognition could not be loaded, so names cannot be read. Tap Done and type them on the page.</string>
     <string name="scan_failed">Scan failed: %1$s</string>
+    <string name="scan_photo_lost">The app couldn’t hand the photo to the page. Tap Shoot to try again.</string>
     <!-- What one shot came to (ShotLine): %1$s is the card's name, %2$s its set and number as " (FRC 21)" or empty. -->
     <string name="shot_found">Found “%1$s”%2$s. Tap Done to add it on the page; Shoot again replaces it.</string>
     <string name="shot_found_paused">Found “%1$s”%2$s. Auto paused: tap Done to check it on the page.</string>

@@ -12,8 +12,13 @@ package local.mtgassistantgateway.app
  *
  * While the phone camera is open the page sits on its list tab (which stops the page's own camera)
  * and the app keeps the lens. Each photo is handed over with [onPhoto] as a same-origin URL the app
- * answers itself from `shouldInterceptRequest` (the page's CSP allows `img-src 'self'`), so no
- * base64 copy of the picture ever crosses into JavaScript. What the page did with it comes back
+ * answers itself from `shouldInterceptRequest` (the page's CSP allows `img-src 'self'`), so in the
+ * usual case no base64 copy of the picture crosses into JavaScript. The page's service worker
+ * (scope /scan) sees that request first and leaves it alone; the app answers it whether WebView
+ * then asks its WebViewClient or its ServiceWorkerClient. Should neither be asked (the request
+ * reaches the gateway, which answers 404), the glue sends `photo-direct` and the app hands that one
+ * photo over with [photoData]; with no answer either, the photo's `done` carries the error
+ * [PHOTO_LOST], which the panel says plainly. What the page did with it comes back
  * through the `MtgNative.scanEvent` bridge as small JSON objects, each carrying the [install]
  * nonce and the photo's sequence number so stale or spoofed events are dropped: the page's own
  * `scan:auto-added`, `scan:unsure`, `scan:unidentified` and `scan:undo` events, then `done` when
@@ -47,6 +52,11 @@ object ScanGlue {
     const val PHOTO_PATH = "$PHOTO_DIR/"
     /** Long side of the working copy of a photo, matching the page's PHOTO_MAX. */
     const val PHOTO_MAX = 2400
+    /** How long the glue waits for [photoData] after asking for a photo directly (`photo-direct`). */
+    const val DIRECT_MS = 8000
+    /** The `done` event's error when the photo never reached the page, by URL or directly. */
+    const val PHOTO_LOST = "photo-lost"
+    private val BASE64 = Regex("^[A-Za-z0-9+/]*={0,2}$")
     /** The hooks the glue needs on `window.__scan`; all in scan.js's export list. */
     val HOOKS = listOf("flattenCard", "flatTitleRegion", "infoRegionOf", "scanRegion", "showTab", "noCardFrame", "undoLastAdd")
 
@@ -60,6 +70,8 @@ object ScanGlue {
 (function () {
   if (window.__mtgNative) return 'present';
   var PHOTO_MAX = $PHOTO_MAX;
+  var DIRECT_MS = $DIRECT_MS;
+  var PHOTO_LOST = '$PHOTO_LOST';
   var NONCE = '__NONCE__';
   var seq = 0;
   function hooks() {
@@ -118,8 +130,26 @@ object ScanGlue {
       img.src = url;
     });
   }
+  // The photo straight from the app, for when its URL did not load (the request went past the app,
+  // to the gateway, which has no such page): a photo-direct event asks the app, which answers
+  // through photoData. Single use, and the bytes only ever sit in a blob: URL revoked once read.
+  var direct = {};
+  function loadDirect(n) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () { delete direct[n]; reject(new Error(PHOTO_LOST)); }, DIRECT_MS);
+      direct[n] = function (bytes) {
+        clearTimeout(timer);
+        delete direct[n];
+        var u = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+        load(u).then(function (c) { URL.revokeObjectURL(u); resolve(c); },
+          function () { URL.revokeObjectURL(u); reject(new Error(PHOTO_LOST)); });
+      };
+      send({ type: 'photo-direct', seq: n });
+    });
+  }
   async function process(s, url, n, guide) {
-    var c = await load(url);
+    var c;
+    try { c = await load(url); } catch (e) { c = await loadDirect(n); }
     s.state.lastPicture = { w: c.width, h: c.height };
     // Where the dashed box was over the photo, as the page's own guide box is over its video.
     var g = guide ? { x: guide.x * c.width, y: guide.y * c.height, w: guide.w * c.width, h: guide.h * c.height }
@@ -199,6 +229,18 @@ object ScanGlue {
       });
       return 'ok:' + n;
     },
+    photoData: function (n, b64) {
+      var take = direct[n];
+      if (!take) return 'stale';
+      var bytes;
+      try {
+        var bin = atob(String(b64 || ''));
+        bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } catch (e) { bytes = new Uint8Array(0); }
+      take(bytes); // an empty or broken hand-over fails at once, as photo-lost
+      return 'ok';
+    },
     undo: function () {
       var s = hooks();
       if (!s) return 'no-scan';
@@ -246,6 +288,17 @@ object ScanGlue {
             "{x:${guide[0]},y:${guide[1]},w:${guide[2]},h:${guide[3]}}"
         }
         return "(function(){return window.__mtgNative ? window.__mtgNative.onPhoto('$url', $g) : 'no-glue';})();"
+    }
+
+    /**
+     * Hands photo [seq] to the page directly, for the glue's `photo-direct` event: its URL did not
+     * load. [base64] is the JPEG, or empty when the app no longer has that photo (the page then
+     * reports [PHOTO_LOST] at once). Evaluates to 'ok', or 'stale' when the page is not waiting for it.
+     */
+    fun photoData(seq: Int, base64: String): String {
+        require(seq > 0) { "bad seq" }
+        require(BASE64.matches(base64)) { "bad photo data" }
+        return "(function(){return window.__mtgNative && window.__mtgNative.photoData ? window.__mtgNative.photoData($seq, '$base64') : 'no-glue';})();"
     }
 
     /** The gateway URL the photo with sequence number [n] is served at (see [photoSeqOf]). */

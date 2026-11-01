@@ -45,6 +45,8 @@ class ShotLineTest {
         assertEquals(ShotLine.Outcome.PageSaid("Added Sol Ring (FRC 21). Next card, or undo."),
             of(false, status = "Added Sol Ring (FRC 21). Next card, or undo.", auto = true))
         assertEquals(ShotLine.Outcome.Failed("photo not loaded"), of(true, matched = true, name = "Sol Ring", error = "photo not loaded"))
+        // The photo never reached the page at all: its own outcome, for a plain line.
+        assertEquals(ShotLine.Outcome.PhotoLost, of(false, error = ScanGlue.PHOTO_LOST))
     }
 
     @Test fun onceGateRunsOnce() {
