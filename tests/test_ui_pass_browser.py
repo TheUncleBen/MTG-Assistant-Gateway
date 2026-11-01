@@ -190,7 +190,7 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
 TOUCH_TARGETS = {
     "/": ".topbar .icon-btn, a.brand, footer.site .links a, main .btn, main button,"
     " main input:not([type=hidden])",
-    "/reports": ".rp-t .title .t a, .rp-t a.act",
+    "/reports": ".rp-t .title .t a, .rp-t .act > a",
     "/collection?view=list": ".ui-widgets a.ext",
     "/guide/how-export": ".guide h4 .anchor",
     "/decks/42": ".curveaxis .mv, .rowbtn, .banner .social .soc",

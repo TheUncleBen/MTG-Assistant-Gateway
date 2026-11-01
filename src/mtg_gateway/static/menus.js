@@ -788,13 +788,16 @@
     var name = $(".title .t", tr) ? $(".title .t", tr).textContent.trim() : "";
     var details = $(".act a[href*='open=']", tr), restore = $("form.hy-restore button", tr);
     var remake = $("form.hy-new-deck button", tr);  // a deleted deck's snapshot
-    var report = $("a[href^='/history/reports/']", tr), deck = $(".title a.t[href^='/decks/']", tr);
+    var report = $("a[href^='/history/reports/']", tr), deck = tr.getAttribute("data-deck");
+    var deckHref = tr.getAttribute("data-deck-href") || (deck ? "/decks/" + enc(deck) : "");  // a lists change opens My lists
+    var test = $("form.hy-test button", tr);  // the forms stay in the row, out of sight, for the menu
     var items = [];
     if (details) items.push(link("Details", "eye", details.getAttribute("href")));
     if (restore) items.push(item("Restore (review first)", "undo", function () { restore.click(); }));
     if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
-    if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", deck.getAttribute("href"))); }
+    if (test) items.push(item("Test this version", "report", function () { test.click(); }));
+    if (deckHref) { items.push(sep()); items.push(deckHref === "/lists" ? link("Open My lists", "decks", deckHref) : link("Open the deck", "decks", deckHref)); }
     // a report or a snapshot: its Details with the confirm box open (restores are proposals)
     var chev = $("a.chev[href*='open=']", tr), dh = (details || chev) ? (details || chev).getAttribute("href") : "";
     if (/[?&]open=[sr]-/.test(dh)) { items.push(sep()); items.push(link("Delete…", "trash", dh + "&box=delete", { danger: true })); }

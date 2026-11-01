@@ -272,7 +272,7 @@ def add_history_routes(
             ui.assistant_head(
                 "/history",
                 "History" if not deck_id else "Deck history",
-                sub_html=f"{_esc(PAGE_SUB_TEXT)} " + ui.cap_link("Proposals", "/proposals") + ".",
+                PAGE_SUB_TEXT,
             )
             + back
             + _history_widgets(sub, deck_id, copies, now=now)
@@ -284,7 +284,7 @@ def add_history_routes(
             + copies_panel
         )
         opened = next((e for e in shown if e["key"] == query["open"]), None) if query["open"] else None
-        extra = ""
+        extra = opener_html = ""
         if opened and opened["kind"] == "snapshot":
             # Delete…: the shared confirm box, open when the address asks (a row menu's Delete…)
             oid = opened["key"][2:]
@@ -299,11 +299,13 @@ def add_history_routes(
                 open=request.query_params.get("box") == "delete",
                 close_href="/history" + query_string(query, open=opened["key"]),
             )
-            extra = f"<div class='ui-actions'>{opener}</div>{box}"
+            extra, opener_html = box, opener
         deleted = DELETED_NOTICES.get(request.query_params.get("deleted") or "", "")
         if deleted:  # the address names what went; the words are the page's own
             list_html = f"<p class='notice ok' role='status'>{_esc(deleted)}</p>" + list_html
-        body = ui.split(list_html, details_panel(opened, query, extra_html=extra) if opened else "")
+        acts = [opener_html] if opener_html else []
+        panel = details_panel(opened, query, extra_html=extra, extra_actions=acts) if opened else ""
+        body = ui.split(list_html, panel)
         return page(
             "History" if not deck_id else "Deck history",
             body,
