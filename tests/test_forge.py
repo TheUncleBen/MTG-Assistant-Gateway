@@ -658,7 +658,9 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "Games finished so far: 0 of 10." in forge_html({"state": "running", "games_requested": 10})
     assert forge_html(None) == ""
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
-    assert "## Forge games (against precons)" in md and "Cards Forge could not play: Fake Sticker Card" in md
+    # one card per line, so a name with a comma in it is never read as two
+    assert "## Forge games (against precons)" in md
+    assert "- Cards Forge could not play:\n  - Fake Sticker Card\n" in md
     assert "Liesa <b>: 2 wins, 50% (95% interval 15% to 85%)." in md and "1 of them stopped at the time" in md
     # a newer run: turns, losses and each game
     newer = {
