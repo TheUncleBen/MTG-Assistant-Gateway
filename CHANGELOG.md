@@ -41,7 +41,8 @@ name per thing.
   `MTG_ACCESS_TOKEN_TTL=3600` and `MTG_REFRESH_TOKEN_TTL=2592000` too: leave them out unless you
   set them on purpose, or they lock their rows.
 - **Remove `MTG_REAUTH_INTERVAL` from your variables.** The stack file and `docker-compose.yml` no
-  longer pass it, so a line left in your file does nothing. Assistants now connect again when the
+  longer pass it, so a line left in your file does nothing; a stack that still passes it gets a
+  warning in the log at start, naming the time that applies now. Assistants now connect again when the
   Settings page's **Assistant refresh** time has passed since they signed in (30 days by default,
   or `MTG_REFRESH_TOKEN_TTL` if your variables set it), instead of after a week. To keep a week,
   set **Sign-in → Assistant refresh** to 7 days.

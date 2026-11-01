@@ -268,3 +268,33 @@ def test_mtg_reauth_interval_is_gone() -> None:
     from mtg_gateway.config import Settings
 
     assert "reauth_interval" not in Settings.__dataclass_fields__
+
+
+def test_a_leftover_mtg_reauth_interval_is_warned_about_at_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Security review 3, R3-01: a stack that still sets MTG_REAUTH_INTERVAL (say a day, so a
+    stolen refresh token stops working soon) silently got the 30-day Assistant refresh time. One
+    WARNING at start names the variable, the Assistant refresh row and how to keep a shorter time."""
+    import logging
+
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.delenv("MTG_REAUTH_INTERVAL", raising=False)
+    with caplog.at_level(logging.DEBUG, logger="mtg_gateway.config"):
+        load_settings()
+    assert not [r for r in caplog.records if "MTG_REAUTH_INTERVAL" in r.getMessage()]
+    monkeypatch.setenv("MTG_REAUTH_INTERVAL", "86400")
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="mtg_gateway.config"):
+        s = load_settings()
+    warned = [r for r in caplog.records if "MTG_REAUTH_INTERVAL" in r.getMessage()]
+    assert len(warned) == 1 and warned[0].levelno == logging.WARNING, caplog.records
+    text = warned[0].getMessage()
+    assert "Assistant refresh" in text and "MTG_REFRESH_TOKEN_TTL" in text and "30 days" in text, text
+    assert s.refresh_token_ttl == 30 * 86400  # still ignored: the warning is the change
+    # a blank value is no setting, as for every other variable
+    monkeypatch.setenv("MTG_REAUTH_INTERVAL", "  ")
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="mtg_gateway.config"):
+        load_settings()
+    assert not [r for r in caplog.records if "MTG_REAUTH_INTERVAL" in r.getMessage()]
