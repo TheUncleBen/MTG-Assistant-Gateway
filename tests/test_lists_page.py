@@ -15,7 +15,7 @@ import pytest
 
 from mtg_gateway import account_lists
 
-from .conftest import Stack, stack_with
+from .conftest import Stack, aged_stamp, stack_with
 from .test_account_lists import _picture
 from .test_approval_modes import SHIPPED
 from .test_decks_and_proxy import Browser, linked_user
@@ -574,8 +574,20 @@ async def test_a_template_added_to_a_deck_is_added_at_once_with_undo(member: Bro
     assert listed[0]["kind"] == "categories" and listed[0]["state"] == "applied"
     # Undo shows what it puts back: only this category goes
     fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", m.group(1)))
+    assert fields["back"] == "/lists/templates"
     r = await member.http.post("/proposals/undo", data=fields)
     assert r.status_code == 200 and "Card draw" in r.text, r.text
+    # Undo comes back to the Templates tab with its notice, and makes no backup copy on
+    # Archidekt, as the add it undoes made none (independent review 2, M2 and L12)
+    confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.text))
+    confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
+    decks_before = set(ark.decks)
+    r = await member.http.post("/proposals/undo", data=confirm)
+    assert r.status_code == 303 and r.headers["location"] == "/lists/templates?ok=undone", r.text
+    assert set(ark.decks) == decks_before
+    assert "Card draw" not in [c["name"] for c in ark.decks[42]["categories"]]
+    page = (await member.http.get(r.headers["location"])).text
+    assert _notice(page) == "Undone. The deck is back as it was before that change."
     # a Premier template asks first: its review page
     ark.account.templates[WHO].append(
         {"id": 14, "name": "Legends", "includedInDeck": True, "includedInPrice": True, "isPremier": True}

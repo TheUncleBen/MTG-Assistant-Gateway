@@ -98,6 +98,7 @@ FLAGS = (
 HIST_TAIL = " is kept under History, and the result is read back to check."
 # the member's own text in the box after a save: the mockup's toasts
 NOTICES = {
+    "undone": "Undone. The deck is back as it was before that change.",
     "template_created": "Template created on Archidekt and read back.",
     "template_saved": "Template saved on Archidekt and read back.",
     "template_deleted": "Deleted “{name}” on Archidekt.",
@@ -1655,7 +1656,9 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         row = state.db.get_proposal(pid, sub)
         if row is None or row.get("state") != "applied" or row.get("kind") != "categories":
             return ""
-        return proposals_view.undo_box_form(csrf, row) if row.get("snapshot_id") else ""
+        if not row.get("snapshot_id"):
+            return ""
+        return proposals_view.undo_box_form(csrf, row, back=tab_href("templates"))
 
     async def read_tab(
         sub: str, tab: Tab, *, page_no: int = 1, q: str = "", fresh: bool = False

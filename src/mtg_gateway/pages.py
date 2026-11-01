@@ -1101,7 +1101,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if submitted_too_soon(s.session_secret, f"undo:{sub}:{snapshot_id}", data.get("shown")):
                 return RedirectResponse("/proposals", status_code=303)
             try:
-                done = await state.decks.undo(sub, snapshot_id, seen=data.get("deck_seen") or "")
+                done = await state.decks.undo(
+                    sub, snapshot_id, seen=data.get("deck_seen") or "", applied=applied
+                )
             except DeckError as exc:
                 return page(
                     "Undo",
@@ -1117,6 +1119,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     heading=False,
                     head_extra=smallpage.HEAD,
                 )
+            made = state.db.get_proposal(done["proposal_id"], sub) or {}
+            back = undo_back(data.get("back"), str(made.get("deck_id") or ""))
+            if back and done.get("state") == "applied":  # back where the member pressed Undo
+                return RedirectResponse(undone_url(back), status_code=303)
             return RedirectResponse(f"/proposals/{done['proposal_id']}?ok=undone", status_code=303)
         try:
             look = await state.decks.undo_preview(sub, snapshot_id, applied=applied, after_at=after_at)
@@ -1136,9 +1142,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 head_extra=smallpage.HEAD,
             )
         stamp = form_stamp(s.session_secret, f"undo:{sub}:{snapshot_id}")
+        back = undo_back(data.get("back"), str(look.get("deck_id") or ""))
         return page(
             "Undo this change?",
-            _undo_body(look, _csrf(s, sid), stamp, applied, after_at),
+            _undo_body(look, _csrf(s, sid), stamp, applied, after_at, back),
             sub=sub,
             sid=sid,
             current="/proposals",
@@ -3845,12 +3852,35 @@ def undo_rows_left(left: int) -> str:
     return "1 more row is not shown." if left == 1 else f"{left} more rows are not shown."
 
 
-def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list[str], after_at: int) -> str:
+# Where an Undo drawn beside the member's own one-click save (undo_box_form's ``back``) returns
+# to once done (independent review 2, M2): the deck page, its Deck settings, or My lists'
+# Templates tab, each with its "Undone." notice. Only these exact addresses; anything else is
+# ignored and the restore's own review page is shown, as before.
+_UNDO_BACK = re.compile(r"/decks/(\d{1,12})(/settings)?|/lists/templates")
+
+
+def undo_back(raw: str | None, deck_id: str | None = None) -> str:
+    """The checked return address of an Undo form, or '' (``deck_id``: a deck address must be the
+    deck the Undo is of)."""
+    m = _UNDO_BACK.fullmatch(raw or "")
+    if m is None or (m.group(1) and deck_id is not None and m.group(1) != str(deck_id)):
+        return ""
+    return m.group(0)
+
+
+def undone_url(back: str) -> str:
+    return back + "?ok=undone" + ("#categories" if back.endswith("/settings") else "")
+
+
+def _undo_body(
+    look: dict[str, Any], csrf: str | None, shown: str, applied: list[str], after_at: int, back: str = ""
+) -> str:
     """Flow G step 3-4: what Undo puts back, and the one warning when that is more than the apply."""
     out = [f"<div class='card' id='undo-confirm'><h2>{html.escape(look['deck_name'])}</h2>"]
+    leave = html.escape(back or "/proposals")
     if look["nothing"]:
         out.append("<p>The deck already matches how it was before that change. There is nothing to undo.</p>")
-        return "".join(out) + "<p><a class='btn btn-plain' href='/proposals'>Back</a></p></div>"
+        return "".join(out) + f"<p><a class='btn btn-plain' href='{leave}'>Back</a></p></div>"
     if look["warning"]:
         out.append(f"<p class='notice warn'>{html.escape(look['warning'])}</p>")
     out.append("<p>Undo puts the deck back as it was before that change:</p><ul class='results'>")
@@ -3869,10 +3899,11 @@ def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list
                 "snapshot": look["snapshot_id"],
                 "applied": ",".join(applied),
                 "after": str(after_at),
+                **({"back": back} if back else {}),
             },
             buttons=[("undo", "Undo: put the deck back", "primary btn-primary")],
             action="/proposals/undo",
-            extra="<a class='btn btn-plain' href='/proposals'>Not now</a>",
+            extra=f"<a class='btn btn-plain' href='{leave}'>Not now</a>",
             tab_reachable=True,
         )
     )
