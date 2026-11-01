@@ -108,9 +108,11 @@ name per thing.
   Move to list… and Stop watching. Watching a card from a card menu or the deck editor says the
   price alert it came with (“Sol Ring added to your watchlist, with a price alert: drops 10% below
   $1.50.”).
-- Pull to refresh in the Android app, on the list pages and the deck page. It, and the browser's
-  Reload, read Archidekt again on My decks, Binder, Pinned cards, the lists, Alerts, the forum and
-  profiles instead of the copy kept from the last minute or two.
+- Pull to refresh in the Android app, on a deck page and on Home, My decks, Binder, Pinned cards,
+  the Watchlist, Proposals, History, Reports, Alerts, Precons, the search pages, Activity and the
+  forum. The browser's Reload reads Archidekt again on My decks, Binder, Pinned cards, the lists,
+  Alerts, the forum and profiles instead of the copy kept from the last minute or two, and so does
+  a pull on those of them that offer it (Binder › Lists, each list and profiles have no pull).
 - History can make a new deck from a deleted deck's snapshot, for you to review and apply.
 - History lists the changes to your Archidekt lists, with the list as it was just before.
 - `check_new_deck`: an assistant checks a new deck before proposing it, with no card in the chat.
@@ -127,8 +129,7 @@ name per thing.
   changed.
 - Reports keep the exact list they tested, say when the deck has changed since, and can put that
   list back as a proposal. “Since your last test” compares a report with the deck's previous test.
-- A report shows its Solo test and Forge games side by side, with how much of the deck the solo
-  test played, and names the app that ran it.
+- A report shows its Solo test and Forge games side by side and names the app that ran it.
 - History is your decks' timeline: applied changes, snapshots and tests; a test opens its report.
 - Delete one report or one snapshot from History, its menus or the report page, after a box that
   asks first. A snapshot a waiting restore needs says why it can't go. An assistant can only hand
@@ -243,13 +244,14 @@ name per thing.
   deck changing since a moment later.
 - Pages reuse what the gateway has just read from Archidekt: a deck's Settings, Goldfish, Compare
   and editor reuse the deck the deck page read, Deck settings reads its parts all at once, the
-  Move box's folder list opens at once, and Alerts, your lists, the Forum and profiles are kept for
-  up to 2 minutes. Anything you change yourself shows at once, on every page.
+  Move box's folder list opens at once, Alerts are kept for a minute, and your lists, the Forum and
+  profiles for 2 minutes. Anything you change yourself shows at once, on every page.
 - Card lookups and saving a scanned list ask Scryfall only for cards the gateway hasn't read that
   day, and watching a deck's prices reuses the deck you just opened.
-- A deck page or My decks you saw recently shows at once and updates behind; reloading soon after
-  doesn't ask Archidekt again. When Archidekt can't be reached, a deck you opened earlier shows as
-  last read, says how old it is, and offers Try again, with changes off.
+- A deck page you saw recently shows at once and updates behind; reloading it within 30 seconds
+  doesn't ask Archidekt again. My decks also shows at once and updates behind. When Archidekt can't
+  be reached, a deck you opened earlier shows as last read, says how old it is, and offers Try
+  again, with changes off.
 - Back is instant on ordinary pages. Binder › Lists shows at once and fills in its counts after;
   the bell and watched names are asked once a minute. Archidekt problems are described in plain words.
 - **Deck page**: Quick add adds one copy at once, with Undo.
@@ -306,8 +308,6 @@ name per thing.
 - Restore makes a deleted Maybeboard or Sideboard record again.
 - Someone you followed on Archidekt a moment ago can be added as a collaborator at once.
 - A color tag given by name gets your own tag's color.
-- A new card package is never shown as Failed once Archidekt has made it; if Archidekt saved its
-  settings differently, the package says what differs.
 - Gateway messages name things in curly quotes, deck details as Deck settings names them, and a
   restore by its snapshot's date.
 - On a proposal's review page, deleting a deck, taking custom cards out of a deck or deleting from
@@ -393,9 +393,9 @@ name per thing.
   the row's own category, and Maybeboard and Sideboard rows offer Printings….
 - Deleting a deck or folder no longer leaves a backup deck on Archidekt; the gateway keeps its
   snapshot.
-- A new card package that Archidekt saved differently says what differs instead of “Archidekt
-  refused it”; pages and cards say “New card package: NAME”, and a long name no longer stands one
-  letter per line.
+- A new card package is never shown as Failed once Archidekt has made it; if Archidekt saved its
+  settings differently, it says what differs instead of “Archidekt refused it”. Pages and cards
+  say “New card package: NAME”, and a long name no longer stands one letter per line.
 - Every place you can watch a card shows when it is already on your watchlist, down to the
   printing, and the same card is never added twice.
 - The Binder can change the oldest entries of a large Binder, and adding a printing again adds to
