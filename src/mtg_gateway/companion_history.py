@@ -626,7 +626,16 @@ def add_history_routes(
         refused = _more_notices().get(request.query_params.get("more") or "", "")
         if refused:
             notice, kind = _esc(refused), "notice warn"
-        from .report_page import REPORT_PAGE_CSS, report_page_html
+        from .report_page import REPORT_PAGE_CSS, report_page_html, stop_box_html
+
+        if request.query_params.get("stopped") == "1" and not notice:
+            notice, kind = "You stopped this test.", "notice"
+        # Stop the test's box (the progress panel's button opens it), while something can be stopped
+        stop_box = (
+            stop_box_html(r, _csrf(s, sid) or "", open=request.query_params.get("box") == "stop")
+            if isinstance(r.get("progress"), dict)
+            else ""
+        )
 
         # the member's own saved descriptions, as a box the mentions open (card_models_view)
         my_models = (
@@ -662,7 +671,7 @@ def add_history_routes(
             removable=mine,
             csrf=_csrf(s, sid) or "",
             card_types=_card_types(left_out) if left_out else {},
-            my_models=my_models + delete_box,
+            my_models=my_models + delete_box + stop_box,
             by_html=by_html,
             changes_html=changes,
             since_html=since_last_html(r, prev, tested=tested),
@@ -1073,6 +1082,59 @@ def add_history_routes(
                 raise
             return RedirectResponse(f"/history/reports/{_esc(rid)}?more={code}", status_code=303)
         return RedirectResponse(f"/history/reports/{_esc(rid)}", status_code=303)
+
+    @server.custom_route("/history/running", methods=["GET"], include_in_schema=False)
+    async def running_marks(request: Request) -> Response:
+        """The running mark of Home (``shape`` home) or a deck's page (``shape`` deck, with
+        ``deck_id``) as it is now, for running-live.js: ``html`` replaces the mark, and ``live``
+        says whether to ask again. Once the reports it showed (``ids``) have all ended, the mark
+        says so with the way to the report. Reads the gateway's own database only."""
+        from starlette.responses import JSONResponse
+
+        from .home import ended_row, running_row
+        from .running_view import deck_done_html, deck_notice_html
+
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401)
+        qp = request.query_params
+        deck_id = str(qp.get("deck_id") or "").strip()
+        home = qp.get("shape") != "deck"
+        running = reports.running(sub, None if home else deck_id or None)
+        if running:
+            html_out = running_row(running) if home else deck_notice_html(running, deck_id)
+        else:
+            ended = []
+            for rid in str(qp.get("ids") or "").split()[:20]:
+                try:
+                    r = reports.get(sub, rid)
+                except DeckError:
+                    continue  # deleted meanwhile, or not the member's
+                ended.append({k: r.get(k) for k in ("report_id", "deck_name", "status")})
+            html_out = ended_row(ended) if home else deck_done_html(ended)
+        resp = JSONResponse({"ok": True, "live": bool(running), "count": len(running), "html": html_out})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @server.custom_route("/history/reports/{rid}/forge/stop", methods=["POST"], include_in_schema=False)
+    async def report_stop(request: Request) -> Response:
+        """Stop the test: its Forge games still waiting or playing end now, and the games already
+        played stay in the report (reports.stop)."""
+        sub, sid = browser_session(state, request)
+        rid = request.path_params["rid"]
+        if not sub:
+            return login_redirect("/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return _expired(sub, sid)
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            reports.stop(sub, rid)
+        except DeckError as exc:
+            if exc.kind == "not_found":
+                return _not_found(sub, sid)
+            raise
+        return RedirectResponse(f"/history/reports/{_esc(rid)}?stopped=1", status_code=303)
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
         name = _filename(r.get("deck_name") or r["deck_id"])

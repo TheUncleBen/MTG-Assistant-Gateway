@@ -28,7 +28,7 @@ from mtg_gateway.reports import (
     more_room,
 )
 
-from .test_forge import BRACKETED, FakeForge, _Decks, _PairDecks
+from .test_forge import BRACKETED, FakeForge, _Decks, _more, _PairDecks, _ran
 
 
 def _service(tmp_path: Path, fake: FakeForge | None) -> tuple[Database, ReportService]:
@@ -48,7 +48,7 @@ async def _until(check: Any) -> None:
 
 
 async def _finished_report(reports: ReportService, fake: FakeForge, winners: list[int], seed: int = 7) -> str:
-    out = await reports.run("alice", "42", games=300, options={"seed": seed})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": seed})
     fake.finish(out["forge"]["job_id"], winners)
     rid = out["report_id"]
     await _until(lambda: reports.get("alice", rid)["forge"]["state"] == "done")
@@ -63,7 +63,7 @@ async def test_more_games_play_the_same_table_and_count_with_the_earlier_ones(tm
     assert done["more_games"] == 4
     assert not {"deck_text", "played", "earlier", "previous"} & done.keys()  # kept inside
     first = fake.started[0]
-    after = await reports.play_more("alice", rid)
+    after = await _more(reports, "alice", rid)
     assert len(fake.started) == 2
     again = fake.started[1]
     assert again["games"] == 4 and again["decks"] == first["decks"]  # same deck, same opponents
@@ -92,9 +92,9 @@ async def test_more_games_wait_behind_the_members_running_run(tmp_path: Path) ->
     fake = FakeForge()
     _, reports = _service(tmp_path, fake)
     rid = await _finished_report(reports, fake, [1, 1, 1, 1])
-    other = await reports.run("alice", "43", games=300, options={"seed": 2})
+    other = await _ran(reports, "alice", "43", games=300, options={"seed": 2})
     assert other["forge"]["state"] == "running" and len(fake.started) == 2
-    waiting = (await reports.play_more("alice", rid))["forge"]
+    waiting = (await _more(reports, "alice", rid))["forge"]
     assert waiting["state"] == "queued" and waiting["position"] == 1
     assert waiting["result"]["games"] == 4  # the earlier games stay on show
     assert len(fake.started) == 2
@@ -110,12 +110,12 @@ async def test_a_full_queue_starts_nothing_and_keeps_the_report(tmp_path: Path) 
     db, reports = _service(tmp_path, fake)
     rid = await _finished_report(reports, fake, [1, 2, 3, 4])
     before = db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"]
-    await reports.run("alice", "43", games=300, options={"seed": 1})  # plays
-    await reports.run("alice", "42", games=300, options={"seed": 2})  # waits
-    await reports.run("alice", "42", games=300, options={"seed": 3})  # waits
+    await _ran(reports, "alice", "43", games=300, options={"seed": 1})  # plays
+    await _ran(reports, "alice", "42", games=300, options={"seed": 2})  # waits
+    await _ran(reports, "alice", "42", games=300, options={"seed": 3})  # waits
     started = len(fake.started)
     with pytest.raises(DeckError) as refused:
-        await reports.play_more("alice", rid)
+        await _more(reports, "alice", rid)
     assert str(refused.value) == MORE_QUEUE_FULL and len(fake.started) == started
     assert db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"] == before
     reports._forge_task.cancel()
@@ -124,21 +124,21 @@ async def test_a_full_queue_starts_nothing_and_keeps_the_report(tmp_path: Path) 
 async def test_refusals_say_why(tmp_path: Path) -> None:
     fake = FakeForge()
     db, reports = _service(tmp_path, fake)
-    running = await reports.run("alice", "42", games=300, options={"seed": 1})
+    running = await _ran(reports, "alice", "42", games=300, options={"seed": 1})
     with pytest.raises(DeckError, match=MORE_NOT_ENDED):
-        await reports.play_more("alice", running["report_id"])
+        await _more(reports, "alice", running["report_id"])
     with pytest.raises(DeckError) as missing:
-        await reports.play_more("alice", "nope")
+        await _more(reports, "alice", "nope")
     assert missing.value.kind == "not_found"
     with pytest.raises(DeckError) as theirs:  # someone else's report
-        await reports.play_more("bob", running["report_id"])
+        await _more(reports, "bob", running["report_id"])
     assert theirs.value.kind == "not_found"
     # a report from before the gateway kept the deck it played: nothing to add to
     old = {"state": "done", "seats": ["Liesa", "A", "B", "C"], "result": {"games": 4}}
     with db.tx() as c:
         c.execute("UPDATE reports SET forge_json = ? WHERE id = ?", (json.dumps(old), running["report_id"]))
     with pytest.raises(DeckError, match=MORE_NOT_THIS_ONE):
-        await reports.play_more("alice", running["report_id"])
+        await _more(reports, "alice", running["report_id"])
     assert reports.get("alice", running["report_id"])["forge"]["more_games"] == 0
     _, plain = _service(tmp_path / "plain", None)
     with pytest.raises(DeckError, match=MORE_NO_FORGE):
@@ -166,7 +166,7 @@ async def test_opponents_gone_from_forge_keep_the_earlier_games(tmp_path: Path) 
     _, reports = _service(tmp_path, fake)
     rid = await _finished_report(reports, fake, [1, 1, 2, 2])
     fake.brackets = {"Another Precon": 3, "Precon 1": 3}  # Precon 2 and 3 left this Forge
-    after = (await reports.play_more("alice", rid))["forge"]
+    after = (await _more(reports, "alice", rid))["forge"]
     assert len(fake.started) == 1
     assert after["state"] == "done" and after["result"]["games"] == 4
     assert after["more_note"] == (
@@ -177,7 +177,7 @@ async def test_opponents_gone_from_forge_keep_the_earlier_games(tmp_path: Path) 
     assert "The extra games did not start. Some of this report&#x27;s opponents" in html
     # pressing again once they are back clears the note
     fake.brackets = None
-    again = (await reports.play_more("alice", rid))["forge"]
+    again = (await _more(reports, "alice", rid))["forge"]
     assert again["state"] == "running" and "more_note" not in again
     reports._forge_task.cancel()
 
@@ -191,7 +191,7 @@ async def test_an_engine_failure_keeps_the_earlier_games(tmp_path: Path, monkeyp
         return {"state": "failed", "error": "Forge gave an unexpected answer."}
 
     monkeypatch.setattr(reports_module, "start_run", failed)
-    after = (await reports.play_more("alice", rid))["forge"]
+    after = (await _more(reports, "alice", rid))["forge"]
     assert after["state"] == "done" and after["result"]["games"] == 4
     assert after["more_note"] == "Forge gave an unexpected answer." and after["more_games"] == 4
 
@@ -211,9 +211,9 @@ def test_the_button_shows_only_when_more_games_can_be_added() -> None:
 
 async def _finished_pair(reports: ReportService, fake: FakeForge) -> tuple[str, str]:
     """A Forge comparison's two reports (compare_with, then same_opponents_as), both finished."""
-    first = await reports.run("alice", "42", simulate=False, forge=True, pair_with="43")
-    second = await reports.run(
-        "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
+    first = await _ran(reports, "alice", "42", simulate=False, forge=True, pair_with="43")
+    second = await _ran(
+        reports, "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
     )
     fake.finish(first["forge"]["job_id"], [1, 2, 1, 1])
     await _until(lambda: len(fake.started) == 2)
@@ -238,7 +238,7 @@ async def test_a_comparison_gets_more_games_on_both_decks(tmp_path: Path) -> Non
     assert (
         "Plays 4 more Forge games for this deck and 4 for Deck 42, the other deck of this comparison" in html
     )
-    await reports.play_more("alice", b)  # pressed on the second deck: the first deck starts first
+    await _more(reports, "alice", b)  # pressed on the second deck: the first deck starts first
     assert len(fake.started) == 3  # one place in this Forge: the second deck's games wait
     assert reports.get("alice", a)["forge"]["state"] == "running"
     assert reports.get("alice", b)["forge"]["state"] == "queued"
@@ -261,25 +261,25 @@ async def test_a_comparison_waits_for_both_and_needs_room_for_both(tmp_path: Pat
     fake = FakeForge(brackets=BRACKETED)
     reports = ReportService(db, _PairDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    first = await reports.run("alice", "42", simulate=False, forge=True, pair_with="43")
-    second = await reports.run(
-        "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
+    first = await _ran(reports, "alice", "42", simulate=False, forge=True, pair_with="43")
+    second = await _ran(
+        reports, "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
     )
     fake.finish(first["forge"]["job_id"], [1, 1, 1, 1])
     await _until(lambda: reports.get("alice", first["report_id"])["forge"]["state"] == "done")
     # the other deck's games are still playing
     assert reports.get("alice", first["report_id"])["forge"]["more_games"] == 0
     with pytest.raises(DeckError, match=MORE_PAIR_WAIT):
-        await reports.play_more("alice", first["report_id"])
+        await _more(reports, "alice", first["report_id"])
     await _until(lambda: len(fake.started) == 2)
     fake.finish(reports.get("alice", second["report_id"])["forge"]["job_id"], [1, 1, 1, 1])
     await _until(lambda: reports.get("alice", second["report_id"])["forge"]["state"] == "done")
     # one run playing and one waiting: no room for both decks' games, so neither starts
-    await reports.run("alice", "44", simulate=False, forge=True)
-    await reports.run("alice", "45", simulate=False, forge=True)
+    await _ran(reports, "alice", "44", simulate=False, forge=True)
+    await _ran(reports, "alice", "45", simulate=False, forge=True)
     started = len(fake.started)
     with pytest.raises(DeckError, match=MORE_PAIR_QUEUE):
-        await reports.play_more("alice", second["report_id"])
+        await _more(reports, "alice", second["report_id"])
     assert len(fake.started) == started
     assert reports.get("alice", second["report_id"])["forge"]["result"]["games"] == 4
     reports._forge_task.cancel()
@@ -297,10 +297,10 @@ async def test_a_comparison_whose_other_report_is_gone_or_full(tmp_path: Path) -
     with db.tx() as c:
         c.execute("UPDATE reports SET forge_json = ? WHERE id = ?", (json.dumps(full), a))
     with pytest.raises(DeckError, match=MORE_PAIR_CANT):
-        await reports.play_more("alice", b)
+        await _more(reports, "alice", b)
     with db.tx() as c:  # the other deck's report deleted: just this one
         c.execute("DELETE FROM reports WHERE id = ?", (a,))
-    view = (await reports.play_more("alice", b))["forge"]
+    view = (await _more(reports, "alice", b))["forge"]
     assert view["state"] in ("running", "queued") and len(fake.started) == 3
     reports._forge_task.cancel()
 
@@ -314,7 +314,7 @@ async def test_a_later_report_at_the_same_table_never_replaces_the_partner(tmp_p
     reports = ReportService(db, _PairDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
     a, b = await _finished_pair(reports, fake)
-    later = await reports.run("alice", "44", simulate=False, forge=True, same_opponents_as=a)
+    later = await _ran(reports, "alice", "44", simulate=False, forge=True, same_opponents_as=a)
     fake.finish(later["forge"]["job_id"], [1, 1, 1, 1])
     c = later["report_id"]
     await _until(lambda: reports.get("alice", c)["forge"]["state"] == "done")
@@ -322,7 +322,7 @@ async def test_a_later_report_at_the_same_table_never_replaces_the_partner(tmp_p
     assert reports.get("alice", b)["forge"]["more_with"] == "Deck 42"
     alone = reports.get("alice", c)["forge"]
     assert alone["more_games"] == 4 and "more_with" not in alone
-    await reports.play_more("alice", c)  # only its own games
+    await _more(reports, "alice", c)  # only its own games
     assert len(fake.started) == 4  # one run: the comparison's two reports are left alone
     assert reports.get("alice", a)["forge"]["state"] == reports.get("alice", b)["forge"]["state"] == "done"
     reports._forge_task.cancel()
@@ -347,7 +347,7 @@ async def test_the_first_deck_is_taken_back_when_the_second_does_not_start(
         return await real(client, text, name, **kw)
 
     monkeypatch.setattr(reports_module, "start_run", second_fails)
-    await reports.play_more("alice", a)
+    await _more(reports, "alice", a)
     assert reports.get("alice", b)["forge"]["state"] == "queued"  # waits for the first deck's
     fake.finish(reports.get("alice", a)["forge"]["job_id"], [1, 1, 1, 1])
     await _until(lambda: reports.get("alice", b)["forge"].get("more_note"))
@@ -368,7 +368,7 @@ async def test_a_retry_on_a_busy_forge_keeps_the_runs_place(tmp_path: Path) -> N
     fake = _BusyForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     reports.forge_interval = 0.05
-    out = await reports.run("alice", "42", games=300, options={"seed": 9})
+    out = await _ran(reports, "alice", "42", games=300, options={"seed": 9})
     rid = out["report_id"]
     stored = json.loads(db._one("SELECT forge_json FROM reports WHERE id = ?", (rid,))["forge_json"])
     with db.tx() as c:
@@ -391,7 +391,7 @@ async def test_an_undo_while_the_refresher_waits_on_forge_is_not_overwritten(
     db, reports = _service(tmp_path, fake)
     rid = await _finished_report(reports, fake, [1, 2, 1, 1])
     before = reports._own_forge("alice", rid)[1]
-    playing = (await reports.play_more("alice", rid))["forge"]
+    playing = (await _more(reports, "alice", rid))["forge"]
     real, undone = reports_module.refresh, []
 
     async def slow_refresh(forge: Any, section: dict[str, Any], **kw: Any) -> dict[str, Any]:

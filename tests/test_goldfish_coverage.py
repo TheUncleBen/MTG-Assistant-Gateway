@@ -120,6 +120,8 @@ async def test_the_forge_view_carries_the_forge_result(tmp_path) -> None:
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
     out = await reports.run("alice", "42", games=300, options={"seed": 7})
+    await reports.starts_settled()  # handed to Forge in the background, after the answer
+    out = reports.get("alice", out["report_id"])
     assert reports.forge_only("alice", out["report_id"])["forge_result"] is None  # still playing
     fake.finish(out["forge"]["job_id"], [1, 2, 1, 1])
     await asyncio.wait_for(reports._forge_task, timeout=20)
