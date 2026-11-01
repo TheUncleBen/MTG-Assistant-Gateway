@@ -1,6 +1,6 @@
 /* Collection page (the member's Archidekt Collection). Works without this file: every control is a
    form or a link. With it: the stepper, the Details box and Remove update a row in place through the
-   JSON API; − on the last copy and Remove ask first (the shared box); the name box narrows the list
+   JSON API; − on the last copy and Remove take the row out at once, with Undo; the name box narrows the list
    as you type; Load more appends the next rows; the drop-downs apply on change; notices are strips
    with a × to close. The shared menus.js reaches the row's hidden Remove form and Details hook. */
 (function () {
@@ -70,40 +70,57 @@
     var n = Math.max(0, (parseInt(c.textContent.replace(/,/g, ""), 10) || 0) + delta);
     c.textContent = n.toLocaleString() + (n === 1 ? " entry" : " entries");
   }
-  function gone(item) {
+  /* -- Remove: at once, with Undo (QOL-01, 0.7.46 audit QG-09) ------------------------------
+     − on the last copy, the hidden Remove form and the Details box's button all remove the row
+     at once; the strip offers Undo for as long as it stays, which adds the row back with its
+     copies, printing, finish, condition, language and price paid. Archidekt has no request to
+     put a row's tags back, so the strip says when Undo cannot bring those. */
+  function gone(item, removed) {
     var name = nameOf(item);
+    var next = item.nextElementSibling;
     item.remove();
     bumpCount(-1);
-    strip("Removed from your binder.", "ok");
-    if (list && !$("li[data-id]", list)) location.reload();
+    var tags = removed && removed.tags && removed.tags.length;
+    var undo = document.createElement("button");
+    undo.type = "button"; undo.className = "btn small"; undo.textContent = "Undo";
+    undo.addEventListener("click", function () { putBack(item, removed, next, undo); });
+    strip("Removed from your binder." + (tags ? " Undo puts it back without its tags." : ""), "ok", removed ? [undo] : []);
+    if (list && !$("li[data-id]", list)) list.hidden = true;  // the page's empty state comes with the next load
     return name;
   }
-
-  /* -- the Remove box: − on the last copy, the hidden Remove form, the Details box's button --- */
-  function askRemove(item, returnFocus) {
-    var name = nameOf(item);
-    var out = $("form.qty output", item);
-    var qty = out ? parseInt(out.textContent, 10) || 1 : 1;
-    var fin = FIN[item.getAttribute("data-fin")] || "Normal";
-    var where = (item.getAttribute("data-setline") || "").trim();
-    var text = "This removes " + (qty === 1 ? "it" : "all " + qty + " copies") + " (" + (where ? where + ", " : "") + fin + ") from your binder.";
-    if (!window.MtgBox) {
-      if (window.confirm("Remove “" + name + "”? " + text)) doRemove(item);
-      return;
-    }
-    window.MtgBox.confirm({
-      title: "Remove “" + name + "”?", text: text, ok: "Remove", danger: true, icon: "trash",
-      returnFocus: returnFocus,
-      onOk: function () { return doRemove(item); }
+  function putBack(item, removed, next, undo) {
+    var name = removed.name || nameOf(item);
+    undo.disabled = true;
+    var spec = { name: name, quantity: removed.quantity || 1, finish: removed.finish || "nonfoil", condition: removed.condition || "", language: removed.lang || "EN" };
+    if (removed.set) spec.set_code = removed.set;
+    if (removed.collector_number) spec.collector_number = removed.collector_number;
+    request("POST", "/collection/api/add", { items: [spec], source: "manual" }).then(function (d) {
+      var row = d.ok && d.added && d.added[0];
+      if (!row) { undo.disabled = false; failed(d.ok ? { message: "Archidekt did not take the card back." } : d, name); return; }
+      item.setAttribute("data-id", row.id);
+      $$("button", item).forEach(function (b) { b.disabled = false; });
+      $$("output", item).forEach(function (o) { o.textContent = row.quantity; });
+      if (list) {
+        list.hidden = false;
+        if (next && next.parentNode === list) list.insertBefore(item, next); else list.appendChild(item);
+      }
+      bumpCount(1);
+      var paid = removed.purchase_price;
+      if (paid === null || paid === undefined || paid === "") { strip(name + " is back in your binder.", "ok"); return; }
+      request("POST", "/collection/api/rows/" + encodeURIComponent(row.id), { name: name, purchase_price: String(paid) }).then(function (u) {
+        if (u.ok) strip(name + " is back in your binder.", "ok");
+        else strip(name + " is back in your binder, without the price you paid. " + Fetch.problem(u, "the price was not set").text, "error", Fetch.problem(u).actions);
+      });
     });
   }
+  function askRemove(item) { return doRemove(item); }
   function doRemove(item) {
     var id = item.getAttribute("data-id");
     var name = nameOf(item);
     $$("button", item).forEach(function (b) { b.disabled = true; });
     return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id) + "?name=" + encodeURIComponent(name)).then(function (d) {
       if (!d.ok) { failed(d, name); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
-      gone(item);
+      gone(item, d.removed || null);
       return false;
     });
   }

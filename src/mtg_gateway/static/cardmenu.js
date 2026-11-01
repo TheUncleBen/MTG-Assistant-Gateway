@@ -230,6 +230,11 @@
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
     return Promise.resolve(false);
   }
+  // any button with data-copy-text copies that text and says so (data-copy-said)
+  document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest ? e.target.closest("button[data-copy-text]") : null;
+    if (b) copyAndSay(b.getAttribute("data-copy-text"), b.getAttribute("data-copy-said") || "Copied.");
+  });
   function copyAndSay(text, said) {
     return copyText(text).then(function (ok) {
       if (ok) toast(said, { ok: true, ms: 4000 });

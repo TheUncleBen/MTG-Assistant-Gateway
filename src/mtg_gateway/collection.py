@@ -1406,7 +1406,7 @@ def _stepper(r: dict[str, Any], csrf_in: str, rid: str) -> str:
 
 def _shims(r: dict[str, Any], csrf_in: str) -> str:
     """Hidden pieces the shared card menu (static/menus.js) reaches for: the Remove from collection
-    form (the page's script asks first, then removes) and the Details… hook (opening it opens the
+    form (the page's script removes at once, with Undo) and the Details… hook (opening it opens the
     Details box)."""
     name = _esc(r["name"])
     return (

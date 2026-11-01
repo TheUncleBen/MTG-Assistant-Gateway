@@ -201,6 +201,7 @@ def deck_problem_title(exc: DeckError) -> str:
     if text:
         return text
     text = str(exc).strip() or "This deck could not be shown."
+    text = text[:1].upper() + text[1:]  # a refusal's own words, as a sentence (0.7.46 audit QG-19)
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
@@ -337,9 +338,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if busy := busy_response(exc, request, page, sub=sub, sid=sid):
             return busy
         title = deck_problem_title(exc)
+        # the sentence is the page's title; the panel holds the way back, not the sentence again
         return page(
             title,
-            f"<div class='panel deckproblem'><p>{_esc(title)}</p>"
+            f"<div class='panel deckproblem'>"
             f"<a class='btn btn-primary' href='/decks'>{icon('decks')} Back to my decks</a></div>",
             sub=sub,
             sid=sid,

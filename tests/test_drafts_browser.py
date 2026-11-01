@@ -60,7 +60,9 @@ def test_new_deck_box_keeps_its_draft_through_a_reload_and_an_ended_sign_in(
 
             # the sign-in ends while the form is filled in: Create deck goes to the sign-in page
             # with ?draft=1 in the address it comes back to (the POST's body is dropped)
-            page.route("**/login?*", lambda r: r.fulfill(status=200, content_type="text/html", body="<p>sign in</p>"))
+            page.route(
+                "**/login?*", lambda r: r.fulfill(status=200, content_type="text/html", body="<p>sign in</p>")
+            )
             page.context.clear_cookies()
             box.locator(".acts button.primary", has_text="Create deck").click()
             page.wait_for_url("**/login?next=/decks/new?draft=1", timeout=8000)
@@ -108,10 +110,11 @@ def test_binder_import_and_deck_comment_keep_their_drafts(server: Server) -> Non
             page.reload(wait_until="networkidle")
             assert page.locator("#ctext").input_value() == "A long comment typed on a phone"
             # another member on this browser never sees it: the draft is keyed by the member
-            page.evaluate("() => document.querySelector('header.topbar [data-who]').setAttribute('data-who', 'other')")
-            assert page.evaluate(
-                "() => Object.keys(localStorage).filter(k => k.startsWith('mtg_draft:')).every(k => k.indexOf(':other:') < 0)"
+            page.evaluate(
+                "() => document.querySelector('header.topbar [data-who]').setAttribute('data-who', 'other')"
             )
+            keys = page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('mtg_draft:'))")
+            assert keys and all(":other:" not in k for k in keys), keys
             assert errors == [], errors
         finally:
             browser.close()
