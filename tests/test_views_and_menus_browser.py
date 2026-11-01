@@ -76,6 +76,19 @@ def _pick(page, select_id: str, label: str) -> None:
         page.locator("[role=listbox] [role=option]", has_text=label).first.click()
 
 
+def _pick_view(page, label: str) -> None:
+    """Choose the deck page's view: from View as on a wide screen, from the View sheet's Layout
+    on a phone (the redesigned phone toolbar is one row, Quick add, View and ⋮)."""
+    if page.locator(".field:has(#f-view) .msel-btn").is_visible():
+        _pick(page, "f-view", label)
+        return
+    page.locator(".toolbar .viewbtn").click()
+    layout = page.locator(".viewsheet #vs-view")
+    layout.wait_for(timeout=3000)
+    with page.expect_navigation(wait_until="networkidle"):
+        layout.select_option(label=label)
+
+
 def _nav(page, href: str) -> None:
     """Follow the site's own link to ``href`` (tab bar on a phone, top bar on a desktop)."""
     link = page.locator(f".tabbar > a[href='{href}']:visible, .topbar nav.site a[href='{href}']:visible")
@@ -91,14 +104,16 @@ def test_view_as_is_remembered_after_leaving_and_coming_back(server: Server, wid
         # the deck page: Text by default, Stacks picked, then away to the deck list and back in
         page.goto(f"{server.base}/decks/{DECK}", wait_until="networkidle")
         assert page.locator("#cards.deckview.text").count() == 1
-        _pick(page, "f-view", "Stacks")
+        _pick_view(page, "Stacks")
         assert "view=stacks" in page.url and page.locator("#cards.deckview.stacks").count() == 1
         _nav(page, "/decks")
         with page.expect_navigation(wait_until="networkidle"):
             page.locator(f"a[href='/decks/{DECK}']").first.click()
         assert page.url == f"{server.base}/decks/{DECK}", page.url
         assert page.locator("#cards.deckview.stacks").count() == 1, "the deck went back to Text"
-        assert page.locator(".field:has(#f-view) .msel-btn").inner_text().strip() == "Stacks"
+        # the View as box says so (hidden on a phone, where the View sheet mirrors it)
+        shown = page.locator(".field:has(#f-view) .msel-btn").evaluate("b => b.textContent").strip()
+        assert shown == "Stacks", shown
         # rendered so by the gateway: the first paint already has it (no flash of Text)
         first = page.request.get(f"{server.base}/decks/{DECK}").text()
         assert "class='deckview stacks'" in first and "<option value='stacks' selected>" in first
