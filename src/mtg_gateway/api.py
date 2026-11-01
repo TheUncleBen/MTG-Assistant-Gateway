@@ -86,7 +86,8 @@ def fail(exc: DeckError) -> JSONResponse:
     )
 
 
-def _unauth(message: str = "Sign in to use the API.") -> JSONResponse:
+# the browser's own answer (a page script shows "You're signed out" with Sign in, static/fetchjson.js)
+def _unauth(message: str = "You're signed out. Sign in to carry on.") -> JSONResponse:
     return JSONResponse(
         {"ok": False, "error": "unauthenticated", "message": message, "login": "/login"},
         401,

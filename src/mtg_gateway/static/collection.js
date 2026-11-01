@@ -21,35 +21,44 @@
     var live = $("#live");
     if (live) live.textContent = text;
   }
-  /* a strip at the top of the page, with a × to close; errors are alerts */
-  function strip(text, kind) {
-    say(text);
-    if (!notes) return;
+  /* a strip at the top of the page, with a × to close; errors are alerts. One strip at a time
+     (a second press replaces the first), and the strip is the one live region that reads it:
+     the page's #live is used only when there is no place for a strip (QG-08). ``actions``: the
+     buttons that can help (Sign in, Undo), after the text. */
+  function strip(text, kind, actions) {
+    if (!notes) { say(text); return null; }
+    var old = notes.querySelector(".notice[data-strip]");
+    if (old) old.remove();
     var d = document.createElement("div");
     d.className = "notice " + (kind === "error" ? "error" : "ok");
     d.setAttribute("role", kind === "error" ? "alert" : "status");
+    d.setAttribute("data-strip", "");
     var x = document.createElement("button");
     x.type = "button"; x.className = "nx"; x.setAttribute("aria-label", "Close"); x.title = "Close";
     x.setAttribute("data-dismiss", ""); x.innerHTML = ICON_X;
     d.appendChild(x);
     d.appendChild(document.createTextNode(text));
+    (actions || []).forEach(function (a) { d.appendChild(document.createTextNode(" ")); d.appendChild(a); });
     notes.insertBefore(d, notes.firstChild);
+    return d;
+  }
+  /* what a failed change says: the one wording for signed out (with Sign in) and no connection
+     (static/fetchjson.js), Archidekt's own reason otherwise */
+  function failed(d, name) {
+    var what = (name || "the card") + " was not changed";
+    var why = d && d.error;
+    if (why === "unavailable" || why === "rate_limited" || why === "busy") { strip(name + " was not changed. " + NOT_ANSWERING, "error"); return; }
+    var pr = Fetch.problem(d, what);
+    strip(pr.signedOut || pr.noConnection ? pr.text : name + " was not changed. " + pr.text, "error", pr.actions);
   }
   document.addEventListener("click", function (e) {
     var x = e.target.closest ? e.target.closest("#col-notes [data-dismiss]") : null;
     if (x) { var n = x.closest(".notice"); if (n) n.remove(); }
   });
-  function failText(d, name) {
-    var why = d && d.error;
-    var msg = (why === "unavailable" || why === "rate_limited" || why === "busy") ? NOT_ANSWERING : ((d && d.message) || "That did not work.");
-    return (name ? name + " was not changed. " : "") + msg;
-  }
+  var Fetch = window.MtgFetch;
+  // never rejects: a lost connection or an ended session comes back as {ok: false} with the words
   function request(method, url, body) {
-    return fetch(url, {
-      method: method, credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
+    return Fetch.answer(url, { method: method, body: body === undefined ? undefined : JSON.stringify(body), csrf: CSRF });
   }
   function nameOf(item) {
     var n = $(".name", item);
@@ -93,12 +102,8 @@
     var name = nameOf(item);
     $$("button", item).forEach(function (b) { b.disabled = true; });
     return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id) + "?name=" + encodeURIComponent(name)).then(function (d) {
-      if (!d.ok) { strip(failText(d, name), "error"); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
+      if (!d.ok) { failed(d, name); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
       gone(item);
-      return false;
-    }).catch(function () {
-      $$("button", item).forEach(function (b) { b.disabled = false; });
-      strip(failText(null, name), "error");
       return false;
     });
   }
@@ -128,13 +133,10 @@
       /* one more or one fewer than Archidekt holds now: another tab's presses add up, not overwrite */
       request("POST", "/collection/api/rows/" + encodeURIComponent(id), { delta: action === "inc" ? 1 : -1, name: name }).then(function (d) {
         $$("form.qty button", item).forEach(function (b) { b.disabled = false; });
-        if (!d.ok) { strip(failText(d, name), "error"); return; }
+        if (!d.ok) { failed(d, name); return; }
         if (!d.row || d.row.quantity === 0) { gone(item); return; }
         $$("output", item).forEach(function (o) { o.textContent = d.row.quantity; });
         say(name + ": " + d.row.quantity + (d.row.quantity === 1 ? " copy" : " copies"));
-      }).catch(function () {
-        $$("form.qty button", item).forEach(function (b) { b.disabled = false; });
-        strip(failText(null, name), "error");
       });
     });
     /* the shared menu's Details… opens the row's hidden hook; that opens the Details box */
@@ -251,11 +253,11 @@
       btns.forEach(function (b) { b.disabled = true; });
       request("POST", "/collection/api/rows/" + encodeURIComponent(form.getAttribute("data-id")), body).then(function (d) {
         btns.forEach(function (b) { b.disabled = false; });
-        if (!d.ok) { strip(failText(d, name), "error"); return; }
+        if (!d.ok) { failed(d, name); return; }
         applyRow(item, d.row || {});
         if (window.MtgBox) window.MtgBox.close();
         strip("Card details saved to your binder.", "ok");
-      }).catch(function () { btns.forEach(function (b) { b.disabled = false; }); strip(failText(null, name), "error"); });
+      });
     });
   }
 
@@ -324,11 +326,10 @@
     else if (params.get("dir") === "desc") params.delete("dir");
     var mine = ++searchSeq;
     if (list) list.setAttribute("aria-busy", "true");
-    fetch("/collection/api/rows?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
-      .then(function (r) { return r.json(); }).then(function (d) {
+    Fetch.answer("/collection/api/rows?" + params.toString()).then(function (d) {
         if (mine !== searchSeq) return;
         if (list) list.removeAttribute("aria-busy");
-        if (!d.ok) throw new Error(d.message || "");
+        if (!d.ok) throw d;
         if (list) { list.innerHTML = d.html; list.hidden = !d.total; }
         var c = $("#col-count");
         if (c) c.textContent = d.count_text;
@@ -343,10 +344,11 @@
         if (!/[?&]view=/.test(location.search)) params.delete("view");
         try { history.replaceState(history.state, "", "/collection" + (params.toString() ? "?" + params.toString() : "")); } catch (err) { /* keep the address */ }
         say(d.count_text + (params.get("q") ? " match “" + params.get("q") + "”." : "."));
-      }).catch(function () {
+      }).catch(function (d) {
         if (mine !== searchSeq) return;
         if (list) list.removeAttribute("aria-busy");
-        strip(NOT_ANSWERING, "error");
+        var pr = Fetch.problem(d, "the rows could not be read");
+        strip(pr.signedOut || pr.noConnection ? pr.text : NOT_ANSWERING, "error", pr.actions);
       });
   }
   if (listform) {
@@ -429,8 +431,8 @@
     var wrap = a.closest(".loadmore");
     var href = a.getAttribute("href").replace(/^\/collection(\?|$)/, "/collection/api/rows$1");
     a.setAttribute("aria-busy", "true"); a.setAttribute("aria-disabled", "true");
-    fetch(href, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) { return r.json(); }).then(function (d) {
-      if (!d.ok) throw new Error(d.message || "");
+    Fetch.answer(href).then(function (d) {
+      if (!d.ok) throw d;
       var tmp = document.createElement("ul");
       tmp.innerHTML = d.html;
       var first = null;
@@ -449,9 +451,10 @@
       say(d.shown + " of " + d.total + " shown.");
       var focus = first ? $(".thumbbtn, .kebab", first) : null;
       if (focus) focus.focus({ preventScroll: true });
-    }).catch(function () {
+    }).catch(function (d) {
       a.removeAttribute("aria-busy"); a.removeAttribute("aria-disabled");
-      strip(NOT_ANSWERING, "error");
+      var pr = Fetch.problem(d, "more rows could not be read");
+      strip(pr.signedOut || pr.noConnection ? pr.text : NOT_ANSWERING, "error", pr.actions);
     });
   });
 })();

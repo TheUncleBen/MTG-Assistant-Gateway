@@ -62,19 +62,12 @@
   function kebabOf(tr) { return $(".kebab", tr); }
 
   // (a form's .action is its action= input here, so the attribute is read instead)
+  // never rejects: signed out and no connection come back as {ok: false} in the site's words
   function postForm(path, fields) {
     var body = new URLSearchParams();
     Object.keys(fields).forEach(function (k) { if (fields[k] !== undefined && fields[k] !== null) body.append(k, fields[k]); });
     if (!fields.csrf) body.append("csrf", Menu.csrf());
-    return fetch(path, {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: body.toString()
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () {
-        return { ok: false, status: r.status, message: "The gateway sent an answer this page could not read. Reload the page to see whether the change was made." };
-      });
-    });
+    return window.MtgFetch.answer(path, { method: "POST", body: body.toString(), form: true });
   }
   function said(d, fallback) {
     if (d.verified === false) toast(d.notice || fallback, { error: true });
@@ -256,6 +249,13 @@
       if (gate) { gate.checked = false; gateButton(box, false); }
     }
   };
+  // what is typed into the custom card and template editors is kept and put back (static/draft.js),
+  // one draft per card or template being edited and one for a new one
+  function draftOf(box, mode, d) {
+    var form = box.id === "cc-box" ? $("#cc-f", box) : box.id === "tpl-box" ? $("#tpl-f", box) : null;
+    if (!form || !window.MtgDraft) return;
+    window.MtgDraft.keep(form, box.id + ":" + (mode === "edit" ? (d.id || d.name || "edit") : "new"));
+  }
   function openBox(id, mode, tr, back) {
     var box = document.getElementById(id);
     if (!box) return;
@@ -263,6 +263,7 @@
     var name = tr ? nameOf(tr) : "";
     clearNote(box);
     if (fillers[id]) fillers[id](box, mode, d);
+    draftOf(box, mode, d);
     retitle(box, mode, name);
     $$("[data-count]", box).forEach(countOf);
     Box.openElement(box, { returnFocus: back || (tr ? kebabOf(tr) : null) });
@@ -275,6 +276,7 @@
     if (!box || !fillers[box.id] || opener.closest(".tr")) return;
     clearNote(box);
     fillers[box.id](box, "new", {});
+    draftOf(box, "new", {});
     retitle(box, "new", "");
     $$("[data-count]", box).forEach(countOf);
   }, true);
@@ -504,7 +506,7 @@
     postForm(form.getAttribute("action"), { action: "edit", pin_id: $("[name=pin_id]", form).value, quantity: want }).then(function (d) {
       form.removeAttribute("aria-busy");
       $$("button", form).forEach(function (x) { x.disabled = false; });
-      if (!d.ok) { drawCopies(tr, dataOf(tr).quantity); toast(d.message || "Archidekt refused the change.", { error: true }); return; }
+      if (!d.ok) { drawCopies(tr, dataOf(tr).quantity); Menu.fail(d, "Archidekt refused the change."); return; }
       pinChanged(tr, { quantity: want });
       drawCopies(tr, want);
       said(d, "Saved on Archidekt.");
@@ -524,7 +526,7 @@
       ta.setAttribute("aria-busy", "true");
       postForm(form.getAttribute("action"), { action: "edit", pin_id: $("[name=pin_id]", form).value, notes: text }).then(function (d) {
         ta.removeAttribute("aria-busy");
-        if (!d.ok) { toast(d.message || "Archidekt refused the note.", { error: true }); return; }
+        if (!d.ok) { Menu.fail(d, "Archidekt refused the note."); return; }
         pinChanged(tr, { notes: text });
         said(d, "Saved on Archidekt.");
       }, function () { ta.removeAttribute("aria-busy"); toast(NO_CONNECTION, { error: true }); });
@@ -793,7 +795,7 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           use.disabled = false; drop.disabled = false; use.removeAttribute("aria-busy");
-          if (!d.ok) { toast(d.message || "Archidekt refused the picture.", { error: true }); return; }
+          if (!d.ok) { Menu.fail(d, "Archidekt refused the picture."); return; }
           resetCrop(crop, true);
           said(d, "Picture saved on Archidekt and read back.");
           var tr = $$(".lp .ui-table .tr[data-row]").filter(function (x) { return nameOf(x) === name; })[0];

@@ -450,10 +450,12 @@ def toolbar_html() -> str:
     return f"<div class='rt' role='toolbar' aria-label='Text style'>{buttons}</div>"
 
 
-def reply_form_html(csrf: str, me_name: str) -> str:
+def reply_form_html(csrf: str, me_name: str, thread_id: str = "") -> str:
     public = REPLY_PUBLIC.format(name=me_name) if me_name else REPLY_PUBLIC_UNNAMED
+    # the reply typed is kept and put back (static/draft.js), per thread
     return (
-        f"<form class='newcomment' data-forum='1' data-me-name='{esc(me_name)}'>"
+        f"<form class='newcomment' data-forum='1' data-me-name='{esc(me_name)}' "
+        f"data-draft='reply:{esc(thread_id)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<label for='ctext'>Your reply</label>"
         + toolbar_html()
@@ -697,7 +699,7 @@ def thread_html(
     }
     data = _json_for_html(pre)  # every < escaped: no reply can open a tag inside the block
     if can_write:
-        form = reply_form_html(csrf, me_name)
+        form = reply_form_html(csrf, me_name, str(tid))
     elif closed:
         form = ""
     elif not linked:
