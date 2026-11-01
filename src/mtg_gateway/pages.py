@@ -2325,7 +2325,7 @@ def _forget_choices_card(csrf_in: str) -> str:
     """Once view choices follow the account, signing out no longer resets them; this does."""
     return (
         "<div class='card' id='choices'>"
-        "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
+        "<p>Your views, card size, stats choices and dismissed tips follow your "
         "account to every device. Light or dark mode stays on each device.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
         # the tick on its own 44 px row, the button under it
