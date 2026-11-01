@@ -309,12 +309,24 @@ reload_read: ContextVar[set[Any] | None] = ContextVar("reload_read", default=Non
 _RELOAD_RE = re.compile(r"max-age\s*=\s*0\b|no-cache", re.I)
 
 
+# The Android app's pull to refresh loads the page with this header (WebView.loadUrl(url, headers),
+# PullRefresh.kt): the member asked for what is on Archidekt now. Said by the app itself rather
+# than read from the WebView's own reload headers, which Android does not document.
+PULL_HEADER = "x-mtg-pull"
+
+
+def is_pull(headers: Any) -> bool:
+    """Whether a page request is the Android app's pull to refresh (PULL_HEADER: 1)."""
+    return (headers.get(PULL_HEADER, "") or "").strip() == "1"
+
+
 def is_reload(headers: Any) -> bool:
-    """Whether a page request is a reload: Chrome (and the Android app's WebView, whose pull to
-    refresh is its reload) sends ``Cache-Control: max-age=0``, a hard reload ``no-cache`` (with
-    ``Pragma: no-cache``)."""
+    """Whether a page request is a reload: Chrome (and the Android app's WebView menu Reload)
+    sends ``Cache-Control: max-age=0``, a hard reload ``no-cache`` (with ``Pragma: no-cache``),
+    and the app's pull to refresh its own PULL_HEADER."""
     return bool(
-        _RELOAD_RE.search(headers.get("cache-control", "") or "")
+        is_pull(headers)
+        or _RELOAD_RE.search(headers.get("cache-control", "") or "")
         or "no-cache" in (headers.get("pragma", "") or "").lower()
     )
 
@@ -350,6 +362,12 @@ PAGE_DECK_STALE = 6 * 3600.0
 # The browser's Reload (and the app's pull to refresh) reads the deck again only when the copy on
 # show is older than this (owner decision, 0.7.46): a Reload right after a read shows it at once.
 PAGE_DECK_RELOAD = 30.0
+# The app's pull to refresh on a deck page always reads the deck from Archidekt again (through the
+# pacer and the member's Archidekt slot like any read), except that a read kept under this many
+# seconds ago is shown as it is: a second pull, or one fired twice, never queues another call in
+# the pacer every member shares for an answer Archidekt gave a moment ago (its gap between calls
+# is two seconds).
+PAGE_DECK_PULL_FLOOR = 3.0
 # When Archidekt can't be asked (busy, paused, unreachable), the deck page shows the member's last
 # read of the deck, read-only and dated, for up to this long after that read (0.7.46).
 PAGE_DECK_LAST = 24 * 3600.0
@@ -4684,7 +4702,7 @@ class DeckService:
         return deck
 
     async def page_deck_view(
-        self, sub: str, deck_ref: str, *, fresh: bool = False
+        self, sub: str, deck_ref: str, *, fresh: bool = False, pull: bool = False
     ) -> tuple[Deck, dict[str, Any]]:
         """``get_any_deck`` for showing a deck page, and how it was got. Switching between the
         deck's views, or coming back to it, within PAGE_DECK_SECONDS shows the deck as last read
@@ -4695,6 +4713,8 @@ class DeckService:
         all). ``fresh`` (the browser's Reload, the app's pull) shows a read younger than
         PAGE_DECK_RELOAD as it is, and an older one at once while it is read again
         (``{"checking": True, "reload": True}``), skipping the client's shared read cache.
+        ``pull`` (the app's pull to refresh) reads the deck now, skipping both, unless the kept
+        read is younger than PAGE_DECK_PULL_FLOOR.
         When the deck has to be read and Archidekt can't be asked (busy, paused, unreachable), the
         member's last good read of it within PAGE_DECK_LAST comes back with ``{"held_at": wall
         time of that read, "refused": the error}``, for a read-only page that says how old it is.
@@ -4702,7 +4722,11 @@ class DeckService:
         ttl = self.page_deck_seconds
         key = (sub, _clean_deck_id(deck_ref))
         hit = self._page_decks.get(key)
-        if hit is not None and ttl > 0:
+        if pull:
+            fresh = True
+            if hit is not None and ttl > 0 and time.monotonic() - hit[0] < PAGE_DECK_PULL_FLOOR:
+                return pickle.loads(hit[1]), {}
+        elif hit is not None and ttl > 0:
             age = time.monotonic() - hit[0]
             if age < (max(ttl, PAGE_DECK_RELOAD) if fresh else ttl):
                 return pickle.loads(hit[1]), {}  # a copy of its own: the page may change it
