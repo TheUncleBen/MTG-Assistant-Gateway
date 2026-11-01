@@ -675,3 +675,23 @@ async def test_a_provider_error_on_renewal_signs_nobody_out(
             assert (await b.http.get("/account/details")).status_code == 302
         assert any("idp_refused_refresh" in r.getMessage() for r in caplog.records), caplog.text
         await b.aclose()
+
+
+async def test_the_admin_api_waits_for_the_provider_like_the_admin_pages(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    """0.7.46 review: a GET of /api/v1/admin/* with the browser's cookie counted as a page being
+    read, so an admin just taken out of the admin group could still read the member list during
+    the background check."""
+    settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
+    async with running(Harness(settings, idp)) as h:
+        idp.user = {**idp.user, "groups": ["mtg-users", "mtg-admins"]}
+        b = Browser(h)
+        await b.login("/admin")
+        assert (await b.http.get("/api/v1/admin/users")).status_code == 200
+        _age_last_check(h, 10)  # past the 5 s cache
+        idp.set_groups(SUB, ["mtg-users"])  # still a member, no longer an admin
+        r = await b.http.get("/api/v1/admin/users")
+        assert r.status_code in (401, 403, 404), (r.status_code, r.text[:300])
+        assert "alice" not in r.text.lower()
+        await b.aclose()
