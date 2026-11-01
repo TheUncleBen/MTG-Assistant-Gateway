@@ -1396,7 +1396,7 @@ class Database:
             )
 
     def forget_assistant(self, sub: str, assistant: str | None = None) -> int:
-        """Forget one assistant (every one with None) when it is disconnected: connected again, it
+        """Forget one assistant (every one with None) when the member disconnects it: connected again, it
         starts at the member's default."""
         with self.tx() as c:
             if assistant is None:
