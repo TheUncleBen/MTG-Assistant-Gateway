@@ -3111,7 +3111,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         that is not empty asks first: the copies are added to what is there, never replace it."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         data = await form(request)
         if not check_csrf(sid, data):
             return restore_refused(sub, sid, "This form expired. Reload History and try again.", 403)
@@ -3160,7 +3160,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         """A copy of the Binder kept before a clear, as a CSV (History's Download CSV)."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         snap = binder_copy(sub, str(request.path_params["snap_id"]))
         if snap is None:
             return Response("That copy of your binder is no longer kept.", status_code=404)
