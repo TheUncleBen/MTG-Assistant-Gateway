@@ -644,7 +644,11 @@ type in a field.
 Only
 you can see your decks, proposals, snapshots, scans and collection; another
 member cannot reach them, and neither can their assistant. Nothing is
-public or indexed. Your Archidekt sign-in is stored encrypted; no page,
+public or indexed. Your binder stays on Archidekt; the gateway keeps a copy
+of it made just before **Clear binder** empties it (the card names,
+printings, finishes, conditions, languages, tags and prices paid, under
+History until you delete it) and, while a list import or a restore runs,
+the lines still to go in, which go once it has ended. Your Archidekt sign-in is stored encrypted; no page,
 admin tool, log or backup shows it, and backups leave it out, so after the
 gateway is restored from a backup you sign in again and relink Archidekt.
 The key that opens it is on the same server, so whoever runs the server
@@ -699,7 +703,7 @@ mentioned at the end.
 *What the person who runs this server can do*
 
 - The key that opens the session is on the same server. Anyone with access to the server, including the person who runs it, can use the session to act as you on Archidekt until it expires: read, change or delete your decks and collection, or anything else your sign-in allows. If Archidekt lets a session change your email or password (not known), they could use that to keep your account. They cannot get your password from the session.
-- They can read everything else the gateway keeps about you, unencrypted: your name, email, username, user ID and groups at the sign-in service, profile picture (if sent), sign-in and last-seen times, approval mode, Archidekt username and user number, proposed and applied deck and binder changes, deck snapshots, reports and covers, scans, connected assistants, usage counts and the activity log. The sign-in service's tokens the gateway keeps to check your groups use the same key, so they can open those too.
+- They can read everything else the gateway keeps about you, unencrypted: your name, email, username, user ID and groups at the sign-in service, profile picture (if sent), sign-in and last-seen times, approval mode, Archidekt username and user number, proposed and applied deck and binder changes, deck snapshots, the copy of your binder kept before a clear, the lines of an import while it runs, reports and covers, scans, connected assistants, usage counts and the activity log. The sign-in service's tokens the gateway keeps to check your groups use the same key, so they can open those too.
 - They control the code this server runs. This gateway's code never keeps your password, but changed code could.
 
 *What admins on this site can do*

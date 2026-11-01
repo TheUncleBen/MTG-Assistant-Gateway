@@ -284,8 +284,11 @@ async def test_a_clear_keeps_a_copy_that_history_restores_and_downloads(stack: S
         r = await b.http.post(
             "/collection/restore", data={"csrf": await b.csrf("/history"), "snapshot_id": snap_id}
         )
-        assert r.status_code == 200 and "Your binder is not empty" in r.text
-        assert "name='confirm' value='1'" in r.text and len(_rows(stack)) == 5
+        # ... in a box on the Binder page (test_polish3_0746 has the box)
+        assert r.status_code == 303 and r.headers["location"] == f"/collection?restore={snap_id}", r.text
+        asked = (await b.http.get(r.headers["location"], headers=NAV)).text
+        assert "Your binder is not empty" in asked and "id='col-restore'" in asked
+        assert "name='confirm' value='1'" in asked and len(_rows(stack)) == 5
     finally:
         await b.aclose()
 
