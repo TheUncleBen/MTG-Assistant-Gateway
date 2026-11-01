@@ -24,7 +24,10 @@ from .test_decks_and_proxy import Browser, call, linked_user, structured
 stack_options = stack_with(SHIPPED)
 WHO = "alice"
 P, E, D = "/account/details/profile", "/account/details/email", "/account/details/defaults"
-BELL_WHERE = "Turn them off under Account › Account details › Email and alerts on Archidekt."
+BELL_WHERE = (
+    "Choose which of the gateway's alerts you get under Account › Account details › Push notifications,"
+    " and Archidekt's under Email and alerts on Archidekt."
+)
 
 
 def _png(size: tuple[int, int] = (64, 64), fmt: str = "PNG") -> bytes:
@@ -473,11 +476,11 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     # the page without scripts
     page = (await member.http.get("/notifications")).text
     assert "<title>Alerts" in page and "amy commented on “Meren”" in page
-    assert profile_page.BELL_NOTE in page and "href='/account/details/email'" in page
-    # the note names the card as Account details titles it (review F12), in the page and the box
+    assert _said(page, profile_page.BELL_NOTE) and "href='/account/details/email'" in page
+    # the note names the cards as Account details titles them (review F12), in the page and the box
     assert BELL_WHERE in profile_page.BELL_NOTE
     bell_js = (Path(profile_page.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
-    assert BELL_WHERE in bell_js and "Account › Email and alerts." not in bell_js
+    assert BELL_WHERE.replace("'", "\u2019") in bell_js and "Account › Email and alerts." not in bell_js
     assert "aria-current=page" in page.split("class='icon-btn bell'", 1)[1][:160]
 
 

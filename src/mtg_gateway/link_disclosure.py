@@ -129,7 +129,8 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "They can read everything else the gateway keeps about you, unencrypted: your name, "
             "email, username, user ID and groups at the sign-in service, profile picture (if "
             "sent), sign-in and last-seen times, approval mode, Archidekt username and user "
-            "number, proposed and applied deck and binder changes, deck snapshots, reports and "
+            "number, proposed and applied deck and binder changes, deck snapshots, the copy of "
+            "your binder kept before a clear, the lines of an import while it runs, reports and "
             "covers, scans, connected assistants, usage counts and the activity log. The sign-in "
             "service's tokens the gateway keeps to check your groups use the same key, so they can "
             "open those too.",

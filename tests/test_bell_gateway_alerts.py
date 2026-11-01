@@ -79,3 +79,14 @@ async def test_the_bell_keeps_the_newest_alerts_only(stack: Stack) -> None:
     assert gw.db.unseen_gateway_alerts(sub) == notify.KEPT_ALERTS
     gw.db.mark_gateway_alerts_seen(sub)
     assert gw.db.unseen_gateway_alerts(sub) == 0
+
+
+async def test_delete_my_data_takes_the_member_s_bell_alerts_too(stack: Stack) -> None:
+    gw = stack.gw
+    await (await linked_browser(stack)).aclose()  # a member exists
+    sub = _sub(gw)
+    gw.db.add_gateway_alert(sub, "prices", "Sol Ring fell below $10", "Sol Ring is $9.50.", "/watchlist")
+    assert gw.db.gateway_alerts(sub)
+    out = gw.db.delete_member_data(sub)
+    assert out["gateway_alerts"] == 1
+    assert gw.db._conn.execute("SELECT count(*) FROM gateway_alerts").fetchone()[0] == 0

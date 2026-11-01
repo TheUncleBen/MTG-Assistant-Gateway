@@ -1068,6 +1068,7 @@ MEMBER_TABLES = (
     ("notify_prefs", "sub"),
     ("account_prefs", "sub"),
     ("assistant_modes", "sub"),  # the approval mode they chose for each assistant
+    ("gateway_alerts", "sub"),  # the gateway's own alerts kept for their bell
     ("card_models", "added_by"),  # their simulator card models go too
     ("backup_deletes", "sub"),  # their queued backup deletes go with their snapshots
     ("users", "sub"),

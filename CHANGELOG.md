@@ -21,13 +21,14 @@ scanner finds more cards, new Archidekt alerts reach your phone, and the whole g
 name per thing.
 
 ### Upgrade notes
-- **The database goes to schema 21**: one live chat card per change (16), sign-ins kept per device
+- **The database goes to schema 22**: one live chat card per change (16), sign-ins kept per device
   with the reason you were signed out (17), Binder records and prices (18), a waiting deck
   change's deck once applied, for its review page (19), each connected assistant's own approval
-  mode (20), and the Watchlist's lists with the price a card had when it was added (21). The
-  gateway saves a copy before it upgrades, as in [docs/UPGRADING.md](docs/UPGRADING.md). Existing
-  sign-ins carry on. Every assistant starts on the approval mode you have now, so nothing changes
-  until you pick another. Cards you already watch keep their alerts and sit in no list; the
+  mode (20), the Watchlist's lists with the price a card had when it was added (21), and the
+  gateway's own alerts kept for the website's bell (22). The steps from 15 to 22 run by
+  themselves at the first start. The gateway saves a copy before it upgrades, as in
+  [docs/UPGRADING.md](docs/UPGRADING.md). Existing sign-ins carry on. Every assistant starts on
+  the approval mode you have now, so nothing changes until you pick another. Cards you already watch keep their alerts and sit in no list; the
   default price alert goes on cards you watch from now on. A card watched by name alone starts a
   new price history from the first daily price check; a watch limit already saved on the Settings
   page stays as saved.
