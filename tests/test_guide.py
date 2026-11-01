@@ -94,7 +94,7 @@ def test_the_search_finds_topics_and_marks_the_match() -> None:
 def test_the_navigation_is_described_from_the_navigation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", True)
     text = guide.nav_description(html_out=False)
-    for label in ("Home", "Decks", "Binder", "Assistant", "More", "Cards", "Wants", "Watchlist", "Proposals"):
+    for label in ("Home", "Decks", "Binder", "Assistant", "More", "Cards", "Lists", "Watchlist", "Proposals"):
         assert label in text, label
     for _g, links in theme.more_groups():
         for _h, label, _i in links:

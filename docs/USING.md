@@ -33,7 +33,7 @@ you the exact change first.
 <!-- nav:start -->
 
 On a phone the tabs at the bottom are Home, Decks, Binder and Assistant, then
-More. Binder holds Cards, Wants and Watchlist, switched at its top; Assistant
+More. Binder holds Cards, Lists and Watchlist, switched at its top; Assistant
 holds Proposals, History and Reports the same way, and shows how many
 proposals are waiting. More opens Search decks and cards, Precons, Scan, Card models and Forum; the magnifier at the top opens the search box for cards
 and decks. On a wider touch screen, such as an unfolded foldable or a tablet,
@@ -41,7 +41,7 @@ and in the Android app from 600 px, the same places are on a rail down the
 left edge, then Scan, Precons, Card models, Forum and Alerts, with no More. A
 computer's browser shows them all in the top bar when it is wide enough, else
 the four places with More as a drop-down, and a search box beside them. Your
-picture at the top right opens the Account page: Account details, My lists,
+picture at the top right opens the Account page: Account details, Lists,
 My activity, the look, the Guide, the assistant skill and the apps, and Sign
 out.
 
@@ -288,7 +288,7 @@ same confirmation when a change is large; kept for review while writes are
 off), so nothing skips your approval settings. Without a linked Archidekt
 account the button is disabled and says why. A card's menu (right-click, or
 press and hold) also has **Pin card**, which pins it on Archidekt: it then
-shows under **Pinned** in My lists.
+shows under **Pinned cards** in Binder › Lists.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,
@@ -463,7 +463,7 @@ Watchlists are on unless the operator turns them off; then the page, the
 card viewer's price buttons and your assistant's watchlist abilities are not
 there.
 
-The **Watchlist** page (Binder › Watchlist; Binder's switch holds Cards, Wants
+The **Watchlist** page (Binder › Watchlist; Binder's switch holds Cards, Lists
 and Watchlist) keeps the price of cards and decks you choose, once a day:
 
 - **Watch a card** by name, or one printing by its set code and number, in

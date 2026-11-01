@@ -377,7 +377,7 @@ def nav_description(*, html_out: bool = True) -> str:
         f"places are on a rail down the left edge, then {', '.join(rail)} and {b('Alerts')}, with no More. "
         "A computer's browser shows them all in the top bar when it is wide enough, else the four "
         "places with More as a drop-down, and a search box beside them. Your "
-        "picture at the top right opens the Account page: Account details, My lists, My activity, "
+        "picture at the top right opens the Account page: Account details, Lists, My activity, "
         "the look, the Guide, the assistant skill and the apps, and Sign out."
     )
     if html_out:
