@@ -44,6 +44,7 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from . import dbwait
 from .db import Database
 from .theme import esc as _esc
 from .theme import icon, in_app
@@ -405,6 +406,7 @@ class Notifier:
         finally:
             if self._http is None:
                 await http.aclose()
+            await dbwait.settle()  # a background job's database work waits off the loop
         if r.status_code >= 300:
             logger.warning("ntfy publish refused: HTTP %d", r.status_code)
             return False

@@ -22,7 +22,7 @@ import zlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import card_models, deck_stats
+from . import card_models, dbwait, deck_stats
 from . import forge as forge_module
 from .archidekt import Deck, DeckCard
 from .db import Database, _like
@@ -908,7 +908,7 @@ class ReportService:
                 stored.set_result(rid)
 
         run = job(mark) if job is not None else self.run(sub, deck_ref, forge=forge, on_stored=mark)
-        task = loop.create_task(run)
+        task = loop.create_task(self._as_job(run))
         self._background.add(task)
         task.add_done_callback(self._ended)
         await asyncio.wait({task, stored}, return_when=asyncio.FIRST_COMPLETED)
@@ -938,7 +938,7 @@ class ReportService:
 
         async def go() -> None:
             try:
-                await work
+                await self._as_job(work)
             except Exception:  # never left unread: the run says what happened (see _start_forge)
                 logger.exception("handing report %s to Forge failed", rid)
                 self._start_broke(rid)
@@ -2071,7 +2071,16 @@ class ReportService:
         except RuntimeError:  # no running loop (a synchronous caller); the next async one starts it
             pass
 
+    async def _as_job(self, work: Awaitable[Any]) -> Any:
+        """A run going on by itself: its database work after each answer waits off the loop."""
+        with dbwait.job(self.db):
+            return await work
+
     async def _refresh_forge_runs(self) -> None:
+        with dbwait.job(self.db):
+            await self._refresh_forge_runs_now()
+
+    async def _refresh_forge_runs_now(self) -> None:
         assert self.forge is not None
         finals = tuple(FINAL_STATES)
         while True:

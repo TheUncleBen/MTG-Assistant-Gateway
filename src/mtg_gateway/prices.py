@@ -41,6 +41,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import dbwait
 from .binder_prices import BINDER_PAGE_SIZE, PRICED_FOR_DAYS, BinderStore
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, owns_deck
@@ -1606,7 +1607,12 @@ class DailyJobs:
             )
 
     async def run_due(self) -> dict[str, Any]:
-        """Run what is due now; returns what ran (empty when nothing was due)."""
+        """Run what is due now; returns what ran (empty when nothing was due). Its database work
+        after each Scryfall or Archidekt answer, and after each step, waits off the loop."""
+        with dbwait.job(self.db):
+            return await self._run_due()
+
+    async def _run_due(self) -> dict[str, Any]:
         t = now()
         day = day_of(t)
         if _dt.datetime.fromtimestamp(t, _dt.UTC).hour < self.hour:
@@ -1619,9 +1625,11 @@ class DailyJobs:
                 logger.warning("daily price check failed, trying again later: %s", exc.__class__.__name__)
                 out["prices"] = {"error": exc.__class__.__name__}
             else:
+                await dbwait.settle()
                 self._mark("prices", day, out["prices"])
         if self.summaries is not None and self._last_day("summaries") != day:
             out["summaries"] = await self.summaries.send_due(day)
+            await dbwait.settle()
             self._mark("summaries", day, {"sent": out["summaries"]})
         return out
 
