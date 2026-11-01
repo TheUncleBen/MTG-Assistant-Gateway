@@ -239,8 +239,19 @@ def _open(server: Server, ctx, sid: str):  # noqa: F811
 
 
 def _goto(server: Server, page, path: str, zoom: str | None = None) -> None:  # noqa: F811
+    from playwright.sync_api import Error as PlaywrightError
+
     server.db.delete_prefs("user-1", prefixes=("view.",))
-    r = page.goto(f"{server.base}{path}", wait_until="networkidle")
+    try:
+        r = page.goto(f"{server.base}{path}", wait_until="networkidle")
+    except PlaywrightError as exc:
+        # a drop-down the sweep closed gives its history entry back as the next page is asked
+        # for, and the browser keeps the page's own back() and drops the sweep's navigation:
+        # once that back() has landed, the page is asked for again
+        if "ERR_ABORTED" not in str(exc):
+            raise
+        page.wait_for_load_state("networkidle")
+        r = page.goto(f"{server.base}{path}", wait_until="networkidle")
     assert r is not None and r.status == 200, (path, r and r.status)
     if zoom:
         page.evaluate(zoom)
