@@ -147,7 +147,16 @@ async def test_the_members_own_write_forgets_every_kept_read(stack: Stack) -> No
     gw = stack.gw
     try:
         w = Watch(stack)
-        paths = ("/decks/42/settings", "/decks/api/folders", "/notifications", "/forum", "/users/alice")
+        # Binder › Lists: the pins at /collection/wants and a list's tab use the same kept reads
+        paths = (
+            "/decks/42/settings",
+            "/decks/api/folders",
+            "/notifications",
+            "/forum",
+            "/users/alice",
+            "/collection/wants",
+            "/lists/templates",
+        )
         for path in paths:
             await _view(b, path)
         n = len(w.asked)
