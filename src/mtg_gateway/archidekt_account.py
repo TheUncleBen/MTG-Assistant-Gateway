@@ -171,6 +171,33 @@ class AccountRequests:
     async def delete_color_tag(self: ArchidektClient, token: str, tag_id: int) -> None:
         await self._request("DELETE", f"/decks/colorTags/{_id(tag_id, 'color tag id')}/", token=token)
 
+    # -- the collection's own tags and clearing it (0.7.46, Archidekt parity release 3) -----------
+    # The routes are archidekt.com's (its _app script, parity research 2026-10-22: POST
+    # /collection/tags/, PATCH and DELETE /collection/modifyTag/{id}/, DELETE /collection/clear/).
+    # Their bodies were not recorded: the tag bodies below follow the color tag list's own
+    # ({name, color}; the whole tag object on an edit) and the clear sends none. The member's tag
+    # list is the ``tags`` field of the collection listing (ArchidektClient.collection_page). All
+    # of it is for the owner's first live run on the TEST account; every caller reads back.
+
+    async def create_collection_tag(self: ArchidektClient, token: str, name: str, color: str) -> Any:
+        body = AccountRequests._tag_body(name, color)
+        return await self._request("POST", "/collection/tags/", token=token, json_body=body)
+
+    async def update_collection_tag(self: ArchidektClient, token: str, tag: dict[str, Any]) -> Any:
+        tid = _id(tag.get("id"), "collection tag id")
+        body = {**tag, **AccountRequests._tag_body(tag.get("name"), tag.get("color")), "id": tid}
+        return await self._request("PATCH", f"/collection/modifyTag/{tid}/", token=token, json_body=body)
+
+    async def delete_collection_tag(self: ArchidektClient, token: str, tag_id: int) -> None:
+        await self._request(
+            "DELETE", f"/collection/modifyTag/{_id(tag_id, 'collection tag id')}/", token=token
+        )
+
+    async def clear_collection(self: ArchidektClient, token: str) -> None:
+        """Every record of the member's collection, gone. No undo on Archidekt: the gateway keeps
+        a snapshot of the whole binder first (collection_bulk.clear)."""
+        await self._request("DELETE", "/collection/clear/", token=token)
+
     # -- pinned cards: /users/pins/ ----------------------------------------------------------------
 
     async def pins(self: ArchidektClient, token: str) -> list[dict[str, Any]]:

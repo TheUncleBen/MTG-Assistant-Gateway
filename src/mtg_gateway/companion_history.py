@@ -885,6 +885,7 @@ def add_history_routes(
             snap = state.db.get_snapshot(snap_id, sub)
             if not snap:
                 raise DeckError("not_found", SNAPSHOT_GONE)
+            decks.snapshot(sub, snap_id)  # a copy of the binder is not a deck to test: refused
             deck = parse_deck(snap["deck"])
             return reports.run(sub, snap_id, deck=deck, snapshot_id=snap_id, on_stored=mark)
 

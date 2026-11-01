@@ -17,7 +17,7 @@ from .decks import DeckError
 LIST_FIELD = Field(
     description=(
         "Which list: templates (category templates), default_categories (each card's preset "
-        "categories), color_tags, pins (pinned cards) or custom_cards."
+        "categories), color_tags, pins (pinned cards), custom_cards or collection_tags."
     )
 )
 
@@ -67,6 +67,7 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
             "- color_tags: create {name (32 characters at most), color (hex, default #fa890d)}; edit "
             "{name, new_name?, color?}; delete {name}. Cards already tagged keep their old name and "
             "color.\n"
+            "- collection_tags (binder tags): as color_tags.\n"
             "- pins: pin {card, set_code?, collector_number?, finish? (Normal, Foil or Etched), "
             "quantity?, notes?}; edit {card or pin_id, quantity?, notes?, finish?, set_code? and "
             "collector_number? for another printing}; unpin {card or pin_id}; remove_all {}.\n"
@@ -79,8 +80,8 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
             "Each change is checked against the list as it is now. Returns the proposal (kind "
             "'lists') and its review URL; it is applied with apply_proposal like any other. A small "
             "change is low risk (assistant_may_apply says when you may apply it yourself); a delete "
-            "(a template, a color tag, a custom card, or all pins) always waits for the user's own "
-            "press. Changes nothing on Archidekt by itself."
+            "(or remove_all pins) always waits for the user's own press. Changes nothing on Archidekt "
+            "by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,
