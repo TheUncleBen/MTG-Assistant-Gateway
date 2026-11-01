@@ -173,6 +173,9 @@
       document.body.classList.contains("app");
   };
   var enc = encodeURIComponent;
+  // Mockup screen 3, for the owner: on a narrow phone the card menu's "More" group starts folded, so the
+  // count, the main rows and Remove fit one screen; false shows it open, as on wider screens.
+  var MORE_FOLDED_ON_PHONE = false;
   function readJson(attr, fallback) { try { return JSON.parse(cards.getAttribute(attr)) || fallback; } catch (e) { return fallback; } }
   var deckCats = readJson("data-cats", []);
   var sideCat = cards.getAttribute("data-side") || "Maybeboard";
@@ -600,75 +603,26 @@
       toast("Removed " + name + ".", { actions: [undo] });
     }, function () { /* told */ });
   }
-  // the menu's items for a custom card: its count, Move to and removal, Copy name; Lock personal
-  // categories is shown but not offered (Archidekt keeps no default categories for them)
+  // the menu's items for a custom card, in the same shape as a printed card's: the count in the
+  // head, then Open card, Move to and Color tag…, Mana value… and Copy name under More, and the
+  // removal last. No Printings…, Watch or Add to binder (a custom card has no printings or
+  // price), and no Lock categories: Archidekt keeps no default categories for a custom card (the
+  // endpoint says so, CUSTOM_LOCK, should a tool ask).
   function customItems(m, card, name) {
+    var edits = own && deckId;
+    menuHead(m, card, name, edits ? customStep : null);
     m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
-    if (!(own && deckId)) {
+    if (!edits) {
       if (window.MtgMenu) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
       return;
     }
-    var row = el("div", "item qtyrow");
-    row.setAttribute("role", "none");
-    row.appendChild(el("span", "lbl", "Quantity"));
-    var minus = el("button", "step", "−");
-    minus.type = "button";
-    minus.setAttribute("role", "menuitem");
-    var n = el("b", "n", String(qtyOf(card)));
-    var plus = el("button", "step", "+");
-    plus.type = "button";
-    plus.setAttribute("role", "menuitem");
-    var relabel = function () {
-      var q = qtyOf(card);
-      n.textContent = String(q);
-      minus.setAttribute("aria-label", q <= 1 ? "Remove the last copy of " + name : "One fewer " + name + ": " + (q - 1));
-      plus.setAttribute("aria-label", "One more " + name + ": " + (q + 1));
-    };
-    relabel();
-    qtyLabels.push({ el: n, card: card, show: relabel });
-    minus.addEventListener("click", function (e) { stop(e); customStep(card, -1); });
-    plus.addEventListener("click", function (e) { stop(e); customStep(card, 1); });
-    row.appendChild(minus); row.appendChild(n); row.appendChild(plus);
-    m.appendChild(row);
-    var moveBtn = menuItem("Move to", "swap", null, "more");
-    moveBtn.setAttribute("aria-haspopup", "true");
-    moveBtn.setAttribute("aria-expanded", "false");
-    moveBtn.appendChild(el("span", "chev", "›"));
-    var sub = el("div", "sub");
-    sub.setAttribute("role", "group");
-    sub.setAttribute("aria-label", "Categories");
-    sub.hidden = true;
-    categoryChoices(card).forEach(function (c) {
-      var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () { closeMenu(); customMove(card, c.name); }, c.current ? "on" : "");
-      if (c.side) b.title = "Not counted in the deck";
-      if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
-      sub.appendChild(b);
-    });
-    var toggleSub = function (open) {
-      sub.hidden = !open;
-      moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
-      if (!open) return;
-      fit(m);
-      var end = sub.offsetTop + sub.offsetHeight - m.clientHeight;
-      if (m.scrollTop < end) m.scrollTop = Math.min(moveBtn.offsetTop, end);
-      var f = $("button:not([disabled])", sub);
-      if (f) f.focus({ preventScroll: true });
-    };
-    moveBtn.addEventListener("click", function (e) { stop(e); toggleSub(sub.hidden); });
-    moveBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleSub(true); } });
-    sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
-    m.appendChild(moveBtn);
-    m.appendChild(sub);
-    // Archidekt's card extras for a custom card in your own deck: the color tag and the mana value
+    moveToItems(m, card, customMove);
     m.appendChild(menuItem("Color tag…", "tag", function () { customTagForm(card, m); }));
-    m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
+    var more = [menuItem("Mana value…", "edit", function () { manaValueForm(card, m); })];
+    if (window.MtgMenu) more.push(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
+    appendGroup(m, "More", more, MORE_FOLDED_ON_PHONE && narrow());
+    m.appendChild(el("div", "sep"));
     m.appendChild(menuItem(removeLabel(card), "x", function () { customRemove(card); }, "danger"));
-    // no Lock personal categories: Archidekt keeps no default categories for a custom card
-    // (the endpoint says so, CUSTOM_LOCK, should a tool ask)
-    if (window.MtgMenu) {
-      m.appendChild(el("div", "sep"));
-      m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); window.MtgMenu.copyAndSay(name, "Name copied."); }));
-    }
   }
 
   // A custom card's picture comes through the gateway's own route (deckpage.custom_picture_url)
@@ -1903,9 +1857,16 @@
   // -- card viewer (static/cardview.js shows the whole card; this adds the deck's actions) -------
   var CardView = window.MtgCardView;
   function closeViewer() { if (CardView) CardView.close(); }
+  // The viewer's action rows (mockup screen 3): [− n +] [Move to…] [Remove], then [Add to
+  // binder] [Edit in deck editor]; its Printing row opens the Printings sheet (openPrintings),
+  // and EDHREC, TCGplayer and Scryfall are the viewer's own pills. Remove is the red outline: a
+  // solid red button is for a final confirm only (U10a).
   function openViewer(card) {
     if (!CardView) return;
     var name = card.getAttribute("data-card") || "";
+    var data = CardView.fromElement(card);
+    var prints = openPrintings(card);
+    if (prints) data.onPrintings = prints;
     var acts = [];
     if (own && deckId) {
       var ctl = el("span", "qtyctl");
@@ -1929,10 +1890,6 @@
       plus.addEventListener("click", function () { stepQty(card, 1); });
       ctl.appendChild(minus); ctl.appendChild(n); ctl.appendChild(plus);
       acts.push(ctl);
-      var rm = el("button", "btn btn-danger", removeLabel(card));
-      rm.type = "button";
-      rm.addEventListener("click", function () { removeCard(card); });
-      acts.push(rm);
       var move = el("button", "btn", "Move to…");
       move.type = "button";
       move.addEventListener("click", function () {
@@ -1940,29 +1897,41 @@
         setTimeout(function () { var r = card.getBoundingClientRect(); openMenu(card, r.left + r.width / 2, r.top + r.height / 2, { submenu: true }); }, 50);
       });
       acts.push(move);
+      var rm = el("button", "btn btn-outline-danger", removeLabel(card));
+      rm.type = "button";
+      rm.addEventListener("click", function () { removeCard(card); });
+      acts.push(rm);
       if (!isCustom(card)) {
+        acts.push(el("span", "br"));  // the next actions on a row of their own
+        var ownBtn = el("button", "btn", "Add to binder");
+        ownBtn.type = "button";
+        ownBtn.addEventListener("click", function () { addToBinder(ownBtn, name); });
+        acts.push(ownBtn);
         var editLink = el("a", "btn", "Edit in deck editor");
         editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
         acts.push(editLink);
       }
+      CardView.open(data, acts);
+      return;
     }
-    if (isCustom(card)) { CardView.open(CardView.fromElement(card), acts); return; }  // no collection or Scryfall row for a custom card
-    var ownBtn = el("button", "btn", "Add to binder");
-    ownBtn.type = "button";
-    ownBtn.addEventListener("click", function () {
-      ownBtn.disabled = true;
-      ownBtn.textContent = "Adding…";
-      fetch("/collection/api/add", {
-        method: "POST", credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-        body: JSON.stringify({ items: [{ name: name, quantity: 1 }], source: "manual" })
-      }).then(function (r) { return r.json(); }).then(function (d) {
-        ownBtn.textContent = d.ok && d.added && d.added.length ? "Added to your binder" : "Could not add (" + ((d && d.message) || "lookup failed") + ")";
-      }).catch(function () { ownBtn.textContent = "Could not add: no connection"; });
-    });
-    acts.push(ownBtn);
-    acts.push(scryfallLink(name));
-    CardView.open(CardView.fromElement(card), acts);
+    if (isCustom(card)) { CardView.open(data, acts); return; }  // no binder row for a custom card
+    var binderBtn = el("button", "btn", "Add to binder");
+    binderBtn.type = "button";
+    binderBtn.addEventListener("click", function () { addToBinder(binderBtn, name); });
+    acts.push(binderBtn);
+    CardView.open(data, acts);
+  }
+  // one copy into the binder, the button saying how it went
+  function addToBinder(btn, name) {
+    btn.disabled = true;
+    btn.textContent = "Adding…";
+    fetch("/collection/api/add", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
+      body: JSON.stringify({ items: [{ name: name, quantity: 1 }], source: "manual" })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      btn.textContent = d.ok && d.added && d.added.length ? "Added to your binder" : "Could not add (" + ((d && d.message) || "lookup failed") + ")";
+    }).catch(function () { btn.textContent = "Could not add: no connection"; });
   }
   function scryfallLink(name, cls) {
     var scry = el("a", cls || "btn", "Open on Scryfall");
@@ -1976,11 +1945,13 @@
   // A themed menu (the shared .menu styling) in place of the browser's; Escape, a click or tap
   // outside, scrolling and the phone's Back button close it, and focus goes back to the card.
   var menu = null, menuCard = null, menuStack = null, menuPushed = false, menuFocusBack = false, ignorePop = false;
+  var menuScrim = null;  // the dimmed page under the phone's sheet
   function closeMenu(fromHistory) {
     if (!menu) return;
     var m = menu, card = menuCard, stack = menuStack, back = menuFocusBack;
     menu = null; menuCard = null; menuStack = null; menuFocusBack = false;
     m.remove();
+    if (menuScrim) { menuScrim.remove(); menuScrim = null; }
     if (menuPushed && !fromHistory) {
       // going back over the menu's entry fires popstate later; that one is ours, not a Back press
       menuPushed = false;
@@ -2017,50 +1988,67 @@
     var src = tpl ? tpl.content.querySelector("[data-ic='" + name + "'] svg") : null;
     return src ? src.cloneNode(true) : iconSlot();
   }
-  function openMenu(card, x, y, opts) {
-    opts = opts || {};
-    closeMenu();
-    var name = card.getAttribute("data-card") || "";
-    var m = el("div", "menu ctxmenu");
-    m.setAttribute("role", "menu");
-    m.setAttribute("aria-label", "Card: " + name);
-    var head = el("div", "head", name);
-    m.appendChild(head);
-    if (isCustom(card)) { customItems(m, card, name); } else {
-    m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
-    if (document.body.hasAttribute("data-watchlist")) {
-      // watch the card's price, or browse its printings and watch one (the picker's browse mode)
-      var CardMenu = window.MtgCardMenu;
-      if (CardMenu && CardMenu.isWatched(name)) {
-        // watched already (any printing): the item opens its watchlist entry
-        var onList = el("a", "", "");
-        onList.href = "/watchlist?q=" + enc(name);
-        onList.setAttribute("role", "menuitem");
-        onList.appendChild(icon("check"));
-        onList.appendChild(document.createTextNode("On your watchlist"));
-        m.appendChild(onList);
-      } else {
-        m.appendChild(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
-      }
-      // the one Printings… item: browse and watch a printing, and on the member's own deck also
-      // put it in the deck (artVariants); the row's edits below then have none of their own
-      if (window.MtgPrintPick) m.appendChild(menuItem("Printings…", "image", function () { closeMenu(); artVariants(card); }));
+  // A group's name inside the menu (Elsewhere, More)
+  function groupHead(text) { return el("div", "ghead", text); }
+  // A group of items under its name; folded (``fold``) it is a row that opens the group, so the
+  // phone's sheet shows the count, the main rows and Remove in one screen and the rarer items on
+  // one more tap. The arrow keys reach the row; its items join the list once it is open.
+  function appendGroup(m, name, nodes, fold) {
+    if (!nodes.length) return;
+    if (!fold) {
+      m.appendChild(groupHead(name));
+      nodes.forEach(function (n) { m.appendChild(n); });
+      return;
     }
-    // one copy into the collection, as the viewer's "I own this card" (the shared layer's call)
-    var Shared = window.MtgMenu;
-    if (Shared) m.appendChild(menuItem("Add to binder", "collection", function () { closeMenu(); Shared.collect(name); }));
-    if (Shared && Shared.pin) m.appendChild(menuItem("Pin card", "pin", function () { closeMenu(); Shared.pin(name); }));
-    if (own && deckId) {
-      var row = el("div", "item qtyrow");
-      row.setAttribute("role", "none");
-      row.appendChild(el("span", "lbl", "Quantity"));
+    var btn = el("button", "ghead fold", "");
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    btn.setAttribute("aria-haspopup", "true");
+    btn.setAttribute("aria-expanded", "false");
+    btn.appendChild(iconSlot());
+    btn.appendChild(document.createTextNode(name));
+    btn.appendChild(el("span", "chev", "›"));
+    var grp = el("div", "grp");
+    grp.setAttribute("role", "group");
+    grp.setAttribute("aria-label", name);
+    grp.hidden = true;
+    nodes.forEach(function (n) { grp.appendChild(n); });
+    btn.addEventListener("click", function (e) {
+      stop(e);
+      var open = grp.hidden;
+      grp.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!open) return;
+      fit(m);
+      var end = grp.offsetTop + grp.offsetHeight - m.clientHeight;
+      if (m.scrollTop < end) m.scrollTop = Math.min(btn.offsetTop, end);
+      var f = $("[role=menuitem]:not([disabled]), [role=menuitemcheckbox]:not([disabled])", grp);
+      if (f) f.focus({ preventScroll: true });
+    });
+    btn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight" && grp.hidden) { stop(e); btn.click(); } });
+    m.appendChild(btn);
+    m.appendChild(grp);
+  }
+  // a phone (the narrow window, not the Fold or the app on a wide screen): the menu is a sheet
+  // from the bottom over the dimmed page, as every other menu there (static/cardmenu.js)
+  function narrow() { return window.matchMedia("(max-width: 599.98px)").matches; }
+  // The menu's head: the card's name and, on your own deck, its count with − and + (the most
+  // used action first, with no scrolling). The menu stays open for more steps; each shows at once
+  // and saves in the background. ``step``: the function a press calls with the card and ±1.
+  function menuHead(m, card, name, step) {
+    var top = el("div", "headrow");
+    var head = el("div", "head");
+    head.appendChild(el("span", "nm", name));
+    top.appendChild(head);
+    if (step) {
+      var row = el("div", "qtyrow");
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", "Copies of " + name + " in the deck");
       var minus = el("button", "step", "−");
       minus.type = "button";
-      minus.setAttribute("role", "menuitem");
       var n = el("b", "n", String(qtyOf(card)));
       var plus = el("button", "step", "+");
       plus.type = "button";
-      plus.setAttribute("role", "menuitem");
       var relabel = function () {
         var q = qtyOf(card);
         n.textContent = String(q);
@@ -2068,134 +2056,195 @@
         plus.setAttribute("aria-label", "One more " + name + ": " + (q + 1));
       };
       relabel();
-      // the menu stays open for more steps; each shows at once and saves in the background
       qtyLabels.push({ el: n, card: card, show: relabel });
-      minus.addEventListener("click", function (e) { stop(e); stepQty(card, -1); });
-      plus.addEventListener("click", function (e) { stop(e); stepQty(card, 1); });
+      minus.addEventListener("click", function (e) { stop(e); step(card, -1); });
+      plus.addEventListener("click", function (e) { stop(e); step(card, 1); });
       row.appendChild(minus); row.appendChild(n); row.appendChild(plus);
-      m.appendChild(row);
-      var moveBtn = menuItem("Move to", "swap", null, "more");
-      moveBtn.setAttribute("aria-haspopup", "true");
-      moveBtn.setAttribute("aria-expanded", "false");
-      moveBtn.appendChild(el("span", "chev", "›"));
-      var sub = el("div", "sub");
-      sub.setAttribute("role", "group");
-      sub.setAttribute("aria-label", "Categories");
-      sub.hidden = true;
-      categoryChoices(card).forEach(function (c) {
-        var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () { closeMenu(); moveTo(card, c.name); }, c.current ? "on" : "");
-        if (c.side) b.title = "Not counted in the deck";
-        if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
-        sub.appendChild(b);
-      });
-      var toggleSub = function (open) {
-        sub.hidden = !open;
-        moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
-        if (!open) return;
-        fit(m);
-        // the opened list in view inside the menu (which scrolls in a short window), from its
-        // Move to item down as far as fits
-        var end = sub.offsetTop + sub.offsetHeight - m.clientHeight;
-        if (m.scrollTop < end) m.scrollTop = Math.min(moveBtn.offsetTop, end);
-        var f = $("button:not([disabled])", sub);
-        if (f) f.focus({ preventScroll: true });
-      };
-      moveBtn.addEventListener("click", function (e) { stop(e); toggleSub(sub.hidden); });
-      moveBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleSub(true); } });
-      sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
-      m.appendChild(moveBtn);
-      m.appendChild(sub);
-      // Finish: Normal, Foil or Etched, the card's own marked; the gateway refinishes cards in
-      // the deck itself, so a maybeboard or sideboard row has no Finish list
-      if (zoneOf(card) === "main") {
-        var finBtn = menuItem("Finish", "layers", null, "finbtn");
-        finBtn.setAttribute("aria-haspopup", "true");
-        finBtn.setAttribute("aria-expanded", "false");
-        finBtn.appendChild(el("span", "chev", "›"));
-        var finSub = el("div", "finsub");
-        finSub.setAttribute("role", "group");
-        finSub.setAttribute("aria-label", "Finishes");
-        finSub.hidden = true;
-        var curFin = finishOf(card);
-        FINISH_CHOICES.forEach(function (f) {
-          var b = menuItem(f, f === curFin ? "check" : "", function () { setFinishOf(card, f); }, f === curFin ? "on" : "");
-          if (f === curFin) { b.disabled = true; b.setAttribute("aria-current", "true"); }
-          finSub.appendChild(b);
-        });
-        var toggleFin = function (open) {
-          finSub.hidden = !open;
-          finBtn.setAttribute("aria-expanded", open ? "true" : "false");
-          if (!open) return;
-          fit(m);
-          var f = $("button:not([disabled])", finSub);
-          if (f) f.focus({ preventScroll: true });
-        };
-        finBtn.addEventListener("click", function (e) { stop(e); toggleFin(finSub.hidden); });
-        finBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleFin(true); } });
-        finSub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleFin(false); finBtn.focus(); } });
-        m.appendChild(finBtn);
-        m.appendChild(finSub);
-      }
-      // every row: a row of a card that has other rows (a maybeboard row, say) changes on its own
-      // (with watchlists on, Printings… is already above, with the watch items)
-      if (window.MtgPrintPick && !document.body.hasAttribute("data-watchlist")) m.appendChild(menuItem("Printings…", "image", function () { closeMenu(); changePrinting(card); }));
-      if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
-      m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
-      // Archidekt's card menu switches: on shows a check, as the Move to list's current category
-      var comp = menuItem("Companion", card.hasAttribute("data-companion") ? "check" : "", function () { switchRow(card, "companion"); }, card.hasAttribute("data-companion") ? "on" : "");
-      comp.setAttribute("role", "menuitemcheckbox");
-      comp.setAttribute("aria-checked", card.hasAttribute("data-companion") ? "true" : "false");
-      m.appendChild(comp);
-      if ((card.getAttribute("data-card") || "").indexOf("//") >= 0) {
-        var back = menuItem("Show back face", card.hasAttribute("data-flipped") ? "check" : "", function () { switchRow(card, "back_face"); }, card.hasAttribute("data-flipped") ? "on" : "");
-        back.setAttribute("role", "menuitemcheckbox");
-        back.setAttribute("aria-checked", card.hasAttribute("data-flipped") ? "true" : "false");
-        m.appendChild(back);
-      }
-      m.appendChild(menuItem(removeLabel(card), "x", function () { removeCard(card); }, "danger"));
-      m.appendChild(el("div", "sep"));
-      // Lock personal categories (deck_extras.py): the card's categories here become its default
-      // categories on Archidekt; not for a custom card, which has none there
-      if (window.MtgDeckExtras && document.getElementById("lock") && !card.hasAttribute("data-custom")) {
-        m.appendChild(menuItem("Lock personal categories", "lock", function () {
-          var cats = catsOf(card);
-          closeMenu();
-          window.MtgDeckExtras.open("lock", { card: name, cats: cats });
-        }));
-      }
-      // the shared card menu's items on your own deck too (F6, M9): Add to deck… and Open on Scryfall
-      var addLink = el("a", "", "");
-      addLink.setAttribute("role", "menuitem");
-      addLink.href = "/cards?q=" + enc(name);
-      addLink.appendChild(icon("plus"));
-      addLink.appendChild(document.createTextNode("Add to deck…"));
-      m.appendChild(addLink);
-      if (Shared) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
-      var ownScry = scryfallLink(name, "");
-      ownScry.setAttribute("role", "menuitem");
-      ownScry.insertBefore(icon("external"), ownScry.firstChild);
-      m.appendChild(ownScry);
-      var editLink = el("a", "", "");
-      editLink.setAttribute("role", "menuitem");
-      editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
-      editLink.appendChild(icon("edit"));
-      editLink.appendChild(document.createTextNode("Edit in deck editor"));
-      m.appendChild(editLink);
+      top.appendChild(row);
+    }
+    m.appendChild(top);
+  }
+  // Move to ›: the deck's categories (and "Not counted in the deck" ones) in a list that opens
+  // inside the menu; ``mover`` moves the card (moveTo, or customMove for a custom card)
+  function moveToItems(m, card, mover) {
+    var moveBtn = menuItem("Move to", "swap", null, "more");
+    moveBtn.setAttribute("aria-haspopup", "true");
+    moveBtn.setAttribute("aria-expanded", "false");
+    moveBtn.appendChild(el("span", "chev", "›"));
+    var sub = el("div", "sub");
+    sub.setAttribute("role", "group");
+    sub.setAttribute("aria-label", "Categories");
+    sub.hidden = true;
+    categoryChoices(card).forEach(function (c) {
+      var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () { closeMenu(); mover(card, c.name); }, c.current ? "on" : "");
+      if (c.side) b.title = "Not counted in the deck";
+      if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
+      sub.appendChild(b);
+    });
+    var toggleSub = function (open) {
+      sub.hidden = !open;
+      moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!open) return;
+      fit(m);
+      // the opened list in view inside the menu (which scrolls in a short window), from its
+      // Move to item down as far as fits
+      var end = sub.offsetTop + sub.offsetHeight - m.clientHeight;
+      if (m.scrollTop < end) m.scrollTop = Math.min(moveBtn.offsetTop, end);
+      var f = $("button:not([disabled])", sub);
+      if (f) f.focus({ preventScroll: true });
+    };
+    moveBtn.addEventListener("click", function (e) { stop(e); toggleSub(sub.hidden); });
+    moveBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleSub(true); } });
+    sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
+    m.appendChild(moveBtn);
+    m.appendChild(sub);
+  }
+  // Finish ›: Normal, Foil or Etched, the card's own marked; the gateway refinishes cards in the
+  // deck itself, so a maybeboard or sideboard row has no Finish list
+  function finishItems(card) {
+    var frag = document.createDocumentFragment();
+    var m = menu;
+    var finBtn = menuItem("Finish", "layers", null, "finbtn");
+    finBtn.setAttribute("aria-haspopup", "true");
+    finBtn.setAttribute("aria-expanded", "false");
+    finBtn.appendChild(el("span", "chev", "›"));
+    var finSub = el("div", "finsub");
+    finSub.setAttribute("role", "group");
+    finSub.setAttribute("aria-label", "Finishes");
+    finSub.hidden = true;
+    var curFin = finishOf(card);
+    FINISH_CHOICES.forEach(function (f) {
+      var b = menuItem(f, f === curFin ? "check" : "", function () { setFinishOf(card, f); }, f === curFin ? "on" : "");
+      if (f === curFin) { b.disabled = true; b.setAttribute("aria-current", "true"); }
+      finSub.appendChild(b);
+    });
+    var toggleFin = function (open) {
+      finSub.hidden = !open;
+      finBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!open) return;
+      fit(m);
+      var f = $("button:not([disabled])", finSub);
+      if (f) f.focus({ preventScroll: true });
+    };
+    finBtn.addEventListener("click", function (e) { stop(e); toggleFin(finSub.hidden); });
+    finBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleFin(true); } });
+    finSub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleFin(false); finBtn.focus(); } });
+    frag.appendChild(finBtn);
+    frag.appendChild(finSub);
+    return frag;
+  }
+  // The one Printings… sheet (the viewer's Printing row opens it too): browse the card's
+  // printings and watch one, and on your own deck put one in the deck (artVariants); with
+  // watchlists off, on your own deck, the pick alone (changePrinting). Null where there is
+  // neither (someone else's deck with watchlists off).
+  function openPrintings(card) {
+    if (!window.MtgPrintPick) return null;
+    if (document.body.hasAttribute("data-watchlist")) return function () { artVariants(card); };
+    if (own && deckId) return function () { changePrinting(card); };
+    return null;
+  }
+  // A menu link (Add to deck…, Edit in deck editor, Open on Scryfall)
+  function menuLink(text, ic, href) {
+    var a = el("a", "", "");
+    a.setAttribute("role", "menuitem");
+    a.href = href;
+    a.appendChild(icon(ic));
+    a.appendChild(document.createTextNode(text));
+    return a;
+  }
+  // Report card… (deck_extras.py): to Archidekt's moderators, on any deck the member can read;
+  // not for the member's own custom card in their own deck (Archidekt's menu hides it there too)
+  function reportItem(card, name) {
+    if (!window.MtgDeckExtras || !document.getElementById("reportcard") || (own && isCustom(card))) return null;
+    return menuItem("Report card…", "flag", function () { closeMenu(); window.MtgDeckExtras.open("reportcard", { card: name }); });
+  }
+  // The menu, in one standard shape (mockup screen 3): the card's name with its count in the
+  // head; Open card, Printings…, Move to › and Color tag…; "Elsewhere" (the watchlist, the
+  // binder, a pin, another deck); "More" (the card's switches, the editor, Copy name, Scryfall,
+  // Report card…); then Remove from deck alone after a line, in red. On someone else's deck the
+  // editing items are not offered.
+  function openMenu(card, x, y, opts) {
+    opts = opts || {};
+    closeMenu();
+    var name = card.getAttribute("data-card") || "";
+    var m = el("div", "menu ctxmenu");
+    m.setAttribute("role", "menu");
+    m.setAttribute("aria-label", "Card: " + name);
+    var sheet = narrow();
+    if (sheet) m.classList.add("cs-menu");
+    menu = m;
+    var Shared = window.MtgMenu, CardMenu = window.MtgCardMenu;
+    var edits = own && deckId;
+    if (isCustom(card)) {
+      customItems(m, card, name);
+      var rep = reportItem(card, name);
+      if (rep) m.appendChild(rep);
     } else {
-      if (Shared) m.appendChild(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
+      menuHead(m, card, name, edits ? stepQty : null);
+      m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
+      var prints = openPrintings(card);
+      if (prints) m.appendChild(menuItem("Printings…", "image", function () { closeMenu(); prints(); }));
+      if (edits) {
+        moveToItems(m, card, moveTo);
+        if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
+      }
+      // Elsewhere: the card beyond this deck
+      var elsewhere = [];
+      if (document.body.hasAttribute("data-watchlist")) {
+        if (CardMenu && CardMenu.isWatched(name)) {
+          // watched already (any printing): the item opens its watchlist entry
+          elsewhere.push(menuLink("On your watchlist", "check", "/watchlist?q=" + enc(name)));
+        } else {
+          elsewhere.push(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
+        }
+      }
+      // one copy into the binder, as the viewer's Add to binder (the shared layer's call)
+      if (Shared) elsewhere.push(menuItem("Add to binder", "collection", function () { closeMenu(); Shared.collect(name); }));
+      if (Shared && Shared.pin) elsewhere.push(menuItem("Pin card", "pin", function () { closeMenu(); Shared.pin(name); }));
+      elsewhere.push(menuLink(edits ? "Add to another deck…" : "Add to deck…", "plus", "/cards?q=" + enc(name)));
+      appendGroup(m, "Elsewhere", elsewhere, false);
+      // More: the card's own switches and the rest
+      var more = [];
+      if (edits) {
+        more.push(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
+        // Archidekt's card menu switches: on shows a check, as the Move to list's current category
+        var comp = menuItem("Companion", card.hasAttribute("data-companion") ? "check" : "", function () { switchRow(card, "companion"); }, card.hasAttribute("data-companion") ? "on" : "");
+        comp.setAttribute("role", "menuitemcheckbox");
+        comp.setAttribute("aria-checked", card.hasAttribute("data-companion") ? "true" : "false");
+        more.push(comp);
+        if (name.indexOf("//") >= 0) {
+          var back = menuItem("Show back face", card.hasAttribute("data-flipped") ? "check" : "", function () { switchRow(card, "back_face"); }, card.hasAttribute("data-flipped") ? "on" : "");
+          back.setAttribute("role", "menuitemcheckbox");
+          back.setAttribute("aria-checked", card.hasAttribute("data-flipped") ? "true" : "false");
+          more.push(back);
+        }
+        if (zoneOf(card) === "main") more.push(finishItems(card));
+        // Lock categories (deck_extras.py): the card's categories here become its default
+        // categories on Archidekt
+        if (window.MtgDeckExtras && document.getElementById("lock")) {
+          more.push(menuItem("Lock categories", "lock", function () {
+            var cats = catsOf(card);
+            closeMenu();
+            window.MtgDeckExtras.open("lock", { card: name, cats: cats });
+          }));
+        }
+        more.push(menuLink("Edit in deck editor", "edit", "/decks/" + enc(deckId) + "/edit#card-" + enc(name)));
+      }
+      if (Shared) more.push(menuItem("Copy name", "copy", function () { closeMenu(); Shared.copyAndSay(name, "Name copied."); }));
       var scry = scryfallLink(name, "");
       scry.setAttribute("role", "menuitem");
       scry.insertBefore(icon("external"), scry.firstChild);
-      m.appendChild(scry);
-    }
-    }
-    // Report card… (deck_extras.py): to Archidekt's moderators, on any deck the member can read;
-    // not for the member's own custom card in their own deck (Archidekt's menu hides it there too)
-    if (window.MtgDeckExtras && document.getElementById("reportcard") && !(own && isCustom(card))) {
-      m.appendChild(menuItem("Report card…", "flag", function () { closeMenu(); window.MtgDeckExtras.open("reportcard", { card: name }); }));
+      more.push(scry);
+      var report = reportItem(card, name);
+      if (report) more.push(report);
+      appendGroup(m, "More", more, MORE_FOLDED_ON_PHONE && narrow());
+      if (edits) {
+        m.appendChild(el("div", "sep"));
+        m.appendChild(menuItem(removeLabel(card), "x", function () { removeCard(card); }, "danger"));
+      }
     }
     m.addEventListener("keydown", function (e) {
-      var items = $$("[role=menuitem]:not([disabled]), [role=menuitemcheckbox]:not([disabled])", m).filter(function (b) { return b.offsetParent !== null; });
+      var items = $$(".qtyrow .step:not([disabled]), [role=menuitem]:not([disabled]), [role=menuitemcheckbox]:not([disabled])", m).filter(function (b) { return b.offsetParent !== null; });
       var i = items.indexOf(document.activeElement);
       if (e.key === "Escape") { stop(e); closeMenu(); return; }
       if (e.key === "ArrowDown") { stop(e); (items[i + 1] || items[0]).focus(); }
@@ -2211,17 +2260,24 @@
     menuFocusBack = true;
     menuScroll = [window.scrollX, window.scrollY];
     m.style.visibility = "hidden";
+    if (sheet) {
+      menuScrim = el("div", "cs-scrim");
+      document.body.appendChild(menuScrim);
+    }
     document.body.appendChild(m);
     m.style.left = x + "px";
     m.style.top = y + "px";
     fit(m);
     m.style.visibility = "";
     if (opts.submenu && own) { var mb = $(".more", m); if (mb) mb.click(); }
-    var first = $("[role=menuitem]:not([disabled])", m);
+    // focus starts on Open card, the first row under the head (the head's − and + are reached
+    // with the arrow keys)
+    var first = $("[role=menuitem]:not([disabled]):not(.step)", m);
     if (first && !(opts.submenu && own)) first.focus();
     if (phone()) { try { history.pushState({ menu: 1, card: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; } }
   }
   function fit(m) {
+    if (m.classList.contains("cs-menu")) return;  // the phone's sheet sits at the bottom, its own height
     // keep the whole menu inside the window: never a horizontal scrollbar, never off the bottom
     var pad = 8;
     // measured at its own height, not at the cap an earlier fit put on it: a list opened inside
@@ -2256,7 +2312,11 @@
       openMenu(card, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40));
     }
   });
-  document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target)) closeMenu(); }, true);
+  // a press outside the menu closes it; a press on a toast's button (Undo, Try again) does not,
+  // since the menu's count steps keep it open while their saves are said
+  document.addEventListener("pointerdown", function (e) {
+    if (menu && !menu.contains(e.target) && !e.target.closest(".deck-toast")) closeMenu();
+  }, true);
   document.addEventListener("keydown", function (e) { if (menu && e.key === "Escape" && !menu.contains(e.target)) { closeMenu(); } });
   // the page scrolling away closes the menu (a list inside it may scroll; a scroll that ended
   // just before the menu opened reports itself a frame later and does not count)
@@ -2317,6 +2377,7 @@
   // Undo when every step can be put back. The assistant never reaches this path.
   var picking = false;
   var togglePick = function () {};
+  var setPickMode = function () {};  // the View sheet's Select cards switch (a phone)
   if (own && deckId) (function () {
     var bar = el("div", "bulkbar");
     bar.setAttribute("role", "region");
@@ -2420,6 +2481,7 @@
     function setMode(on) {
       picking = on;
       cards.classList.toggle("picking", on);
+      bar.classList.toggle("on", on);  // a phone shows the bar only while selecting
       start.setAttribute("aria-pressed", on ? "true" : "false");
       start.hidden = on;
       tools.hidden = !on;
@@ -2449,6 +2511,7 @@
       refresh();
     });
     document.addEventListener("keydown", function (e) { if (picking && e.key === "Escape" && !document.querySelector(".confirmbar, .cardview.open, .deck-toast[role=alertdialog]")) setMode(false); });
+    setPickMode = setMode;
 
     // One change per card name and zone: two rows of a card in one zone are one Archidekt row
     // set as far as a set_category or a remove is concerned.
@@ -2605,6 +2668,139 @@
       });
       run(changes, inverses, "Finish set to " + to + ".");
     });
+  })();
+
+  // -- the toolbar on a phone (mockup screen 5) --------------------------------------------------
+  // One row: Quick add with its +, View and ⋮. View opens a sheet with Layout, Card size (the
+  // picture views), Group by, Sort by, Filter and a Select cards switch; each drives the server's
+  // own control, hidden there (a layout, grouping or sort change reloads the page as it always
+  // did, the filter applies as you type). ⋮ holds Add a package, Undo and Redo, which the phone
+  // had lost. Wider screens keep the toolbar as it is (the CSS shows one or the other).
+  (function () {
+    var toolbar = $(".toolbar.panel"), controls = toolbar && $(".controls", toolbar), vf = $("#viewform");
+    if (!toolbar || !controls || !vf || !window.MtgBox) return;
+    var Menu = window.MtgMenu, Box = window.MtgBox;
+    var viewBtn = el("button", "btn viewbtn", "");
+    viewBtn.type = "button";
+    viewBtn.setAttribute("aria-haspopup", "dialog");
+    viewBtn.appendChild(icon("layers"));
+    viewBtn.appendChild(document.createTextNode("View"));
+    viewBtn.appendChild(el("span", "chev", "\u2304"));
+    viewBtn.addEventListener("click", openViewSheet);
+    controls.appendChild(viewBtn);
+    var addpkg = $(".quickrow .addpkg", toolbar);
+    if (own && deckId) {
+      var moreBtn = el("button", "btn toolmore", "");
+      moreBtn.type = "button";
+      moreBtn.setAttribute("aria-haspopup", "menu");
+      moreBtn.setAttribute("aria-label", "More: Add a package, Undo and Redo");
+      moreBtn.appendChild(Menu ? Menu.icon("more") : icon("more"));  // the shared layer's ⋮
+      moreBtn.addEventListener("click", function () {
+        if (!Menu) return;
+        var items = [];
+        if (addpkg && !addpkg.hasAttribute("aria-disabled")) {
+          items.push(Menu.item("Add a package…", "package", function () { Menu.whenClosed(function () { addpkg.click(); }); }));
+        }
+        items.push(Menu.item("Undo", "history", undoLast, { disabled: !undoBtnEl || undoBtnEl.disabled, title: "Nothing to undo" }));
+        items.push(Menu.item("Redo", "history", redoLast, { disabled: !redoBtnEl || redoBtnEl.disabled, title: "Nothing to redo" }));
+        var r = moreBtn.getBoundingClientRect();
+        Menu.open({ head: "Deck tools", label: "Deck tools", items: items, focusBack: moreBtn }, r.left, r.bottom + 4);
+      });
+      controls.appendChild(moreBtn);
+    }
+    toolbar.classList.add("compact");
+    // the one "hold a card to move it" line, above the cards, on a touch phone
+    if (canDrag && touch && narrow()) {
+      var hint = el("p", "movehint", "Hold a card to move it to another category.");
+      cards.parentNode.insertBefore(hint, cards);
+      cards.setAttribute("data-hint-top", "");
+    }
+    function mirror(sel, label) {
+      var row = el("div", "vrow");
+      var lab = el("label", null, label);
+      var copy = el("select");
+      copy.id = "vs-" + sel.name;
+      lab.htmlFor = copy.id;
+      $$("option", sel).forEach(function (o) {
+        var c = el("option", null, o.textContent);
+        c.value = o.value;
+        copy.appendChild(c);
+      });
+      copy.value = sel.value;
+      copy.addEventListener("change", function () {
+        sel.value = copy.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));  // the form applies on change
+      });
+      row.appendChild(lab);
+      row.appendChild(copy);
+      return row;
+    }
+    function openViewSheet() {
+      var body = el("div", "viewsheet");
+      var view = vf.elements.view, group = vf.elements.group, sort = vf.elements.sort;
+      if (view) body.appendChild(mirror(view, "Layout"));
+      var sizes = $(".cardsize .sizeseg", vf);
+      if (sizes) {
+        var srow = el("div", "vrow");
+        srow.appendChild(el("span", "lbl", "Card size"));
+        var seg = el("span", "sizeseg");
+        seg.setAttribute("role", "group");
+        seg.setAttribute("aria-label", "Card size");
+        $$("button", sizes).forEach(function (b) {
+          var c = el("button", "", b.textContent);
+          c.type = "button";
+          c.setAttribute("aria-label", b.getAttribute("aria-label") || b.textContent);
+          c.setAttribute("aria-pressed", b.getAttribute("aria-pressed") || "false");
+          c.addEventListener("click", function () {
+            b.click();  // static/prefs.js applies and keeps it
+            $$("button", seg).forEach(function (x) { x.setAttribute("aria-pressed", x === c ? "true" : "false"); });
+          });
+          seg.appendChild(c);
+        });
+        srow.appendChild(seg);
+        body.appendChild(srow);
+      }
+      if (group) body.appendChild(mirror(group, "Group by"));
+      if (sort) body.appendChild(mirror(sort, "Sort by"));
+      var q = $("#q", vf);
+      if (q) {
+        var frow = el("div", "vrow");
+        var flab = el("label", null, "Filter");
+        var fin = el("input");
+        fin.type = "search";
+        fin.id = "vs-q";
+        flab.htmlFor = fin.id;
+        fin.placeholder = q.placeholder || "eg: Sol Ring";
+        fin.autocomplete = "off";
+        fin.value = q.value;
+        fin.addEventListener("input", function () {
+          q.value = fin.value;
+          q.dispatchEvent(new Event("input", { bubbles: true }));  // the live filter
+        });
+        frow.appendChild(flab);
+        frow.appendChild(fin);
+        body.appendChild(frow);
+      }
+      if (own && deckId) {
+        var prow = el("div", "vrow");
+        prow.appendChild(el("span", "lbl", "Select cards"));
+        var sw = el("label", "switch");
+        var swIn = el("input");
+        swIn.type = "checkbox";
+        swIn.checked = picking;
+        swIn.setAttribute("aria-label", "Select cards");
+        swIn.addEventListener("change", function () {
+          setPickMode(swIn.checked);
+          if (swIn.checked) Box.close();  // the select bar is under the sheet
+        });
+        sw.appendChild(swIn);
+        sw.appendChild(el("span", "track"));
+        prow.appendChild(sw);
+        body.appendChild(prow);
+      }
+      var done = Box.button("Done", "btn", null, { cancel: true });
+      Box.open({ title: "View", body: body, actions: [done], returnFocus: viewBtn });
+    }
   })();
 
   // -- own deck: drag cards between categories; each drop is saved to Archidekt at once ---------
@@ -3104,33 +3300,39 @@
   // deck, Clone deck, Test and play) is not repeated here, and the deck's proposals are the
   // banner's Proposals pill. Items that change the deck show on your own decks only, and not
   // while the deck is still being made (its page says so; the gateway would refuse them).
+  // Mockup screen 2's choices, for the owner (each one flips here): Add a package… in this menu as well
+  // as the toolbar's button (false: the button alone); the Registration PDF as a row of the
+  // Export box (false: its own item here); one Contests… item that asks enter or withdraw
+  // (false: the two items); Share second, as "Share" (false: third, "Share and print").
+  var PACKAGE_IN_MENU = false, PDF_IN_EXPORT = true, ONE_CONTESTS_ITEM = true, SHARE_SECOND = true;
   function items() {
     var id = enc(d.id), out = [], edits = d.own && !d.making;
     if (edits) {
       out.push(head("This deck"));
       out.push(item("Rename…", "edit", renameDeck));
       out.push(item("Move to folder…", "folder", moveDeck));
-      if (d.can && document.getElementById("package")) out.push(item("Add a package…", "package", extras("package")));
+      if (PACKAGE_IN_MENU && d.can && document.getElementById("package")) out.push(item("Add a package…", "package", extras("package")));
       out.push(link("Deck settings", "settings", "/decks/" + id + "/settings"));
       out.push(sep());
     }
-    out.push(head("Look into it"));
-    out.push(link("Deck stats", "report", "/decks/" + id + "#stats"));
-    out.push(link("Deck reports", "stats", "/reports?deck_id=" + id));
-    if (d.can) out.push(item("Compare with…", "layers", openBox("compare")));
-    out.push(link("History and snapshots", "history", "/history?deck_id=" + id));
-    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) out.push(item("Watch deck price", "eye", function () { window.MtgDeckWatch(d.id); }));
-    out.push(sep());
-    out.push(head("Share and print"));
-    out.push(item("Share…", "send", share));
-    if (d.can) out.push(item("Export…", "download", openBox("export")));
-    if (d.can && document.getElementById("pdf")) out.push(item("Registration PDF…", "pdf", extras("pdf")));
-    out.push(link("Open on Archidekt", "external", "https://archidekt.com/decks/" + id, { ext: true }));
+    var shareItems = [head(SHARE_SECOND ? "Share" : "Share and print"), item("Share…", "send", share)];
+    if (d.can) shareItems.push(item("Export…", "download", openBox("export")));
+    if (!PDF_IN_EXPORT && d.can && document.getElementById("pdf")) shareItems.push(item("Registration PDF…", "pdf", extras("pdf")));
+    shareItems.push(link("Open on Archidekt", "external", "https://archidekt.com/decks/" + id, { ext: true }));
+    var look = [head("Look into it"), link("Deck stats", "report", "/decks/" + id + "#stats"), link("Deck reports", "stats", "/reports?deck_id=" + id)];
+    look.push(link("History", "history", "/history?deck_id=" + id));
+    if (d.can) look.push(item("Compare with…", "layers", openBox("compare")));
+    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) look.push(item("Watch price", "eye", function () { window.MtgDeckWatch(d.id); }));
+    if (SHARE_SECOND) out = out.concat(shareItems, [sep()], look);
+    else out = out.concat(look, [sep()], shareItems);
     var community = [];
     if (d.own && d.can && document.getElementById("help")) {
-      community.push(item("Request deck help…", "hand", extras("help")));
-      community.push(item("Enter in a contest…", "trophy", extras("contest")));
-      community.push(item("Withdraw from a contest…", "trophy", extras("withdraw")));
+      community.push(item("Deck help…", "hand", extras("help")));
+      if (ONE_CONTESTS_ITEM) community.push(item("Contests…", "trophy", contests));
+      else {
+        community.push(item("Enter in a contest…", "trophy", extras("contest")));
+        community.push(item("Withdraw from a contest…", "trophy", extras("withdraw")));
+      }
     }
     if (d.can && document.getElementById("report")) community.push(item("Report deck…", "flag", extras("report")));
     if (community.length) { out.push(sep()); out.push(head("Community")); out = out.concat(community); }
@@ -3140,6 +3342,35 @@
     }
     return out;
   }
+  // Contests…: one item; the box offers entering the deck in a contest or withdrawing an entry
+  // (the two boxes of deck_extras.py), as the share box offers its ways
+  function contests() {
+    var rows = el("div", "sharebox");
+    function row(text, ic, note, which) {
+      var b = el("button", "btn sharerow", "");
+      b.type = "button";
+      b.appendChild(Menu.icon(ic));
+      b.appendChild(el("span", "t", text));
+      if (note) b.appendChild(el("small", "", note));
+      b.addEventListener("click", function () {
+        Box.close();
+        setTimeout(extras(which), 60);
+      });
+      rows.appendChild(b);
+    }
+    row("Enter this deck in a contest…", "trophy", "with a summary of the deck", "contest");
+    row("Withdraw from a contest…", "x", "takes the deck's entry back", "withdraw");
+    Box.open({ title: "Contests: “" + d.name + "”", body: rows, actions: [cancelButton("Close")], returnFocus: btn });
+  }
+  // the Export box's Registration PDF row opens the PDF box through its own script (the fields
+  // it fills), not the plain box-open way
+  var regpdf = $("#export .regpdf");
+  if (regpdf) regpdf.addEventListener("click", function (e) {
+    if (!window.MtgDeckExtras || !document.getElementById("pdf")) return;  // the link's own address
+    e.preventDefault();
+    Box.close();
+    setTimeout(extras("pdf"), 60);
+  });
 
   // Share: in the app, the phone's own share sheet (MainActivity's MtgNative.share, with Open on
   // Archidekt, Copy gateway link and Copy deck list as its own actions); in a browser, a box with
@@ -3188,7 +3419,8 @@
     testBtn.type = "button";
     testBtn.setAttribute("aria-haspopup", "menu");
     testBtn.appendChild(Menu.icon("play"));
-    testBtn.appendChild(document.createTextNode(" Test and play"));
+    testBtn.appendChild(document.createTextNode(" Test"));
+    testBtn.appendChild(el("span", "lg", "and play"));  // the long label, on wide screens
     testDd.parentNode.insertBefore(testBtn, testDd);
     testBtn.addEventListener("click", function () {
       var id = enc(d.id), t = [head("On the gateway"), link("Goldfish", "layers", "/decks/" + id + "/goldfish")];

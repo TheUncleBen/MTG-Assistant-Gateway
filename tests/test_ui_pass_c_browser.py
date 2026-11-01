@@ -360,8 +360,8 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
         menu.wait_for(state="visible")
         items = [t.split("\n")[0] for t in _items(page)]
         assert items[0] == "Open card" and "Move to" in items and "Remove from deck" in items, items
-        # no Lock personal categories (Archidekt keeps no default categories for a custom card)
-        assert "Lock personal categories" not in items and "Copy name" in items
+        # no Lock categories (Archidekt keeps no default categories for a custom card)
+        assert "Lock categories" not in items and "Copy name" in items
         # Archidekt's own custom card menu offers the colour tag and the mana value
         assert "Color tag…" in items and "Mana value…" in items, items
         # ... and no report of the member's own card (kept on another member's deck)
@@ -370,6 +370,7 @@ def test_a_custom_cards_menu_on_the_deck_page(server: Server, width: int, theme:
             "Edit in deck editor",
             "Open on Scryfall",
             "Add to deck…",
+            "Add to another deck…",
             "Report card…",
         ):
             assert gone not in items, items

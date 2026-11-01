@@ -436,8 +436,13 @@ def test_chips_filters_sizes_and_searches_respond_at_once(server: Server) -> Non
             current = page.evaluate("() => document.documentElement.getAttribute('data-card-size')")
             other = sizes.filter(has_not=page.locator(f"[data-card-size-set='{current}']")).first
             if d.width < 600 and not other.is_visible():
-                other = page.locator("[data-card-size-set]:visible").first
-            back = page.locator(f"[data-card-size-set='{current}']").first
+                # a phone (0.7.46, mockup screen 5): the View sheet holds the card size switch
+                page.locator(".toolbar .viewbtn").click()
+                page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet .sizeseg").wait_for(timeout=3000)
+                other = page.locator(".viewsheet .sizeseg button[aria-pressed=false]").first
+                back = page.locator(".viewsheet .sizeseg button", has_text=current.upper()).first
+            else:
+                back = page.locator(f"[data-card-size-set='{current}']").first
             undo = partial(back.click, no_wait_after=True)
             ms = d.measure(partial(other.click, no_wait_after=True), reset=undo, budget=CHIP_MS)
             slow.append(("card size", d.width, ms))

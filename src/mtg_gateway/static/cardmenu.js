@@ -377,7 +377,7 @@
     o = o || {};
     var opts = {
       name: name,
-      current: null,
+      current: o.current || null,  // the printing on show, marked in the list (the viewer's Printing row)
       finish: "nonfoil",
       returnFocus: o.returnFocus || null,
       onWatch: function (p, finish) {
