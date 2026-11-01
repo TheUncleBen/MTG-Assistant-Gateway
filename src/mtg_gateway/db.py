@@ -908,6 +908,27 @@ def _step_19(conn: sqlite3.Connection) -> None:
     _add_column(conn, "proposals", "deck_after_json", "TEXT")
 
 
+def _step_20(conn: sqlite3.Connection) -> None:
+    """0.7.46: each connected assistant's own approval mode (assistants.py). One row per member and
+    assistant: Claude (claude.ai) and ChatGPT (chatgpt.com) are one assistant each however many
+    times they connect; any other app, and one on the member's own computer, is its own (``app:``
+    and its client id). ``mode`` NULL follows the member's default (``users.approval_mode``),
+    which is how every assistant starts, so the upgrade changes no one's mode. ``first_seen_at`` is
+    when it first signed in, ``opened_at`` when the member first saw it (its page, or it was
+    connected before this step): until then it shows New and the notice on Home."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS assistant_modes (
+            sub TEXT NOT NULL,
+            assistant TEXT NOT NULL,
+            mode TEXT,
+            set_at INTEGER,
+            first_seen_at INTEGER NOT NULL,
+            opened_at INTEGER,
+            PRIMARY KEY (sub, assistant)
+        )"""
+    )
+
+
 # A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
 # result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
 RISK_REASON_KEY = "_risk_reason"
@@ -933,6 +954,7 @@ MIGRATIONS = [
     _step_17,
     _step_18,
     _step_19,
+    _step_20,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -999,6 +1021,7 @@ MEMBER_TABLES = (
     ("owned_decks", "sub"),  # the printings of their decks, for the price history
     ("notify_prefs", "sub"),
     ("account_prefs", "sub"),
+    ("assistant_modes", "sub"),  # the approval mode they chose for each assistant
     ("card_models", "added_by"),  # their simulator card models go too
     ("backup_deletes", "sub"),  # their queued backup deletes go with their snapshots
     ("users", "sub"),
@@ -1291,6 +1314,83 @@ class Database:
         with self.tx() as c:
             cur = c.execute("UPDATE users SET approval_mode = ? WHERE sub = ?", (mode, sub))
             return cur.rowcount > 0
+
+    # Each connected assistant's own approval mode (assistants.py) ---------------------------------
+    def note_assistant(self, sub: str, assistant: str, client_id: str) -> bool:
+        """Remember that ``assistant`` signed in for ``sub`` (called before its new tokens are
+        saved). The first time it follows the member's default (no mode of its own), and counts as
+        new unless ``client_id`` already held a token for the member (connected before schema 20).
+        True when the row is new."""
+        now = int(time.time())
+        with self.tx() as c:
+            known = c.execute(
+                "SELECT 1 FROM tokens WHERE sub = ? AND client_id = ? LIMIT 1", (sub, client_id)
+            ).fetchone()
+            cur = c.execute(
+                "INSERT OR IGNORE INTO assistant_modes (sub, assistant, mode, set_at, first_seen_at, "
+                "opened_at) VALUES (?, ?, NULL, NULL, ?, ?)",
+                (sub, assistant, now, now if known else None),
+            )
+            return cur.rowcount > 0
+
+    def assistant_modes(self, sub: str) -> dict[str, dict[str, Any]]:
+        """The member's assistants by key: mode (None follows their default), set_at,
+        first_seen_at and opened_at."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT assistant, mode, set_at, first_seen_at, opened_at FROM assistant_modes WHERE sub = ?",
+                (sub,),
+            ).fetchall()
+        return {r["assistant"]: dict(r) for r in rows}
+
+    def assistant_mode(self, sub: str, assistant: str) -> str | None:
+        """The mode the member chose for one assistant, or None while it follows their default."""
+        row = self._one("SELECT mode FROM assistant_modes WHERE sub = ? AND assistant = ?", (sub, assistant))
+        return row["mode"] if row else None
+
+    def set_assistant_mode(self, sub: str, assistant: str, mode: str | None) -> None:
+        """The member's own choice for one assistant (None: back to their default). Only the member's
+        own browser calls this, never an assistant over MCP or the API (modes.py)."""
+        now = int(time.time())
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO assistant_modes (sub, assistant, mode, set_at, first_seen_at, opened_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (sub, assistant) DO UPDATE SET "
+                "mode = excluded.mode, set_at = excluded.set_at, "
+                "opened_at = COALESCE(assistant_modes.opened_at, excluded.opened_at)",
+                (sub, assistant, mode, now, now, now),
+            )
+
+    def mark_assistant_opened(self, sub: str, assistant: str) -> None:
+        """The member has seen this assistant (its page): no longer New, no notice on Home."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE assistant_modes SET opened_at = ? "
+                "WHERE sub = ? AND assistant = ? AND opened_at IS NULL",
+                (int(time.time()), sub, assistant),
+            )
+
+    def forget_assistant(self, sub: str, assistant: str | None = None) -> int:
+        """Forget one assistant (every one with None) when it is disconnected: connected again, it
+        starts at the member's default."""
+        with self.tx() as c:
+            if assistant is None:
+                cur = c.execute("DELETE FROM assistant_modes WHERE sub = ?", (sub,))
+            else:
+                cur = c.execute(
+                    "DELETE FROM assistant_modes WHERE sub = ? AND assistant = ?", (sub, assistant)
+                )
+            return cur.rowcount
+
+    def client_redirects(self, client_id: str) -> list[str]:
+        """Where an app sends members back after sign-in: a registered app's redirect addresses, or
+        those of the client metadata document the gateway fetched. Empty when none is kept."""
+        info = self.get_client(client_id)
+        if info is None:
+            row = self._one("SELECT info_json FROM cimd_clients WHERE client_id = ?", (client_id,))
+            info = json.loads(row["info_json"]) if row else None
+        uris = info.get("redirect_uris") if isinstance(info, dict) else None
+        return [str(u) for u in uris] if isinstance(uris, list) else []
 
     def set_user_disabled(self, sub: str, disabled: bool) -> bool:
         """Mark a user disabled (refused at token load, refresh, sign-in and browser session) or

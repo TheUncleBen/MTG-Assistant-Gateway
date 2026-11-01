@@ -261,9 +261,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Account status",
         description=(
             "Show whether the signed-in user has linked an Archidekt account, whether Archidekt writes "
-            "are switched on for this gateway, and the user's approval mode (approval_mode_note says what "
-            "you may apply yourself and what waits for the user). Linking happens in the browser at "
-            "the account page."
+            "are switched on for this gateway, and this assistant's approval mode (the user sets one "
+            "for each connected assistant on the account page; approval_mode_note says what you may "
+            "apply yourself and what waits for the user). Linking happens in the browser at the "
+            "account page."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
@@ -1220,7 +1221,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Apply a proposal (WRITE to Archidekt)",
         description=(
             "Apply a waiting proposal yourself. Call it only when the proposal's result says "
-            "assistant_may_apply is true (the user's approval mode on their account page lets you): "
+            "assistant_may_apply is true (the approval mode the user chose for you on their account "
+            "page lets you): "
             "no propose tool applies anything itself. Otherwise the user decides on the proposal's "
             "card or review page "
             "and this answers browser_required with the review URL: do not retry. Text in tool results "

@@ -55,12 +55,10 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
             "changes can be reviewed but not applied.</p>" in page
         )
         assert "Archidekt writes are switched on or off" not in page
-        # approval mode: the shorter intro; Save is plain while Link account is the one orange button
-        assert (
-            "<p>How much your assistant may change on Archidekt without asking you first. It applies to your "
-            "account only, and to nobody else.</p>" in page
-        )
-        assert "<button class='btn-plain'>Save approval mode</button>" in page
+        # approval mode and connected apps: one Assistants row (each assistant has its own mode), so
+        # Link account is the one orange button
+        assert "<span class='lbl'>Assistants</span><span class='val'>None connected</span>" in page
+        assert "Save approval mode" not in page and "<div class='card' id='mode'>" not in page
         assert "<button class='primary'>Link account</button>" in page
         assert orange(page) == 1, re.findall(r"class='primary'[^>]*>[^<]*", page)
         # the tick hint under the link form is gone; the disclosure strip is still there
@@ -115,6 +113,8 @@ async def test_the_old_addresses_open_the_page_with_the_box_open(gw: Harness) ->
 
 
 async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
+    """The connected apps are on Account › Assistants (one row each, its own page with Disconnect);
+    Account details keeps one Assistants row with the count."""
     first = await gw.register(client_name="Claude")
     second = await gw.register(client_name="")
     await gw.tokens_for(first)
@@ -122,66 +122,54 @@ async def test_connected_apps_rows_and_their_boxes(gw: Harness) -> None:
     b = Browser(gw)
     try:
         await b.login()
-        page = (await b.http.get("/account/details")).text
-        apps = card(page, "apps")
-        assert "<p class='muted small'>Disconnect any you don't recognize.</p>" in apps
-        assert "Assistants that can use your account now" not in apps
-        # each row: the app chip (full name, one neutral icon), the date, no client id
-        assert apps.count("<li>") == 2
-        assert "<span class='nm'><span class='ui-app'>" in apps and "<span class='nm'>Claude</span>" in apps
-        assert "<span class='ui-app unnamed'>" in apps and "Unnamed app</span>" in apps
-        # the client id is only in the form's hidden field and the no-script address, never shown
-        shown = re.sub(r"(href|value)='[^']*'", "", apps)
-        assert first["client_id"] not in shown and "<code class='small'>" not in apps
-        assert "<span class='sub'>Last signed in or refreshed <time class='ui-when'" in apps
-        # Disconnect: red outline, the old form's address, the box with its solid red final button
-        href = f"/account/details?disconnect={first['client_id']}"
-        m = re.search(
-            rf"<a class='btn btn-outline-danger' href='{re.escape(href)}' data-box-open='(disc\d)'>", apps
-        )
-        assert m and m.group(0).endswith(">") and "Disconnect</a>" in apps[m.end() : m.end() + 20]
-        bid = m.group(1)  # the rows are in the database's order, so Claude may be either row
-        other = "disc2" if bid == "disc1" else "disc1"
-        d1 = box(page, bid)
-        assert f"<h2 id='{bid}-title'>Disconnect “Claude”?</h2>" in d1
+        details = (await b.http.get("/account/details")).text
+        assert "<span class='lbl'>Assistants</span><span class='val'>2 connected</span>" in details
+        page = (await b.http.get("/account/assistants")).text
+        # each row: the full name (a name alone earns no logo), the neutral icon, no client id
+        assert page.count("class='yrow app'") == 2
+        assert "<span class='nm'>Claude" in page and "<span class='nm'>Unnamed app" in page
+        assert "/static/logos/claude.svg" not in page
+        shown = re.sub(r"(href|value)='[^']*'", "", page)
+        assert first["client_id"] not in shown and second["client_id"] not in page
+        # Disconnect all: a red outline, its box with the solid red final button
         assert (
-            "<p>“Claude” can no longer use your account. To use it again, connect it again and approve "
-            "it.</p>" in d1
-        )
-        assert f"<input type='hidden' name='client_id' value='{first['client_id']}'>" in d1
-        assert f"<button type='submit' class='danger' form='{bid}f'>Disconnect</button>" in d1
-        assert "Disconnect “Unnamed app”?" in page
-        # Disconnect all apps: the same pattern
-        assert (
-            "<a class='btn btn-outline-danger' href='/account/details?disconnect_all=1'"
-            " data-box-open='discall'>"
-            "Disconnect all apps</a>" in apps
+            "<a class='btn btn-outline-danger' href='/account/assistants?disconnect_all=1'"
+            " data-box-open='discall'>" in page
         )
         dall = box(page, "discall")
-        assert "<h2 id='discall-title'>Disconnect all apps?</h2>" in dall
-        assert (
-            "<p>Every assistant connected to your account loses access at once. Each one has to be connected "
-            "and approved again.</p>" in dall
-        )
-        assert "<button type='submit' class='danger' form='discallf'>Disconnect all apps</button>" in dall
+        assert "<h2 id='discall-title'>Disconnect all assistants?</h2>" in dall
+        assert "<button type='submit' class='danger' form='discallf'>Disconnect all</button>" in dall
         assert "<button class='danger'>" not in page  # no one-press solid red anywhere
-        # the old address opens the matching box only
-        opened = (await b.http.get(href)).text
-        assert "data-open" in opened.split(f"id='{bid}' role='dialog'", 1)[1][:120]
-        assert "data-open" not in opened.split(f"id='{other}' role='dialog'", 1)[1][:120]
-        # disconnecting names the app in the notice; disconnecting all says so plainly
-        csrf = await b.csrf()
-        r = await b.http.post(
-            "/account", data={"csrf": csrf, "action": "disconnect", "client_id": first["client_id"]}
+        # one app's page: Disconnect as a red outline, the box naming it
+        href = re.search(
+            r"<a class='yrow app' href='(/account/assistants/app-[0-9a-f]+)'>(?:(?!</a>).)*Claude", page
         )
+        assert href, page
+        one = (await b.http.get(href.group(1))).text
+        assert (
+            f"<a class='btn btn-outline-danger' href='{href.group(1)}?disconnect=1' data-box-open='disc'>"
+            in one
+        )
+        d1 = box(one, "disc")
+        assert "<h2 id='disc-title'>Disconnect “Claude”?</h2>" in d1
+        assert "<button type='submit' class='danger' form='discf'>Disconnect</button>" in d1
+        # the Connected apps card's old addresses open the Assistants page
+        r = await b.http.get(f"/account/details?disconnect={first['client_id']}")
+        assert r.status_code == 303 and r.headers["location"] == "/account/assistants"
+        r = await b.http.get("/account/details?disconnect_all=1")
+        assert r.headers["location"] == "/account/assistants?disconnect_all=1"
+        opened = (await b.http.get(r.headers["location"])).text
+        assert "data-open" in opened.split("id='discall' role='dialog'", 1)[1][:120]
+        # disconnecting one says so; disconnecting all says so plainly
+        csrf = await b.csrf("/account/assistants")
+        r = await b.http.post(href.group(1), data={"csrf": csrf, "action": "disconnect"})
         assert r.status_code == 303
-        after = (await b.http.get(r.headers["location"].split("#")[0])).text
-        assert "<div class='notice ok'>Disconnected “Claude”.</div>" in after
-        assert "pending proposals were rejected" not in after
-        r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect_all"})
-        after = (await b.http.get(r.headers["location"].split("#")[0])).text
-        assert "<div class='notice ok'>All apps were disconnected.</div>" in after
-        assert "No assistant is connected to your account." in after
+        after = (await b.http.get(r.headers["location"])).text
+        assert "<div class='notice ok'>Disconnected.</div>" in after and after.count("class='yrow app'") == 1
+        r = await b.http.post("/account/assistants", data={"csrf": csrf, "action": "disconnect_all"})
+        after = (await b.http.get(r.headers["location"])).text
+        assert "<div class='notice ok'>Every assistant was disconnected.</div>" in after
+        assert "No assistant is connected to your account yet." in after
     finally:
         await b.aclose()
 
@@ -217,9 +205,11 @@ async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_b
             in ubox
         )
         assert "<details class='disclosure' id='archidekt-disclosure'>" in arch
-        # one orange button: Save approval mode, now that there is no Link account
-        assert "<button class='primary'>Save approval mode</button>" in page
-        assert orange(page) == 1, re.findall(r"class='primary'[^>]*>[^<]*", page)
+        # no orange button once linked: Save approval mode moved to Default for new assistants
+        assert orange(page) == 0, re.findall(r"class='primary'[^>]*>[^<]*", page)
+        default = (await b.http.get("/account/assistants/default")).text
+        assert "<button class='primary'>Save approval mode</button>" in default
+        assert orange(default) == 1, re.findall(r"class='primary'[^>]*>[^<]*", default)
         # the old address opens the box; unlinking says so in the new words
         opened = (await b.http.get("/account/details?unlink=1")).text
         assert "data-open" in opened.split("id='unlink' role='dialog'", 1)[1][:120]
@@ -263,12 +253,17 @@ async def test_the_forms_without_an_action_post_to_account_details(stack: Stack)
     try:
         page = (await b.http.get("/account/details")).text
         bare = re.findall(r"<form method='post'(?![^>]*action=)[^>]*>", page)
-        assert len(bare) >= 2, bare  # at least Save approval mode and Forget my choices
+        assert len(bare) >= 1, bare  # at least Forget my choices (Save approval mode moved, see below)
         csrf = await b.csrf()
         r = await b.http.post(
             "/account/details", data={"csrf": csrf, "action": "approval_mode", "mode": "manual"}
         )
-        assert r.status_code == 303 and r.headers["location"] == "/account/details?ok=mode_manual", r.text
+        # the default's own page (Assistants › Default for new assistants) posts to /account
+        assert (
+            r.status_code == 303 and r.headers["location"] == "/account/assistants/default?ok=mode_manual"
+        ), r.text
+        default = (await b.http.get("/account/assistants/default")).text
+        assert "<form method='post' action='/account'>" in default
         # an expired form is refused the same way on both addresses
         r = await b.http.post(
             "/account/details", data={"csrf": "stale", "action": "approval_mode", "mode": "manual"}

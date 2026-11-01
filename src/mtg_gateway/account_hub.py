@@ -157,7 +157,7 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
         "<div class='yhub'>"
         "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
         f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
-        f"<span class='sub'>{linked}{f' · Approval: {mode}' if mode else ''}</span></span></div>"
+        f"<span class='sub'>{linked}{f' · Default approval: {mode}' if mode else ''}</span></span></div>"
         "<div class='ycols'>"
         + "".join(f"<div class='ycol'>{''.join(_group_html(g) for g in c)}</div>" for c in cols if c)
         + "</div>"

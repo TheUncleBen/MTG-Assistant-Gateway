@@ -441,8 +441,9 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     assert "Helper Bot" in page and client_id[:12] not in page
     listing = (await b.http.get("/proposals")).text
     assert "Helper Bot" in listing
-    account = (await b.http.get("/account/details")).text
-    assert client_id[:12] in account
+    # the Assistants page lists it by its name, without its client id
+    account = (await b.http.get("/account/assistants")).text
+    assert "Helper Bot" in account and client_id[:12] not in account
     csrf = await b.csrf("/account/details")
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
