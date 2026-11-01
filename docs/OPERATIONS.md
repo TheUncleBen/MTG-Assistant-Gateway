@@ -995,7 +995,9 @@ whether a change applies at once or after a restart.
   Android app sign-in lasts unused (7 days), the longest it lasts however
   much it is used (30 days), and how long an assistant's access (1 hour) and
   refresh (30 days) last. A change applies to the next sign-in or token, with
-  no restart. `MTG_BROWSER_SESSION_TTL`, `MTG_ACCESS_TOKEN_TTL` and
+  no restart. The assistant refresh time is also when the member connects the
+  assistant again, counted from its sign-in, and a change to it applies to
+  sign-ins already made at their next refresh. `MTG_BROWSER_SESSION_TTL`, `MTG_ACCESS_TOKEN_TTL` and
   `MTG_REFRESH_TOKEN_TTL` (empty in the example files) lock their rows; the
   longest time has no stack variable. The unused time can't be longer than
   the longest time. How long a sign-in lasts at your identity provider is
@@ -1006,7 +1008,7 @@ whether a change applies at once or after a restart.
   default; 0.7.32 lowered it from 40). Raise it only if Archidekt has said
   it can take more.
 - **Some settings stay in the stack only**: the identity provider, secrets,
-  the forced sign-in again (`MTG_REAUTH_INTERVAL`), the membership check, `MTG_WRITES_ENABLED` and the folders on
+  the membership check, `MTG_WRITES_ENABLED` and the folders on
   disk ([DEPLOY.md](DEPLOY.md#environment-reference)).
 - Every change is in the activity log as "Gateway setting changed", with the
   setting's name and its old and new value, under the admin's account. Three

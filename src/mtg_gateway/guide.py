@@ -494,8 +494,8 @@ def build(
         "pick up a scan from the Scan page.</li>"
         "<li>“Which cards in this deck do I own?” using your binder.</li></ul>"
         "<p>Your assistant's access can be withdrawn at any time from Account details (the "
-        "<strong>Assistants</strong> list) and ends on its own after a while (a week, unless "
-        "this gateway is set otherwise) unless you sign in "
+        "<strong>Assistants</strong> list) and ends on its own after a while (30 days after you "
+        "connected it, unless this gateway is set otherwise) unless you sign in "
         "again.</p>"
     )
     tut_first_edit = (
@@ -1233,8 +1233,8 @@ def build(
         "<li>Nothing about the cards in your binder is stored on this gateway: it is read from and "
         "written to Archidekt through your link.</li>"
         "<li>Your assistant's access can be withdrawn at any time from Account details (the "
-        "<strong>Assistants</strong> list) and ends on its own after a while (a week, unless "
-        "this gateway is set otherwise) unless you sign in "
+        "<strong>Assistants</strong> list) and ends on its own after a while (30 days after you "
+        "connected it, unless this gateway is set otherwise) unless you sign in "
         "again.</li>"
         "<li>Nothing of yours is public, and nothing here is indexed. Only this guide and the setup "
         "steps can be read without signing in. Links to Archidekt and Scryfall carry no referrer.</li>"
