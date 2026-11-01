@@ -300,6 +300,35 @@ ONE_CLICK_REUSE = 2.0
 # Add to a deck…): its snapshot is its own, not the deck page sitting's, so Undo puts back that
 # save only (review F6).
 own_snapshot: ContextVar[bool] = ContextVar("own_snapshot", default=False)
+# Set around a page request the member reloaded (the browser's Reload, the app's pull to refresh,
+# app.ReloadMiddleware): the keys of the kept reads this request already read again. A page that
+# keeps its reads (the deck list, the folder tree, short_reads, Binder's first page, Alerts) reads
+# Archidekt once more for it, through the pacer like any read, instead of serving its kept copy
+# (independent review 2, M1). None outside such a request.
+reload_read: ContextVar[set[Any] | None] = ContextVar("reload_read", default=None)
+_RELOAD_RE = re.compile(r"max-age\s*=\s*0\b|no-cache", re.I)
+
+
+def is_reload(headers: Any) -> bool:
+    """Whether a page request is a reload: Chrome (and the Android app's WebView, whose pull to
+    refresh is its reload) sends ``Cache-Control: max-age=0``, a hard reload ``no-cache`` (with
+    ``Pragma: no-cache``)."""
+    return bool(
+        _RELOAD_RE.search(headers.get("cache-control", "") or "")
+        or "no-cache" in (headers.get("pragma", "") or "").lower()
+    )
+
+
+def reloading(key: Any) -> bool:
+    """True the first time a kept read under ``key`` is asked for in a reloaded page request: read
+    it again now (later asks in the same request use what that read kept)."""
+    seen = reload_read.get()
+    if seen is None or key in seen:
+        return False
+    seen.add(key)
+    return True
+
+
 # A member's deck list is kept in memory for this long after Archidekt answered (fresh), and
 # served for up to DECK_LIST_STALE seconds more while one refresh runs in the background.
 DECK_LIST_FRESH = 90.0
@@ -593,6 +622,15 @@ class MemberCache:
         ``prefer_fresh`` (with ``wait``) waits that long for the refresh of a stale value before
         falling back to it: the same one request, for a page that judges what is still there."""
         value, state = self.peek(sub)
+        if state != "miss" and reloading((id(self), sub)):
+            # a reload: read again (waiting up to ``wait``), the kept value if that read fails
+            task = self._refresh(sub, fetch)
+            started = time.perf_counter()
+            done, _pending = await asyncio.wait({task}, timeout=wait)
+            add_time(archidekt_time, time.perf_counter() - started)
+            if done and not task.cancelled() and task.exception() is None:
+                return task.result()
+            return value
         if state == "fresh":
             return value
         if state == "stale":
@@ -666,6 +704,8 @@ class ShortReads:
             return await fetch()
         k = (sub, key)
         hit = self._entries.get(k)
+        if hit is not None and reloading((id(self), k)):
+            fresh = True  # a reload: read again
         if hit is not None and not fresh and time.monotonic() - hit[0] < self.seconds:
             return copy.deepcopy(hit[1])
         stamp = self._stamp(sub)

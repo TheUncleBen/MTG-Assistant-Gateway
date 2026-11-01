@@ -6,8 +6,12 @@ import java.net.URISyntaxException
 /**
  * Pull to refresh (0.7.46, screen 9): which gateway pages offer it. Pure, unit tested.
  *
- * A pull from the very top of a page that shows a list reloads it, as the browser's Reload does
- * (the gateway's pages read Archidekt again on a reload instead of their cached copy). Forms, the
+ * A pull from the very top of a page that shows a list reloads it (WebView.reload), as the
+ * browser's Reload does: the reload asks with `Cache-Control: max-age=0`, and on such a request the
+ * gateway's pages read Archidekt again, through its pacer, instead of the copies it keeps for a
+ * while (app.ReloadMiddleware: My decks, Binder, Pinned cards, the lists, Alerts, the forum and
+ * profiles). The deck page shows a copy read under 30 seconds ago as it is, and an older one at
+ * once while it is read again (owner decision, decks.PAGE_DECK_RELOAD). Forms, the
  * deck editor, the scanner and the sign-in never offer it: a pull there would throw away what is
  * being typed, edited or scanned. Whether one touch may start a pull is the page's call
  * (static/topbar.js tells the app at each touch through `MtgNative.pullAllowed`): not while a box
