@@ -2953,15 +2953,26 @@ class Database:
         return out
 
     def snapshot_stats(self, owner_sub: str, deck_id: str | None = None) -> dict[str, int]:
-        """The History page's "Snapshots kept" widget: how many, on how many decks, the newest."""
-        sql = "SELECT COUNT(*), COUNT(DISTINCT deck_id), MAX(taken_at) FROM snapshots WHERE owner_sub = ?"
-        args: list[Any] = [owner_sub]
+        """The History page's "Snapshots kept" widget: how many, on how many decks (the copies of
+        the Binder kept before a clear counted apart, as ``binder``), the newest."""
+        from .collection_bulk import TARGET as binder
+
+        sql = (
+            "SELECT COUNT(*), COUNT(DISTINCT CASE WHEN deck_id = ? THEN NULL ELSE deck_id END), "
+            "SUM(deck_id = ?), MAX(taken_at) FROM snapshots WHERE owner_sub = ?"
+        )
+        args: list[Any] = [binder, binder, owner_sub]
         if deck_id:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
         with self._lock:
-            n, decks, newest = self._conn.execute(sql, args).fetchone()
-        return {"count": int(n or 0), "decks": int(decks or 0), "newest": int(newest or 0)}
+            n, decks, copies, newest = self._conn.execute(sql, args).fetchone()
+        return {
+            "count": int(n or 0),
+            "decks": int(decks or 0),
+            "binder": int(copies or 0),
+            "newest": int(newest or 0),
+        }
 
     def applied_via(self, owner_sub: str, proposal_id: str) -> str | None:
         """Where a proposal's apply was called from (``via`` of its ``proposal_applied`` audit row),

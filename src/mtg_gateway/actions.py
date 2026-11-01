@@ -562,6 +562,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             f"“{deck.name}”, for good"
         )
         row["note"] = PURGE_NOTE
+        row["label"] = "Remove"  # the review row's label column is narrow; the title says the rest
     elif action == "create_folder":
         name = decks._folder_name(params.get("name"))
         info = await decks.folders(sub)

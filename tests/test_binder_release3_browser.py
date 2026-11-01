@@ -52,9 +52,10 @@ def test_the_tag_filter_and_the_details_tags_fit(server: Server, width: int, the
         page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
         assert page.evaluate(MEASURE) == [], width
         assert page.locator("#col-tag").is_visible()
-        clear = page.locator("button[value=clear]")
-        # the head's buttons: 44 px on touch screens, as Export CSV beside it
-        assert clear.is_visible() and clear.bounding_box()["height"] >= (44 if width < 900 else 36)
+        # Clear binder… lives in the head's More menu (test_polish3_0746_browser has the menu)
+        page.locator(".ui-head .acts details.colmore > summary").click()
+        clear = page.locator("details.colmore button[value=clear]")
+        assert clear.is_visible() and clear.bounding_box()["height"] >= 44
         assert errors == []
         browser.close()
 

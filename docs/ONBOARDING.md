@@ -300,6 +300,13 @@ Good to know:
   links and unlinks go in an audit log, and the gateway keeps a snapshot of
   each deck from just before a change. The owner can see these. The backup
   copies on Archidekt are private decks in your own account.
+- Your binder stays on Archidekt, and the gateway keeps two things of it: a
+  copy made just before **Clear binder** empties it (the card names,
+  printings, finishes, conditions, languages, tags and prices paid, kept
+  under History like a snapshot until you delete it), and the lines of a
+  list you import, or of a copy you put back, while that import runs; they
+  go once it has ended. With watchlists on, your binder as last read whole
+  is kept too, so it can be priced.
 - Research lookups go from the owner's server to Scryfall, EDHREC, Commander
   Spellbook, Wizards of the Coast (rules) and Archidekt's public deck pages,
   not from your device.

@@ -1591,8 +1591,49 @@ def _tick(r: dict[str, Any]) -> str:
     return ui.check_cell("sel", f"{r['id']} {name}", f"Select {name}", form=BULK_FORM)
 
 
-def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
-    """One entry: card search's tile with the stepper and ⋮ (grid), or one table row (list)."""
+def tag_colors_of(tags: list[dict[str, Any]] | None) -> dict[str, str]:
+    """A tag name -> its colour (``#rrggbb``), from the listing's tag list."""
+    out: dict[str, str] = {}
+    for t in tags or []:
+        name, color = str(t.get("name") or ""), str(t.get("color") or "")
+        if name and re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            out[name] = color.lower()
+    return out
+
+
+def _tag_color(name: str, colors: dict[str, str] | None) -> str:
+    for k, v in (colors or {}).items():
+        if collection_tags.same_name(k, name):
+            return v
+    return ""
+
+
+def tag_chip(name: str, colors: dict[str, str] | None) -> str:
+    """One tag as a chip: a colour dot (the tag's colour on Archidekt, in the ``--tagc`` custom
+    property; grey when it has none) beside the name in the page's own text colour, so the chip
+    reads in both themes whatever the colour."""
+    color = _tag_color(name, colors)
+    style = f" style='--tagc:{color}'" if color else ""
+    return f"<span class='pill tag'{style}><i class='sw' aria-hidden='true'></i>{_esc(name)}</span>"
+
+
+def tag_chips(names: list[str], colors: dict[str, str] | None) -> str:
+    """A row's tags as chips (``.tagrow``), at most TAG_CHIPS of them and "+N" for the rest."""
+    shown = [str(t) for t in names[:TAG_CHIPS]]
+    more = len(names) - len(shown)
+    out = "".join(tag_chip(t, colors) for t in shown)
+    if more > 0:
+        rest = _esc(", ".join(str(t) for t in names[TAG_CHIPS:]))
+        out += f"<span class='pill tag more' title='{rest}'>+{more}</span>"
+    return f"<span class='tagrow'>{out}</span>" if out else ""
+
+
+TAG_CHIPS = 4  # chips a tile or row shows before "+N"
+
+
+def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, str] | None = None) -> str:
+    """One entry: card search's tile with the stepper and ⋮ (grid), or one table row (list).
+    ``tag_colors``: the member's tag colours by name (tag_colors_of), for the row's tag chips."""
     img = r.get("image_small") or ""
     rid = _esc(r["id"])
     name = _esc(r["name"])
@@ -1621,6 +1662,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         )
         sub = set_line + (f" · {_esc(_language_name(lang))}" if lang != "EN" else "")
         price = price_text(r)
+        chips = tag_chips([str(t) for t in (r.get("tags") or [])], tag_colors)
         return (
             f"<li class='cc c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
             f"<button type='button' class='pic thumbbtn' aria-label='Show {name}' title='Show the card'>"
@@ -1628,6 +1670,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             f"<div class='meta'><span class='nm'>{_tick(r)}<span class='name' title='{name}'>{name}</span>"
             f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span>"
             + (f"<span class='pr'>{_esc(price)}</span>" if price else "")
+            + chips
             + f"</div><div class='act'>{stepper}</div>{shims}</li>"
         )
     fin_word = finish or "Normal"
@@ -1652,7 +1695,9 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         f"title='Show the card'>{thumb}</button><span class='tx'><span class='name' title='{name}'>{name}"
         "</span>"
         + (f"<span class='s lg'>{_esc(r['type_line'])}</span>" if r.get("type_line") else "")
-        + f"<span class='sub'>{sub_md}</span><span class='s smline'>{sub_sm}</span></span></span>"
+        + f"<span class='sub'>{sub_md}</span><span class='s smline'>{sub_sm}</span>"
+        + tag_chips([str(t) for t in (r.get("tags") or [])], tag_colors)
+        + "</span></span>"
         f"<span class='md-hide setc' role='cell'>{set_line}"
         + (f"<span class='s'>{set_name}</span>" if set_name else "")
         + f"</span><span class='md-hide' role='cell'>{fin_word}</span>"
@@ -1682,15 +1727,23 @@ def table_head_html() -> str:
     return f"<li class='tr th' role='row'>{spans}</li>"
 
 
-def list_html(rows: list[dict[str, Any]], csrf: str, *, view: str) -> str:
-    items = "".join(row_html(r, csrf, view=view) for r in rows)
+def _tag_colors_attr(tag_colors: dict[str, str] | None) -> str:
+    """The tag colours on the list, for the page's script (it redraws a row's chips after a save)."""
+    return f" data-tag-colors='{_esc(json.dumps(tag_colors, separators=(',', ':')))}'" if tag_colors else ""
+
+
+def list_html(
+    rows: list[dict[str, Any]], csrf: str, *, view: str, tag_colors: dict[str, str] | None = None
+) -> str:
+    items = "".join(row_html(r, csrf, view=view, tag_colors=tag_colors) for r in rows)
+    colors = _tag_colors_attr(tag_colors)
     if view == "list":
         style = _esc(f"--cols:{TABLE_COLS};--cols-md:{TABLE_MD};--cols-sm:{TABLE_SM}")
         return (
             f"<ul class='ui-table colllist' id='cards' role='table' aria-label='Your binder' "
-            f"style='{style}'>{table_head_html()}{items}</ul>"
+            f"style='{style}'{colors}>{table_head_html()}{items}</ul>"
         )
-    return f"<ul class='cardgrid collgrid' id='cards'>{items}</ul>"
+    return f"<ul class='cardgrid collgrid' id='cards'{colors}>{items}</ul>"
 
 
 def _opts(values: Iterable[str], current: str, labels: dict[str, str] | None = None) -> str:
@@ -1706,28 +1759,46 @@ def _lang_opts(current: str) -> str:
     return _opts(langs, current or "EN", {k: _language_name(k) for k in langs})
 
 
-def _tag_boxes(all_tags: list[str], on: list[str]) -> str:
-    """The Details box's Tags: one box to tick per binder tag the member has (``tag:NAME`` fields,
-    so the form works without scripts), and the link to make or change them."""
+def tag_tick(name: str, colors: dict[str, str] | None, *, field: str, checked: bool, form: str = "") -> str:
+    """One binder tag to tick, drawn as a chip: the box, the tag's colour dot and its name."""
+    color = _tag_color(name, colors)
+    style = f" style='--tagc:{color}'" if color else ""
+    f = f" form='{_esc(form)}'" if form else ""
+    value = "1" if field.startswith("tag:") else _esc(name)
+    return (
+        f"<label class='tagck'{style}><input type='checkbox' name='{_esc(field)}' value='{value}' "
+        f"data-tag='{_esc(name)}'{f}{' checked' if checked else ''}><i class='sw' aria-hidden='true'></i>"
+        f"<span class='t'>{_esc(name)}</span></label>"
+    )
+
+
+def _tag_boxes(all_tags: list[str], on: list[str], colors: dict[str, str] | None = None) -> str:
+    """The Details box's Tags: one chip to tick per binder tag the member has (``tag:NAME`` fields,
+    so the form works without scripts), each with its colour, in a box that scrolls when the
+    member has many, and the link to make or change them."""
     if not all_tags:
         return (
             "<div class='field tags'><span>Tags</span><span class='muted small'>No binder tags yet. "
             "<a href='/lists/btags'>Make one</a></span></div>"
         )
     ticks = "".join(
-        f"<label class='tagck'><input type='checkbox' name='tag:{_esc(t)}' value='1' data-tag='{_esc(t)}'"
-        f"{' checked' if any(collection_tags.same_name(t, x) for x in on) else ''}> {_esc(t)}</label>"
+        tag_tick(t, colors, field=f"tag:{t}", checked=any(collection_tags.same_name(t, x) for x in on))
         for t in all_tags
     )
     return (
         "<fieldset class='field tags'><legend>Tags <a class='small' href='/lists/btags'>Manage tags</a>"
-        f"</legend><input type='hidden' name='tags_shown' value='1'><span class='tagline'>{ticks}</span>"
-        "</fieldset>"
+        "</legend><input type='hidden' name='tags_shown' value='1'>"
+        f"<span class='tagline ticks'>{ticks}</span></fieldset>"
     )
 
 
 def details_box_html(
-    r: dict[str, Any] | None, csrf: str, *, open: bool = False, all_tags: list[str] | None = None
+    r: dict[str, Any] | None,
+    csrf: str,
+    *,
+    open: bool = False,
+    all_tags: list[str] | None = None,
+    tag_colors: dict[str, str] | None = None,
 ) -> str:
     """The Details box: finish, condition, language, price paid and tags, saved to Archidekt.
     ``all_tags``: the member's binder tags, each a box to tick (None: the row's tags are only
@@ -1739,7 +1810,7 @@ def details_box_html(
     cond = (r.get("condition") or "").upper()
     lang = (r.get("lang") or "EN").upper()
     tags = [str(t) for t in (r.get("tags") or [])[:8]]
-    tagline = "".join(f"<span class='pill'>{_esc(t)}</span>" for t in tags)
+    tagline = "".join(tag_chip(t, tag_colors) for t in tags)
     sub = " · ".join(x for x in (_esc(_set_line(r)), _esc(r.get("set_name") or "")) if x)
     body = (
         f"<form method='post' action='/collection' id='col-detailsform' class='detailsform' data-id='{rid}'>"
@@ -1756,7 +1827,7 @@ def details_box_html(
         f"max='{int(MAX_PRICE)}' step='0.01' inputmode='decimal' value='{_esc(_price_value(r))}' "
         "placeholder='None'></label>"
         + (
-            _tag_boxes(all_tags, [str(t) for t in (r.get("tags") or [])])
+            _tag_boxes(all_tags, [str(t) for t in (r.get("tags") or [])], tag_colors)
             if all_tags is not None
             else f"<div class='field tags'{'' if tags else ' hidden'}><span>Tags</span>"
             f"<span class='tagline'>{tagline}</span></div>"
@@ -2041,7 +2112,7 @@ def widgets_html(
     return ui.widgets(items)
 
 
-def bulk_html(csrf: str, back: str, tags: list[str]) -> str:
+def bulk_html(csrf: str, back: str, tags: list[str], tag_colors: dict[str, str] | None = None) -> str:
     """Select's bar (0.7.46 audit QG-17): hidden until a row is ticked; the rows' tick boxes and the
     boxes' fields belong to one hidden form, so a press sends the ticked rows with the box's
     choice. Condition…, Finish… and Tags… open a box; Remove goes at once (the notice offers
@@ -2089,15 +2160,11 @@ def bulk_html(csrf: str, back: str, tags: list[str]) -> str:
         label="Set the finish",
     )
     if tags:
-        ticks = "".join(
-            f"<label class='chkline'><input type='checkbox' name='tags' value='{_esc(t)}' "
-            f"form='{BULK_FORM}'> {_esc(t)}</label>"
-            for t in tags
-        )
+        ticks = "".join(tag_tick(t, tag_colors, field="tags", checked=False, form=BULK_FORM) for t in tags)
         tag_body = (
             "<p><span data-bulk-count>The selected cards</span> get these tags, and no others. "
             "Tick none to clear their tags.</p>"
-            f"<div class='chklist'>{ticks}</div>"
+            f"<div class='tagline ticks'>{ticks}</div>"
         )
     else:
         tag_body = (
@@ -2117,6 +2184,45 @@ def bulk_html(csrf: str, back: str, tags: list[str]) -> str:
         label="Set the tags",
     )
     return form + bar + cond + fin + tag_box
+
+
+def restore_box_html(snap_id: str, csrf: str, *, now: int, copies: int) -> str:
+    """The question before a copy of the Binder is put back onto a Binder that is not empty
+    (``/collection?restore=ID``, where /collection/restore sends the member): what the restore adds
+    and what it never does, the one orange button and the way out. A box the Binder page holds
+    open, as every confirm box is; without scripts it is a panel at the top of the page."""
+    entries = f"{now:,} {'entry' if now == 1 else 'entries'}"
+    cards = f"{copies:,} {'card' if copies == 1 else 'cards'}"
+    words = (
+        f"<p>It holds {entries} now. Restoring adds the {cards} of this copy to them: a card already "
+        "there gets more copies, nothing is replaced or removed.</p>"
+        if now
+        else f"<p>Restoring puts the {cards} of this copy back into your empty binder.</p>"
+    )
+    body = (
+        words + "<p class='small muted'>The restore runs here on the Binder page, where you can follow it; "
+        "each card goes back with its finish, condition, language, tags and price paid.</p>"
+        f"<form method='post' action='/collection/restore' id='col-restoref'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        f"<input type='hidden' name='snapshot_id' value='{_esc(snap_id)}'>"
+        "<input type='hidden' name='confirm' value='1'></form>"
+    )
+    return ui.box(
+        "col-restore",
+        "Your binder is not empty" if now else "Put this copy back?",
+        body,
+        actions=[
+            "<a class='btn btn-plain' href='/history?type=snapshots'>Keep my binder as it is</a>",
+            ui.box_button(
+                "Add them to my binder" if now else "Put them back",
+                kind="primary",
+                form="col-restoref",
+                icon_name="plus",
+            ),
+        ],
+        open=True,
+        close_href="/collection",
+    )
 
 
 def panel_html(
@@ -2205,12 +2311,49 @@ COLLECTION_CSS = """
 .value-reading .ui-spin{margin-right:.35em}
 .collection .ui-head .acts{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .collection .ui-head .acts .btn{margin:0}
-.collection .ui-head .acts form.clearf{display:inline-flex;margin:0}
+/* the head's More menu: Export CSV, then Clear binder… in red; its summary is a 44 px button */
+.collection .ui-head .acts details.colmore{margin:0}
+.collection .ui-head .acts details.colmore > summary.btn{margin:0;display:inline-flex;align-items:center;
+  gap:.35rem}
+.collection .ui-head .acts details.colmore .menu{min-width:12rem}
+.collection .ui-head .acts details.colmore .menu a,.collection .ui-head .acts details.colmore .menu button{
+  min-height:44px}
+.collection .ui-head .acts details.colmore form.clearf{margin:0}
+.collection .ui-head .acts details.colmore form.clearf button{width:100%}
 .mtgbox .body fieldset.tags{border:0;padding:0;margin:0;grid-column:1/-1;min-width:0}
-.mtgbox .body .tagck{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;margin-right:.75rem}
 .collection .ui-head.phead{align-items:center}
 @media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%}
-  .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center} }
+  .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center}
+  .collection .ui-head .acts details.colmore{flex:1 1 auto}
+  .collection .ui-head .acts details.colmore > summary.btn{width:100%;box-sizing:border-box} }
+/* a tag as a chip: the tag's colour as a dot (--tagc) beside its name in the page's own text colour,
+   so it reads in both themes whatever colour the member picked */
+.pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem .1rem .35rem;
+  border-radius:999px;border-color:var(--border-soft);background:var(--surface-2);color:var(--text);
+  font-weight:600;font-size:.8rem;line-height:1.5;max-width:100%;min-width:0}
+.pill.tag > span,.pill.tag{overflow-wrap:anywhere}
+.pill.tag .sw,.tagck .sw{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;flex:none;
+  background:var(--tagc,var(--text-muted));box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
+.pill.tag.more{padding:.1rem .5rem}
+.tagrow{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem;min-width:0}
+ul.collgrid .meta .tagrow{margin-top:.2rem}
+ul.colllist .cardc .tagrow{margin-top:.25rem}
+/* the Details box's tags and the Tags… box: chips to tick (44 px), in a box that scrolls when the
+   member has many */
+.mtgbox .body .tagline.ticks{display:flex;flex-wrap:wrap;gap:.4rem;max-height:13rem;overflow:auto;
+  padding:.4rem;overscroll-behavior:contain;border:1px solid var(--border-soft);border-radius:var(--radius)}
+/* (label.tagck: deck.css makes a box field's labels block; the chip is a flex row) */
+.mtgbox .body label.tagck,.mtgbox .body .field label.tagck{display:inline-flex;align-items:center;gap:.4rem;
+  min-height:44px;margin:0;padding:0 .8rem 0 .5rem;border:1px solid var(--control-border);
+  border-radius:999px;background:var(--surface);cursor:pointer;max-width:100%;box-sizing:border-box;
+  font-weight:600}
+.mtgbox .body label.tagck:hover{background:var(--surface-2)}
+.mtgbox .body label.tagck:has(input:checked){background:var(--orange-tint);border-color:var(--orange)}
+.mtgbox .body label.tagck:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.mtgbox .body label.tagck input,.mtgbox .body .fl .tags label.tagck input{width:20px;height:20px;
+  min-height:0;margin:0;flex:none;accent-color:var(--orange-ctl)}
+.mtgbox .body label.tagck .sw{width:.75rem;height:.75rem}
+.mtgbox .body label.tagck .t{min-width:0;overflow-wrap:anywhere}
 /* notices are strips at the top of the page with a × to close */
 #col-notes .notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .75rem;overflow-wrap:anywhere}
 #col-notes .notice .nx{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
@@ -2266,9 +2409,6 @@ ul.collgrid .nm .kebab{grid-column:3;grid-row:1}
 ul.collgrid .cc.sel .pic,ul.colllist li.sel{outline:3px solid var(--orange-ctl);outline-offset:-3px}
 ul.colllist .cardc .chk{margin-left:-.4rem}
 .collection .col-select[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text)}
-.mtgbox .body .chklist{display:flex;flex-wrap:wrap;gap:0 1rem}
-.mtgbox .body .chkline{display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
-.mtgbox .body .chkline input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
 /* the 44 px stepper */
 .collection form.qty{display:inline-flex;align-items:center;gap:0;margin:0}
 .collection main form.qty > button{all:unset;cursor:pointer;box-sizing:border-box;margin:0;
@@ -2283,8 +2423,16 @@ ul.colllist .cardc .chk{margin-left:-.4rem}
   stroke-linecap:round}
 .collection form.qty output{min-width:2rem;text-align:center;font-weight:700;
   font-variant-numeric:tabular-nums}
-/* the table (List view) */
-ul.colllist{list-style:none;margin:0 0 1rem;padding:0}
+/* the table (List view): its columns are rem widths, so it folds to the narrower layouts by its own
+   width in rem (container queries beside the theme's pixel ones): at 200% text a desktop window
+   holds the two-column layout, never a sideways scroll */
+ul.colllist{list-style:none;margin:0 0 1rem;padding:0;container-type:inline-size}
+@container (max-width:64rem){
+  ul.colllist .tr{grid-template-columns:var(--cols-md)}
+  ul.colllist .md-hide{display:none}
+  ul.colllist .sub{display:flex}
+  ul.colllist .cardc .lg{display:none}
+  ul.colllist .cardc .sub .lgh{display:block} }
 ul.colllist .tr{padding:.45rem .75rem}
 ul.colllist .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
 ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0}
@@ -2305,10 +2453,20 @@ ul.colllist .prc .s{font-weight:400}
 @media (min-width:900px){ ul.colllist .sub .lgh{display:none} }
 .collection .wdg form.inline{display:inline;margin:0}
 .collection .wdg form.inline .btn{margin:0}
-/* the import's progress strip: the words take the room, Refresh keeps its own width (wraps on phone) */
+/* the import's progress strip: the words, then the bar across the strip (the theme's orange on
+   the strip's own surface), then Refresh, or on a stop Resume and Stop here in a row */
 .notice.importing{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
 .notice.importing .itext{flex:1 1 14rem;min-width:0}
 .notice.importing .btn{flex:0 0 auto;margin:0}
+.notice.importing .iprog{flex:1 1 100%;width:100%;height:8px;margin:0;border:0;border-radius:4px;
+  appearance:none;-webkit-appearance:none;background:var(--surface-3);overflow:hidden;display:block}
+.notice.importing .iprog::-webkit-progress-bar{background:transparent}
+.notice.importing .iprog::-webkit-progress-value{background:var(--orange);border-radius:4px;
+  transition:width .4s ease}
+.notice.importing .iprog::-moz-progress-bar{background:var(--orange);border-radius:4px}
+.notice.importing .iacts{display:flex;flex-wrap:wrap;gap:.5rem;flex:1 1 100%}
+.notice.importing .iacts form{margin:0;display:contents}
+.notice.importing .iacts .btn{margin:0}
 ul.colllist .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:block}
 ul.colllist .setc{min-width:0;overflow-wrap:anywhere}
@@ -2686,7 +2844,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 f"value='{jid}'>"
             )
             return (
-                f"<div class='notice error importing stopped' role='alert' data-import-stopped='{jid}'>"
+                f"<div class='notice warn importing stopped' role='alert' data-import-stopped='{jid}'>"
                 f"<span class='itext'>{_esc(import_text(job))}</span>{bar}"
                 "<span class='iacts'>"
                 f"<form method='post' action='/collection' class='inline'>{hidden}"
@@ -3028,6 +3186,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             )
         rows = got["rows"]
         tag_names = [str(t["name"]) for t in whole.get("tags") or [] if t.get("name")]
+        tag_colors = tag_colors_of(whole.get("tags"))
         if got.get("tag") is not None and not got["tag"]["known"]:
             notes += strip(f"You have no binder tag called “{lq['tag']}”.", "error")
         elif got.get("tag") is not None and not got["tag"]["complete"]:
@@ -3051,7 +3210,17 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     collection_tags.name_rows([details_row], [rec], list(whole.get("tags") or []))
             except CollectionError:
                 details_row = None
-        details_box = details_box_html(details_row, csrf, open=details_row is not None, all_tags=tag_names)
+        details_box = details_box_html(
+            details_row, csrf, open=details_row is not None, all_tags=tag_names, tag_colors=tag_colors
+        )
+        restore_box = ""
+        if qp.get("restore"):
+            snap = binder_copy(sub, str(qp.get("restore")))
+            if snap is None:
+                notes += strip("That copy of your binder is no longer kept.", "error")
+            else:
+                copies = sum(int(i["quantity"]) for i in collection_bulk.restore_items(snap))
+                restore_box = restore_box_html(str(snap["id"]), csrf, now=int(whole["count"]), copies=copies)
         add_box = add_box_html(
             csrf, tab=add_tab, open=open_add, defaults=prefs.choices(state.db, sub, prefs.BINDER_ADD)
         )
@@ -3080,22 +3249,29 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 + live
                 + export_help_html()
                 + add_box
+                + restore_box
             )
         else:
-            # Clear binder: a proposal; its review page holds the typed confirmation (actions.py)
+            # The head's More menu (the deck page's pattern): Export CSV, then the destructive
+            # Clear binder… as its red last item. Clear binder is a proposal; its review page holds
+            # the typed confirmation (actions.py). Add cards stays the one orange button.
             clear_form = (
-                "<form method='post' action='/collection' class='inline clearf'>"
+                "<form method='post' action='/collection' class='clearf'>"
                 f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
-                f"<button type='submit' class='btn {ui.BUTTON_KINDS['danger']}' name='action' "
-                f"value='clear'>{icon('trash')}Clear binder…</button></form>"
+                f"<button type='submit' class='danger' name='action' value='clear'>{icon('trash')} "
+                "Clear binder…</button></form>"
             )
-            acts = (
-                ui.button_link("Export CSV", "/collection/export.csv", icon_name="download")
-                + clear_form
-                + ui.box_opener("Add cards", "/collection?add=1", "col-add", kind="primary", icon_name="plus")
+            more = (
+                "<details class='dd colmore'><summary class='btn' aria-haspopup='menu'>"
+                f"{icon('more')} More</summary><div class='menu'>"
+                f"<a href='/collection/export.csv'>{icon('download')} Export CSV</a>{clear_form}"
+                "</div></details>"
+            )
+            acts = more + ui.box_opener(
+                "Add cards", "/collection?add=1", "col-add", kind="primary", icon_name="plus"
             )
             cards = (
-                list_html(rows, csrf, view=view)
+                list_html(rows, csrf, view=view, tag_colors=tag_colors)
                 if rows
                 else (
                     f"<ul class='{'cardgrid collgrid' if view == 'grid' else 'ui-table colllist'}' "
@@ -3129,10 +3305,11 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 + cards
                 + f"<p class='muted col-nomatch'{' hidden' if rows else ''}>No cards match that filter.</p>"
                 + more_html(lq, view_in_link, got)
-                + bulk_html(csrf, same_url(request), tag_names)
+                + bulk_html(csrf, same_url(request), tag_names, tag_colors)
                 + export_help_html()
                 + add_box
                 + details_box
+                + restore_box
             )
         resp = page("Binder", body, sub=sub, sid=sid, scripts=True, heading=False)
         if remember:
@@ -3158,7 +3335,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         except CollectionError as exc:
             return _fail(exc)
         csrf = _csrf(s, sid) or ""
-        html = "".join(row_html(r, csrf, view=view) for r in got["rows"])
+        try:
+            tags = got["out"]["tags"] if got["out"] is not None else await service.tags(sub)
+        except CollectionError:
+            tags = []
+        colors = tag_colors_of(tags)
+        html = "".join(row_html(r, csrf, view=view, tag_colors=colors) for r in got["rows"])
         total = got["total"]
         return JSONResponse(
             {
@@ -3401,24 +3583,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 return restore_refused(sub, sid, "That copy of your binder holds no cards.")
             if data.get("confirm") != "1":
                 now = int((await service.page(sub))["count"])
-                if now:
-                    copies = sum(int(i["quantity"]) for i in items)
-                    return page(
-                        "Restore to my binder",
-                        "<div class='card'><h2>Your binder is not empty</h2>"
-                        f"<p>It holds {now:,} {'entry' if now == 1 else 'entries'} now. Restoring adds "
-                        f"the {copies:,} cards of this copy to them: a card already there gets more "
-                        "copies, nothing is replaced or removed.</p>"
-                        "<form method='post' action='/collection/restore' class='actions'>"
-                        f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid) or '')}'>"
-                        f"<input type='hidden' name='snapshot_id' value='{_esc(snap_id)}'>"
-                        "<input type='hidden' name='confirm' value='1'>"
-                        "<button type='submit' class='btn btn-primary'>Add them to my binder</button>"
-                        "<a class='btn' href='/history?type=snapshots'>Keep my binder as it is</a>"
-                        "</form></div>",
-                        sub=sub,
-                        sid=sid,
-                    )
+                if now:  # the question is a box on the Binder page (restore_box_html)
+                    return RedirectResponse(f"/collection?restore={snap_id}", status_code=303)
         except CollectionError as exc:
             if exc.kind == "writes_disabled":
                 return restore_refused(sub, sid, refusals.WRITES_OFF, 503)

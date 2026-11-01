@@ -229,12 +229,50 @@
   function itemOf(id) {
     return list ? $("li[data-id='" + id + "']", list) : null;
   }
+  /* a row's tag chips (collection.tag_chips): the colours come with the list (data-tag-colors) */
+  var TAG_CHIPS = 4, tagColors = null;
+  function colorOf(name) {
+    if (tagColors === null) {
+      tagColors = {};
+      try { tagColors = JSON.parse((list && list.getAttribute("data-tag-colors")) || "{}"); } catch (err) { tagColors = {}; }
+    }
+    var low = String(name).toLowerCase();
+    for (var k in tagColors) if (k.toLowerCase() === low) return tagColors[k];
+    return "";
+  }
+  function drawChips(item, tags) {
+    var row = $(".tagrow", item);
+    if (!tags.length) { if (row) row.remove(); return; }
+    if (!row) {
+      row = document.createElement("span");
+      row.className = "tagrow";
+      var home = $(".meta", item) || $(".cardc .tx", item);
+      if (!home) return;
+      home.appendChild(row);
+    }
+    row.textContent = "";
+    tags.slice(0, TAG_CHIPS).forEach(function (t) {
+      var chip = document.createElement("span"), sw = document.createElement("i");
+      chip.className = "pill tag";
+      var c = colorOf(t);
+      if (c) chip.style.setProperty("--tagc", c);
+      sw.className = "sw"; sw.setAttribute("aria-hidden", "true");
+      chip.appendChild(sw); chip.appendChild(document.createTextNode(t));
+      row.appendChild(chip);
+    });
+    if (tags.length > TAG_CHIPS) {
+      var more = document.createElement("span");
+      more.className = "pill tag more"; more.title = tags.slice(TAG_CHIPS).join(", ");
+      more.textContent = "+" + (tags.length - TAG_CHIPS);
+      row.appendChild(more);
+    }
+  }
   function applyRow(item, row) {
     item.setAttribute("data-fin", row.finish || "nonfoil");
     item.setAttribute("data-cond", row.condition || "");
     item.setAttribute("data-lang", row.lang || "EN");
     item.setAttribute("data-paid", row.purchase_price == null ? "" : row.purchase_price);
-    if (row.tags) item.setAttribute("data-tags", JSON.stringify(row.tags));
+    if (row.tags) { item.setAttribute("data-tags", JSON.stringify(row.tags)); drawChips(item, row.tags); }
     item.setAttribute("data-finish", row.finish === "foil" ? "Foil" : row.finish === "etched" ? "Etched" : "");
     var fin = FIN[row.finish] || "Normal", cond = row.condition || "", lang = row.lang || "EN";
     row.lang_name = LANG[lang] || lang;
