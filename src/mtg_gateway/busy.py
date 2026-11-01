@@ -2,7 +2,7 @@
 
 A page that reads from Archidekt catches a DeckError (or a CollectionError, which copies its
 ``kind``). Two kinds are not about the deck or the member at all: ``rate_limited`` (the member's
-Archidekt budget, ``MTG_ARCHIDEKT_CALLS_PER_10_MIN``, or the concurrency cap is used up,
+Archidekt budget, the Settings row ``archidekt_calls_per_10_min``, or the concurrency cap is used up,
 Archidekt asked the gateway to slow down, or other work for the member is still running) and
 ``unavailable`` (Archidekt or Mystic Forge cannot be reached). Every page maps those two through
 :func:`busy_response` to the same page, status and headers, so no page can call a used-up budget
