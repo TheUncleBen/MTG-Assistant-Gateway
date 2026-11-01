@@ -204,3 +204,56 @@ def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
             assert not got["sizeShown"] and got["sheetSize"], got
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width", [344, 375, 390, 412])
+def test_a_phone_shows_two_cards_a_row_at_the_default_size(server: Server, width: int) -> None:
+    """0.7.46 full review (D, F9): at the default size (M) a phone showed one card a row, each
+    tile taller than the screen. Now S and M give two a row on a narrow phone, as the Binder's
+    grid does (L stays one); the Watch pill is icon-only on those narrow tiles, as at S; nothing
+    scrolls sideways, at 200% text too."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, width, exe)
+        page.goto(f"{server.base}/cards?q=Sol", wait_until="networkidle")
+        page.wait_for_selector("#cardgrid .cc")
+        assert page.evaluate("() => document.documentElement.getAttribute('data-card-size')") == "m"
+        tops = page.evaluate(
+            "() => [...document.querySelectorAll('#cardgrid .cc')].map(e => e.getBoundingClientRect().top)"
+        )
+        assert len(tops) >= 2 and abs(tops[0] - tops[1]) < 1, tops  # side by side
+        tile = page.locator("#cardgrid .cc").first.bounding_box()
+        assert tile and tile["height"] < 600, tile  # two tiles fit a phone screen
+        pill = page.locator("#cardgrid .wbtn").first
+        box = pill.bounding_box()
+        assert box and box["width"] <= 48 and box["height"] >= 44, box  # icon only, 44 px on touch
+        assert pill.get_attribute("aria-label")  # its words stay for a screen reader
+        for zoom in (None, TEXT_200):
+            if zoom:
+                page.evaluate(zoom)
+                page.wait_for_timeout(100)
+            got = page.evaluate(
+                "() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]"
+            )
+            assert got[0] <= got[1], (zoom, got)
+            # the pill stays inside its tile
+            tile = page.locator("#cardgrid .cc").first.bounding_box()
+            box = pill.bounding_box()
+            assert box["x"] >= tile["x"] - 1 and box["x"] + box["width"] <= tile["x"] + tile["width"] + 1
+        # L is one a row
+        page.locator(".sp-open").click()
+        page.locator("#sp-filters.open").wait_for(timeout=3000)
+        # (the sheet's sticky foot covers the size row at this height: press it as a script would)
+        page.locator("#sp-filters [data-card-size-set=l]").first.dispatch_event("click")
+        page.wait_for_function("() => document.documentElement.getAttribute('data-card-size') === 'l'")
+        page.locator("#sp-filters .sp-sheet-head .close").click()
+        tops = page.evaluate(
+            "() => [...document.querySelectorAll('#cardgrid .cc')].map(e => e.getBoundingClientRect().top)"
+        )
+        assert tops[1] > tops[0] + 100, tops
+        assert errors == []
+        browser.close()

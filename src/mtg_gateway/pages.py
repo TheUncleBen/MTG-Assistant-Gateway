@@ -1813,10 +1813,10 @@ def actor_html(label: str | None) -> str:
 
 def _lists_card(sub: str) -> str:
     """Your Archidekt lists: the account-wide lists that shape decks with the counts known so far
-    (each count comes from that tab's last read, account_lists.counts), one press from My lists;
-    the pinned cards are Binder's Wants (decision C8)."""
+    (each count comes from that tab's last read, account_lists.counts), one press from Binder ›
+    Lists (mockup screen 8); the pinned cards keep their own page there."""
     from . import account_lists  # (imports archidekt first: not at the top)
-    from .lists_page import ACCOUNT_TABS, PAGE, WANTS
+    from .lists_page import ACCOUNT_TABS, HUB, PAGE, WANTS
 
     counts = account_lists.counts(sub)
     words = {
@@ -1835,9 +1835,10 @@ def _lists_card(sub: str) -> str:
         "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
         "<p>Lists that shape every deck, kept on Archidekt:</p>"
         f"<p class='ui-caps'>{''.join(parts)}</p>"
-        f"<p class='muted'>The cards you pin on Archidekt are your wants: "
-        f"{ui.cap_link('Binder › Wants', WANTS, icon_name='bookmark')}</p>"
-        f"<div class='ui-actions'><a class='btn' href='{PAGE}'>{icon('list')} Open My lists</a></div></div>"
+        f"<p class='muted'>The cards you pin on Archidekt: "
+        f"{ui.cap_link('Pinned cards', WANTS, icon_name='bookmark')}</p>"
+        f"<div class='ui-actions'><a class='btn' href='{HUB}'>{icon('list')} Open Binder › Lists</a>"
+        "</div></div>"
     )
 
 
@@ -2628,7 +2629,7 @@ def _deck_meta(p: dict[str, Any]) -> tuple[str, str]:
         title = html.escape(str(p.get("deck_name") or tid))
         return "Forum thread", f"<a href='/forum/thread/{quote(tid, safe='')}'>{title}</a>"
     if p.get("kind") == "lists":
-        return "Target", "<a href='/lists'>Your Archidekt lists</a>"
+        return "Target", "<a href='/collection/lists'>Your Archidekt lists</a>"
     return (
         "Deck",
         f"<a href='/decks/{quote(str(p['deck_id']), safe='')}'>"

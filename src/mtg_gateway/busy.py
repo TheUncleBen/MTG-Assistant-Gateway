@@ -119,7 +119,7 @@ def same_url(request: Request) -> str:
 AREAS = (
     ("/collection", "collection", "/collection", "Binder"),
     ("/watchlist", "watchlist", "/collection", "Binder"),
-    ("/lists", "lists", "/lists", "My lists"),
+    ("/lists", "lists", "/collection/lists", "Lists"),
     ("/decks", "decks", "/decks", "My decks"),
     ("/folders", "decks", "/decks", "My decks"),
     ("/compare", "decks", "/decks", "My decks"),

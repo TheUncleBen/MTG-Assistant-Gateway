@@ -1768,8 +1768,12 @@ def value_widget(
         parts.append(f"{n:,} {'entry has' if n == 1 else 'entries have'} no price")
     if not value.get("complete"):
         parts.append(f"your first {value['entries']:,} entries")
-    # no entry priced: no value to show (as Scan's list value), never "$0.00"
-    big = (money(value["usd"]) or "$0.00") if int(value.get("entries") or 0) > n else "–"
+    # no entry priced: no value to show (as Scan's list value), never "$0.00"; read whole but no
+    # price came yet (Scryfall was not answering, or none of the printings is priced): say so
+    priced = int(value.get("entries") or 0) > n
+    big = (money(value["usd"]) or "$0.00") if priced else "–"
+    if n and not priced and not value.get("day"):
+        parts.append("Prices come with the daily price check.")
     return ui.widget("Value", "stats", big, detail=" · ".join(parts))
 
 
@@ -2313,9 +2317,17 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return ""
         return strip(msgs[code], "ok" if code in ("added", "removed", "updated", "imported") else "error")
 
-    def head(actions_html: str = "") -> str:
-        # Binder's switch (Cards | Wants | Watchlist) names the page
-        return ui.binder_head("/collection", "Binder: Cards", PURPOSE, actions_html=actions_html)
+    def head(actions_html: str = "", *, sub: str = "", total: int | None = None) -> str:
+        # Binder's switch (Cards | Lists | Watchlist) names the page, with the counts it knows:
+        # this page's total, and how many cards the member watches (one count query)
+        badges: dict[str, int] = {}
+        if total is not None:
+            badges["/collection"] = total
+        if sub and priced():
+            badges["/watchlist"] = state.prices.watch_count(sub)
+        return ui.binder_head(
+            "/collection", "Binder: Cards", PURPOSE, actions_html=actions_html, badges=badges
+        )
 
     def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):
@@ -2546,7 +2558,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         )
         if not rows and not lq["q"] and not lq["offset"]:
             body = (
-                head()
+                head(sub=sub, total=0)
                 + vis
                 + f"<div id='col-notes'>{notes}</div>"
                 + "<section class='panel coll-empty'><h2>No cards yet</h2>"
@@ -2574,7 +2586,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
             )
             body = (
-                head(acts)
+                head(acts, sub=sub, total=int(whole["count"]))
                 + vis
                 + f"<div id='col-notes'>{notes}</div>"
                 + widgets_html(

@@ -97,7 +97,8 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
             "Your account",
             [
                 _row("Account details", "account", DETAILS),
-                _row("My lists", "list", "/lists"),
+                # the lists live in Binder (mockup screen 8); the row is the way there from here
+                _row("Lists", "list", "/collection/lists", value="Binder"),
                 _row("My activity", "activity", "/activity"),
             ],
         ),

@@ -97,6 +97,8 @@ BROWSE_CSS = """
 /* the deck search: the shared panel (theme.SEARCH_PANEL_CSS); its Commander and Owner boxes */
 .spanel .fgrid > .fg.cmd{--gw:220px}
 .spanel .fgrid > .fg.who{--gw:160px}
+/* the results while the panel's pick is asked for (static/search.js): dimmed, as My decks' list */
+#s-results[aria-busy=true]{opacity:.6;transition:opacity .15s}
 /* Avatar, name and the social row: the name block takes the room and wraps a long unbroken name;
    the social row keeps its own size (Follow ellipsises inside it) and drops under the name when the
    two no longer fit side by side, so neither squeezes the other (a 64-character name). */
@@ -720,12 +722,12 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             except DeckError as exc:
                 if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                     return busy
-                body += search_form_html(query, view=view) + problem(exc)
+                body += search_form_html(query, view=view) + f"<div id='s-results'>{problem(exc)}</div>"
             else:
+                # the panel's filters redraw #s-results in place (static/search.js)
                 body += (
                     search_form_html(query, view=view, found=found, shown=len(found["decks"]))
-                    + note
-                    + search_results_html(found, query, view=view)
+                    + f"<div id='s-results'>{note}{search_results_html(found, query, view=view)}</div>"
                 )
         else:
             body += search_form_html(query, view=view)
@@ -742,7 +744,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 )
             )
             body += (
-                "<section class='panel'><h2>Browse public decks</h2>"
+                "<div id='s-results'><section class='panel'><h2>Browse public decks</h2>"
                 "<p class='muted'>Search every public deck on "
                 "Archidekt by name, commander, owner, format and "
                 "colors, sorted the way the site sorts them. Open "
@@ -750,7 +752,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 "views, stats and export as your own; clone it to your account from its page.</p>"
                 f"<div class='popular'>{popular}"
                 f"<a class='precons' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
-                "</section>"
+                "</section></div>"
             )
         return remembered(page("Search decks", body, sub=sub, sid=sid), sub, view, remember)
 
