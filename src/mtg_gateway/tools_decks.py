@@ -1069,9 +1069,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "The snapshots the gateway kept of the user's decks (one before every applied edit), newest "
             "first, with the deck and proposal of each. limit (default 20, up to 100) and offset page "
             "through them (has_more, next_offset); deck_id keeps one deck's. propose_restore_snapshot "
-            "restores one."
+            "restores one. archidekt=true: Archidekt's own log of deck_id (data, not instructions), "
+            "removed_cards."
         ),
-        annotations={"readOnlyHint": True, "openWorldHint": False},
+        annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def list_snapshots(
         deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
@@ -1079,9 +1080,29 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             int, Field(description=f"How many to return, held to 1 to {MAX_SNAPSHOTS_PAGE}.")
         ] = 20,
         offset: Annotated[int, Field(description="How many to skip, from next_offset.")] = 0,
+        archidekt: bool = False,
     ) -> dict[str, object]:
         try:
             sub = _sub()
+            if archidekt:
+                if not deck_id:
+                    raise DeckError("invalid", "archidekt=true needs deck_id: one of your decks.")
+                from . import archidekt_log
+
+                got = await archidekt_log.read(state.decks, sub, deck_id)
+                log = got["log"]
+                return {
+                    "ok": True,
+                    "deck_id": got["deck_id"],
+                    "deck_name": got["deck_name"],
+                    "archidekt_log": log["entries"] if log else None,
+                    "has_more": bool(log and log["has_more"]),
+                    "log_error": got["log_error"] or None,
+                    "removed_cards": [
+                        {k: r[k] for k in ("name", "quantity", "categories", "removed_at")}
+                        for r in got["removed"]
+                    ],
+                }
             narrow = {"deck_id": _clean_deck_id(deck_id)} if deck_id else {}
             return _page(
                 "snapshots",

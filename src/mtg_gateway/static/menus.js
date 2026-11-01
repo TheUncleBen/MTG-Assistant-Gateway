@@ -475,6 +475,11 @@
       var ok = Box.button("Move", "primary", function () {
         box.busy(true);
         post("/decks/api/folders/" + enc(f.id) + "/move", { parent_id: picked(tree) }).then(function (r) {
+          if (!r.ok && r.error === "backup_inside") {
+            box.busy(false);
+            backupInTheWay(box, r, "“" + f.name + "” can't be moved yet", function () { moveFolder(f); });
+            return;
+          }
           if (!r.ok) return failed(box, r);
           reloadDecks(r.notice || "folder_moved");
         }, function () { failed(box); });
@@ -485,14 +490,32 @@
     }, function () { failed(box); });
   }
   function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+  // The backup folder sits inside the folder being moved or deleted: when the gateway can move it
+  // to the top level, the box offers that, then asks about the folder again (again()).
+  function backupInTheWay(box, c, title, again) {
+    box.setTitle(title);
+    box.setBody(el("p", null, c.message || ""));
+    if (!c.backup_folder_id) {
+      box.setActions([Box.button("OK", "primary", null, { cancel: true })]);
+      box.focusFirst();
+      return;
+    }
+    var move = Box.button("Move the backup folder to your top level", "primary", function () {
+      box.busy(true);
+      post("/decks/api/folders/backup/" + enc(c.backup_folder_id) + "/top", {}).then(function (r) {
+        if (!r.ok) return failed(box, r);
+        box.close();
+        again();
+      }, function () { failed(box); });
+    });
+    box.setActions([cancelButton(), move]);
+    move.focus();
+  }
   function deleteFolder(f, said) {
     var box = Box.open({ title: "Delete the folder “" + f.name + "”?", body: loading(), actions: [cancelButton("Keep it")], returnFocus: f.focus });
     getJSON("/decks/api/folders/" + enc(f.id) + "/contents").then(function (c) {
       if (!c.ok && c.error === "backup_inside") {
-        box.setTitle("“" + f.name + "” can't be deleted here");
-        box.setBody(el("p", null, c.message || ""));
-        box.setActions([Box.button("OK", "primary", null, { cancel: true })]);
-        box.focusFirst();
+        backupInTheWay(box, c, "“" + f.name + "” can't be deleted yet", function () { deleteFolder(f); });
         return;
       }
       if (!c.ok) return failed(box, c);

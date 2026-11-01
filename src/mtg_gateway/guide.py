@@ -1021,8 +1021,9 @@ def build(
     )
     # in every mode; since 0.7.29 the card in the chat too, but never for a deck deletion
     on_review_page = (
-        "<td>you press Apply on the card or on its review page (deleting a deck, and an edit of a "
-        "comment that has formatting: on its review page only)</td>"
+        "<td>you press Apply on the card or on its review page (deleting a deck, clearing your binder, "
+        "removing a removed card's row, and an edit of a comment that has formatting: on its review "
+        "page only)</td>"
     )
     ref_approval = (
         "<p>The approval mode on <a href='/account/assistants'>Assistants</a> says how much each "

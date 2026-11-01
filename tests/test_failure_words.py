@@ -114,9 +114,9 @@ async def test_member_pages_never_show_archidekts_raw_words(stack: Stack, answer
 @pytest.mark.parametrize(
     ("answer", "words"),
     [
-        (503, "Scryfall had a problem answering. Try again in a few minutes."),
-        (httpx.ConnectError("down"), "Scryfall couldn't be reached. Try again in a few minutes."),
-        (httpx.ReadTimeout("slow"), "Scryfall couldn't be reached. Try again in a few minutes."),
+        (503, "Scryfall had a problem answering. Try again later."),
+        (httpx.ConnectError("down"), "Scryfall couldn't be reached. Try again later."),
+        (httpx.ReadTimeout("slow"), "Scryfall couldn't be reached. Try again later."),
     ],
 )
 async def test_scryfall_failures_are_plain_sentences(answer: object, words: str) -> None:

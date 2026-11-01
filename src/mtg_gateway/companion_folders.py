@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import prefs
+from . import backup_place, prefs
 from .decks import DeckError, current_client
 from .folderview import visible_folders
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
@@ -61,7 +61,7 @@ def _fail(kind: str, message: str, **extra: Any) -> JSONResponse:
 
 
 def _from(exc: DeckError) -> JSONResponse:
-    extra = {k: v for k, v in exc.extra.items() if k in ("counts",)}
+    extra = {k: v for k, v in exc.extra.items() if k in ("counts", "backup_folder_id") and v is not None}
     resp = _fail(exc.kind, str(exc), **extra)
     if exc.retry_after:
         resp.headers["Retry-After"] = str(exc.retry_after)
@@ -265,6 +265,22 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
         except DeckError as exc:
             return _from(exc)
         return ok(folder=_folder_out(now), notice="folder_moved")
+
+    @server.custom_route("/decks/api/folders/backup/{fid}/top", methods=["POST"], include_in_schema=False)
+    async def backup_folder_top(request: Request) -> Response:
+        """The move or delete box's own answer to "the backup folder is inside": the member's press
+        moves the backup folder to the top level (backup_place.move_to_top), then the box asks again."""
+        sub, refused = await member(request, write=True)
+        if refused:
+            return refused
+        fid = folder_id_of(request)
+        if fid is None:
+            return _fail("invalid", "Pick a folder.")
+        try:
+            now = await backup_place.move_to_top(decks, sub, fid)
+        except DeckError as exc:
+            return _from(exc)
+        return ok(folder=_folder_out(now), notice="backup_moved")
 
     @server.custom_route("/decks/api/folders/{fid}/contents", methods=["GET"], include_in_schema=False)
     async def folder_contents(request: Request) -> Response:

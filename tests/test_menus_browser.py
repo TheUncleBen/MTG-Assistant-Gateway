@@ -599,13 +599,18 @@ def test_a_folder_holding_the_backup_folder_is_refused_in_the_box(tmp_path: Path
             page.locator("li.folder[data-folder-id='504'] button.kebab").click()
             _pick(page, "Delete folder…")
             box = _box(page)
-            page.locator(".mtgbox h2", has_text="can't be deleted here").wait_for(timeout=3000)
-            assert box.locator("h2").inner_text() == "“Archive” can't be deleted here"
+            page.locator(".mtgbox h2", has_text="can't be deleted yet").wait_for(timeout=3000)
+            assert box.locator("h2").inner_text() == "“Archive” can't be deleted yet"
             assert box.locator(".body").inner_text().strip()
-            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == ["OK"]
-            box.locator(".acts button").click()
+            # 0.7.46: the box offers to move the backup folder out of the way (or Cancel)
+            assert [t.strip() for t in box.locator(".acts button").all_inner_texts()] == [
+                "Cancel",
+                "Move the backup folder to your top level",
+            ]
+            box.locator(".acts button", has_text="Cancel").click()
             _gone(page)
             assert ark.folder_deletes == []
+            assert next(f for f in ark.folders["alice"] if f["id"] == 505)["parent"] == 504
             assert errors == [], errors
             browser.close()
     finally:
