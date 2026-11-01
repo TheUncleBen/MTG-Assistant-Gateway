@@ -1162,8 +1162,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             p = state.decks.describe(sub, pid)
         except DeckError:
             return page(
-                "Not found",
-                "<p>No such proposal for your account.</p>",
+                "Proposal not found",
+                "<p>This proposal could not be found. It may belong to another account, or its link "
+                "may be wrong.</p>"
+                f"<p><a class='btn btn-primary' href='/proposals'>{icon('back')} Back to Assistant</a></p>",
                 status=404,
                 sub=sub,
                 sid=sid,
@@ -2753,6 +2755,12 @@ def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
     return p.get("state") == "failed"
 
 
+# a refusal written for the assistant's call (a field "must be" a list, a non-empty list, a dict)
+_DEVELOPER_WORDS = re.compile(
+    r"\bmust be a (non-empty )?(list|dict|whole number|integer)|non-empty list|\bJSON\b"
+)
+
+
 def _page_step(p: dict[str, Any]) -> str:
     """What happens next, said to the person reading the review page. next_step speaks to the
     assistant (call this tool, do not call that one), so the page words it on its own."""
@@ -2822,6 +2830,10 @@ def _page_step(p: dict[str, Any]) -> str:
     if state == "failed":
         # the reason, in the gateway's words (DeckError messages: no codes), then what is left
         why = str(result.get("detail") or "").strip()
+        if _DEVELOPER_WORDS.search(why):
+            # a proposal whose own content failed the checks (an empty or malformed change list):
+            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21)
+            why = "the proposal is empty or damaged. Ask your assistant for a new one"
         lead = (
             f"This change could not be applied: {why.rstrip('.')}. "
             if why

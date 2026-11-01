@@ -148,8 +148,12 @@ def test_home_is_recent_decks_and_needs_you_not_the_navigation_again(server: Ser
     # not linked: Link Archidekt is the one orange button, no deck panel, nothing needs them yet
     assert page.count("btn-primary") == 1 and "Link Archidekt</a>" in page
     assert "<h2>My decks</h2>" not in page and "id='needs-h'" not in page
-    # no assistant connected: the connection details are offered
+    # no assistant connected: the connection details are offered; the row says what it is for
+    # and the connector address sits inside with Copy, not as the row's text (0.7.46 audit QG-20)
     assert "<details class='connect panel'>" in page and "Guided setup" in page
+    assert "<summary>Connect an AI assistant <span class='muted addr'>Claude or ChatGPT" in page
+    assert f"<code>{server.base}/mcp</code>" in page and f"data-copy-text='{server.base}/mcp'" in page
+    assert f"<span class='muted addr'>{server.base}/mcp" not in page
     assert "<script src='/static/bell.js" in page
 
 

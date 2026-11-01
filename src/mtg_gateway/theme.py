@@ -1011,6 +1011,14 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
   align-items:baseline}
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
+.home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.home details.connect .addrline code{word-break:break-all;font-size:.9rem}
+/* the keyboard shortcuts box (static/sitesearch.js) */
+.mtgbox dl.keys{display:grid;grid-template-columns:auto 1fr;gap:.4rem 1rem;margin:0}
+.mtgbox dl.keys dt{margin:0}.mtgbox dl.keys dd{margin:0}
+.mtgbox dl.keys kbd{font-family:inherit;font-size:.9rem;padding:.1rem .4rem;
+  border:1px solid var(--border-soft);
+  border-radius:4px;background:var(--surface-2);white-space:nowrap}
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}

@@ -86,14 +86,20 @@ def test_the_page_fits_and_its_controls_are_44px_at_every_width(
         browser.close()
 
 
-def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(server: Server) -> None:
+def test_the_stepper_removes_the_last_copy_with_undo_and_the_menu_reaches_the_details_box(
+    server: Server,
+) -> None:
+    """− on the last copy takes the row out at once and the strip offers Undo, which puts it back
+    with its printing, finish and price paid (QOL-01, 0.7.46 audit QG-09); no question first."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
     sid = server.sign_in_and_link()
     _seed(server, 3)
+    dialogs: list[str] = []
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1280)
+        page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
         page.goto(f"{server.base}/collection?view=grid", wait_until="networkidle")
         first = page.locator("#cards > li[data-id]").last  # the oldest entry, with three copies
         rid = first.get_attribute("data-id")
@@ -103,26 +109,34 @@ def test_the_stepper_asks_on_the_last_copy_and_the_menu_reaches_the_details_box(
             f"() => document.querySelector(\"[data-id='{rid}'] output\").textContent === '4'"
         )
         assert server.ark.collections["alice"][int(rid)]["quantity"] == 4
-        # − on a single copy asks first: the shared box, Cancel keeps it
+        # − on a single copy: the row goes at once, no box, and the strip offers Undo
         one = page.locator("#cards > li[data-id]").first
         one_id = one.get_attribute("data-id")
+        was = dict(server.ark.collections["alice"][int(one_id)])
+        was["purchasePrice"] = 2.5
+        server.ark.collections["alice"][int(one_id)]["purchasePrice"] = 2.5
         one.locator("button[value=dec]").click()
-        box = page.locator(".mtgbox[role=dialog]:visible")
-        box.wait_for(timeout=3000)
-        assert box.locator("h2").inner_text().startswith("Remove “")
-        assert "from your binder." in box.inner_text()
-        assert box.locator("button.danger", has_text="Remove").count() == 1
-        box.locator("[data-cancel]").click()
-        page.wait_for_timeout(200)
-        assert page.locator("#cards > li[data-id]").count() == 3
-        # Remove: the row goes and a strip with a × says so
-        one.locator("button[value=dec]").click()
-        box.wait_for(timeout=3000)
-        box.locator("button.danger").click()
         page.wait_for_function(f"() => !document.querySelector(\"[data-id='{one_id}']\")")
+        assert page.locator(".mtgbox[role=dialog]:visible").count() == 0 and dialogs == []
         assert int(one_id) not in server.ark.collections["alice"]
         strip = page.locator("#col-notes .notice.ok[role=status]")
-        assert strip.inner_text().strip() == "Removed from your binder."
+        assert strip.inner_text().strip().startswith("Removed from your binder.")
+        assert page.locator("#col-count").inner_text() == "2 entries"
+        # Undo: the row is back on the page and on Archidekt, the same printing, finish and price
+        strip.locator("button", has_text="Undo").click()
+        page.locator("#col-notes .notice.ok", has_text="is back in your binder.").wait_for(timeout=8000)
+        assert page.locator("#cards > li[data-id]").count() == 3
+        assert page.locator("#col-count").inner_text() == "3 entries"
+        back = [r for r in server.ark.collections["alice"].values() if r["card"]["id"] == was["card"]["id"]]
+        assert len(back) == 1 and back[0]["quantity"] == 1 and back[0]["modifier"] == was["modifier"]
+        page.wait_for_function("() => !document.querySelector('#col-notes .notice.error')", timeout=3000)
+        assert back[0].get("purchasePrice") in (2.5, "2.50", "2.5")
+        new_id = str(back[0]["id"])
+        assert page.locator(f"#cards > li[data-id='{new_id}']").count() == 1
+        # removed again: a strip with a × says so
+        page.locator(f"#cards > li[data-id='{new_id}'] button[value=dec]").click()
+        page.wait_for_function(f"() => !document.querySelector(\"[data-id='{new_id}']\")")
+        strip = page.locator("#col-notes .notice.ok[role=status]")
         assert page.locator("#col-count").inner_text() == "2 entries"
         strip.locator("[data-dismiss]").click()
         assert page.locator("#col-notes .notice").count() == 0

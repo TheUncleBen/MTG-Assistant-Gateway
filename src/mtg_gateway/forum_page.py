@@ -813,9 +813,19 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             resp = respond(body, sub, sid, status=plan.status)
             resp.headers.update(busy_headers(plan))
             return resp
+        words = str(exc)
         if exc.kind == "not_found":
             status = 404
-        body = ui.page_head(TITLE, SUB) + ui.notice(str(exc), "error", role="alert") + open_form_html()
+            # Archidekt's generic "could not find that deck" is about a thread here (QG-19)
+            words = "That thread could not be found. It may have been deleted on Archidekt."
+        elif exc.kind == "invalid" and words.startswith("thread_id must be"):
+            words = OPEN_BAD  # the open form's own words, not the tool's field name
+        body = (
+            ui.page_head(TITLE, SUB)
+            + ui.notice(words, "error", role="alert")
+            + f"<p><a class='btn btn-primary' href='{PAGE}'>{icon('back')} Back to the forum</a></p>"
+            + open_form_html()
+        )
         return respond(body, sub, sid, status=status)
 
     @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)

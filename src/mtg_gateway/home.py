@@ -299,12 +299,16 @@ def connect_html(mcp_url: str) -> str:
     """Connect an AI assistant: the connector address and the ways in, shown only while no
     assistant is connected (afterwards the Account page has it)."""
     return (
+        # the row says what it is for, not the connector address (0.7.46 audit QG-20); the
+        # address is inside, with Copy, for someone setting up a connector by hand
         "<details class='connect panel'><summary>Connect an AI assistant "
-        f"<span class='muted addr'>{_esc(mcp_url)}</span></summary>"
-        "<p>Claude and ChatGPT talk to this gateway through its connector URL. Add it as a custom "
-        "connector and sign in when asked; the assistant can then read your decks, research cards and "
-        "propose edits you approve here.</p>"
-        f"<pre>{_esc(mcp_url)}</pre>"
+        "<span class='muted addr'>Claude or ChatGPT, with Guided setup</span></summary>"
+        "<p>Claude and ChatGPT talk to this gateway through its connector address. Guided setup walks "
+        "you through it; the assistant can then read your decks, research cards and propose edits "
+        "you approve here.</p>"
+        f"<p class='addrline'><code>{_esc(mcp_url)}</code> "
+        f"<button type='button' class='btn small' data-copy-text='{_esc(mcp_url)}' "
+        "data-copy-said='Connector address copied.'>Copy address</button></p>"
         f"<div class='actions'><a class='btn' href='/install'>{icon('download')} Guided setup"
         f"</a><a class='btn' href='/install?for=skill'>{icon('report')} Assistant skill</a>"
         f"<a class='btn' href='/install?for=android'>{icon('download')} Android app</a></div></details>"
