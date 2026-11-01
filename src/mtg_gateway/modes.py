@@ -144,9 +144,10 @@ HIGH_RISK_TEXT = (
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
     f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
-    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} and deleting a deck are never "
+    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT}, deleting a deck and clearing your binder are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
-    "chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on "
+    "chat or on its review page (deleting a deck, clearing your binder, and an edit of a comment "
+    "that has formatting: on "
     "the review page only). An edit of a description that has formatting is also approved on its "
     "review page only."
 )
@@ -184,7 +185,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
             f"changes nothing that exists), and {lists_low_text(max_rows)}. A new deck built from a list, "
             "restores, deck details and categories, commander "
             f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), "
-            f"{LISTS_DELETE_TEXT}, {LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} or deleting a deck still wait for "
+            f"{LISTS_DELETE_TEXT}, {LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT}, deleting a deck or clearing "
+            "your binder still wait for "
             "your press. "
             "So does a held change, a change waiting for another change first, one another app had a "
             "hand in, one that replaces another app's change, or one that another app's waiting change "
@@ -266,7 +268,7 @@ def mode_points(
                     "deck details and categories",
                     "commander changes and bigger edits",
                     f"anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
-                    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT} or deleting a deck",
+                    f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT}, deleting a deck or clearing your binder",
                     _STILL_WAITS,
                 ],
             ),

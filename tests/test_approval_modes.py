@@ -542,6 +542,7 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         "collaborator_add": "collaborator changes",
         "collaborator_remove": "collaborator changes",
         "delete_deck": "deleting a deck",
+        "clear_collection": "clearing your binder",
         "deck_help": "deck help requests",
         "report": "reports to Archidekt's moderators",
         "profile": "profile and email settings",
@@ -554,6 +555,8 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         assert modes.risk_of("action", [{"action": action}])[0] in modes.MEMBER_ONLY
     for mode in modes.MODES:
         assert "Archidekt account" in modes.mode_help(mode) and "deleting a deck" in modes.mode_help(mode)
+    for mode in ("semi", "auto"):
+        assert "clearing your binder" in modes.mode_help(mode) + modes.MEMBER_ONLY_TEXT
 
 
 async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> None:

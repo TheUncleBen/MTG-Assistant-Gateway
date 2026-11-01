@@ -78,6 +78,7 @@ TABS = (
     Tab("tags", "Color tags", "color_tags"),
     Tab("pins", "Pinned cards", "pins"),
     Tab("custom", "Custom cards", "custom_cards"),
+    Tab("btags", "Binder tags", "collection_tags"),
 )
 BY_SLUG = {t.slug: t for t in TABS}
 PINS = BY_SLUG["pins"]
@@ -89,6 +90,7 @@ TAB_ICONS = {
     "tags": "tag",
     "pins": "bookmark",
     "custom": "image",
+    "btags": "tag",
 }
 FLAGS = (
     ("in_deck", "In deck", "Counts in the deck"),
@@ -107,6 +109,9 @@ NOTICES = {
     "tag_created": "Color tag created on Archidekt and read back.",
     "tag_saved": "Color tag saved on Archidekt and read back.",
     "tag_deleted": "Deleted “{name}” on Archidekt.",
+    "btag_created": "Binder tag created on Archidekt and read back.",
+    "btag_saved": "Binder tag saved on Archidekt and read back.",
+    "btag_deleted": "Deleted “{name}” on Archidekt. The entries that had it keep everything else.",
     "pin_saved": "Saved on Archidekt.",
     "pinned": "Pinned “{name}” on Archidekt.",
     "pin_removed": "Pin removed on Archidekt.",
@@ -267,7 +272,7 @@ def tab_page_of(tab: Tab) -> str:
 
 
 def tabs_html(current: str, counts: dict[str, int]) -> str:
-    """The tab bar on a list's page: the quick way between the five Archidekt lists. A tab whose
+    """The tab bar on a list's page: the quick way between the six Archidekt lists. A tab whose
     list has not been read yet has no number; static/lists.js asks COUNTS_API for them after the
     page has drawn (data-counts), so the page never waits for them."""
     out = []
@@ -298,7 +303,7 @@ def hub_html(
     open_box: str = "",
 ) -> str:
     """The hub's two blocks, in the Account page's grouped-list style (account_hub.HUB_CSS): the
-    five Archidekt lists with the counts known so far (static/lists.js fills the rest from
+    six Archidekt lists with the counts known so far (static/lists.js fills the rest from
     COUNTS_API), and the watchlist lists (None while watchlists are off) with their counts, a ⋮
     (Rename list…, Delete list…) and New list…, a box posting to the Watchlist."""
     rows = []
@@ -790,7 +795,36 @@ def swatch(color: str) -> str:
     return f"<span class='lp-swatch' style='background:{esc(color)}' aria-hidden='true'></span>"
 
 
-def tags_rows(items: list[dict[str, Any]]) -> str:
+# Color tags (the deck tag list) and Binder tags (the tags on binder entries, collection_tags.py)
+# share the rows and boxes; each its own page, so the boxes keep one set of ids
+TAG_WORDS = {
+    "tags": {
+        "title": "Color tags",
+        "one": "color tag",
+        "empty": "No color tags yet.",
+        "purpose": "Tags you can put on cards in any deck. A card keeps the name and color it was "
+        "tagged with, so changes here don't reach cards already tagged.",
+        "edit_warn": "Cards already tagged keep their old name and color. Archidekt doesn't link a card's "
+        "tag to this list.",
+        "delete": "Cards already tagged keep their color and name; the tag only leaves this list and the "
+        "deck's tag picker. A copy of the list from just before is kept under History.",
+        "placeholder": "Cut",
+    },
+    "btags": {
+        "title": "Binder tags",
+        "one": "binder tag",
+        "empty": "No binder tags yet. Make one here, then tick it in a card's Details in your binder.",
+        "purpose": "Tags on the cards in your binder, as Archidekt's collection has them: tick them in a "
+        "card's Details, and filter your binder by one.",
+        "edit_warn": "Every entry with this tag shows the new name and color.",
+        "delete": "Every entry in your binder with this tag loses it; the entries themselves stay. A copy "
+        "of the list from just before is kept under History.",
+        "placeholder": "For trade",
+    },
+}
+
+
+def tags_rows(items: list[dict[str, Any]], slug: str = "tags") -> str:
     out = []
     for t in items:
         name, color = t["name"], t["color"]
@@ -800,14 +834,14 @@ def tags_rows(items: list[dict[str, Any]]) -> str:
                 (
                     "Rename or recolor…",
                     "edit",
-                    tab_href("tags", edit=t["id"]),
+                    tab_href(slug, edit=t["id"]),
                     {"data-box": "tag-box", "data-mode": "edit"},
                 ),
                 None,
                 (
                     "Delete…",
                     "trash",
-                    tab_href("tags", delete=t["id"]),
+                    tab_href(slug, delete=t["id"]),
                     {"class": "danger", "data-box": "tag-del"},
                 ),
             ],
@@ -821,12 +855,13 @@ def tags_rows(items: list[dict[str, Any]]) -> str:
     return "".join(out)
 
 
-def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
+def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "tags") -> str:
     items = got["items"]
+    w = TAG_WORDS[slug]
     head = list_head(
-        "Color tags",
+        w["title"],
         f"{len(items)}",
-        ui.box_opener("New color tag", tab_href("tags", new=1), "tag-box", kind="primary", icon_name="plus"),
+        ui.box_opener(f"New {w['one']}", tab_href(slug, new=1), "tag-box", kind="primary", icon_name="plus"),
     )
     table = (
         ui.table_open(
@@ -834,34 +869,43 @@ def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
             "minmax(0,1fr) 7rem 44px",
             "minmax(0,1fr) 44px",
             cls="lp-tbl lp-tag",
-            label="Color tags",
+            label=w["title"],
         )
         + ui.table_header([ui.Column("Tag"), ui.Column("Color", "sm-hide"), ui.Column("")])
-        + (tags_rows(items) or "<div class='tr lp-empty'><span class='muted'>No color tags yet.</span></div>")
+        + (
+            tags_rows(items, slug)
+            or f"<div class='tr lp-empty'><span class='muted'>{esc(w['empty'])}</span></div>"
+        )
         + "</div>"
     )
     return (
         head
-        + "<p class='ui-sub'>Tags you can put on cards in any deck. A card keeps the name and color it was "
-        "tagged with, so changes here don't reach cards already tagged.</p>"
+        + f"<p class='ui-sub'>{esc(w['purpose'])}</p>"
         + table
-        + tag_box(csrf, box if box.get("box") == "tag-box" else {})
-        + tag_delete_box(csrf, box if box.get("box") == "tag-del" else {})
+        + tag_box(csrf, box if box.get("box") == "tag-box" else {}, slug)
+        + tag_delete_box(csrf, box if box.get("box") == "tag-del" else {}, slug)
     )
 
 
-def tag_box(csrf: str, st: dict[str, Any]) -> str:
+def tag_box(csrf: str, st: dict[str, Any], slug: str = "tags") -> str:
+    w = TAG_WORDS[slug]
     v = st.get("values") or {}
     editing = st.get("mode") == "edit"
     name = v.get("name", "")
     color = v.get("color") or account_lists.DEFAULT_TAG_COLOR
     body = (
-        f"<form id='tag-f' method='post' action='{PAGE}/tags'>"
+        f"<form id='tag-f' method='post' action='{PAGE}/{slug}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='action' value='{'edit' if editing else 'create'}'>"
         f"<input type='hidden' name='was_name' value='{esc(v.get('was_name', ''))}'>"
         + text_field(
-            "tag-n", "name", "Name", name, limit=account_lists.TAG_NAME_MAX, placeholder="Cut", required=True
+            "tag-n",
+            "name",
+            "Name",
+            name,
+            limit=account_lists.TAG_NAME_MAX,
+            placeholder=w["placeholder"],
+            required=True,
         )
         + "<div class='field'><label for='tag-c'>Color</label><div class='lp-tagpv'>"
         f"<input type='color' id='tag-c' value='{esc(color)}' aria-label='Pick a color' "
@@ -873,19 +917,15 @@ def tag_box(csrf: str, st: dict[str, Any]) -> str:
         f"class='nm'>{esc(name or 'Preview')}</span></span>"
         "</div></div>"
         + f"<div data-edit-only{'' if editing else ' hidden'}>"
-        + warn(
-            "",
-            "Cards already tagged keep their old name and color. Archidekt doesn't link a card's tag to this "
-            "list.",
-        )
+        + warn("", w["edit_warn"])
         + "</div>"
-        + hist("A copy of your color tags from just before")
+        + hist(f"A copy of your {w['title'].lower()} from just before")
         + "</form>"
         + box_note(st.get("error", ""))
     )
     return ui.box(
         "tag-box",
-        f"Rename or recolor “{name}”" if editing else "New color tag",
+        f"Rename or recolor “{name}”" if editing else f"New {w['one']}",
         body,
         actions=[
             ui.box_button("Cancel", cancel=True),
@@ -894,27 +934,26 @@ def tag_box(csrf: str, st: dict[str, Any]) -> str:
             ),
         ],
         open=bool(st),
-        close_href=f"{PAGE}/tags",
+        close_href=f"{PAGE}/{slug}",
         cls="lp-box",
     ).replace(
         "<div class='ui-box",
-        "<div data-t-new='New color tag' data-t-edit='Rename or recolor “{name}”' data-ok-new='Create tag' "
+        f"<div data-t-new='New {w['one']}' data-t-edit='Rename or recolor “{{name}}”' "
+        "data-ok-new='Create tag' "
         "data-ok-edit='Save tag' data-default-color='" + account_lists.DEFAULT_TAG_COLOR + "' class='ui-box",
         1,
     )
 
 
-def tag_delete_box(csrf: str, st: dict[str, Any]) -> str:
+def tag_delete_box(csrf: str, st: dict[str, Any], slug: str = "tags") -> str:
     name = (st.get("values") or {}).get("name", "")
     body = (
-        f"<form id='tag-del-f' method='post' action='{PAGE}/tags'>"
+        f"<form id='tag-del-f' method='post' action='{PAGE}/{slug}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'><input type='hidden' name='action' "
         "value='delete'>"
         "<input type='hidden' name='confirmed' value='1'><input type='hidden' name='was_name' "
         f"value='{esc(name)}'></form>"
-        "<p>Cards already tagged keep their color and name; the tag only leaves this list and the deck's tag "
-        "picker. A copy of the list from just before is kept under History.</p>"
-        + box_note(st.get("error", ""))
+        f"<p>{esc(TAG_WORDS[slug]['delete'])}</p>" + box_note(st.get("error", ""))
     )
     return ui.box(
         "tag-del",
@@ -925,7 +964,7 @@ def tag_delete_box(csrf: str, st: dict[str, Any]) -> str:
             ui.box_button(f"Delete “{name}”", kind="danger-solid", form="tag-del-f", icon_name="trash"),
         ],
         open=bool(st),
-        close_href=f"{PAGE}/tags",
+        close_href=f"{PAGE}/{slug}",
         cls="lp-box",
     ).replace(
         "<div class='ui-box",
@@ -1440,7 +1479,7 @@ CSS = """
 .lp-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
 .lp-tabs{margin:0 0 1rem}
 .lp-tabs a{white-space:normal;text-align:center;line-height:1.15;padding:.2rem .4rem;gap:.35rem}
-/* on a phone the five tabs are one row that scrolls sideways (the admin bar's even rows would
+/* on a phone the six tabs are one row that scrolls sideways (the admin bar's even rows would
    leave a hole), the current one brought into view by lists.js */
 @media (max-width:599.98px){
   .lp-tabs{display:flex;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;
@@ -1725,7 +1764,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return {"box": "def-box", "values": d}
             if d := by_id(items, q.get("clear"), "oracle_id"):
                 return {"box": "def-clear", "values": d}
-        elif tab.slug == "tags":
+        elif tab.slug in ("tags", "btags"):
             if "new" in q:
                 return {"box": "tag-box", "mode": "new", "values": {}}
             if t := by_id(items, q.get("edit")):
@@ -1756,8 +1795,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             inner = templates_tab(got, csrf, box)
         elif tab.slug == "defaults":
             inner = defaults_tab(got, csrf, box, q)
-        elif tab.slug == "tags":
-            inner = tags_tab(got, csrf, box)
+        elif tab.slug in ("tags", "btags"):
+            inner = tags_tab(got, csrf, box, tab.slug)
         elif tab.slug == "pins":
             inner = pins_tab(got, csrf, box)
         else:
@@ -1772,7 +1811,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
     def head_of(tab: Tab, counts: dict[str, int] | None = None) -> str:
         """A list's page head: Binder's switch (Lists lit), the way back to the hub with the
-        list's name, its purpose line and the tab bar between the five lists."""
+        list's name, its purpose line and the tab bar between the six lists."""
         sub_text = WANTS_SUB if tab is PINS else SUB_TEXT
         return (
             ui.binder_head(HUB, WANTS_TITLE if tab is PINS else f"Binder: {tab.label}", sub_text)
@@ -2100,17 +2139,18 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return {"op": "set", "card": card, "categories": picked}, "defaults_saved", "def-box"
             if action == "clear":
                 return {"op": "clear", "card": card}, "defaults_cleared", "def-clear"
-        elif tab.slug == "tags":
+        elif tab.slug in ("tags", "btags"):
             color = (data.get("color") or "").strip()
+            pre = "b" if tab.slug == "btags" else ""
             if action == "create":
-                return {"op": "create", "name": name, "color": color or None}, "tag_created", "tag-box"
+                return {"op": "create", "name": name, "color": color or None}, f"{pre}tag_created", "tag-box"
             if action == "edit":
                 c = {"op": "edit", "name": was, "color": color or None}
                 if name and name != was:
                     c["new_name"] = name
-                return c, "tag_saved", "tag-box"
+                return c, f"{pre}tag_saved", "tag-box"
             if action == "delete":
-                return {"op": "delete", "name": was}, "tag_deleted", "tag-del"
+                return {"op": "delete", "name": was}, f"{pre}tag_deleted", "tag-del"
         elif tab.slug == "pins":
             pid = data.get("pin_id") or ""
             pin_id = int(pid) if _ID.fullmatch(pid) else None
@@ -2283,6 +2323,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 key = {
                     "templates": "delete",
                     "tags": "delete",
+                    "btags": "delete",
                     "custom": "delete",
                     "defaults": "clear",
                     "pins": "remove",

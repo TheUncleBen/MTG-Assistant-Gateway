@@ -2165,6 +2165,7 @@ def _lists_fold(sub: str) -> str:
         "default_categories": ("card with default categories", "cards with default categories"),
         "color_tags": ("color tag", "color tags"),
         "custom_cards": ("custom card", "custom cards"),
+        "collection_tags": ("binder tag", "binder tags"),
     }
     parts = []
     for t in ACCOUNT_TABS:
@@ -2393,6 +2394,7 @@ LIST_LABELS = {
     "color_tags": "Color tag",
     "pins": "Pin",
     "custom_cards": "Custom card",
+    "collection_tags": "Binder tag",
 }
 
 
@@ -2956,7 +2958,7 @@ def _before_line(kind: str, e: dict[str, Any]) -> str:
             if e.get(k)
         ]
         return f"{e.get('name', '')}: {', '.join(flags) or 'not in deck or price'}"
-    if kind == "color_tags":
+    if kind in ("color_tags", "collection_tags"):
         return f"{e.get('name', '')}: {e.get('color', '')}"
     if kind == "pins":
         note = f", note “{e['notes']}”" if e.get("notes") else ""
@@ -3054,6 +3056,24 @@ def _delete_deck_box(p: dict[str, Any]) -> str:
         "you press Delete this deck.</p>"
     )
     return _confirm_box(f"Delete “{name}”?", body, "Keep it", "Delete this deck")
+
+
+def _clear_binder_box(p: dict[str, Any]) -> str:
+    """Clearing the whole binder (actions.py clear_collection): how many entries go, the copy kept
+    under History first, and that Archidekt has no undo."""
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    n = int(changes.get("entries") or 0)
+    size = plural(n, "entry", "entries") if n else "every entry"
+    if isinstance(changes.get("cards"), int):
+        size += f" ({plural(int(changes['cards']), 'card')})"
+    body = (
+        f"<p>This removes <strong>{html.escape(size)}</strong> from your Archidekt collection. The "
+        "gateway keeps a copy of your whole binder under History first: download it as a CSV, or put it "
+        "back with “Restore to my binder”. <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Clear my binder.</p>"
+    )
+    return _confirm_box("Clear your whole binder?", body, "Keep it", "Clear my binder")
 
 
 def _custom_cards_box(p: dict[str, Any]) -> str:
@@ -3364,6 +3384,18 @@ def _proposal_body(
             )
             apply_button = ("apply", "Take them out on Archidekt", "btn-outline-danger")
             box = _custom_cards_box(p)
+        elif destroy and (p.get("changes") or {}).get("action") == "clear_collection":
+            ask = (
+                "<div class='apply destroy'><h3 class='ui-section'>Clear your whole binder on Archidekt?"
+                "</h3><p class='notice error'><strong>This removes every entry from your Archidekt "
+                "collection. Archidekt itself has no undo.</strong></p>"
+                "<p class='small'>The gateway first keeps a copy of your whole binder under History, where "
+                "you can download it as a CSV or put it back with Restore to my binder, and checks that "
+                "your binder still has the entries reviewed here. Only you can approve this, in every "
+                "approval mode. Nothing happens until you tap Clear.</p>"
+            )
+            apply_button = ("apply", "Clear my binder on Archidekt", "btn-outline-danger")
+            box = _clear_binder_box(p)
         elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"

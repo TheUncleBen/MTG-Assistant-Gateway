@@ -1058,6 +1058,9 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
 # The ``via`` of DeckService.apply that only the review page's own form (pages.py) passes: the
 # one caller that may apply an Archidekt account action.
 REVIEW_PAGE = "review_page"
+# Account actions applied on their own review page only: never from the card in the chat, never
+# in Apply all (deleting a deck, clearing the whole binder)
+REVIEW_PAGE_ONLY = ("delete_deck", "clear_collection")
 # Who rejected a proposal (DeckService.reject records it; describe() shows it as closed_by).
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 # The reason the member typed when rejecting on the card, kept with the rejection (at most this long)
@@ -5942,7 +5945,7 @@ class DeckService:
         which only its review page applies, and a change that keeps formatting.
         Account actions (likes, comments, folders, collaborators...) may since 0.7.29:
         the member's press on the card, never the assistant's own apply."""
-        if row.get("kind") == "action" and (row.get("changes") or {}).get("action") == "delete_deck":
+        if row.get("kind") == "action" and (row.get("changes") or {}).get("action") in REVIEW_PAGE_ONLY:
             return False
         # A change that keeps a description's or comment's formatting is approved where its
         # formatting is shown, the review page; the card asks the member to open it there
@@ -7853,15 +7856,20 @@ class DeckService:
         removes: list[dict[str, Any]],
         *,
         extra: dict[str, Any] | None = None,
+        tags: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """A proposal (kind ``collection``) that adds cards to, or removes cards from, the member's
         Archidekt Collection. Like every write the assistant can start it waits for the member's
         approval (or their approval mode); the review rows are ``add`` and ``remove`` rows, so the
         same tiers apply as to a deck edit. ``adds`` are the items collection.add accepts (already
-        validated), ``removes`` are ``{"id", "name", "quantity"}`` records resolved by the caller."""
+        validated), ``removes`` are ``{"id", "name", "quantity"}`` records resolved by the caller.
+        ``tags`` (0.7.46): entries whose binder tags change, ``{"id", "name", "printing", "tags",
+        "before", "new"}`` resolved by the caller (collection.py); their rows are ``binder_tags``,
+        which no low-risk edit has, so semi-auto never applies them by itself."""
         self._room_for_proposal(sub)
-        if not adds and not removes:
-            raise DeckError("invalid", "nothing to change: give cards to add or remove")
+        tags = tags or []
+        if not adds and not removes and not tags:
+            raise DeckError("invalid", "nothing to change: give cards to add, remove or tag")
         rows = [
             _row(
                 "add",
@@ -7874,6 +7882,24 @@ class DeckService:
             _row("remove", name=str(r["name"]), qty=int(r["quantity"]), printing=r.get("printing"))
             for r in removes
         ]
+        for t in tags:
+            label = str(t["name"]) + (f" {t['printing']}" if t.get("printing") else "")
+            after = ", ".join(f"“{n}”" for n in t["tags"]) or "none"
+            before = ", ".join(f"“{n}”" for n in t.get("before") or []) or "none"
+            new = [n for n in t.get("new") or []]
+            rows.append(
+                _row(
+                    "binder_tags",
+                    name=str(t["name"]),
+                    printing=t.get("printing"),
+                    text=f"{label}: binder tags {before} -> {after}"
+                    + (
+                        f" (new tag{'s' if len(new) != 1 else ''} {', '.join(f'“{n}”' for n in new)})"
+                        if new
+                        else ""
+                    ),
+                )
+            )
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
             {
@@ -7887,6 +7913,11 @@ class DeckService:
                     **{k: v for k, v in (extra or {}).items() if v},
                     "add": adds,
                     "remove": [{"id": r["id"], "quantity": r["quantity"]} for r in removes],
+                    **(
+                        {"tag": [{"id": t["id"], "name": t["name"], "tags": list(t["tags"])} for t in tags]}
+                        if tags
+                        else {}
+                    ),
                 },
             },
             rows,
@@ -9055,9 +9086,17 @@ class DeckService:
                 raise DeckError("invalid", f"{other} is not a proposal of this user")
 
     def snapshot(self, sub: str, snapshot_id: str) -> dict[str, Any]:
+        """A deck snapshot. A copy of the member's binder (kept before a clear, collection_bulk) is
+        not a deck: it is put back from History's Restore to my binder, never as a deck."""
         row = self.db.get_snapshot(snapshot_id, sub)
         if row is None:
             raise DeckError("not_found", "No such snapshot for your account.")
+        if str(row.get("deck_id") or "") == "collection":
+            raise DeckError(
+                "invalid",
+                "That snapshot is a copy of your binder from before it was cleared, not a deck. Put it "
+                "back with “Restore to my binder” under History, or download it there as a CSV.",
+            )
         return row
 
     def list_snapshots(self, sub: str, **narrow: Any) -> list[dict[str, Any]]:
@@ -12312,6 +12351,16 @@ def applied_text(
                 "your backup folder."
             )
         return "The deck is deleted on Archidekt. A snapshot of it was kept."
+    if action == "clear_collection":
+        if r.get("verified") is False:
+            return (
+                "Sent to Archidekt, but reading your binder back still showed entries. A copy of it from "
+                "just before is kept under History."
+            )
+        return (
+            "Your binder is cleared on Archidekt. A copy of it from just before is kept under History, "
+            "where Restore to my binder puts it back."
+        )
     if action == "collaborator_add":
         return "They can edit your deck on Archidekt now."
     if action == "collaborator_remove":
