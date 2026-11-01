@@ -121,6 +121,7 @@ ICONS = {
     "archidekt_session_refreshed": "refresh",
     "setting_changed": "settings",
     "approval_mode_set": "settings",
+    "assistant_mode_set": "settings",
     "view_choices_forgotten": "settings",
     "report_created": "report",
     "report_more_games": "report",
@@ -1352,7 +1353,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             len(apps_now),
             unit="connected",
             detail_html=app_line,
-            actions=[ui.button_link("Connected apps", "/account/details#apps")],
+            actions=[ui.button_link("Assistants", "/account/assistants")],
         ),
     ]
     filters = [

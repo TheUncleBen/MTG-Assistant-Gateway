@@ -2274,6 +2274,8 @@ ICONS = {
     "italic": "<path d='M10 4h8M6 20h8M14 4l-4 16'/>",
     # the one neutral "connected app" mark (ui.app_chip): a plug, never a company's logo
     "app": "<path d='M9 2v5M15 2v5'/><path d='M6 7h12v3a6 6 0 0 1-12 0z'/><path d='M12 16v6'/>",
+    # an assistant that runs on the member's own computer (localhost, such as Claude Code)
+    "terminal": "<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M7 9l3 3-3 3M12 15h5'/>",
 }
 
 

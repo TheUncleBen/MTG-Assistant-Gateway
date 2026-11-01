@@ -24,6 +24,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import (
     account_hub,
     app_signin,
+    assistants,
     link_disclosure,
     masked,
     modes,
@@ -445,8 +446,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return to_login("/account/details")
         q = request.query_params
         ok, err = q.get("ok"), q.get("err")
-        # The Notifications and Summary cards show their own notices inside them (where the
-        # redirect lands); every other notice stays at the top of the page.
+        if "disconnect" in q or "disconnect_all" in q:
+            # the Connected apps card's old addresses: its apps are on the Assistants page now
+            return RedirectResponse(
+                assistants.PAGE + ("?disconnect_all=1" if "disconnect_all" in q else ""), status_code=303
+            )
         if ok == "disconnected":
             # the app's registered name, looked up by the id the redirect carries (never the URL's
             # words), and only among the member's own apps (any other id reads as an unnamed app)
@@ -532,6 +536,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action in ("disconnect", "disconnect_all"):
             client_id = data.get("client_id") if action == "disconnect" else None
             n = state.db.revoke_client_for_user(sub, client_id)
+            # the mode chosen for it goes too (an assistant of its own; all of them with every app)
+            key = assistants.assistant_key(state.db, client_id) if client_id else None
+            if client_id is None or (key and key.startswith(assistants.APP_PREFIX)):
+                state.db.forget_assistant(sub, key)
             # A disconnected app's pending proposals go with it: they stay visible, rejected, and
             # can no longer be applied from the review page.
             closed = state.db.reject_client_proposals(sub, client_id)
@@ -563,7 +571,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # the cap as it is now: the Settings page changes it without a restart (LiveSettings)
             cap = str(state.live.get("approval_mode_max"))
             if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(cap):
-                return RedirectResponse("/account/details?err=mode_invalid", status_code=303)
+                return RedirectResponse(f"{assistants.DEFAULT_PAGE}?err=mode_invalid", status_code=303)
             before = state.decks.mode_of(sub)
             state.db.set_approval_mode(sub, mode)
             state.db.audit(
@@ -572,7 +580,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 client_id=BROWSER_CLIENT_ID,
                 detail={"from": before, "to": mode, "by": "user"},
             )
-            return RedirectResponse(f"/account/details?ok=mode_{mode}", status_code=303)
+            return RedirectResponse(f"{assistants.DEFAULT_PAGE}?ok=mode_{mode}", status_code=303)
         if action == "forget_choices":
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account/details?err=confirm_forget#choices", status_code=303)
@@ -633,6 +641,200 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             anchor = "#summary" if action in ("summary_save", "summary_send") else "#notifications"
             return RedirectResponse(f"/account/details?{done}{anchor}", status_code=303)
         return account_response(page, _err("Unknown action."), sub, sid, status=400)
+
+    # -- Account › Assistants: each connected assistant's own approval mode (assistants.py) ------
+    def assistants_page(title: str, body: str, sub: str, sid: str | None) -> Response:
+        return page(
+            title,
+            body,
+            sub=sub,
+            sid=sid,
+            current="/account/details",
+            heading=False,
+            head_extra=ACCOUNT_HEAD + f"<style>{account_hub.HUB_CSS}{assistants.CSS}</style>",
+        )
+
+    def assistants_form_expired(sub: str, sid: str | None, back: str) -> Response:
+        return small(
+            "Form expired",
+            smallpage.form_expired("Reload the page", back, back, nothing="Nothing was changed."),
+            status=403,
+            sub=sub,
+            sid=sid,
+        )
+
+    def disconnect_apps(sub: str, client_ids: list[str] | None) -> None:
+        """Disconnect apps (every one with None), as Account details' Disconnect always did: their
+        tokens revoked and their waiting proposals rejected (still listed)."""
+        for client_id in client_ids if client_ids is not None else [None]:
+            n = state.db.revoke_client_for_user(sub, client_id)
+            closed = state.db.reject_client_proposals(sub, client_id)
+            state.db.audit(
+                "apps_disconnected",
+                sub=sub,
+                client_id=client_id,
+                detail={"tokens": n, "by": "user", "proposals_rejected": len(closed)},
+            )
+            for pid in closed:
+                state.db.audit(
+                    "proposal_rejected",
+                    sub=sub,
+                    client_id=BROWSER_CLIENT_ID,
+                    detail={"proposal_id": pid, "origin": "browser", "reason": "app disconnected"},
+                )
+
+    @server.custom_route(assistants.PAGE, methods=["GET"], include_in_schema=False)
+    async def assistants_list(request: Request) -> Response:
+        sub, sid = current(request)
+        if not sub:
+            return to_login(assistants.PAGE)
+        q = request.query_params
+        notice = ""
+        if q.get("ok") == "disconnected_assistant":
+            # only a name the gateway gives (one of the two checked assistants) is repeated from the
+            # address, never words a link chose
+            name = q.get("name")
+            notice = _ok(
+                f"Disconnected “{name}”." if name in assistants.BRAND_NAMES.values() else "Disconnected."
+            )
+        elif q.get("ok") == "disconnected_all":
+            notice = _ok("Every assistant was disconnected.")
+        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+        body = assistants.list_html(
+            state.db, sub, state.decks.mode_of(sub), csrf_in, open_box="disconnect_all" in q
+        )
+        return assistants_page("Assistants", notice + body, sub, sid)
+
+    @server.custom_route(assistants.PAGE, methods=["POST"], include_in_schema=False)
+    async def assistants_list_post(request: Request) -> Response:
+        sub, sid = current(request)
+        if not sub:
+            return to_login(assistants.PAGE)
+        current_client.set(BROWSER_CLIENT_ID)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        if not check_csrf(sid, data):
+            return assistants_form_expired(sub, sid, assistants.PAGE)
+        if data.get("action") != "disconnect_all":
+            return RedirectResponse(assistants.PAGE, status_code=303)
+        disconnect_apps(sub, None)
+        state.db.forget_assistant(sub, None)
+        return RedirectResponse(f"{assistants.PAGE}?ok=disconnected_all", status_code=303)
+
+    @server.custom_route(assistants.DEFAULT_PAGE, methods=["GET"], include_in_schema=False)
+    async def assistants_default(request: Request) -> Response:
+        """Default for new assistants: the approval mode list Account details had (its folds say
+        what each mode does), posting to Account details' own form action."""
+        sub, sid = current(request)
+        if not sub:
+            return to_login(assistants.DEFAULT_PAGE)
+        q = request.query_params
+        ok = q.get("ok") if str(q.get("ok") or "").startswith("mode_") else None
+        notice = _notice(ok, q.get("err") if q.get("err") == "mode_invalid" else None)
+        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+        body = (
+            f"<a class='yback' href='{assistants.PAGE}'>{icon('chev')}Assistants</a>"
+            f"<h1>Default for new assistants</h1>{notice}"
+            f"<div class='acc'>{_mode_card(state, sub, csrf_in)}</div>"
+        )
+        return assistants_page("Default for new assistants", body, sub, sid)
+
+    @server.custom_route(assistants.PAGE + "/{slug}", methods=["GET"], include_in_schema=False)
+    async def assistant_page(request: Request) -> Response:
+        sub, sid = current(request)
+        slug = request.path_params["slug"]
+        if not sub:
+            return to_login(f"{assistants.PAGE}/{quote(slug, safe='')}")
+        a = assistants.find(state.db, sub, slug)
+        if a is None:
+            # disconnected, or never this member's: the list says what is connected
+            return RedirectResponse(assistants.PAGE, status_code=303)
+        q = request.query_params
+        default = state.decks.mode_of(sub)
+        cap = str(state.live.get("approval_mode_max"))
+        notice = ""
+        ok = str(q.get("ok") or "")
+        if ok.startswith("mode_") and (ok[5:] in modes.MODES or ok[5:] == "default"):
+            notice = _ok(assistants.saved_text(a, ok[5:], default))
+        elif q.get("err") == "mode_invalid":
+            notice = _err(ERR_MESSAGES["mode_invalid"])
+        confirm = str(q.get("confirm") or "")
+        to_default = confirm == "default"
+        if to_default:
+            confirm = default
+        if confirm not in ("semi", "auto") or modes.rank(confirm) > modes.rank(cap):
+            confirm = ""
+        csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
+        body = assistants.app_html(
+            state,
+            sub,
+            a,
+            default,
+            cap,
+            csrf_in,
+            confirm=confirm,
+            confirm_default=to_default,
+            open_disconnect="disconnect" in q,
+        )
+        state.db.mark_assistant_opened(sub, a.key)  # seen: no longer New, no notice on Home
+        return assistants_page(a.name, notice + body, sub, sid)
+
+    @server.custom_route(assistants.PAGE + "/{slug}", methods=["POST"], include_in_schema=False)
+    async def assistant_post(request: Request) -> Response:
+        sub, sid = current(request)
+        slug = request.path_params["slug"]
+        if not sub:
+            return to_login(f"{assistants.PAGE}/{quote(slug, safe='')}")
+        # Whatever this form does is the member's own browser acting, never an assistant (modes.py)
+        current_client.set(BROWSER_CLIENT_ID)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        a = assistants.find(state.db, sub, slug)
+        back = a.href if a is not None else assistants.PAGE
+        if not check_csrf(sid, data):
+            return assistants_form_expired(sub, sid, back)
+        if a is None:
+            return RedirectResponse(assistants.PAGE, status_code=303)
+        action = data.get("action")
+        if action == "disconnect":
+            disconnect_apps(sub, a.client_ids)
+            state.db.forget_assistant(sub, a.key)
+            said = quote(a.name if a.brand else "", safe="")
+            return RedirectResponse(
+                f"{assistants.PAGE}?ok=disconnected_assistant&name={said}", status_code=303
+            )
+        if action != "mode":
+            return RedirectResponse(back, status_code=303)
+        choice = data.get("mode", "")
+        cap = str(state.live.get("approval_mode_max"))
+        default = state.decks.mode_of(sub)
+        if choice == "default":
+            after, stored = default, None
+        elif modes.valid_mode(choice) and modes.rank(choice) <= modes.rank(cap):
+            after, stored = choice, choice
+        else:
+            return RedirectResponse(f"{back}?err=mode_invalid", status_code=303)
+        before = state.decks.mode_of(sub, a.client_ids[0])
+        # Loosening asks first, in a box that names the app (its Allow sends confirm=yes);
+        # tightening takes effect at once, for its changes already waiting too.
+        if assistants.loosens(before, after) and data.get("confirm") != "yes":
+            return RedirectResponse(f"{back}?confirm={choice}", status_code=303)
+        state.db.set_assistant_mode(sub, a.key, stored)
+        state.db.audit(
+            "assistant_mode_set",
+            sub=sub,
+            client_id=BROWSER_CLIENT_ID,
+            detail={
+                "assistant": a.name,
+                "from": before,
+                "to": after,
+                "own": stored is not None,
+                "by": "user",
+            },
+        )
+        return RedirectResponse(f"{back}?ok=mode_{choice}", status_code=303)
 
     # -- proposals ----------------------------------------------------------
     @server.custom_route("/proposals", methods=["GET"], include_in_schema=False)
@@ -1367,14 +1569,16 @@ OK_MESSAGES = {
     "disconnected": "The app was disconnected.",  # the Account page names the app when it can
     "disconnected_all": "All apps were disconnected.",
     "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
-    "mode_manual": "Saved: your assistant asks you every time.",
-    "mode_semi": "Saved: your assistant applies low-risk changes without asking (a small deck or binder "
-    "edit, or a private copy of a deck) and asks for everything else. A change to one of your decks keeps "
-    "a snapshot you can restore from History; a binder change keeps none. Restoring a snapshot does "
+    "mode_manual": "Saved as your default: an assistant that follows it asks you every time.",
+    "mode_semi": "Saved as your default: an assistant that follows it applies low-risk changes without "
+    "asking (a small deck or binder edit, or a private copy of a deck) and asks for everything else. "
+    "A change to one of your decks keeps a snapshot you can restore from History; a binder change "
+    "keeps none. Restoring a snapshot does "
     "not put back a deck's folder, tags, cover or custom cards.",
-    "mode_auto": "Saved: your assistant applies changes without asking. Restoring a "
-    "snapshot, a commander or companion change, a new deck, an edit of more rows than Full auto applies by "
-    "itself, making a deck public or unlisted, any edit of a description that has formatting, such as "
+    "mode_auto": "Saved as your default: an assistant that follows it applies changes without asking. "
+    "Restoring a snapshot, a commander or companion change, a new deck, an edit of more rows than "
+    "Full auto applies by itself, making a deck public or unlisted, any edit of a description that "
+    "has formatting, such as "
     "bold text, links or pictures, actions on your Archidekt account, taking custom cards out of a deck "
     "and deleting a deck still wait for you. So does a held change, a change waiting for another "
     "change first, one another app had a hand "
@@ -1557,8 +1761,8 @@ def account_response(page: Any, body: str, sub: str, sid: str | None, *, status:
         status=status,
         current="/account/details",
         heading=False,
-        head_extra=ACCOUNT_HEAD
-        + f"<style>{PROFILE_CSS}</style><script src='/static/profile.js' defer></script>",
+        head_extra=ACCOUNT_HEAD + f"<style>{PROFILE_CSS}{account_hub.HUB_CSS}{assistants.CSS}</style>"
+        "<script src='/static/profile.js' defer></script>",
     )
     resp.headers["Content-Security-Policy"] = ACCOUNT_CSP
     return resp
@@ -1673,10 +1877,9 @@ def _account_body(
         "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
         f"{icon('x')}<span>Sign out on all my devices</span></button></form></div>"
     ]
-    # One orange button on the page: Save approval mode while Archidekt is linked, Link account
-    # while it is not (as Compare switches its main button by state).
-    out.append(_mode_card(state, sub, csrf_in, primary=linked))
-    out.append(_apps_card(state, sub, csrf_in, open_box=open_box, open_client=open_client))
+    # Approval mode and Connected apps are one row, Assistants (each assistant has its own mode,
+    # assistants.py): the count connected, one press from the page that lists them.
+    out.append(assistants.details_row(state.db, sub))
     if state.summaries is not None:
         # the Notifications card, and with ntfy on the Summary card after it
         out.append(notify.account_card_html(state, sub, csrf_in, ok=ok, err=err))
@@ -1774,7 +1977,9 @@ NOT_ALLOWED = "<span class='small muted'> (not allowed on this gateway)</span>"
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> str:
-    """The member's approval mode (modes.py): three radio choices, the current one checked,
+    """The member's default approval mode (modes.py), on Assistants › Default for new assistants:
+    every assistant starts with it and follows it until given its own (assistants.py). Three radio
+    choices, the current one checked,
     choices above the gateway's cap shown disabled. A tight list (the owner, 2026-10-22): each choice
     is one row, its name, with what it means in a fold opened by the chevron at the row's end.
     The whole warning (AUTO_WARNING) is in the two auto modes' details, and nowhere else on the
@@ -1806,74 +2011,13 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
         )
     return (
         "<div class='card' id='mode'><h2>Approval mode</h2>"
-        "<p>How much your assistant may change on Archidekt without asking you first. It applies to "
-        "your account only, and to nobody else.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
+        "<p>How much an assistant may change on Archidekt without asking you first. A newly connected "
+        "assistant starts with this, and every assistant you have not given its own mode follows it. "
+        "It applies to your account only, and to nobody else.</p>"
+        f"<form method='post' action='/account'>{csrf_in}"
+        "<input type='hidden' name='action' value='approval_mode'>"
         f"<div class='mode-list'>{''.join(choices)}</div>"
         f"<button class='{'primary' if primary else 'btn-plain'}'>Save approval mode</button></form></div>"
-    )
-
-
-def _apps_card(
-    state: Any, sub: str, csrf_in: str, *, open_box: str | None = None, open_client: str | None = None
-) -> str:
-    """The assistants connected to this account: each row the app's full name (ui.app_chip, no
-    client id in member text) and when it last signed in, with a red-outline Disconnect that asks
-    first in a box; Disconnect all apps the same way."""
-    apps = state.db.user_clients(sub)
-    if not apps:
-        return (
-            "<div class='card' id='apps'><h2>Connected apps</h2><p class='muted'>No assistant is connected "
-            "to your account.</p></div>"
-        )
-    rows, boxes = [], []
-    for n, a in enumerate(apps, 1):
-        name = ui.app_name(a["name"])
-        box_id = f"disc{n}"
-        href = f"/account/details?disconnect={quote(a['client_id'], safe='')}"
-        rows.append(
-            f"<li><span class='nm'>{ui.app_chip(a['name'], unnamed=True, client_id=a['client_id'])}</span>"
-            f"<span class='sub'>Last signed in or refreshed {ui.when(a['last_issued_at'])}</span>"
-            f"<span class='btn-cell'>{ui.box_opener('Disconnect', href, box_id, kind='danger')}</span></li>"
-        )
-        boxes.append(
-            ui.box(
-                box_id,
-                f"Disconnect “{name}”?",
-                f"<form id='{box_id}f' class='inbox' method='post' action='/account'>{csrf_in}"
-                "<input type='hidden' name='action' value='disconnect'>"
-                f"<input type='hidden' name='client_id' value='{html.escape(a['client_id'])}'>"
-                f"<p>“{html.escape(name)}” can no longer use your account. To use it again, connect it again "
-                "and approve it.</p></form>",
-                actions=[
-                    ui.box_button("Cancel", cancel=True),
-                    ui.box_button("Disconnect", kind="danger-solid", form=f"{box_id}f"),
-                ],
-                open=open_box == "disconnect" and open_client == a["client_id"],
-                close_href="/account/details",
-            )
-        )
-    all_box = ui.box(
-        "discall",
-        "Disconnect all apps?",
-        f"<form id='discallf' class='inbox' method='post' action='/account'>{csrf_in}"
-        "<input type='hidden' name='action' value='disconnect_all'>"
-        "<p>Every assistant connected to your account loses access at once. Each one has to be "
-        "connected and approved again.</p></form>",
-        actions=[
-            ui.box_button("Cancel", cancel=True),
-            ui.box_button("Disconnect all apps", kind="danger-solid", form="discallf"),
-        ],
-        open=open_box == "disconnect_all",
-        close_href="/account/details",
-    )
-    return (
-        "<div class='card' id='apps'><h2>Connected apps</h2>"
-        "<p class='muted small'>Disconnect any you don't recognize.</p>"
-        f"<ul class='apps'>{''.join(rows)}</ul>"
-        "<div class='ui-actions'>"
-        + ui.box_opener("Disconnect all apps", "/account/details?disconnect_all=1", "discall", kind="danger")
-        + f"</div>{''.join(boxes)}{all_box}</div>"
     )
 
 
