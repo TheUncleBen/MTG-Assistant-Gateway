@@ -66,7 +66,26 @@ async def add_one(h: Harness, token: str, name: str = "Sol Ring") -> dict:
     ("client_id", "redirects", "key"),
     [
         ("c1", [CLAUDE_CB], "claude"),
-        ("c2", ["https://claude.ai/other/cb"], "claude"),  # a second Claude app: the same assistant
+        ("c2", [CLAUDE_CB.replace("claude.ai", "claude.com")], "claude"),  # Claude's other callback
+        ("c3", [CLAUDE_CB, CLAUDE_CB.replace("claude.ai", "claude.com")], "claude"),
+        ("c4", [CLAUDE_CB.replace("claude.ai", "CLAUDE.AI")], "claude"),  # a host's case is no matter
+        # security review 3, R3-02: only the exact known callbacks count, never any address on the
+        # brand's hosts (an open redirect there would hand the code on)
+        ("o1", ["https://claude.ai/other/cb"], "app:o1"),
+        ("o2", ["https://api.claude.ai/api/mcp/auth_callback"], "app:o2"),
+        ("o3", [CLAUDE_CB + "?to=https://evil.test"], "app:o3"),
+        ("o4", [CLAUDE_CB + "#x"], "app:o4"),
+        ("o5", ["https://claude.ai:8443/api/mcp/auth_callback"], "app:o5"),
+        ("o6", ["https://u@claude.ai/api/mcp/auth_callback"], "app:o6"),
+        ("o7", ["http://claude.ai/api/mcp/auth_callback"], "app:o7"),
+        ("o8", ["https://chatgpt.com/some/redirector?to=https://evil.test"], "app:o8"),
+        ("o9", ["https://anthropic.com/api/mcp/auth_callback"], "app:o9"),
+        ("o10", [CLAUDE_CB, GPT_CB], "app:o10"),  # two brands: neither
+        ("o11", [CLAUDE_CB + "/"], "app:o11"),
+        # a metadata document on a brand's host is that brand only by the callbacks it names
+        ("https://anything.claude.ai/u/x.json", ["https://evil.test/cb"], "app:https://anything.claude.ai/u/x.json"),
+        ("https://community.openai.com/x.json", [], "app:https://community.openai.com/x.json"),
+        ("https://claude.ai/oauth/client.json", [CLAUDE_CB], "claude"),
         ("g1", [GPT_CB], "openai"),
         ("l1", [LOCAL_CB], "app:l1"),  # Claude Code: its own
         ("l2", ["http://127.0.0.1:9/cb"], "app:l2"),
