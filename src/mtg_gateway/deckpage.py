@@ -3362,7 +3362,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .rows .row > :not(.lg):not(.legal){display:inline-block;margin-right:.6rem}
   .banner .rows .row > .legal{margin-right:.6rem}
   .banner .rows .fmt,.banner .rows .owner-sm{font-weight:700;color:#fff}
-  .banner .rows .owner-sm{text-decoration:none}
+  /* an owner's name can be one long word (Archidekt allows 64 letters): it breaks inside the
+     line rather than widen the page */
+  .banner .rows .owner-sm{text-decoration:none;max-width:100%;overflow-wrap:anywhere}
   .banner .rows .owner-sm:hover,.banner .rows .owner-sm:focus-visible{color:var(--orange);
     text-decoration:underline}
   .banner .lg{display:none} .banner .sm{display:inline}
