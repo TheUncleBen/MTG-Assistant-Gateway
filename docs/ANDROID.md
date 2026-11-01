@@ -202,7 +202,18 @@ emulator; a real-phone check is still to come). It stops when the gateway says t
 phone's key is no longer valid or push notifications are off, and when the app is
 set up for another gateway. A connection that fails is tried again after 5
 seconds, then after longer waits up to 5 minutes, and at once when the
-phone's network comes back.
+phone's network comes back. The next try is also set as an Android alarm, so
+it happens while the phone is in deep sleep too, and a connection that has
+sent nothing for 90 seconds is dropped and tried again in the same way. The
+app keeps the phone awake for at most 30 seconds for each try.
+
+**Samsung phones.** Samsung's own battery saving can put an app to sleep
+even when Android lets it run in the background. On a Samsung Galaxy phone,
+open **Settings > Battery > Background usage limits** (on older One UI
+versions, **Settings > Device care > Battery > Background usage limits**) and
+add MTG Assistant Gateway to **Never sleeping apps**. Make sure it is not in
+**Sleeping apps** or **Deep sleeping apps**. The Push notifications card on
+the Account page says this too.
 
 The same connection brings new Archidekt alerts (comments, replies,
 follows) from 0.7.46, while **A new alert on Archidekt** is ticked on the
@@ -320,6 +331,9 @@ else your gateway serves. A few things are native:
   your sign-in has ended in the meantime, the app says so instead of saving a
   sign-in page; reload, sign in and download again.
 - **File pickers** (photo and CSV import) open for the gateway's pages only.
+  Where a page takes several files, you can pick several. A HEIC or HEIF photo
+  (what Samsung's camera saves when **High efficiency pictures** is on) reaches
+  the page as a JPEG, so the scanner can read it.
 - **The /scan page's own camera** works inside the app: the app asks for camera
   permission once, and grants it to the gateway's pages only.
 - **Look and theme.** The app's own screens (setup, error, menu) use the pages'
@@ -729,7 +743,7 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   keeps the connection to the gateway open while the app is closed),
   `RECEIVE_BOOT_COMPLETED` (to start that service again after the phone
   restarts), `WAKE_LOCK` (to keep the phone awake for a moment while a message
-  is shown) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to ask you once to let
+  is shown, and for at most 30 seconds while it connects again) and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (to ask you once to let
   the app run in the background, so battery saving doesn't cut the
   connection); all but `POST_NOTIFICATIONS` are granted at install.
   The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store

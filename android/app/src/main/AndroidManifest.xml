@@ -124,6 +124,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- NotifyService's alarm: the next try, or the check on a quiet connection, in deep sleep
+             too. Not exported: only the app's own alarm reaches it. -->
+        <receiver
+            android:name="local.mtgassistantgateway.app.NotifyService$Tick"
+            android:exported="false" />
+
         <!-- PackageInstaller's answer to an update (Updater.kt). Not exported: only the install
              session's own PendingIntent reaches it. -->
         <receiver
