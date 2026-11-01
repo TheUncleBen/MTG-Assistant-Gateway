@@ -130,7 +130,8 @@ async def test_old_pins_addresses_land_on_wants_and_a_save_comes_back_there(
     r = await member.http.post(
         "/lists/pins", data={"csrf": csrf, "action": "edit", "pin_id": "31", "quantity": "2"}
     )
-    assert r.status_code == 303 and r.headers["location"] == "/collection/wants?ok=pin_saved"
+    # the notice's Undo token rides after the code (0.7.46 audit QG-09)
+    assert r.status_code == 303 and r.headers["location"].startswith("/collection/wants?ok=pin_saved&undo=")
     assert stack.ark.account.pins[WHO][0]["quantity"] == 2
     page = (await member.http.get(r.headers["location"])).text
     assert "Saved on Archidekt." in page

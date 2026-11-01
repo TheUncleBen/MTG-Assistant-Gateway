@@ -455,6 +455,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         secure=secure,
     )
     state.folder_jobs = add_folder_routes(server, state)
+    from .deck_bulk import add_bulk_routes
+
+    add_bulk_routes(server, state)
     add_custom_picture_routes(server, state)
     add_deck_routes(server, state, h)
     add_deck_extras_routes(server, state, h)
