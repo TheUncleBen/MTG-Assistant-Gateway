@@ -243,9 +243,10 @@ The same mechanism shows a card where you have something to pick: the
 **printings** of a card as pictures in a grid (tap the one you mean, filter by
 set or finish, expand it), and the **cards read from your photos or list**
 with a tick per row and suggestions for names it was unsure about (press
-**Use these cards** when the list is right). A tap on these cards is sent to
-the assistant as plain text and it carries on from there, with a proposal if
-anything is to change; neither changes anything by itself. The pictures come
+**Use these cards** when the list is right). A tap on these cards is passed to
+the assistant as plain text, which it reads with your next message (the card
+posts nothing in your name); it carries on from there, with a proposal if
+anything is to change. Neither changes anything by itself. The pictures come
 from Scryfall; the printings come from the gateway through a link that is
 yours alone and expires after ten minutes. Both cards are tested in a browser
 test against the cards themselves, not yet in a live Claude session; Claude

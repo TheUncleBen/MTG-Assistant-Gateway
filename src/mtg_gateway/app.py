@@ -106,6 +106,7 @@ from .schemas import (
     changes_for_assistant,
     compact_schema,
     inline_refs,
+    without_item_descriptions,
 )
 from .setup_hub import add_setup_routes
 from .skill_page import add_skill_routes
@@ -1082,6 +1083,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # and without the generated titles and null branches, which only cost tokens.
     for tool in server._tool_manager.list_tools():
         tool.parameters = compact_schema(inline_refs(tool.parameters))
+        if tool.name in SAME_CHANGES_AS_PROPOSE:  # the fields are explained on propose_deck_changes
+            tool.parameters = without_item_descriptions(tool.parameters, "changes")
         if tool.name in PROPOSAL_TOOLS:
             tool.annotations = _proposal_hints(tool.annotations)
 
@@ -1094,6 +1097,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
 # One hint for every tool that records, changes or closes a proposal (A9): each is read only, as
 # it changes only the gateway's own proposal records and never Archidekt (owner decision 0.7.46: no
 # propose applies in the same call; apply_proposal is the one write), so a host treats them alike.
+# Tools that take propose_deck_changes' list of changes and say so in the parameter's description:
+# the list's fields are explained there once, not in every tool (review F15).
+SAME_CHANGES_AS_PROPOSE = frozenset({"check_deck_changes", "amend_proposal"})
+
 PROPOSAL_TOOLS: frozenset[str] = frozenset(
     {
         "propose_new_deck",

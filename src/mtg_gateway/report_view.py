@@ -18,6 +18,7 @@ from typing import Any
 
 from . import card_models, ui
 from .deck_stats import is_basic_land
+from .decklist import LINE as DECK_LINE
 from .theme import ICON_DATA_URL, icon, time_html, time_text
 from .theme import esc as _esc
 from .tool_labels import TOOLS
@@ -67,6 +68,13 @@ MILESTONES = (
     ("cmdr21", "21 commander damage"),
 )
 MAX_RAW = 60_000
+
+
+def _card_name(text: str) -> str:
+    """A card name the research service echoed, maybe as the deck's own line ("1 Aesi, Tyrant
+    of Gyre Strait (cmr) 365 *F* [Commander]"): the name alone (0.7.46 review F9)."""
+    m = DECK_LINE.match(" ".join(text.split()))
+    return (m.group("name").strip() if m else "") or text
 
 
 def front_face(name: Any) -> str:
@@ -357,7 +365,7 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
             if key == "deck" and val:
                 out["deck_size"] = _int(val.split()[0]) or out["deck_size"]
             elif key == "commander" and val:
-                out["commander"] = val
+                out["commander"] = _card_name(val)
             elif key == "format" and val:
                 # "Format: 60-card (no commander, 20 life, on the play)"
                 out["format"] = "constructed" if val.startswith("60-card") else val
@@ -1896,9 +1904,10 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     # The research service's validation is a Commander check (100 cards, a commander): a 60-card
     # deck is not sent to it, and one an older report sent is not shown.
     v = None if constructed else parse_validation(r.get("validation"))
-    commander = (g or {}).get("commander") or ((stats.get("commanders") or [None])[0] if stats else None)
+    # the deck's commander as the gateway read it first, then the research service's header
+    commander = ((stats.get("commanders") or [None])[0] if stats else None) or (g or {}).get("commander")
     if g:
-        _mark_commanders(g, [commander, *(stats.get("commanders") or [])])
+        _mark_commanders(g, [g.get("commander"), *(stats.get("commanders") or [])])
     return {
         "goldfish": g,
         "validation": v,
