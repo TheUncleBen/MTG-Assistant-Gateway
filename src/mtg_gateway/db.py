@@ -1130,6 +1130,11 @@ class Database:
         # closes (settle_risks); the app wires in DeckService.stored_risk. None stores nothing.
         # It may answer (tier, reason): the reason is kept with the tier (RISK_REASON_KEY).
         self.risk_source: Callable[[dict[str, Any]], str | tuple[str, str]] | None = None
+        # What the Watchlist's kept rows (PriceService.card_summaries) are worked out from, counted
+        # as it is written (_count_watchlist_writes): per member, writes to their watched cards and
+        # their Binder as last read; and, shared by everyone, writes to the price points.
+        self._watchlist_writes: dict[str, int] = {}
+        self._price_writes = 0
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -1143,6 +1148,7 @@ class Database:
             try:
                 self._migrate()
                 upgrade_backup.went_forward(self._conn)
+                self._count_watchlist_writes()
             except Exception:
                 self._conn.close()
                 raise
@@ -1320,6 +1326,51 @@ class Database:
                 "CREATE TEMP TRIGGER IF NOT EXISTS mtg_mode_changed AFTER UPDATE OF approval_mode ON users "
                 "BEGIN SELECT mtg_proposal_changed(NEW.sub, NULL); END"
             )
+
+    def _count_watchlist_writes(self) -> None:
+        """Count every write to what a member's Watchlist rows are worked out from, as SQLite makes
+        it: ``watch_cards`` and ``binder_records`` per member (an insert, update or delete of a
+        row, by any statement, a member's data being deleted included) and
+        ``price_points`` for everyone (a price is not personal). Nothing else counts, so a Binder
+        visit or an assistant's tool call, which write elsewhere, leave the kept rows in place.
+        The triggers are TEMP: they live on this connection and nothing is written to the file. A
+        write rolled back still counts, which only works the rows out again."""
+
+        def member(sub: Any) -> None:
+            key = str(sub)
+            self._watchlist_writes[key] = self._watchlist_writes.get(key, 0) + 1
+
+        def shared() -> None:
+            self._price_writes += 1
+
+        self._conn.create_function("mtg_watchlist_write", 1, member)
+        self._conn.create_function("mtg_price_write", 0, shared)
+        # a database an older step list made (tests) may lack some; the steps run only at open
+        present = {r[0] for r in self._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        for table in ("watch_cards", "binder_records", "price_points"):
+            if table not in present:
+                continue
+            for event, body in (
+                ("INSERT", "SELECT mtg_watchlist_write(NEW.sub);"),
+                ("DELETE", "SELECT mtg_watchlist_write(OLD.sub);"),
+                (
+                    "UPDATE",
+                    "SELECT mtg_watchlist_write(OLD.sub); "
+                    "SELECT mtg_watchlist_write(NEW.sub) WHERE NEW.sub IS NOT OLD.sub;",
+                ),
+            ):
+                if table == "price_points":
+                    body = "SELECT mtg_price_write();"
+                self._conn.execute(
+                    f"CREATE TEMP TRIGGER IF NOT EXISTS mtg_{table}_{event.lower()} AFTER {event} ON {table} "
+                    f"BEGIN {body} END"
+                )
+
+    def watchlist_stamp(self, sub: str) -> tuple[int, int]:
+        """How many times what ``sub``'s Watchlist rows are worked out from has been written
+        (_count_watchlist_writes): their own rows, then the shared prices. Equal stamps, same
+        rows."""
+        return self._watchlist_writes.get(sub, 0), self._price_writes
 
     def pending_proposal_decks(self) -> list[tuple[str, str]]:
         """(owner_sub, deck_id) of every pending proposal not yet expired, one row per pair: the

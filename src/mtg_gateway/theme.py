@@ -2395,10 +2395,12 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
 _NUMBERS = re.compile(r"(\d+)")
 
 
+@functools.lru_cache(maxsize=16384)
 def natural_key(text: str | None) -> tuple[str | int, ...]:
     """A sort key for names: the numbers in them sort as numbers ("Card 2" before "Card 10"),
     the rest without regard to case. Every key alternates text and numbers from the first
-    character, so any two compare."""
+    character, so any two compare. Kept for the last names asked about: a Watchlist at the cap
+    sorts 5,000 names on every view."""
     return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
 
 
