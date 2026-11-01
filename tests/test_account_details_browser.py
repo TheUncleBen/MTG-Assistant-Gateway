@@ -36,6 +36,7 @@ PAGES = (
     "/account/details/defaults",
     "/account/details/notifications",
     "/account/details/choices",
+    "/account/details/backups",
 )
 
 

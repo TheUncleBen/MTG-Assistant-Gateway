@@ -548,6 +548,7 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         "profile": "profile and email settings",
         "contest_enter": "contest entries",
         "contest_withdraw": "contest entries",
+        "purge_removed": "removing a removed card's row for good",
     }
     assert set(words) == set(LABELS)
     for action, word in words.items():

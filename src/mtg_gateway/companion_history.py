@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import activity_view, card_models_view, ui
+from . import activity_view, archidekt_log, card_models_view, ui
 from .busy import _headers as busy_headers
 from .busy import busy_body, busy_plan
 from .companion import (
@@ -98,6 +98,9 @@ def add_history_routes(
     form = h.form
     page = h.page
     s = h.s
+
+    # Archidekt's own change log of a deck, and its removed card rows (archidekt_log.py)
+    archidekt_log.add_routes(server, state, h)
 
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)
@@ -278,6 +281,7 @@ def add_history_routes(
             + chips
             + toolbar_html(query, current, gone=gone)
             + listing
+            + (archidekt_log.history_link_html(deck_id) if deck_id and unfiltered else "")
             + copies_panel
         )
         opened = next((e for e in shown if e["key"] == query["open"]), None) if query["open"] else None

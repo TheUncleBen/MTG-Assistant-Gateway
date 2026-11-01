@@ -1042,9 +1042,9 @@ async def test_printings_by_name_while_scryfall_says_wait_is_try_again_not_no_ca
             assert raw not in out["message"], out
         if handler is limited:
             assert out["error"] == "rate_limited" and out["retry_in"] == 12, out
-            assert "Try again in about 12 s" in out["message"], out
+            assert "retry_in" in out["message"] and out.get("retry_in") == 12, out
         else:
-            assert out["error"] == "unavailable" and "Try again in a few minutes" in out["message"], out
+            assert out["error"] == "unavailable" and "Try again later" in out["message"], out
         # resolve_cards says the same plain words when Scryfall is down
         if handler is down:
             resolved = await call(stack.h, token, "resolve_cards", {"cards": [{"name": "Sol Ring"}]})

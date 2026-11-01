@@ -100,7 +100,7 @@ EXPIRE_SOON = 2 * 86400  # an "expires in" flag under two days left, as before
 
 # Changes that are not edits to one of the member's decks ("Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection", "lists")
-_DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
+_DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck", "purge_removed")
 UNDO_KINDS = ("edit", "details", "restore", "categories")
 
 # Waiting list: tick box, the change with its facts, then Review and the ⋮ (one line at every

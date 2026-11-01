@@ -420,9 +420,10 @@ async def test_a_box_in_the_address_draws_open_and_the_way_back_is_kept(stack: S
         assert r.status_code == 303 and r.headers["location"] == "/collection/lists?ok=list_created"
         hub = (await b.http.get("/collection/lists?ok=list_created")).text
         assert "List created." in hub
-        # the five Archidekt lists as rows (not the tab bar's sideways strip), counts filled after
+        # the six Archidekt lists as rows, Binder tags among them (not the tab bar's strip),
+        # counts filled after
         arch = hub.split("<h2>Your Archidekt lists</h2>")[1].split("</section>")[0]
-        assert arch.count("<a class='yrow' href=") == 5 and "lp-tabs" not in arch
+        assert arch.count("<a class='yrow' href=") == 6 and "lp-tabs" not in arch
         assert "<div class='rows lp-hubrows' data-counts='/lists/api/counts'>" in arch
         assert "href='/collection/wants'" in arch and "Pinned cards" in arch
         rows = hub.split("<h2>Watchlist lists</h2>")[1].split("</section>")[0]

@@ -30,6 +30,7 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -1907,13 +1908,21 @@ class ArchidektClient(AccountRequests):
 
     async def user_profile(self, username: str) -> dict[str, Any] | None:
         """A public profile by username, through the deck listing (``/api/users/{id}/`` needs the
-        numeric id, which the listing's owner block carries). None when the user has no public
-        decks or does not exist."""
+        numeric id, which the listing's owner block carries); for someone with no public decks,
+        through their profile page on archidekt.com (user_by_page). None when there is no such
+        user."""
         found = await self.search_decks(owner=username, order_by="-updatedAt")
-        if not found["decks"]:
+        first = found["decks"][0] if found["decks"] else None
+        if first is not None and str(first.get("owner") or "").casefold() == username.casefold():
+            return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
+        user = await self.user_by_page(username)
+        if user is None:
             return None
-        first = found["decks"][0]
-        return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
+        return {
+            **user,
+            "id": str(user["id"]),
+            "decks": {"decks": [], "count": 0, "has_more": False, "page": 1},
+        }
 
     async def get_deck(self, token: str | None, deck_id: str, *, fresh: bool = False) -> Deck:
         """Fetch a deck. With ``token=None`` this is an anonymous read of a public deck, served
@@ -2389,6 +2398,50 @@ class ArchidektClient(AccountRequests):
         return await self._request(
             "POST", "/users/follow/", token=token, json_body={"followId": int(user_id), "unfollow": not on}
         )
+
+    async def user_by_page(self, username: str) -> dict[str, Any] | None:
+        """``{username, id}`` of a user read from archidekt.com's own profile page
+        (``/u/{username}``, which the site draws on its server, for someone with no public decks
+        too), or None when the site has no such user. The page's data is not an API and its
+        layout is not recorded: the user is the object in it carrying exactly this username with
+        a numeric ``id``, wherever it sits (find_user). A page without its data raises
+        ``changed``. Not exercised live by the gateway yet: the owner's live check."""
+        try:
+            props = await self.site_page_data(f"/u/{quote(username, safe='')}")
+        except ArchidektError as exc:
+            if exc.kind == "not_found":
+                return None
+            raise
+        return find_user(props, username)
+
+    # Archidekt's own change log of a deck (the parity report's ``GET /api/decks/{id}/logs/``,
+    # seen in the site's scripts). Its answer's layout is NOT recorded anywhere: the reading below
+    # takes a list, or a page {"results": [...], "next", "count"}, and from each entry the fields
+    # it can recognise (log_entry). Not exercised live by the gateway yet: the owner's live check.
+    async def deck_logs(self, token: str, deck_id: str, page: int = 1) -> dict[str, Any]:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        body = await self._request(
+            "GET", f"/decks/{deck_id}/logs/", token=token, params={"page": max(1, int(page))}, fresh=True
+        )
+        rows = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(rows, list):
+            raise ArchidektError(
+                "changed", "Archidekt's change log came back in a layout the gateway can't read."
+            )
+        count = body.get("count") if isinstance(body, dict) else None
+        return {
+            "entries": [log_entry(r) for r in rows if isinstance(r, dict)],
+            "has_more": bool(body.get("next")) if isinstance(body, dict) else False,
+            "count": count if isinstance(count, int) and not isinstance(count, bool) else None,
+        }
+
+    async def delete_deck_relation(self, token: str, relation_id: int) -> Any:
+        """``DELETE /decks/relations/{id}/``: removes one card row of a deck for good (the parity
+        report's evidence: the site's _app script). The gateway sends it only for a row the deck
+        lists as removed (``deletedAt`` set, removed_rows), checked just before. Not exercised
+        live by the gateway yet: the owner's live check."""
+        return await self._request("DELETE", f"/decks/relations/{int(relation_id)}/", token=token)
 
     # Deck collaborators ("editors"), from archidekt.com's deck settings bundle (2026-10-10):
     # GET /decks/{id}/editors/ answers {"results": [{id, user {id, username, avatar}, createdBy,
@@ -2946,3 +2999,112 @@ def parse_deck(body: Any) -> Deck:
         comment_root=_int(body.get("commentRoot")) or None,
         custom_cards=parse_custom_rows(body.get("customCards")),
     )
+
+
+# -- Archidekt's own records of a deck: its change log and its removed card rows ------------------
+LOG_TIME_KEYS = ("createdAt", "created_at", "created", "date", "timestamp", "time", "updatedAt")
+LOG_WHO_KEYS = ("user", "owner", "editor", "author", "createdBy")
+LOG_WHAT_KEYS = ("description", "message", "text", "summary", "change", "changes", "action", "type", "event")
+LOG_TEXT_MAX = 500
+
+
+def _log_words(value: Any) -> str:
+    """A log field as plain words: a string, a number, or a short list of them."""
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, (str, int, float)):
+        return " ".join(str(value).split())
+    if isinstance(value, list):
+        parts = [_log_words(v) for v in value[:20]]
+        return "; ".join(p for p in parts if p)
+    if isinstance(value, dict):
+        name = value.get("name") or value.get("username")
+        return _log_words(name) if isinstance(name, str) else ""
+    return ""
+
+
+def log_entry(raw: dict[str, Any]) -> dict[str, Any]:
+    """One entry of a deck's change log as the gateway shows it: ``when`` (Archidekt's time
+    text), ``who`` (a username) and ``what`` (words). The layout of Archidekt's entries is not
+    recorded (ArchidektClient.deck_logs), so each is the first field it recognises; an entry with
+    none of them shows its other plain fields as "name: value"."""
+    when = next((str(raw[k]) for k in LOG_TIME_KEYS if isinstance(raw.get(k), str) and raw[k]), "")
+    who = ""
+    for k in LOG_WHO_KEYS:
+        v = raw.get(k)
+        if isinstance(v, dict) and isinstance(v.get("username"), str):
+            who = v["username"]
+            break
+        if isinstance(v, str) and v:
+            who = v
+            break
+    if not who and isinstance(raw.get("username"), str):
+        who = raw["username"]
+    what = next((w for k in LOG_WHAT_KEYS if (w := _log_words(raw.get(k)))), "")
+    if not what:
+        skip = {"id", "deck", *LOG_TIME_KEYS, *LOG_WHO_KEYS, "username"}
+        what = "; ".join(f"{k}: {w}" for k, v in raw.items() if k not in skip and (w := _log_words(v)))
+    return {
+        "when": when[:40],
+        "who": " ".join(who.split())[:60],
+        "what": what[:LOG_TEXT_MAX],
+    }
+
+
+def removed_rows(deck: Deck) -> list[dict[str, Any]]:
+    """The card rows Archidekt still keeps for cards taken out of the deck: in the deck JSON with
+    ``deletedAt`` set (parse_deck leaves them out of ``cards``). Each ``{relation_id, name,
+    quantity, categories, removed_at}``; a row without a numeric id can't be removed for good and
+    is left out. Newest removal first."""
+    out: list[dict[str, Any]] = []
+    raw_cards = deck.raw.get("cards") if isinstance(deck.raw, dict) else None
+    for entry in raw_cards if isinstance(raw_cards, list) else []:
+        if not isinstance(entry, dict) or not entry.get("deletedAt"):
+            continue
+        rid = entry.get("id")
+        if not isinstance(rid, int) or isinstance(rid, bool):
+            continue
+        card = entry.get("card") if isinstance(entry.get("card"), dict) else {}
+        oracle = card.get("oracleCard") if isinstance(card.get("oracleCard"), dict) else {}
+        custom = entry.get("customCard") if isinstance(entry.get("customCard"), dict) else {}
+        name = str(oracle.get("name") or custom.get("name") or "").strip() or "A card"
+        qty = entry.get("quantity")
+        out.append(
+            {
+                "relation_id": rid,
+                "name": name,
+                "quantity": qty if isinstance(qty, int) and not isinstance(qty, bool) else None,
+                "categories": [str(c) for c in (entry.get("categories") or []) if isinstance(c, str)],
+                "removed_at": str(entry.get("deletedAt")),
+            }
+        )
+    out.sort(key=lambda r: r["removed_at"], reverse=True)
+    return out
+
+
+def find_user(data: Any, username: str) -> dict[str, Any] | None:
+    """The object in a site page's data that is the user called ``username`` (any capitals) with a
+    numeric ``id``: ``{username, id}`` as Archidekt spells the name. Searched breadth-first a few
+    levels deep, so the page's own user comes before one named in a list further down."""
+    want = username.casefold()
+    level = [data]
+    for _ in range(6):
+        nxt: list[Any] = []
+        for node in level:
+            if isinstance(node, dict):
+                name, uid = node.get("username"), node.get("id")
+                if (
+                    isinstance(name, str)
+                    and name.casefold() == want
+                    and isinstance(uid, int)
+                    and not isinstance(uid, bool)
+                    and uid > 0
+                ):
+                    return {"username": name, "id": uid}
+                nxt.extend(v for v in node.values() if isinstance(v, (dict, list)))
+            elif isinstance(node, list):
+                nxt.extend(v for v in node[:200] if isinstance(v, (dict, list)))
+        level = nxt
+        if not level:
+            break
+    return None

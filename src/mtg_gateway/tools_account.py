@@ -277,16 +277,23 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "review page, in every approval mode: never call apply_proposal for it. A snapshot is kept, but "
             "no backup copy is made on Archidekt, a snapshot can't be restored onto a deleted deck, and "
             "Archidekt has no undo. A change to the deck after "
-            "the proposal stops the deletion."
+            "the proposal stops the deletion. removed_card: clear a removed card's row for good instead."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
     )
-    async def propose_delete_deck(deck_id: str) -> CallToolResult:
+    async def propose_delete_deck(
+        deck_id: str,
+        removed_card: str | None = None,
+    ) -> CallToolResult:
         try:
-            return _proposal(
-                {"ok": True, **(await state.decks.propose_action(_sub(), "delete_deck", deck_id=deck_id))}
-            )
+            if removed_card is not None:
+                out = await state.decks.propose_action(
+                    _sub(), "purge_removed", deck_id=deck_id, card=removed_card
+                )
+            else:
+                out = await state.decks.propose_action(_sub(), "delete_deck", deck_id=deck_id)
+            return _proposal({"ok": True, **out})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 

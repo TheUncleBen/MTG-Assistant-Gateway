@@ -86,7 +86,8 @@ LOW_RISK_CHANGES = "a card added or removed, or a new " + ", ".join(_CHANGED[:-1
 # The Archidekt account actions of actions.py, in the member's words.
 ACCOUNT_ACTIONS_TEXT = (
     "likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, "
-    "reports to Archidekt's moderators, contest entries, and profile and email settings"
+    "reports to Archidekt's moderators, contest entries, removing a removed card's row for good, "
+    "and profile and email settings"
 )
 
 
@@ -146,10 +147,9 @@ MEMBER_ONLY_TEXT = (
     f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}), {LISTS_DELETE_TEXT}, "
     f"{LISTS_PREMIER_TEXT}, {CUSTOM_OUT_TEXT}, deleting a deck and clearing your binder are never "
     "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
-    "chat or on its review page (deleting a deck, clearing your binder, and an edit of a comment "
-    "that has formatting: on "
-    "the review page only). An edit of a description that has formatting is also approved on its "
-    "review page only."
+    "chat or on its review page (deleting a deck, clearing your binder, removing a removed card's "
+    "row, and an edit of a comment that has formatting: on the review page only). An edit of a "
+    "description that has formatting is also approved on its review page only."
 )
 
 
@@ -171,8 +171,9 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DE
     if mode == "manual":
         return (
             "Every change waits for your own press on the card in the chat or on the review page, "
-            "actions on your Archidekt account too (deleting a deck, and any edit of a description or "
-            "comment that has formatting: on the review page only). The safest choice, and the default."
+            "actions on your Archidekt account too (deleting a deck, clearing your binder, removing a "
+            "removed card's row, and any edit of a description or comment that has formatting: on the "
+            "review page only). The safest choice, and the default."
         )
     if mode == "semi":
         return (
