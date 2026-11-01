@@ -295,3 +295,82 @@ async def test_one_member_clicking_through_pages_stays_under_the_shared_cap(
         assert slowest < 3.0, slowest
     finally:
         await b.aclose()
+
+
+# -- a reload (the browser's Reload, the app's pull to refresh) reads Archidekt again ------------
+RELOAD = {**NAV, "Cache-Control": "max-age=0"}  # what Chrome and the app's WebView reload send
+
+RELOADED_VIEWS = (
+    "/decks",
+    "/collection",
+    "/notifications",
+    "/collection/wants",
+    "/lists/templates",
+    "/forum",
+    "/users/alice",
+)
+
+
+@pytest.mark.parametrize("path", RELOADED_VIEWS)
+async def test_a_reload_reads_archidekt_again_through_the_pacer(
+    stack: Stack, path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Independent review 2, M1: pull to refresh and Reload are asked for "what is on Archidekt
+    now", so a page that keeps its reads (My decks 90 s, Binder 60 s, Alerts, the forum and Pinned
+    cards 2 min) reads again on a reload, through the one pacer; a plain view still does not."""
+    b = await _member(stack)
+    try:
+        w = Watch(stack)
+        pacer = stack.gw.decks.client.pacer
+        turns: list[bool] = []
+        enter = pacer.enter
+
+        async def counted(*a, **k):
+            turns.append(True)
+            return await enter(*a, **k)
+
+        monkeypatch.setattr(pacer, "enter", counted)
+        await _view(b, path)
+        n = len(w.asked)
+        await _view(b, path)
+        assert w.since(n) == [], "a plain second view is served from the kept read"
+        r = await b.http.get(path, headers=RELOAD)
+        assert r.status_code == 200, r.text[:500]
+        assert w.since(n), f"a reload of {path} showed the kept copy"
+        assert len(turns) >= len(w.asked), "every Archidekt read took its turn in the pacer"
+        n = len(w.asked)
+        await _view(b, path)  # what the reload read is kept for the next plain view
+        assert w.since(n) == []
+    finally:
+        await b.aclose()
+
+
+async def test_a_reload_of_my_decks_shows_a_deck_made_on_archidekt(stack: Stack) -> None:
+    from .fake_archidekt import to_deck_json
+
+    b = await _member(stack)
+    try:
+        await _view(b, "/decks")
+        stack.ark.decks[77] = to_deck_json(
+            [], deck_id=77, name="Made on Archidekt", owner="alice", updated_at="2026-10-02T10:00:00Z"
+        )
+        assert "Made on Archidekt" not in (await _view(b, "/decks")).text  # the kept list, 90 s
+        for hdr in (RELOAD, {**NAV, "Cache-Control": "no-cache", "Pragma": "no-cache"}):
+            r = await b.http.get("/decks", headers=hdr)
+            assert r.status_code == 200 and "Made on Archidekt" in r.text, r.text[:400]
+    finally:
+        await b.aclose()
+
+
+async def test_a_reload_of_a_deck_list_that_fails_shows_the_kept_list(stack: Stack) -> None:
+    """A reload while Archidekt is busy is no worse than a plain view: the kept list is shown."""
+    b = await _member(stack)
+    try:
+        first = await _view(b, "/decks")
+        assert "Sample Commander Deck" in first.text
+        stack.ark.inject.extend([(503, None)] * 6)
+        r = await b.http.get("/decks", headers=RELOAD)
+        assert r.status_code == 200 and "Sample Commander Deck" in r.text
+    finally:
+        stack.ark.inject.clear()
+        await b.aclose()

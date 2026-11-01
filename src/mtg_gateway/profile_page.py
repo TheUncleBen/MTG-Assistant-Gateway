@@ -249,8 +249,10 @@ async def unseen_count(decks: Any, sub: str) -> int:
 
 
 async def notification_list(decks: Any, sub: str) -> dict[str, Any]:
+    from .decks import reloading
+
     hit = _LIST.get(sub)
-    if hit and hit[0] > time.monotonic():
+    if hit and hit[0] > time.monotonic() and not reloading(("alerts", sub)):  # a reload reads again
         return hit[1]
     gen = _LIST_GEN.get(sub, 0)
     got = await profile.notifications(decks, sub)

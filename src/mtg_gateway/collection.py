@@ -46,7 +46,7 @@ from .binder_prices import BINDER_PAGE_SIZE, BINDER_READ_PAGES, BinderStore
 from .busy import busy_body, busy_headers, busy_plan, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
-from .decks import DeckError, _writing, archidekt_wait, current_client
+from .decks import DeckError, _writing, archidekt_wait, current_client, reloading
 from .pages import (
     NO_STORE,
     _csrf,
@@ -544,7 +544,7 @@ class CollectionService:
         uid = self._user_id(sub)
         cacheable = page == 1 and not q and page_size == PAGE_SIZE and self.first_page_ttl > 0
         key = sort if descending else f"{sort}:asc"
-        if cacheable:
+        if cacheable and not reloading((id(self), sub, key)):  # a reload reads the page again
             hit = self._first_pages.get(sub, {}).get(key)
             if hit is not None and time.monotonic() - hit[0] < self.first_page_ttl:
                 return {**hit[1], "rows": list(hit[1]["rows"])}

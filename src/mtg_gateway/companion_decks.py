@@ -43,7 +43,7 @@ from .deckpage import (
     folder_options_html,
     reread_href,
 )
-from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, owns_deck
+from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, is_reload, owns_deck
 from .folderview import FOLDER_CSS, arrange, filter_params, level_html, read_filters, resolve_folder
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -806,7 +806,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         ``box_error`` in its box. ``templates``: the member's template names, read for the Lock box
         drawn open from its address."""
         # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
-        reload = re.search(r"max-age=0|no-cache", request.headers.get("cache-control", "")) is not None
+        reload = is_reload(request.headers)
         try:
             deck, how = await decks.page_deck_view(sub, deck_id, fresh=reload)
         except DeckError as exc:

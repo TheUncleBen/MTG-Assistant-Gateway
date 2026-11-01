@@ -84,6 +84,8 @@ from .decks import (
     DeckError,
     DeckService,
     current_client,
+    is_reload,
+    reload_read,
     scopes_allow_writes,
 )
 from .forge import ForgeClient
@@ -859,6 +861,35 @@ class SessionRenewalMiddleware:
         await self.app(scope, receive, send_renewed)
 
 
+class ReloadMiddleware:
+    """A page the member reloaded (the browser's Reload; the Android app's pull to refresh, which
+    is the WebView's reload) reads Archidekt again instead of serving the copies the gateway keeps
+    for a while: My decks' list and folders, Binder's first page, Alerts, the forum, profiles,
+    Pinned cards and the lists (independent review 2, M1). It sets decks.reload_read for the
+    request; each kept read then reads once more, through the pacer like every read. The deck page
+    keeps its own rule for a reload (stale while it is read again, companion_decks)."""
+
+    SKIP = re.compile(r"^/(?:decks/\d{1,12}/?$|static/|mcp|late/|oauth|\.well-known/)")
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope.get("method") != "GET"
+            or self.SKIP.match(str(scope.get("path", "")))
+            or not is_reload(Headers(scope=scope))
+        ):
+            await self.app(scope, receive, send)
+            return
+        token = reload_read.set(set())
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reload_read.reset(token)
+
+
 class BodyLimitMiddleware:
     """Refuse oversized bodies on the anonymous OAuth endpoints before the SDK parses them
     (registration is open, and its JSON is otherwise read and validated up to the SDK's 4 MB)."""
@@ -1353,6 +1384,7 @@ def create_app(
     _friendly_errors(app, state)
     # inside the theme's context and the membership check: a slow page is drawn at once
     app.add_middleware(LatePageMiddleware, state=state)
+    app.add_middleware(ReloadMiddleware)  # outside the late page, whose task copies the context
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
     # Restore points kept per deck follow the admin Settings page at once (0.7.29).
