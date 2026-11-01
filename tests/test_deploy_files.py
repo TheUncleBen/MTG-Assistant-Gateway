@@ -153,13 +153,16 @@ def test_example_env_files_leave_each_switch_empty_so_the_page_can_change_it(nam
 
 
 @pytest.mark.parametrize("name", ENV_FILES)
-def test_example_env_files_have_the_gateway_name_commented_out_with_its_reason(name: str):
-    """Ben, 2026-10-28: MTG_SERVER_NAME is in each example, commented out under a one-line note, so
-    the Settings page keeps the Gateway name until someone sets it in the stack."""
+def test_example_env_files_have_the_gateway_name_empty_with_its_reason(name: str):
+    """Ben, 2026-10-28: MTG_SERVER_NAME is in each example under a one-line note, and the Settings
+    page keeps the Gateway name until someone sets it in the stack. Empty like every other optional
+    line (0.7.46 review): a name typed after a commented-out ``#MTG_SERVER_NAME=`` in Portainer's
+    Advanced mode was silently ignored."""
     lines = (ROOT / name).read_text().splitlines()
-    at = lines.index(f"#{NAME_VAR}=")
+    at = lines.index(f"{NAME_VAR}=")
     assert "Gateway name" in lines[at - 1] and lines[at - 1].startswith("# ")
-    assert NAME_VAR not in _env(ROOT / name)
+    assert f"#{NAME_VAR}=" not in lines
+    assert _env(ROOT / name)[NAME_VAR] == ""
 
 
 @pytest.mark.parametrize("name", STACK_FILES)
@@ -307,3 +310,25 @@ def test_the_release_manifest_check_finds_the_hook_and_never_passes_on_nothing(t
     assert r.returncode == 1 and "PushTestHooks" in r.stderr
     # another flavor's manifests are not this build's
     assert subprocess.run(["bash", str(check), str(build), "applinks"], capture_output=True).returncode == 1
+
+
+# Values the 0.7.45 example files set for the operator that are empty from 0.7.46 (a value there
+# locks a Settings row, or means something else now). Copying them over from an old file is the
+# trap the update steps warn about (0.7.46 review).
+EMPTIED_IN_0746 = {
+    "MTG_ACCESS_TOKEN_TTL": "3600",
+    "MTG_REFRESH_TOKEN_TTL": "2592000",
+    "MTG_BROWSER_SESSION_TTL": "7200",
+}
+
+
+@pytest.mark.parametrize("name", ENV_FILES)
+def test_every_value_the_older_examples_set_and_these_leave_empty_is_named_in_the_update_steps(name: str):
+    env = _env(ROOT / name)
+    upgrading = (ROOT / "docs" / "UPGRADING.md").read_text()
+    step_one = upgrading.split("1. **Your values.**", 1)[1].split("2. **Secrets.**", 1)[0]
+    bullet = upgrading.split("- **0.7.45 or older:** the older example files", 1)[1].split("\n- **", 1)[0]
+    for var, old in EMPTIED_IN_0746.items():
+        assert env[var] == "", var
+        assert f"`{var}={old}`" in step_one, var
+        assert f"`{var}={old}`" in bullet, var

@@ -106,7 +106,8 @@ async def test_a_script_fetch_and_other_pages_are_never_deferred(stack: Stack) -
         _slow(stack, 1.2)
         r = await b.http.get("/notifications", headers={"Accept": "application/json"})
         assert "data-late" not in r.text
-        assert latepage.late_page_of("/decks/42/edit") is None
+        assert latepage.late_page_of("/decks/42/edit.json") is None
+        assert latepage.late_page_of("/decks/42/busy") is None
         assert latepage.late_page_of("/decks/42") is not None
         assert latepage.late_page_of("/account") is None
     finally:
@@ -143,5 +144,38 @@ async def test_a_finished_page_is_never_shown_once_its_session_has_ended(stack: 
         page = await b.http.get("/notifications", headers=PAGE)
         assert page.status_code in (302, 303), page.status_code
         assert "Alerts" not in page.text and len(asked) == sent
+    finally:
+        await b.aclose()
+
+
+DECK_PAGES = (
+    ("/decks/42/settings", "Deck settings"),
+    ("/decks/42/goldfish", "Goldfish"),
+    ("/decks/42/compare", "Compare"),
+    ("/decks/42/edit", "Edit deck"),
+    ("/decks/42/export", "Deck"),
+    ("/history/reports/rep_x", "Report"),
+)
+
+
+async def test_a_decks_other_pages_and_reports_send_the_frame_at_once_too(stack: Stack) -> None:
+    """0.7.46 review: the frame came for seven kinds of address only, so Deck settings, Goldfish,
+    Compare, the editor and a report waited on a slow Archidekt with nothing on screen."""
+    for path, title in DECK_PAGES:
+        assert latepage.late_page_of(path) is not None, path
+        assert latepage.late_page_of(path)[0] == title
+    b = await _linked(stack)
+    try:
+        _slow(stack, 2.0)
+        for path in ("/decks/42/settings", "/decks/42/goldfish", "/decks/42/compare", "/decks/42/edit"):
+            stack.h.app.state.gateway.decks._forget_page_decks()  # nothing kept: Archidekt is asked
+            t0 = time.monotonic()
+            r = await b.http.get(path, headers=PAGE)
+            assert time.monotonic() - t0 < 1.5, path
+            assert r.status_code == 200 and "Reading this page from Archidekt" in r.text, path
+            key = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", r.text).group(1)
+            assert (await b.http.get(key)).json()["ready"] is True
+            page = await b.http.get(path, headers=PAGE)
+            assert page.status_code == 200 and "data-late" not in page.text, path
     finally:
         await b.aclose()

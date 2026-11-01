@@ -671,6 +671,9 @@ ADMIN_CSS = """
 .ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;min-height:22px;padding-top:2px;padding-bottom:2px}
 .ao .ui-row .ctl{overflow-wrap:anywhere;font-size:.95rem}
 .ao .ui-row .lab .muted{font-weight:400;margin-left:.35rem}
+/* the Speed card's labels are page addresses (/history/reports/{rid}/head-to-head): they wrap
+   anywhere, so at 200% text on a phone they never push the page wider than the screen */
+.ao #speed .ui-row .lab{overflow-wrap:anywhere;min-width:0}
 .ao .ui-card .notice{margin:.75rem 0 0}
 .ao .ui-card details{margin:.5rem 0 0}
 .ao .ui-card details > summary:not(.fold-btn){display:flex;align-items:center;gap:.4rem;min-height:44px;
@@ -1000,7 +1003,8 @@ SPEED_ROUTES = 5  # the slowest pages the Speed card lists
 
 
 def _seconds(value: float) -> str:
-    return f"{value:.1f} s" if value < 60 else f"{value / 60:.1f} min"
+    # a non-breaking space: at large text the unit never breaks away from its number
+    return f"{value:.1f}\u00a0s" if value < 60 else f"{value / 60:.1f}\u00a0min"
 
 
 def _speed_why(r: Mapping[str, Any]) -> str:
@@ -1008,6 +1012,8 @@ def _speed_why(r: Mapping[str, Any]) -> str:
     if r["failures"]:
         n = r["failures"]
         return f"Archidekt failed or asked to slow down {n} time{'' if n == 1 else 's'}"
+    if r.get("idp", 0.0) >= 0.5 and r["idp"] >= max(r["pacer"], r["archidekt"]):
+        return "mostly asking the identity provider whether the member may still come in"
     if r["pacer"] >= 0.5 and r["pacer"] >= r["archidekt"]:
         return "mostly waiting for a turn with Archidekt (the shared pacing)"
     if r["archidekt"] >= 0.5:
@@ -1020,7 +1026,8 @@ def _speed_card(d: Mapping[str, Any]) -> str:
     where their time went (the shared pacer's waits, Archidekt's answers, Archidekt's failures).
     Pages by their address pattern only: never a member, a deck or a query."""
     head = (
-        "<section class='ui-card' id='speed' aria-labelledby='speed-h'><h2 id='speed-h'>Speed, last 24 h</h2>"
+        "<section class='ui-card' id='speed' aria-labelledby='speed-h'>"
+        "<h2 id='speed-h'>Speed, last 24\u00a0h</h2>"
     )
     since = _dt.datetime.fromtimestamp(d["since"], tz=_dt.UTC).strftime("%d %b %H:%M UTC")
     foot = (
@@ -1030,19 +1037,30 @@ def _speed_card(d: Mapping[str, Any]) -> str:
     if not d["views"]:
         return head + "<p class='muted'>No page views yet.</p>" + foot + "</section>"
     slow = int(d["slow"])
-    rows = _row(
-        "Page views",
-        f"{d['views']:,}, {slow:,} slower than {SLOW_REQUEST_SECONDS:g} s",
-    ) + _row(
-        "Where the time went",
-        f"{_seconds(d['pacer'])} waiting for a turn with Archidekt, {_seconds(d['archidekt'])} "
-        f"Archidekt answering, {d['failures']:,} failed Archidekt call{'' if d['failures'] == 1 else 's'}",
+    rows = (
+        _row(
+            "Page views",
+            f"{d['views']:,}, {slow:,} slower than {SLOW_REQUEST_SECONDS:g}\u00a0s",
+        )
+        + _row(
+            "Where the time went",
+            f"{_seconds(d['pacer'])} waiting for a turn with Archidekt, {_seconds(d['archidekt'])} "
+            f"Archidekt answering, {d['failures']:,} failed Archidekt "
+            f"call{'' if d['failures'] == 1 else 's'}",
+        )
+        + _row(
+            # every page view first asks the identity provider whether the member may still come in,
+            # once its last answer is older than the membership check's cache (membership.py)
+            "Identity provider",
+            f"{_seconds(d.get('idp', 0.0))} asking whether members may still come in",
+        )
     )
     listed = [r for r in d["routes"] if r["max"] >= 1.0][:SPEED_ROUTES]
     for r in listed:
         rows += _row(
             r["route"],
-            f"{_seconds(r['p95'])} for 95 in 100 views, at most {_seconds(r['max'])}; {_speed_why(r)}",
+            f"{_seconds(r['p95'])} for 95 in 100 views, at most {_seconds(r['max'])}; "
+            f"{_seconds(r.get('idp', 0.0))} identity provider on average; {_speed_why(r)}",
             note=f"{r['views']:,} view{'' if r['views'] == 1 else 's'}",
         )
     if not listed:

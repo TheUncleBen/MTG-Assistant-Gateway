@@ -1000,8 +1000,11 @@ whether a change applies at once or after a restart.
   longest time has no stack variable. The unused time can't be longer than
   the longest time. How long a sign-in lasts at your identity provider is
   still set there.
-- **Pacing only gets gentler.** The Archidekt and Scryfall pacing can only be
-  set to ask less often than the gateway's defaults.
+- **Pacing stays within bounds.** The Archidekt and Scryfall pacing can be
+  set to ask less often than the gateway's defaults, with one row that can
+  also ask more often: **Archidekt requests per minute** goes from 1 to 40 (30 by
+  default; 0.7.32 lowered it from 40). Raise it only if Archidekt has said
+  it can take more.
 - **Some settings stay in the stack only**: the identity provider, secrets,
   the forced sign-in again (`MTG_REAUTH_INTERVAL`), the membership check, `MTG_WRITES_ENABLED` and the folders on
   disk ([DEPLOY.md](DEPLOY.md#environment-reference)).

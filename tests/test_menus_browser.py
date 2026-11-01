@@ -372,6 +372,9 @@ def test_the_deck_boxes_rename_move_export_compare_and_delete(tmp_path: Path) ->
             _pick(page, "Move to folder…")
             box = _box(page)
             assert box.locator("h2").inner_text() == "Move “Renamed deck”"
+            # the tree fills in once /decks/api/folders answers: wait for it (all_inner_texts
+            # doesn't), not a fixed moment
+            box.locator(".tree label", has_text="Precons").wait_for(timeout=5000)
             labels = [t.strip() for t in box.locator(".tree label").all_inner_texts()]
             assert labels == ["Top level (no folder)", "Archive", "Commander", "Brews", "Precons"]
             assert box.locator(".tree input:checked").evaluate("i => i.value") == "503"
@@ -462,6 +465,9 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             box = _box(page)
             box.locator("input#mb-fname").wait_for(timeout=3000)
             assert box.locator("h2").inner_text() == "New folder"
+            box.locator("select#mb-finside option", has_text="Precons").wait_for(
+                state="attached", timeout=5000
+            )
             inside = [t.strip() for t in box.locator("select#mb-finside option").all_inner_texts()]
             assert inside == ["Top level (no folder)", "Archive", "Commander", "Brews", "Precons"]
             box.locator("input#mb-fname").fill("Cube")
@@ -507,6 +513,7 @@ def test_the_folder_menu_new_rename_and_move_boxes(tmp_path: Path) -> None:
             box = _box(page)
             box.locator(".tree").wait_for(timeout=3000)
             assert box.locator("h2").inner_text() == "Move the folder “Commander”"
+            box.locator(".tree label", has_text="Old lists").wait_for(timeout=5000)
             labels = [t.strip() for t in box.locator(".tree label").all_inner_texts()]
             assert labels == ["Top level (no folder)", "Cube", "Old lists"]
             assert box.locator(".body .muted").inner_text() == (

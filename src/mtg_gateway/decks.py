@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import copy
 import dataclasses
 import datetime
 import hashlib
@@ -329,6 +330,11 @@ _DECK_WRITE_PATH = re.compile(r"^/decks/(\d+)/")
 # notice saying how old it is, instead of the busy page.
 DECK_LIST_LAST = 24 * 3600.0
 PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
+# A page's own Archidekt reads that no deck cache holds (the forum, profiles, My lists and Wants,
+# a deck's collaborators) are kept this long per member (ShortReads): a member going back to a page
+# within it is not held up by the pacer every member shares. Any write the gateway sends with the
+# member's session forgets them at once. archidekt_cache_seconds 0 turns it off.
+SHORT_READ_SECONDS = 120.0
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
 OUT_OF_DATE_STEP = (
@@ -387,7 +393,7 @@ HELD_REPLACED_STEP = (
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
 # cap above: a looping assistant cannot keep a steady stream of requests going on the member's
-# Archidekt account and the shared pacer. MTG_ARCHIDEKT_CALLS_PER_10_MIN sets it.
+# Archidekt account and the shared pacer. The Settings row archidekt_calls_per_10_min sets it.
 ARCHIDEKT_BUDGET_WINDOW = 600
 
 
@@ -628,6 +634,61 @@ class MemberCache:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class ShortReads:
+    """Short copies of a page's own Archidekt reads, per member (Alerts aside, which keeps its
+    own: the forum, profiles, My lists and Wants, a deck's collaborators). A read is kept for
+    ``seconds`` and served to the same member only, under the caller's key. Every write the
+    gateway sends with a member's session forgets all of that member's copies, before the write
+    goes out and again once it has landed (``drop``), and a read that was under way meanwhile
+    keeps nothing, so a page never shows what it showed before the member's own change. A write
+    sent with no member known forgets everyone's (``clear``)."""
+
+    MAX_ENTRIES = 2000
+
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self._entries: dict[tuple[str, tuple[Any, ...]], tuple[float, Any]] = {}
+        self._gen: dict[str, int] = {}  # sub -> writes seen; a read started before one keeps nothing
+        self._all_gen = 0
+
+    def _stamp(self, sub: str) -> tuple[int, int]:
+        return self._all_gen, self._gen.get(sub, 0)
+
+    async def get(
+        self, sub: str, key: tuple[Any, ...], fetch: Callable[[], Awaitable[Any]], *, fresh: bool = False
+    ) -> Any:
+        """The member's kept copy under ``key`` when younger than ``seconds``, else ``fetch()``,
+        kept unless a write of theirs came while it ran. A failed fetch keeps nothing. ``fresh``
+        (a form about to change what it shows) reads now and keeps what it read."""
+        if self.seconds <= 0 or not sub:
+            return await fetch()
+        k = (sub, key)
+        hit = self._entries.get(k)
+        if hit is not None and not fresh and time.monotonic() - hit[0] < self.seconds:
+            return copy.deepcopy(hit[1])
+        stamp = self._stamp(sub)
+        value = await fetch()
+        if self._stamp(sub) == stamp:
+            if k not in self._entries and len(self._entries) >= self.MAX_ENTRIES:
+                oldest = min(self._entries, key=lambda e: self._entries[e][0])
+                self._entries.pop(oldest, None)
+            self._entries[k] = (time.monotonic(), copy.deepcopy(value))
+        return value
+
+    def drop(self, sub: str) -> None:
+        """A write with the member's session: their copies go."""
+        self._gen[sub] = self._gen.get(sub, 0) + 1
+        for k in [k for k in self._entries if k[0] == sub]:
+            del self._entries[k]
+        if len(self._gen) > 10_000:  # forgetting the counters forgets the reads under way too
+            self._gen.clear()
+            self._all_gen += 1
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._all_gen += 1
 
 
 # -- review rows ----------------------------------------------------------------
@@ -1010,7 +1071,7 @@ class DeckError(Exception):
     left the gateway (the pacer refused it), so nothing can have been written whatever the kind.
     ``busy_cause`` names why a rate_limited refusal was made, for the busy page (busy.py):
     "member_slots" (the member's own Archidekt work fills their slots) or "budget" (the member's
-    MTG_ARCHIDEKT_CALLS_PER_10_MIN is used up); None otherwise."""
+    archidekt_calls_per_10_min, a Settings row, is used up); None otherwise."""
 
     busy_cause: str | None = None
 
@@ -3472,6 +3533,10 @@ class DeckService:
         # kept through writes, shown read-only and dated while Archidekt can't be asked
         self._page_last: dict[tuple[str, str], tuple[float, bytes]] = {}
         self.page_deck_seconds = min(PAGE_DECK_SECONDS, float(settings.archidekt_cache_seconds))
+        # a page's other Archidekt reads, per member, forgotten by the member's own writes
+        self.short_reads = ShortReads(
+            SHORT_READ_SECONDS if float(settings.archidekt_cache_seconds) > 0 else 0.0
+        )
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
         # called with (sub, deck) after a deck page read a deck (prices.PriceService.note_deck)
@@ -3502,7 +3567,9 @@ class DeckService:
         self._delete_prep.clear()  # a delete box's read may be of the deck this changes
         sub = _acting_sub.get()
         if not sub:
+            self.short_reads.clear()  # whose write it is isn't known: nobody's copy is trusted
             return
+        self.short_reads.drop(sub)
         if not path.startswith("/collection"):
             self.deck_lists.drop(sub)
             self.folder_trees.drop(sub)
@@ -3513,6 +3580,7 @@ class DeckService:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
         self.deck_lists.forget(sub)
         self.folder_trees.forget(sub)
+        self.short_reads.drop(sub)
         self._forget_page_decks()
         for key in [k for k in self._page_last if k[0] == sub]:
             del self._page_last[key]
@@ -4229,7 +4297,9 @@ class DeckService:
 
     async def get_own_deck(self, sub: str, deck_id: str) -> Deck:
         """Fetch with the user's session and insist the linked account owns the deck."""
-        deck = await self.get_deck(sub, deck_id)
+        return self._require_own(sub, await self.get_deck(sub, deck_id))
+
+    def _require_own(self, sub: str, deck: Deck) -> Deck:
         _token, link = self._token(sub)
         owned = owns_deck(deck, link)
         if owned is None:
@@ -4616,6 +4686,37 @@ class DeckService:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(running), wait)
         return self._page_checked.pop(key, None)
+
+    async def page_deck_live(self, sub: str, deck_ref: str) -> tuple[Deck, dict[str, Any]]:
+        """``page_deck_view`` for a deck's other pages (Goldfish, Compare, the editor, Deck
+        settings): the deck as the member's last view of it read it, kept and dropped the same way
+        (a write the gateway sends to the deck forgets it). A copy older than PAGE_DECK_SECONDS is
+        shown at once while it is read again (``how["checking"]``: the page carries
+        deckpage.deck_check_html, which says so when that read finds a change). Never the last
+        read while Archidekt can't be asked: that refusal is raised, as a fresh read's would be."""
+        deck, how = await self.page_deck_view(sub, deck_ref)
+        if how.get("held_at") is not None:
+            raise how["refused"]
+        return deck, how
+
+    async def page_own_deck(self, sub: str, deck_ref: str) -> tuple[Deck, dict[str, Any]]:
+        """``page_deck_live`` for a page that changes the deck (the editor, Deck settings): the
+        linked account must own it, as ``get_own_deck`` insists."""
+        deck, how = await self.page_deck_live(sub, deck_ref)
+        return self._require_own(sub, deck), how
+
+    def kept_page_deck(self, sub: str, deck_ref: str) -> Deck | None:
+        """The deck as a page view read it within PAGE_DECK_SECONDS (never older, never a read
+        from before a write to it), or None; reads nothing."""
+        hit = self._page_decks.get((sub, _clean_deck_id(deck_ref)))
+        if hit is None or self.page_deck_seconds <= 0 or time.monotonic() - hit[0] >= self.page_deck_seconds:
+            return None
+        return pickle.loads(hit[1])
+
+    async def read_page_deck(self, sub: str, deck_ref: str) -> Deck:
+        """The deck read now and kept for the deck's pages (``page_deck_view``)."""
+        key = (sub, _clean_deck_id(deck_ref))
+        return await self._read_page_deck(sub, deck_ref, key, fresh=False)
 
     async def research_deck_text(self, sub: str, deck_ref: str) -> str:
         """The decklist text a research tool (goldfish_annotate) is given in place of a deck id or

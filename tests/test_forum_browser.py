@@ -136,6 +136,9 @@ def test_the_forum_pages_fit_every_width_in_both_themes(server: Server, width: i
         _fits(page, "locked thread", width)
         # when Archidekt's forum pages change: the plain words and the way to a thread
         ark.forum_page_changed = True
+        # the change is Archidekt's, not the member's: the forum list kept for up to 2 minutes
+        # (decks.short_reads) is read again once that time is up, as it is here
+        server.app.state.gateway.decks.short_reads.clear()
         page.goto(f"{server.base}/forum", wait_until="networkidle")
         assert "Archidekt changed how its forum pages load" in page.locator(".fm .notice").inner_text()
         _fits(page, "changed", width)

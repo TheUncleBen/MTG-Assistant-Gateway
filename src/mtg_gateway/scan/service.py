@@ -583,7 +583,7 @@ class ScanService:
             owners.append(i)
         try:
             async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
-                found, missing = await self.scryfall.collection(idents)
+                found, missing = await self.scryfall.collection(idents, cached=True)
         except TimeoutError:
             return [self._deferred(inp, "budget") for inp in inputs]
         except ScryfallError as exc:
