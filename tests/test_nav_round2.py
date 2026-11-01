@@ -99,8 +99,9 @@ def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
 
 def test_a_long_word_scrolls_the_switch_not_the_page() -> None:
     # the switch scrolls inside at every width (large text on a Fold's inner screen beside the
-    # rail pushed the page sideways); full width on a phone
-    assert "max-width:100%;\n  overflow-x:auto;scrollbar-width:none}" in theme.CSS
+    # rail pushed the page sideways); full width on a phone; position:relative keeps its hidden counts
+    # inside the scroller (they widened /collection at 200% text)
+    assert "max-width:100%;\n  overflow-x:auto;scrollbar-width:none;position:relative}" in theme.CSS
     assert ".hubseg{display:flex;width:100%}" in theme.CSS
     js = (Path(theme.__file__).parent / "static" / "topbar.js").read_text(encoding="utf-8")
     assert 'seg.querySelector("[aria-current=page]")' in js
