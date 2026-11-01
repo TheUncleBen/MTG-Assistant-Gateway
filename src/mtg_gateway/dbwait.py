@@ -13,24 +13,32 @@ the request waits on a worker thread (Database.wait_write_free, one wait shared 
 that finds it locked), so the loop keeps serving what doesn't need the database, then goes on;
 after WAIT_LIMIT_SECONDS it is answered 503 with Retry-After, saying to try again.
 
+Background jobs don't pass through here; they wait the same way where they already wait on the
+network (``job`` and ``settle`` below), and a job run in a worker thread waits for the lock
+without holding up the loop (Database._begin_off_loop).
+
 What it does not change: a lock taken by another connection after a request has passed this check
-still makes that request's write wait on the loop (up to BUSY_TIMEOUT_MS, as before), and
-background jobs don't pass through here. Writes keep their wait rather than failing at once, so a
-change Archidekt already took is always recorded. Moving the database work off the loop entirely
-is the fuller fix, kept for a later release.
+still makes that request's next write wait on the loop (up to BUSY_TIMEOUT_MS, as before). Writes
+keep their wait rather than failing at once, so a change Archidekt already took is always
+recorded; a request can't be stopped and run again once it may have changed something.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
+from collections.abc import Iterator
+from contextvars import ContextVar
+from typing import TYPE_CHECKING
 
 from starlette.datastructures import Headers
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .db import Database
+if TYPE_CHECKING:
+    from .db import Database
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +56,6 @@ class DatabaseWaitMiddleware:
         self.app = app
         self.db = db
         self.limit = limit
-        self._waiting: asyncio.Future[bool] | None = None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -65,22 +72,62 @@ class DatabaseWaitMiddleware:
         await _busy(scope)(scope, receive, send)
 
     async def until_write_free(self, limit: float) -> bool:
-        """Wait, off the loop, at most ``limit`` seconds until a write could start. Requests that
-        arrive while one wait is running share it rather than starting their own thread."""
-        deadline = time.monotonic() + limit
-        while True:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                return False
-            task = self._waiting
-            if task is None or task.done():
-                task = self._waiting = asyncio.ensure_future(asyncio.to_thread(self.db.wait_write_free, left))
-            try:
-                await asyncio.wait_for(asyncio.shield(task), left)
-            except TimeoutError:
-                return False
-            if self.db.write_free():
-                return True
+        return await until_write_free(self.db, limit)
+
+
+async def until_write_free(db: Database, limit: float) -> bool:
+    """Wait, off the loop, at most ``limit`` seconds until a write could start. Everything that
+    finds the lock held while one wait is running (requests, jobs) shares it rather than starting
+    a thread of its own."""
+    deadline = time.monotonic() + limit
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        task: asyncio.Future[bool] | None = getattr(db, "_async_wait", None)
+        if task is None or task.done():
+            task = asyncio.ensure_future(asyncio.to_thread(db.wait_write_free, left))
+            db._async_wait = task  # type: ignore[attr-defined]
+        try:
+            await asyncio.wait_for(asyncio.shield(task), left)
+        except TimeoutError:
+            return False
+        if db.write_free():
+            return True
+
+
+# -- background jobs -------------------------------------------------------------------------------
+# The database a background job works with, set for the length of one job step (``job``). Where the
+# job already waits on the network (an Archidekt or Scryfall answer, a notification sent), the wait
+# goes on, off the loop, until the write lock is free too (``settle``), so the database work that
+# follows never waits for it on the loop. Nothing new can run in between: the job was already
+# waiting at that point, so the order of its own reads, decisions and writes is unchanged.
+_job_db: ContextVar[Database | None] = ContextVar("dbwait_job_db", default=None)
+# The longest a job waits so; after it, its write waits on the loop as it always did.
+JOB_WAIT_SECONDS = 60.0
+
+
+@contextlib.contextmanager
+def job(db: Database | None) -> Iterator[None]:
+    """One background job step: the network answers it awaits settle (see above)."""
+    token = _job_db.set(db)
+    try:
+        yield
+    finally:
+        _job_db.reset(token)
+
+
+async def settle() -> None:
+    """In a background job step, wait off the loop until the database's write lock is free (at
+    most JOB_WAIT_SECONDS). Anywhere else, nothing: a request's own waits are not stretched."""
+    db = _job_db.get()
+    if db is None:
+        return
+    try:
+        if not db.write_free():
+            await until_write_free(db, JOB_WAIT_SECONDS)
+    except Exception:  # only ever a wait: the job's own work then says what is wrong
+        logger.debug("waiting for the database's write lock failed", exc_info=True)
 
 
 def _busy(scope: Scope) -> Response:

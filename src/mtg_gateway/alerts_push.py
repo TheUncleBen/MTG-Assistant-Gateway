@@ -48,7 +48,7 @@ import time
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from . import notify, profile, profile_page
+from . import dbwait, notify, profile, profile_page
 from .decks import DeckError
 
 if TYPE_CHECKING:
@@ -171,6 +171,10 @@ class AlertWatch:
             return await task
 
     async def _round(self) -> int:
+        with dbwait.job(self.db):  # its database work after each answer waits off the loop
+            return await self._members_round()
+
+    async def _members_round(self) -> int:
         n = 0
         for sub in self.members():
             result = await self.check(sub)

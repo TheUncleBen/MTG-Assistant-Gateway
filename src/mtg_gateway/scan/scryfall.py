@@ -37,6 +37,8 @@ from typing import Any
 
 import httpx
 
+from .. import dbwait
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE = "https://api.scryfall.com"
@@ -369,6 +371,14 @@ class ScryfallClient:
         )
 
     async def _request(
+        self, method: str, path: str, *, interval: float | None = None, **kw: Any
+    ) -> httpx.Response:
+        try:
+            return await self._request_now(method, path, interval=interval, **kw)
+        finally:
+            await dbwait.settle()  # a background job's database work waits off the loop
+
+    async def _request_now(
         self, method: str, path: str, *, interval: float | None = None, **kw: Any
     ) -> httpx.Response:
         async with self._lock:

@@ -43,7 +43,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import assistants, batch, board, formatting, modes, refusals, ui
+from . import assistants, batch, board, dbwait, formatting, modes, refusals, ui
 from .approve import approval_code, approval_matches, approval_set_code, card_seq_of
 from .archidekt import (
     FORMAT_IDS,
@@ -7573,6 +7573,10 @@ class DeckService:
                 logger.exception("queued backup delete failed")
 
     async def delete_one_queued_backup(self) -> dict[str, Any] | None:
+        with dbwait.job(self.db):  # its database work after each answer waits off the loop
+            return await self._delete_one_queued_backup()
+
+    async def _delete_one_queued_backup(self) -> dict[str, Any] | None:
         """One pass of the later deletes: the one queued delete due first, across all
         members, never while the client is paused or writes are off. It runs the same checks as
         _drop_unused_backup, through the member's own link as a normal call (outside an apply its

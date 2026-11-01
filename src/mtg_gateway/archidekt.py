@@ -34,6 +34,7 @@ from urllib.parse import quote
 
 import httpx
 
+from . import dbwait
 from .timing import add_time, archidekt_failures, archidekt_time, pacer_time
 
 logger = logging.getLogger(__name__)
@@ -1652,6 +1653,7 @@ class ArchidektClient(AccountRequests):
             raise
         finally:
             add_time(archidekt_time, time.perf_counter() - started)  # pacer wait and transfer alike
+            await dbwait.settle()  # a background job's database work waits off the loop
 
     async def _paced_send(
         self,
