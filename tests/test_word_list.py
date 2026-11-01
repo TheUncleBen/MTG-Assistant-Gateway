@@ -99,7 +99,12 @@ RETIRED: list[tuple[str, re.Pattern[str], str]] = [
 # no test run, and the word list gives it no other name, so its own name and its links keep it.
 GOLDFISH_PAGE = "the hand-play page's own name: no test run, and the word list renames it to nothing"
 ALLOWED: list[tuple[str, str, str]] = [
-    ("deckpage.py", r"<h1>Goldfish</h1>|by hand, here on the gateway'>\{\} Goldfish</a>", GOLDFISH_PAGE),
+    # the page's heading: its own name, then the deck's name in a span (<h1>Goldfish <span>{name}</span>)
+    (
+        "deckpage.py",
+        r"<h1>Goldfish(?: <span >\{\}</span>)?</h1>|by hand, here on the gateway'>\{\} Goldfish</a>",
+        GOLDFISH_PAGE,
+    ),
     ("deckpage.py", r"The goldfish needs JavaScript", GOLDFISH_PAGE),
     ("companion_tools.py", r"^Goldfish: \{\}$", GOLDFISH_PAGE),
     ("deck.js", r"^Goldfish$", GOLDFISH_PAGE),
