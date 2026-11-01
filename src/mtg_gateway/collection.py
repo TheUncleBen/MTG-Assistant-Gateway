@@ -2347,11 +2347,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "Archidekt is slow or down the page cannot show it.</p></section>"
         )
 
-    def listing_query(qp: Any) -> dict[str, Any]:
-        """The list's address: name filter, sort and direction, offset (the old ``page`` too)."""
+    def listing_query(qp: Any, request: Request | None = None, sub: str | None = None) -> dict[str, Any]:
+        """The list's address: name filter, sort and direction, offset (the old ``page`` too).
+        With ``request`` and ``sub``, the sort is the one remembered on the account when the
+        address names none, and a pick from this site is remembered (prefs.sort_choice)."""
         q = _clean(qp.get("q"), 80)
-        sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
-        direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
+        if request is not None and sub:
+            sort, direction = prefs.sort_choice(
+                state.db,
+                sub,
+                request,
+                "collection",
+                sorts=SORTS,
+                default="added",
+                dirs=DIRECTION_WORDS,
+                default_dir="desc",
+            )
+        else:
+            sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
+            direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
         try:
             offset = max(0, min(int(qp.get("offset") or 0), 1_000_000))
         except ValueError:
@@ -2440,7 +2454,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if not sub:
             return login_redirect_here(request, "/collection")
         qp = request.query_params
-        lq = listing_query(qp)
+        lq = listing_query(qp, request, sub)
         view, remember = prefs.view_choice(state.db, sub, request, "collection", ("grid", "list"), "grid")
         view_in_link = view if qp.get("view") in ("grid", "list") else None
         csrf = _csrf(s, sid) or ""
@@ -2632,7 +2646,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return who
         sub, sid = who
         qp = request.query_params
-        lq = listing_query(qp)
+        lq = listing_query(qp, request, sub)
         view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
         try:
             got = await listing(sub, lq)

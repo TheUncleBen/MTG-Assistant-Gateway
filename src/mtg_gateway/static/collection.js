@@ -318,15 +318,17 @@
   /* then, once typing stops, the whole binder: Archidekt's own name filter, with the count */
   var searchSeq = 0, searchTimer = null;
   function search() {
-    var params = new URLSearchParams(new FormData(listform));
-    params.delete("offset");
-    if (!params.get("q")) params.delete("q");
-    /* the defaults stay out of the address, as the page's own links leave them */
+    var sent = new URLSearchParams(new FormData(listform));
+    sent.delete("offset");
+    if (!sent.get("q")) sent.delete("q");
+    /* the sort goes with every ask (a pick of the default is remembered as such, prefs.py); the
+       defaults stay out of the address, as the page's own links leave them */
+    var params = new URLSearchParams(sent);
     if (params.get("sort") !== "edition") { params.delete("sort"); params.delete("dir"); }
     else if (params.get("dir") === "desc") params.delete("dir");
     var mine = ++searchSeq;
     if (list) list.setAttribute("aria-busy", "true");
-    Fetch.answer("/collection/api/rows?" + params.toString()).then(function (d) {
+    Fetch.answer("/collection/api/rows?" + sent.toString()).then(function (d) {
         if (mine !== searchSeq) return;
         if (list) list.removeAttribute("aria-busy");
         if (!d.ok) throw d;
