@@ -36,6 +36,7 @@ from .timing import (
     PageTime,
     archidekt_failures,
     archidekt_time,
+    idp_time,
     logged_path,
     pacer_time,
     speed_log,
@@ -211,6 +212,7 @@ class LatePageMiddleware:
                     ctx.get(pacer_time, 0.0),
                     int(ctx.get(archidekt_failures, 0.0)),
                     status or 500,
+                    ctx.get(idp_time, 0.0),
                 )
             )
 

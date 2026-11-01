@@ -471,6 +471,16 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _empty_speed_log() -> None:
+    """Admin's Speed card reads one module-level log (timing.speed_log) that every test server in
+    the same worker adds to: each test starts with it empty, so what /admin shows never depends on
+    which tests ran before (a loaded run left slow rows behind for the text-zoom test)."""
+    from mtg_gateway import timing
+
+    timing.speed_log._rows.clear()
+
+
+@pytest.fixture(autouse=True)
 def _forget_package_lists() -> None:
     """packages.listing keeps a member's own package list for a minute; tests share member ids,
     so each test starts with that memory empty."""
