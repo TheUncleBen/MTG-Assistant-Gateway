@@ -301,10 +301,18 @@ def test_menus_open_within_one_beat(server: Server) -> None:
             slow.append(("decks right-click", d.width, ms))
             d.escape()
             if d.width < 600:
-                # a press and hold: the menu comes within the beat after the hold's own time
-                d.goto("/decks")  # a fresh page: the menu just closed is still settling its Back entry
+                # a press and hold: the menu comes within the beat after the hold's own time. Like
+                # the others, the best of a few runs (one sample read the runner: a busy machine
+                # fires the page's 450 ms hold timer late), each on a fresh page, as the menu just
+                # closed is still settling its Back entry
+                d.goto("/decks")
                 tile = page.locator("li.deck[data-deck-id]").first
-                ms = d.measure(partial(d.hold, tile), tries=1)
+
+                def fresh(d: Driver = d) -> None:
+                    d.escape()
+                    d.goto("/decks")
+
+                ms = d.measure(partial(d.hold, tile), reset=fresh, budget=MENU_MS + HOLD_MS)
                 assert d.menu().is_visible()
                 slow.append(("decks hold", d.width, ms - HOLD_MS))
                 d.escape()
