@@ -767,7 +767,10 @@ class PriceService:
         if self._limit("watch_max_decks") <= 0:
             raise DeckError("invalid", "Watchlists are switched off on this gateway.")
         self._check_deck_limit(sub, deck_id)
-        deck = await self.decks.get_any_deck(sub, deck_id)
+        # the deck as a page of it read it moments ago, when there is one (never from before a
+        # change the gateway sent to it); else read now
+        kept = getattr(self.decks, "kept_page_deck", None)
+        deck = (kept(sub, deck_id) if kept else None) or await self.decks.get_any_deck(sub, deck_id)
         t = int(now())
         with self.db.tx() as c:
             # counted again in the same transaction as the insert, so parallel watches cannot pass it
@@ -783,7 +786,8 @@ class PriceService:
             raise DeckError("not_found", "No gateway account for this member.")
         note = ""
         try:
-            await self._price_missing(day_of(t), only_deck=(sub, deck.id))
+            # the member is waiting: the batch pace, not the daily check's single-lookup pace
+            await self._price_missing(day_of(t), only_deck=(sub, deck.id), waiting=True)
         except Exception as exc:  # Scryfall busy: the daily check prices it
             logger.info("pricing a newly watched deck waits for the daily check: %s", exc.__class__.__name__)
             note = "Scryfall could not be asked just now; today's value comes with the next daily check."
@@ -928,14 +932,20 @@ class PriceService:
         return True
 
     async def _price_missing(
-        self, day: str, *, only_deck: tuple[str, str] | None = None, only_binder: str | None = None
+        self,
+        day: str,
+        *,
+        only_deck: tuple[str, str] | None = None,
+        only_binder: str | None = None,
+        waiting: bool = False,
     ) -> int:
         """Ask Scryfall (in batches of 75) for the watched printings, and those of the Binders and
         decks in use, with no point for ``day``, store their points, and record the printing of
         rows that had none (a name-only watch, a deck card or a Binder record without a Scryfall
         id) and the oracle id of a watch by name alone (its cheapest printing is priced by
         _price_cheapest, not here). ``only_deck`` (member, deck id): that deck's cards only;
-        ``only_binder`` (member): that member's Binder only."""
+        ``only_binder`` (member): that member's Binder only. ``waiting``: a member waits for the
+        answer (watch_deck), so the requests go at the batch pace."""
         owned: list[dict[str, Any]] = []
         if only_binder:
             cards, decks = [], []
@@ -988,7 +998,9 @@ class PriceService:
         if not wanted:
             return 0
         client = self._scry()
-        found, _missing = await client.collection(list(wanted.values()), interval=client.lookup_interval)
+        found, _missing = await client.collection(
+            list(wanted.values()), interval=None if waiting else client.lookup_interval
+        )
         by_key: dict[tuple[str, ...], dict[str, Any]] = {}
         for card in found:
             for k in _card_keys(card):
