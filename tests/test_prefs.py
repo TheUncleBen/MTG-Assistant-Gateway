@@ -301,3 +301,11 @@ def test_the_scan_intro_is_seen_or_dismissed() -> None:
     for bad in ("yes", "Seen", False, 1, None):
         assert not prefs.valid(prefs.SCAN_INTRO, bad), bad
     assert not prefs.valid(prefs.EDHPLAY_STEPS, "seen")
+
+
+def test_card_searchs_filters_are_open_or_closed() -> None:
+    """Card search keeps whether its filter groups sit open or folded on a Fold or desktop
+    (mockup screen 5): "open" or "closed", nothing else."""
+    assert prefs.valid(prefs.CARDS_FILTERS, "open") and prefs.valid(prefs.CARDS_FILTERS, "closed")
+    for bad in ("Open", True, 1, None, ""):
+        assert not prefs.valid(prefs.CARDS_FILTERS, bad), bad

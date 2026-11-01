@@ -565,7 +565,10 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 )
         else:
             results = START_HTML
-        body = f"<section class='panel spanel cs-panel'>{cv.filters_html(f, view=view, total=total)}"
+        # the filter groups on a Fold or desktop start as the member left them (closed until opened)
+        folded = state.db.get_pref(sub, prefs.CARDS_FILTERS) != "open"
+        filters = cv.filters_html(f, view=view, total=total, folded=folded)
+        body = f"<section class='panel spanel cs-panel'>{filters}"
         if not linked:
             body += (
                 f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "

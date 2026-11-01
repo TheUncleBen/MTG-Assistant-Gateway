@@ -68,13 +68,17 @@ def name_row(
     under_html: str = "",
     attrs: str = "",
     filters_button: bool = True,
+    fold: bool | None = None,
 ) -> str:
     """The panel's first row: the name box with its search button (``attrs`` adds attributes to
     the box), ``under_html`` right under the box (deck search's "Open this deck"), the Filters
     button phones open the sheet with, and ``cross_html`` (the cross-link) at the end of the row,
-    hidden on phones."""
+    hidden on phones. ``fold``: the button shows at every width and folds the filter groups in
+    place on a Fold or desktop (``filters_sheet`` with ``folded``); True when they start open."""
+    expanded = "true" if fold else "false"
     fbtn = (
-        "<button type='button' class='btn sp-open fbtn' aria-controls='sp-filters' aria-expanded='false'>"
+        f"<button type='button' class='btn sp-open fbtn{' fold' if fold is not None else ''}' "
+        f"aria-controls='sp-filters' aria-expanded='{expanded}'>"
         f"{icon('filter')} Filters <span class='n'></span></button>"
         if filters_button
         else ""
@@ -196,10 +200,23 @@ def text_group(
 # --- the phone sheet ---------------------------------------------------------------------------
 
 
-def filters_sheet(inner_html: str, *, show_html: str, clear_html: str, size: bool = True) -> str:
+def filters_sheet(
+    inner_html: str,
+    *,
+    show_html: str,
+    clear_html: str,
+    size: bool = True,
+    folded: bool | None = None,
+    pref: str = "",
+) -> str:
     """The filter groups, which phones open as a full-screen sheet (the Filters button in the
     name row): a head with Filters and ×, the groups, the card size (phones only, where the
-    results bar hides it), then Clear filters and ``show_html`` (the button that closes it)."""
+    results bar hides it), then Clear filters and ``show_html`` (the button that closes it).
+    ``folded``: on a Fold or desktop the groups fold in place behind the same button (mockup
+    screen 5): True draws them folded, False open, None (other panels) always open. ``pref``: the
+    account choice static/searchpanel.js keeps the last state in. Without scripts nothing can
+    open a sheet or unfold the groups, so a <noscript> style shows them at every width and hides
+    the button."""
     size_html = (
         "<div class='sheet-size'>"
         + card_size_control().replace("class='field cardsize'", "class='cardsize'")
@@ -207,10 +224,17 @@ def filters_sheet(inner_html: str, *, show_html: str, clear_html: str, size: boo
         if size
         else ""
     )
+    cls = " folded" if folded else ""
+    data = f" data-pref='{esc(pref)}'" if pref else ""
+    noscript = (
+        "<noscript><style>.spanel .sp-filters,.spanel .sp-filters.folded{display:contents;position:static;"
+        "overflow:visible}"
+        ".spanel .fbtn.sp-open,.spanel .sp-sheet-head,.spanel .sp-sheet-foot{display:none}</style></noscript>"
+    )
     return (
-        "<div id='sp-filters' class='sp-filters'><div class='sp-sheet-head'><h2>Filters</h2>"
+        f"<div id='sp-filters' class='sp-filters{cls}'{data}><div class='sp-sheet-head'><h2>Filters</h2>"
         f"<button type='button' class='close' aria-label='Close filters'>{icon('x')}</button></div>"
-        f"{inner_html}{size_html}<div class='sp-sheet-foot'>{clear_html}{show_html}</div></div>"
+        f"{inner_html}{size_html}<div class='sp-sheet-foot'>{clear_html}{show_html}</div></div>{noscript}"
     )
 
 
