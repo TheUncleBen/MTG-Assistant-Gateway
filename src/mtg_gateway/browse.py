@@ -858,10 +858,17 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return login_redirect_here(request, f"/users/{username}")
         query = read_query({**request.query_params, "owner": username})
-        query["order_by"] = (
-            request.query_params.get("order")
-            if request.query_params.get("order") in SEARCH_ORDERS
-            else "-updatedAt"
+        # the profile opens sorted as it was left (prefs.sort_choice)
+        query["order_by"], query["direction"] = prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "profile",
+            sorts=SEARCH_ORDERS,
+            default="-updatedAt",
+            name="order",
+            dirs=dict(DIRECTIONS),
+            default_dir="auto",
         )
         view, remember = view_of(request, sub)
         asked = archidekt_query(query)

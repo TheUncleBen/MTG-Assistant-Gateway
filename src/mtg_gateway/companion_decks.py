@@ -26,6 +26,7 @@ from .companion import (
 )
 from .deckpage import (
     DECK_BOXES,
+    LIST_ORDERS,
     VIEWS,
     compare_mine_html,
     covers_for,
@@ -341,6 +342,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         qp = request.query_params
         chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
+        order, _dir = prefs.sort_choice(
+            state.db, sub, request, "decks", sorts=LIST_ORDERS, default="updated", name="order"
+        )
         filters = read_filters(qp)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait, last_read_ok=True)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
@@ -532,6 +536,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         qp = request.query_params
         shape = qp.get("shape") if qp.get("shape") in ("recent", "pick") else "list"
         q, order, view, folder = list_query(qp)
+        if shape == "list":  # the page's list opens sorted as it was left (the panel sends its pick)
+            order, _dir = prefs.sort_choice(
+                state.db, sub, request, "decks", sorts=LIST_ORDERS, default="updated", name="order"
+            )
         filters = read_filters(qp)
         try:
             rows = await asyncio.wait_for(decks.list_decks(sub), DECKS_JSON_TIMEOUT)
