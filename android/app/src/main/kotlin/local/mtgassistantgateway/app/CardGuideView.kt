@@ -13,6 +13,10 @@ import android.view.View
  * A dashed card outline over the camera preview, 63:88 like a Magic card, so people hold the
  * card where the photo will have it large and sharp. The page finds the card's real edges in the
  * photo afterwards, so framing only has to be roughly right.
+ *
+ * It is [WIDTH] of the viewfinder's width. Filling it holds a phone's main camera about 15 cm from
+ * the card: the main lens of some phones (Samsung's Ultra models among them) cannot focus much
+ * closer, and a card held closer comes out blurred.
  */
 class CardGuideView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -30,8 +34,8 @@ class CardGuideView @JvmOverloads constructor(context: Context, attrs: Attribute
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        // Fit a 63:88 card into 80% of the shorter side's matching dimension.
-        var cw = w * 0.8f
+        // Fit a 63:88 card into WIDTH of the width, and at most 80% of the height.
+        var cw = w * WIDTH
         var ch = cw * 88f / 63f
         if (ch > h * 0.8f) {
             ch = h * 0.8f
@@ -39,5 +43,9 @@ class CardGuideView @JvmOverloads constructor(context: Context, attrs: Attribute
         }
         rect.set((w - cw) / 2f, (h - ch) / 2f, (w + cw) / 2f, (h + ch) / 2f)
         canvas.drawRoundRect(rect, 24f, 24f, paint)
+    }
+
+    companion object {
+        const val WIDTH = 0.6f
     }
 }

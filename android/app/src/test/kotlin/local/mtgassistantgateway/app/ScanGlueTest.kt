@@ -44,6 +44,16 @@ class ScanGlueTest {
         assertTrue(!install.contains("showTab('camera')") || install.indexOf("showTab('camera')") > install.indexOf("end: function"))
     }
 
+    @Test fun eachPhotoReportsItsOwnOutcome() {
+        // A read left waiting by the photo before is dropped as the next one is handed over, so the
+        // done event's outcome is this photo's; it names the card found, or the name as read.
+        val onPhoto = install.substring(install.indexOf("onPhoto: function"), install.indexOf("undo: function"))
+        assertTrue(onPhoto.indexOf("s.state.pending = null;") in 0 until onPhoto.indexOf("process(s, url"))
+        for (field in listOf("ev.matched", "ev.name", "ev.set", "ev.number", "ev.read", "ev.blurry", "ev.pending")) {
+            assertTrue(field, install.contains("$field = "))
+        }
+    }
+
     @Test fun onPhotoEmbedsTheUrlAndTheGuide() {
         val url = "https://mtg.example.com" + ScanGlue.PHOTO_PATH + "7"
         val js = ScanGlue.onPhoto(url)

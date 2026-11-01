@@ -19,6 +19,7 @@ import androidx.activity.ComponentActivity
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -44,6 +45,8 @@ import java.util.concurrent.ExecutionException
  *   CameraX answers on Android 15 and later for cameras with more than one level). Elsewhere the
  *   slider is hidden.
  * - Zoom and exposure compensation, within what `CameraInfo` reports.
+ * - Focus and metering on the dashed box before each shot (`startFocusAndMetering`), so the
+ *   picture is taken once the lens has settled on the card.
  *
  * The panel is a view inside [MainActivity], not its own activity, so the page in the WebView
  * underneath keeps running while the camera is up: every Shoot hands one JPEG to the page through
@@ -117,6 +120,8 @@ class CameraPanel(
     private var aeHigh = 0
     private var exposure = 0
     private var capturing = false
+    /** Counts shots, so a focus result that arrives after its shot was given up on starts nothing. */
+    private var shotToken = 0
 
     /** A photo is with the page until its `done` event (or the watchdog) comes back. */
     private var awaitingPage = false
@@ -260,7 +265,9 @@ class CameraPanel(
             )
             .build()
         val ic = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            // Quality over speed: the page reads small print off the card, and the focus wait
+            // before each shot already sets the pace.
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setJpegQuality(92)
             .setResolutionSelector(
                 ResolutionSelector.Builder().setAspectRatioStrategy(ratio)
@@ -394,9 +401,27 @@ class CameraPanel(
         if (capturing || awaitingPage) return
         capturing = true
         shoot.isEnabled = false
-        status.text = activity.getString(R.string.status_capturing)
+        status.text = activity.getString(R.string.status_focusing)
         ui.removeCallbacks(captureWatchdog)
         ui.postDelayed(captureWatchdog, CAPTURE_TIMEOUT_MS) // a still that never arrives must not freeze Shoot
+        // Focus and meter on the middle of the dashed box first, and shoot when the camera reports
+        // the result (sharp or not) or after FOCUS_TIMEOUT_MS, whichever comes first.
+        val token = ++shotToken
+        val gate = OnceGate { if (token == shotToken && capturing && imageCapture === ic) takePicture(ic) }
+        val cam = camera
+        val box = guideView.guide()
+        if (cam == null || box.isEmpty) {
+            gate.fire()
+            return
+        }
+        val point = previewView.meteringPointFactory.createPoint(box.centerX(), box.centerY())
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE).build()
+        cam.cameraControl.startFocusAndMetering(action).addListener({ gate.fire() }, activity.mainExecutor)
+        ui.postDelayed({ gate.fire() }, FOCUS_TIMEOUT_MS)
+    }
+
+    private fun takePicture(ic: ImageCapture) {
+        status.text = activity.getString(R.string.status_capturing)
         ic.targetRotation = displayRotation() // the activity is not recreated on rotation, so set it per shot
         val out = ByteArrayOutputStream(512 * 1024)
         val wanted = ic
@@ -546,17 +571,29 @@ class CameraPanel(
             "no-card" -> pageDone(activity.getString(R.string.no_card_outline))
             "ocr" -> onOcr(ev.optString("state", ""), ev.optDouble("progress", 0.0))
             "done" -> {
-                val error = ev.optString("error", "")
-                val pageStatus = ev.optString("status", "")
-                val pending = ev.optBoolean("pending", false)
-                when {
-                    error.isNotEmpty() -> pageDone(activity.getString(R.string.scan_failed, error), stopAuto = true)
-                    // A read waits on the page for a tap. The page's own continuous mode stops shooting
-                    // while one does, and shooting on would only replace it, so Auto pauses here too.
-                    pending && autoToggle.isChecked -> pageDone(activity.getString(R.string.auto_paused_pending), stopAuto = true)
-                    pending -> pageDone(activity.getString(R.string.pending_on_page))
-                    pageStatus.isNotEmpty() -> pageDone(pageStatus)
-                    else -> pageDone(activity.getString(R.string.status_next))
+                // What this photo came to, never what an earlier one left waiting on the page.
+                val o = ShotLine.of(
+                    ev.optString("error", ""), ev.optString("status", ""), ev.optBoolean("pending", false),
+                    ev.optBoolean("matched", false), name, ev.optString("set", ""), ev.optString("number", ""),
+                    ev.optString("read", ""), ev.optBoolean("blurry", false), autoToggle.isChecked,
+                )
+                when (o) {
+                    is ShotLine.Outcome.Failed -> pageDone(activity.getString(R.string.scan_failed, o.error), stopAuto = true)
+                    is ShotLine.Outcome.Found -> pageDone(
+                        activity.getString(if (o.autoPaused) R.string.shot_found_paused else R.string.shot_found, o.name, o.where),
+                        stopAuto = o.autoPaused,
+                    )
+                    is ShotLine.Outcome.NoMatch -> pageDone(
+                        when {
+                            o.blurry -> activity.getString(R.string.shot_blurred)
+                            o.autoPaused -> activity.getString(R.string.shot_no_match_paused, o.read)
+                            else -> activity.getString(R.string.shot_no_match, o.read)
+                        },
+                        stopAuto = o.autoPaused,
+                    )
+                    is ShotLine.Outcome.Unreadable -> pageDone(activity.getString(R.string.shot_unreadable, o.pageStatus))
+                    is ShotLine.Outcome.PageSaid -> pageDone(o.status)
+                    ShotLine.Outcome.Next -> pageDone(activity.getString(R.string.status_next))
                 }
             }
         }
@@ -641,8 +678,10 @@ class CameraPanel(
          * as lost. The first use's download reports progress (`ocr` events), each of which starts it over.
          */
         private const val PAGE_TIMEOUT_MS = 45_000L
-        /** A still capture that neither delivers nor fails within this is given up on. */
+        /** A still capture that neither delivers nor fails within this is given up on (focus wait included). */
         private const val CAPTURE_TIMEOUT_MS = 6_000L
+        /** The longest a shot waits for the camera to report focus on the dashed box before it is taken anyway. */
+        private const val FOCUS_TIMEOUT_MS = 1_500L
         /** How long to wait for CameraX to report the device closed before telling the page anyway. */
         private const val CLOSE_TIMEOUT_MS = 2_000L
     }

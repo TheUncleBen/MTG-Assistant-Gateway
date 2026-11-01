@@ -170,12 +170,12 @@ body.picker-open{overflow:hidden}
   aspect-ratio:3/4;max-height:54vh;width:min(100%,calc(54vh * 3 / 4));margin:0 auto}
 .scan .camera video{width:100%;height:100%;object-fit:cover;display:block}
 /* once there is a match to confirm, the preview gives up room so the result shows above the controls.
-   Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop
+   Shrinking by width keeps the 3:4 box and the guide's 50% width (GUIDE_WIDTH), which scan.js relies on for the crop
    (and keeps the guide's card name box inside the preview). */
 .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
 .scan .cam-panel.has-result .cam-hint{display:none}
 .scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:78%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
+  width:50%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
   box-shadow:0 0 0 999px var(--scrim);pointer-events:none}
 .scan .camera .guide::before,.scan .camera .guide::after{content:"";position:absolute;width:14%;height:10%;
   border:3px solid var(--orange);pointer-events:none}
@@ -183,8 +183,10 @@ body.picker-open{overflow:hidden}
 .scan .camera .guide::after{right:-3px;bottom:-3px;border-left:0;border-top:0;border-bottom-right-radius:6px}
 .scan .camera .guide .title{position:absolute;left:4%;right:4%;top:4%;height:8.5%;
   border:2px dashed var(--orange);border-radius:var(--radius-panel);background:var(--orange-tint)}
+/* the label stays on one line inside the name box, which is a share of the viewfinder, at any text size */
 .scan .camera .guide .title::after{content:"card name";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
-  text-align:center;color:var(--navbar-text);font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;
+  text-align:center;color:var(--navbar-text);font-weight:700;font-size:min(.8rem,3vw);letter-spacing:.08em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;
   text-shadow:0 1px 2px var(--navbar-bg);opacity:.9}
 .scan .cam-hint{margin:0;text-align:center;font-size:.9rem;font-weight:700}
 .scan .camera.busy video{filter:brightness(.5)}
