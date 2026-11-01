@@ -1408,7 +1408,7 @@ def _users_body(
             actions=[ui.button_link("Not linked", _href(path, chip="notlinked"))],
         ),
         ui.widget(
-            "Connected apps",
+            "Assistants",
             "layers",
             connections,
             unit="connections",
@@ -1617,7 +1617,7 @@ def _user_panel(
         ("First sign-in", ui.when(u["first_login_at"], now=now)),
         ("Last seen", ui.when(_seen_at(u), now=now)),
         ("Archidekt", html.escape(u["archidekt_username"] or "not linked")),
-        ("Connected apps", apps),
+        ("Assistants", apps),
         ("Active tokens", str(u["active_tokens"])),
         ("Browser sessions", str(u["browser_sessions"])),
     ]

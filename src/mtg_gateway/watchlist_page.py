@@ -729,6 +729,13 @@ def card_rows_html(
         body = "".join(parts)
     elif start:
         body = ""
+    elif query.list and not any(in_list(v, query.list) for v in cards):
+        # a list with no card in it yet: nothing was filtered away (independent review 2, L4)
+        name = list_word("" if query.list == "-" else query.list)
+        body = (
+            f"<p class='ui-empty'>No cards in “{esc(name)}” yet. Move cards here with a card's "
+            "Move to list…, or tick several with Select.</p>"
+        )
     elif cards:
         body = "<p class='ui-empty'>No cards match. Clear the search or the filters to see them all.</p>"
     else:
@@ -1044,12 +1051,14 @@ def watchlist_page_html(
     checked = f"{day_text(last, today)} at {at} UTC" if last else ""
     cards = data["cards"]
     query, _shown, body, pager = card_rows_html(cards, ids, csrf_in, today, query, card_history, lists=lists)
+    # the list the address shows: its own chips' counts and total (L4), every card without one
+    listed = [v for v in cards if in_list(v, query.list)]
     decks = data["decks"]
     chips = ui.chips(
         [
             ui.Chip(
                 word,
-                len(decks) if key == "decks" else sum(1 for v in cards if in_chip(v, key)),
+                len(decks) if key == "decks" else sum(1 for v in listed if in_chip(v, key)),
                 query.href(show=key, upto=0),
                 key == query.show,
             )
@@ -1121,10 +1130,10 @@ def watchlist_page_html(
         f"<a class='ui-cap' href='{esc(query.href(box='newlist'))}' {ui.box_open_attr('w-newlist')}>"
         f"{icon('plus')}New list</a>"
     )
-    worth = [c["price"] for c in cards if c.get("price") is not None]
+    worth = [c["price"] for c in listed if c.get("price") is not None]
     card_list = (
         "<div id='w-cards' class='w-sec'>"
-        + ui.list_head("Cards", len(cards), f"Together {money(sum(worth))} today" if worth else "")
+        + ui.list_head("Cards", len(listed), f"Together {money(sum(worth))} today" if worth else "")
         + f"<span class='w-secacts'>{new_list}{ui.card_size_control(cls='cardsize w-size')}</span></div>"
         + ui.table_open(TABLE_COLS, TABLE_MD, TABLE_SM, cls="w-t", label="Watched cards")
         + head

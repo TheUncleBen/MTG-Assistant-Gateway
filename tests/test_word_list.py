@@ -74,6 +74,8 @@ RETIRED: list[tuple[str, re.Pattern[str], str]] = [
         "Price alert (a watched card's), never the bare “Alerts”",
     ),
     ("printings", re.compile(r"Change printing|Art variants"), "Printings…"),
+    # independent review 2, L2: the Admin pages and the Delete my data box still said it
+    ("assistants", re.compile(rf"{_C}[Cc]onnected apps{_E}"), "Assistants (“connected assistants”)"),
     (
         "test",
         re.compile(
@@ -380,4 +382,16 @@ def test_the_watchlist_names_a_card_s_alert_a_price_alert() -> None:
     assert f"{icon('tag')}Price alert defaults</a>" in page and f"{icon('tag')}1 price alert past</a>" in page
     assert icon("bell") not in page
     found = _report("/watchlist", _visible(page))
+    assert not found, "\n".join(found)
+
+
+def test_the_python_words_never_say_my_lists() -> None:
+    """Independent review 2, L3: /lists is Binder › Lists now, so the server's own words (refusals,
+    review pages, tool answers) name it that way. The scripts' strings are the page builder's."""
+    found = [
+        f"{path.relative_to(SRC)}: {text[:120]}"
+        for path in _python_files()
+        for text in _python_words(path)
+        if re.search(r"\bMy lists\b", text)
+    ]
     assert not found, "\n".join(found)

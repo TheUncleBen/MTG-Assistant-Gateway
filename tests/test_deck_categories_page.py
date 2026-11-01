@@ -815,7 +815,9 @@ async def test_a_category_delete_has_its_own_snapshot_and_an_undo_that_puts_it_b
         confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
         r = await b.http.post("/proposals/undo", data=confirm)
         # back to Deck settings' categories with its notice (independent review 2, M2)
-        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=undone#categories", r.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42/settings?ok=undone#categories", (
+            r.text
+        )
         back = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert "Undone. The deck is back as it was before that change." in back
         names = [c["name"] for c in stack.ark.decks[42]["categories"]]

@@ -183,7 +183,7 @@ async def test_custom_cards_never_take_a_picture_from_the_assistant(stack: Stack
             }
         ],
     )
-    assert pic["ok"] is False and "My lists page" in pic["message"]
+    assert pic["ok"] is False and "Binder › Lists › Custom cards" in pic["message"]
     p = await _propose(
         h,
         token,

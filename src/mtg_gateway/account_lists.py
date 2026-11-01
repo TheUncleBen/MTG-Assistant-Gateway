@@ -654,7 +654,9 @@ async def _custom_by_name(decks: DeckService, sub: str, c: dict[str, Any]) -> di
     if not hits:
         raise DeckError("not_found", f"You have no custom card called “{want}”.")
     if len(hits) > 1:
-        raise _err(f"You have {len(hits)} custom cards called “{want}”: change it on the My lists page.")
+        raise _err(
+            f"You have {len(hits)} custom cards called “{want}”: change it on Binder › Lists › Custom cards."
+        )
     return hits[0]
 
 
@@ -673,7 +675,9 @@ def _custom_fields(raw: Any, base: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise _err(f"unknown custom card field {unknown[0]!r}")
     if any(k in PICTURE_FIELDS for k in raw):
-        raise _err("A custom card's picture is uploaded on the My lists page only, by the member.")
+        raise _err(
+            "A custom card's picture is uploaded on Binder › Lists › Custom cards only, by the member."
+        )
     out = {k: base.get(k) for k in CUSTOM_CARD_FIELDS}
     for k, v in raw.items():
         if k == "hasBack":

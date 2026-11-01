@@ -335,6 +335,12 @@ async def test_undo_of_a_deck_page_delete_comes_back_to_the_deck_and_makes_no_ba
         assert r.status_code == 200 and "name='action' value='undo'" in r.text, r.text
         confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.text))
         assert confirm["back"] == DECK  # carried into the box's own form
+        # what Undo puts back, in words per card, not tool notation (independent review 2, L14)
+        listed = r.text.split("Undo puts the deck back as it was before that change:", 1)[1]
+        listed = listed.split("</ul>", 1)[0]
+        assert "[" not in listed and "]" not in listed and " -> " not in listed, listed
+        for name in RAMP:
+            assert f"{name}: Removal → Ramp" in listed, listed
         confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
         decks_before = set(stack.ark.decks)
         r = await b.http.post("/proposals/undo", data=confirm)

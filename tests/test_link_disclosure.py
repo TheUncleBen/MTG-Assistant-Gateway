@@ -71,7 +71,7 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "approval mode",
         "profile picture",
         "deck and binder changes",
-        "connected apps, usage counts",
+        "connected assistants, usage counts",
         "use the same key, so they can open those too",
         # everything admins see and do
         "username, groups and user ID at the sign-in service",
