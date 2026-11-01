@@ -574,6 +574,44 @@ async def test_a_new_category_from_a_template_takes_its_switches(stack: Stack) -
     assert stack.ark.category_creates == []
 
 
+async def test_deleting_a_board_out_of_the_deck_says_its_cards_join_the_deck(stack: Stack) -> None:
+    """Confirmation pass, N1: the delete line said a Maybeboard's cards "stay in the deck with no
+    category" when they were never in the deck; they join it. The same for a move into a category
+    that counts, and a move to another board keeps the neutral words."""
+    from mtg_gateway.decks import category_line
+
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    ark.add_side_row(42, "Sol Ring")
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Maybeboard", "no_category": True}]
+    )
+    assert p["diff"].startswith("Delete category “Maybeboard”: its 1 card joins the deck with no category.")
+    assert p["rows"][0]["joins_deck"] is True and p["rows"][0]["counts"] is True
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Maybeboard", "move_cards_to": "Ramp"}]
+    )
+    assert p["diff"].startswith(
+        "Delete category “Maybeboard”: its 1 card moves to “Ramp” first and joins the deck."
+    )
+    ark.decks[42]["categories"].append({"name": "Sideboard", "isPremier": False, "includedInDeck": False})
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Maybeboard", "move_cards_to": "Sideboard"}]
+    )
+    assert p["diff"].startswith("Delete category “Maybeboard”: its 1 card moves to “Sideboard” first.")
+    assert "joins_deck" not in p["rows"][0]
+    # a plain category's cards were in the deck: the words are as before
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Ramp", "no_category": True}]
+    )
+    assert p["diff"].startswith("Delete category “Ramp”: its 2 cards stay in the deck with no category.")
+    row = {"name": "M", "delete": True, "cards": 2, "no_category": True, "joins_deck": True}
+    assert category_line(row) == "Delete category “M”: its 2 cards join the deck with no category."
+    assert category_line({"name": "M", "delete": True, "cards": 2, "move_to": "X", "joins_deck": True}) == (
+        "Delete category “M”: its 2 cards move to “X” first and join the deck."
+    )
+
+
 async def test_delete_with_no_category_clears_the_cards_then_deletes(stack: Stack) -> None:
     """The deck page's "No category" choice (review 2, M6): the cards stay in the deck with no
     category (each row written with its other categories, if any) and only then is the empty

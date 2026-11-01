@@ -19,6 +19,7 @@ Set MTG_CATS_SHOTS=<dir> to save screenshots. Skipped without a Chromium build."
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -417,6 +418,83 @@ def test_the_delete_box_never_picks_commander_and_offers_no_category(server: Ser
         box.locator(".acts button[data-cancel]").click()
         page.wait_for_timeout(300)
         assert len(server.ark.category_deletes) == 1  # kept
+        assert errors == [], errors
+        browser.close()
+
+
+def test_the_delete_box_says_what_happens_to_cards_out_of_the_deck_and_to_commanders(server: Server) -> None:
+    """Confirmation pass, N1: deleting the Maybeboard said its card "stays in the deck with no
+    category" and offered "Sideboard (leaves the deck)" for a card that was never in the deck.
+    Each choice now says what happens from where the cards are: out of the deck they join it
+    (No category, a plain category, Commander) or move to another board and stay out, which
+    comes picked; from Commander they stop being commanders unless they go to another Premier
+    category. The sentence the server shows in its box says they join the deck too."""
+    from playwright.sync_api import sync_playwright
+
+    server.ark.add_side_row(42, "Sol Ring")
+    server.ark.decks[42]["categories"].append(
+        {"name": "Sideboard", "isPremier": False, "includedInDeck": False, "includedInPrice": False}
+    )
+    sid = server.sign_in_and_link()
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 1280, "light", False, False)
+        menu = page.locator(".ctxmenu[role=menu]")
+        box = page.locator(BOX)
+        _kebab(page, "Maybeboard").click()
+        menu.wait_for(timeout=3000)
+        menu.locator("[role=menuitem]", has_text="Delete…").click()
+        box.wait_for(timeout=3000)
+        page.wait_for_timeout(200)
+        select = box.locator("select#catmove")
+        body = box.locator(".body")
+        m = re.match(r"Its (\d+) cards? ", body.inner_text())
+        assert m, body.inner_text()
+        n = int(m.group(1))  # the fixture deck may hold a maybeboard row of its own
+        one = n == 1
+        its = f"Its {n} card{'' if one else 's'} "
+        assert select.input_value() == "Sideboard"  # the other board: the cards stay as they are
+        assert its + f"move{'s' if one else ''} to “Sideboard”, still out of the deck." in body.inner_text()
+        labels = select.locator("option").all_inner_texts()
+        assert "Sideboard (still out of the deck)" in labels and "leaves the deck" not in " ".join(labels)
+        assert labels[0] == "No category (joins the deck)" and "Ramp (joins the deck)" in labels
+        assert f"Commander (makes {'it a commander' if one else 'them commanders'})" in labels
+        select.select_option("")
+        joins = its + f"join{'s' if one else ''} the deck"
+        assert joins + " with no category, listed by type." in body.inner_text()
+        select.select_option("Ramp")
+        assert joins + ", in “Ramp”." in body.inner_text()
+        select.select_option("Commander")
+        becomes = f"become{'s' if one else ''} {'a commander' if one else 'commanders'}"
+        assert joins + f" in “Commander” and {becomes}." in body.inner_text()
+        assert "stay" not in body.inner_text()
+        # the server's own box (the move changes what counts) says the cards join the deck
+        select.select_option("")
+        box.locator(".acts button.danger").click()
+        page.wait_for_function(BOX_TITLE, arg="Delete the category “Maybeboard”?", timeout=6000)
+        words = box.locator(".body").inner_text()
+        assert f"its {n} card{'' if one else 's'} join{'s' if one else ''} the deck with no category" in words
+        assert "stay in the deck" not in words and "stays in the deck" not in words
+        box.locator(".acts button[data-cancel]").click()
+        page.wait_for_timeout(300)
+        assert server.ark.category_deletes == []
+        # Commander (Premier, holding the commander): its cards stop being commanders
+        _kebab(page, "Commander").click()
+        menu.wait_for(timeout=3000)
+        menu.locator("[role=menuitem]", has_text="Delete…").click()
+        box.wait_for(timeout=3000)
+        page.wait_for_timeout(200)
+        n = int(page.locator(".stack[data-group='Commander'] li.row").count())
+        assert n >= 1
+        select.select_option("")
+        text = body.inner_text()
+        assert "with no category, listed by type and " in text and "no longer" in text and "commander" in text
+        select.select_option("Ramp")
+        assert "in “Ramp” and " in body.inner_text() and "no longer" in body.inner_text()
+        select.select_option("Maybeboard")
+        text = body.inner_text()
+        assert "to “Maybeboard”, out of the deck and " in text and "no longer" in text
+        box.locator(".acts button[data-cancel]").click()
         assert errors == [], errors
         browser.close()
 
