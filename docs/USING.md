@@ -115,8 +115,9 @@ One deck:
   Ctrl+Y (Cmd on a Mac), except while you type in a field. A card's notes
   cannot come back: Archidekt gives the gateway no way to write them, so
   removing a card that has a note asks first.
-- Stacks follow the deck's category order on Archidekt, with Maybeboard and
-  Sideboard last.
+- Stacks come in the order Archidekt's own deck page shows them: the
+  commander's category first, then the categories in the deck by name, then
+  Sideboard, then Maybeboard and any other category not in the deck.
 - On your own deck, **Quick add** adds one copy of the card you type straight
   to the deck, with **Undo** on the message; a name Archidekt doesn't know is
   refused in red and nothing changes.
@@ -293,7 +294,10 @@ same confirmation when a change is large; kept for review while writes are
 off), so nothing skips your approval settings. Without a linked Archidekt
 account the button is disabled and says why. A card's menu (right-click, or
 press and hold) also has **Pin card**, which pins it on Archidekt: it then
-shows under **Pinned cards** in Binder › Lists.
+shows under **Pinned cards** in Binder › Lists. The filters wait behind the
+**Filters** button, which counts the ones in use: on a phone they open as a
+full-screen panel; on a Fold or desktop they unfold in place, and whether you
+left them open or closed is kept on your account.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,

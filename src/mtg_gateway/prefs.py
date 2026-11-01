@@ -58,6 +58,10 @@ MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # the update can't bring the forgotten choices back. Not a choice: the pages' API can't read or
 # set it.
 FORGOTTEN = "prefs.forgotten"
+# Card search's filter groups on a Fold or desktop: folded behind the Filters button ("closed",
+# the default) or open (mockup screen 5, 2026-11-01); phones always open them as a sheet
+CARDS_FILTERS = "cards.filters"
+CARDS_FILTERS_STATES = ("open", "closed")
 
 CARD_SIZE_NAMES = (CARD_SIZE, *(f"{CARD_SIZE}.{page}" for page in CARD_SIZE_PAGES))
 
@@ -74,6 +78,8 @@ def valid(name: str, value: Any) -> bool:
         return value in CARD_SIZES
     if name == EDHPLAY_STEPS:
         return value is True
+    if name == CARDS_FILTERS:
+        return value in CARDS_FILTERS_STATES
     if name == SCAN_INTRO:  # "seen": shown once, folded from then on; True: dismissed with Got it
         return value is True or value == "seen"
     if name == BINDER_ADD:

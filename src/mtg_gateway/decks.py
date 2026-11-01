@@ -68,6 +68,7 @@ from .archidekt import (
     art_url,
     backup_name,
     backup_writes,
+    category_sort_key,
     finish_modifier,
     front_face,
     jwt_exp,
@@ -11000,7 +11001,8 @@ def deck_categories(deck: Deck) -> list[dict[str, Any]]:
                 "record": s["id"] is not None,
             }
         )
-    return sorted(out, key=lambda c: (not c["premier"], c["name"].casefold()))
+    # as archidekt.com's pages list them: Premier first, then by name as the site sorts it
+    return sorted(out, key=lambda c: (not c["premier"], category_sort_key(c["name"])))
 
 
 def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:

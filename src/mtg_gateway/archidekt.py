@@ -400,6 +400,17 @@ class ArchidektError(Exception):
 
 BACKUP_FOLDER_NAME = "MTG Gateway Backups"
 DECK_ID_RE = re.compile(r"[0-9]{1,12}")
+_DIGITS_RE = re.compile(r"(\d+)")
+
+
+def category_sort_key(name: str) -> tuple[Any, ...]:
+    """How archidekt.com's deck page orders category names: a numeric-aware, case-insensitive
+    comparison (its ``Intl.Collator`` with ``numeric`` and ``sensitivity: "base"``, read from its
+    bundle on 2026-11-01), so "Ramp 2" comes before "Ramp 10" and "draw" sorts with "Draw". The
+    deck answer itself lists categories by record, which the site never shows; it keeps no order
+    of its own (no field, no route), so this rule is the one order there is."""
+    parts = _DIGITS_RE.split(name.casefold())
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in parts if p), name
 
 
 def backup_name(deck_name: str, when: float) -> str:
