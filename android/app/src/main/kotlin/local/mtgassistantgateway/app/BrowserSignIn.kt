@@ -104,6 +104,21 @@ object BrowserSignIn {
     }
 
     /**
+     * The browser a Custom Tab sign-in opens in, named outright: an unnamed one goes to whatever
+     * app Android picks for the gateway's https address, and in the applinks build that is this app
+     * itself (its verified App Link), which would load /login in its own page instead of a browser.
+     * The phone's default browser when there is one; else the browser that came with the phone, if
+     * just one did; null when neither (the app then lets the person pick a browser, itself left
+     * out). [browsers] are the apps that open any https link, as the phone lists them;
+     * [default] is the one Android opens such a link in without asking, if any; never [self].
+     */
+    fun customTabBrowser(default: String?, browsers: List<String>, self: String, isSystemApp: (String) -> Boolean): String? {
+        val others = browsers.filter { it != self }.distinct()
+        if (default != null && default in others) return default
+        return others.filter(isSystemApp).singleOrNull()
+    }
+
+    /**
      * The host an Auth Tab returns on: the gateway's own, when [origin] is plain `https://host`.
      * Null (the Auth Tab on [SCHEME] instead) for anything else, a port included: an Auth Tab
      * matches a host and a path only.

@@ -158,4 +158,25 @@ class BrowserSignInTest {
     @Test(expected = IllegalArgumentException::class) fun finishBodyRefusesOddValues() {
         BrowserSignIn.finishBody("a".repeat(43), "x&y=1")
     }
+
+    /**
+     * The Custom Tab names its browser: in the applinks build an unnamed one goes to this app (it
+     * owns the gateway's https links). Never this app, whatever the phone lists.
+     */
+    @Test fun customTabNeverOpensThisApp() {
+        val self = "local.mtgassistantgateway.app"
+        val system = { p: String -> p in setOf("com.android.chrome", "com.sec.android.app.sbrowser") }
+        // the default browser, when there is one
+        assertEquals("org.mozilla.firefox",
+            BrowserSignIn.customTabBrowser("org.mozilla.firefox", listOf("org.mozilla.firefox", "com.android.chrome", self), self, system))
+        // never this app, even listed as the default
+        assertEquals("com.android.chrome", BrowserSignIn.customTabBrowser(self, listOf(self, "com.android.chrome"), self, system))
+        // no default (Android's own chooser answered): the one browser that came with the phone
+        assertEquals("com.android.chrome",
+            BrowserSignIn.customTabBrowser("android", listOf("com.android.chrome", "org.mozilla.firefox", self), self, system))
+        // two built-in browsers and no default, or none at all: the person picks (null)
+        assertNull(BrowserSignIn.customTabBrowser(null, listOf("com.android.chrome", "com.sec.android.app.sbrowser"), self, system))
+        assertNull(BrowserSignIn.customTabBrowser(null, listOf(self, "org.example.sideloaded"), self, system))
+        assertNull(BrowserSignIn.customTabBrowser(null, emptyList(), self, system))
+    }
 }
