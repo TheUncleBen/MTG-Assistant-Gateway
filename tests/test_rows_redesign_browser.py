@@ -192,16 +192,20 @@ def test_the_row_menus_reject_and_apply_ask_in_the_page_like_the_bar(tmp_path: P
             page.keyboard.press("Escape")
             page.locator(".mtgbox-scrim").first.wait_for(state="detached", timeout=3000)
             assert page.locator("input[type=checkbox]:checked").count() == 0  # the pick is undone
-            # Apply from the ⋮ presses the bar's Apply: the same confirm (its guarded page) as a
-            # ticked row's, for this row alone
+            # Apply from the ⋮ presses the bar's Apply: the same box (its guarded Apply) as a
+            # ticked row's, for this row alone, on this page
             row.locator(".title").click(button="right")
             _menu(page)
             page.locator(".ctxmenu [role=menuitem]", has_text="Apply").click()
-            page.wait_for_selector("form.guarded button[value=apply]", timeout=8000)
-            assert page.url != url
-            page.go_back()
-            page.wait_for_load_state("networkidle")
-            row = page.locator(ROWS["/proposals"], has_text="Arcane Signet").first
+            ask = page.locator("#apply-box[role=dialog]:not([hidden])")
+            ask.wait_for(timeout=8000)
+            assert page.url == url
+            assert ask.locator("h2").inner_text().strip() == "Apply this change?"
+            assert ask.locator(".acts button[value=apply][data-guard]").count() == 1
+            ask.locator(".acts button[data-cancel]").click()
+            page.locator(".mtgbox-scrim").first.wait_for(state="detached", timeout=3000)
+            assert page.locator("input[type=checkbox]:checked").count() == 0  # the pick is undone
+            assert server.app.state.gateway.decks.describe("user-1", pid)["state"] == "pending"
             row.locator("a.kebab").tap()
             _menu(page)
             page.locator(".ctxmenu [role=menuitem]", has_text="Reject").click()

@@ -38,7 +38,7 @@ from . import (
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
-from .clickguard import form_stamp, guarded_form, submitted_too_soon
+from .clickguard import GUARD_DWELL_MS, GUARD_SETTLE_MS, form_stamp, guarded_form, submitted_too_soon
 from .db import SESSION_END_NOTICE
 from .decks import (
     ADMIN_CLIENT,
@@ -3757,6 +3757,10 @@ def _confirm_body(
 
 
 APPLY_BOX_NOTE = "A snapshot is kept first, so Undo can put the cards back."
+APPLY_BOX_GUARD_HINT = (
+    "Apply unlocks a moment after this box opens, once you move the pointer, touch the screen or press "
+    "a key here. On a phone, tap once to unlock, then tap Apply."
+)
 
 
 def _apply_box_html(
@@ -3811,7 +3815,14 @@ def _apply_box_html(
             f"<input type='hidden' name='{html.escape(k)}' value='{html.escape(v)}'>"
             for k, v in hidden.items()
         )
-        out.append(f"<form id='apply-f' method='post' action='/proposals/apply'>{fields}</form>")
+        # the click guard as on the confirm page (clickguard.py, data-tab): Apply stays locked, but
+        # in the Tab order, until the box has been seen and used; static/proposals.js restarts the
+        # guard's clocks as the box opens and opens the page instead when the guard is missing
+        out.append(
+            f"<form id='apply-f' method='post' action='/proposals/apply' class='guarded' data-tab "
+            f"data-dwell='{GUARD_DWELL_MS}' data-settle='{GUARD_SETTLE_MS}'>{fields}</form>"
+            f"<p class='muted small guard-hint'>{APPLY_BOX_GUARD_HINT}</p>"
+        )
         actions.append(
             ui.box_button(
                 "Apply" if n == 1 else f"Apply {n}",
@@ -3820,6 +3831,7 @@ def _apply_box_html(
                 name="action",
                 value="apply",
                 icon_name="check",
+                attrs="data-guard aria-disabled='true'",
             )
         )
     return ui.box("apply-box", title, "".join(out), actions=actions, close_href=back)

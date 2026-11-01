@@ -106,23 +106,27 @@
       });
     }
     // Apply asks in a box over this page (the server renders the confirm as a ui.box when the
-    // form says box=1); anything but a box answer falls back to the confirm page.
+    // form says box=1); anything but a box answer falls back to the confirm page. The box's Apply
+    // carries the click guard of the confirm page (static/clickguard.js, loaded with this script):
+    // without the guard there is no box, the confirm page asks. The route reads the form
+    // urlencoded (parse_qs), so the body goes as URLSearchParams, never as multipart FormData.
     var apply = bar.querySelector("button[name=action][value=apply]");
-    if (apply && window.MtgBox && window.fetch && window.FormData) {
+    if (apply && window.MtgBox && window.MtgGuard && window.fetch && window.FormData && window.URLSearchParams) {
       apply.setAttribute("data-asks", "1");  // the rows' menus press it to ask the same way
       apply.addEventListener("click", function (e) {
         if (e.defaultPrevented || apply.disabled) return;
         e.preventDefault();
-        var body = new FormData(form);
+        var body = new URLSearchParams(new FormData(form));
         body.set("action", "apply");
         body.set("box", "1");
         apply.disabled = true;
+        apply.setAttribute("data-busy", "");  // asking the server: the rows' menus wait for the box
+        var done = function () { apply.removeAttribute("data-busy"); update(); };
         fetch(form.getAttribute("action") || "/proposals/select", {
           method: "POST", body: body, credentials: "same-origin", headers: { Accept: "application/json" }
         }).then(function (r) { return r.json(); }).then(function (out) {
-          apply.disabled = false;
           if (!out || !out.ok || !out.box) {
-            if (out && out.message) { alertNote(out.message); return; }
+            if (out && out.message) { done(); alertNote(out.message); return; }
             return fallback();
           }
           var old = document.getElementById("apply-box");
@@ -132,7 +136,9 @@
           var box = holder.firstElementChild;
           document.body.appendChild(box);
           window.MtgBox.openElement(box, { returnFocus: apply });
-        }).catch(function () { apply.disabled = false; fallback(); });
+          window.MtgGuard.restart();  // locked until this box has been seen and used
+          done();
+        }).catch(function () { fallback(); });
       });
     }
     function fallback() {
@@ -216,6 +222,7 @@
       var left = form.querySelectorAll("input[name=sure], input[name=reason], input[type=hidden][name=action]");
       for (var i = 0; i < left.length; i++) left[i].remove();
       if (asking) asking.close();
+      if (apply && apply.hasAttribute("data-busy")) { apply.removeAttribute("data-busy"); update(); }
     });
     update();
   }

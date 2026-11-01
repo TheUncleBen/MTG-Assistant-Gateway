@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from . import board, ui
+from .clickguard import GUARD_SCRIPT
 
 LIST_SCRIPT = "/static/proposals.js"
 
@@ -163,7 +164,8 @@ def deck_box_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str
             f"<label class='pick all'><input type='checkbox' class='all' data-all='{did}'>"
             f"<span>All {len(lines)} waiting</span></label>"
             f"<ul class='wlist'>{rows}</ul></div>" + action_bar(inline=True) + every + "</form>"
-            f"<script src='{LIST_SCRIPT}' defer></script>"
+            # the click guard first: the bar's Apply box carries it (static/proposals.js)
+            f"<script src='{GUARD_SCRIPT}' defer></script><script src='{LIST_SCRIPT}' defer></script>"
         )
     return ui.box("proposals", "Proposals for this deck", body, close_href=f"/decks/{did}", cls="propbox")
 
@@ -177,6 +179,10 @@ form.guarded button[data-guard][aria-disabled=true]{opacity:1;background:transpa
   border:1px dashed currentColor;cursor:default}
 form.guarded button.primary[aria-disabled=true]{color:var(--orange-text)}
 form.guarded button.danger[aria-disabled=true]{color:var(--danger-text)}
+/* the same for the Apply box's button, which sits in the box's action row (form='apply-f') */
+.ui-box button[data-guard][aria-disabled=true]{opacity:1;background:transparent;
+  border:1px dashed currentColor;cursor:default}
+.ui-box button.primary[data-guard][aria-disabled=true]{color:var(--orange-text)}
 /* Reject's short confirm in the bar; focus moves to its Reject by script */
 .wbar .rejectask{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;flex:1 1 100%}
 .wbar .rejectask span{flex:1 1 10rem;font-weight:700}

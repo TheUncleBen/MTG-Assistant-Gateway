@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
+from .clickguard import GUARD_SCRIPT
 from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
@@ -930,7 +931,11 @@ def list_html(
         if rows:
             parts.append(f"<p class='ui-note'>{esc(WAITING_NOTE)}</p>")
             parts.append(_waiting_table(rows, data, csrf=csrf, query=query, now=now, open_id=open_id, qs=qs))
-            parts.append("<script src='/static/proposals.js' defer></script>")
+            # the click guard first: the bar's Apply box carries it (static/proposals.js)
+            parts.append(
+                f"<script src='{GUARD_SCRIPT}' defer></script>"
+                "<script src='/static/proposals.js' defer></script>"
+            )
         else:
             empty = (
                 NOTHING_MATCHES if filtered or show == "needs_look" and counts["waiting"] else NOTHING_WAITING

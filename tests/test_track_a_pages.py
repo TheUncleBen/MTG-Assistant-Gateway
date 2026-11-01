@@ -303,7 +303,14 @@ async def test_apply_checked_opens_the_confirm_as_a_box_for_the_lists_script(sta
         assert "<h2 id='apply-box-title'>Apply this change?</h2>" in box
         assert "A snapshot is kept first, so Undo can put the cards back." in box
         assert "<ol class='order'><li><b>#" in box and "+1 Opt" in box
-        assert "<form id='apply-f' method='post' action='/proposals/apply'>" in box
+        # the confirm page's click guard (clickguard.py, data-tab): the form is a guarded one and
+        # Apply starts locked, in the Tab order, with the hint that says how it unlocks
+        assert (
+            "<form id='apply-f' method='post' action='/proposals/apply' class='guarded' data-tab "
+            "data-dwell='800' data-settle='300'>"
+        ) in box
+        assert "form='apply-f' data-guard aria-disabled='true'>" in box
+        assert "class='muted small guard-hint'>Apply unlocks a moment after this box opens" in box
         assert "name='shown' value='" in box and f"name='v_{a}' value='1'" in box
         assert f"name='picks' value='{a}'" in box and "name='back' value='/decks/42'" in box
         assert "name='action' value='apply' form='apply-f'" in box and ">Apply</button>" in box

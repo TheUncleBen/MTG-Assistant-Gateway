@@ -104,7 +104,9 @@ name per thing.
   lists, and says “In binder · you own N” when you have it. Make, rename and delete lists, move
   cards between them and filter by one; Select and its bar set a price alert, move or stop
   watching many cards at once. Each row's ⋮, a right-click or a press and hold offers Details,
-  Move to list… and Stop watching. Watching a card says the price alert it came with.
+  Move to list… and Stop watching. Watching a card from a card menu or the deck editor says the
+  price alert it came with (“Sol Ring added to your watchlist, with a price alert: drops 10% below
+  $1.50.”).
 - Pull to refresh in the Android app, on the list pages and the deck page. It, and the browser's
   Reload, read Archidekt again on My decks, Binder, Pinned cards, the lists, Alerts, the forum and
   profiles instead of the copy kept from the last minute or two.
@@ -303,8 +305,13 @@ name per thing.
 - Gateway messages name things in curly quotes, deck details as Deck settings names them, and a
   restore by its snapshot's date.
 - On a proposal's review page, deleting a deck, taking custom cards out of a deck or deleting from
-  your Archidekt lists asks once more in the site's box, with Keep it first. Reject on the
-  Proposals page and the deck's Proposals box asks in the same box.
+  your Archidekt lists asks once more in the site's box, with Keep it first.
+- **Apply and Reject ask in a pop-up box on the list**, on the Proposals page and the deck's
+  Proposals box, from the bar or from a row's ⋮: Reject's red box with its optional reason and
+  “Keep it”, Apply's box with the order the changes run in. Apply in the box unlocks a moment after
+  the box opens, once you move the pointer, touch the screen or press a key, as on the confirm
+  page. “Keep it” puts the ticks back as they were and takes the focus, so the reason field never
+  opens a phone's keyboard by itself.
 - Every delete confirmation, and the assistant's delete tool, says no copy is made on Archidekt and
   that a snapshot can't be restored onto a deleted deck.
 - Alerts for forum replies and new followers open the thread or profile here; Archidekt news and
@@ -343,6 +350,28 @@ name per thing.
   guide is smaller so the card is held further back.
 - ChatGPT setup: the phone apps work once the connector is added on chatgpt.com in a browser
   (tried in the Android app). The website footer says “Assistant skill”.
+- **Deleting a category on the deck page** can leave its cards in the deck with “No category”,
+  listed by type (the cards are cleared first, then the empty category deleted). The box picks the
+  biggest plain category, else “No category”, never Commander, a Premier category or a board out
+  of the deck; each choice says what it does (“Commander (makes them commanders)”, “Maybeboard
+  (leaves the deck)”) and the sentence under it follows the pick. A Premier pick asks once more.
+- Large text on a phone: the Watchlist's list and card names wrap between words, not one letter
+  per line; Proposals, History and Reports rows drop the phone chevron so the title keeps its room;
+  the Account details, Assistants and Binder › Lists rows put the value under the label, with the
+  icon beside the words and the chevron at the row's end.
+- Binder › Lists: a watchlist list's row opens its menu from a right-click and a press and hold
+  too, as every row does.
+- The deck page's Companion switch answers faster: a change in one row no longer lays out every
+  column of the text view again. A row's card picture on hover stays on screen and follows the
+  scroll, and a row's focus ring draws inside the row.
+- History: the Proposal capsule follows the words with a space instead of a “ · ” that wrapped onto
+  a line of its own, and a lists change's menu says “Open Binder › Lists”, not “Open the deck”.
+- The deck page's link to category templates says “Binder › Lists › Category templates”.
+- The More menu gives Card models its own icon instead of Precons' box.
+- Deck page on a phone: the owner's name in the banner is a 44 px target.
+- Account details: the two columns are balanced (Archidekt over Your data, Assistant over This
+  gateway); “Sign out on all my devices…” ends in an ellipsis like its neighbours; Price alert
+  defaults says “10% drop” on one line.
 
 ### Fixed
 - Large text: the Binder and Assistant switches show their current page and fade the edge that
