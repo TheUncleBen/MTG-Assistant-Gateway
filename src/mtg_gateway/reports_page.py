@@ -577,12 +577,15 @@ def paste_test_html(csrf: str) -> str:
     )
 
 
-# Phones: two widgets a row as the widgets draw them, one a row when the text is so large that half the
-# width cannot hold a word (the column's minimum is in the widgets' own text size, so it grows
-# with a phone's font scale or a text-only zoom). Shared by the dashboard pages.
+# Phones: at most two widgets a row (half the row less half the gap, as theme.UI_CSS lays out the
+# Proposals and History widgets; a bare 8.5em minimum let three cramped ones share a 412 px row),
+# one a row when the text is so large that half the width cannot hold a word (the minimum is in
+# the widgets' own text size, so it grows with a phone's font scale or a text-only zoom). Shared
+# by the dashboard pages.
 PHONE_WIDGETS_CSS = """
 @media (max-width:599.98px){
-  .gb-dash .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5em),1fr))}
+  .gb-dash .ui-widgets{
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5em,calc(50% - .25rem))),1fr))}
 }
 /* a label in a narrow table cell wraps (large text) instead of running out of its column */
 .gb-dash .ui-table .ui-lbl{white-space:normal;height:auto;min-height:24px;line-height:1.2}

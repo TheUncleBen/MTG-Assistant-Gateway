@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 
 import pytest
 
 from .test_deck_categories import _give_categories
 from .test_deck_menu_browser import _EXE, PNG, Server, _chromium
+from .test_history_page import store_report
 from .test_overflow_sweep_browser import MEASURE
 from .test_social_browser import Server as ReportsServer
 from .test_text_zoom_browser import TEXT_200
@@ -207,5 +209,35 @@ def test_the_quick_add_field_shows_its_whole_placeholder(
         if touch:
             for sel in ("#quick", ".toolbar .quickrow button:not(.addpkg)"):
                 assert page.locator(sel).first.bounding_box()["height"] >= 44, sel
+        assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [320, 375, 412])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_reports_tiles_are_two_a_row_on_a_phone(reports: ReportsServer, width: int, theme: str) -> None:
+    """The Reports page's four tiles on a phone: at most two share a row, each at least two fifths
+    of the row (never three cramped ones), every quick start 44 px tall, nothing sideways; as the
+    Proposals tiles are laid out."""
+    from playwright.sync_api import sync_playwright
+
+    sid = reports.sign_in_and_link()
+    now = int(time.time())
+    store_report(reports.db, "user-1", "rep_done", taken_at=now - 3 * 86400)
+    store_report(reports.db, "user-1", "rep_new", deck_id="43", deck_name="Aesi, Tyrant", taken_at=now - 500)
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _context(p, reports.base, sid, width, theme, True)
+        page.goto(f"{reports.base}/reports", wait_until="networkidle")
+        got = page.evaluate(WIDGETS)
+        _shot(page, f"reports-tiles-{width}-{theme}")
+        assert got["tiles"] == 4, got
+        assert got["columns"] <= 2, got
+        assert got["share"] >= 0.4, got
+        assert got["targets"] and min(got["targets"]) >= 44, got
+        assert got["sideways"] <= 0, got
+        page.goto(f"{reports.base}/proposals", wait_until="networkidle")
+        same = page.evaluate(WIDGETS)
+        assert same["columns"] <= 2 and same["share"] >= 0.4, same
         assert errors == [], errors
         browser.close()
