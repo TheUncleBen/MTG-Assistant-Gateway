@@ -800,9 +800,11 @@ def android_glue() -> str:
     src = ANDROID_GLUE.read_text(encoding="utf-8")
     hooks = re.search(r"val HOOKS = listOf\(([^)]*)\)", src).group(1)
     names = re.findall(r'"([A-Za-z]+)"', hooks)
-    photo_max = re.search(r"const val PHOTO_MAX = (\d+)", src).group(1)
     js = re.search(r'val INSTALL_TEMPLATE: String = """\n(.*?)"""', src, re.S).group(1)
-    js = js.replace("$PHOTO_MAX", photo_max).replace("__NONCE__", GLUE_NONCE)
+    for name in ("PHOTO_MAX", "DIRECT_MS", "PHOTO_LOST"):
+        value = re.search(rf'const val {name} = "?([^"\n]+)"?', src).group(1)
+        js = js.replace(f"${name}", value)
+    js = js.replace("__NONCE__", GLUE_NONCE)
     js = re.sub(r"\$\{HOOKS\.joinToString[^}]*\}\s*\}", ", ".join(f"'{n}'" for n in names), js)
     assert "$" not in js, "unexpanded Kotlin template in the glue"
     return js
