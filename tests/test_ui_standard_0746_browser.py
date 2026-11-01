@@ -283,10 +283,33 @@ def test_every_placeholder_fits_its_box(server: Server, walk) -> None:  # noqa: 
     assert problems == [], "\n".join(problems)
 
 
+# Every item of every menu on the page, the drop-downs opened (the top bar's, More, a sort menu)
+# and the first row's ⋮ menu (.ctxmenu, the one shared style) opened by menus.js.
+MENU_ITEMS = (
+    "() => {"
+    + VISIBLE
+    + """
+  const out = [];
+  document.querySelectorAll('details.dd:not([open])').forEach(d => { d.open = true; });
+  const items = '.menu a, .menu button, .menu .item, .ctxmenu a, .ctxmenu button';
+  for (const el of document.querySelectorAll(items)) {
+    if (!visible(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 43.5 || r.height < 43.5)
+      out.push('menu item ' + name(el) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+  }
+  document.querySelectorAll('details.dd[open]').forEach(d => { d.open = false; });
+  return out;
+}"""
+)
+
+
 def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> None:  # noqa: F811
     """In the app (touch, 412 px) every link, button, box and tab is at least 44 px each way:
     the stats pie and bars, type rows, Undo and Redo, the category picker, the Binder's menu
-    button, the watchlist's links and links inside text (0.7.46 audit)."""
+    button, the watchlist's links and links inside text (0.7.46 audit), and every item of every
+    menu (the top bar's, More, the sort menus, a row's ⋮ menu), which were 35 px."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
 
     exe, sid, pages = walk
@@ -298,6 +321,21 @@ def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> Non
         for path in pages:
             _goto(server, page, path)
             problems += [f"{path}: {f}" for f in page.evaluate(TARGETS)]
+            kebab = page.locator(".kebab").first
+            if kebab.count() and kebab.is_visible() and not page.locator(".mtgbox-scrim.in").count():
+                before = page.url
+                kebab.click()  # a page drawn with a box open keeps its scrim over the rows
+                try:
+                    page.locator(".ctxmenu[role=menu], details.rowmenu[open] .menu").first.wait_for(
+                        timeout=3000
+                    )
+                except PlaywrightTimeoutError:
+                    page.wait_for_load_state("networkidle")
+                    if page.url == before:
+                        problems.append(f"{path}: the first ⋮ opened no menu")
+                    # else the row's ⋮ is its link to the row's own page (admin's card models)
+            problems += [f"{path}: {f}" for f in page.evaluate(MENU_ITEMS)]
+            page.keyboard.press("Escape")
         browser.close()
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 60 else ""
