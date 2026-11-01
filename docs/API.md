@@ -27,7 +27,8 @@ with the default scope `mtg`, with no scope, or with any scope that is not read-
 `read write`) has full access, as before.
 
 A missing or invalid credential answers `401` with `{"ok": false, "error": "unauthenticated",
-"login": "/login"}`. Someone no longer in `MTG_REQUIRED_GROUP` gets the same `401`: before a request is served the gateway
+"login": "/login"}`; a page script's own request gets the same with a `message` ("You're signed
+out. Sign in to carry on.") that the page shows with a Sign in button. Someone no longer in `MTG_REQUIRED_GROUP` gets the same `401`: before a request is served the gateway
 asks the identity provider whether the caller is still a member (cached for `MTG_MEMBERSHIP_CHECK_TTL`
 seconds) and revokes a removed member's tokens and browser sessions. When the identity provider can't be
 reached, the request gets `503` with `"error": "idp_unavailable"` instead, and nothing is revoked. When

@@ -213,7 +213,7 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
         assert _offline(page)
         relay.restore()
         page.reload()
-        assert page.title().startswith("History"), page.title()
+        assert page.title().startswith("Assistant: History"), page.title()
 
         steps.now = "the Try again link"
         relay.cut()
@@ -222,7 +222,7 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
         relay.restore()
         with page.expect_navigation():
             page.get_by_role("link", name="Try again").click()
-        assert page.title().startswith("History"), page.title()
+        assert page.title().startswith("Assistant: History"), page.title()
 
         # The gateway is cut off here rather than the browser set offline: on newer Chromium,
         # Playwright's set_offline never returns once the worker has been stopped.
@@ -254,7 +254,7 @@ def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> 
         page.goto(f"{base}/history")
         assert _offline(page)
         ctx.set_offline(False)
-        _wait_for_title(page, "History", int((CHECK_EVERY - 1) * 1000))
+        _wait_for_title(page, "Assistant: History", int((CHECK_EVERY - 1) * 1000))
 
         steps.now = "the gateway checked every few seconds while cut off"
         checks: list[float] = []
@@ -270,7 +270,7 @@ def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> 
 
         steps.now = "the gateway back: the page loads by itself"
         relay.restore()
-        _wait_for_title(page, "History", int((CHECK_EVERY + 6) * 1000))
+        _wait_for_title(page, "Assistant: History", int((CHECK_EVERY + 6) * 1000))
         after = len(checks)
         page.wait_for_timeout(CHECK_EVERY * 1000 + 1000)
         assert len(checks) == after, "the checks went on after the page had loaded"
@@ -292,7 +292,7 @@ def test_the_worker_keeps_trying_a_failed_load_for_about_five_seconds(served) ->
         finally:
             back.cancel()
             relay.restore()
-        assert page.title().startswith("History"), page.title()
+        assert page.title().startswith("Assistant: History"), page.title()
 
         steps.now = "a longer cut shows the offline page after the tries"
         relay.cut()
@@ -322,7 +322,7 @@ def test_a_browser_that_knows_it_is_offline_gets_the_offline_page_at_once(served
         assert took < 2.5, took  # it used to take about 5 s of tries
         steps.now = "back online: the page loads by itself"
         ctx.set_offline(False)
-        _wait_for_title(page, "History", int((CHECK_EVERY - 1) * 1000))
+        _wait_for_title(page, "Assistant: History", int((CHECK_EVERY - 1) * 1000))
 
     _drive(served, run)
 
@@ -353,6 +353,6 @@ def test_a_page_that_keeps_failing_is_reloaded_three_times_at_most(served) -> No
         relay.refuse = None
         with page.expect_navigation():
             page.get_by_role("link", name="Try again").click()
-        assert page.title().startswith("History"), page.title()
+        assert page.title().startswith("Assistant: History"), page.title()
 
     _drive(served, run)

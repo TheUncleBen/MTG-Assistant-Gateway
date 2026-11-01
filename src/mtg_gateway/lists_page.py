@@ -344,6 +344,10 @@ def kebab_menu(name: str, items: list[tuple[str, str, str, dict[str, str]] | Non
     )
 
 
+# the search box's count for screen readers (lists.js fills it as the rows are narrowed)
+FILTER_NOTE = "<p class='sr-only' data-filter-count role='status' aria-live='polite'></p>"
+
+
 def row_attrs(kind: str, name: str, data: dict[str, Any]) -> str:
     return (
         f"class='tr' data-kind='{esc(kind)}' data-name='{esc(name)}' data-row='{esc(json.dumps(data))}' "
@@ -538,7 +542,7 @@ def templates_rows(items: list[dict[str, Any]]) -> str:
             ],
         )
         out.append(
-            f"<div {row_attrs('template', name, t)}>"
+            f"<div {row_attrs('template', name, t)} data-q='{esc(name.casefold())}'>"
             f"<span class='title'><span class='t'>{esc(name)}</span>"
             f"<span class='sm-only'>{esc(' · '.join(on) or 'Not in deck or price')}</span></span>"
             f"<span class='sm-hide flags'>{lbls}</span>{menu}</div>"
@@ -613,6 +617,8 @@ def templates_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
         head
         + "<p class='ui-sub'>Categories you can add to any deck in one press. Once added, the deck's copy "
         "and the template are not linked.</p>"
+        + ui.toolbar(tab_href("templates"), search_label="Search by name", placeholder="Name")
+        + FILTER_NOTE
         + table
         + template_box(csrf, box if box.get("box") == "tpl-box" else {})
         + template_delete_box(csrf, box if box.get("box") == "tpl-del" else {})
@@ -796,7 +802,7 @@ def defaults_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) ->
         "the main one. Set them from a card's menu on a deck (Lock personal categories) or here. Choices "
         "come from your category templates.</p>"
         + ui.toolbar(f"{PAGE}/defaults", search_label="Search by name", placeholder="Name", q=q)
-        + "<p class='sr-only' data-filter-count role='status' aria-live='polite'></p>"
+        + FILTER_NOTE
         + table
         + more
         + defaults_box(csrf, got.get("templates") or [], box if box.get("box") == "def-box" else {})
@@ -939,7 +945,7 @@ def tags_rows(items: list[dict[str, Any]], slug: str = "tags") -> str:
             ],
         )
         out.append(
-            f"<div {row_attrs('tag', name, t)}>"
+            f"<div {row_attrs('tag', name, t)} data-q='{esc(name.casefold())}'>"
             f"<span class='title lp-tagc'>{swatch(color)}<span class='t'>{esc(name)}</span>"
             f"<span class='sm-only'><code>{esc(color)}</code></span></span>"
             f"<span class='sm-hide'><code>{esc(color)}</code></span>{menu}</div>"
@@ -973,6 +979,8 @@ def tags_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], slug: str = "t
     return (
         head
         + f"<p class='ui-sub'>{esc(w['purpose'])}</p>"
+        + ui.toolbar(tab_href(slug), search_label="Search by name", placeholder="Name")
+        + FILTER_NOTE
         + table
         + tag_box(csrf, box if box.get("box") == "tag-box" else {}, slug)
         + tag_delete_box(csrf, box if box.get("box") == "tag-del" else {}, slug)
@@ -1118,7 +1126,7 @@ def pin_row(p: dict[str, Any], csrf: str) -> str:
         ],
     )
     return (
-        f"<div {row_attrs('pin', name, p)}>"
+        f"<div {row_attrs('pin', name, p)} data-q='{esc(name.casefold())}'>"
         f"<span class='title'><span class='cardc'>{thumb(p.get('uid') or '', name)}<span class='tx'>"
         f"<span class='t'>{esc(name)}</span><span "
         f"class='s'>{esc(printing_text(p))}</span></span></span></span>"
@@ -1159,6 +1167,8 @@ def pins_tab(got: dict[str, Any], csrf: str, box: dict[str, Any]) -> str:
     return (
         head
         + "<p class='ui-sub'>Notes save when you leave the box.</p>"
+        + ui.toolbar(tab_href("pins"), search_label="Search by name", placeholder="Name")
+        + FILTER_NOTE
         + table
         + pin_remove_box(csrf, box if box.get("box") == "pin-rm" else {})
         + pins_remove_all_box(csrf, n, box if box.get("box") == "pin-all" else {})

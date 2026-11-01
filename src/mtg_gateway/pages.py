@@ -870,7 +870,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         query = proposals_view.read_query(request.query_params)
         body = proposals_view.list_html(state, sub, _csrf(s, sid), query, notice=notice)
         return page(
-            "Proposals",
+            "Assistant: Proposals",
             ui.split(body),
             sub=sub,
             sid=sid,

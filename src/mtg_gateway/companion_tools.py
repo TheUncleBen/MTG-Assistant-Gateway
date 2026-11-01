@@ -597,7 +597,7 @@ def add_deck_tool_routes(
             csrf=_csrf(s, sid) or "",
         )
         return page(
-            "Reports",
+            "Assistant: Reports",
             body,
             sub=sub,
             sid=sid,
