@@ -2,8 +2,8 @@
 
 Archidekt is the local mock from stacks/edge-stack.yml (tests/fake_archidekt.py over HTTP), so
 nothing here touches archidekt.com. The run deploys with writes off (run.sh); the write tests switch
-MTG_WRITES_ENABLED with ``docker service update``, set alice's approval mode on her own account page,
-and switch both back at the end of the module.
+MTG_WRITES_ENABLED with ``docker service update``, set alice's default approval mode on her own
+Assistants › Default for new assistants page, and switch both back at the end of the module.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ from .test_04_operations import GATEWAY, container_of, copy_backup, sh
 CSV = (Path(__file__).resolve().parents[1] / "fixtures" / "sample_deck.csv").read_text(encoding="utf-8")
 MOCK = "http://archidektmock:8000"
 STATE: dict[str, str] = {}  # proposal ids shared between the ordered tests below
+# Account details › Archidekt account (link, unlink) and Assistants › Default for new assistants
+ARCHIDEKT_PAGE = "/account/details/archidekt"
+DEFAULT_MODE_PAGE = "/account/assistants/default"
 
 
 def run(coro):
@@ -80,22 +83,33 @@ def set_writes(writes: str) -> None:
 
 
 async def set_mode(env: Env, user: str, mode: str) -> None:
-    """Pick ``user``'s approval mode on their own Account details page, the only place a mode is set."""
+    """Pick ``user``'s default approval mode on Account › Assistants › Default for new assistants,
+    the only place a default is set. The deck clients below sign in from a loopback address, so each
+    is an assistant of its own that follows this default until given its own mode (none is here)."""
     async with browser_page() as page:
-        await gateway_browser_sign_in(page, env, user, "/account/details")
+        await gateway_browser_sign_in(page, env, user, DEFAULT_MODE_PAGE)
         await page.check(f"input[name=mode][value={mode}]")
-        await page.click("text=Save approval mode")
-        await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=mode_{mode}", timeout=30_000)
+        await page.click("button:has-text('Save approval mode')")
+        await page.wait_for_url(f"{PUBLIC_URL}{DEFAULT_MODE_PAGE}?ok=mode_{mode}", timeout=30_000)
+        assert "Saved as your default" in await page.inner_text("main")
 
 
 async def ensure_unlinked(env: Env, user: str) -> None:
-    """Start from 'no Archidekt account linked' even when the suite ran before on this stack."""
+    """Start from 'no Archidekt account linked' even when the suite ran before on this stack:
+    Account details › Archidekt account, its Unlink button and the box that asks first."""
     async with browser_page() as page:
-        await gateway_browser_sign_in(page, env, user, "/account/details")
-        if "Unlink and delete stored session" in await page.inner_text("body"):
-            await page.click("text=Unlink and delete stored session")
+        await gateway_browser_sign_in(page, env, user, ARCHIDEKT_PAGE)
+        if "Unlink and delete stored session" in await page.inner_text("main"):
+            await page.click("#archidekt a[data-box-open=unlink]")
+            await page.click("#unlink button[form=unlinkf]")
+            # unlinking lands on the Account details list, its Archidekt row saying so
             await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=unlinked", timeout=30_000)
-        assert "Link your Archidekt account" in await page.inner_text("body")
+            text = await page.inner_text("main")
+            assert "Unlinked. The gateway's copy of the session was deleted." in text, text
+            assert "Not linked" in text, text
+            await page.click("a.yrow[href='/account/details/archidekt']")
+            await page.wait_for_url(f"{PUBLIC_URL}{ARCHIDEKT_PAGE}", timeout=30_000)
+        assert "Link your Archidekt account" in await page.inner_text("main")
 
 
 def test_tool_surface_includes_deck_and_proxied_research_tools(clients):
@@ -192,7 +206,7 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
     async def go():
         await ensure_unlinked(env, user)
         async with browser_page() as page:
-            await gateway_browser_sign_in(page, env, user, "/account/details")
+            await gateway_browser_sign_in(page, env, user, ARCHIDEKT_PAGE)
             # a wrong password is refused by Archidekt (the mock) and shown on the page
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", "wrong")
@@ -200,15 +214,20 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
             assert await page.is_disabled("input[name=accept_risk]")
             await page.click("#archidekt-disclosure-detail > summary")
             await page.check("input[name=accept_risk]")
-            await page.click("text=Link account")
+            await page.click("button:has-text('Link account')")
             await page.wait_for_load_state("domcontentloaded")
-            assert "did not accept" in await page.inner_text("body")
+            assert "did not accept" in await page.inner_text("main")
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", f"pw-{archidekt_user}")
             await page.check("input[name=accept_risk]")
-            await page.click("text=Link account")
+            await page.click("button:has-text('Link account')")
+            # linking lands on the Account details list, its Archidekt row naming the account
             await page.wait_for_url(f"{PUBLIC_URL}/account/details?ok=linked", timeout=30_000)
-            text = await page.inner_text("body")
+            text = await page.inner_text("main")
+            assert "Archidekt account linked." in text and f"{archidekt_user} · linked" in text, text
+            await page.click("a.yrow[href='/account/details/archidekt']")
+            await page.wait_for_url(f"{PUBLIC_URL}{ARCHIDEKT_PAGE}", timeout=30_000)
+            text = await page.inner_text("main")
             assert f"Linked to {archidekt_user}" in text, text
         c = clients[user]
         async with c.session() as s:
