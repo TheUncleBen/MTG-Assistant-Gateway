@@ -224,10 +224,13 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
 ) -> None:
     from playwright.sync_api import sync_playwright
 
-    # SLD 1075 carries the same picture as the deck's CMR 472; the binder holds SLD 1074
+    # SLD 1075 carries the same picture as the deck's CMR 472; the binder holds SLD 1074; LEA 270
+    # is a summary without the picture's id (one kept from before this release carried it)
     for c in server.sf.extra_cards:
         if c["set"] == "sld" and c["collector_number"] == "1075":
             c["illustration_id"] = "art-001"
+        if c["set"] == "lea":
+            del c["illustration_id"]
     sid = server.sign_in_and_link()
     _own(server, sid, [{"name": "Sol Ring", "quantity": 1, "set": "sld", "collector_number": "1074"}])
     _chromium()
@@ -276,11 +279,11 @@ def test_a_tap_opens_the_viewer_whose_printing_row_opens_the_printings_sheet(
         # Different art: one printing of each other picture; the deck's own stays, marked Current
         chips.nth(1).click()
         page.wait_for_timeout(200)
-        # SLD 1075 (the same picture as the deck's) and the printings whose picture Scryfall has
-        # not named are left out; the deck's own stays
+        # SLD 1075 (the same picture as the deck's) is left out; the deck's own stays, and so
+        # does a printing whose summary has no picture id (LEA 270): it counts as its own art
         art = codes()
         assert "SLD #1075" not in art and "CMR #472" in art, art
-        assert {"SLD #1074", "LEA #270", "4ED #325"} <= set(art) and len(art) < all_n, art
+        assert {"SLD #1074", "LEA #270", "4ED #325"} <= set(art) and len(art) == all_n - 1, art
         assert page.locator(".printpick .pptile.current").count() == 1
         # In my binder: the binder's printing (and the deck's own)
         chips.nth(2).click()
@@ -335,7 +338,7 @@ def test_the_deck_menu_is_grouped_and_the_contests_and_the_pdf_have_new_homes(
             "Deck reports",
             "History",
             "Compare with…",
-            "Watch price",
+            "Watch deck price",
             "Deck help…",
             "Contests…",
             "Report deck…",
@@ -349,7 +352,7 @@ def test_the_deck_menu_is_grouped_and_the_contests_and_the_pdf_have_new_homes(
             "Withdraw from a contest…",
             "Request deck help…",
             "History and snapshots",
-            "Watch deck price",
+            "Watch price",
         ):
             assert gone not in items, (gone, items)
         assert items[-1] == "Delete deck…"

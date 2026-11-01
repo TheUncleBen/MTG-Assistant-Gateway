@@ -3731,7 +3731,7 @@
     var look = [head("Look into it"), link("Deck stats", "report", "/decks/" + id + "#stats"), link("Deck reports", "stats", "/reports?deck_id=" + id)];
     look.push(link("History", "history", "/history?deck_id=" + id));
     if (d.can) look.push(item("Compare with…", "layers", openBox("compare")));
-    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) look.push(item("Watch price", "eye", function () { window.MtgDeckWatch(d.id); }));
+    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) look.push(item("Watch deck price", "eye", function () { window.MtgDeckWatch(d.id); }));
     if (SHARE_SECOND) out = out.concat(shareItems, [sep()], look);
     else out = out.concat(look, [sep()], shareItems);
     var community = [];

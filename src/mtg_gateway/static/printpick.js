@@ -565,7 +565,7 @@
     if (!english(p)) return false;
     if (!st.all && (preview(p) || digital(p))) return false;
     if (st.scope === "mine" && !(st.binder && st.binder[printKey(p)])) return false;
-    if (st.scope === "art" && (!p.illustration_id || p.illustration_id === ownArt())) return false;
+    if (st.scope === "art" && artOf(p) === ownArt()) return false;
     if (st.complete) {
       if (st.params.finish && (p.finishes || []).indexOf(st.params.finish) < 0) return false;
       if (st.params.frame && String(p.frame || "") !== st.params.frame) return false;
@@ -709,17 +709,22 @@
 
   // -- the chips: All, Different art, In my binder ------------------------------------------
   function printKey(p) { return String(p.set || "").toLowerCase() + "#" + String(p.collector_number || ""); }
+  // which picture a printing carries: Scryfall's illustration id, or the printing itself when a
+  // summary has none (one kept from before the id was carried, or a lookup without it), so no
+  // printing ever drops out of Different art for want of the id
+  function artOf(p) { return p.illustration_id ? "art:" + p.illustration_id : "print:" + printKey(p); }
   // the picture on the card's own printing (its current one, else the pick waiting)
   function ownArt() {
     var own = st.list.concat(extraMine()).filter(isMine)[0];
-    return own && own.illustration_id ? own.illustration_id : null;
+    return own ? artOf(own) : null;
   }
   // one printing of each picture, the first in the chosen order
   function onePerArt(list) {
     var seen = Object.create(null);
     return list.filter(function (p) {
-      if (seen[p.illustration_id]) return false;
-      seen[p.illustration_id] = true;
+      var key = artOf(p);
+      if (seen[key]) return false;
+      seen[key] = true;
       return true;
     });
   }
