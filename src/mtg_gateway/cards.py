@@ -45,6 +45,7 @@ from mcp_types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from . import refusals
 from .approve import CARD_IMAGE_HOSTS
 
 if TYPE_CHECKING:
@@ -404,7 +405,7 @@ def with_card(data: dict[str, Any], card: dict[str, Any] | None) -> CallToolResu
 FIXED_MESSAGES = {
     "not_found": "The card behind this link no longer exists.",
     "invalid": "The card behind this link no longer exists.",
-    "not_linked": "No Archidekt account is linked; link one under Account details on the gateway.",
+    "not_linked": refusals.not_linked(),
     "rate_limited": "Scryfall asked the gateway to wait. Ask your assistant for the printings again.",
     "unavailable": "The data behind this link could not be loaded right now.",
 }

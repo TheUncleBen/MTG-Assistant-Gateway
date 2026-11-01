@@ -3,6 +3,12 @@ service validates, for tests that run the gateway's Mystic Forge proxy in memory
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
+import mcp_types as types
+from mcp.server.lowlevel import Server
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -109,3 +115,22 @@ def fake_mystic_forge() -> MCPServer:
         return "hidden"
 
     return mf
+
+
+# The pinned Mystic Forge's own tool listing (scripts/record_mystic_forge_tools.py), for the tests
+# that measure what production lists: the fake above serves only a few tools.
+RECORDED_LISTING = Path(__file__).parent / "fixtures" / "mystic_forge" / "tools.json"
+
+
+def recorded_listing() -> dict[str, Any]:
+    return json.loads(RECORDED_LISTING.read_text(encoding="utf-8"))
+
+
+def recorded_mystic_forge() -> Server[Any]:
+    """A Mystic Forge that lists exactly the recorded tools of the pinned image (no calls)."""
+    listing = types.ListToolsResult.model_validate({"tools": recorded_listing()["tools"]})
+
+    async def list_tools(_ctx: Any, _params: Any) -> types.ListToolsResult:
+        return listing
+
+    return Server("mystic-forge-recorded", on_list_tools=list_tools)

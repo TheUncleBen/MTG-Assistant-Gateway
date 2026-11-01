@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .conftest import COLLECTION, Stack, stack_with
 from .fake_mystic_forge import SIM_CALLS
-from .test_decks_and_proxy import call, linked_user, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 stack_options = stack_with(COLLECTION)
 
@@ -31,8 +31,25 @@ async def test_decks_of_different_sizes_play_unpaired_under_one_seed(stack: Stac
     assert runs[0]["n"] == runs[1]["n"] == 20
     assert "not game for game" in ab["note"] and "100" in ab["note"] and "103" in ab["note"], ab
     assert ab["a"]["text"].startswith("# Goldfish run") and ab["b"]["text"].startswith("# Goldfish run"), ab
-    # not kept as a comparison report: that page reads a paired A/B's deltas
-    assert "report_id" not in out and "run_deck_report" in ab["note"], out
+    # every run is a report (owner, 10-27; whole-application audit row 10): not one paired A/B
+    # report (that page reads a paired A/B's deltas) but each deck's own solo test, naming the other
+    assert out["stored"] is True and out["report_id"] == out["report_ids"]["a"], out
+    assert "kept as a report of its own" in ab["note"], ab
+    for side in ("a", "b"):
+        got = structured(
+            await call(stack.h, token, "get_deck_report", {"report_id": out["report_ids"][side]})
+        )
+        assert got["ok"] and got["source"]["kind"] == "compare_unpaired", got
+        assert got["source"]["label"] == "Comparison, not game for game" and got["source"]["side"] == side
+        assert got["goldfish"]["text"] == ab[side]["text"], got  # the solo test as the deck played it
+        assert "against" in got["deck_name"], got["deck_name"]
+    listed = structured(await call(stack.h, token, "list_deck_reports", {}))["reports"]
+    assert {r["report_id"] for r in listed} >= set(out["report_ids"].values()), listed
+    b = Browser(stack.h)
+    await b.login()
+    page = await b.http.get(f"/history/reports/{out['report_ids']['b']}")
+    await b.aclose()
+    assert page.status_code == 200 and "Comparison, not game for game" in page.text, page.text[:500]
 
 
 async def test_an_unpaired_comparison_keeps_the_seed_it_was_given(stack: Stack) -> None:

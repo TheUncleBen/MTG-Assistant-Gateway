@@ -522,12 +522,10 @@ class CollectionService:
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
         if link is None:
-            raise CollectionError(
-                "not_linked", "No Archidekt account is linked. Link one on the Account page first."
-            )
+            raise CollectionError("not_linked", refusals.not_linked(self.decks.settings.public_url))
         uid = link.get("archidekt_user_id")
         if not uid or not str(uid).isdigit():
-            raise CollectionError("not_linked", "The linked Archidekt account has no user id; relink it.")
+            raise CollectionError("not_linked", refusals.no_user_id(self.decks.settings.public_url))
         return str(uid)
 
     def _writes_on(self) -> None:
@@ -3326,13 +3324,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="list_collection",
         title="List the cards I own",
         description=(
-            "The user's binder (their Archidekt collection): the cards they own, one row per printing "
-            "and finish with a quantity, 100 a page, newest first. Optional `query` "
-            "filters by card name; `sort` is added, edition (set release) or price (highest first, with "
-            "each card's price from the daily price check; once the member opened their Binder); `page` "
-            "pages; "
-            "`tag`: one binder tag's cards. Returns cards, count, total_pages, tags. "
-            "Read-only."
+            "The user's binder, their linked Archidekt collection: one row per printing and finish with a "
+            "quantity, 100 a page, newest first. query filters by card name; sort: added, edition or price "
+            "(highest first, from the daily price check, once the member opened their Binder); page pages; "
+            "tag: one binder tag's cards. Returns cards, count, total_pages and tags. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -3616,19 +3611,16 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="propose_collection_changes",
         title="Propose changes to my binder",
         description=(
-            "Propose changes to the user's binder (their Archidekt collection). A proposal like a deck "
-            "edit: show its diff and review_url; the user applies it, or you with apply_proposal when "
-            "assistant_may_apply is true. add: a list of {name, set_code?, collector_number?, quantity?, "
-            "finish?, condition?, language?} or plain names (without set_code and collector_number "
-            "Archidekt picks the printing; nonfoil unless finish says); "
-            "text: one card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; scan_session: a scan session's id "
-            "or name (its matched cards; the session is removed once applied); remove: "
-            "a list of {id (from list_collection) | name, quantity?} (no quantity removes every copy); "
-            "tag: a list of {id | name, tags} setting every binder tag those rows have (new names are "
-            "made). At most 100 cards each way per proposal. Once applied, each added or removed row has "
-            "quantity (now; 0 when gone), previous_quantity and added_quantity or removed_quantity. "
-            "clear: true, alone, proposes clearing the whole binder (the user applies it on its review "
-            "page)."
+            "Propose adding cards to, or removing cards from, the user's binder (their Archidekt "
+            "collection): show its diff and review_url; the user applies it, or you do with apply_proposal "
+            "when assistant_may_apply is true. add: cards or names (without set_code and collector_number "
+            "Archidekt picks the printing); text: one card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; "
+            "scan_session: a scan's matched cards (the scan is removed once applied); remove: {id (from "
+            "list_collection) | name, quantity?} (no quantity: every copy); tag: {id | name, tags} sets "
+            "every binder tag of those rows (new names are made). At most 100 cards each way. Once "
+            "applied, each row has quantity (held now), previous_quantity and added_quantity or "
+            "removed_quantity. clear: true, alone, proposes clearing the whole binder (the user applies "
+            "it on its review page)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=dict(CARD_TOOL_META) if in_chat else None,

@@ -1011,10 +1011,12 @@ def row_line(r: dict[str, Any]) -> str:
             f", {r['game']}" if r.get("game") else ""
         )
         where = f" in folder “{r['folder']}”" if r.get("folder") else ""
+        n = int(r.get("cards") or 0)
+        count = f"{n} {'card' if n == 1 else 'cards'}"
         if r.get("package"):
-            what = f"{r['cards']} cards{side}, {visibility}; {r['package']}"
+            what = f"{count}{side}, {visibility}; {r['package']}"
             return f"New card package “{r['name']}”{where} ({what})"
-        return f"New {r['format']} deck “{r['name']}”{where} ({r['cards']} cards{side}, {visibility}{more})"
+        return f"New {r['format']} deck “{r['name']}”{where} ({count}{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
             n = int(r["changes"])
@@ -3948,14 +3950,11 @@ class DeckService:
         returned to callers of the service."""
         row = self.db.get_link(sub)
         if row is None:
-            raise DeckError(
-                "not_linked",
-                f"No Archidekt account is linked. Sign in at {self.settings.public_url}/account to link one.",
-            )
+            raise DeckError("not_linked", refusals.not_linked(self.settings.public_url))
         secret = self._open(sub, row["secret_enc"])
         access = secret.get("access") if secret is not None else None
         if not isinstance(access, str) or not access:
-            raise DeckError("not_linked", "The stored Archidekt session could not be read. Relink.")
+            raise DeckError("not_linked", refusals.relink(self.settings.public_url))
         row["_secret"] = secret
         return access, row
 
@@ -3985,14 +3984,10 @@ class DeckService:
 
         def expire(reason: str) -> DeckError:
             if background:
-                return DeckError("not_linked", "Archidekt did not accept the stored session.")
+                return DeckError("not_linked", refusals.relink(self.settings.public_url))
             if self.db.revoke_link(sub, only_secret=stored["secret_enc"]):
                 self._audit("archidekt_link_expired", sub=sub, detail={"reason": reason})
-            return DeckError(
-                "not_linked",
-                "Archidekt no longer accepts the stored session. "
-                f"Relink at {self.settings.public_url}/account.",
-            )
+            return DeckError("not_linked", refusals.relink(self.settings.public_url))
 
         async def refreshed(reason: str) -> str:
             if not isinstance(refresh, str) or not refresh:
@@ -7680,11 +7675,18 @@ class DeckService:
                 sub=sub,
                 detail={"proposal_id": row["id"], "deck_id": deck.id, "error": exc.kind},
             )
+            # the way out depends on why: a session Archidekt no longer accepts needs a relink,
+            # never a wait (whole-application audit, row 12)
+            then = (
+                "Relink your Archidekt account, then apply it again"
+                if exc.kind == "not_linked"
+                else "It can be applied again once Archidekt answers"
+            )
+            why = str(exc).rstrip(".")
             raise DeckError(
                 "backup_failed",
-                f"The backup copy of “{deck.name}” could not be made on Archidekt ({exc}). Nothing was "
-                "changed; the proposal is still pending, so it can be applied again once Archidekt "
-                "answers.",
+                f"The backup copy of “{deck.name}” could not be made on Archidekt ({why}). Nothing was "
+                f"changed and the proposal is still pending. {then}.",
             ) from exc
         self._trim_backups(sub, deck.id)
         return made

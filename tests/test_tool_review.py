@@ -4,9 +4,10 @@ input refusals reported as such."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from .conftest import COLLECTION, Stack, stack_with
+from .conftest import COLLECTION, FakeIdP, Stack, stack_with
 from .test_decks_and_proxy import call, linked_user, structured
 from .track_a_helpers import account_call
 
@@ -511,17 +512,48 @@ async def test_a_new_commander_deck_without_a_commander_is_warned(stack: Stack) 
 
 
 # -- the tool catalogue's size (0.7.46 full review F15) -------------------------------------------
-async def test_the_tool_catalogue_stays_small_and_keeps_what_the_assistant_needs(stack: Stack) -> None:
-    """tools/list was 105 KB, run_deck_report's description alone 6,048 characters, most of it
-    result fields the skill's tool reference lists anyway (owner decision C3 #5: the long how-to
-    text goes to the skill). Every app reads the whole list, so its size is a cost in every chat."""
-    import json
+def test_the_recorded_research_listing_is_the_pinned_image() -> None:
+    """The size test below measures the research tools from a recording of the pinned Mystic Forge;
+    a new pin or patch set must come with a new recording (scripts/record_mystic_forge_tools.py)."""
+    import re
     from pathlib import Path
 
-    from .conftest import sse_json
+    from mtg_gateway.mf_proxy import ALLOWED_TOOLS
 
-    token = await linked_user(stack)
-    tools = sse_json(await stack.h.mcp(token, "tools/list", {}, rid=3))["result"]["tools"]
+    from .fake_mystic_forge import recorded_listing
+
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "docker/mystic-forge/Dockerfile").read_text(encoding="utf-8")
+    version = re.search(r"^ARG MF_VERSION=(\S+)", dockerfile, re.M)
+    local = re.search(r"^ARG MF_LOCAL=(\S+)", dockerfile, re.M)
+    assert version and local
+    recorded = recorded_listing()
+    assert recorded["image_tag"] == f"{version.group(1)}-{local.group(1)}"
+    for stack_file in ("deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"):
+        text = (root / stack_file).read_text(encoding="utf-8")
+        assert f"mtg-assistant-mysticforge:{recorded['image_tag']}" in text, stack_file
+    assert ALLOWED_TOOLS <= {t["name"] for t in recorded["tools"]}
+
+
+async def test_the_tool_catalogue_stays_small_and_keeps_what_the_assistant_needs(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    """tools/list was 105 KB, run_deck_report's description alone 6,048 characters, most of it
+    result fields the skill's tool reference lists anyway (owner decision C3 #5: the long how-to
+    text goes to the skill). Every app reads the whole list, so its size is a cost in every chat.
+    Measured as production lists it: the gateway's tools plus all 25 research tools of the pinned
+    Mystic Forge (recorded), not the fake's two."""
+    import json
+
+    from mtg_gateway.mf_proxy import ALLOWED_TOOLS
+
+    from .conftest import open_stack, sse_json
+    from .fake_mystic_forge import recorded_mystic_forge
+
+    async with open_stack(tmp_path, idp, COLLECTION.but(mystic_forge=recorded_mystic_forge)) as stack:
+        token = await linked_user(stack)
+        tools = sse_json(await stack.h.mcp(token, "tools/list", {}, rid=3))["result"]["tools"]
+    assert ALLOWED_TOOLS <= {t["name"] for t in tools}
     size = len(json.dumps(tools, separators=(",", ":"), ensure_ascii=False).encode())
     assert size <= 100_000, size
     by = {t["name"]: t for t in tools}
@@ -559,3 +591,12 @@ async def test_the_tool_catalogue_stays_small_and_keeps_what_the_assistant_needs
     row = next(line for line in ref.splitlines() if line.startswith("| `run_deck_report`"))
     for words in ("forge_solo", "won_rate_95", "not_played", "`timeout`, `cancelled`", "models_kept"):
         assert words in row, words
+
+
+# -- compare_decks names the side it could not read (whole-application audit, BACKEND) -------------
+async def test_compare_decks_says_which_side_it_could_not_read(stack: Stack) -> None:
+    token = await linked_user(stack)
+    for args, side in (({"a": "42", "b": "999999"}, "b"), ({"a": "999999", "b": "42"}, "a")):
+        out = structured(await call(stack.h, token, "compare_decks", args))
+        assert out["ok"] is False and out["error"] == "not_found", out
+        assert out["message"].startswith(f"Deck {side}: "), out

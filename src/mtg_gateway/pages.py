@@ -2540,15 +2540,17 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "add",
                     "Clone",
                     html.escape(str(r.get("name", ""))),
-                    html.escape(f"copy of {r.get('source', '')}, {r.get('cards', 0)} cards, private"),
+                    html.escape(
+                        f"copy of {r.get('source', '')}, {plural(int(r.get('cards') or 0), 'card')}, private"
+                    ),
                 )
             )
         elif kind == "new_deck":
             visibility = "private" if r.get("private") else "PUBLIC"
             what = (
-                f"{r.get('cards', 0)} cards, {visibility}; {r['package']}"
+                f"{plural(int(r.get('cards') or 0), 'card')}, {visibility}; {r['package']}"
                 if r.get("package")
-                else f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"
+                else f"{r.get('format', '')}, {plural(int(r.get('cards') or 0), 'card')}, {visibility}"
             )
             if r.get("folder"):
                 what += f"; in folder “{r['folder']}”"

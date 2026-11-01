@@ -172,7 +172,8 @@ class FakeArchidekt:
         self.folder_details_fail: set[int] = set()  # folders whose listing answers 500
         self.fail_deck_update = False
         self.updates: list[dict[str, Any]] = []  # bodies of PATCH /decks/{id}/update/, with deck_id
-        self.fail_backup = False  # POST /decks/copy/ answers 503
+        # POST /decks/copy/ answers 503 (True), or this status (401: the session is no longer accepted)
+        self.fail_backup: bool | int = False
         # Copies made here (POST /decks/copy/) carry createdAt and updatedAt as the time they were
         # made, in Archidekt's "...Z" form with fractions, and an update moves their updatedAt to
         # its own time (inferred, not seen live). Every other deck keeps its fixed times.
@@ -879,8 +880,10 @@ class FakeArchidekt:
             # leaves unanswered is a request the gateway should never send
             raise AssertionError(f"the gateway called the category templates route {path}")
         if path == "/api/decks/copy/" and request.method == "POST":
-            if self.fail_backup:
+            if self.fail_backup is True:
                 return httpx.Response(503, json={"detail": "Service unavailable."})
+            if self.fail_backup:
+                return httpx.Response(self.fail_backup, json={"detail": "Invalid token."})
             body = json.loads(request.content)
             src = self.decks.get(body["copyId"])
             if src is None or (body["copyId"] in self.private and src["owner"]["username"] != who):

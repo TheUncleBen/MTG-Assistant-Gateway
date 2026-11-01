@@ -754,6 +754,11 @@ async def test_forge_health_is_probed_once_and_reports_an_outage() -> None:
     fake.up = False
     client._health = (0.0, True)  # the cached answer has expired
     assert await client.healthy() is False and client._health[1] is False
+    # what a member reads (a report's forge.error): plain words, no exception name (audit row 12)
+    with pytest.raises(ForgeError) as err:
+        await client.health()
+    assert str(err.value) == "Forge couldn't be reached, so no Forge games were played.", str(err.value)
+    assert "ConnectError" not in str(err.value)
 
 
 async def test_pruning_old_reports_cancels_their_unfinished_forge_runs(

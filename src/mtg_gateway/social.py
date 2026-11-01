@@ -177,10 +177,10 @@ class SocialService:
         """(Archidekt user id, username) of the member's linked account."""
         link = self.state.db.get_link(sub)
         if link is None:
-            raise DeckError("not_linked", "Link your Archidekt account on the Account page first.")
+            raise DeckError("not_linked", refusals.not_linked(self.state.settings.public_url))
         uid = str(link.get("archidekt_user_id") or "")
         if not uid.isdigit():
-            raise DeckError("not_linked", "The linked Archidekt account has no user id; relink it.")
+            raise DeckError("not_linked", refusals.no_user_id(self.state.settings.public_url))
         return uid, str(link.get("archidekt_username") or "")
 
     async def deck(self, sub: str, deck_id: str) -> Deck:

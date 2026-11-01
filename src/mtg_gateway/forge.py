@@ -357,7 +357,11 @@ class ForgeClient:
         if r.status_code == 429:
             raise ForgeError("busy", "Forge's queue is full. Try again later.")
         if r.status_code >= 400:
-            raise ForgeError("invalid", data.get("error") or f"HTTP {r.status_code}")
+            if r.status_code >= 500 and not data.get("error"):
+                raise ForgeError(
+                    "unavailable", "Forge had a problem answering, so no Forge games were played."
+                )
+            raise ForgeError("invalid", data.get("error") or "Forge refused the request.")
         return data
 
     async def health(self) -> dict[str, Any]:

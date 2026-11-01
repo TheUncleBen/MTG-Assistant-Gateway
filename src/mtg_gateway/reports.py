@@ -3942,8 +3942,8 @@ AB_SIZE_REFUSAL = "A/B decks must be the same size"
 UNPAIRED_NOTE = (
     "Unpaired: the decks have different sizes ({a} and {b} cards), so they could not play the same "
     "games. Each played its own {games} games under the same seed: compare the two results side by "
-    "side, but they are not game for game, so a small difference may be chance. Not kept as a "
-    "report; run_deck_report keeps each deck's own."
+    "side, but they are not game for game, so a small difference may be chance. Each deck's games "
+    "are kept as a report of its own."
 )
 MIXED_MODES_TEXT = (
     "No comparison games: one deck has a commander and the other does not. The comparison plays "

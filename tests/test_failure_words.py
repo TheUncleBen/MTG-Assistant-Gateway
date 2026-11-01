@@ -109,3 +109,29 @@ async def test_member_pages_never_show_archidekts_raw_words(stack: Stack, answer
     finally:
         stack.ark.inject = []
         await b.aclose()
+
+
+@pytest.mark.parametrize(
+    ("answer", "words"),
+    [
+        (503, "Scryfall had a problem answering. Try again in a few minutes."),
+        (httpx.ConnectError("down"), "Scryfall couldn't be reached. Try again in a few minutes."),
+        (httpx.ReadTimeout("slow"), "Scryfall couldn't be reached. Try again in a few minutes."),
+    ],
+)
+async def test_scryfall_failures_are_plain_sentences(answer: object, words: str) -> None:
+    """Whole-application audit (resolve_cards, save_scan_session): "Scryfall unreachable:
+    ConnectError" and "Scryfall returned 503" reached the member; now a sentence, the details in the
+    log."""
+    from mtg_gateway.scan.scryfall import ScryfallClient, ScryfallError
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        if isinstance(answer, Exception):
+            raise answer
+        return httpx.Response(int(answer), json={"object": "error"})  # type: ignore[call-overload]
+
+    client = ScryfallClient(min_interval=0, http=httpx.AsyncClient(transport=httpx.MockTransport(reply)))
+    for ask in (client.named("Sol Ring"), client.autocomplete("Sol")):
+        with pytest.raises(ScryfallError) as err:
+            await ask
+        assert str(err.value) == words and not any(raw in str(err.value) for raw in RAW), err.value
