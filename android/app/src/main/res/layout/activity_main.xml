@@ -4,8 +4,13 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@color/bg">
 
-    <WebView android:id="@+id/web"
-        android:layout_width="match_parent" android:layout_height="match_parent" />
+    <!-- Pull to refresh (PullRefresh.kt): a pull from the top of a list page reloads it. The layer
+         wraps the page only; the app's own boxes below stay above it. -->
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout android:id="@+id/refresh"
+        android:layout_width="match_parent" android:layout_height="match_parent">
+        <WebView android:id="@+id/web"
+            android:layout_width="match_parent" android:layout_height="match_parent" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     <ProgressBar android:id="@+id/progress"
         style="@android:style/Widget.Material.ProgressBar.Horizontal"
