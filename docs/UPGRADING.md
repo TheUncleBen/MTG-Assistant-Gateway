@@ -216,7 +216,7 @@ reach past the stack, so if your old version is older than the one named, also:
   unless you set them on purpose. `MTG_BROWSER_SESSION_TTL` is now how long a sign-in lasts
   unused, so `7200` keeps sign-ins to 2 hours unused (`604800` is a week). A value in either of
   the other two locks its row on the Settings page.
-- **0.7.46 or older:** delete the `MTG_REAUTH_INTERVAL` line from your variables; it does nothing
+- **0.7.45 or older:** delete the `MTG_REAUTH_INTERVAL` line from your variables; it does nothing
   now. Assistants connect again when the Settings page's **Assistant refresh** time (30 days by
   default) has passed since they signed in, not after a week. To keep a week, set that row to 7 days.
 
