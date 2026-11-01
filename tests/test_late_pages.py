@@ -148,6 +148,34 @@ async def test_a_finished_page_is_never_shown_once_its_session_has_ended(stack: 
         await b.aclose()
 
 
+async def test_a_late_page_lives_only_as_long_as_the_session_that_asked_for_it(stack: Stack) -> None:
+    """Security review 3, R3-04 (R2-04): a finished slow page is kept for, and served to, only the
+    same live session that asked for it. Once that session has ended, the page is dropped at its
+    next request, /late/{key} no longer says it is ready, and the store never hands it out (it
+    holds the member it was read for and checks it again)."""
+    b = await _linked(stack)
+    store = stack.h.app.state.gateway.late_pages
+    try:
+        _slow(stack, 1.5)
+        r = await b.http.get("/notifications", headers=PAGE)
+        key = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", r.text).group(1)
+        late = store.by_key[key.rsplit("/", 1)[1]]
+        assert late.sub == "user-1"
+        assert (await b.http.get(key)).json()["ready"] is True
+        # the store itself never serves it to another member, or with no live session
+        assert store.finished(late.owner, late.url, "user-2") is None
+        assert store.finished(late.owner, late.url, None) is None
+        assert late in store.by_key.values()  # neither of those used it up
+        stack.h.db.delete_browser_sessions_for("user-1", "elsewhere")  # sign out on all devices
+        gone = await b.http.get(key)
+        assert gone.status_code == 404 and gone.json()["gone"] is True
+        page = await b.http.get("/notifications", headers=PAGE)
+        assert page.status_code in (302, 303) and "Alerts" not in page.text
+        assert not [x for x in store.by_key.values() if x.owner == late.owner], "kept after the sign-out"
+    finally:
+        await b.aclose()
+
+
 DECK_PAGES = (
     ("/decks/42/settings", "Deck settings"),
     ("/decks/42/goldfish", "Goldfish"),

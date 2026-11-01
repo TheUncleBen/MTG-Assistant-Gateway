@@ -12,8 +12,11 @@ from Archidekt), and the page carries on in the background. static/feedback.js t
 finished page, kept for that member's session for LATE_KEEP. Nothing is shown that the page
 itself would not show, and nothing is read twice: the finished answer is served once.
 
-The finished answer is kept in memory under a fingerprint of the member's session cookie and
-the page's address, so it is only ever served to the browser session that asked for it.
+The finished answer is kept in memory under a fingerprint of the member's session cookie, the
+member that session was signed in as and the page's address, and it is only ever served to that
+same session while it is still live and still that member's (security review 3, R3-04): a
+request from a session that has ended drops every page kept for it, and ``/late/{key}`` answers
+"gone" to it.
 """
 
 from __future__ import annotations
@@ -77,6 +80,7 @@ def late_page_of(path: str) -> tuple[str, str] | None:
 @dataclass
 class _Late:
     owner: str  # fingerprint of the session cookie
+    sub: str  # the member that session was signed in as when the page was asked for
     url: str
     task: asyncio.Task[list[Message] | None]
     started: float = field(default_factory=time.monotonic)
@@ -97,10 +101,20 @@ class LateStore:
             oldest = min(self.by_key, key=lambda k: self.by_key[k].started)
             self.by_key.pop(oldest)
 
-    def finished(self, owner: str, url: str) -> list[Message] | None:
-        """The finished page for this session and address, served once; None when there is none."""
+    def forget(self, owner: str) -> None:
+        """Drop every page kept or under way for a session that has ended."""
         for key, late in list(self.by_key.items()):
-            if late.owner == owner and late.url == url and late.task.done():
+            if late.owner == owner:
+                del self.by_key[key]
+
+    def finished(self, owner: str, url: str, sub: str | None) -> list[Message] | None:
+        """The finished page for this session and address, served once, when ``sub`` (the member
+        the session is live for now, None when it has ended) is the member it was read for; None
+        when there is none."""
+        if not sub:
+            return None
+        for key, late in list(self.by_key.items()):
+            if late.owner == owner and late.sub == sub and late.url == url and late.task.done():
                 del self.by_key[key]
                 if late.task.cancelled() or late.task.exception() is not None:
                     return None
@@ -116,11 +130,6 @@ def _cookie(scope: Scope, cookie: str) -> str | None:
                 if name == cookie and val:
                     return val.strip()
     return None
-
-
-def _owner(scope: Scope, cookie: str) -> str | None:
-    value = _cookie(scope, cookie)
-    return hashlib.sha256(value.encode()).hexdigest()[:32] if value else None
 
 
 def _wants_html(scope: Scope) -> bool:
@@ -161,9 +170,15 @@ class LatePageMiddleware:
         now = time.monotonic()
         self.store.prune(now)
         # Only while the session is live: its cookie outlives it (to say why it ended), and a page
-        # that finished after a sign-out is never shown again (security review 2, R2-04). The
-        # request then goes on as usual and is signed out.
-        kept = self.store.finished(owner, url) if self.state.db.get_browser_session(cookie) else None
+        # that finished after a sign-out is never shown again (security reviews 2 and 3, R2-04 and
+        # R3-04): every page kept for an ended session is dropped, and the request goes on as
+        # usual and is signed out.
+        live = self.state.db.get_browser_session(cookie)
+        if live is None:
+            self.store.forget(owner)
+            await self.app(scope, receive, send)
+            return
+        kept = self.store.finished(owner, url, live)
         if kept is not None:
             for message in kept:
                 await send(message)
@@ -190,7 +205,7 @@ class LatePageMiddleware:
                 await send(message)
             return
         key = secrets.token_urlsafe(16)
-        late = _Late(owner, url, task)
+        late = _Late(owner, live, url, task)
         self.store.by_key[key] = late
         scope["mtg_late"] = True  # timing.py counts this view when its content is there
 
@@ -262,9 +277,13 @@ def add_late_routes(server: Any, state: Any) -> None:
 
         store: LateStore = state.late_pages
         late = store.by_key.get(request.path_params["key"])
-        owner = _owner(request.scope, cookie_name(SESSION_COOKIE, state.settings))
+        cookie = _cookie(request.scope, cookie_name(SESSION_COOKIE, state.settings))
+        owner = hashlib.sha256(cookie.encode()).hexdigest()[:32] if cookie else None
         headers = {"Cache-Control": "no-store"}
-        if late is None or owner is None or late.owner != owner:
+        live = state.db.get_browser_session(cookie) if cookie else None
+        if owner is not None and live is None:
+            store.forget(owner)  # the session has ended: nothing of it is kept
+        if late is None or owner is None or late.owner != owner or late.sub != live:
             return JSONResponse({"ready": False, "gone": True}, 404, headers=headers)
         try:
             await asyncio.wait_for(asyncio.shield(late.task), LATE_WAIT)
