@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from . import dbwait
 from .decklist import DecklistError, parse_decklist
 
 logger = logging.getLogger(__name__)
@@ -343,9 +344,11 @@ class ForgeClient:
         try:
             r = await self._client.request(method, path, json=body)
         except httpx.HTTPError as exc:
+            await dbwait.settle()
             # the cause for whoever runs the gateway goes to its log; the member reads plain words
             logger.info("Forge did not answer %s %s: %s", method, path, type(exc).__name__)
             raise ForgeError("unavailable", FORGE_UNREACHABLE) from exc
+        await dbwait.settle()  # a background job's database work waits off the loop
         try:
             data = r.json()
         except ValueError:

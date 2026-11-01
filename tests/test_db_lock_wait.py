@@ -161,3 +161,20 @@ def test_the_check_says_busy_without_waiting_and_keeps_the_writes_wait(stack: St
     finally:
         holder.wait(timeout=30)
     assert db.write_free() is True
+
+
+def test_a_read_never_waits_for_another_process_s_write_lock(stack: Stack) -> None:
+    """In WAL mode a read does not wait for a writer: while another process holds the write lock,
+    the gateway's reads answer at once. So it is only a write, taken after the check before a
+    request (dbwait.py), that can still wait for the lock on the loop."""
+    db = stack.h.db
+    holder = _hold(str(db.path), 1.5)
+    try:
+        started = time.monotonic()
+        for _ in range(20):
+            db.get_user("user-1")
+            db.list_proposals("user-1", 10)
+        assert time.monotonic() - started < 0.15
+        assert db.write_free() is False  # the write lock really is held meanwhile
+    finally:
+        holder.wait(timeout=30)
