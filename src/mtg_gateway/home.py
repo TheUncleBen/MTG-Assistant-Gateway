@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import prefs, ui
+from . import assistants, prefs, ui
 from .companion import DECK_CSP
 from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
@@ -374,12 +374,15 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             recent = ""
         # the connection details only while no assistant is connected (Account details lists them after)
         connect = connect_html(s.mcp_url) if not state.db.user_clients(sub) else ""
+        # an assistant connected for the first time: one notice under the greeting, naming the
+        # default it starts with (assistants.py), until its page is opened
+        joined = assistants.home_notice(state.db, sub, state.decks.mode_of(sub), now=now)
         # the New deck box (F4): the hero's New deck and the empty panel's "Create one" open it here
         csrf = _csrf(s, sid)
         newdeck = new_deck_box_html(csrf, None, back="/") if link["linked"] and csrf else ""
         resp = render(
             "Home",
-            hero + needs + recent + connect + newdeck,
+            hero + joined + needs + recent + connect + newdeck,
             site=s.server_name,
             signed_in=True,
             csrf=csrf,
@@ -390,7 +393,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             heading=False,
             body_class="home",
             # decks.js fills the recent-decks panel; Home has none of deck.js's hooks
-            head_extra=f"<style>{HOME_CSS}{NEW_DECK_CSS if newdeck else ''}</style>"
+            head_extra=f"<style>{HOME_CSS}{assistants.HOME_CSS if joined else ''}"
+            f"{NEW_DECK_CSS if newdeck else ''}</style>"
             "<script src='/static/decks.js' defer></script>"
             + "".join(
                 f"<script src='/static/{n}' defer></script>" for n in (NEW_DECK_SCRIPTS if newdeck else ())

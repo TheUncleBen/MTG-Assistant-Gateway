@@ -42,7 +42,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import batch, board, formatting, modes, refusals, ui
+from . import assistants, batch, board, formatting, modes, refusals, ui
 from .approve import approval_code, approval_matches, approval_set_code, card_seq_of
 from .archidekt import (
     FORMAT_IDS,
@@ -3664,19 +3664,23 @@ class DeckService:
             **self.mode_info(sub),
         }
 
-    def mode_of(self, sub: str) -> str:
-        """The approval mode governing this member (modes.py): their own choice from the Account
-        page, or the gateway's default while they have not chosen, never above the cap. Read by
-        ``sub`` only, so one member's choice never reaches another's proposals or apps."""
+    def mode_of(self, sub: str, client_id: str | None = None) -> str:
+        """The approval mode governing this member's assistant ``client_id`` (modes.py,
+        assistants.py): the mode the member chose for that assistant, else their default (their
+        own choice for new assistants, or the gateway's default while they have not chosen), never
+        above the cap. Without ``client_id``: the member's default. Read by ``sub`` only, so one
+        member's choice never reaches another's proposals or apps."""
         user = self.db.get_user(sub) or {}
+        chosen = assistants.chosen_mode(self.db, sub, client_id) or user.get("approval_mode")
         return modes.effective_mode(
-            user.get("approval_mode"),
+            chosen,
             default=str(self.live.get("approval_mode_default")),
             cap=str(self.live.get("approval_mode_max")),
         )
 
     def mode_info(self, sub: str) -> dict[str, Any]:
-        mode = self.mode_of(sub)
+        """The calling assistant's own mode (account_status: each assistant is told its own)."""
+        mode = self.mode_of(sub, current_client.get())
         return {
             "approval_mode": mode,
             "approval_mode_label": modes.MODE_LABELS[mode],
@@ -3685,7 +3689,7 @@ class DeckService:
                 max_rows=int(self.live.get("auto_apply_max_rows")),
                 big_rows=int(self.live.get("auto_big_edit_rows")),
             )
-            + " Change it on the account page.",
+            + " The user sets it for each assistant on the account page (Assistants).",
         }
 
     # The stored session is sealed to the member it belongs to: the encrypted blob names its
@@ -4359,15 +4363,16 @@ class DeckService:
         return self.proposal_risk(str(row.get("owner_sub") or ""), row)
 
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
-        """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval
-        mode, and whether that mode lets the assistant apply it itself. On top of the tiers
+        """(risk, why, mode, allowed): the proposal's risk tier and reason, the approval mode of
+        the assistant that made it (only that app may apply it), and whether that mode lets the
+        assistant apply it itself. On top of the tiers
         (modes.py): auto mode still waits for the member's press on a restore, a new deck, a
         commander change or a big edit (more rows than ``auto_big_edit_rows``); and in
         every mode an assistant never applies a proposal another app changed after it was made
         or one that is held."""
         kind = row.get("kind", "edit")
         risk, why = modes.risk_of(kind, row.get("rows"), max_rows=int(self.live.get("auto_apply_max_rows")))
-        mode = self.mode_of(sub)
+        mode = self.mode_of(sub, row.get("created_by_client"))
         # Any version another app wrote, not only the last (one that
         # ChatGPT rewrote and Claude changed again still had another app's hand in it)
         if risk not in modes.MEMBER_ONLY and self.rewritten_by_another_app(sub, row):
@@ -5681,7 +5686,7 @@ class DeckService:
                 formatting_review_only(row) + " Nothing was sent to Archidekt; do not retry.",
                 review_url=f"{self.settings.public_url}/proposals/{row['id']}",
                 state=row["state"],
-                approval_mode=self.mode_of(sub),
+                approval_mode=self.mode_of(sub, row.get("created_by_client")),
                 risk=risk,
             )
         where = (
@@ -5696,7 +5701,7 @@ class DeckService:
             f"own approval {where}, in every approval mode. Nothing was sent to Archidekt; do not retry.",
             review_url=f"{self.settings.public_url}/proposals/{row['id']}",
             state=row["state"],
-            approval_mode=self.mode_of(sub),
+            approval_mode=self.mode_of(sub, row.get("created_by_client")),
             risk=risk,
         )
 

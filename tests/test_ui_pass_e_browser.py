@@ -321,7 +321,7 @@ def test_the_two_new_controls_are_finger_sized_on_touch(server: Server) -> None:
     with sync_playwright() as p:
         # a phone: Approval mode's chevron is 44 px and each mode's name keeps its one row
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
-        _account(page, server.base)
+        page.goto(f"{server.base}/account/assistants/default", wait_until="networkidle")
         page.locator("#mode .mode-list").scroll_into_view_if_needed()
         for i in range(page.locator("#mode details.mode-info > summary").count()):
             b = page.locator("#mode details.mode-info > summary").nth(i).bounding_box()

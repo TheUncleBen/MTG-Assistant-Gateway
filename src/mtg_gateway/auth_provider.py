@@ -37,7 +37,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
-from . import masked, smallpage
+from . import assistants, masked, smallpage
 from .cimd import (
     CimdBusy,
     CimdError,
@@ -905,6 +905,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         refresh = secrets.token_urlsafe(32)
         resource = resource or self.settings.mcp_url
         access_ttl = self._ttl("access_token_ttl")
+        # the assistant this app belongs to (assistants.py): a new one starts at the member's
+        # default; read before the new tokens are saved, so a first sign-in counts as new
+        assistants.note_sign_in(self.db, sub, client_id)
         self.db.save_token(
             access,
             kind="access",

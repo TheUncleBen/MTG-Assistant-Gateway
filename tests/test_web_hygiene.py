@@ -309,8 +309,10 @@ async def test_member_can_see_and_disconnect_connected_apps(h: Harness) -> None:
     b = Browser(h)
     try:
         await b.login()
-        page = (await b.http.get("/account/details")).text
-        assert "Connected apps" in page and "Claude" in page and "ChatGPT" in page
+        # each app is listed on the Assistants page, which the Account page's "Assistants" row opens
+        assert "href='/account/assistants'" in (await b.http.get("/account/details")).text
+        page = (await b.http.get("/account/assistants")).text
+        assert "Default for new assistants" in page and "Claude" in page and "ChatGPT" in page
         csrf = await b.csrf()
         r = await b.http.post(
             "/account", data={"csrf": csrf, "action": "disconnect", "client_id": first["client_id"]}
