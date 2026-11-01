@@ -410,14 +410,33 @@ def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "
     return f"<div class='hubbar'><h1 class='sr-only'>{esc(title)}</h1>{switch}</div>{line}"
 
 
-def binder_head(current: str, title: str, sub: str = "", *, actions_html: str = "") -> str:
-    """The head of the Binder place's pages (Cards, Wants, Watchlist; decision C8): their switch,
-    which names the page, so the page's heading is for screen readers only, the page's actions at
-    the row's end (the one orange button among them), then the purpose line. ``current``: the
-    page's path (theme.BINDER_PAGES)."""
+def binder_head(
+    current: str,
+    title: str,
+    sub: str = "",
+    *,
+    actions_html: str = "",
+    badges: Mapping[str, int] | None = None,
+) -> str:
+    """The head of the Binder place's pages (Cards, Lists, Watchlist; decision C8 and mockup
+    screen 8): their switch, which names the page, so the page's heading is for screen readers
+    only, the page's actions at the row's end (the one orange button among them), then the purpose
+    line. ``current``: the page's path (theme.BINDER_PAGES). ``badges``: a count on a switch part
+    (Cards 18, Watchlist 3), by path, when the page knows it cheaply."""
     line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
     acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
-    switch = hub_switch("Binder", [(href, text, href) for href, text, _ic in binder_pages()], current)
+    counts = badges or {}
+    links = "".join(
+        f"<a href='{esc(href)}'{' aria-current=page' if href == current else ''}>{esc(text)}"
+        + (
+            f"<span class='cn'>{counts[href]:,}</span><span class='sr-only'>, {counts[href]:,}</span>"
+            if counts.get(href)
+            else ""
+        )
+        + "</a>"
+        for href, text, _ic in binder_pages()
+    )
+    switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
     return (
         f"<div class='ui-head phead hubhead'><h1 class='sr-only'>{esc(title)}</h1>{switch}{acts}</div>{line}"
     )

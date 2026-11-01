@@ -56,7 +56,7 @@ def test_the_places_are_four_and_more_holds_three_groups(monkeypatch: pytest.Mon
 
 def test_watchlist_leaves_binder_when_watchlists_are_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(theme, "WATCHLISTS", False)
-    assert [h for h, _l, _i in theme.binder_pages()] == ["/collection", "/collection/wants"]
+    assert [h for h, _l, _i in theme.binder_pages()] == ["/collection", "/collection/lists"]
 
 
 def test_the_switch_marks_its_page_and_counts_on_its_first_part() -> None:
@@ -146,7 +146,7 @@ def test_the_account_page_is_a_settings_list_and_details_is_one_row_in(server: S
         assert f"<h2>{name}</h2>" in hub, name
     for href in (
         "/account/details",
-        "/lists",  # My lists sits under Account (decision C8)
+        "/collection/lists",  # the lists live in Binder (mockup screen 8); Account keeps a row
         "/activity",
         "/guide",
         "/install?for=skill",

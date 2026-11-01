@@ -87,11 +87,11 @@ def _notice(page: str) -> str:
 # -- the tabs ------------------------------------------------------------------------------------------
 
 
-async def test_lists_opens_on_the_first_tab(member: Browser) -> None:
+async def test_lists_opens_on_the_hub(member: Browser) -> None:
     r = await member.http.get("/lists")
-    assert r.status_code == 302 and r.headers["location"] == "/lists/templates"
+    assert r.status_code == 302 and r.headers["location"] == "/collection/lists"
     r = await member.http.get("/lists/nothing")
-    assert r.status_code == 302 and r.headers["location"] == "/lists/templates"
+    assert r.status_code == 302 and r.headers["location"] == "/collection/lists"
 
 
 async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
@@ -104,12 +104,10 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     }
     for slug, (label, names, extra) in want.items():
         page = (await member.http.get(_page_of(slug))).text
-        if slug == "pins":  # Binder's Wants page: its switch names it
-            assert "<a href='/collection/wants' aria-current=page>Wants</a>" in page
-            assert "<title>Binder: Wants" in page and extra in page
-        else:
-            assert f"<a href='/lists/{slug}' aria-current='page'>{label}" in page, slug
-            assert "<title>My lists" in page and extra in page, slug
+        # every list is one of Binder's Lists: the switch lights Lists, the tab names the list
+        assert "<a href='/collection/lists' aria-current=page>Lists</a>" in page, slug
+        assert f"<a href='{_page_of(slug)}' aria-current='page'>{label}" in page, slug
+        assert f"<title>Binder: {label}" in page and extra in page, slug
         for n in names:
             assert f"data-name='{n}'" in page and f"aria-label='Menu for {n}'" in page, (slug, n)
         # every row's menu is a plain drop-down of links without scripts, its delete in red
@@ -123,7 +121,7 @@ async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
     assert "class='danger' data-box='tpl-del'" in page
     # the tabs carry the counts read so far (one Archidekt read per tab view)
     assert "Category templates<span class='n'>2</span>" in page
-    assert "Custom cards<span class='n'>1</span>" in page and "Pinned cards" not in page
+    assert "Custom cards<span class='n'>1</span>" in page and "Pinned cards<span class='n'>1</span>" in page
 
 
 async def test_an_unlinked_member_is_sent_to_link(stack: Stack) -> None:
@@ -455,16 +453,16 @@ async def test_the_picture_goes_through_its_own_route(member: Browser, stack: St
 # -- the links to the page ---------------------------------------------------------------------------
 
 
-async def test_the_account_page_links_to_my_lists_and_more_does_not(member: Browser, stack: Stack) -> None:
+async def test_the_account_page_links_to_the_lists_and_more_does_not(member: Browser, stack: Stack) -> None:
     page = (await member.http.get("/reports")).text
     nav = page.split("<nav class='site' aria-label='Site'>")[1].split("</nav>")[0]
     menu = nav.split("<div class='menu'>")[1]
     labels = [x.split("</svg>")[1] for x in menu.split("</a>")[:-1]]
-    # My lists lives under Account (decision C8): More's Your cards group has Scan and Card models
+    # the lists live in Binder (mockup screen 8): More's Your cards group has Scan and Card models
     assert labels[-3:] == ["Scan", "Card models", "Forum"]
-    assert "href='/lists'" not in page
+    assert "href='/lists'" not in page and "href='/collection/lists'" not in nav
     hub = (await member.http.get("/account")).text
-    assert "href='/lists'" in hub and "My lists" in hub
+    assert "<a class='yrow' href='/collection/lists'>" in hub and ">Lists</span>" in hub
 
     # the Account page's panel, with the counts of the tabs read so far
     account_lists.forget_counts("user-1")  # as before any tab was opened
@@ -472,7 +470,7 @@ async def test_the_account_page_links_to_my_lists_and_more_does_not(member: Brow
     assert "<h2>Your Archidekt lists</h2>" in acc
     assert "Lists that shape every deck, kept on Archidekt:" in acc
     assert "<a class='ui-cap' href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
-    assert "<a class='btn' href='/lists'>" in acc and "Open My lists</a>" in acc
+    assert "<a class='btn' href='/collection/lists'>" in acc and "Open Binder › Lists</a>" in acc
     for slug in ("templates", "defaults", "tags", "custom"):
         await member.http.get(f"/lists/{slug}")
     await member.http.get("/collection/wants")
@@ -640,7 +638,7 @@ async def test_the_tab_counts_never_open_the_shared_breaker(
 async def test_my_lists_draws_with_one_read_and_fills_the_other_counts_after(
     member: Browser, stack: Stack
 ) -> None:
-    """0.7.46 audit SH-03: a first visit to My lists read every list one after another before
+    """0.7.46 audit SH-03: a first visit to the lists read every list one after another before
     drawing (40 s at 8 s Archidekt latency). It now reads the open tab only; the tab bar asks for
     the other counts once the page is there."""
     account_lists.forget_counts("user-1")
@@ -654,7 +652,7 @@ async def test_my_lists_draws_with_one_read_and_fills_the_other_counts_after(
     assert "Custom cards<span class='n'>" not in page.text  # not read yet
     got = (await member.http.get("/lists/api/counts")).json()
     assert got["ok"] is True and got["counts"]["templates"] == 2 and got["counts"]["custom"] == 1
-    assert "pins" not in got["counts"]  # the pins are Binder's Wants, not a tab
+    assert got["counts"]["pins"] == got["counts"]["wants"] == 1  # the Pinned cards tab, by both names
     again = await member.http.get("/lists/templates")
     assert "Custom cards<span class='n'>1</span>" in again.text and "data-counts" not in again.text
     js = (await member.http.get("/static/lists.js")).text

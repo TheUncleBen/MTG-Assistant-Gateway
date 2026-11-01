@@ -1319,6 +1319,9 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a{white-space:nowrap}
 .hubseg a:hover{background:var(--surface-2)}
 .hubseg a[aria-current=page]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+/* a part's count (Binder: Cards 18, Watchlist 3; mockup screen 8): a quiet grey pill */
+.hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;
+  border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
 @media (pointer:coarse){ .hubseg a{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%}
@@ -2437,8 +2440,9 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 # 600 px) list these; the rail adds Forum and Alerts (the bell) before More. Assistant is the
 # assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
 # the count of proposals waiting for the member. Binder is the member's cards, behind one switch too
-# (BINDER_PAGES): Cards (the Archidekt collection), Wants (the cards pinned on Archidekt) and
-# Watchlist (decision C8, 0.7.46).
+# (BINDER_PAGES): Cards (the Archidekt collection), Lists (the Archidekt lists that shape decks, the
+# pinned cards among them, and the watchlist's own lists) and Watchlist, the want list (decision C8
+# and mockup screen 8, 0.7.46).
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
@@ -2451,26 +2455,26 @@ ASSISTANT_PAGES = (
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
 )
-# Binder's switch (Cards, Wants, Watchlist); Watchlist only while watchlists are on (binder_pages)
+# Binder's switch (Cards, Lists, Watchlist); Watchlist only while watchlists are on (binder_pages)
 BINDER_PAGES = (
     ("/collection", "Cards", "collection"),
-    ("/collection/wants", "Wants", "bookmark"),
+    ("/collection/lists", "Lists", "list"),
     ("/watchlist", "Watchlist", "stats"),
 )
 NAV_PLACE = {
     "/history": "/proposals",
     "/reports": "/proposals",
+    "/collection/lists": "/collection",
     "/collection/wants": "/collection",
     "/watchlist": "/collection",
 }
-# The pages that light the picture (the Account place): the Account pages and the Archidekt lists
-# that live under Account (category templates, default categories, color tags, custom cards)
-ACCOUNT_PAGES = ("/account", "/account/details", "/lists")
+# The pages that light the picture (the Account place)
+ACCOUNT_PAGES = ("/account", "/account/details")
 # The rail's extra places between the four and More (the phone bar keeps the bell in the top bar
 # and Forum under More): (href, label, icon, class)
 RAIL_EXTRA = (("/forum", "Forum", "comment", "railonly"),)
 # More, in groups. Account, Guide and Admin live on the Account page your picture opens; the
-# Archidekt lists live under Account; Watchlist lives in Binder.
+# lists and the Watchlist live in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
     ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),

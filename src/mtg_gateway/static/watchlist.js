@@ -168,6 +168,86 @@
     return true;
   }
 
+  // -- the selection and the bulk bar ------------------------------------------------------------
+  // A tick on any row shows the bar (its count, Price alert…, Move to list…, Stop watching,
+  // Cancel); the rows' tick boxes and the boxes' fields belong to the one bulk form, so a press
+  // sends the selected cards with the box's values. Select ticks every card row on screen, or
+  // clears them all; a list head's tick box does the same for its own cards.
+  function boxes() { return Array.prototype.slice.call(document.querySelectorAll(".watch-page .w-t .chk input[name=watch_id]")); }
+  function ticked() { return boxes().filter(function (b) { return b.checked; }); }
+  function rowsOfList(head) {
+    var out = [], node = head.nextElementSibling;
+    while (node && !node.classList.contains("wgrp")) {
+      if (node.id && node.id.indexOf("wr-") === 0) out.push(node);
+      node = node.nextElementSibling;
+    }
+    return out;
+  }
+  function redraw() {
+    var n = ticked().length, bar = document.querySelector(".watch-page .ui-bar");
+    boxes().forEach(function (b) { var tr = b.closest(".tr"); if (tr) tr.classList.toggle("sel", b.checked); });
+    document.querySelectorAll(".watch-page .w-t .wgrp").forEach(function (head) {
+      var rows = rowsOfList(head), on = rows.filter(function (r) { return r.querySelector(".chk input").checked; }).length;
+      var all = head.querySelector(".w-grpsel");
+      if (all) { all.checked = rows.length > 0 && on === rows.length; all.indeterminate = on > 0 && on < rows.length; }
+    });
+    if (bar) {
+      bar.hidden = n === 0;
+      bar.querySelector(".count").textContent = n + " selected";
+    }
+    var sel = document.querySelector(".watch-page .w-select");
+    if (sel) sel.setAttribute("aria-pressed", n > 0 && n === boxes().length ? "true" : "false");
+    var stop = document.querySelector("#w-stop [data-stop-count]");
+    if (stop) stop.textContent = n === 1 ? "The selected card goes" : "The " + n + " selected cards go";
+    var word = document.querySelector("#w-stop p");
+    if (word) word.childNodes[1].textContent = (n === 1 ? " from your watchlist with its price history." : " from your watchlist with their price history.") + " Your Binder is not touched.";
+  }
+  function setAll(on, which) {
+    (which || boxes()).forEach(function (b) { b.checked = on; });
+    redraw();
+  }
+  // the page draws Select hidden: it needs this script
+  var selectBtn = document.querySelector(".watch-page .w-select");
+  if (selectBtn) selectBtn.hidden = false;
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!t || !t.closest || !t.closest(".watch-page .w-t")) return;
+    if (t.classList.contains("w-grpsel")) {
+      var head = t.closest(".wgrp");
+      setAll(t.checked, rowsOfList(head).map(function (r) { return r.querySelector(".chk input"); }));
+      return;
+    }
+    if (t.name === "watch_id") redraw();
+  });
+  // a list's Rename and Delete boxes, filled from the head they were opened for: its ⋮ is a
+  // script menu (static/menus.js, which keeps the menu's history entry and the box's apart);
+  // without scripts the head's own drop-down of links opens the page with the box drawn open
+  function openListBox(which, head) {
+    var Box = window.MtgBox, name = head ? head.getAttribute("data-list") : "";
+    var box = document.getElementById(which);
+    if (!box || !Box || !Box.openElement) return false;
+    box.querySelectorAll("[data-list-name]").forEach(function (i) { i.value = name; });
+    var word = box.querySelector("[data-list-word]"), input = box.querySelector("input[name=new_name]");
+    if (word) word.textContent = "“" + name + "”";
+    if (input) input.value = name;
+    Box.openElement(box, { returnFocus: head ? head.querySelector("summary") : null });
+    return true;
+  }
+  // one row's ⋮ › Move to list…: that row alone is selected, then the Move box opens
+  window.MtgWatchlist = {
+    selectOnly: function (tr) {
+      setAll(false);
+      var b = tr && tr.querySelector(".chk input[name=watch_id]");
+      if (b) { b.checked = true; redraw(); }
+    },
+    open: function (id, back) {
+      var Box = window.MtgBox;
+      var node = document.getElementById(id);
+      if (Box && Box.openElement && node) Box.openElement(node, { returnFocus: back });
+    },
+    openListBox: openListBox
+  };
+
   // -- Load more: the rows the list lacks, added in place ------------------------------------------
   var loading = false;
   function loadMore(link) {
@@ -176,7 +256,7 @@
     if (!table || !table.classList.contains("w-t") || typeof fetch !== "function") return false;
     if (loading) return true;
     var part = /decks/i.test(table.getAttribute("aria-label") || "") ? "decks" : "cards";
-    var shown = table.querySelectorAll(".tr:not(.th)").length;
+    var shown = table.querySelectorAll(".tr[id^='wr-']").length;
     var url = link.href.split("#")[0] + (link.href.indexOf("?") < 0 ? "?" : "&") +
       "part=" + part + "&from=" + shown;
     loading = true;
@@ -213,6 +293,17 @@
     if (more) { if (toggle(more)) e.preventDefault(); return; }
     var grow = e.target.closest(".watch-page .loadmore a[data-load-more]");
     if (grow) { if (loadMore(grow)) e.preventDefault(); return; }
+    var sel = e.target.closest(".watch-page .w-select");
+    if (sel) { setAll(sel.getAttribute("aria-pressed") !== "true"); return; }
+    var clear = e.target.closest(".watch-page .ui-bar .w-clear");
+    if (clear) { setAll(false); return; }
+    var bulk = e.target.closest(".watch-page .ui-bar a[data-box-open]");
+    if (bulk && ticked().length === 0) {
+      e.preventDefault();
+      var Menu = window.MtgMenu;
+      if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true });
+      return;
+    }
     var range = e.target.closest(".watch-page .seg button[data-range]");
     if (range) { setRange(range); return; }
     var name = e.target.closest(".watch-page a.wcard");

@@ -611,13 +611,13 @@ def lock_box_html(
         sentence = (
             f"None of this card's categories ({esc(', '.join(cats)) or 'none'}) is one of your category "
             "templates, so there is nothing to lock. Make a template first on "
-            "<a href='/lists/templates'>My lists</a> (under Account)."
+            "<a href='/lists/templates'>Category templates</a> (Binder › Lists)."
         )
     else:
         sentence = (
             f"From now on, when you add “<span data-lock-card>{esc(name)}</span>” to any deck, it goes into "
-            f"<b data-cats>{esc(', '.join(kept))}</b> (its categories in this deck). Saved to My lists › "
-            "Default categories."
+            f"<b data-cats>{esc(', '.join(kept))}</b> (its categories in this deck). Saved to "
+            "Binder › Lists › Default categories."
         )
     left_line = (
         f"<p class='muted small' data-left>Left out, not a template: {esc(', '.join(left))}.</p>"
@@ -1307,7 +1307,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 raise DeckError(
                     "invalid",
                     f"None of this card's categories ({', '.join(hit.categories) or 'none'}) is one of your "
-                    "category templates, so there is nothing to lock. Make a template first on My lists.",
+                    "category templates, so there is nothing to lock. Make a template first under "
+                    "Binder › Lists.",
                 )
             out = await account_lists.hand_change(
                 decks, sub, "default_categories", {"op": "set", "card": hit.name, "categories": kept}

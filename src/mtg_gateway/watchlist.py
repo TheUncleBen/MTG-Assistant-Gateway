@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import parse_qs
 
@@ -60,6 +61,7 @@ def watchlist_body(
     data = {
         "cards": cards,
         "decks": svc.deck_summaries(sub),
+        "lists": svc.lists(sub),
         "limits": svc.limits(),
         "checked_daily_at_utc": f"{state.settings.price_hour_utc:02d}:00",
     }
@@ -87,6 +89,7 @@ def watchlist_body(
         card_history=lambda views: svc.card_histories(views, 30),
         deck_history=lambda views: svc.deck_histories(sub, views, 30),
         defaults=prefs.choices(state.db, sub, prefs.WATCH_ADD),
+        alert_defaults=prefs.alert_defaults(state.db, sub),
     )
 
 
@@ -145,13 +148,50 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             pass
         prefs.save(state.db, sub, prefs.WATCH_ADD, choice)
 
+    def alert_values(data: dict[str, str]) -> dict[str, str | None]:
+        """The five alert boxes of a form as prices.set_alerts takes them (drop, rise, pct,
+        above, below; an empty box is None)."""
+        return {
+            k: ((data.get(f"alert_{k}") or "").strip() or None)
+            for k in ("pct", "above", "below", "drop", "rise")
+        }
+
+    def save_defaults(sub: str, data: dict[str, str]) -> None:
+        """The member's price alert defaults (prefs.WATCH_ALERTS), checked as a card's alerts are."""
+        values = prices._alerts(*(alert_values(data)[k] for k in prices.ALERT_KINDS))
+        kept = {k: v for k, v in zip(prices.ALERT_KINDS, values, strict=True) if v is not None}
+        if not prefs.save(state.db, sub, prefs.WATCH_ALERTS, kept):
+            raise DeckError("invalid", "Those defaults could not be saved.")
+
+    def list_of(data: dict[str, str]) -> str | None:
+        """The list a form names: a new list's name over the drop-down's choice; None when the
+        form has neither (a watched card stays where it is)."""
+        if "new_list" not in data and "list" not in data:
+            return None
+        return prices.clean_list_name(data.get("new_list") or data.get("list") or "")
+
+    def back_to(data: dict[str, str], done: str, renamed: tuple[str, str] | None = None) -> RedirectResponse:
+        """Back to the list the member was looking at (``back``: a Watchlist address, or the Lists
+        hub's) with the notice; ``renamed`` (old, new) follows a list just renamed."""
+        back = (data.get("back") or "").strip()[:300]
+        if back.startswith("/collection/lists"):
+            return RedirectResponse(f"/collection/lists?ok={done}", status_code=303)
+        q = Query()
+        if back.startswith("/watchlist?"):
+            q = Query.parse({k: v[0] for k, v in parse_qs(back.split("?", 1)[1]).items()})
+        if renamed and q.list == renamed[0]:
+            q = replace(q, list=renamed[1])
+        href = q.href(upto=0)
+        return RedirectResponse(href + ("&" if "?" in href else "?") + f"ok={done}", status_code=303)
+
     @server.custom_route("/watchlist", methods=["POST"], include_in_schema=False)
     async def watchlist_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/watchlist")
-        raw = await read_limited(request, MAX_FORM)
-        data = {k: v[0] for k, v in parse_qs((raw or b"").decode("utf-8", "replace")).items()}
+        raw = await read_limited(request, MAX_FORM * 8)  # the bulk form carries up to 5,000 ids
+        fields = parse_qs((raw or b"").decode("utf-8", "replace"))
+        data = {k: v[0] for k, v in fields.items()}
         csrf = _csrf(s, sid) or ""
         if raw is None or not csrf_form_ok(s, sid, data):
             return page(
@@ -162,6 +202,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             )
         action = data.get("action", "")
         svc = state.prices
+        renamed: tuple[str, str] | None = None
         try:
             if action == "add_card":
                 pct = (data.get("alert_pct") or "").strip()
@@ -172,18 +213,19 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                     collector_number=data.get("cn") or data.get("collector_number"),
                     finish=data.get("finish", "nonfoil"),
                     alert_pct=pct or None,
+                    defaults=prefs.alert_defaults(state.db, sub),
+                    list_name=list_of(data),
                 )
                 if data.get("remember") == "1":
                     remember_watch(sub, data.get("finish", "nonfoil"), pct)
                 done = "card_added" if out.get("created") else "card_updated"
             elif action == "alerts":
+                v = alert_values(data)
                 svc.set_alerts(
-                    sub,
-                    data.get("watch_id", ""),
-                    data.get("alert_pct"),
-                    data.get("alert_above"),
-                    data.get("alert_below"),
+                    sub, data.get("watch_id", ""), v["pct"], v["above"], v["below"], v["drop"], v["rise"]
                 )
+                if (name := list_of(data)) is not None:
+                    svc.move_to_list(sub, [data.get("watch_id", "")], name)
                 done = "card_updated"
             elif action == "remove_card":
                 svc.unwatch_card(sub, data.get("watch_id", ""))
@@ -194,12 +236,40 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             elif action == "remove_deck":
                 svc.unwatch_deck(sub, data.get("deck_id", ""))
                 done = "deck_removed"
+            elif action == "defaults":
+                save_defaults(sub, data)
+                done = "defaults_saved"
+            elif action == "list_new":
+                svc.create_list(sub, data.get("name", ""))
+                done = "list_created"
+            elif action == "list_rename":
+                old = prices.clean_list_name(data.get("name", ""))
+                renamed = (old, svc.rename_list(sub, old, data.get("new_name", "")))
+                done = "list_renamed"
+            elif action == "list_delete":
+                svc.delete_list(sub, prices.clean_list_name(data.get("name", "")))
+                done = "list_deleted"
+            elif action == "bulk":
+                # the bulk bar: the ticked rows (watch_id, many) and what to do with them
+                ids = fields.get("watch_id") or []
+                do = data.get("do", "")
+                if do == "alerts":
+                    svc.set_alerts_many(sub, ids, **alert_values(data))
+                    done = "alerts_set"
+                elif do == "move":
+                    svc.move_to_list(sub, ids, list_of(data) or "")
+                    done = "moved"
+                elif do == "remove":
+                    svc.unwatch_many(sub, ids)
+                    done = "removed"
+                else:
+                    raise DeckError("invalid", "Choose what to do with the selected cards.")
             else:
                 raise DeckError("invalid", "Unknown action.")
         except DeckError as exc:
             status = 404 if exc.kind == "not_found" else 429 if exc.kind == "rate_limited" else 400
             return page(watchlist_body(state, sub, csrf, err=str(exc)), sub=sub, sid=sid, status=status)
-        return RedirectResponse(f"/watchlist?ok={done}", status_code=303)
+        return back_to(data, done, renamed)
 
     @server.custom_route("/watchlist/api/names", methods=["GET"], include_in_schema=False)
     async def names_api(request: Request) -> Response:
@@ -278,9 +348,10 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                 # a Watch that names no finish (a card menu's) takes the remembered one
                 finish=str(body.get("finish") or kept.get("finish") or "nonfoil"),
                 # a Watch button on a card already watched must not clear its alerts; a new
-                # watch gets the remembered alert
+                # watch gets the member's default price alert
                 keep_alerts=True,
                 default_pct=kept.get("alert_pct"),
+                defaults=prefs.alert_defaults(state.db, sub),
             )
         except DeckError as exc:
             status = 404 if exc.kind == "not_found" else 429 if exc.kind == "rate_limited" else 400
@@ -352,9 +423,11 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
             "alone it follows the printing Scryfall gives for that name; set_code and collector_number "
             "follow one printing; finish is nonfoil, foil or etched. Optional alerts: alert_pct (a move of "
             "more than this percent from one day to the next), alert_above and alert_below (a price "
-            "crossed, in dollars, or euros when the card has no dollar price). The gateway checks prices "
-            "once a day; alerts reach the member through their push notifications. Changes only the member's "
-            "gateway data, never Archidekt. Returns today's price when Scryfall answered, with "
+            "crossed, in dollars, or euros when the card has no dollar price), alert_drop (a drop of this "
+            "many percent below the price when added). A new watch that names no alert gets the member's "
+            "defaults. list_name puts the card in one of the member's watchlist lists. The gateway checks "
+            "prices once a day; alerts reach the member through their push notifications. Changes only the "
+            "member's gateway data, never Archidekt. Returns today's price when Scryfall answered, with "
             "printing_now, the printing that price is for."
         ),
         annotations={
@@ -376,10 +449,21 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         alert_below: Annotated[
             float | None, Field(description="Alert when the price falls below this.")
         ] = None,
+        alert_drop: Annotated[
+            float | None,
+            Field(description="Alert when the price drops this many percent below the price when added."),
+        ] = None,
+        list_name: Annotated[
+            str | None,
+            Field(
+                description="The watchlist list (group) to put the card in; made when new. Empty: no list."
+            ),
+        ] = None,
     ) -> dict[str, object]:
+        sub = _sub()
         try:
             out = await state.prices.watch_card(
-                _sub(),
+                sub,
                 name,
                 set_code=set_code,
                 collector_number=collector_number,
@@ -387,6 +471,9 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
                 alert_pct=alert_pct,
                 alert_above=alert_above,
                 alert_below=alert_below,
+                alert_drop=alert_drop,
+                defaults=prefs.alert_defaults(state.db, sub),
+                list_name=list_name,
             )
         except DeckError as exc:
             return fail(exc)
