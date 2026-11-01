@@ -1,8 +1,10 @@
-"""On a phone one history entry stands for "a menu is open" (static/feedback.js), so Back closes
-the menu instead of leaving the page. Opening a second menu straight from the first used to
-leave the second without an entry, and Back left the page. The entry has one owner now: the first
-menu takes it, the last one closing gives it back, and a menu opened while that back() is still
-landing takes it again. Real taps in a touch context at 390 px. Skipped without Chromium."""
+"""On a phone one history entry stands for "a menu is open" (static/feedback.js for the drop-downs,
+static/cardmenu.js for the shared menu), so Back closes the menu instead of leaving the page.
+Opening a second menu straight from the first used to leave the second without an entry, and Back
+left the page. The entry has one owner now: the first menu takes it, the last one closing gives
+it back, and a menu opened while that back() is still landing takes it again, whichever of the
+two scripts owns each menu (the deck page's category ⋮ and the tab bar's More here). Real taps
+in a touch context at 390 px. Skipped without Chromium."""
 
 from __future__ import annotations
 
@@ -28,24 +30,21 @@ def server(tmp_path: Path):
         s.stop()
 
 
-OPEN = "() => [...document.querySelectorAll('details.dd[open]')].map(d => d.querySelector(':scope > summary').getAttribute('aria-label') || d.querySelector(':scope > summary').innerText.trim())"  # noqa: E501
-STATE = "() => ({ menu: !!(history.state && history.state.menu), open: document.querySelectorAll('details.dd[open]').length })"  # noqa: E501
+# what is open: each open drop-down by its button's words, and the shared menu by its head
+OPEN = "() => [...document.querySelectorAll('details.dd[open]')].map(d => d.querySelector(':scope > summary').getAttribute('aria-label') || d.querySelector(':scope > summary').innerText.trim()).concat([...document.querySelectorAll('.ctxmenu[role=menu]')].map(m => m.getAttribute('aria-label')))"  # noqa: E501
+# the entry (either script's) and how many menus are open
+STATE = "() => ({ menu: !!(history.state && (history.state.menu || history.state.mtgmenu)), open: document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length })"  # noqa: E501
 
 
 def _two_menus(page):
-    """Two dropdown menus with a visible button on the page (the deck page's first category menu,
-    scrolled into the window, and the tab bar's More at phone width), as locators of their
-    summaries."""
-    summaries = page.locator("details.dd:not(.more) > summary")
-    found = []
-    for i in range(summaries.count()):
-        s = summaries.nth(i)
-        if s.is_visible() and (s.bounding_box() or {}).get("width", 0) > 0:
-            s.scroll_into_view_if_needed()  # a tap lands only inside the window
-            found.append(s)
-            break
-    found.append(page.locator(".tabbar details.more > summary"))
-    assert len(found) == 2 and found[1].is_visible(), "the page needs two visible menus"
+    """Two menus with a visible button on the page (the deck page's first category ⋮, the shared
+    menu, scrolled into the window, and the tab bar's More drop-down at phone width), as locators
+    of their buttons."""
+    a = page.locator(".stackhead .kebab").first
+    assert a.count() == 1 and a.is_visible(), "the page needs the category menu"
+    a.scroll_into_view_if_needed()  # a tap lands only inside the window
+    found = [a, page.locator(".tabbar details.more > summary")]
+    assert found[1].is_visible(), "the page needs two visible menus"
     return found
 
 
@@ -75,52 +74,44 @@ def _open(server: Server):
     page.on("pageerror", lambda e: errors.append(str(e)))
     # Account details first, so that one Back too many has somewhere to go, and the test can tell
     # "went back once" (still on the deck) from "went back twice" (on Account details) with a real
-    # navigation. The deck page: its category menus are two visible menus on a phone (the account
-    # menu left the top bar in navigation round 2)
+    # navigation. The deck page: its category ⋮ (the shared menu since 0.7.46) and the tab bar's
+    # More are two visible menus on a phone (the account menu left the top bar in navigation
+    # round 2)
     page.goto(f"{server.base}/account/details", wait_until="networkidle")
     page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+    page.locator(".stackhead .kebab").first.wait_for(timeout=5000)
     return p, browser, page, errors
 
 
-# Closes the open menu with its own button and opens the other in the same script run, before the
-# close's history.back() can land (a popstate is a later task): the real race.
-RACE = """
-([ai, bi]) => {
-  const s = [...document.querySelectorAll('details.dd > summary')]
-    .filter(x => x.getBoundingClientRect().width > 0);
-  s[ai].click();
-  s[bi].click();
-  return document.querySelectorAll('details.dd[open]').length;
-}
-"""
+# The two buttons: the category ⋮ (0) and More (1)
+BUTTONS = (
+    "[document.querySelector('.stackhead .kebab'), document.querySelector('.tabbar details.more > summary')]"
+)
+# Closes the open shared menu (as a press outside does) and opens More in the same script run,
+# before the close's history.back() can land (a popstate is a later task): the real race.
+RACE = (
+    "([ai, bi]) => { const s = " + BUTTONS + "; window.MtgMenu.close(false); s[bi].click();"
+    " return document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length; }"
+)
 # Back and another menu's button in the same instant, with a menu open.
-BACK_AND_OPEN = """
-(bi) => {
-  const s = [...document.querySelectorAll('details.dd > summary')]
-    .filter(x => x.getBoundingClientRect().width > 0);
-  history.back();
-  s[bi].click();
-}
-"""
+BACK_AND_OPEN = "(bi) => { const s = " + BUTTONS + "; history.back(); s[bi].click(); }"
 
 
 def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server) -> None:
-    """Open menu A, tap menu B's button; B opens with the history entry, and Back
-    closes B and stays on the page."""
+    """Open menu A, close it with a tap outside and tap menu B's button at once; B opens with the
+    history entry, and Back closes B and stays on the page."""
     p, browser, page, errors = _open(server)
     try:
         url = page.url
         a, b = _two_menus(page)
         _tap(page, a)
         assert page.evaluate(STATE) == {"menu": True, "open": 1}
-        # the account menu ends above the tab bar, so B's button is still there to tap
-        assert (
-            page.evaluate(
-                "() => document.querySelector('details.dd[open] .menu').getBoundingClientRect().bottom"
-            )
-            <= b.bounding_box()["y"]
-        )
-        _tap(page, b)
+        # the category menu is a sheet over the page and the tab bar: a tap above it (on its
+        # scrim) closes it, and B's button, there again, is tapped at once, before A's back() lands
+        assert page.evaluate("() => document.querySelector('.ctxmenu').getBoundingClientRect().top") > 160
+        page.touchscreen.tap(195, 120)
+        box = b.bounding_box()
+        page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         page.wait_for_timeout(200)  # A's back() lands and B takes the entry again
         assert page.evaluate(STATE) == {"menu": True, "open": 1}, page.evaluate(OPEN)
         page.go_back(wait_until="commit")
@@ -155,7 +146,7 @@ def test_closing_one_menu_and_opening_another_quickly_goes_back_once(server: Ser
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
-        assert page.url.endswith("/account/details"), "a second Back should leave the deck list, not stay"
+        assert page.url.endswith("/account/details"), "a second Back should leave the deck, not stay"
         assert errors == []
     finally:
         browser.close()
@@ -172,11 +163,11 @@ def _settled(page) -> None:
         """async () => {
           for (;;) {
             const before = [window.__pops, history.length, JSON.stringify(history.state),
-              document.querySelectorAll('details.dd[open]').length].join();
+              document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length].join();
             await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
             await new Promise(r => setTimeout(r, 0));
             const after = [window.__pops, history.length, JSON.stringify(history.state),
-              document.querySelectorAll('details.dd[open]').length].join();
+              document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length].join();
             if (before === after) return;
           }
         }"""
@@ -201,10 +192,10 @@ def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(serv
         length = page.evaluate("() => history.length")
         a, _b = _two_menus(page)
         _tap(page, a)
-        # A has taken its entry (the toggle event that pushes it is a task after the tap)
+        # A has taken its entry
         page.wait_for_function(
-            "() => !!(history.state && history.state.menu)"
-            " && document.querySelectorAll('details.dd[open]').length === 1"
+            "() => !!(history.state && (history.state.menu || history.state.mtgmenu))"
+            " && document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length === 1"
         )
         assert page.evaluate("() => history.length") == length + 1
         page.evaluate(POPS)
@@ -221,7 +212,7 @@ def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(serv
             _settled(page)
             assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
-        assert page.url.endswith("/account/details"), "one more Back leaves the deck list exactly once"
+        assert page.url.endswith("/account/details"), "one more Back leaves the deck exactly once"
         assert errors == []
     finally:
         browser.close()

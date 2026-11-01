@@ -25,6 +25,10 @@ JSON = {"Accept": "application/json"}
 
 async def _page(b, path: str = DECK) -> tuple[str, str]:  # noqa: ANN001
     page = (await b.http.get(path, headers=NAV)).text
+    late = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", page)
+    if late:  # the first read took over the late frame's mark (a loaded machine): the finished page
+        assert (await b.http.get(late.group(1))).json()["ready"] is True
+        page = (await b.http.get(path, headers=NAV)).text
     return page, re.search(r"name='csrf' value='([0-9a-f]+)'", page).group(1)
 
 

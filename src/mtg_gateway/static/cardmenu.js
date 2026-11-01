@@ -391,6 +391,16 @@
 
   // -- the menu ----------------------------------------------------------------------------------
   var menu = null, menuBack = null, scrim = null, menuPushed = false, ignorePop = false, menuScroll = [0, 0];
+  // the menu's own back() landed in this task (its popstate handler ran, before the drop-downs'
+  // in static/feedback.js): a drop-down open meanwhile takes the entry again, never a second one
+  var justLanded = false, wantsPush = false;
+  function dropdownsBackPending() {
+    var D = window.MtgDropdowns;
+    return !!(D && D.backPending && D.backPending());
+  }
+  function pushEntry() {
+    try { history.pushState({ mtgmenu: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; }
+  }
   // until when the scrim ignores a click: the lift of the finger whose hold opened the sheet lands
   // as a click wherever the finger was, and under a phone's bottom sheet that is the scrim, which
   // would close the menu the moment it opened (bind sets it on the lift)
@@ -400,6 +410,7 @@
     menu.remove();
     if (scrim) scrim.remove();
     menu = null; scrim = null;
+    wantsPush = false;
     if (menuPushed && !fromHistory) {
       // going back over the menu's entry fires popstate later; that one is ours, not a Back press
       menuPushed = false;
@@ -495,7 +506,8 @@
     menuScroll = [window.scrollX, window.scrollY];
     var first = m.querySelector("[role=menuitem]:not([disabled])");
     if (first) first.focus({ preventScroll: true });
-    if (backCloses()) { try { history.pushState({ mtgmenu: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; } }
+    // a drop-down's own Back still settling: the menu's entry goes on once it has landed
+    if (backCloses()) { if (dropdownsBackPending()) wantsPush = true; else pushEntry(); }
     return m;
   }
   document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target) && e.target !== scrim) close(false); }, true);
@@ -525,7 +537,18 @@
     }, 1500);
   }
   window.addEventListener("popstate", function () {
-    if (ignorePop) { ignorePop = false; flushAfterPop(); return; }
+    if (ignorePop) {
+      ignorePop = false;
+      justLanded = true;
+      setTimeout(function () { justLanded = false; }, 0);
+      flushAfterPop();
+      return;
+    }
+    if (dropdownsBackPending()) {
+      // a drop-down's back() landed: a menu opened meanwhile takes the entry now
+      if (menu && wantsPush) { wantsPush = false; pushEntry(); }
+      return;
+    }
     if (menu && menuPushed) { menuPushed = false; close(true, true); }
   });
 
@@ -644,8 +667,11 @@
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
     toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
     copyText: copyText, copyAndSay: copyAndSay, collect: collect, pin: pin, enabled: enabled, phone: phone, norm: norm,
-    // true while the menu's own history.back() has not landed yet (static/box.js asks)
+    // true while the menu's own history.back() has not landed yet (static/box.js and
+    // static/feedback.js ask), and through the task in which it lands (feedback.js's popstate
+    // handler runs after this one and tells that popstate from a Back press by it)
     backPending: function () { return ignorePop; },
+    backLanding: function () { return justLanded; },
     // a page change a menu item starts (a form sent, an address opened) goes through this
     whenClosed: whenClosed
   };
