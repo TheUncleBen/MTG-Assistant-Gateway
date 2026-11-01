@@ -542,14 +542,17 @@ def deck_row(v: dict[str, Any], csrf_in: str, today: str, *, query: Query) -> st
 
 # -- the list's chips, filters and order -------------------------------------------------------------
 def in_chip(v: dict[str, Any], chip: str) -> bool:
-    seven = v.get("change_7d_pct")
-    return {
-        "": True,
-        "alert": bool(v.get("alerts")),
-        "up": seven is not None and seven > 0,
-        "down": seven is not None and seven < 0,
-        "decks": False,
-    }[chip]
+    # called for every card and chip on each view (25,000 times at the cap): no dict per call
+    if chip == "":
+        return True
+    if chip == "alert":
+        return bool(v.get("alerts"))
+    if chip == "up" or chip == "down":
+        seven = v.get("change_7d_pct")
+        return seven is not None and (seven > 0 if chip == "up" else seven < 0)
+    if chip == "decks":
+        return False
+    raise KeyError(chip)
 
 
 def in_list(v: dict[str, Any], which: str) -> bool:
