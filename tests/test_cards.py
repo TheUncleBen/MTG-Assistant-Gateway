@@ -117,10 +117,10 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
         assert res[uri]["mimeType"] == "text/html;profile=mcp-app"
         assert meta.get("prefersBorder") is True
     csp = {uri: res[uri]["_meta"]["ui"].get("csp") or {} for uri in REGISTERED}
-    # Pictures from Scryfall; the deck and printings cards fetch their data from the gateway; the
-    # deck card reads rules text from Scryfall's API; the account card loads nothing.
+    # Pictures from Scryfall; the deck and printings cards fetch their data from the gateway and
+    # read rules text from Scryfall's API; the account card loads nothing.
     assert "https://cards.scryfall.io" in csp[PRINTINGS_CARD_URI]["resourceDomains"]
-    assert csp[PRINTINGS_CARD_URI]["connectDomains"] == ["https://mtg.test"]
+    assert csp[PRINTINGS_CARD_URI]["connectDomains"] == ["https://mtg.test", "https://api.scryfall.com"]
     assert csp[DECK_CARD_URI]["connectDomains"] == ["https://mtg.test", "https://api.scryfall.com"]
     assert "connectDomains" not in csp[PICKER_CARD_URI] or not csp[PICKER_CARD_URI]["connectDomains"]
     assert not csp[ACCOUNT_CARD_URI].get("resourceDomains") and not csp[ACCOUNT_CARD_URI].get(
