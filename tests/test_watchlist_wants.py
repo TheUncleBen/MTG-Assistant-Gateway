@@ -38,12 +38,48 @@ def _sol(stack: Stack) -> dict:
 def test_the_schema_grows_lists_and_the_price_when_added(tmp_path: Path) -> None:
     d = Database(tmp_path / "w.sqlite")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 20
+        assert d.schema_version == db_module.SCHEMA_VERSION == 21
         cols = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_cards)")}
         assert {"list_name", "added_price", "added_currency", "alert_drop_pct", "alert_rise_pct"} <= cols
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
         assert lists == {"sub", "name", "created_at"}
         assert ("watch_lists", "sub") in db_module.MEMBER_TABLES  # delete my data removes them
+    finally:
+        d.close()
+
+
+def test_schema_21_adds_the_lists_to_a_schema_20_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Step 21 is the want-list step: a database at schema 20 (assistant_modes) has no lists yet,
+    and opening it adds them and keeps the card it watched, in no list."""
+    path = tmp_path / "w20.sqlite"
+    monkeypatch.setattr(db_module, "MIGRATIONS", db_module.MIGRATIONS[:20])
+    old = Database(path)
+    try:
+        assert old.schema_version == 20
+        names = {r[0] for r in old._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert "assistant_modes" in names and "watch_lists" not in names
+        with old.tx() as c:
+            c.execute(
+                "INSERT INTO users (sub, groups_json, first_login_at, last_login_at) VALUES (?, '[]', 1, 1)",
+                (SUB,),
+            )
+            c.execute(
+                "INSERT INTO watch_cards (id, sub, name, set_code, collector_number, finish, created_at) "
+                "VALUES ('w1', ?, 'Sol Ring', 'frc', '21', 'nonfoil', 1)",
+                (SUB,),
+            )
+    finally:
+        old.close()
+    monkeypatch.undo()
+    d = Database(path, upgrade_dir=tmp_path / "before-upgrade")
+    try:
+        assert d.schema_version == db_module.SCHEMA_VERSION == 21
+        lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
+        assert lists == {"sub", "name", "created_at"}
+        row = d._conn.execute("SELECT list_name, added_price FROM watch_cards WHERE id = 'w1'").fetchone()
+        assert tuple(row) == ("", None)
     finally:
         d.close()
 
