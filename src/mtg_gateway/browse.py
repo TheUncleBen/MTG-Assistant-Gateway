@@ -585,6 +585,33 @@ def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str,
 
 
 # -- a member's profile (UI overhaul 2026-10-21, mockup 22-user-profile) -------------------------
+def profile_empty_html(shown: str, known: bool | None) -> str:
+    """A profile with no public decks: what that means, in place of an empty list. ``known``:
+    the person is on Archidekt (True), Archidekt has no such user (False), or their Archidekt
+    profile could not be read just now (None: Follow is not offered, the page says why)."""
+    name = _esc(shown)
+    if known is False:
+        head, words = (
+            "No such user",
+            f"No Archidekt user called “{name}” was found. Check the spelling.",
+        )
+    elif known is None:
+        head, words = (
+            "No public decks yet",
+            f"“{name}” has no public decks. The gateway couldn't read their Archidekt profile just "
+            "now, so Follow isn't offered here: try again later, or open their Archidekt profile.",
+        )
+    else:
+        head, words = (
+            "No public decks yet",
+            f"“{name}” has no public decks on Archidekt yet. When they make one public, it shows here.",
+        )
+    return (
+        f"<section class='panel pempty' aria-labelledby='pempty-h'><h2 id='pempty-h'>{head}</h2>"
+        f"<p class='muted'>{words}</p></section>"
+    )
+
+
 def profile_bar_html(query: dict[str, Any], found: dict[str, Any] | None, *, view: str) -> str:
     """Deck search's results bar alone: the count, Sort by with its direction, Grid or List and
     the card size. The form sends itself when a drop-down changes (static/searchpanel.js)."""
@@ -884,7 +911,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 return busy
             return page(
                 username,
-                profile_head_html(username, None, sub) + problem(exc),
+                profile_head_html(username, None, sub, known=None, has_decks=False) + problem(exc),
                 sub=sub,
                 sid=sid,
                 current="/search",
@@ -894,11 +921,24 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
         rows = found["decks"]
         shown = rows[0]["owner"] if rows else username
+        owner_id = rows[0].get("owner_id") if rows else None
+        known: bool | None = True
+        filtered = any(asked.get(k) for k in ("name", "commander", "colors")) or (
+            asked.get("deck_format") is not None or int(asked.get("page") or 1) > 1
+        )
+        if not rows and not filtered:
+            # no public decks: the person is looked up on their Archidekt profile page, so they
+            # can still be followed (and a name nobody has says so)
+            known, shown, owner_id = await _person(sub, username)
         resp = page(
             shown,
-            profile_head_html(shown, rows[0].get("owner_id") if rows else None, sub)
-            + profile_bar_html(query, found, view=view)
-            + search_results_html(found, query, view=view, empty_text="No public decks yet."),
+            profile_head_html(shown, owner_id, sub, known=known, has_decks=bool(rows) or filtered)
+            + (
+                profile_bar_html(query, found, view=view)
+                + search_results_html(found, query, view=view, empty_text="No public decks yet.")
+                if rows or filtered
+                else profile_empty_html(shown, known)
+            ),
             sub=sub,
             sid=sid,
             social=True,
@@ -906,7 +946,24 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         )
         return remembered(resp, sub, view, remember)
 
-    def profile_head_html(shown: str, owner_id: Any, sub: str) -> str:
+    async def _person(sub: str, username: str) -> tuple[bool | None, str, Any]:
+        """(known, name as Archidekt spells it, user id) of someone with no public decks, from
+        their Archidekt profile page (DeckService.user_profile): known False when Archidekt has
+        no such user, None when the page could not be read (the head then says nothing either
+        way). Kept briefly per member, as the deck listing is."""
+        try:
+            found = await decks.short_reads.get(
+                sub, ("person", username.casefold()), lambda: decks.user_profile(sub, username)
+            )
+        except DeckError:
+            return None, username, None
+        if not found or not str(found.get("id") or "").isdigit():
+            return False, username, None
+        return True, str(found.get("username") or username), found["id"]
+
+    def profile_head_html(
+        shown: str, owner_id: Any, sub: str, *, known: bool | None = True, has_decks: bool = True
+    ) -> str:
         """One header: the avatar, the name as the page title with the line under it, then Follow
         (44 px; disabled with the reason when writes are off) and the Archidekt profile link."""
         link = state.db.get_link(sub) or {}
@@ -928,7 +985,13 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             if follow and not writes
             else ""
         )
-        line = "Public decks on Archidekt" if owner_id else "No public decks, or no such user"
+        line = (
+            "No such user on Archidekt"
+            if known is False
+            else "Public decks on Archidekt"
+            if has_decks
+            else "Archidekt profile"
+        )
         return (
             f"<section class='profile'>{avatar_html(shown, 'xl')}<div class='who'>"
             f"<h1 class='uname'>{_esc(shown)}</h1><p class='sub'>{line}</p></div>"

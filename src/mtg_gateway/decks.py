@@ -1063,7 +1063,7 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
 REVIEW_PAGE = "review_page"
 # Account actions applied on their own review page only: never from the card in the chat, never
 # in Apply all (deleting a deck, clearing the whole binder)
-REVIEW_PAGE_ONLY = ("delete_deck", "clear_collection")
+REVIEW_PAGE_ONLY = ("delete_deck", "clear_collection", "purge_removed")
 # Who rejected a proposal (DeckService.reject records it; describe() shows it as closed_by).
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 # The reason the member typed when rejecting on the card, kept with the rejection (at most this long)
@@ -10279,10 +10279,13 @@ class DeckService:
         if target.get("backup"):
             raise _no_such_folder(info, target["name"])
         if any(f.get("backup") for f in self._inside(info, folder["id"])):
+            from .backup_place import in_the_way
+
             raise DeckError(
                 "backup_inside",
                 f"The gateway's backup folder is inside “{folder['name']}”, so it can't be moved. Move "
-                f"the backup folder out of “{folder['name']}” on Archidekt first.",
+                "the backup folder to your top level first.",
+                backup_folder_id=in_the_way(self, sub, info, folder["id"]),
             )
         self._not_being_deleted(sub, target_id)
         self._not_being_deleted(sub, folder["id"], moving=True)
@@ -10354,11 +10357,13 @@ class DeckService:
                 "deleted here.",
             )
         if any(f.get("backup") or f["id"] in recorded for f in below):
+            from .backup_place import in_the_way
+
             raise DeckError(
                 "backup_inside",
                 f"The gateway's backup folder is inside “{folder['name']}”, and deleting it would delete "
-                "the backup copies too. Move the backup folder out of "
-                f"“{folder['name']}” on Archidekt first.",
+                "the backup copies too. Move the backup folder to your top level first.",
+                backup_folder_id=in_the_way(self, sub, info, folder["id"]),
             )
         decks: list[dict[str, Any]] = []
         packages: list[dict[str, Any]] = []
@@ -12365,6 +12370,8 @@ def applied_text(
             "Your binder is cleared on Archidekt. A copy of it from just before is kept under History, "
             "where Restore to my binder puts it back."
         )
+    if action == "purge_removed":
+        return "The removed card's row is deleted on Archidekt."
     if action == "collaborator_add":
         return "They can edit your deck on Archidekt now."
     if action == "collaborator_remove":

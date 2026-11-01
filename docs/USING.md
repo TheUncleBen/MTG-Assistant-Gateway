@@ -84,8 +84,13 @@ and folders that is and asks you to type the folder's name. The gateway first
 makes a snapshot of every deck (no copy is made on Archidekt, and a snapshot
 can't be restored onto a deleted deck) and stops if any of them fails; card
 packages get no snapshot or copy.
-The backup folder can't be moved or deleted, and a folder holding it can't be
-moved or deleted. The assistant can't move or delete folders.
+The backup folder doesn't show in My decks and can't be deleted here. A
+folder holding it can't be moved or deleted until the backup folder is out of
+it: that box offers **Move the backup folder to your top level**, then asks
+again. **Account details › Backup folder** shows where the backup folder is,
+moves it to your top level, or renames it (the copies already made stay in
+the renamed folder, which then shows in My decks, and the next copy goes into
+a new backup folder). The assistant can't move or delete folders.
 
 One deck:
 
@@ -399,7 +404,8 @@ on its own.
 Every deck page has Archidekt's own social buttons: **Like** (with the
 deck's score), **Bookmark**, **Follow** its owner, and a **Comments** panel
 that shows the deck's thread and lets you reply or add a comment, and edit
-or delete your own comments. A user page has the Follow button too. Each one asks you to confirm first, then
+or delete your own comments. A user page has the Follow button too, also for
+someone with no public decks yet. Each one asks you to confirm first, then
 goes to Archidekt under your Archidekt name, exactly as if you had pressed
 it on archidekt.com. Your assistant can suggest a like, bookmark, follow or
 comment, but it never sends one: each waits for your own press, in every
@@ -415,8 +421,9 @@ removal or a change to the commander zone asks you to confirm, and a restore
 from History opens its review first. An **assistant's** edit, new deck, clone,
 settings change, restore or binder change is first saved as a
 **proposal**: the exact list of what would change. Apply it on the card
-in the chat or on the review page (deleting a deck, and any edit of a
-description or comment that has formatting: on the review page only), or
+in the chat or on the review page (deleting a deck, clearing your binder,
+removing a removed card's row, and any edit of a description or comment that
+has formatting: on the review page only), or
 pick an approval mode for each assistant under Account › Account details › **Assistants** (Manual, shown as "Ask me every
 time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or binder edits and copies of a deck; Full auto, shown as "Apply changes without asking") and the
 assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
@@ -454,6 +461,11 @@ Claude on the web, desktop and phone counts as one assistant, and so does ChatGP
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
+  A deck's own History links to **Archidekt's change log**: Archidekt's own
+  record of changes to the deck, as Archidekt keeps it, and the rows it keeps
+  of cards taken out of the deck. **Remove for good…** deletes one of those
+  rows on Archidekt; it has no undo, so it is a proposal only you approve, on
+  its review page, after a confirm box.
 - **Reports** (Assistant › Reports) list your stored deck reports, newest first (the
   gateway keeps the newest 200), with what Forge has going for you now. Each holds
   the deck's statistics, a legality check, and the solo test, the Forge games

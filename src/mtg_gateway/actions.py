@@ -52,11 +52,17 @@ LABELS = {
     "contest_withdraw": "Withdraw contest entry",
     # 0.7.46 (Archidekt parity release 3)
     "clear_collection": "Clear binder",
+    # 0.7.46: a removed card's row Archidekt keeps, deleted for good (archidekt_log.py)
+    "purge_removed": "Remove a removed card for good",
 }
 ACTIONS = frozenset(LABELS)
 # never applied by an assistant on its own; applied on their review page only (not the card)
-DESTRUCTIVE = frozenset({"delete_deck", "clear_collection"})
-CANNOT_UNDO = frozenset({"delete_deck", "comment_delete", "clear_collection"})
+DESTRUCTIVE = frozenset({"delete_deck", "clear_collection", "purge_removed"})
+CANNOT_UNDO = frozenset({"delete_deck", "comment_delete", "clear_collection", "purge_removed"})
+PURGE_NOTE = (
+    "Archidekt keeps a row for each card taken out of a deck. This deletes that row on Archidekt. "
+    "Archidekt has no undo, and the gateway's snapshots don't hold these rows."
+)
 # the comment actions, on a deck's thread or a forum thread (thread_id)
 COMMENT_ACTIONS = frozenset({"comment_post", "comment_edit", "comment_delete", "comment_vote"})
 VOTES = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}
@@ -200,6 +206,11 @@ def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
     action = str((rows or [{}])[0].get("action") or "")
     if action == "clear_collection":
         return "destructive", "clears your whole binder; an assistant never applies this by itself"
+    if action == "purge_removed":
+        return (
+            "destructive",
+            "deletes a removed card's row on Archidekt for good; an assistant never applies this by itself",
+        )
     if action in DESTRUCTIVE:
         return "destructive", "deletes a deck; an assistant never applies this by itself"
     if action == "create_folder":
@@ -308,21 +319,33 @@ async def collaborator_target(
 
 
 async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[int, str]:
-    """(user id, username) of the person to follow by name: one Archidekt read,
-    through their public decks, which is the only lookup the gateway has, so someone with no
-    public decks is not found."""
+    """(user id, username) of the person to follow by name: through their public decks, or for
+    someone with none through their profile page on archidekt.com (ArchidektClient.user_profile).
+    When that page can't be read, someone the member already follows is still found in the
+    following list (so they can be unfollowed)."""
     want = clean_text(str(username or "")).lstrip("@")
     if not want:
         raise DeckError("invalid", "Give the person's Archidekt username.")
-    found = await decks.user_profile(sub, want)
+    try:
+        found = await decks.user_profile(sub, want)
+    except DeckError as exc:
+        if exc.kind != "changed":
+            raise
+        followed = await _social(decks).find_followed(sub, want)
+        if followed is not None:
+            return followed
+        raise DeckError(
+            "unavailable",
+            f"Archidekt's profile page for {want} didn't show the gateway who they are, so they can't be "
+            f"followed from here just now. Their page on Archidekt: {profile_url(want)}",
+            follow_url=profile_url(want),
+        ) from exc
     name = clean_text(str((found or {}).get("username") or ""))
     if not found or not str(found.get("id") or "").isdigit() or name.casefold() != want.casefold():
         # one text for follow and unfollow
         raise DeckError(
             "not_found",
-            f"No Archidekt user called {want} with public decks was found. Check the spelling. The "
-            "gateway finds people only through their public decks, so someone with none can't be "
-            f"found from here: go to their page on Archidekt instead ({profile_url(want)}).",
+            f"No Archidekt user called {want} was found. Check the spelling.",
             follow_url=profile_url(want),
         )
     return int(found["id"]), name
@@ -366,6 +389,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             "report",
             "profile",
             "clear_collection",
+            "purge_removed",
             *CONTEST_ACTIONS,
         )
         else None
@@ -390,7 +414,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
-            if action in ("delete_deck", "deck_help", *CONTEST_ACTIONS) or action in COLLABORATOR_ACTIONS
+            if action in ("delete_deck", "deck_help", "purge_removed", *CONTEST_ACTIONS)
+            or action in COLLABORATOR_ACTIONS
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
@@ -526,6 +551,17 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             "first (download it as a CSV, or put it back with Restore to my binder) and checks that your "
             "binder still has these entries."
         )
+    elif action == "purge_removed":
+        rows = _purge_rows(deck, params)
+        changes["relation_ids"] = [r["relation_id"] for r in rows]
+        changes["name"] = rows[0]["name"]
+        n = len(rows)
+        copies = f" ({n} rows)" if n > 1 else ""
+        row["text"] = (
+            f"Remove “{rows[0]['name']}”{copies} from the cards Archidekt keeps as taken out of your deck "
+            f"“{deck.name}”, for good"
+        )
+        row["note"] = PURGE_NOTE
     elif action == "create_folder":
         name = decks._folder_name(params.get("name"))
         info = await decks.folders(sub)
@@ -828,6 +864,8 @@ async def apply(
         from . import collection_bulk
 
         result = await collection_bulk.clear(decks, sub, row, progress)
+    elif action == "purge_removed":
+        result = await _apply_purge(decks, sub, deck_id, [int(i) for i in c.get("relation_ids") or []])
     elif action == "create_folder":
         folder = await decks.create_folder(sub, str(c["name"]), int(c["parent"]))
         result = {"folder_id": folder["id"], "name": folder["name"], "verified": True}
@@ -913,3 +951,63 @@ async def _apply_contest_enter(
         "snapshot_id": snapshot_id,
         "verified": entered and rich_text(back.description).strip() == summary.strip(),
     }
+
+
+def _purge_rows(deck: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """The removed card rows a ``purge_removed`` proposal is about: the one row ``relation_id``
+    names (the History page's button), or every removed row of the card called ``card`` (an
+    assistant names the card). Refused when the deck has no such removed row."""
+    from .archidekt import removed_rows
+
+    removed = removed_rows(deck)
+    rid = params.get("relation_id")
+    if rid not in (None, ""):
+        hits = [r for r in removed if str(r["relation_id"]) == str(rid).strip()]
+        if not hits:
+            raise DeckError(
+                "not_found",
+                "That card is not among the removed cards Archidekt keeps for this deck now. Reload the "
+                "page to see the list as it is.",
+            )
+        return hits
+    card = clean_text(str(params.get("card") or ""))
+    if not card:
+        raise DeckError("invalid", "Name the removed card (removed_card).")
+    hits = [r for r in removed if r["name"].casefold() == card.casefold()]
+    if not hits:
+        names = ", ".join(dict.fromkeys(f"“{r['name']}”" for r in removed)) or "none"
+        raise DeckError(
+            "not_found",
+            f"“{card}” is not among the removed cards Archidekt keeps for this deck "
+            f"(those it keeps: {names}).",
+        )
+    return hits
+
+
+async def _apply_purge(decks: DeckService, sub: str, deck_id: str, ids: list[int]) -> dict[str, Any]:
+    """Delete each reviewed removed row that is still a removed row, after reading the deck again: a
+    row that is a card in the deck again stops the whole proposal (a delete would take the card
+    out); one already gone is left. Read back after."""
+    from .archidekt import removed_rows
+
+    decks._writes_switch()
+    deck = await decks.get_own_deck(sub, deck_id)
+    live = {c.relation_id for c in deck.cards if c.relation_id is not None}
+    if any(i in live for i in ids):
+        raise needs_look_error(
+            "The card is in the deck again on Archidekt since this was reviewed, so nothing was removed."
+        )
+    still = {r["relation_id"] for r in removed_rows(deck)}
+    sent = [i for i in ids if i in still]
+    for i in sent:
+        await decks._call_unslotted(sub, lambda token, *_, i=i: decks.client.delete_deck_relation(token, i))
+    back = await decks.get_own_deck(sub, deck_id)
+    left = {r["relation_id"] for r in removed_rows(back)} | {
+        c.relation_id for c in back.cards if c.relation_id is not None
+    }
+    decks._audit(
+        "removed_card_deleted",
+        sub=sub,
+        detail={"deck_id": deck_id, "rows": len(sent), "already": len(ids) - len(sent)},
+    )
+    return {"removed_rows": len(sent), "verified": not any(i in left for i in ids)}

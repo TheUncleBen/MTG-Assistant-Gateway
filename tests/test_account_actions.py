@@ -969,11 +969,13 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
     ("propose_contest_entry", {"deck_id": "42", "contest": "881", "summary": "Sea monsters"}),
     ("propose_contest_entry", {"deck_id": "42", "contest": "880", "entry_action": "withdraw"}),
     ("propose_collection_changes", {"clear": True}),
+    # 0.7.46: a removed card's row Archidekt keeps, removed for good (seeded by _removed_ready)
+    ("propose_delete_deck", {"deck_id": "42", "removed_card": "Acidic Slime"}),
 ]
 
 
 def _other(args: dict) -> str:
-    return "clear" if args.get("clear") else "folder"
+    return "clear" if args.get("clear") else "removed_card" if args.get("removed_card") else "folder"
 
 
 def _binder_ready(ark: FakeArchidekt) -> None:
@@ -981,6 +983,11 @@ def _binder_ready(ark: FakeArchidekt) -> None:
     ark.next_coll_id += 1
     row = ark._collection_row(ark.next_coll_id, ark.printing(9003), {"quantity": 1})
     ark.collections.setdefault("alice", {})[row["id"]] = row
+
+
+def _removed_ready(ark: FakeArchidekt) -> None:
+    """A row Archidekt keeps of a card taken out of alice's deck 42."""
+    ark.add_removed_row(42, "Acidic Slime")
 
 
 def _contest_ready(ark: FakeArchidekt) -> None:
@@ -1027,6 +1034,7 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     _help_ready(ark)
     _contest_ready(ark)
     _binder_ready(ark)
+    _removed_ready(ark)
     await _set_mode(h, "auto")
     p = structured(await account_call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
@@ -1061,6 +1069,7 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
     _help_ready(ark)
     _contest_ready(ark)
     _binder_ready(ark)
+    _removed_ready(ark)
     seen = set()
     for tool, args in ALL_ACCOUNT_ACTIONS:
         if tool == "propose_collaborator" and args["action"] == "add":
@@ -1523,7 +1532,7 @@ async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
 async def test_follow_and_unfollow_someone_by_username(stack: Stack) -> None:
     """The assistant can follow or unfollow anyone by their Archidekt username. It
     is an account action like the rest: only the member's press applies it, and the person is
-    found with one read, through their public decks."""
+    found with one read, through their public decks (someone with none: their profile page)."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     before = len(ark.calls)
@@ -1547,11 +1556,11 @@ async def test_follow_and_unfollow_someone_by_username(stack: Stack) -> None:
             await account_call(h, token, "propose_deck_social", {"action": "follow_user", "username": name})
         )
         assert out["ok"] is False and out["error"] == kind, (name, out)
-    ark.private.add(43)  # amy's only deck private: she can't be found
+    ark.private.add(43)  # amy's only deck private: found through her Archidekt profile page (0.7.46)
     out = structured(
         await account_call(h, token, "propose_deck_social", {"action": "follow_user", "username": "amy"})
     )
-    assert out["error"] == "not_found" and "public decks" in out["message"], out
+    assert out["ok"] and out["rows"][0]["text"] == "Follow amy on Archidekt", out
 
 
 async def test_apply_all_on_the_card_lists_account_actions_before_the_press(stack: Stack) -> None:
