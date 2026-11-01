@@ -2,11 +2,15 @@
 mockups show): Account › Account details › Assistants.
 
 What counts as one assistant is where it provably sends the member back after sign-in, never the
-name it gives itself: every app whose sign-in addresses are all on claude.ai's hosts is "Claude"
-(the web, desktop and phone apps, and one that connects again under a new client id), every one on
-chatgpt.com's is "ChatGPT" (ui.client_brand). Any other app is one assistant per client id, and so
-is an app that runs on the member's own computer (a localhost address, such as Claude Code),
-whatever its metadata says: anyone can claim a well-known name that way.
+name it gives itself: every app whose sign-in addresses are all Claude's known callback addresses
+(KNOWN_CALLBACKS: the scheme, host and path exactly) is "Claude" (the web, desktop and phone apps,
+and one that connects again under a new client id), every one sending members back to ChatGPT's is
+"ChatGPT". Any other address on those companies' hosts makes an app its own assistant, starting at
+the default (security review 3, R3-02): an open redirect there would hand the code on, and a
+metadata document anywhere on those hosts proves nothing about where it sends members. The wider
+host match still picks the app's logo (ui.client_brand). Any other app is one assistant per client
+id, and so is an app that runs on the member's own computer (a localhost address, such as Claude
+Code), whatever its metadata says: anyone can claim a well-known name that way.
 
 Each assistant follows the member's default (``users.approval_mode``, "Default for new
 assistants") until the member picks a mode for it; a newly connected one always starts at that
@@ -57,12 +61,38 @@ def is_local(redirects: Iterable[str]) -> bool:
     return bool(hosts) and all(h in LOOPBACK for h in hosts)
 
 
+# The exact addresses Claude and ChatGPT send members back to after sign-in (docs/CONNECT.md):
+# brand -> (host, path). Only these group an app under the brand for its approval mode.
+KNOWN_CALLBACKS = {
+    "claude": (("claude.ai", "/api/mcp/auth_callback"), ("claude.com", "/api/mcp/auth_callback")),
+    "openai": (("chatgpt.com", "/connector_platform_oauth_redirect"),),
+}
+
+
+def callback_brand(url: str) -> str | None:
+    """The brand whose known callback ``url`` is exactly (https, the host in any letter case, the
+    path, no port, user, query or fragment), else None."""
+    try:
+        p = urlsplit(url)
+        port = p.port
+    except ValueError:
+        return None
+    if p.scheme != "https" or port is not None or p.username or p.password or p.query or p.fragment:
+        return None
+    if "#" in url or "?" in url:  # an empty query or fragment is still one
+        return None
+    found = ((p.hostname or "").casefold(), p.path)
+    return next((brand for brand, known in KNOWN_CALLBACKS.items() if found in known), None)
+
+
 def key_of(client_id: str, redirects: list[str]) -> str:
-    """The assistant a client belongs to: "claude" or "openai" for an app checked by where it
-    sends members back (ui.client_brand), else "app:<client id>". An app on localhost is always
-    its own, even with a Claude or OpenAI metadata address."""
-    if not is_local(redirects):
-        brand = ui.client_brand(client_id, {"redirect_uris": redirects})
+    """The assistant a client belongs to: "claude" or "openai" when every address it sends members
+    back to is that brand's known callback (KNOWN_CALLBACKS), else "app:<client id>". The client
+    id itself (a metadata document's address) counts for nothing here, and an app on localhost is
+    always its own."""
+    brands = {callback_brand(u) for u in redirects}
+    if len(brands) == 1 and None not in brands:
+        brand = brands.pop()
         if brand in BRAND_NAMES:
             return brand
     return APP_PREFIX + client_id

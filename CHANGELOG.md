@@ -86,7 +86,9 @@ name per thing.
 ### Added
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a
   “Default for new assistants” on top. Claude and ChatGPT are one assistant each across your
-  devices; Claude Code and other apps are each their own. Loosening a mode asks first; tightening
+  devices, known by the exact address each sends you back to after sign-in; Claude Code and other
+  apps (any other address, even on Claude's or OpenAI's sites) are each their own and start at
+  your default. Loosening a mode asks first; tightening
   is immediate. When an assistant connects, Home shows a one-time notice with a button to change
   its mode.
 - **Categories are edited on the deck page**: each category's ⋮ (also a right-click, a press and
