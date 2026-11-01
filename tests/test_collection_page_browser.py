@@ -90,12 +90,22 @@ def test_the_stepper_removes_the_last_copy_with_undo_and_the_menu_reaches_the_de
     server: Server,
 ) -> None:
     """− on the last copy takes the row out at once and the strip offers Undo, which puts it back
-    with its printing, finish and price paid (QOL-01, 0.7.46 audit QG-09); no question first."""
+    with its printing, finish, price paid and Binder tags (QOL-01, 0.7.46 audit QG-09); no
+    question first."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
     sid = server.sign_in_and_link()
     _seed(server, 3)
+    # the single-copy rows carry a Binder tag of the member's: Undo must bring it back too
+    ark = server.ark
+    ark.next_collection_tag_id += 1
+    tag_id = ark.next_collection_tag_id
+    tag = {"id": tag_id, "name": "trade", "color": "#1ebb6c"}
+    ark.collection_tag_lists.setdefault("alice", {})[tag_id] = tag
+    for row in ark.collections["alice"].values():
+        if row["quantity"] == 1:
+            row["tags"] = [tag_id]
     dialogs: list[str] = []
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1280)
@@ -133,6 +143,8 @@ def test_the_stepper_removes_the_last_copy_with_undo_and_the_menu_reaches_the_de
         assert len(back) == 1 and back[0]["quantity"] == 1 and back[0]["modifier"] == was["modifier"]
         page.wait_for_function("() => !document.querySelector('#col-notes .notice.error')", timeout=3000)
         assert back[0].get("purchasePrice") in (2.5, "2.50", "2.5")
+        assert back[0].get("tags") == [tag_id]  # its Binder tag is back on the row
+        assert "without its tags" not in toast.inner_text()
         new_id = str(back[0]["id"])
         assert page.locator(f"#cards > li[data-id='{new_id}']").count() == 1
         # removed again: the toast says so, and its × dismisses it

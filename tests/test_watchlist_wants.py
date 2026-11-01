@@ -38,7 +38,7 @@ def _sol(stack: Stack) -> dict:
 def test_the_schema_grows_lists_and_the_price_when_added(tmp_path: Path) -> None:
     d = Database(tmp_path / "w.sqlite")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 21
+        assert d.schema_version == db_module.SCHEMA_VERSION == 22
         cols = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_cards)")}
         assert {"list_name", "added_price", "added_currency", "alert_drop_pct", "alert_rise_pct"} <= cols
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
@@ -75,7 +75,7 @@ def test_schema_21_adds_the_lists_to_a_schema_20_database(
     monkeypatch.undo()
     d = Database(path, upgrade_dir=tmp_path / "before-upgrade")
     try:
-        assert d.schema_version == db_module.SCHEMA_VERSION == 21
+        assert d.schema_version == db_module.SCHEMA_VERSION == 22
         lists = {r[1] for r in d._conn.execute("PRAGMA table_info(watch_lists)")}
         assert lists == {"sub", "name", "created_at"}
         row = d._conn.execute("SELECT list_name, added_price FROM watch_cards WHERE id = 'w1'").fetchone()
@@ -337,7 +337,9 @@ async def test_the_bulk_bar_sets_alerts_moves_and_removes_many(stack: Stack, mon
             "/watchlist",
             data={"csrf": csrf, "action": "bulk", "do": "remove", "watch_id": ["w_other", both[0]]},
         )
-        assert r.status_code == 303 and r.headers["location"] == "/watchlist?ok=removed"
+        # the stop names the card and carries its Undo (test_undo_stop_watching.py)
+        assert r.status_code == 303
+        assert r.headers["location"].startswith("/watchlist?ok=removed&w=Sol%20Ring&undo=")
         assert [w["name"] for w in svc.watched_cards(SUB)] == ["Sol Talisman"]
         assert svc.watched_cards("user-2")[0]["id"] == "w_other"
         assert svc.lists(SUB) == [{"name": "Trade for", "count": 1}]

@@ -87,6 +87,9 @@ SUMMARIES_KEPT = 16  # members whose watchlist rows are kept worked out (card_su
 # shipped default.
 DEFAULT_ALERTS: dict[str, float] = {"drop": 10.0}
 ALERT_KINDS = ("pct", "above", "below", "drop", "rise")
+# A watch that was stopped is kept in memory this long (seconds) so the notice's Undo can bring
+# it back as the same row, alerts, list and added price included (0.7.46 audit QG-09)
+STOPPED_KEEP = 15 * 60
 # each alert's column on watch_cards (drop and rise are percentages of the price when added)
 ALERT_COLUMNS = {
     "pct": "alert_pct",
@@ -263,6 +266,7 @@ class PriceService:
         self.decks = decks
         self._scryfall = scryfall
         self.notifier = notifier
+        self._stopped: dict[str, tuple[str, float, list[dict[str, Any]]]] = {}  # Undo of Stop watching
         self._run_lock = asyncio.Lock()
         self.binder = BinderStore(db)
         # each member's watchlist rows as last worked out (card_summaries): (stamp, rows)
@@ -878,15 +882,55 @@ class PriceService:
 
     def unwatch_many(self, sub: str, watch_ids: list[str]) -> int:
         """The bulk bar's Stop watching: the selected watches of the member's go. Returns how
-        many went."""
+        many went (:meth:`stop_watching` keeps them for an Undo)."""
+        return len(self.stop_watching(sub, watch_ids)[1])
+
+    # -- Stop watching with Undo (0.7.46 audit QG-09) ---------------------------------------------
+    def stop_watching(self, sub: str, watch_ids: list[str]) -> tuple[str, list[dict[str, Any]]]:
+        """The selected watches of the member's go, and are kept for STOPPED_KEEP seconds under
+        the returned token, so :meth:`rewatch` can bring them back as they were. Returns
+        ``(token, the rows that went)``."""
         ids = _own_ids(watch_ids)
         if not ids:
             raise DeckError("invalid", "Select at least one card first.")
+        marks = ",".join("?" * len(ids))
+        rows = self._rows(
+            f"SELECT * FROM watch_cards WHERE sub = ? AND id IN ({marks}) ORDER BY name, set_code, finish",
+            (sub, *ids),
+        )
         with self.db.tx() as c:
-            n = c.executemany(
-                "DELETE FROM watch_cards WHERE id = ? AND sub = ?", [(wid, sub) for wid in ids]
-            ).rowcount
-        return n
+            c.executemany("DELETE FROM watch_cards WHERE id = ? AND sub = ?", [(w["id"], sub) for w in rows])
+        self.forget_stopped()
+        token = secrets.token_urlsafe(18)
+        if rows:
+            self._stopped[token] = (sub, time.time() + STOPPED_KEEP, rows)
+        return token, rows
+
+    def rewatch(self, sub: str, token: str) -> list[str]:
+        """Undo of :meth:`stop_watching`: the rows kept under the member's ``token`` are back
+        with their alerts, list and added price (the same ids, so their history stays theirs).
+        A token that is spent, another member's or forgotten says so."""
+        self.forget_stopped()
+        kept = self._stopped.pop(str(token or ""), None)
+        if kept is None or kept[0] != sub:
+            raise DeckError("not_found", "That Undo is no longer available.")
+        rows = kept[2]
+        with self.db.tx() as c:
+            for w in rows:
+                cols = [k for k in w.keys() if k != "rowid"]
+                self._ensure_list(c, sub, w.get("list_name") or "", int(time.time()))
+                marks = ", ".join("?" * len(cols))
+                c.execute(
+                    f"INSERT OR IGNORE INTO watch_cards ({', '.join(cols)}) VALUES ({marks})",
+                    tuple(w[k] for k in cols),
+                )
+        return [w["name"] for w in rows]
+
+    def forget_stopped(self, now: float | None = None) -> None:
+        """Drop kept rows whose Undo time has passed."""
+        now = time.time() if now is None else now
+        for token in [t for t, (_s, until, _r) in self._stopped.items() if until <= now]:
+            self._stopped.pop(token, None)
 
     # -- watchlist lists (groups of watched cards; mockup screen 8) ---------------------------------
     @staticmethod

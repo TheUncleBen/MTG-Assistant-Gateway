@@ -966,7 +966,7 @@ class CollectionService:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
             self.binder.drop(sub, rid)
             self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid})
-            return {"row": None, "removed": row_out(rec)}
+            return {"row": None, "removed": await self.removed_out(sub, rec)}
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, quantity=quantity))
         row = row_out({**rec, **out, "card": rec.get("card")})
         self.binder.put(sub, row)
@@ -1080,7 +1080,18 @@ class CollectionService:
             left = row_out({**rec, **out, "card": rec.get("card")})
             self.binder.put(sub, left)
         self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
-        return {"removed": row_out(rec), "row": left}
+        return {"removed": await self.removed_out(sub, rec), "row": left}
+
+    async def removed_out(self, sub: str, rec: dict[str, Any]) -> dict[str, Any]:
+        """A removed record for the page's Undo: its tags by name (Archidekt sends ids), so the
+        row that comes back gets them again (0.7.46 audit QG-09)."""
+        row = row_out(rec)
+        if rec.get("tags"):
+            try:
+                collection_tags.name_rows([row], [rec], await self.tags(sub))
+            except DeckError:
+                pass  # the tag names could not be read: the row comes back without them
+        return row
 
     async def export_csv(self, sub: str) -> str:
         """The collection as CSV: Quantity, Name, Finish, Condition, Language, Edition Code,

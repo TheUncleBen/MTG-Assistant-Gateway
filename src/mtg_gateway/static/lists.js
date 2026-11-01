@@ -69,9 +69,25 @@
     if (!fields.csrf) body.append("csrf", Menu.csrf());
     return window.MtgFetch.answer(path, { method: "POST", body: body.toString(), form: true });
   }
-  function said(d, fallback) {
-    if (d.verified === false) toast(d.notice || fallback, { error: true });
-    else toast(d.notice || fallback, { ok: true, ms: 5000 });
+  // a saved change answers with an Undo token for a while (lists_page.py): the toast offers it,
+  // and the page reloads with the reverse change applied (0.7.46 audit QG-09)
+  function said(d, fallback, path) {
+    if (d.verified === false) { toast(d.notice || fallback, { error: true }); return; }
+    var actions = [];
+    if (d.undo && path) {
+      var undo = el("button", "btn small", "Undo");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        undo.disabled = true;
+        postForm(path, { action: "undo", token: d.undo }).then(function (r) {
+          if (r.ok) { location.reload(); return; }
+          undo.disabled = false;
+          toast(r.message || "That Undo is no longer available.", { error: true });
+        });
+      });
+      actions.push(undo);
+    }
+    toast(d.notice || fallback, { ok: true, ms: actions.length ? 15000 : 5000, actions: actions });
   }
 
   // -- the boxes -----------------------------------------------------------------------------------
@@ -509,7 +525,7 @@
       if (!d.ok) { drawCopies(tr, dataOf(tr).quantity); Menu.fail(d, "Archidekt refused the change."); return; }
       pinChanged(tr, { quantity: want });
       drawCopies(tr, want);
-      said(d, "Saved on Archidekt.");
+      said(d, "Saved on Archidekt.", form.getAttribute("action"));
     }, function () {
       form.removeAttribute("aria-busy");
       $$("button", form).forEach(function (x) { x.disabled = false; });
@@ -528,7 +544,7 @@
         ta.removeAttribute("aria-busy");
         if (!d.ok) { Menu.fail(d, "Archidekt refused the note."); return; }
         pinChanged(tr, { notes: text });
-        said(d, "Saved on Archidekt.");
+        said(d, "Saved on Archidekt.", form.getAttribute("action"));
       }, function () { ta.removeAttribute("aria-busy"); toast(NO_CONNECTION, { error: true }); });
     };
     ta.addEventListener("blur", saveNote);
