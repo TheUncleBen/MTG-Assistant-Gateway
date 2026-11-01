@@ -44,6 +44,10 @@ STACK = "stack:"  # + deck id + ":" + grouping
 # binder" or Watch, which asks nothing, uses them too.
 BINDER_ADD = "binder.add"
 WATCH_ADD = "watch.add"
+# the member's price alert defaults, set on every card they watch from then on (mockup screen 8):
+# {pct, above, below, drop, rise}, each a number or absent (off); prices.DEFAULT_ALERTS until set
+WATCH_ALERTS = "watch.alerts"
+_ALERT_HI = {"pct": 1000, "above": 1_000_000, "below": 1_000_000, "drop": 100, "rise": 1000}
 _FINISHES = ("nonfoil", "foil", "etched")
 _CONDITIONS = ("NM", "LP", "MP", "HP", "DMG")
 _LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
@@ -91,6 +95,15 @@ def valid(name: str, value: Any) -> bool:
                 or (isinstance(pct, int | float) and not isinstance(pct, bool) and 0 < pct <= 1000)
             )
         )
+    if name == WATCH_ALERTS:
+        return (
+            isinstance(value, dict)
+            and set(value) <= set(_ALERT_HI)
+            and all(
+                isinstance(v, int | float) and not isinstance(v, bool) and 0 < v <= _ALERT_HI[k]
+                for k, v in value.items()
+            )
+        )
     if name == DECKSTATS:
         return (
             isinstance(value, dict)
@@ -127,7 +140,8 @@ def save(db: Database, sub: str, name: str, value: Any) -> bool:
 def valid_name(name: str) -> bool:
     return (
         (name.startswith(VIEW) and name[len(VIEW) :] in VIEW_KINDS)
-        or name in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD)
+        or name
+        in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD, WATCH_ALERTS)
         or bool(_STACK_NAME.match(name))
     )
 
@@ -148,6 +162,17 @@ def choices(db: Database, sub: str, name: str) -> dict[str, Any]:
     """The remembered Add or Watch choices (BINDER_ADD, WATCH_ADD), or {}."""
     value = db.get_pref(sub, name)
     return value if isinstance(value, dict) and valid(name, value) else {}
+
+
+def alert_defaults(db: Database, sub: str) -> dict[str, float]:
+    """The price alerts a card the member watches gets (WATCH_ALERTS): the member's own once
+    they saved any, else the shipped default (prices.DEFAULT_ALERTS)."""
+    from .prices import DEFAULT_ALERTS  # prices imports theme, not this module
+
+    value = db.get_pref(sub, WATCH_ALERTS)
+    if isinstance(value, dict) and valid(WATCH_ALERTS, value):
+        return {k: float(v) for k, v in value.items()}
+    return dict(DEFAULT_ALERTS)
 
 
 def copies_refused(db: Database, sub: str) -> bool:

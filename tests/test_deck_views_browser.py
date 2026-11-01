@@ -372,7 +372,7 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
         page.goto(f"{server.base}/decks/42?view={view}", wait_until="networkidle")
         sel = ".deckview .c, .deckview .row"
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         tools = page.locator(".bulkbar .bulktools")
         assert tools.is_visible()
         assert page.locator(".bulkbar select").first.is_disabled()
@@ -405,7 +405,7 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         assert all(_rows(server, n)[0]["categories"] != ["Maybeboard"] for n in picks)
 
         # finish: one change per name; the badge redraws from the answer
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         for name in picks:
             page.locator(f'.deckview [data-card="{name}"]').first.click()
         with page.expect_response(EDIT_URL) as req3:
@@ -426,11 +426,11 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         assert first.get_attribute("data-finish") == "Foil"
 
         # remove, with Escape leaving selection first to show it clears
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         page.locator(f'.deckview [data-card="{picks[0]}"]').first.click()
         page.keyboard.press("Escape")
         assert page.locator(".deckview .picked").count() == 0
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         for name in picks:
             page.locator(f'.deckview [data-card="{name}"]').first.click()
         before = page.locator(sel).count()
@@ -485,7 +485,7 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         page.reload(wait_until="networkidle")
         dot = page.locator(".deckview .row[data-card='Cultivate'] .tagdot")
         assert dot.get_attribute("title") == "Tag: Have"
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         page.locator(".deckview .row[data-card='Cultivate']").first.click()
         page.locator(".bulkbar button", has_text="Color tag").click()
         with page.expect_response(EDIT_URL):
@@ -520,7 +520,7 @@ def test_bulk_edge_cases_at_320(server: Server) -> None:
         browser, page, errors = _page(p, server, sid, 320, color_scheme="dark")
         page.on("dialog", lambda d: errors.append("dialog: " + d.message))
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         side = page.locator(".deckview .row[data-zone='side'][data-card='Sol Ring']").first
         side.click()
         assert _overflow(page) == 0
@@ -530,7 +530,7 @@ def test_bulk_edge_cases_at_320(server: Server) -> None:
         assert page.locator(".deck-toast").count() == 0  # nothing was sent
         page.locator(".bulkbar button", has_text="Cancel").click()
         # two main rows of Sol Ring: the remove goes through, without an Undo
-        page.locator(".bulkbar button", has_text="Select cards").click()
+        _select_cards(page)
         page.locator(".deckview .row[data-zone='main'][data-card='Sol Ring']").first.click()
         page.evaluate(
             "() => { const r = document.querySelector(\".row[data-zone='main'][data-card='Sol Ring']\");"
@@ -680,6 +680,24 @@ def _hold_timers(page) -> None:
 def _menu_shot(page, what: str, width: int, scheme: str) -> None:
     device = "phone" if width < 500 else "fold" if width < 1000 else "desktop"
     _shot(page, f"t159-menu-{what}-{scheme}-{device}")
+
+
+def _select_cards(page) -> None:
+    """Starts (or ends) selecting: the select bar's button where the bar shows, else the View
+    sheet's Select cards switch (a phone, mockup screen 5), which closes the sheet."""
+    btn = page.locator(".bulkbar button", has_text="Select cards")
+    if btn.is_visible():
+        btn.click()
+        return
+    page.locator(".toolbar .viewbtn").click()
+    sheet = page.locator(".mtgbox[role=dialog]:not([hidden])")
+    sheet.wait_for(timeout=3000)
+    switch = sheet.locator(".viewsheet .switch input")
+    on = switch.is_checked()
+    sheet.locator(".viewsheet .switch").click()
+    if on:  # switched off: the sheet stays; Done closes it (switched on, it closes by itself)
+        sheet.locator(".acts button", has_text="Done").click()
+    page.locator(".mtgbox-scrim").wait_for(state="detached")
 
 
 def _open_menu(page, row):

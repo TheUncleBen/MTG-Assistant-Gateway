@@ -657,8 +657,10 @@
       var h = el("input"); h.type = "hidden"; h.name = n; h.value = src.value; form.appendChild(h);
     });
     var stack = el("div", "stack");
-    [["alert_pct", "Moves more than (%)"], ["alert_above", "Rises above"], ["alert_below", "Falls below"]].forEach(function (f) {
+    [["alert_drop", "Drops below the price when added by (%)"], ["alert_rise", "Rises above the price when added by (%)"],
+     ["alert_pct", "Moves in a day by more than (%)"], ["alert_above", "Rises above"], ["alert_below", "Falls below"]].forEach(function (f) {
       var src = inRow.elements[f[0]];
+      if (!src) return;
       var wrap = el("div", "field"), lab = el("label", null, f[1]), input = el("input");
       input.type = "text"; input.inputMode = "decimal"; input.name = f[0]; input.id = "wxb-" + f[0];
       input.value = src ? src.value : "";
@@ -670,12 +672,28 @@
     form.appendChild(stack);
     var save = Box.button("Save price alert", "primary", function () {
       if (form.requestSubmit) form.requestSubmit(); else form.submit();
-    }, { icon: "bell" });
+    }, { icon: "tag" });
     Box.open({ title: "Price alert: " + name, body: form, actions: [Box.button("Cancel", "btn", null, { cancel: true }), save], returnFocus: focusBack });
   }
   function watchRowOf(node) {
     var tr = node && node.closest ? node.closest(".tr[id^='wr-']") : null;
     return tr;
+  }
+  // a watchlist list's head (mockup screen 8): its ⋮, a right-click or a hold open Rename list…
+  // and Delete list…; "Not in a list" has no menu of its own
+  function watchGroupOf(node) {
+    var head = node && node.closest ? node.closest(".watch-page .tr.wgrp[data-list]") : null;
+    return head && head.getAttribute("data-list") ? head : null;
+  }
+  function openWatchGroupMenu(head, x, y) {
+    var name = head.getAttribute("data-list"), W = window.MtgWatchlist;
+    if (!W || !W.openListBox) return;
+    var items = [
+      item("Rename list…", "edit", function () { W.openListBox("w-rename", head); }),
+      sep(),
+      item("Delete list…", "trash", function () { W.openListBox("w-delete", head); }, { danger: true })
+    ];
+    Menu.open({ head: name, label: "List: " + name, items: items, focusBack: $("summary.kebab", head) || head }, x, y);
   }
   function openWatchMenu(tr, x, y) {
     var key = tr.id.slice(3);
@@ -691,12 +709,17 @@
       if (f) f.focus();
     });
     var rmBtn = wx ? $("form.rm button, button[form^='rm-']", wx) : null;
-    var remove = rmBtn ? item("Remove", "x", function () { rmBtn.click(); }, { danger: true }) : null;
+    var remove = rmBtn ? item("Stop watching", "x", function () { rmBtn.click(); }, { danger: true }) : null;
     var card = $(".wcard[data-card]", tr);
     if (card) {
       var name = card.getAttribute("data-card");
+      // Details opens the row in place; Move to list… selects this row alone and opens the Move box
+      var details = more ? item(more.getAttribute("aria-expanded") === "true" ? "Close details" : "Details", "stats", function () { more.click(); }) : null;
+      var W = window.MtgWatchlist;
+      var move = W && $("#w-move") ? item("Move to list…", "folder", function () { W.selectOnly(tr); W.open("w-move", more || tr); }) : null;
       Card.open(cardMenuBase(name, {
-        onOpen: function () { card.click(); }, noWatch: true, before: [alert], after: remove ? [sep(), remove] : [], focus: card
+        onOpen: function () { card.click(); }, noWatch: true,
+        before: [details, alert, move].filter(Boolean), after: remove ? [sep(), remove] : [], focus: card
       }), x, y);
       return;
     }
@@ -788,13 +811,16 @@
     var name = $(".title .t", tr) ? $(".title .t", tr).textContent.trim() : "";
     var details = $(".act a[href*='open=']", tr), restore = $("form.hy-restore button", tr);
     var remake = $("form.hy-new-deck button", tr);  // a deleted deck's snapshot
-    var report = $("a[href^='/history/reports/']", tr), deck = $(".title a.t[href^='/decks/']", tr);
+    var report = $("a[href^='/history/reports/']", tr), deck = tr.getAttribute("data-deck");
+    var deckHref = tr.getAttribute("data-deck-href") || (deck ? "/decks/" + enc(deck) : "");  // a lists change opens My lists
+    var test = $("form.hy-test button", tr);  // the forms stay in the row, out of sight, for the menu
     var items = [];
     if (details) items.push(link("Details", "eye", details.getAttribute("href")));
     if (restore) items.push(item("Restore (review first)", "undo", function () { restore.click(); }));
     if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
-    if (deck) { items.push(sep()); items.push(link("Open the deck", "decks", deck.getAttribute("href"))); }
+    if (test) items.push(item("Test this version", "report", function () { test.click(); }));
+    if (deckHref) { items.push(sep()); items.push(deckHref === "/lists" ? link("Open My lists", "decks", deckHref) : link("Open the deck", "decks", deckHref)); }
     // a report or a snapshot: its Details with the confirm box open (restores are proposals)
     var chev = $("a.chev[href*='open=']", tr), dh = (details || chev) ? (details || chev).getAttribute("href") : "";
     if (/[?&]open=[sr]-/.test(dh)) { items.push(sep()); items.push(link("Delete…", "trash", dh + "&box=delete", { danger: true })); }
@@ -828,6 +854,7 @@
     { of: deckOf, open: openDeckMenu, el: function (d) { return d.el; } },
     { of: folderOf, open: openFolderMenu, el: function (f) { return f.el; } },
     { of: collectionRowOf, open: openCollectionMenu },
+    { of: watchGroupOf, open: openWatchGroupMenu },
     { of: watchRowOf, open: openWatchMenu },
     { of: cardLinkOf, open: openCardLinkMenu },
     { of: proposalRowOf, open: openProposalMenu },

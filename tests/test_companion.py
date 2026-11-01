@@ -182,7 +182,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         page = await b.http.get("/history?deck_id=42", headers=NAV)
         # the history table shows the report as a row of its own (history_view), not a "Report:" line
         assert page.status_code == 200 and "<span class='ui-lbl blue'>" in page.text
-        assert "Open report</a>" in page.text
+        assert "aria-label='Open report'>" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
         assert detail.status_code == 200 and "Quick solo test (" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
@@ -686,7 +686,8 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
         await stack.h.app.state.gateway.reports.settle()  # the run goes on after the page opens
         listed = await b.http.get("/reports", headers=NAV)
-        assert "<a href='/history/reports/rep_" in listed.text and "class='ui-table rp-t'" in listed.text
+        assert "<a href='/history/reports/rep_" in listed.text
+        assert "class='ui-table rp-t ui-rows'" in listed.text
         assert "Sample Commander Deck" in listed.text and "Deck trend and history" not in listed.text
         assert "/history?deck_id=42&amp;type=tests" in listed.text  # the Latest report widget's Deck trend
         # Load more under the table, no Newer / Older pager (0.7.46)
@@ -1453,7 +1454,7 @@ def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
     assert "No legality check" in row({**base, "has_validation": False, "bracket_set": 4})
     assert "Commander check only" in row({**base, "constructed": True})
     # the status as a status label: Partial orange with the triangle, Failed red
-    assert "class='ui-lbl orange'" in row({**base, "status": "partial"}) and "Partial" in row(
+    assert "class='ui-lbl orange stin'" in row({**base, "status": "partial"}) and "Partial" in row(
         {**base, "status": "partial"}
     )
-    assert "class='ui-lbl red'" in row({**base, "status": "failed"})
+    assert "class='ui-lbl red stin'" in row({**base, "status": "failed"})

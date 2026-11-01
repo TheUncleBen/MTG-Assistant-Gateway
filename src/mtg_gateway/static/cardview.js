@@ -241,9 +241,35 @@
     var dl = el("dl", "facts");
     var printing = [printLabel(card.set), card.rarity ? titleCase(card.rarity) : "",
       card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? titleCase(card.finish) : ""].filter(Boolean).join(" · ");
-    fact(dl, "Printing", printing);
+    var price = card.price && !isNaN(Number(card.price)) ? money(card.price, "usd") : "";
+    // The Printing row: a button that opens the Printings sheet (every printing, to watch one or,
+    // on your own deck, to use one), so the viewer itself leads to the other printings (Ben:
+    // "the printings button surfaced when you just click on a normal card"). A plain fact where
+    // nothing can open the sheet (a custom card, or no picker on the page).
+    var opener = printingsOpener(card);
+    if (printing && opener) {
+      var prow = el("button", "printrow");
+      prow.type = "button";
+      prow.setAttribute("aria-label", "Printing: " + printing + (price ? " · " + price : "") + ". See every printing");
+      var pic2 = el("span", "pic");
+      pic2.setAttribute("aria-hidden", "true");
+      pic2.innerHTML = "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><circle cx='8.5' cy='9.5' r='1.5'/><path d='m21 16-5-5-8 8'/></svg>";
+      prow.appendChild(pic2);
+      prow.appendChild(el("span", "lbl", "Printing"));
+      prow.appendChild(el("span", "val", printing + (price ? " · " + price : "")));
+      var chev = el("span", "chev", "›");
+      chev.setAttribute("aria-hidden", "true");
+      prow.appendChild(chev);
+      prow.addEventListener("click", function () {
+        close();
+        setTimeout(opener, 60);  // the sheet opens once the viewer's own history entry has gone
+      });
+      side.appendChild(prow);
+    } else {
+      fact(dl, "Printing", printing);
+      fact(dl, "Price", price);
+    }
     fact(dl, "Artist", card.artist);
-    fact(dl, "Price", card.price && !isNaN(Number(card.price)) ? money(card.price, "usd") : "");
     fact(dl, "Salt", card.salt ? String(card.salt) : "");
     fact(dl, "EDHREC rank", card.rank ? Number(card.rank).toLocaleString() : "");
     if (card.gc) fact(dl, "Note", "Game changer", "gc");
@@ -329,11 +355,16 @@
     var pbtn = document.body.hasAttribute("data-watchlist") ? priceButton(card) : null;
     if (pbtn) more.appendChild(pbtn);
     more.appendChild(outLink("EDHREC", card.links && card.links.edhrec || edhrecUrl(card.name || "")));
+    // Scryfall as a pill with the other sites (no plain link under the actions); TCGplayer, read
+    // with the card's links, goes before it
+    var scryPill = outLink("Scryfall", card.scry || "https://scryfall.com/search?q=" + encodeURIComponent("!\"" + (card.name || "") + "\""));
+    scryPill.setAttribute("data-scry", "1");
+    more.appendChild(scryPill);
     function offerLinks(links) {
       if (links && links.tcgplayer && !more.querySelector("[data-shop]")) {
         var t = outLink("TCGplayer", links.tcgplayer);
         t.setAttribute("data-shop", "tcgplayer");
-        more.appendChild(t);
+        more.insertBefore(t, scryPill);
       }
     }
     if (card.name) {
@@ -360,6 +391,18 @@
     box.appendChild(side);
     v.appendChild(box);
     return closeBtn;
+  }
+  /* What the Printing row opens: the page's own opener (card.onPrintings; the deck page's, which
+     can also put the printing in the deck), or the shared browse-and-watch sheet
+     (static/cardmenu.js) where the gateway has watchlists on. Null for a custom card. */
+  function printingsOpener(card) {
+    if (card.custom) return null;
+    if (typeof card.onPrintings === "function") return card.onPrintings;
+    var CardMenu = window.MtgCardMenu;
+    if (!window.MtgPrintPick || !CardMenu || !CardMenu.artVariants || !document.body.hasAttribute("data-watchlist")) return null;
+    var pr = String(card.set || "").trim().split(/\s+/);
+    var current = pr.length === 2 && pr[0] ? { set: pr[0].toLowerCase(), number: pr[1] } : null;
+    return function () { CardMenu.artVariants(card.name || "", { current: current, returnFocus: lastFocus }); };
   }
   /* Price history: the printing on show when the member owns it (in their Binder or a deck of
      theirs, which the daily price check prices) as a chart and a table, then the member's own
@@ -542,6 +585,7 @@
       name: node.getAttribute("data-card") || "",
       img: node.getAttribute("data-img") || "",
       sid: node.getAttribute("data-sid") || "",
+      scry: node.getAttribute("data-scry") || "",  // the printing's own Scryfall page, where the page knows it
       // the back face's picture: a two-faced card's (Show back face) or a custom card's, through
       // the gateway
       back_img: node.getAttribute("data-back") || "",

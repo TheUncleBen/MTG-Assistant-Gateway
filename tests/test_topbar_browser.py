@@ -816,7 +816,8 @@ def test_the_app_bar_keeps_its_own_spacing(chromium, server: Server, width: int)
         assert seen[LONG_NAME]["cut"], seen[LONG_NAME]
 
 
-# The Account page on a phone with 200% text, scripts on and off (the bottom tab bar at 344
+# Account details and its Archidekt account page (0.7.46: the link form and its disclosure are
+# on their own page) on a phone with 200% text, scripts on and off (the bottom tab bar at 344
 # and 360 px; 320 px too): nothing reaches past the window. The causes found
 # were the link disclosure's "/decks/{deck_id}" (shown open without scripts) and the
 # "Notifications" heading at 320 px; both now break instead.
@@ -832,17 +833,19 @@ def test_the_account_page_fits_a_phone_at_200_percent_text(chromium, server: Ser
                 )
                 ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
                 page = ctx.new_page()
-                _open(page, f"{server.base}/account/details")
-                _zoom(page, zoom)
-                _settle(page)
-                got = page.evaluate(
-                    "() => ({doc: document.documentElement.scrollWidth,"
-                    " win: document.documentElement.clientWidth,"
-                    " tabbar: document.querySelector('.tabbar').getBoundingClientRect().right,"
-                    " disclosure: !!document.querySelector('#archidekt-disclosure')})"
-                )
-                if got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5 or not got["disclosure"]:
-                    problems.append(f"@{width}px {zoom}: {got}")
+                for path in ("/account/details", "/account/details/archidekt"):
+                    _open(page, f"{server.base}{path}")
+                    _zoom(page, zoom)
+                    _settle(page)
+                    got = page.evaluate(
+                        "() => ({doc: document.documentElement.scrollWidth,"
+                        " win: document.documentElement.clientWidth,"
+                        " tabbar: document.querySelector('.tabbar').getBoundingClientRect().right,"
+                        " disclosure: !!document.querySelector('#archidekt-disclosure')})"
+                    )
+                    wide = got["doc"] > got["win"] or got["tabbar"] > got["win"] + 0.5
+                    if wide or (path.endswith("archidekt") and not got["disclosure"]):
+                        problems.append(f"{path} @{width}px {zoom}: {got}")
                 ctx.close()
     assert problems == [], "\n".join(problems)
 

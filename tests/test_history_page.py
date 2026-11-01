@@ -203,12 +203,13 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
 # -- pages -------------------------------------------------------------------------
 def _table(body: str) -> str:
     """The History table's markup (between its opening tag and the pager)."""
-    return body.split("class='ui-table hy-table'")[1].split("<div class='loadmore'")[0]
+    return body.split("class='ui-table hy-table ui-rows'")[1].split("<div class='loadmore'")[0]
 
 
 def _entries(body: str) -> list[str]:
     """Each entry row of the History table (not its header, day or deck rows)."""
-    return [r for r in re.split(r"(?=<div class='tr)", _table(body)) if r.startswith("<div class='tr'>")]
+    rows = re.split(r"(?=<div class='tr)", _table(body))
+    return [r for r in rows if r.startswith("<div class='tr'>") or r.startswith("<div class='tr' data-deck")]
 
 
 def _ids(body: str) -> set[str]:
@@ -258,14 +259,15 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert "Load more</a>" in body and "25 of 52</p>" in body
         assert "<div class='tr daygroup'>Today · " in body and "<div class='tr daygroup'>Yesterday · " in body
         snaps = [r for r in rows if "open=s-" in r and "open=p-" not in r]
-        assert snaps and all("Restore (review first)" in r and ">Details</a>" in r for r in snaps)
-        # on a phone a row is one tap to its details, where Restore sits (a test's: its report page)
-        assert all("class='sm-only chev'" in r for r in rows)
+        assert snaps and all("Restore (review first)" in r and ">Details</span>" in r for r in snaps)
+        # a row's one main action, Details (a test's: its report page), is a capsule beside its ⋮:
+        # the word from 600 px, a chevron on a phone (0.7.46 redesign)
+        assert all("class='sm-only chev'" in r and "class='kebab'" in r for r in rows)
         tests = [r for r in rows if "/history/reports/rep_a'" in r]
         assert (
             tests
             and ">Test</span>" in tests[0]
-            and "class='sm-only chev' href='/history/reports/rep_a'" in tests[0]
+            and "<a class='ui-cap' href='/history/reports/rep_a' aria-label='Open report'>" in tests[0]
         )
         assert "title='Snapshots do not record who made them'>—" in snaps[0]
         # chips with counts, a deck name search and the three filters
@@ -356,7 +358,7 @@ async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatc
             page = await b.http.get(f"/history{query}", headers=NAV)
             assert page.status_code == 200
             body = page.text.split("<main")[1]
-            return _ids(body) if "class='ui-table hy-table'" in body else set()
+            return _ids(body) if "class='ui-table hy-table ui-rows'" in body else set()
 
         everything = {
             "s_now", "s_midnight", "s_yesterday", "s_6d", "s_7d", "s_29d", "s_89d", "s_100d",
@@ -411,15 +413,16 @@ async def test_history_grouped_by_deck(stack: Stack) -> None:
         listing = _table(body)
         assert "<option value='deck' selected>Group by deck</option>" in body
         heads = re.findall(
-            r"<div class='tr group hy-group'><span><a href='/decks/(\d+)'>([^<]+)</a>", listing
+            r"<div class='tr group hy-group nochk'><span class='m'><a href='/decks/(\d+)'>([^<]+)</a>",
+            listing,
         )
         # deck 42's applied changes (applied as the test began) are newer than deck 43's report
         assert heads == [("42", "Immortal Reckoning"), ("43", "Reap the Tides")]
         assert "<a class='ui-cap' href='/history?deck_id=43&amp;group=deck'>Only this deck</a>" in listing
-        assert "open=p-p" in listing.split("<div class='tr'>")[1]  # the newest entry leads
+        assert "open=p-p" in listing.split("<div class='tr' data-deck")[1]  # the newest entry leads
         # 15 changes, 15 snapshots and the report: a page of 25
         assert len(_entries(body)) == 25 and "daygroup" not in listing
-        sec42, sec43 = listing.split("<div class='tr group hy-group'>")[1:]
+        sec42, sec43 = listing.split("<div class='tr group hy-group nochk'>")[1:]
         assert "/history/reports/rep_a'" in sec43 and "open=s-" not in sec43
         s42 = list(dict.fromkeys(re.findall(r"open=s-(s\d\d)'", sec42)))  # newest first
         assert s42 == sorted(s42) and len(s42) == 9

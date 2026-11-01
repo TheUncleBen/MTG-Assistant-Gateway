@@ -248,7 +248,7 @@ async def test_a_few_forge_games_are_not_a_headline_win_rate_on_reports(stack: S
                 (json.dumps(FORGE_DONE),),
             )
         page = (await b.http.get("/reports", headers=NAV)).text
-        table = page.split("class='ui-table rp-t'", 1)[1]
+        table = page.split("class='ui-table rp-t ui-rows'", 1)[1]
         row = table.split("/history/reports/rep_few'", 1)[1].split("<div class='tr'>", 1)[0]
         assert "10 games, too few" in row and "40%" not in row
         assert "won against precons" not in page  # the Latest report widget leads with the solo test
@@ -278,7 +278,8 @@ async def test_history_lists_applied_changes_and_tests_open_their_report(stack: 
         assert ">Changes <span class='n'>1</span>" in body and ">Tests <span class='n'>1</span>" in body
         assert f"open=p-{p['proposal_id']}'" in body and ">Change</span>" in body
         assert f"/proposals/{waiting['proposal_id']}'" not in body  # waiting: on Proposals only
-        assert "class='sm-only chev' href='/history/reports/rep_t'" in body and "open=r-rep_t" not in body
+        assert "<a class='ui-cap' href='/history/reports/rep_t' aria-label='Open report'>" in body
+        assert "open=r-rep_t" not in body
         r = await b.http.get("/history?open=r-rep_t", headers=NAV, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"] == "/history/reports/rep_t"
     finally:

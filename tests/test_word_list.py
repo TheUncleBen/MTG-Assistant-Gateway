@@ -370,8 +370,8 @@ def test_the_watchlist_names_a_card_s_alert_a_price_alert() -> None:
     from .test_watchlist_page import DATA, NOW
 
     page = watchlist_page_html(DATA, {}, "tok", Query(), now=NOW)
-    widgets = page.split("aria-label='At a glance'>")[1].split("</section>")[0]
-    assert f"<span class='lab'>{icon('tag')}Price alerts</span>" in widgets
+    assert "With a price alert <span class='n'>3</span>" in page  # the chip
+    assert f"{icon('tag')}Price alert defaults</a>" in page and f"{icon('tag')}1 price alert past</a>" in page
     assert icon("bell") not in page
     found = _report("/watchlist", _visible(page))
     assert not found, "\n".join(found)

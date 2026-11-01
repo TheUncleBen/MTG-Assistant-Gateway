@@ -1,7 +1,7 @@
 """Pages that read Archidekt draw at once (Standard 1 of the 0.7.46 audit: "cache first, never
 blank").
 
-A page such as a deck, Notifications, the forum, a profile, My lists or the Binder is drawn from
+A page such as a deck, Notifications, the forum, a profile, the lists or the Binder is drawn from
 what Archidekt answers. When that answer is slow (the shared pacer is busy, or Archidekt itself
 is slow), the browser used to show nothing but a thin bar until it came. :class:`LatePageMiddleware`
 lets such a page run as usual; if it has not answered within LATE_AFTER, the member gets the
@@ -51,8 +51,8 @@ _PAGES = (
     (re.compile(r"^/notifications$"), "Alerts", ""),
     (re.compile(r"^/forum(/[^/]+){0,3}$"), "Forum", ""),
     (re.compile(r"^/users/[^/]{1,80}$"), "Profile", ""),
-    (re.compile(r"^/lists/[a-z_-]{1,20}$"), "My lists", ""),
-    (re.compile(r"^/collection/wants$"), "Wants", "/collection"),
+    (re.compile(r"^/lists/[a-z_-]{1,20}$"), "Lists", "/collection"),
+    (re.compile(r"^/collection/wants$"), "Pinned cards", "/collection"),
     (re.compile(r"^/collection$"), "Binder", "/collection"),
 )
 LOADING_TEXT = "Reading this page from Archidekt…"

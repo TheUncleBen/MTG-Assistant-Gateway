@@ -27,12 +27,12 @@ TEXT = (
     ".ds .ds-pkg .help, .ds .ds-pkg .lab, .ds .budget label, .ds .fmts label"
 )
 WORDS = " ".join(["word"] * 12)
+# the deck menu's Community group (mockup screen 2): Deck help…, one Contests… item (its box
+# offers entering and withdrawing), Report deck…. Add a package… is in the toolbar's ⋮ and
+# the Registration PDF a row of the Export box's Files pane (_open_from_deck_menu).
 DECK_ITEMS = [
-    "Add a package…",
-    "Registration PDF…",
-    "Request deck help…",
-    "Enter in a contest…",
-    "Withdraw from a contest…",
+    "Deck help…",
+    "Contests…",
     "Report deck…",
 ]
 
@@ -119,14 +119,42 @@ def _close_menu(page) -> None:
     assert page.locator(".ctxmenu").count() == 0
 
 
+def _pick_card_item(page, text: str) -> None:
+    """Presses a card menu item; on a phone the More group is folded first (screen 3)."""
+    item = page.locator(".ctxmenu [role=menuitem]", has_text=text)
+    if not item.is_visible():
+        page.locator(".ctxmenu button.ghead.fold").click()
+    item.click()
+
+
 def _close_box(page) -> None:
     page.keyboard.press("Escape")
     page.locator(".mtgbox-scrim").wait_for(state="detached")
 
 
 def _open_from_deck_menu(page, text: str, box_id: str):
-    page.locator(".banner .deckmenu").click()
-    page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
+    """Opens a deck box the way the page offers it (mockup screen 2): Add a package… from the
+    toolbar's ⋮, the Registration PDF from the Export box's Files pane, a contest entry or
+    withdrawal from the Contests… box, the rest from the banner's ⋮."""
+    if text == "Add a package…":
+        if page.locator(".toolbar .addpkg").is_visible():  # wider than a phone: the button
+            page.locator(".toolbar .addpkg").click()
+        else:
+            page.locator(".toolbar .toolmore").click()
+            page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
+    elif text == "Registration PDF…":
+        page.locator(".banner .deckmenu").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Export…").click()
+        page.locator("#export [role=tab][data-tab='exp-files']").click()
+        page.locator("#export .regpdf").click()
+    elif text in ("Enter in a contest…", "Withdraw from a contest…"):
+        page.locator(".banner .deckmenu").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Contests…").click()
+        row = "Enter this deck in a contest…" if text.startswith("Enter") else text
+        page.locator(".mtgbox .sharerow", has_text=row).click()
+    else:
+        page.locator(".banner .deckmenu").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text=text).click()
     box = page.locator(f"#{box_id}")
     box.wait_for(state="visible")
     page.wait_for_timeout(300)  # the box's open transition (a slight scale) ends before measuring
@@ -159,11 +187,13 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
         if width < 900:
             page.evaluate(HOLD, ".banner h1")
             page.wait_for_timeout(900)
-            assert "Request deck help…" in _menu_items(page)
+            assert "Deck help…" in _menu_items(page)
             _close_menu(page)
-        # each box opens from the menu, fits and reads
+        # on a phone the toolbar's ⋮ holds Add a package… (screen 5); the Export box holds the PDF
+        assert page.locator(".toolbar .toolmore").is_visible() == (width < 600)
+        # each box opens from where the page offers it, fits and reads
         for text, box_id, needs in (
-            ("Request deck help…", "help", "Post the request"),
+            ("Deck help…", "help", "Post the request"),
             ("Registration PDF…", "pdf", "Make the PDF"),
             ("Add a package…", "package", "Review the cards"),
             ("Enter in a contest…", "contest", "Review the entry"),
@@ -180,13 +210,13 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
             if width < 900:
                 assert min(_targets(page, f"#{box_id} .acts button, #{box_id} input[type=text]")) >= 43.5
             _close_box(page)
-        # the card menu: Lock personal categories and Report card…
+        # the card menu: Lock categories and Report card…
         card = page.locator(".deckview .row[data-card='Sol Ring']").first
         card.scroll_into_view_if_needed()
         card.click(button="right")
         items = _menu_items(page)
-        assert "Lock personal categories" in items and "Report card…" in items, items
-        page.locator(".ctxmenu [role=menuitem]", has_text="Lock personal categories").click()
+        assert "Lock categories" in items and "Report card…" in items, items
+        _pick_card_item(page, "Lock categories")
         lock = page.locator("#lock")
         lock.wait_for(state="visible")
         lock.locator("[data-sentence] b").wait_for(state="visible")
@@ -202,7 +232,7 @@ def test_the_menus_carry_the_new_items_and_every_box_fits(server: Server, width:
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
         _close_box(page)
         card.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Report card…").click()
+        _pick_card_item(page, "Report card…")
         rc = page.locator("#reportcard")
         rc.wait_for(state="visible")
         page.wait_for_timeout(700)
@@ -233,10 +263,10 @@ def test_the_deck_menu_and_a_box_hold_together_on_a_phone_at_200_percent_text(
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         page.wait_for_timeout(50)
         assert page.evaluate(MEASURE) == []
-        assert "Request deck help…" in _menu_items(page)
+        assert "Deck help…" in _menu_items(page)
         _close_menu(page)
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        _open_from_deck_menu(page, "Request deck help…", "help")
+        _open_from_deck_menu(page, "Deck help…", "help")
         page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
         page.wait_for_timeout(50)
         assert page.evaluate(MEASURE) == []
@@ -257,7 +287,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         # the lock: applied in place, said in a toast
         card = page.locator(".deckview .row[data-card='Sol Ring']").first
         card.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Lock personal categories").click()
+        _pick_card_item(page, "Lock categories")
         lock = page.locator("#lock")
         lock.locator("[data-sentence] b").wait_for(state="visible")
         lock.locator(".acts button", has_text="Lock").click()
@@ -276,7 +306,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         assert ark.account.pdfs[0]["event"] == "FNM"
         _close_box(page)
         # help: the page's own check, then the review page
-        help_box = _open_from_deck_menu(page, "Request deck help…", "help")
+        help_box = _open_from_deck_menu(page, "Deck help…", "help")
         help_box.locator(".acts button", has_text="Post the request").click()
         assert "Each box needs 10 to 200 words." in help_box.locator(".boxnote").inner_text()
         help_box.locator("textarea[name=goals]").fill(WORDS)
@@ -300,7 +330,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         card = page.locator(".deckview .row[data-card='Sol Ring']").first
         card.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Report card…").click()
+        _pick_card_item(page, "Report card…")
         rc = page.locator("#reportcard")
         rc.locator(".acts button", has_text="Send report").click()
         assert "Say what is wrong first." in rc.locator(".boxnote").inner_text()
@@ -417,8 +447,11 @@ def test_new_package_on_my_decks_and_add_to_a_deck_on_my_lists(
         assert tpl.locator(".msel-btn").inner_text().strip() == "Sample Commander Deck"
         assert page.evaluate(MEASURE) == [] and page.evaluate(CONTRAST, TEXT) == []
         tpl.locator(".acts button", has_text="Add category").click()
-        page.wait_for_url("**/proposals/**")
-        assert not [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
+        # the member's own press adds a plain template at once (review B F6): back on My lists with
+        # a notice and Undo; a Premier or Not in deck template would open its review page instead
+        page.wait_for_url("**/lists/templates?**")
+        assert [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
+        assert page.locator("form.undo button", has_text="Undo").count() == 1
         browser.close()
     assert errors == []
 
