@@ -85,7 +85,7 @@ def block_of(deck: Deck) -> dict[str, Any] | None:
 
 def text(block: dict[str, Any]) -> str:
     """'keywords “…”, budget $$, for Commander, Modern' in the review's words."""
-    formats = [format_label(FORMAT_NAMES.get(f)) for f in block.get("intendedFormats") or []]
+    formats = [format_label(FORMAT_NAMES[f]) for f in format_ids(block.get("intendedFormats"))]
     return (
         f"keywords “{block.get('keywords') or ''}”, budget {BUDGETS.get(block.get('budget'), 'any')}, "
         f"for {', '.join(formats) or 'any format'}"
@@ -119,13 +119,41 @@ def _budget(v: Any) -> Any:
     return int(s) if s.isdigit() else s
 
 
+def _saved_format(f: Any) -> Any:
+    """One saved format as compared: its id, from a number, a number written as text, a format's
+    name ("commander", any case) or an object carrying one (``{"id": 3}``, ``{"name": ...}``);
+    anything else as its text, so it still counts as a difference and never stops the check."""
+    if isinstance(f, dict):
+        f = f.get("id", f.get("format", f.get("value", f.get("name"))))
+    if isinstance(f, bool) or f is None:
+        return str(f)
+    s = str(f).strip()
+    if s.isdigit():
+        return int(s)
+    return FORMAT_IDS.get(s.casefold().replace(" ", ""), s)
+
+
+def format_ids(v: Any) -> list[int]:
+    """The known format ids of a saved block's ``intendedFormats``, in its order, however
+    Archidekt wrote them (ids, numbers as text, names, objects); anything else is left out."""
+    out: list[int] = []
+    for f in v if isinstance(v, list) else []:
+        fid = _saved_format(f)
+        if isinstance(fid, int) and fid in FORMAT_NAMES and fid not in out:
+            out.append(fid)
+    return out
+
+
 def _formats(v: Any) -> set[Any]:
-    """Format ids as compared: in any order, a number written as text the same number."""
-    return {int(f) if str(f).isdigit() else f for f in (v if isinstance(v, list) else [])}
+    """Format ids as compared: in any order, a number written as text the same number, and a
+    format saved as an object or by its name the same id (review F5)."""
+    return {_saved_format(f) for f in (v if isinstance(v, list) else [])}
 
 
 def _format_names(ids: set[Any]) -> str:
-    names = sorted(format_label(FORMAT_NAMES.get(f)) if f in FORMAT_NAMES else str(f) for f in ids)
+    names = sorted(
+        format_label(FORMAT_NAMES.get(f)) if isinstance(f, int) and f in FORMAT_NAMES else str(f) for f in ids
+    )
     return ", ".join(names) or "any format"
 
 

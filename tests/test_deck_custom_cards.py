@@ -270,6 +270,16 @@ async def test_bad_changes_are_refused_before_anything_is_stored(stack: Stack) -
             await svc.propose_custom_cards(SUB, "42", bad)
 
 
+async def test_a_custom_cards_color_tag_by_name_gets_the_members_own_color(stack: Stack) -> None:
+    """Review F13: a tag given by name alone takes the color of the member's own tag of that name."""
+    h, ark = stack.h, stack.ark
+    _seed(ark)
+    ark.account.tags["alice"] = [{"id": 1, "name": "Cut", "color": "#ff4d4f"}]
+    token = await linked_user(stack)
+    p = await _propose(h, token, [{"action": "add", "custom_card_id": 41, "label": "Cut"}])
+    assert p["ok"] and "color tag no tag -> Cut (#ff4d4f)" in p["diff"], p
+
+
 async def test_a_custom_cards_color_tag_and_mana_value_as_archidekts_card_menu_sets_them(
     stack: Stack,
 ) -> None:

@@ -384,6 +384,27 @@ async def test_restore_deletes_a_category_added_since_once_it_is_empty(stack: St
     assert "Removal" not in _cats(ark)
 
 
+async def test_restore_makes_a_deleted_maybeboard_record_again(stack: Stack) -> None:
+    """Review F17: Delete unused removed the empty Maybeboard (Not in deck and Not in price on, as
+    Archidekt's default board reads); a restore of a snapshot that held its record left it out, as
+    the default board without a record reads the same. The record is made again, with its switches."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    for row in ark.decks[42]["cards"]:
+        if row["categories"] == ["Maybeboard"]:
+            row["categories"] = ["Ramp"]  # an empty Maybeboard (its record id comes with the first read)
+    p = await svc.propose_categories(SUB, "42", [{"action": "delete", "category": "Maybeboard"}])
+    done = await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert done["state"] == "applied" and "Maybeboard" not in _cats(ark)
+    r = await svc.propose_restore(SUB, done["result"]["snapshot_id"])
+    assert "Category “Maybeboard” is kept on the deck again, as it was in the snapshot." in r["diff"], r
+    back = await svc.apply(SUB, r["proposal_id"], via="browser")
+    assert back["state"] == "applied" and back["result"]["verified"] is True, back
+    made = _cats(ark)["Maybeboard"]
+    assert isinstance(made["id"], int)
+    assert made["includedInDeck"] is False and made["includedInPrice"] is False
+
+
 # -- the assistant's path: the same tool creates and deletes ----------------------------------------
 async def test_the_assistant_creates_deletes_and_deletes_unused_with_the_same_tool(stack: Stack) -> None:
     from .test_approval_modes import _set_mode

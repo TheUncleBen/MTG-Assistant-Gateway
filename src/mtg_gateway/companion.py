@@ -221,6 +221,8 @@ SETTINGS_OK_MESSAGES = {
     "collaborator_removed": "Collaborator removed on Archidekt.",
     "package": "Package settings saved to Archidekt and read back. A snapshot from just before is under "
     "History.",
+    "package_differs": "Package made on Archidekt, but Archidekt saved its settings differently. Check "
+    "them here and press Save package.",
     "template_added": "Category added on Archidekt; a snapshot from just before is under History.",
 }
 # Notices My decks shows (?ok=).
@@ -270,6 +272,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         target = deck_id or str(made.get("deck_id") or result.get("deck_id") or "")
         if not target.isdigit():
             return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)
+        if made.get("package_saved_as") and not made.get("package_block"):
+            return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)  # no block to edit
+        if made.get("package_saved_as"):  # a new package whose settings Archidekt saved otherwise
+            return RedirectResponse(f"/decks/{target}/settings?ok=package_differs#package", status_code=303)
         return RedirectResponse(f"/decks/{target}?ok={ok}", status_code=303)
 
     decks = state.decks

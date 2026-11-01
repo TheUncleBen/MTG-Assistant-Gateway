@@ -283,13 +283,22 @@ _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
 # The member whose Archidekt session the current ``_call_unslotted`` runs with: how a write
 # the client is about to send is tied back to the member whose caches it makes stale.
 _acting_sub: ContextVar[str | None] = ContextVar("_acting_sub", default=None)
-# Set by the deck page's one-click save (api.edit_deck) around its propose and apply (0.7.46 audit
-# D-01): the proposal's own read of the deck is kept here and the apply works on it when it is
-# under ONE_CLICK_REUSE seconds old, instead of reading the deck again (the read right before the
-# write, _rows_unchanged, is still made); the apply's verify read is kept here too, and the page
-# draws from it. A +1 then costs a read, the check before the write, the write and the verify.
+# Set by the member's one-click saves (api.edit_deck, the Deck settings category save) around their
+# propose and apply (0.7.46 audit D-01, review F1): the proposal's own read of the deck is kept here
+# and the apply works on it when it is under ONE_CLICK_REUSE seconds old, instead of reading the
+# deck again. That read is also the check that the deck did not change before the write
+# (_unchanged_since_read): when the write starts under ONE_CLICK_REUSE seconds after it and no
+# backup copy was made in between, it is as recent as a read made just for the check would be (that
+# read and the write were a pacer gap apart), so no second read is sent; otherwise the deck is read
+# again. The snapshot is taken from the same read. The deck the apply worked from is kept as
+# ``base`` (what the page compares its answer with), and the apply's verify read as ``verified``,
+# which the page draws from. A +1 then costs a read, the write and the verify.
 one_click: ContextVar[dict[str, Any] | None] = ContextVar("one_click", default=None)
 ONE_CLICK_REUSE = 2.0
+# Set around a member's own save that offers its Undo where it was made (My lists › a template ›
+# Add to a deck…): its snapshot is its own, not the deck page sitting's, so Undo puts back that
+# save only (review F6).
+own_snapshot: ContextVar[bool] = ContextVar("own_snapshot", default=False)
 # A member's deck list is kept in memory for this long after Archidekt answered (fresh), and
 # served for up to DECK_LIST_STALE seconds more while one refresh runs in the background.
 DECK_LIST_FRESH = 90.0
@@ -799,6 +808,36 @@ def diff_of(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+# A deck details row's field as Deck settings names it (review F14)
+DETAIL_WORDS = {
+    "name": "Deck name",
+    "format": "Format",
+    "bracket": "Commander bracket",
+    "description": "Description",
+    "private": "Private",
+    "unlisted": "Unlisted",
+    "theorycrafted": "Theorycrafted",
+    "game": "Game type",
+    "cover": "Cover image",
+    "tags": "Deck tags",
+    "folder": "Folder",
+    "package": "Package",
+}
+
+
+def detail_word(field: Any) -> str:
+    """A details row's field in words: "Game type" for ``game``."""
+    key = str(field or "")
+    return DETAIL_WORDS.get(key) or key.replace("_", " ").capitalize()
+
+
+def without_tabs_note(text: str) -> str:
+    """A change's text without the note about open Archidekt tabs: a list of changes (History,
+    Proposals, Activity) shows each change's line, and the note belongs on the change's own page
+    (review F14: it was on every entry)."""
+    return text.replace(f" {OPEN_TABS_NOTE}", "").replace(OPEN_TABS_NOTE, "")
+
+
 def row_line(r: dict[str, Any]) -> str:
     """The plain-text diff line for one review row."""
     kind = r.get("kind")
@@ -854,29 +893,29 @@ def row_line(r: dict[str, Any]) -> str:
         where = f" in folder “{r['folder']}”" if r.get("folder") else ""
         if r.get("package"):
             what = f"{r['cards']} cards{side}, {visibility}; {r['package']}"
-            return f"New card package '{r['name']}'{where} ({what})"
-        return f"New {r['format']} deck '{r['name']}'{where} ({r['cards']} cards{side}, {visibility}{more})"
+            return f"New card package “{r['name']}”{where} ({what})"
+        return f"New {r['format']} deck “{r['name']}”{where} ({r['cards']} cards{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
             n = int(r["changes"])
             count = f"{n} change{'' if n == 1 else 's'}"
-            return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({count})"
-        return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({r['rows']} rows)"
+            return f"Put the deck back as it stood on {r['taken']} ({count})"
+        return f"Put the deck back as it stood on {r['taken']} ({r['rows']} rows)"
     if kind == "description":
         after_len = int(r.get("after_len") or 0)
         if not after_len:
-            return "description: (cleared)"
+            return "Description: cleared"
         # The new text on the one diff line, so the user approves words they can read (in full on
         # the review page). clean_text keeps it to one line: it can never pose as another row.
         text = clean_text(r.get("after_text") or "")
         shown = text if len(text) <= DESCRIPTION_EXCERPT else text[: DESCRIPTION_EXCERPT - 1] + "…"
         return (
-            f'description: (changed, {after_len} chars) "{shown}"'
+            f"Description: changed, {after_len} chars: “{shown}”"
             if shown
-            else (f"description: (changed, {after_len} chars)")
+            else (f"Description: changed, {after_len} chars")
         )
     if kind == "detail":
-        line = f"{r['field']}: {r['before']} -> {r['after']}"
+        line = f"{detail_word(r.get('field'))}: {r['before']} → {r['after']}"
         said = tag_change_text(r)
         return f"{line} ({said})" if said else line
     return str(r.get("text", ""))
@@ -4351,12 +4390,14 @@ class DeckService:
 
     def stored_risk(self, row: dict[str, Any]) -> tuple[str, str]:
         """The risk tier stored on a proposal when it closes, with the reason it was judged by
-        (Database.risk_source). A closed edit with no review rows (stored before they existed) has
-        nothing to judge it by: it keeps no tier (``modes.UNJUDGED``) rather than reading High for
-        want of evidence."""
+        (Database.risk_source): the tier and reason it showed while it waited (_assistant_policy,
+        review F12: Full auto's reason for waiting is the one the member and the assistant saw).
+        A closed edit with no review rows (stored before they existed) has nothing to judge it by:
+        it keeps no tier (``modes.UNJUDGED``) rather than reading High for want of evidence."""
         if self.unjudged(row):
             return modes.UNJUDGED, ""
-        return self.proposal_risk(str(row.get("owner_sub") or ""), row)
+        risk, why, _mode, _allowed = self._assistant_policy(str(row.get("owner_sub") or ""), row)
+        return risk, why
 
     def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
         """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval
@@ -4641,6 +4682,8 @@ class DeckService:
         put first that says where the changes come from (a card package's, propose_package).
         ``read``: the deck as this request already read it (its waiting changes re-checked)."""
         deck_id = _clean_deck_id(deck_id)
+        parse_changes(raw_changes, row_flags=row_flags)  # refused as written before any lookup
+        raw_changes = await self._own_tag_colours(sub, raw_changes, ("set_label",))
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
         deck = read if read is not None and read.id == deck_id else await self.get_own_deck(sub, deck_id)
@@ -5672,7 +5715,7 @@ class DeckService:
     def _proposal_listed(self, sub: str, r: dict[str, Any], now: int, full: bool) -> dict[str, Any]:
         """One row of list_proposals."""
         state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
-        diff_text = str(r.pop("diff_text", None) or "")
+        diff_text = without_tabs_note(str(r.pop("diff_text", None) or ""))
         lines = diff_text.splitlines()
         summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
         if full:
@@ -6588,7 +6631,10 @@ class DeckService:
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
-        await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+        if not self._unchanged_since_read(backup):
+            await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
+        if (kept := one_click.get()) is not None:
+            kept["base"] = pickle.dumps(deck)  # the deck the write was worked out on (api.edit_deck)
         for r in row.get("rows") or []:
             if r.get("kind") == "package":
                 # the site reads a package it adds with this one read, which counts one import of
@@ -6922,6 +6968,7 @@ class DeckService:
             and time.monotonic() - read[0] < ONE_CLICK_REUSE
         ):
             deck = pickle.loads(read[2])  # the one-click save's own read, owned, a moment ago
+            kept["read_at"] = read[0]  # type: ignore[index]  # _unchanged_since_read: when it was read
         else:
             deck = await self.get_own_deck(sub, row["deck_id"])  # ownership re-checked at apply time
         status, reason = recheck.check(self, sub, row, deck)
@@ -6937,6 +6984,20 @@ class DeckService:
         now = await self.get_own_deck(sub, deck.id)
         if now.rows_fingerprint() != deck.rows_fingerprint():
             raise needs_look_error(recheck.REASON_DURING_APPLY)
+
+    @staticmethod
+    def _unchanged_since_read(backup: dict[str, Any]) -> bool:
+        """Whether a one-click save's own read of the deck (one_click) still serves as the check
+        right before its write: the apply works on that read, it was made under ONE_CLICK_REUSE
+        seconds ago, and no backup copy was made since (a copy takes several paced calls)."""
+        kept = one_click.get()
+        read_at = kept.get("read_at") if kept is not None else None
+        return (
+            read_at is not None
+            and not backup.get("backup_deck_id")
+            and not backup.get("backup_url")
+            and time.monotonic() - read_at < ONE_CLICK_REUSE
+        )
 
     def recheck_waiting(
         self, sub: str, deck: Deck, *, renamed: dict[str, str] | None = None
@@ -6993,6 +7054,47 @@ class DeckService:
                 out[row["id"]] = status
         return out
 
+    async def _own_tag_colours(self, sub: str, raw: Any, actions: tuple[str, ...] | None) -> Any:
+        """The changes with the member's own color for each color tag given by its name alone
+        (review F13): "Cut" is looked up in the member's color tags on Archidekt (My lists, any
+        case) and gets that tag's name and color, as Archidekt's own tag picker gives it. A name
+        they have no tag for, or a list that can't be read, keeps the default grey; a color given
+        with the name is kept as given. ``actions``: the change actions that carry a tag (None:
+        any change with a ``label``). One read of the list, only when a name came without a color."""
+        from . import account_lists
+
+        if not isinstance(raw, list):
+            return raw
+
+        def bare(item: Any) -> bool:
+            if not isinstance(item, dict) or (actions is not None and item.get("action") not in actions):
+                return False
+            label = item.get("label")
+            return (
+                isinstance(label, str)
+                and bool(clean_text(label))
+                and "," not in label
+                and not item.get("color")
+                and not item.get("colour")
+            )
+
+        if not any(bare(item) for item in raw):
+            return raw
+        try:
+            tags = (await account_lists.read(self, sub, "color_tags"))["items"]
+        except DeckError:
+            return raw  # the tag goes on grey, as before
+        own = {
+            str(t["name"]).casefold(): t
+            for t in tags
+            if t.get("name") and LABEL_COLOUR.fullmatch(str(t.get("color") or ""))
+        }
+        out = []
+        for item in raw:
+            tag = own.get(clean_text(item["label"]).casefold()) if bare(item) else None
+            out.append({**item, "label": tag["name"], "color": tag["color"]} if tag else item)
+        return out
+
     def _take_snapshot(self, sub: str, row: dict[str, Any], deck: Deck) -> str:
         shared = batch.shared_snapshots.get()
         if shared is not None and str(deck.id) in shared:
@@ -7004,6 +7106,8 @@ class DeckService:
             shared is None
             and row.get("created_by_client") == BROWSER_CLIENT
             and row.get("kind") in PAGE_SESSION_KINDS
+            and not deletes_categories(row)
+            and not own_snapshot.get()
         ):
             # The member's own edits on the deck page, one after another (db.PAGE_SESSION_SECONDS):
             # they share the snapshot from before the first, while the deck is as the last left it.
@@ -7914,6 +8018,7 @@ class DeckService:
         if want_folder is not None and verified.parent_folder != want_folder:
             mismatches.append("the folder")
         saved_otherwise: list[str] = []  # a package's settings as Archidekt saved them
+        package_read: dict[str, Any] = {}
         if spec.get("package"):
             from . import packages
 
@@ -7921,15 +8026,24 @@ class DeckService:
             if block is None:  # not in the first read of a package just made: read it once more
                 block = packages.block_of(await self.get_deck(sub, created.id))
             saved_otherwise = packages.differences(block, spec["package"])
+            if saved_otherwise:
+                # The package is made: it is never Failed for its settings (review F5). Applied,
+                # with what Archidekt saved in words and the block as it came back (for the next
+                # live run to show the cause); the member puts it right under Deck settings.
+                package_read = {
+                    "package_saved_as": saved_otherwise,
+                    "package_block": json.loads(json.dumps(block, default=str)),
+                }
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
             "printing_notes": printing_notes,
             "sent_entries": len(entries),
-            "verified": not (mismatches or saved_otherwise),
-            "mismatched_cards": mismatches + saved_otherwise,
+            "verified": not mismatches,
+            "mismatched_cards": mismatches,
+            **package_read,
         }
-        if mismatches or saved_otherwise:
+        if mismatches:
             progress.update(result)  # apply() records it with the error
             differently = f"Archidekt saved it differently: {'; '.join(saved_otherwise)}."
             raise DeckError(
@@ -8117,7 +8231,8 @@ class DeckService:
         kind = row.get("kind") or "edit"
         note: dict[str, Any] = {}
         if kind == "edit":
-            changes = parse_changes(raw_changes)
+            parse_changes(raw_changes)  # refused as written before any lookup
+            changes = parse_changes(await self._own_tag_colours(sub, raw_changes, ("set_label",)))
             _before, _after, rows = plan_rows(deck, changes)
             rows, names_note = await self._check_names(sub, deck, changes, rows)
             rows, legality, after = await self._judge_rules(deck, changes, rows)
@@ -9106,7 +9221,14 @@ class DeckService:
     # -- the deck's own categories: rename and flags (kind "categories") -------------------------
     @_dedupe
     async def propose_categories(
-        self, sub: str, deck_id: str, changes: Any, *, delete_unused: bool = False
+        self,
+        sub: str,
+        deck_id: str,
+        changes: Any,
+        *,
+        delete_unused: bool = False,
+        read: Deck | None = None,
+        read_at: float | None = None,
     ) -> dict[str, Any]:
         """A proposal (kind ``categories``) that renames categories of the member's own deck and
         sets their flags (Premier, Not in deck, Not in price), one review row per category. The
@@ -9125,15 +9247,23 @@ class DeckService:
         and nowhere to move them, and a change that changes nothing. Moving single cards between
         categories stays a card edit (``propose_deck_changes``).
 
-        Applied (``_apply_categories``) with a backup copy first when backups are on, a snapshot,
-        the deck checked again just before writing, one category write at a time through the
-        pacer, and the deck read back to check every name, flag and card. A change touching the
-        commander, or which cards count in the deck, is high risk and waits for the member's press
-        in every approval mode (modes.auto_waits)."""
+        Applied (``_apply_categories``) with a backup copy first when backups are on (not for the
+        settings page's own one-click save, as for the deck page's), a snapshot, the deck checked
+        again just before writing (the save's own read when it is a moment old, one_click), one
+        category write at a time through the pacer, and the deck read back to check every name,
+        flag and card. A change touching the commander, or which cards count in the deck, is high
+        risk and waits for the member's press in every approval mode (modes.auto_waits)."""
         deck_id = _clean_deck_id(deck_id)
         wanted = parse_category_changes(changes) if changes or not delete_unused else []
         self._room_for_proposal(sub)
-        deck = await self.get_own_deck(sub, deck_id)
+        # ``read``: the deck as this request (the member's own settings page) read it at ``read_at``
+        # (time.monotonic())
+        if read is None or read.id != deck_id or read_at is None:
+            deck, read_at = await self.get_own_deck(sub, deck_id), time.monotonic()
+        else:
+            deck = read
+        if (kept := one_click.get()) is not None:  # for the apply that follows at once
+            kept["read"] = (read_at, deck.id, pickle.dumps(deck))
         self.recheck_waiting(sub, deck)
         boards: list[str] = []  # Archidekt's default boards among the unused ones deleted
         if delete_unused:
@@ -9263,8 +9393,8 @@ class DeckService:
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         # The backup takes a while: read again and resolve each category's name to its record id
-        # on the deck of now, just before writing
-        now = await self._categories_unchanged(sub, deck)
+        # on the deck of now, just before writing (a one-click save's own read a moment ago serves)
+        now = deck if self._unchanged_since_read(backup) else await self._categories_unchanged(sub, deck)
         states = category_states(now)
         ids = {s["name"]: s["id"] for s in states}
         for p in plan:
@@ -9325,6 +9455,8 @@ class DeckService:
             progress,
         )
         verified = await self.get_deck(sub, deck.id)
+        if (kept_click := one_click.get()) is not None:
+            kept_click["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it
         updates = [b for b in first if b.get("op", "update") == "update"]
         self.recheck_waiting(sub, verified, renamed=_renames(updates, category_states(deck)))
         mismatches = category_mismatches(deck, plan, verified)
@@ -9387,9 +9519,12 @@ class DeckService:
         Restore cover a deck's cards and details, not its custom card rows (a gateway choice): so
         this kind has no Undo."""
         deck_id = _clean_deck_id(deck_id)
-        wanted = parse_custom_card_changes(changes)
+        parse_custom_card_changes(changes)  # refused as written before any lookup
+        wanted = parse_custom_card_changes(await self._own_tag_colours(sub, changes, None))
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
+        if (kept := one_click.get()) is not None:  # for the apply that follows at once
+            kept["read"] = (time.monotonic(), deck.id, pickle.dumps(deck))
         self.recheck_waiting(sub, deck)
         adds = [w["custom_card_id"] for w in wanted if w["action"] == "add"]
         names = await self.own_custom_cards(sub, adds) if adds else {}
@@ -9442,8 +9577,9 @@ class DeckService:
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
-        # the backup takes a while: read again just before writing
-        now = await self.get_own_deck(sub, deck.id)
+        # the backup takes a while: read again just before writing (a one-click save's own read a
+        # moment ago serves, one_click)
+        now = deck if self._unchanged_since_read(backup) else await self.get_own_deck(sub, deck.id)
         if now.rows_fingerprint() != deck.rows_fingerprint():
             raise needs_look_error(recheck.REASON_DURING_APPLY)
         plan = plan_on(now, recheck.REASON_DURING_APPLY)
@@ -9451,6 +9587,8 @@ class DeckService:
         payload = [custom_card_entry(p, rows_by_id.get(p["custom_card_id"])) for p in plan]
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
+        if (kept := one_click.get()) is not None:
+            kept["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it
         self.recheck_waiting(sub, verified)
         mismatches = custom_card_mismatches(plan, names, verified)
         result = {
@@ -10404,7 +10542,7 @@ def _current_detail(deck: Deck, key: str) -> Any:
 
 def _detail_label(key: str, value: Any) -> str:
     if key == "name":
-        return json.dumps(value, ensure_ascii=False)
+        return f"“{value}”"
     if key in ("private", "unlisted", "theorycrafted"):
         return "yes" if value else "no"
     if key == "game":
@@ -10597,6 +10735,16 @@ OPEN_TABS_NOTE = "Archidekt tabs already open on this deck show the old categori
 CATEGORIES_SAVED = "Categories saved to Archidekt. A snapshot from just before is under History."
 CATEGORY_GONE = "The deck has no category “{name}”."
 CATEGORY_TAKEN = "The deck already has a category named “{name}”. Pick another name."
+
+
+def deletes_categories(row: dict[str, Any]) -> bool:
+    """Whether a proposal deletes a category. Such a save starts a snapshot of its own instead of
+    sharing the sitting's (review F10): "the snapshot from just before the delete" is then there to
+    restore, and the delete's Undo puts back the category and its cards and nothing earlier."""
+    changes = row.get("changes")
+    if row.get("kind") != "categories" or not isinstance(changes, dict):
+        return False
+    return any(isinstance(p, dict) and p.get("op") == "delete" for p in changes.get("categories") or [])
 
 
 def category_state(c: dict[str, Any]) -> dict[str, Any]:
@@ -11033,6 +11181,8 @@ def category_line(r: dict[str, Any]) -> str:
         cards = f" (its {n} card{'s go' if n != 1 else ' goes'} with it)" if n else ""
         bits.append(f"rename to “{r['rename_to']}”{cards}")
     bits += flags
+    if not bits and r.get("record"):  # a default board's record made again, its switches as they are
+        return f"Category “{name}” is kept on the deck again, as it was in the snapshot."
     return f"Category “{name}”: " + ", ".join(bits) + "."
 
 
@@ -11069,9 +11219,10 @@ def category_restore_plan(snapshot: Deck, current: Deck) -> tuple[list[dict[str,
                 cur = same
                 was = {**was, "id": same["id"], "name": same["name"]}
                 if same["id"] is None:
+                    # Archidekt's default board without its record (deleted since, as Delete unused
+                    # does): the record is made again, even with the switches it reads with now,
+                    # so the deck has it as the snapshot did (review F17)
                     body = {"op": "create", **{k: v for k, v in was.items() if k != "id"}, "id": None}
-                    if {k: same[k] for k in same if k != "id"} == {k: was[k] for k in was if k != "id"}:
-                        continue
                     bodies.append(body)
                     row = _row("deck_category", name=same["name"], record=True, cards=None)
                     _flag_rows(row, same, was)
@@ -11880,6 +12031,12 @@ def applied_text(
         from .account_lists import applied_text as lists_text
 
         return lists_text(c, r)
+    if kind == "create_deck" and r.get("package_saved_as"):  # a package made, its settings otherwise
+        return (
+            "The package is made on Archidekt, but Archidekt saved its settings differently: "
+            + "; ".join(str(x) for x in r["package_saved_as"])
+            + ". Change them under Deck settings › Package."
+        )
     if kind == "edit" and r.get("left_out"):  # DeckService._left_out
         names = [str(x.get("name") or "") for x in r["left_out"] if isinstance(x, dict)]
         return (

@@ -17,7 +17,7 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
@@ -160,6 +160,8 @@ class SocialService:
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
         # the next page of the remembered following list to read, None when it was read to the end
         self._following_next: dict[str, int | None] = {}
+        # the last page the remembered list has (find_followed: how much a fresh read costs)
+        self._following_upto: dict[str, int] = {}
         # one page of a member's following list read at a time: a lookup made while another reads
         # waits for that page and carries on from what was read, so parallel calls never read the
         # same pages twice, and a page's short read never waits behind all of a long lookup
@@ -244,23 +246,56 @@ class SocialService:
 
     async def following_names(self, sub: str) -> dict[int, str]:
         """The people the member follows on Archidekt: user id -> username, the first
-        FOLLOWING_PAGES pages (remembered for FOLLOWING_TTL)."""
-        return await self._read_following(sub, pages=FOLLOWING_PAGES)
+        FOLLOWING_PAGES pages (remembered for FOLLOWING_TTL). A remembered list of nobody is read
+        again (one request): "You don't follow anyone" must not stand for two minutes after the
+        member followed someone on archidekt.com (review F11)."""
+        remembered = self._remembered(sub)
+        users = await self._read_following(sub, pages=FOLLOWING_PAGES)
+        if not users and remembered:
+            self._forget_following(sub)
+            users = await self._read_following(sub, pages=FOLLOWING_PAGES)
+        return users
+
+    def _remembered(self, sub: str) -> bool:
+        """Whether a read of the following list now would be answered from the remembered one."""
+        held = self._following.get(sub)
+        return bool(held and held[0] > time.monotonic())
+
+    def _forget_following(self, sub: str) -> None:
+        """Drop the remembered following list (a follow, or a miss that reads it afresh); a read
+        running meanwhile stores nothing (the generation moves on)."""
+        self._following_gen[sub] = self._following_gen.get(sub, 0) + 1
+        self._following.pop(sub, None)
+        self._following_next.pop(sub, None)
+        self._following_upto.pop(sub, None)
 
     async def find_followed(self, sub: str, username: str) -> tuple[int, str] | None:
         """(user id, username) of the person the member follows by that name, None when they are not
         in the list as far as FOLLOWING_LOOKUP_PAGES (``following_cut`` says whether it went on).
-        Someone followed on archidekt.com since the list was read shows once it expires
-        (FOLLOWING_TTL); a follow through the gateway forgets it at once."""
+        A follow through the gateway forgets the remembered list at once. A name missing from a
+        remembered list that ended within FOLLOWING_PAGES pages is looked for once more in a fresh
+        read (review F11: someone followed on archidekt.com a moment ago); a longer list keeps
+        answering from memory until it expires (FOLLOWING_TTL), so a typo never costs its pages
+        again."""
         want = username.casefold()
 
         def hit(users: dict[int, str]) -> tuple[int, str] | None:
             return next(((i, n) for i, n in users.items() if n.casefold() == want), None)
 
-        users = await self._read_following(
-            sub, pages=FOLLOWING_LOOKUP_PAGES, until=lambda u: hit(u) is not None
-        )
-        return hit(users)
+        def read() -> Awaitable[dict[int, str]]:
+            return self._read_following(sub, pages=FOLLOWING_LOOKUP_PAGES, until=lambda u: hit(u) is not None)
+
+        remembered = self._remembered(sub)
+        found = hit(await read())
+        if (
+            found is None
+            and remembered
+            and not self.following_cut(sub)
+            and self._following_upto.get(sub, FOLLOWING_LOOKUP_PAGES) <= FOLLOWING_PAGES
+        ):
+            self._forget_following(sub)
+            found = hit(await read())
+        return found
 
     def following_cut(self, sub: str) -> bool:
         """Whether the last read of the member's following list stopped with more pages left."""
@@ -296,6 +331,7 @@ class SocialService:
                     expires, users, page = now + FOLLOWING_TTL, {}, 1
                 if page is None or page > pages or (until and until(users)):
                     return users
+                asked = page
                 try:
                     body = await self.decks._call(
                         sub, lambda t, page=page: self.client.following(t, uid, page)
@@ -313,6 +349,7 @@ class SocialService:
                     if self._following_gen.get(sub, 0) == gen:
                         self._following[sub] = (expires, users)
                         self._following_next[sub] = page
+                        self._following_upto[sub] = asked
 
     # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
 
@@ -392,9 +429,7 @@ class SocialService:
         if str(user_id) == uid:
             raise DeckError("invalid", refusals.FOLLOW_SELF)
         await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
-        self._following_gen[sub] = self._following_gen.get(sub, 0) + 1
-        self._following.pop(sub, None)
-        self._following_next.pop(sub, None)
+        self._forget_following(sub)
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
         return {"following": on}
 

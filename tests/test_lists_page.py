@@ -550,6 +550,44 @@ async def test_a_custom_card_is_added_to_a_deck_from_its_row(member: Browser, st
     assert not ark.decks[42]["customCards"]
 
 
+async def test_a_template_added_to_a_deck_is_added_at_once_with_undo(member: Browser, stack: Stack) -> None:
+    """Review F6 (T-192): My lists › a template › Add to a deck… sent the member to a waiting
+    proposal, and the deck did not get the category. The member's own press is the approval, as
+    Deck settings › Add template… and a custom card's Add to deck… are: the category is made at
+    once, back on My lists with a notice and Undo (its own snapshot, so Undo puts back this add
+    only). A Premier template still asks first, on its review page, and the box says so."""
+    ark = stack.ark
+    ark.account.templates[WHO].append(
+        {"id": 13, "name": "Card draw", "includedInDeck": True, "includedInPrice": False, "isPremier": False}
+    )
+    r = await _post(member, "templates", action="add_to_deck", was_name="Card draw", deck="42")
+    assert r.status_code == 303, r.text
+    where = r.headers["location"]
+    assert where.startswith("/lists/templates?"), where
+    made = next(c for c in ark.decks[42]["categories"] if c["name"] == "Card draw")
+    assert made["includedInPrice"] is False
+    page = (await member.http.get(where)).text
+    assert _notice(page) == "Added the category “Card draw” to the deck on Archidekt and read back."
+    m = re.search(
+        r"<form method='post' action='/proposals/undo' class='undo' data-undo-box>(.*?)</form>", page
+    )
+    assert m and ">Undo</button>" in m.group(1), page
+    listed = (await member.http.get("/api/v1/proposals")).json()["proposals"]
+    assert listed[0]["kind"] == "categories" and listed[0]["state"] == "applied"
+    # Undo shows what it puts back: only this category goes
+    fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", m.group(1)))
+    r = await member.http.post("/proposals/undo", data=fields)
+    assert r.status_code == 200 and "Card draw" in r.text, r.text
+    # a Premier template asks first: its review page
+    ark.account.templates[WHO].append(
+        {"id": 14, "name": "Legends", "includedInDeck": True, "includedInPrice": True, "isPremier": True}
+    )
+    r = await _post(member, "templates", action="add_to_deck", was_name="Legends", deck="42")
+    assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
+    page = (await member.http.get("/lists/templates?add=13")).text
+    assert "A Premier or Not in deck template opens on its review page first" in page  # the box says so
+
+
 async def test_custom_cards_rows_and_the_edit_box_show_the_cards_picture(
     member: Browser, stack: Stack
 ) -> None:

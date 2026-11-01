@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pickle
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -20,7 +21,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes, prefs
-from .archidekt import page_turn
+from .archidekt import hand_save, page_turn
 from .decks import (
     DeckError,
     changed_anything,
@@ -380,6 +381,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         # set for the rest of this request only (a request runs in a context of its own)
         kept: dict[str, Any] = {}
         one_click.set(kept)
+        hand_save.set(True)  # the member's own click: its calls start from the page burst
         pid = data.get("proposal_id")
         answer = pid is not None
         if answer:
@@ -481,7 +483,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         deck = kept.get("verified") or await decks.get_own_deck(who.sub, deck_id)
         stale = False
         try:
-            before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
+            # compared with the deck this write was worked out on (review F2): the snapshot is
+            # shared by the edits of a sitting (db.PAGE_SESSION_SECONDS), so it holds the deck as it
+            # was before the first of them, not before this one
+            before = (
+                pickle.loads(kept["base"])
+                if kept.get("base")
+                else parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
+            )
             # a printing change is compared by its set, number and finish
             if edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck):
                 await asyncio.sleep(EDIT_REREAD_DELAY)
@@ -518,6 +527,9 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+        kept: dict[str, Any] = {}
+        one_click.set(kept)  # one read for the proposal, the apply and its check (decks.one_click)
+        hand_save.set(True)
         pid = data.get("proposal_id")
         if pid is not None:
             if not isinstance(pid, str) or not pid:
@@ -566,7 +578,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         }
         if not applied:
             return ok(out, 202)
-        deck = await decks.get_own_deck(who.sub, deck_id)
+        deck = kept.get("verified") or await decks.get_own_deck(who.sub, deck_id)  # the verify read
         stats = deck_stats.compute(deck)
         out.update(
             {

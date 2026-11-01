@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
-from .decks import actor_label
+from .decks import actor_label, without_tabs_note
 from .reports_page import source_label_html
 from .theme import esc as _esc
 from .theme import icon, time_html
@@ -45,8 +45,8 @@ WHEN_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
 GROUPS = (("day", "Group by day"), ("deck", "Group by deck"))
 DEFAULTS = {"type": "all", "group": "day"}
 PAGE_SUB_TEXT = (
-    "Your decks' timeline: the changes applied to them, their snapshots and their tests. Changes waiting "
-    "for you are on"
+    "Your decks' timeline: the changes applied to them and to your Archidekt lists, their snapshots and "
+    "their tests. Changes waiting for you are on"
 )
 NO_WHO = "Snapshots do not record who made them"
 NOTHING_YET = (
@@ -139,6 +139,7 @@ CHANGE_WORDS = {
     "create_deck": "Made the deck",
     "details": "Changed the deck's details",
     "categories": "Changed the deck's categories",
+    "lists": "Changed your Archidekt lists",
 }
 
 
@@ -146,12 +147,17 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
     """A change applied to a deck (not a restore): what it did, from its own summary. A sitting
     on the deck page (``session``: its edits, oldest first, sharing one snapshot) is one entry
     listing every edit."""
-    summary = str(p.get("summary") or "").strip()
+    summary = without_tabs_note(str(p.get("summary") or "")).strip()
     lead = CHANGE_WORDS.get(str(p.get("kind") or ""), "Applied a change")
     session = p.get("session") or []
-    diff = str(p.get("diff_text") or "")
+    diff = without_tabs_note(str(p.get("diff_text") or ""))
     if len(session) > 1:
-        lines = [ln for e in session for ln in str(e.get("diff_text") or "").splitlines() if ln.strip()]
+        lines = [
+            ln
+            for e in session
+            for ln in without_tabs_note(str(e.get("diff_text") or "")).splitlines()
+            if ln.strip()
+        ]
         summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
         lead = f"{len(session)} edits on the deck page"
         diff = "\n".join(lines)
@@ -162,6 +168,7 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
     )
     details = (
         (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
+        + str(p.get("before_html") or "")  # a lists change: the list as it was (pages._lists_before)
         + "<div class='ui-actions'>"
         + ui.button_link("Open the review page", f"/proposals/{p['id']}")
         + "</div>"
@@ -443,10 +450,15 @@ def _day_label(day: str, today: str, yesterday: str) -> str:
 COLS = ("8rem minmax(0,1fr) 4rem 6.5rem 17rem", "minmax(0,1fr) auto", "minmax(0,1fr) 44px")
 
 
+def deck_href(deck_id: Any) -> str:
+    """Where an entry's deck name leads: the deck, or My lists for a change to the member's lists."""
+    return "/lists" if str(deck_id) == LISTS_ID else f"/decks/{_esc(str(deck_id))}"
+
+
 def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
     name = _esc(e["deck_name"])
     deck = (
-        f"<a class='t' href='/decks/{_esc(e['deck_id'])}'>{name}</a>"
+        f"<a class='t' href='{deck_href(e['deck_id'])}'>{name}</a>"
         if e.get("deck_id")
         else f"<span class='t'>{name}</span>"
     )
@@ -513,7 +525,7 @@ def events_html(
             rows = by_deck[key]
             name = _esc(rows[0].get("deck_name") or key)
             deck_id = rows[0].get("deck_id")
-            heading = f"<a href='/decks/{_esc(deck_id)}'>{name}</a>" if deck_id else name
+            heading = f"<a href='{deck_href(deck_id)}'>{name}</a>" if deck_id else name
             n = len(rows)
             extra = ""
             if deck_id and not query.get("deck_id"):
@@ -587,7 +599,10 @@ def details_panel(e: dict[str, Any], query: dict[str, Any], *, extra_html: str =
         f"<p class='ui-why'>{e['line']}</p>"
         + ui.meta(
             [
-                ("Deck", f"<a href='/decks/{_esc(e['deck_id'])}'>{_esc(e['deck_name'])}</a>")
+                (
+                    "Lists" if str(e["deck_id"]) == LISTS_ID else "Deck",
+                    f"<a href='{deck_href(e['deck_id'])}'>{_esc(e['deck_name'])}</a>",
+                )
                 if e.get("deck_id")
                 else ("Deck", _esc(e["deck_name"])),
                 ("By", _chip(e) if e["who"] else "—"),

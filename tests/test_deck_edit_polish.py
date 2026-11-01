@@ -330,7 +330,7 @@ async def test_the_page_save_draws_a_new_card_for_the_view_it_names(stack: Stack
         assert row["html"].startswith("<li class='row'") and "data-card='Arcane Signet'" in row["html"]
         assert isinstance(row["stack"], str) and row["stack"]
         deck_calls = [(m, p) for m, p in stack.ark.calls if p.startswith("/api/decks/42/")]
-        assert [m for m, _p in deck_calls] == ["GET", "GET", "PATCH", "GET"], deck_calls
+        assert [m for m, _p in deck_calls] == ["GET", "PATCH", "GET"], deck_calls
         # a picture view: the card tile
         r = await api(
             b,

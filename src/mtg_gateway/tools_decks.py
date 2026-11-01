@@ -159,7 +159,7 @@ MAX_SNAPSHOTS_PAGE = 100
 # propose_new_deck and check_new_deck, for a commander-format deck with no commander marked
 NO_COMMANDER_WARNING = (
     "The deck has no commander: no card is in its Commander category. Put the commander's line "
-    "under a Commander heading (or give it category Commander), or the deck has no colour identity "
+    "under a Commander heading (or give it category Commander), or the deck has no color identity "
     "and can't be tested."
 )
 
