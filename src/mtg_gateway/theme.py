@@ -2076,6 +2076,11 @@ SEARCH_PANEL_CSS = """
   padding:0 .35rem;border-radius:.7rem;background:var(--orange);color:var(--on-orange);font-size:.8rem;
   font-weight:700}
 .spanel .fbtn .n:empty{display:none}
+/* card search on a Fold or desktop (mockup screen 5): the filter groups fold in place behind the
+   same Filters button, so the first result starts near the top; the last state follows the
+   account (searchpanel.filters_sheet, static/searchpanel.js) */
+.spanel .fbtn.fold{display:inline-flex}
+@media (min-width:600px){ .spanel .sp-filters.folded{display:none} }
 /* the filter groups: whole groups in a fluid row, each at least --gw wide, growing to fill its row */
 .spanel .fgrid{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start}
 .spanel .fgrid > *{flex:1 1 var(--gw,150px);min-width:0;margin:0}

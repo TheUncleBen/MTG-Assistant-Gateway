@@ -156,9 +156,13 @@ def test_the_card_search_panel_fits_every_width_and_rarity_shows_its_picks(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, exe)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        # card search's filters wait behind the Filters button at every width (a sheet on a
+        # phone, folded in place on a Fold or desktop)
+        page.locator(".sp-open").click()
         if width < 600:
-            page.locator(".sp-open").click()
             page.locator("#sp-filters.open").wait_for(timeout=3000)
+        else:
+            page.locator("#p-t").wait_for(state="visible", timeout=3000)
         _check_panel(page.evaluate(PANEL), width)
         # the rarity drop-down: a checkbox list that names what is picked
         pick = page.locator(".pickm")
