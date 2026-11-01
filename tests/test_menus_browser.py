@@ -739,16 +739,18 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
                 "Open card",
                 "Add to deck…",
                 "Add to binder",
-                "Pin card",  # 0.7.46: pins it on Archidekt (Binder › Wants)
+                "Pin card",  # 0.7.46: pins it on Archidekt (Binder › Lists › Pinned cards)
+                "Details",  # mockup screen 8: the row's details, its list, and the red Stop watching
                 "Price alert…",
+                "Move to list…",
                 "Copy name",
                 "Open on Scryfall",
-                "Remove",
+                "Stop watching",
             ]
             page.keyboard.press("Escape")
             page.locator("#wr-d42 .act button.kebab").click()
             _menu(page)
-            assert _items(page) == ["Open", "Price alert…", "Remove"]
+            assert _items(page) == ["Open", "Price alert…", "Stop watching"]
             _pick(page, "Price alert…")
             assert page.locator("#wx-d42").is_visible()  # a deck row has no alert fields: its details open
             # a card row's Price alert… is a box (M16) with the row's three fields, posting as the row's form

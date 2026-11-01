@@ -212,6 +212,65 @@ def test_watchlist_rows_open_in_place_and_draw_the_full_history(server: Server, 
         browser.close()
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+def test_load_more_adds_the_next_rows_in_place(server: Server, width: int) -> None:
+    """Load more under the cards asks for only the rows the list lacks and adds them under the
+    ones shown (no page load, the rows before stay as they were, an open row stays open); its
+    line and link follow, and the last press ends the list. A new row's Details opens in place
+    and its ⋮ is there."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with server.db.tx() as c:
+        for i in range(60):
+            c.execute(
+                "INSERT INTO watch_cards (id, sub, name, set_code, collector_number, finish, created_at) "
+                "VALUES (?, 'user-1', ?, '', '', 'nonfoil', 0)",
+                (f"w{i:03d}", f"Card {i:03d}"),
+            )
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, has_touch=width < 900)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(re.compile(r"https://cards\.scryfall\.io/.*"), lambda route: route.abort())
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        asked: list[str] = []
+        page.on("request", lambda r: asked.append(r.url) if "part=" in r.url else None)
+        page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        page.evaluate("window.__same = true")
+        rows = "() => document.querySelectorAll('.w-t[aria-label=\"Watched cards\"] .tr:not(.th)').length"
+        assert page.evaluate(rows) == 25
+        page.locator("#wr-w003 .more").click()
+        assert page.locator("#wx-w003").is_visible()
+        page.get_by_role("link", name="Load more cards").click()
+        page.wait_for_function(f"{rows} === 50", timeout=5000)
+        assert page.evaluate("window.__same === true")
+        assert len(asked) == 1 and "part=cards" in asked[0] and "from=25" in asked[0], asked
+        assert page.locator("#wx-w003").is_visible()  # the rows before are untouched
+        focused = "() => (document.activeElement.closest('.tr') || {}).id"
+        assert page.evaluate(focused) == "wr-w025"  # the first new row's Details has the focus
+        more = page.locator(".w-t[aria-label='Watched cards'] + .loadmore")
+        assert "50 of 60" in more.inner_text()
+        page.locator("#wr-w040 .more").click()
+        assert page.locator("#wx-w040").is_visible() and not page.locator("#wx-w003").is_visible()
+        assert page.locator("#wr-w040 .act .kebab").count() == 1
+        page.get_by_role("link", name="Load more cards").click()
+        page.wait_for_function(f"{rows} === 60", timeout=5000)
+        assert "All 60 cards shown." in more.inner_text()
+        assert page.get_by_role("link", name="Load more cards").count() == 0
+        over = page.evaluate(
+            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        assert over <= 0 and page.evaluate("window.__same === true")
+        assert errors == [], errors
+        browser.close()
+
+
 def test_the_rows_menu_sits_beside_details_and_the_card_size_switch_is_on_the_page(server: Server) -> None:
     """FIXES 2026-10-21: the row's ⋮ (static/menus.js) wrapped under Details; the action column
     now holds both side by side at every width, and the card size switch (R-175) is on the page."""

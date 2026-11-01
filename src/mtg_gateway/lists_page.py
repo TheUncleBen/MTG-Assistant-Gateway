@@ -1,8 +1,11 @@
-"""My lists (/lists): the member's account-wide Archidekt lists (account_lists.py) as one page
-under Account with four tabs: Category templates, Default categories, Color tags and Custom
-cards (parity release 2, mockup screens/10-lists.js). The fifth list, Pinned cards, is Binder's
-Wants page (/collection/wants, decision C8): the same tab under Binder's switch, with its forms
-still posting to /lists/pins.
+"""Binder › Lists (/collection/lists; 0.7.46, mockup screen 8): one page under Binder's switch
+with two blocks. "Your Archidekt lists": the member's account-wide Archidekt lists
+(account_lists.py), each a row that opens its own page (/lists/<tab>: Category templates, Default
+categories, Color tags, Custom cards, and Pinned cards at /collection/wants, its old Binder
+address), with the tab bar on those pages as the quick way between them. "Watchlist lists": the
+member's watchlist lists (prices.py), each a row that opens the Watchlist on that list, with
+Rename and Delete, and New list…. The old /lists address lands on the hub; the forms of the
+Archidekt lists still post to /lists/<tab>.
 
 Each tab is one Archidekt read. Every row has a ⋮ (with scripts a menu from the ⋮, a right-click
 or a press and hold, static/lists.js; without them a plain drop-down of links). The boxes (ui.box)
@@ -25,7 +28,7 @@ from urllib.parse import parse_qs, quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, custom_pictures, modes, proposals_view, ui
+from . import account_hub, account_lists, custom_pictures, modes, proposals_view, ui
 from .archidekt import no_retry
 from .busy import busy_response
 from .companion import DECK_CSP
@@ -43,18 +46,21 @@ from .pages import (
 from .theme import esc, icon
 
 PAGE = "/lists"
-TITLE = "My lists"
+HUB = "/collection/lists"  # Binder › Lists, the hub both blocks live on
+TITLE = "Binder: Lists"
 SUB_TEXT = (
     "Your Archidekt lists that shape every deck. Changes are saved to Archidekt and read "
     "back; a copy from just before is kept under History."
 )
-# Pinned cards: Binder's Wants page (the cards you mean to get, kept on Archidekt)
+# Pinned cards: the cards pinned on Archidekt, at Binder's old Wants address (the Watchlist is
+# the want list; the pins keep Archidekt's own name)
 WANTS = "/collection/wants"
-WANTS_TITLE = "Binder: Wants"
+WANTS_TITLE = "Binder: Pinned cards"
 WANTS_SUB = (
-    "The cards you want: pinned on Archidekt with a note and the copies you are after. Pin one from "
+    "The cards you pinned on Archidekt, with a note and the copies you are after. Pin one from "
     "any card's menu."
 )
+HUB_SUB = "The lists that shape your decks on Archidekt, and the lists your watchlist is grouped in."
 # the page shows the chosen picture before it is sent (a blob: address), and a pin's printing
 LISTS_CSP = DECK_CSP.replace("img-src 'self'", "img-src 'self' blob:")
 PICTURE_BODY_LIMIT = account_lists.PICTURE_MAX_BYTES + 64_000  # the file plus the form's own fields
@@ -75,7 +81,15 @@ TABS = (
 )
 BY_SLUG = {t.slug: t for t in TABS}
 PINS = BY_SLUG["pins"]
-ACCOUNT_TABS = tuple(t for t in TABS if t is not PINS)  # the tab bar under Account
+ACCOUNT_TABS = tuple(t for t in TABS if t is not PINS)  # the lists under /lists/<tab>
+# each list's own icon on the hub
+TAB_ICONS = {
+    "templates": "tag",
+    "defaults": "list",
+    "tags": "tag",
+    "pins": "bookmark",
+    "custom": "image",
+}
 FLAGS = (
     ("in_deck", "In deck", "Counts in the deck"),
     ("in_price", "In price", "Counts in the price"),
@@ -246,26 +260,135 @@ def box_note(error: str) -> str:
 COUNTS_API = PAGE + "/api/counts"
 
 
+def tab_page_of(tab: Tab) -> str:
+    """A list's own page: the pins at Binder's old Wants address, the rest under /lists."""
+    return WANTS if tab is PINS else f"{PAGE}/{tab.slug}"
+
+
 def tabs_html(current: str, counts: dict[str, int]) -> str:
-    """The tab bar. A tab whose list has not been read yet has no number; static/lists.js asks
-    COUNTS_API for them after the page has drawn (data-counts), so the page never waits for them."""
+    """The tab bar on a list's page: the quick way between the five Archidekt lists. A tab whose
+    list has not been read yet has no number; static/lists.js asks COUNTS_API for them after the
+    page has drawn (data-counts), so the page never waits for them."""
     out = []
-    for t in ACCOUNT_TABS:
+    for t in TABS:
         n = counts.get(t.kind)
         cur = " aria-current='page'" if t.slug == current else ""
         num = f"<span class='n'>{n:,}</span>" if n is not None else ""
-        out.append(f"<a href='{PAGE}/{t.slug}'{cur}>{esc(t.label)}{num}</a>")
-    missing = any(counts.get(t.kind) is None for t in ACCOUNT_TABS)
+        out.append(f"<a href='{tab_page_of(t)}'{cur}>{esc(t.label)}{num}</a>")
+    missing = any(counts.get(t.kind) is None for t in TABS)
     fill = f" data-counts='{COUNTS_API}'" if missing else ""
     return f"<nav class='adm-nav lp-tabs' aria-label='Lists'{fill}>{''.join(out)}</nav>"
 
 
-def crumbs_html() -> str:
-    """Account › My lists: the way back, the theme's grey capsule (the page lives under Account)."""
+def crumbs_html(tab: Tab) -> str:
+    """Lists › Category templates: the way back to the hub, the theme's grey capsule."""
     return (
-        f"<nav class='crumbs lp-crumbs' aria-label='You are in'>{ui.cap_link('Account', '/account')}"
-        "<span aria-hidden='true'>›</span><span>My lists</span></nav>"
+        f"<nav class='crumbs lp-crumbs' aria-label='You are in'>{ui.cap_link('Lists', HUB, icon_name='list')}"
+        f"<span aria-hidden='true'>›</span><span>{esc(tab.label)}</span></nav>"
     )
+
+
+def hub_html(
+    counts: dict[str, int],
+    watch_lists: list[dict[str, Any]] | None,
+    *,
+    ungrouped: int = 0,
+    csrf: str = "",
+    open_box: str = "",
+) -> str:
+    """The hub's two blocks, in the Account page's grouped-list style (account_hub.HUB_CSS): the
+    five Archidekt lists with the counts known so far (static/lists.js fills the rest from
+    COUNTS_API), and the watchlist lists (None while watchlists are off) with their counts, a ⋮
+    (Rename list…, Delete list…) and New list…, a box posting to the Watchlist."""
+    rows = []
+    for t in TABS:
+        n = counts.get(t.kind)
+        val = f"<span class='val'>{n:,}</span>" if n is not None else "<span class='val'></span>"
+        rows.append(
+            f"<a class='yrow' href='{tab_page_of(t)}'>{icon(TAB_ICONS[t.slug])}"
+            f"<span class='lbl'>{esc(t.label)}"
+            f"</span>{val}<span class='ch'>{icon('chev')}</span></a>"
+        )
+    missing = any(counts.get(t.kind) is None for t in TABS)
+    fill = f" data-counts='{COUNTS_API}'" if missing else ""
+    arch = (
+        f"<section class='ygrp'><h2>Your Archidekt lists</h2><div class='rows lp-hubrows'{fill}>"
+        f"{''.join(rows)}</div></section>"
+    )
+    if watch_lists is None:
+        return f"<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div></div></div>"
+    wrows = []
+    for wl in watch_lists:
+        name = wl["name"]
+        href = f"/watchlist?{urlencode({'list': name})}"
+        items = "".join(
+            f"<a href='/watchlist?{esc(urlencode({'box': box, 'list': name}))}' data-icon='{ic}'{extra}>"
+            f"{icon(ic)}{text}</a>"
+            for text, ic, box, extra in (
+                ("Rename list…", "edit", "rename", ""),
+                ("Delete list…", "trash", "delete", " class='danger'"),
+            )
+        )
+        wrows.append(
+            f"<div class='yrow wlrow'><a class='lbl' href='{esc(href)}'>{icon('folder')}"
+            f"<span>{esc(name)}</span></a>"
+            f"<span class='val'>{wl['count']:,}</span>"
+            "<details class='dd rowmenu lp-dd'><summary class='kebab' "
+            f"aria-label='Menu for the list {esc(name)}' "
+            f"title='Menu' aria-haspopup='menu'>{icon('more')}</summary>"
+            f"<div class='menu'><div class='head'>{esc(name)}</div>{items}</div></details></div>"
+        )
+    if ungrouped:
+        wrows.append(
+            "<a class='yrow' href='/watchlist?list=-'>"
+            f"{icon('folder')}<span class='lbl'>Not in a list</span><span class='val'>{ungrouped:,}</span>"
+            f"<span class='ch'>{icon('chev')}</span></a>"
+        )
+    wrows.append(
+        f"<a class='yrow' href='/watchlist?box=newlist' {ui.box_open_attr('wl-new')}>{icon('plus')}"
+        "<span class='lbl'>New list…</span></a>"
+    )
+    watch = (
+        f"<section class='ygrp'><h2>Watchlist lists</h2><div class='rows'>{''.join(wrows)}</div></section>"
+    )
+    box = ui.box(
+        "wl-new",
+        "New list",
+        "<form method='post' action='/watchlist' id='wl-new-f'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<input type='hidden' name='action' value='list_new'><input type='hidden' name='back' value='{HUB}'>"
+        "<label for='wl-newname'>Name<input id='wl-newname' name='name' maxlength='40' autocomplete='off' "
+        "required></label><p class='ui-hint'>A list groups the cards you watch: wants for one deck, cards to "
+        "trade for, anything you like. Move cards into it from their ⋮ on the Watchlist, or with "
+        "Select.</p></form>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Create list", kind="primary", form="wl-new-f"),
+        ],
+        open=open_box == "newlist",
+        close_href=HUB,
+    )
+    return (
+        f"<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div>"
+        f"<div class='ycol'>{watch}</div></div></div>{box}"
+    )
+
+
+HUB_CSS = """
+.lp-hub{max-width:62rem;margin:0 auto}
+.lp-hub .ygrp .yrow .val:empty{display:none}
+.lp-hub .yrow.wlrow{padding-right:.25rem}
+.lp-hub .yrow.wlrow a.lbl{display:inline-flex;align-items:center;gap:.8rem;flex:1 1 auto;min-height:44px;
+  color:var(--text);text-decoration:none;font-weight:400}
+.lp-hub .yrow.wlrow a.lbl svg.i{width:20px;height:20px;color:var(--orange-text)}
+.lp-hub .yrow.wlrow a.lbl:hover span{text-decoration:underline}
+.lp-hub .yrow.wlrow .lp-dd > summary.kebab{display:inline-grid;place-items:center;width:44px;height:44px;
+  border-radius:var(--radius);color:var(--text)}
+.lp-hub .yrow.wlrow .lp-dd > summary.kebab:hover{background:var(--surface-2)}
+.lp-hub .yrow.wlrow .lp-dd .menu{min-width:12rem}
+.lp-hub .ui-hint{margin:.5rem 0 0}
+.lp-hub + .ui-box form label{display:flex;flex-direction:column;gap:.25rem;font-weight:700}
+"""
 
 
 def list_head(title: str, count_html: str, actions_html: str = "") -> str:
@@ -1493,14 +1616,14 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         scripts: tuple[str, ...] = ("lists.js",),
         tab: Tab | None = None,
     ) -> Response:
-        wants = tab is PINS
+        title = WANTS_TITLE if tab is PINS else f"Binder: {tab.label}" if tab else TITLE
         return page(
-            WANTS_TITLE if wants else TITLE,
+            title,
             body,
             sub=sub,
             sid=sid,
             status=status,
-            current=WANTS if wants else PAGE,
+            current=WANTS if tab is PINS else HUB,
             csp=LISTS_CSP,
             heading=False,
             extra_css=CSS,
@@ -1634,17 +1757,20 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         return head_of(tab, counts) + notice + tab_body(tab, got, csrf, box, q, counts)
 
     def head_of(tab: Tab, counts: dict[str, int] | None = None) -> str:
-        """The page's head: Binder's switch on Wants; the way back to Account, the title and the
-        tab bar on the lists under Account."""
-        if tab is PINS:
-            return ui.binder_head(WANTS, WANTS_TITLE, WANTS_SUB)
-        return crumbs_html() + ui.page_head(TITLE, SUB_TEXT) + tabs_html(tab.slug, counts or {})
+        """A list's page head: Binder's switch (Lists lit), the way back to the hub with the
+        list's name, its purpose line and the tab bar between the five lists."""
+        sub_text = WANTS_SUB if tab is PINS else SUB_TEXT
+        return (
+            ui.binder_head(HUB, WANTS_TITLE if tab is PINS else f"Binder: {tab.label}", sub_text)
+            + crumbs_html(tab)
+            + tabs_html(tab.slug, counts or {})
+        )
 
     def problem(request: Request, exc: DeckError, sub: str, sid: str | None, tab: Tab) -> Response:
         if busy := busy_response(exc, request, page, sub=sub, sid=sid):
             return busy
         if exc.kind == "not_linked":
-            what = "Your wants" if tab is PINS else "Your lists"
+            what = "Your pinned cards" if tab is PINS else "Your lists"
             body = (
                 f"<div class='card'><h2>Link your Archidekt account</h2><p>{what} appear here once "
                 "Archidekt is "
@@ -1665,10 +1791,57 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
     @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
     async def lists_home(request: Request) -> Response:
+        """The old My lists address: Binder › Lists now."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
-        return RedirectResponse(f"{PAGE}/templates", status_code=302)
+            return login_redirect(HUB)
+        return RedirectResponse(HUB, status_code=302)
+
+    @server.custom_route(HUB, methods=["GET"], include_in_schema=False)
+    async def lists_hub(request: Request) -> Response:
+        """Binder › Lists: the two blocks. The Archidekt counts are the ones read so far (the
+        page never waits on Archidekt; static/lists.js asks for the rest); the watchlist lists
+        are this gateway's own, read in one query."""
+        from .watchlist_page import OK_NOTES
+
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(HUB)
+        prices_svc = getattr(state, "prices", None)
+        watch_lists = None
+        ungrouped = 0
+        badges: dict[str, int] = {}
+        if prices_svc is not None:
+            watch_lists = prices_svc.lists(sub)
+            total = prices_svc.watch_count(sub)
+            ungrouped = total - sum(wl["count"] for wl in watch_lists)
+            badges["/watchlist"] = total
+        q = request.query_params
+        ok = q.get("ok") or ""
+        notice = ui.notice(OK_NOTES[ok], "ok", role="status") if ok in OK_NOTES else ""
+        box = q.get("box") or ""
+        body = (
+            ui.binder_head(HUB, TITLE, HUB_SUB, badges=badges)
+            + notice
+            + hub_html(
+                account_lists.counts(sub),
+                watch_lists,
+                ungrouped=ungrouped,
+                csrf=_csrf(s, sid) or "",
+                open_box=box if box in ("newlist",) else "",
+            )
+        )
+        return page(
+            TITLE,
+            body,
+            sub=sub,
+            sid=sid,
+            current=HUB,
+            heading=False,
+            extra_css=account_hub.HUB_CSS + HUB_CSS + CSS,
+            extra_scripts=("lists.js",),
+            main_class="ui-wide",
+        )
 
     @server.custom_route(COUNTS_API, methods=["GET"], include_in_schema=False)
     async def lists_counts(request: Request) -> Response:
@@ -1683,21 +1856,23 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         except DeckError:
             pass  # a count that can't be read stays blank
         counts = account_lists.counts(sub)
-        # keyed as the tabs' links
-        by_tab = {t.slug: counts[t.kind] for t in ACCOUNT_TABS if t.kind in counts}
+        # keyed as the tabs' links end (the pins' page ends in "wants")
+        by_tab = {t.slug: counts[t.kind] for t in TABS if t.kind in counts}
+        if "pins" in by_tab:
+            by_tab["wants"] = by_tab["pins"]
         return JSONResponse({"ok": True, "counts": by_tab}, headers=headers)
 
     @server.custom_route(WANTS, methods=["GET"], include_in_schema=False)
     async def wants_page(request: Request) -> Response:
-        """Binder › Wants: the Pinned cards tab under Binder's switch."""
+        """Binder › Lists › Pinned cards, at the old Wants address."""
         return await tab_page(request, PINS)
 
     @server.custom_route(PAGE + "/{tab}", methods=["GET"], include_in_schema=False)
     async def lists_tab(request: Request) -> Response:
         tab = BY_SLUG.get(request.path_params["tab"])
         if tab is None:
-            return RedirectResponse(f"{PAGE}/templates", status_code=302)
-        if tab is PINS:  # the old address of the pins: Binder's Wants page, with the same query
+            return RedirectResponse(HUB, status_code=302)
+        if tab is PINS:  # the old address of the pins: the Pinned cards page, with the same query
             q = request.url.query
             return RedirectResponse(WANTS + (f"?{q}" if q else ""), status_code=302)
         return await tab_page(request, tab)

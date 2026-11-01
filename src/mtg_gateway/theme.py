@@ -244,8 +244,9 @@ main:focus{outline:none}
 /* (!important: a row's own img rule, such as .erow .thumb's inline-flex, must not show it again) */
 img.img-broken{display:none !important}
 .img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
-  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
+  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
+/* (the page's text colour, not the muted one: muted was 3.6:1 on the gradient's surface-3 end) */
 /* too small for the name (a row's thumbnail): the plain tile a row without a picture shows */
 .img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
@@ -1335,6 +1336,9 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a{white-space:nowrap}
 .hubseg a:hover{background:var(--surface-2)}
 .hubseg a[aria-current=page]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+/* a part's count (Binder: Cards 18, Watchlist 3; mockup screen 8): a quiet grey pill */
+.hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;
+  border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
 @media (pointer:coarse){ .hubseg a{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%}
@@ -2372,6 +2376,16 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
     return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
 
 
+_NUMBERS = re.compile(r"(\d+)")
+
+
+def natural_key(text: str | None) -> tuple[str | int, ...]:
+    """A sort key for names: the numbers in them sort as numbers ("Card 2" before "Card 10"),
+    the rest without regard to case. Every key alternates text and numbers from the first
+    character, so any two compare."""
+    return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
+
+
 def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
     """'1 card', '2 cards': a real plural instead of 'card(s)'. ``plural_word`` for irregular
     nouns (``plural(2, "copy", "copies")``)."""
@@ -2503,8 +2517,9 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 # 600 px) list these; the rail adds More's pages and Alerts (the bell) instead of More. Assistant is the
 # assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
 # the count of proposals waiting for the member. Binder is the member's cards, behind one switch too
-# (BINDER_PAGES): Cards (the Archidekt collection), Wants (the cards pinned on Archidekt) and
-# Watchlist (decision C8, 0.7.46).
+# (BINDER_PAGES): Cards (the Archidekt collection), Lists (the Archidekt lists that shape decks, the
+# pinned cards among them, and the watchlist's own lists) and Watchlist, the want list (decision C8
+# and mockup screen 8, 0.7.46).
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
@@ -2517,23 +2532,23 @@ ASSISTANT_PAGES = (
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
 )
-# Binder's switch (Cards, Wants, Watchlist); Watchlist only while watchlists are on (binder_pages)
+# Binder's switch (Cards, Lists, Watchlist); Watchlist only while watchlists are on (binder_pages)
 BINDER_PAGES = (
     ("/collection", "Cards", "collection"),
-    ("/collection/wants", "Wants", "bookmark"),
+    ("/collection/lists", "Lists", "list"),
     ("/watchlist", "Watchlist", "stats"),
 )
 NAV_PLACE = {
     "/history": "/proposals",
     "/reports": "/proposals",
+    "/collection/lists": "/collection",
     "/collection/wants": "/collection",
     "/watchlist": "/collection",
 }
-# The pages that light the picture (the Account place): the Account pages and the Archidekt lists
-# that live under Account (category templates, default categories, color tags, custom cards)
-ACCOUNT_PAGES = ("/account", "/account/details", "/lists")
+# The pages that light the picture (the Account place)
+ACCOUNT_PAGES = ("/account", "/account/details")
 # More, in groups: the phone's sheet. Account, Guide and Admin live on the Account page your
-# picture opens; the Archidekt lists live under Account; Watchlist lives in Binder.
+# picture opens; the lists and the Watchlist live in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
     ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),
