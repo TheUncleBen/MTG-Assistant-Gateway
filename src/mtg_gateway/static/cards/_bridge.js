@@ -65,8 +65,6 @@ var Bridge = (function () {
     // its own): the pickers then keep to two columns, so a picture stays big enough to read.
     var sw = window.screen && window.screen.width;
     if (ctx.platform === "mobile" || (sw && window.innerWidth > sw * 1.25)) root.setAttribute("data-narrow", "");
-    var box = ctx.containerDimensions;
-    if (box && typeof box.maxHeight === "number") root.style.setProperty("--max-h", box.maxHeight + "px");
     if (handlers.context) handlers.context(hostCtx);
   }
 
@@ -144,12 +142,16 @@ var Bridge = (function () {
   }
   // A card picture. ``cls`` left out: a row's thumbnail (.pic); "" or a class: a picture sized by
   // its own box. ``big`` (the normal-size picture) goes in a srcset, so a sharp phone screen
-  // draws it instead of stretching the small one. ``opts.onError`` and ``opts.onLoad`` let a card
+  // draws it instead of stretching the small one; ``opts.large`` (Scryfall's 672px picture) joins
+  // it for a picture drawn across the card. ``opts.onError`` and ``opts.onLoad`` let a card
   // count what could not be drawn (a picture host blocked or down).
   function picture(src, cls, big, opts) {
     var img = el("img", cls == null ? "pic" : cls), o = opts || {};
     img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
-    if (big && big !== src) { img.srcset = src + " 146w, " + big + " 488w"; img.sizes = o.sizes || "146px"; }
+    if (big && big !== src) {
+      img.srcset = src + " 146w, " + big + " 488w" + (o.large ? ", " + o.large + " 672w" : "");
+      img.sizes = o.sizes || "146px";
+    }
     img.src = src;
     img.onerror = function () { img.classList.add("none"); img.onerror = null; if (o.onError) o.onError(img); };
     if (o.onLoad) img.onload = function () { o.onLoad(img); };

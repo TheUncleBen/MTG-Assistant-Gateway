@@ -240,8 +240,10 @@ their review link.
 ### The other cards in the chat
 
 The same mechanism shows a card where you have something to pick: the
-**printings** of a card as pictures in a grid (tap the one you mean, filter by
-set or finish, expand it), and the **cards read from your photos or list**
+**printings** of a card as pictures in a grid (tap the one you mean to see it
+at the card's full width with its rules text, filter by set or finish, press
+**Bigger pictures** for one whole card across, or Expand where your chat
+offers a full screen), and the **cards read from your photos or list**
 with a tick per row and suggestions for names it was unsure about (press
 **Use these cards** when the list is right). A tap on these cards is passed to
 the assistant as plain text, which it reads with your next message (the card
