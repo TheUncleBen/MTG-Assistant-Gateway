@@ -224,7 +224,7 @@ def link_strip_html(*, failed: bool = False) -> str:
     words = LINK_FAILED if failed else LINK_WHY
     return (
         f"<div class='fm-link'><p>{esc(words)}</p>"
-        f"<a class='btn btn-primary' href='/account/details#archidekt'>{icon('link')}{esc(LINK_TO_REPLY)}</a>"
+        f"<a class='btn btn-primary' href='/account/details/archidekt'>{icon('link')}{esc(LINK_TO_REPLY)}</a>"
         "</div>"
     )
 

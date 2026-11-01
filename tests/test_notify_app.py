@@ -24,6 +24,7 @@ from .conftest import Stack, StackOptions, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 TOKEN = "tk_secret_ntfy_token_value"
+N = "/account/details/notifications"
 APP_UA = "Mozilla/5.0 (Linux; Android 16; wv) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.7.30"
 
 
@@ -457,22 +458,22 @@ async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
     b, key = await _member(stack, app=True)
     try:
         r = await _post(b, {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1"})
-        assert r.headers["location"] == "/account/details?ok=notify_saved&connect=1#notifications"
-        page = (await b.http.get("/account/details?ok=notify_saved&connect=1")).text
+        assert r.headers["location"] == f"{N}?ok=notify_saved&connect=1#notifications"
+        page = (await b.http.get(f"{N}?ok=notify_saved&connect=1")).text
         assert f"data-native='startNotifications' data-native-arg='{key}' data-native-auto" in page
         assert f"data-native-state='notificationsState' data-native-arg='{key}'" in page
         assert "Get push notifications on this phone" in page and "Update the app" in page
         assert "/install?for=android" not in page
         # a topic a member chose before 0.7.30 is replaced: only gateway-made topics are keys
         notify.save_prefs(stack.h.db, "user-1", ntfy_topic="mtg-my-own-topic-1234")
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         new = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
         assert notify.STRONG_TOPIC_RE.fullmatch(new) and f"data-native-arg='{new}'" in page
         assert "mtg-my-own-topic-1234" not in page
         # off: no phone part and no Send test
         r = await _post(b, {"action": "notify_save"})
-        assert r.headers["location"] == "/account/details?ok=notify_off#notifications"
-        page = (await b.http.get("/account/details")).text
+        assert r.headers["location"] == f"{N}?ok=notify_off#notifications"
+        page = (await b.http.get(N)).text
         assert "startNotifications" not in page and "Send test" not in page
     finally:
         await b.aclose()
@@ -485,7 +486,7 @@ async def test_the_card_outside_the_app_says_to_tick_and_save_in_the_app(stack: 
     The summary's choice is labelled How often, not as if it were a button that sends it."""
     b, _key = await _member(stack, app=False)
     try:
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         assert (
             "open this page in the app, tick Send me push notifications and press Save push notifications."
         ) in page
@@ -556,7 +557,7 @@ async def test_a_topic_typed_while_an_older_version_ran_is_never_a_key(stack: St
         assert notify.replace_old_topics(db) == 1
         new = notify.prefs(db, "user-1")["ntfy_topic"]
         assert new not in (typed, key) and notify.strong_topic(db, "user-1", new)
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         assert typed not in page and f"data-native-arg='{new}'" in page
     finally:
         await b.aclose()
@@ -578,7 +579,7 @@ async def test_a_key_made_after_the_upgrade_still_connects_after_a_restart(stack
 async def test_the_token_is_never_on_the_page(stack: Stack, app: bool) -> None:
     b, _ = await _member(stack, app=app)
     try:
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         assert TOKEN not in page and "ntfy.test" not in page
     finally:
         await b.aclose()

@@ -1,8 +1,10 @@
-"""The Account page after the UI overhaul: the shared On/Off and Active labels, connected apps as
-rows with the app's full name and no client id, red-outline Unlink, Disconnect, Disconnect all
-apps and Delete my data that each open an "are you sure" box (solid red only inside it), one
-orange button on the page (Save approval mode while linked, Link account while not), the
-approved shorter wording, and the old one-press addresses opening the page with its box open."""
+"""Account details in the settings-list style (mockup screen 7, 0.7.46): a grouped list whose
+rows open their own pages (Archidekt account, Archidekt profile, Email and alerts, New device
+defaults, Push notifications, Your view choices) or a box (Sign out on all my devices, Unlink,
+Delete my data, solid red only inside it); the shared On/Off and Active labels, connected apps as
+rows with the app's full name and no client id, one orange button on a page (Link account while
+not linked), the approved shorter wording, and the old one-press addresses opening the list with
+its box open."""
 
 from __future__ import annotations
 
@@ -36,7 +38,7 @@ def orange(text: str) -> int:
 
 def box(page: str, box_id: str) -> str:
     start = page.index(f"<div class='ui-box mtgbox' id='{box_id}' role='dialog'")
-    return page[start : page.index("</div><div class='acts'>", start) + 200]
+    return page[start : page.index("</div><div class='acts'>", start) + 400]
 
 
 async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Harness) -> None:
@@ -44,36 +46,61 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
     try:
         await b.login()
         page = (await b.http.get("/account/details")).text
-        assert "<div class='acc'>" in page and ".acc .apps" in page and "/static/pages.js" in page
-        # the writes badge is the shared label (On green, Off grey); the note is the approved short one
-        writes = "<span class='ui-lbl green'>" if gw.settings.writes_enabled else "<span class='ui-lbl grey'>"
-        word = "On" if gw.settings.writes_enabled else "Off"
-        assert writes in page and f"{word}</span></dd></dl>" in page
+        assert (
+            "<div class='acc acc-list'>" in page and ".ydetails .yfold" in page and "/static/pages.js" in page
+        )
+        # the list: the four groups in the mockup's order, two columns (Archidekt over This gateway,
+        # Assistant over Your data), the member's card at the top
+        groups = re.findall(r"<section class='ygrp' data-g='(\d)'(?: id='apps')?><h2>([^<]*)</h2>", page)
+        assert groups == [("0", "Archidekt"), ("2", "This gateway"), ("1", "Assistant"), ("3", "Your data")]
+        # on a phone the style orders them by data-g: the mockup's order, Your data last
+        assert page.count("<div class='ycol'>") == 2 and "<div class='yme'>" in page
+        assert "src='/account/avatar'" in page and "Signed in as" not in page
+        # Archidekt writes: a row with its value, folded open to the shared label (On green, Off
+        # grey) and the approved short note
+        on = gw.settings.writes_enabled
+        word = "On" if on else "Off"
+        assert f"<span class='lbl'>Archidekt writes</span><span class='val'>{word}</span>" in page
+        writes = "<span class='ui-lbl green'>" if on else "<span class='ui-lbl grey'>"
+        assert f"<p>{writes}" in page and f"{word}</span></p>" in page
         assert "<span class='badge ok'>on</span>" not in page and "<span class='badge'>off</span>" not in page
         assert (
             "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are off, "
             "changes can be reviewed but not applied.</p>" in page
         )
         assert "Archidekt writes are switched on or off" not in page
-        # approval mode and connected apps: one Assistants row (each assistant has its own mode), so
-        # Link account is the one orange button
+        # approval mode and connected apps: one Assistants row (each assistant has its own mode) and
+        # the default's row; no form sits on the list
         assert "<span class='lbl'>Assistants</span><span class='val'>None connected</span>" in page
+        assert "href='/account/assistants/default'" in page and "Ask me every time" in page
         assert "Save approval mode" not in page and "<div class='card' id='mode'>" not in page
-        assert "<button class='primary'>Link account</button>" in page
-        assert orange(page) == 1, re.findall(r"class='primary'[^>]*>[^<]*", page)
+        assert "<div class='card'" not in page and orange(page) == 0
+        # not linked: the Archidekt row says so and opens the Link page; the profile rows wait
+        assert "<span class='lbl'>Archidekt account</span><span class='val'>Not linked</span>" in page
+        assert "Archidekt profile" not in page and "Unlink Archidekt" not in page
+        link = (await b.http.get("/account/details/archidekt")).text
+        assert "<h1>Archidekt account</h1>" in link and "<a class='yback' href='/account/details'>" in link
+        assert "<button class='primary'>Link account</button>" in link
+        assert orange(link) == 1, re.findall(r"class='primary'[^>]*>[^<]*", link)
         # the tick hint under the link form is gone; the disclosure strip is still there
-        assert "accept-risk-hint" not in page and "aria-describedby" not in card(page, "archidekt")
-        assert "<div class='notice disclosure' id='archidekt-disclosure'>" in page
-        # Delete my data: the merged list, a red-outline opener with the trash icon, the box behind it
-        delete = card(page, "delete-data")
-        assert f"<p>Delete everything this gateway keeps for your account: {pages.DELETED_LIST}." in delete
-        assert "your card models" in delete and "deck covers" in delete and "view choices" in delete
+        assert "accept-risk-hint" not in link and "aria-describedby" not in card(link, "archidekt")
+        assert "<div class='notice disclosure' id='archidekt-disclosure'>" in link
+        for section in ("profile", "email", "defaults"):  # nothing to show before linking
+            r = await b.http.get(f"/account/details/{section}")
+            assert r.status_code == 303 and r.headers["location"] == "/account/details/archidekt"
+        assert (await b.http.get("/account/details/nothing")).status_code == 404
+        # Delete my data: the one red row, with the trash icon, opens the box; the merged list of
+        # what goes is inside the box
         assert (
-            "<a class='btn btn-outline-danger' href='/account/details?delete=1'"
-            " data-box-open='delete'>" in delete
+            "<a class='yrow ydanger' href='/account/details?delete=1' id='delete-data' "
+            "data-box-open='delete'>" in page
         )
-        assert "Delete my data…</a>" in delete and "<button class='danger'>" not in delete
+        assert "<span class='lbl'>Delete my data…</span></a>" in page
+        assert "<button class='danger'>" not in page
+        assert page.count("class='yrow ydanger'") == 1  # (the style names it too)
         dbox = box(page, "delete")
+        assert f"<p>Delete everything this gateway keeps for your account: {pages.DELETED_LIST}." in dbox
+        assert "your card models" in dbox and "deck covers" in dbox and "view choices" in dbox
         assert "<h2 id='delete-title'>Delete my data?</h2>" in dbox
         assert (
             "<p>Everything this gateway keeps for your account is deleted and you are signed out. Your decks "
@@ -89,8 +116,25 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
             "</button>" in dbox
         )
         assert "hidden>" in page.split("id='delete' role='dialog'", 1)[1][:200]  # closed until opened
-        # the forget-choices card keeps its plain button behind its tick
-        assert "<div class='ui-actions'><button>Forget my view choices</button></div>" in page
+        # Sign out on all my devices asks first: its row opens a box with the /logout form
+        assert (
+            "<a class='yrow' href='/account/details?signout=1' data-box-open='signout'>" in page
+            and "href='/logout'" not in page
+        )
+        sbox = box(page, "signout")
+        assert "<h2 id='signout-title'>Sign out on all my devices?</h2>" in sbox
+        assert "<form id='signoutf' class='inbox' method='post' action='/logout'>" in sbox
+        assert (
+            "<button type='submit' class='danger' form='signoutf' name='everywhere' value='1' "
+            "data-busy-text='Signing out…'>" in sbox
+        )
+        opened = (await b.http.get("/account/details?signout=1")).text
+        assert "data-open" in opened.split("id='signout' role='dialog'", 1)[1][:120]
+        # the forget-choices page keeps its plain button behind its tick
+        choices = (await b.http.get("/account/details/choices")).text
+        assert "<h1>Your view choices</h1>" in choices and "<h2>Your view choices</h2>" not in choices
+        assert "<div class='ui-actions'><button>Forget my view choices</button></div>" in choices
+        assert "href='/account/details/choices'" in page
     finally:
         await b.aclose()
 
@@ -178,7 +222,19 @@ async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_b
     b = await linked_browser(stack)
     try:
         page = (await b.http.get("/account/details")).text
+        # the list: the row says whose account, and the profile rows are there now
+        assert "<span class='lbl'>Archidekt account</span><span class='val'>alice · linked</span>" in page
+        for section, label in (
+            ("profile", "Archidekt profile"),
+            ("email", "Email and alerts on Archidekt"),
+            ("defaults", "New device defaults"),
+        ):
+            assert f"href='/account/details/{section}'><svg" in page and label in page, section
+        assert "<a class='yrow' href='/account/details?unlink=1' data-box-open='unlink'>" in page
+        assert "<span class='lbl'>Unlink Archidekt…</span></a>" in page
+        page = (await b.http.get("/account/details/archidekt")).text
         arch = card(page, "archidekt")
+        assert "<h1>Archidekt account</h1>" in page and "<h2>Archidekt</h2>" not in page
         assert (
             "<p>Linked to <strong>alice</strong> <span class='ui-lbl green'>" in arch
             and "Active</span></p>" in arch
@@ -207,11 +263,15 @@ async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_b
         assert "<details class='disclosure' id='archidekt-disclosure'>" in arch
         # no orange button once linked: Save approval mode moved to Default for new assistants
         assert orange(page) == 0, re.findall(r"class='primary'[^>]*>[^<]*", page)
+        assert orange((await b.http.get("/account/details")).text) == 0
         default = (await b.http.get("/account/assistants/default")).text
         assert "<button class='primary'>Save approval mode</button>" in default
         assert orange(default) == 1, re.findall(r"class='primary'[^>]*>[^<]*", default)
-        # the old address opens the box; unlinking says so in the new words
+        # the old address opens the box on the list, and ?unlink=1 on the page too; unlinking says
+        # so in the new words
         opened = (await b.http.get("/account/details?unlink=1")).text
+        assert "data-open" in opened.split("id='unlink' role='dialog'", 1)[1][:120]
+        opened = (await b.http.get("/account/details/archidekt?unlink=1")).text
         assert "data-open" in opened.split("id='unlink' role='dialog'", 1)[1][:120]
         csrf = await b.csrf()
         r = await b.http.post("/account", data={"csrf": csrf, "action": "unlink"})
@@ -221,6 +281,7 @@ async def test_linked_archidekt_card_has_the_active_label_dates_and_the_unlink_b
             "<div class='notice ok'>Unlinked. The gateway&#x27;s copy of the session was deleted.</div>"
             in after
         )
+        assert "Not linked" in after and "Unlink Archidekt" not in after
     finally:
         await b.aclose()
 
@@ -246,17 +307,17 @@ async def test_the_disconnected_notice_names_only_the_members_own_app(stack: Sta
 
 
 async def test_the_forms_without_an_action_post_to_account_details(stack: Stack) -> None:
-    """Account details' own forms (Link account, Save approval mode, Forget my choices, the
-    Notifications card) carry no action, so the browser posts them to /account/details itself:
-    that address takes the same posts as /account (a 405 there broke linking and the mode)."""
+    """Account details' own forms (Link account, Forget my choices, the Push notifications card)
+    carry no action, so the browser posts them to their own page's address: every section's
+    address takes the same posts as /account (a 405 there broke linking and the mode)."""
     b = await linked_browser(stack)
     try:
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get("/account/details/choices")).text
         bare = re.findall(r"<form method='post'(?![^>]*action=)[^>]*>", page)
         assert len(bare) >= 1, bare  # at least Forget my choices (Save approval mode moved, see below)
         csrf = await b.csrf()
         r = await b.http.post(
-            "/account/details", data={"csrf": csrf, "action": "approval_mode", "mode": "manual"}
+            "/account/details/choices", data={"csrf": csrf, "action": "approval_mode", "mode": "manual"}
         )
         # the default's own page (Assistants › Default for new assistants) posts to /account
         assert (
@@ -264,10 +325,31 @@ async def test_the_forms_without_an_action_post_to_account_details(stack: Stack)
         ), r.text
         default = (await b.http.get("/account/assistants/default")).text
         assert "<form method='post' action='/account'>" in default
-        # an expired form is refused the same way on both addresses
-        r = await b.http.post(
-            "/account/details", data={"csrf": "stale", "action": "approval_mode", "mode": "manual"}
+        # an expired form is refused the same way on every address
+        for path in ("/account/details", "/account/details/choices"):
+            r = await b.http.post(path, data={"csrf": "stale", "action": "approval_mode", "mode": "manual"})
+            assert r.status_code == 403, path
+    finally:
+        await b.aclose()
+
+
+async def test_ben_can_flip_the_sections_to_fold_open_on_the_list(gw: Harness, monkeypatch) -> None:
+    """Sam's open choice (mockup screen 7): each section on its own page (the default), or every
+    section folded under its row on the list. One constant flips it; with it off a section's
+    address is its fold on the list, and the old #part links need no script."""
+    monkeypatch.setattr(pages, "DETAIL_PAGES", False)
+    b = Browser(gw)
+    await b.login()
+    try:
+        assert pages.section_href("notifications", "ok=notify_off", "summary") == (
+            "/account/details?ok=notify_off#summary"
         )
-        assert r.status_code == 403
+        r = await b.http.get("/account/details/choices?err=confirm_forget")
+        assert r.status_code == 303
+        assert r.headers["location"] == "/account/details?err=confirm_forget#choices"
+        page = (await b.http.get("/account/details")).text
+        assert "<details class='yrow' id='choices'>" in page and "Forget my view choices</button>" in page
+        assert "<details class='yrow' id='archidekt'>" in page and "Link account</button>" in page
+        assert "href='/account/details/" not in page and "data-section-pages='{}'" in page
     finally:
         await b.aclose()

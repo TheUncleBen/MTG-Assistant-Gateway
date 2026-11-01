@@ -167,7 +167,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     h = stack.h
     b = Browser(h)
     await b.login()
-    page = await b.http.get("/account/details")
+    page = await b.http.get("/account/details/archidekt")
     assert "Link your Archidekt account" in page.text
     assert "default-src 'none'" in page.headers["content-security-policy"]
 
@@ -182,6 +182,8 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     # encrypted, no password
     assert "pw-alice" not in row["secret_enc"] and "tok-alice" not in row["secret_enc"]
     page = await b.http.get("/account/details?ok=linked")
+    assert "<span class='val'>alice · linked</span>" in page.text  # the list's row
+    page = await b.http.get("/account/details/archidekt")
     assert "Linked to <strong>alice</strong>" in page.text
 
     token = await mcp_token(h)

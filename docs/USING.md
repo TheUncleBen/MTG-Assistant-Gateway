@@ -61,7 +61,7 @@ decks with their cover art (a row to swipe on a phone) and All decks. The
 search box at the top suggests your own decks first, then cards and public
 decks. **Connect an AI assistant**, with the connector URL and the guided
 setup, shows until an assistant is connected; after that it is on Account
-details under Connected apps. The navigation is not repeated on the page: the
+details under Assistants. The navigation is not repeated on the page: the
 tabs, More and your picture are the same here as everywhere.
 
 ## Your decks
@@ -572,7 +572,7 @@ browser and it opens like an app, scanning included.
 The **Account** page shows who you are signed in as and your Archidekt
 link. Unlinking removes the stored Archidekt session at once. **Sign out on
 all my devices** ends every browser and Android app session; connected
-assistants keep working until you disconnect them under **Connected apps**.
+assistants keep working until you disconnect them under **Assistants**.
 Only
 you can see your decks, proposals, snapshots, scans and collection; another
 member cannot reach them, and neither can their assistant. Nothing is

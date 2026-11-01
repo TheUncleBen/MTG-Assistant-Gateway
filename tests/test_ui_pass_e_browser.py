@@ -83,15 +83,16 @@ def _box(page, sel: str):
     )
 
 
-def _account(page, base: str) -> None:
-    """The Account page with its Archidekt cards (a slow first read draws the page without them)."""
-    page.goto(f"{base}/account/details", wait_until="networkidle")
+def _account(page, base: str, section: str = "defaults", ready: str = "#pr-group_by-btn") -> None:
+    """One of Account details' Archidekt pages (0.7.46: each card on its own page) with its card
+    drawn (a slow first read draws the page without it); ``ready`` is a control of that card."""
+    page.goto(f"{base}/account/details/{section}", wait_until="networkidle")
     for _ in range(3):
-        if page.locator("#pr-group_by-btn").count():
+        if page.locator(ready).count():
             break
         page.wait_for_timeout(1500)
         page.reload(wait_until="networkidle")
-    page.locator("#pr-group_by-btn").wait_for(state="visible")
+    page.locator(ready).first.wait_for(state="visible")
 
 
 def _hold(page, loc) -> None:
@@ -136,7 +137,7 @@ def test_the_account_switch_rows_and_the_price_sources_row(server: Server, width
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        _account(page, server.base)
+        _account(page, server.base, "email", "#email .ui-row.sw .switch")
         page.locator("#email").scroll_into_view_if_needed()
         # no repeated label beside the switch: the row's bold label alone, the switch's for readers
         assert page.locator("#email .sw-text").count() == 0
@@ -156,7 +157,10 @@ def test_the_account_switch_rows_and_the_price_sources_row(server: Server, width
             assert sw["x"] >= lab["x"] + lab["width"] - 1, (i, lab, sw)
             lefts.append(round(sw["x"]))
         assert max(lefts) - min(lefts) <= 1, lefts  # no zigzag
-        # Price sources: the label and its help at the top, level with the first picker
+        assert page.evaluate(MEASURE) == []
+        # Price sources (on New device defaults): the label and its help at the top, level with the
+        # first picker
+        _account(page, server.base)
         two = page.locator("#defaults .ui-row.two")
         two.scroll_into_view_if_needed()
         lab = two.locator(".lab").bounding_box()
