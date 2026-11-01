@@ -202,6 +202,16 @@
     var word = document.querySelector("#w-stop p");
     if (word) word.childNodes[1].textContent = (n === 1 ? " from your watchlist with its price history." : " from your watchlist with their price history.") + " Your Binder is not touched.";
   }
+  function stopNow() {
+    var form = document.getElementById("w-bulk");
+    if (!form) return;
+    var doing = form.querySelector("input[name=do]");
+    if (!doing) { doing = document.createElement("input"); doing.type = "hidden"; doing.name = "do"; form.appendChild(doing); }
+    doing.value = "remove";
+    var bar = document.querySelector(".watch-page .ui-bar");
+    if (bar) bar.querySelectorAll("a, button").forEach(function (b) { b.setAttribute("aria-disabled", "true"); });
+    form.submit();
+  }
   function setAll(on, which) {
     (which || boxes()).forEach(function (b) { b.checked = on; });
     redraw();
@@ -287,6 +297,17 @@
     return true;
   }
 
+  // Stop watching goes at once: the notice on the page that follows offers Undo for a while
+  // (0.7.46 audit QG-09); without scripts the link opens the box that asks first. Seen before
+  // the shared box opener (box.js), which would open that box.
+  document.addEventListener("click", function (e) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var stop = e.target.closest ? e.target.closest(".watch-page .ui-bar a[data-box-open='w-stop']") : null;
+    if (!stop || ticked().length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    stopNow();
+  }, true);
   document.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     var more = e.target.closest(".watch-page .w-t .more");
@@ -304,6 +325,7 @@
       if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true });
       return;
     }
+
     var range = e.target.closest(".watch-page .seg button[data-range]");
     if (range) { setRange(range); return; }
     var name = e.target.closest(".watch-page a.wcard");

@@ -26,6 +26,7 @@ an address with ``box=`` for a browser without scripts."""
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -75,6 +76,7 @@ OK_NOTES = {
     "moved": "Moved to the list.",
     "alerts_set": "Price alert saved on the selected cards.",
     "removed": "The selected cards are no longer watched.",
+    "rewatched": "The cards are watched again.",
 }
 CARD_HINT = (
     "A name alone follows the cheapest printing of the card, checked daily; add a set code and number "
@@ -1014,6 +1016,39 @@ def boxes_html(
 # -- the page ---------------------------------------------------------------------------------------
 
 
+def stop_words(ok: str, said: dict[str, str] | None) -> str:
+    """The notice after Stop watching names how many went, and after its Undo which are back."""
+    said = said or {}
+    if ok not in ("removed", "rewatched"):
+        return OK_NOTES[ok]
+    tail = "no longer watched." if ok == "removed" else "watched again."
+    if said.get("w"):
+        names = said["w"]
+        many = ", " in names
+        if many:
+            head, _, last = names.rpartition(", ")
+            names = f"{head} and {last}"
+        return f"{names} {'are' if many else 'is'} {tail}"
+    if said.get("n", "").isdigit():
+        n = int(said["n"])
+        return f"1 card is {tail}" if n == 1 else f"{n} cards are {tail}"
+    return OK_NOTES[ok]
+
+
+def undo_form(ok: str, said: dict[str, str] | None, csrf_in: str) -> str:
+    """The Undo button beside the Stop watching notice (0.7.46 audit QG-09): a small form, so
+    it works without scripts; the token is the member's own and lasts a while."""
+    token = (said or {}).get("undo") or ""
+    if ok != "removed" or not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token):
+        return ""
+    return (
+        f" <form method='post' action='/watchlist' class='inline'>{csrf_in}"
+        "<input type='hidden' name='action' value='rewatch'>"
+        f"<input type='hidden' name='token' value='{esc(token)}'>"
+        "<button type='submit' class='btn small'>Undo</button></form>"
+    )
+
+
 def watchlist_page_html(
     data: dict[str, Any],
     ids: dict[str, str | None],
@@ -1022,6 +1057,7 @@ def watchlist_page_html(
     *,
     ok: str = "",
     err: str = "",
+    said: dict[str, str] | None = None,
     now: float | None = None,
     card_history: Callable[[list[dict[str, Any]]], None] = _no_history,
     deck_history: Callable[[list[dict[str, Any]]], None] = _no_history,
@@ -1042,7 +1078,10 @@ def watchlist_page_html(
     )
     notice = ""
     if ok in OK_NOTES:
-        notice = f"<div class='notice ok' role='status'>{esc(OK_NOTES[ok])}</div>"
+        notice = (
+            f"<div class='notice ok' role='status'>{esc(stop_words(ok, said))}"
+            f"{undo_form(ok, said, csrf_in)}</div>"
+        )
     if err:
         notice = f"<div class='notice error' role='alert'>{esc(err)}</div>"
     kept = defaults or {}

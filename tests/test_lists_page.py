@@ -79,9 +79,15 @@ async def _post(b: Browser, tab: str, **data):
     return await b.http.post(f"/lists/{tab}", data=data)
 
 
+def _where(r: httpx.Response) -> str:
+    """The redirect's address without the notice's Undo token (test_undo_list_edits.py)."""
+    return re.sub(r"&undo=[A-Za-z0-9_-]+$", "", r.headers["location"])
+
+
 def _notice(page: str) -> str:
-    m = re.search(r"<div class='notice ok' role='status'>([^<]*)</div>", page)
-    return m.group(1) if m else ""
+    # the notice's words (an Undo button may follow them inside the notice, test_undo_list_edits.py)
+    m = re.search(r"<div class='notice ok' role='status'>([^<]*)", page)
+    return m.group(1).strip() if m else ""
 
 
 # -- the tabs ------------------------------------------------------------------------------------------
@@ -89,9 +95,9 @@ def _notice(page: str) -> str:
 
 async def test_lists_opens_on_the_hub(member: Browser) -> None:
     r = await member.http.get("/lists")
-    assert r.status_code == 302 and r.headers["location"] == "/collection/lists"
+    assert r.status_code == 302 and _where(r) == "/collection/lists"
     r = await member.http.get("/lists/nothing")
-    assert r.status_code == 302 and r.headers["location"] == "/collection/lists"
+    assert r.status_code == 302 and _where(r) == "/collection/lists"
 
 
 async def test_every_tab_renders_its_rows_and_menus(member: Browser) -> None:
@@ -150,13 +156,13 @@ async def test_a_signed_out_browser_is_sent_to_login(stack: Stack) -> None:
 async def test_templates_create_edit_and_delete_through_the_forms(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "templates", action="create", name="Draw", in_deck="1", in_price="1")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/templates?ok=template_created", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/templates?ok=template_created", r.text
     assert [t["name"] for t in ark.account.templates[WHO]] == ["Ramp", "Commander", "Draw"]
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Template created on Archidekt and read back."
 
     r = await _post(member, "templates", action="edit", was_name="Draw", name="Card draw", in_deck="1")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/templates?ok=template_saved"
+    assert r.status_code == 303 and _where(r) == "/lists/templates?ok=template_saved"
     t = ark.account.templates[WHO][2]
     assert t["name"] == "Card draw" and t["includedInPrice"] is False
 
@@ -171,7 +177,7 @@ async def test_templates_create_edit_and_delete_through_the_forms(member: Browse
     # the box's own form carries confirmed=1: applied by the member's press (a destructive change)
     r = await _post(member, "templates", action="delete", was_name="Card draw", confirmed="1")
     assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/lists/templates?ok=template_deleted&n=Card+draw"
+    assert _where(r) == "/lists/templates?ok=template_deleted&n=Card+draw"
     assert [t["name"] for t in ark.account.templates[WHO]] == ["Ramp", "Commander"]
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Deleted “Card draw” on Archidekt."
@@ -214,7 +220,7 @@ async def test_default_categories_set_and_clear(member: Browser, stack: Stack) -
             "main": "Commander",
         },
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/defaults?ok=defaults_saved&n=Sol+Ring"
+    assert r.status_code == 303 and _where(r) == "/lists/defaults?ok=defaults_saved&n=Sol+Ring"
     assert ark.account.defaults[WHO][9003] == ["Commander", "Ramp"]  # the main one first
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Default categories for “Sol Ring” saved on Archidekt and read back."
@@ -224,11 +230,11 @@ async def test_default_categories_set_and_clear(member: Browser, stack: Stack) -
     assert r.status_code == 400 and "Tick at least one category" in r.text
 
     r = await _post(member, "defaults", action="clear", card="Sol Ring")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/defaults?clear=9003"
+    assert r.status_code == 303 and _where(r) == "/lists/defaults?clear=9003"
     page = (await member.http.get(r.headers["location"])).text
     assert "Clear the default categories of “Sol Ring”?" in page
     r = await _post(member, "defaults", action="clear", card="Sol Ring", confirmed="1")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/defaults?ok=defaults_cleared"
+    assert r.status_code == 303 and _where(r) == "/lists/defaults?ok=defaults_cleared"
     assert ark.account.defaults[WHO][9003] == []
     page = (await member.http.get("/lists/defaults")).text
     assert "No cards with default categories yet." in page
@@ -252,7 +258,7 @@ async def test_default_categories_load_more_answers_rows(member: Browser, stack:
 async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "tags", action="create", name="Keep", color="#1ebb6c")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/tags?ok=tag_created"
+    assert r.status_code == 303 and _where(r) == "/lists/tags?ok=tag_created"
     assert ark.account.tags[WHO][1] == {
         "id": ark.account.tags[WHO][1]["id"],
         "name": "Keep",
@@ -261,14 +267,14 @@ async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stac
     page = (await member.http.get("/lists/tags?edit=21")).text
     assert "Rename or recolor “Cut”" in page and "value='#ff4d4f'" in page
     r = await _post(member, "tags", action="edit", was_name="Cut", name="Cut it", color="#aa0000")
-    assert r.status_code == 303 and r.headers["location"] == "/lists/tags?ok=tag_saved"
+    assert r.status_code == 303 and _where(r) == "/lists/tags?ok=tag_saved"
     assert ark.account.tags[WHO][0]["name"] == "Cut it" and ark.account.tags[WHO][0]["color"] == "#aa0000"
     r = await _post(member, "tags", action="delete", was_name="Cut it")
-    assert r.headers["location"] == "/lists/tags?delete=21"
+    assert _where(r) == "/lists/tags?delete=21"
     page = (await member.http.get(r.headers["location"])).text
     assert "Delete the tag “Cut it”?" in page
     r = await _post(member, "tags", action="delete", was_name="Cut it", confirmed="1")
-    assert r.headers["location"] == "/lists/tags?ok=tag_deleted&n=Cut+it"
+    assert _where(r) == "/lists/tags?ok=tag_deleted&n=Cut+it"
     assert [t["name"] for t in ark.account.tags[WHO]] == ["Keep"]
 
 
@@ -278,7 +284,7 @@ async def test_color_tags_create_recolor_and_delete(member: Browser, stack: Stac
 async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> None:
     ark = stack.ark
     r = await _post(member, "pins", action="edit", pin_id="31", quantity="2")
-    assert r.status_code == 303 and r.headers["location"] == "/collection/wants?ok=pin_saved"
+    assert r.status_code == 303 and _where(r) == "/collection/wants?ok=pin_saved"
     assert ark.account.pins[WHO][0]["quantity"] == 2
     page = (await member.http.get(r.headers["location"])).text
     assert _notice(page) == "Saved on Archidekt." and "<b class='n' aria-live='polite'>2</b>" in page
@@ -301,12 +307,12 @@ async def test_pins_copies_notes_and_removal(member: Browser, stack: Stack) -> N
 
     # below one copy: the stepper's press asks first, as Remove pin does
     r = await _post(member, "pins", action="edit", pin_id="31", quantity="0")
-    assert r.status_code == 303 and r.headers["location"] == "/collection/wants?remove=31"
+    assert r.status_code == 303 and _where(r) == "/collection/wants?remove=31"
     page = (await member.http.get(r.headers["location"])).text
     assert "Remove the pin on “Sol Ring”?" in page and "data-open" in page
     assert ark.account.pins[WHO]
     r = await _post(member, "pins", action="unpin", pin_id="31", confirmed="1")
-    assert r.headers["location"] == "/collection/wants?ok=pin_removed"
+    assert _where(r) == "/collection/wants?ok=pin_removed"
     assert ark.account.pins[WHO] == []
     page = (await member.http.get("/collection/wants")).text
     assert "No pinned cards yet." in page and "Remove all…" not in page
@@ -324,12 +330,12 @@ async def test_remove_all_pins_asks_then_removes_every_pin(member: Browser, stac
         in page
     )
     r = await _post(member, "pins", action="remove_all")
-    assert r.headers["location"] == "/collection/wants?remove_all=1"
+    assert _where(r) == "/collection/wants?remove_all=1"
     page = (await member.http.get(r.headers["location"])).text
     assert "Remove all 2 pinned cards?" in page and ">Remove all 2</button>" in page
     assert "class='danger' form='pin-all-f'" in page
     r = await _post(member, "pins", action="remove_all", confirmed="1")
-    assert r.headers["location"] == "/collection/wants?ok=pins_removed"
+    assert _where(r) == "/collection/wants?ok=pins_removed"
     assert ark.account.pins[WHO] == []
 
 
@@ -351,7 +357,7 @@ async def test_custom_cards_create_edit_and_a_delete_that_needs_the_tick(
         set_code="CST",
         collector_number="002",
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/custom?ok=card_created", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/custom?ok=card_created", r.text
     made = ark.account.customs[WHO][1]
     assert made["frontName"] == "Rift of Echoes" and made["frontManaCost"] == "{1}{U}" and made["cmc"] == 2
     assert made["hasBack"] is False and made["backName"] is None
@@ -376,7 +382,7 @@ async def test_custom_cards_create_edit_and_a_delete_that_needs_the_tick(
         b_n="Mentor Unbound",
         b_t="Creature",
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/custom?ok=card_saved", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/custom?ok=card_saved", r.text
     c = ark.account.customs[WHO][0]
     assert c["frontPower"] == "3" and c["hasBack"] is True and c["backName"] == "Mentor Unbound"
     page = (await member.http.get("/lists/custom")).text
@@ -393,7 +399,7 @@ async def test_custom_cards_create_edit_and_a_delete_that_needs_the_tick(
     r = await _post(
         member, "custom", action="delete", was_name="Rift of Echoes", confirmed="1", understood="1"
     )
-    assert r.headers["location"] == "/lists/custom?ok=card_deleted&n=Rift+of+Echoes"
+    assert _where(r) == "/lists/custom?ok=card_deleted&n=Rift+of+Echoes"
     assert [c["frontName"] for c in ark.account.customs[WHO]] == ["Grizzled Mentor"]
 
 
@@ -415,7 +421,7 @@ async def test_the_picture_goes_through_its_own_route(member: Browser, stack: St
         data={"csrf": csrf, "name": "Grizzled Mentor", "face": "front", "crop": "100,0,600,840"},
         files={"picture": ("mentor.jpg", _picture("JPEG"), "image/jpeg")},
     )
-    assert r.status_code == 303 and r.headers["location"] == "/lists/custom?ok=picture_saved", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/custom?ok=picture_saved", r.text
     who, body, _d = ark.account.uploads[-1]
     assert who == WHO and body.startswith(b"\x89PNG")
     assert ark.account.customs[WHO][0]["frontImageUrl"].startswith("https://")
@@ -523,7 +529,7 @@ async def test_a_custom_card_is_added_to_a_deck_from_its_row(member: Browser, st
         category="Ramp",
     )
     assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/lists/custom?ok=card_added&n=Grizzled+Mentor"
+    assert _where(r) == "/lists/custom?ok=card_added&n=Grizzled+Mentor"
     rows = ark.decks[42]["customCards"]
     assert len(rows) == 1 and rows[0]["quantity"] == 2 and rows[0]["categories"] == ["Ramp"]
     assert rows[0]["card"]["id"] == 41
@@ -583,7 +589,7 @@ async def test_a_template_added_to_a_deck_is_added_at_once_with_undo(member: Bro
     confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
     decks_before = set(ark.decks)
     r = await member.http.post("/proposals/undo", data=confirm)
-    assert r.status_code == 303 and r.headers["location"] == "/lists/templates?ok=undone", r.text
+    assert r.status_code == 303 and _where(r) == "/lists/templates?ok=undone", r.text
     assert set(ark.decks) == decks_before
     assert "Card draw" not in [c["name"] for c in ark.decks[42]["categories"]]
     page = (await member.http.get(r.headers["location"])).text

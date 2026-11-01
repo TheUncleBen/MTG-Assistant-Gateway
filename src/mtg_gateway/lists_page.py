@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 from types import SimpleNamespace
 from typing import Any, NamedTuple
@@ -30,6 +31,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import account_hub, account_lists, custom_pictures, modes, proposals_view, ui
 from .archidekt import no_retry
+from .archidekt_account import CUSTOM_CARD_FIELDS
 from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
@@ -101,6 +103,7 @@ HIST_TAIL = " is kept under History, and the result is read back to check."
 # the member's own text in the box after a save: the mockup's toasts
 NOTICES = {
     "undone": "Undone. The deck is back as it was before that change.",
+    "list_undone": "Undone. “{name}” is as it was.",
     "template_created": "Template created on Archidekt and read back.",
     "template_saved": "Template saved on Archidekt and read back.",
     "template_deleted": "Deleted “{name}” on Archidekt.",
@@ -159,6 +162,95 @@ def tab_href(slug: str, **params: Any) -> str:
     q = {k: v for k, v in params.items() if v not in (None, "", 0, False)}
     base = WANTS if slug == "pins" else f"{PAGE}/{slug}"
     return base + (f"?{urlencode(q)}" if q else "")
+
+
+# Undo of a list edit (0.7.46 audit QG-09): the reverse change of what the member's own press
+# just applied, kept under a token this long (seconds) for the notice's Undo button, which sends
+# it the same way (applied at once and read back). Only the member who made the change can
+# use it, once.
+UNDO_KEEP = 15 * 60
+_UNDOS: dict[str, tuple[str, str, dict[str, Any], str, float]] = {}  # token: (sub, slug, change, name, until)
+
+
+def keep_undo(sub: str, slug: str, change: dict[str, Any], name: str) -> str:
+    now = time.time()
+    for t in [t for t, v in _UNDOS.items() if v[4] <= now]:
+        _UNDOS.pop(t, None)
+    if len(_UNDOS) > 10_000:
+        _UNDOS.clear()
+    token = secrets.token_urlsafe(18)
+    _UNDOS[token] = (sub, slug, change, name, now + UNDO_KEEP)
+    return token
+
+
+def take_undo(sub: str, slug: str, token: str) -> tuple[dict[str, Any], str] | None:
+    """The kept reverse change for the member's ``token`` on this tab (spent by the take)."""
+    kept = _UNDOS.pop(str(token or ""), None)
+    if kept is None or kept[0] != sub or kept[1] != slug or kept[4] <= time.time():
+        return None
+    return kept[2], kept[3]
+
+
+def reverse_of(slug: str, change: dict[str, Any], before: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The change that undoes ``change``, given the item as it was before (``before``: the tab's
+    row for it, None when there was none). None when it cannot be undone this way (Remove all)."""
+    op = change.get("op")
+    name = change.get("new_name") or change.get("name") or ""
+    was = change.get("name") or ""
+    if slug == "templates":
+        if op == "create":
+            return {"op": "delete", "name": name}
+        if op == "edit" and before:
+            out = {"op": "edit", "name": name, **{k: bool(before.get(k)) for k, _w, _l in FLAGS}}
+            if name != was:
+                out["new_name"] = was
+            return out
+        if op == "delete" and before:
+            return {"op": "create", "name": was, **{k: bool(before.get(k)) for k, _w, _l in FLAGS}}
+    elif slug == "defaults":
+        card = change.get("card") or ""
+        if op in ("set", "clear"):
+            if before and before.get("categories"):
+                return {"op": "set", "card": card, "categories": list(before["categories"])}
+            return {"op": "clear", "card": card} if op == "set" else None
+    elif slug in ("tags", "btags"):
+        if op == "create":
+            return {"op": "delete", "name": name}
+        if op == "edit" and before:
+            out = {"op": "edit", "name": name, "color": before.get("color") or None}
+            if name != was:
+                out["new_name"] = was
+            return out
+        if op == "delete" and before:
+            return {"op": "create", "name": was, "color": before.get("color") or None}
+    elif slug == "pins":
+        if op == "edit" and before:
+            out: dict[str, Any] = {"op": "edit", "pin_id": change.get("pin_id")}
+            if "quantity" in change:
+                out["quantity"] = int(before.get("quantity") or 1)
+            if "notes" in change:
+                out["notes"] = before.get("notes") or ""
+            if change.get("set_code") or change.get("finish"):
+                return None  # a printing change: Archidekt's own history has no way back
+            return out
+        if op == "unpin" and before:
+            out = {"op": "pin", "card": before.get("name") or ""}
+            if before.get("set_code"):
+                out["set_code"] = before["set_code"]
+                out["collector_number"] = before.get("collector_number") or ""
+            if (before.get("finish") or "").lower() in ("foil", "etched"):
+                out["finish"] = before["finish"].capitalize()
+            return out
+    elif slug == "custom":
+        if op == "create":
+            return {"op": "delete", "name": name}
+        if op == "edit" and before:
+            fields = {k: before.get(k) for k in CUSTOM_CARD_FIELDS}
+            return {"op": "edit", "name": name, "fields": fields}
+        if op == "delete" and before:
+            fields = {k: before.get(k) for k in CUSTOM_CARD_FIELDS}
+            return {"op": "create", "fields": fields}
+    return None
 
 
 def notice_text(code: str, name: str = "") -> str:
@@ -1688,7 +1780,19 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             )
             return ui.notice(esc(UNCONFIRMED).replace("review page", link), "warn", html=True, role="status")
         text = notice_text(ok, (q.get("n") or "")[:200])
-        return (ui.notice(text, "ok", role="status") + undo_of(q, sub, csrf)) if text else ""
+        if not text:
+            return ""
+        token = (q.get("undo") or "")[:64]
+        button = ""
+        if re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token) and token in _UNDOS and _UNDOS[token][0] == sub:
+            button = (
+                f" <form method='post' action='{PAGE}/{esc(_UNDOS[token][1])}' class='inline'>"
+                f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+                "<input type='hidden' name='action' value='undo'>"
+                f"<input type='hidden' name='token' value='{esc(token)}'>"
+                "<button type='submit' class='btn small'>Undo</button></form>"
+            )
+        return ui.notice(text + button, "ok", role="status", html=True) + undo_of(q, sub, csrf)
 
     def undo_of(q: Any, sub: str, csrf: str) -> str:
         """The Undo of a template added to a deck (review F6), for the member's own applied add."""
@@ -2262,7 +2366,14 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         return respond(body, sub, sid, status=400, tab=tab)
 
     def done(
-        request: Request, tab: Tab, out: dict[str, Any], code: str, name: str, *, q: str = ""
+        request: Request,
+        tab: Tab,
+        out: dict[str, Any],
+        code: str,
+        name: str,
+        *,
+        q: str = "",
+        undo: str = "",
     ) -> Response:
         result = out.get("result") if isinstance(out.get("result"), dict) else {}
         params: dict[str, Any] = {"q": q} if q else {}
@@ -2274,6 +2385,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             if code == "template_added":
                 params["p"] = out.get("proposal_id") or ""  # its Undo (top_notice)
             text = notice_text(code, name)
+        if undo and result.get("verified") is not False:
+            params["undo"] = undo  # the notice's Undo button (top_notice), last in the address
         if wants_json(request):
             return JSONResponse(
                 {
@@ -2281,6 +2394,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     "notice": text,
                     "verified": result.get("verified"),
                     "proposal_id": out.get("proposal_id"),
+                    "undo": undo if result.get("verified") is not False else "",
                 }
             )
         return RedirectResponse(tab_href(tab.slug, **params), status_code=303)
@@ -2310,6 +2424,17 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if tab.slug == "custom" and data.get("action") == "add_to_deck":
             return await add_custom_to_deck(request, sub, sid, data)
         box_id = ""
+        if data.get("action") == "undo":  # the notice's Undo: the kept reverse change, once
+            kept = take_undo(sub, tab.slug, data.get("token", ""))
+            if kept is None:
+                exc = DeckError("not_found", "That Undo is no longer available.")
+                return await fail(request, tab, exc, sub, sid, "", data)
+            try:
+                current_client.set(BROWSER_CLIENT_ID)
+                out = await account_lists.hand_change(decks, sub, tab.kind, kept[0])
+            except DeckError as exc:
+                return await fail(request, tab, exc, sub, sid, "", data)
+            return done(request, tab, out, "list_undone", kept[1], q=q_of(request.query_params))
         try:
             change, code, box_id = change_of(tab, data)
             # a delete, a clear, a pin below one copy and Remove all ask first: the box's own form
@@ -2345,6 +2470,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return RedirectResponse(tab_href(tab.slug, **{key: ident}), status_code=303)
             if tab.slug == "custom" and change["op"] == "delete" and data.get("understood") != "1":
                 raise DeckError("invalid", "Tick the box first: the card stays as a blank in those decks.")
+            before = await item_before(sub, tab, change, data)
             current_client.set(BROWSER_CLIENT_ID)
             out = await account_lists.hand_change(decks, sub, tab.kind, change)
         except DeckError as exc:
@@ -2357,7 +2483,25 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             or (change.get("fields") or {}).get("frontName")
             or ""
         )
-        return done(request, tab, out, code, str(name), q=q_of(request.query_params))
+        reverse = reverse_of(tab.slug, change, before)
+        undo = keep_undo(sub, tab.slug, reverse, str(name)) if reverse else ""
+        return done(request, tab, out, code, str(name), q=q_of(request.query_params), undo=undo)
+
+    async def item_before(
+        sub: str, tab: Tab, change: dict[str, Any], data: dict[str, str]
+    ) -> dict[str, Any] | None:
+        """The tab's row the change is about, as it is before the change (for its Undo); None
+        when the change makes something new, or the row is not found."""
+        if change.get("op") in ("create", "pin", "remove_all"):
+            return None
+        if tab.slug == "pins":
+            got = await read_tab(sub, tab)
+            return by_id(got["items"], str(change.get("pin_id") or ""))
+        want = (change.get("name") or change.get("card") or "").casefold()
+        if not want:
+            return None
+        got = await read_tab(sub, tab, q=want[:100] if tab.slug in ("custom", "defaults") else "")
+        return next((i for i in got["items"] if str(i.get("name") or "").casefold() == want), None)
 
     @server.custom_route(PAGE + "/custom/picture", methods=["POST"], include_in_schema=False)
     async def picture_post(request: Request) -> Response:

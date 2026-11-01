@@ -165,17 +165,19 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         assert "btn-outline-danger" in (
             bar.locator("a", has_text="Stop watching").get_attribute("class") or ""
         )
+        # Stop watching goes at once (no box asks): the notice names the cards and offers Undo,
+        # which brings them back as they were (0.7.46 audit QG-09)
         bar.locator("a", has_text="Stop watching").click()
-        stop = page.locator("#w-stop:not([hidden])")
-        stop.wait_for(timeout=3000)
-        assert "The 3 selected cards go" in stop.inner_text()
-        assert (
-            stop.locator("button", has_text="Stop watching").evaluate("b => b.className").find("danger") >= 0
-        )
-        stop.locator("button", has_text="Keep them").click()
-        page.wait_for_selector("#w-stop:not([hidden])", state="detached", timeout=3000)
-        page.wait_for_timeout(500)  # the box's history entry goes back (box.js)
-        bar.locator("button.w-clear").click()
+        page.wait_for_url("**/watchlist?ok=removed&*", timeout=8000)
+        notice = page.locator(".notice.ok")
+        assert "are no longer watched." in notice.inner_text()
+        assert page.locator(".w-t .chk input[name=watch_id]").count() == 0  # the card rows went
+        notice.locator("button", has_text="Undo").click()
+        page.wait_for_url("**/watchlist?ok=rewatched&*", timeout=8000)
+        assert "are watched again." in page.locator(".notice.ok").inner_text()
+        assert page.locator(".w-t .chk input[name=watch_id]").count() == 3
+        bar = page.locator(".ui-bar[aria-label='Selected cards']")
+        select = page.locator("button.w-select")
         assert bar.is_hidden() and page.locator(".w-t .tr.sel").count() == 0
         # one tick: the bar counts it; the list's own tick box is part-way
         page.locator("#wr-w_one input[name=watch_id]").check()

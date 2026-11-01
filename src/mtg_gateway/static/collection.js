@@ -78,18 +78,17 @@
   /* -- Remove: at once, with Undo (QOL-01, 0.7.46 audit QG-09) ------------------------------
      − on the last copy, the hidden Remove form and the Details box's button all remove the row
      at once; the strip offers Undo for as long as it stays, which adds the row back with its
-     copies, printing, finish, condition, language and price paid. Archidekt has no request to
-     put a row's tags back, so the strip says when Undo cannot bring those. */
+     copies, printing, finish, condition, language, price paid and Binder tags (the row's tags by
+     name, set on the row that came back). */
   function gone(item, removed) {
     var name = nameOf(item);
     var next = item.nextElementSibling;
     item.remove();
     bumpCount(-1);
-    var tags = removed && removed.tags && removed.tags.length;
     var undo = document.createElement("button");
     undo.type = "button"; undo.className = "btn small"; undo.textContent = "Undo";
     undo.addEventListener("click", function () { putBack(item, removed, next, undo); });
-    said("Removed from your binder." + (tags ? " Undo puts it back without its tags." : ""), removed ? [undo] : []);
+    said("Removed from your binder.", removed ? [undo] : []);
     if (list && !$("li[data-id]", list)) list.hidden = true;  // the page's empty state comes with the next load
     return name;
   }
@@ -118,11 +117,15 @@
         if (next && next.parentNode === list) list.insertBefore(item, next); else list.appendChild(item);
       }
       bumpCount(1);
-      var paid = removed.purchase_price;
-      if (paid === null || paid === undefined || paid === "") { said(name + " is back in your binder."); return; }
-      request("POST", "/collection/api/rows/" + encodeURIComponent(row.id), { name: name, purchase_price: String(paid) }).then(function (u) {
-        if (u.ok) said(name + " is back in your binder.");
-        else strip(name + " is back in your binder, without the price you paid. " + Fetch.problem(u, "the price was not set").text, "error", Fetch.problem(u).actions);
+      // the price paid and the Binder tags go on the row that came back (the add has no field for them)
+      var paid = removed.purchase_price, rest = { name: name };
+      if (!(paid === null || paid === undefined || paid === "")) rest.purchase_price = String(paid);
+      if (removed.tags && removed.tags.length) rest.tags = removed.tags.slice();
+      if (!("purchase_price" in rest) && !("tags" in rest)) { said(name + " is back in your binder."); return; }
+      request("POST", "/collection/api/rows/" + encodeURIComponent(row.id), rest).then(function (u) {
+        if (u.ok) { said(name + " is back in your binder."); return; }
+        var lost = "tags" in rest && "purchase_price" in rest ? "the price you paid and its tags" : "tags" in rest ? "its tags" : "the price you paid";
+        strip(name + " is back in your binder, without " + lost + ". " + Fetch.problem(u, "they were not set").text, "error", Fetch.problem(u).actions);
       });
     });
   }

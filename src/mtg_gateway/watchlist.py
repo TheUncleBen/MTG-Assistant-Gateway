@@ -17,7 +17,7 @@ import logging
 import re
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Any, Literal
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from pydantic import Field
 from starlette.requests import Request
@@ -41,6 +41,14 @@ MAX_FORM = 8192
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
+def said_of(names: list[str]) -> str:
+    """The notice's query after Stop watching and its Undo: the names when there are up to three
+    (``w``), the count otherwise (``n``)."""
+    if 0 < len(names) <= 3:
+        return "w=" + quote(", ".join(names)[:300])
+    return f"n={len(names)}"
+
+
 def watchlist_body(
     state: AppState,
     sub: str,
@@ -51,6 +59,7 @@ def watchlist_body(
     err: str = "",
     part: str = "",
     start: int = 0,
+    said: dict[str, str] | None = None,
 ) -> str:
     """The page's body (watchlist_page.py): every watch's latest price and changes (a fixed number
     of queries, whatever the list's size), and 30 days of prices for the rows on screen only.
@@ -84,6 +93,7 @@ def watchlist_body(
         csrf,
         query or Query(),
         ok=ok,
+        said=said,
         err=err,
         now=prices.now(),
         card_history=lambda views: svc.card_histories(views, 30),
@@ -127,6 +137,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         qp = request.query_params
         ok = qp.get("ok", "")
         query = Query.parse(qp)
+        said = {k: (qp.get(k) or "")[:300] for k in ("n", "w", "undo")}
         part = qp.get("part") or ""
         if part in ("cards", "decks"):
             # Load more (static/watchlist.js): only the rows from ``from``, the rows on screen
@@ -136,7 +147,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                 start = 0
             body = watchlist_body(state, sub, _csrf(s, sid), query, part=part, start=start)
             return HTMLResponse(body, headers=NO_STORE)
-        return page(watchlist_body(state, sub, _csrf(s, sid), query, ok=ok), sub=sub, sid=sid)
+        return page(watchlist_body(state, sub, _csrf(s, sid), query, ok=ok, said=said), sub=sub, sid=sid)
 
     def remember_watch(sub: str, finish: str, pct: str) -> None:
         """Keep the Watch form's finish and alert for next time (prefs.WATCH_ADD)."""
@@ -228,8 +239,14 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                     svc.move_to_list(sub, [data.get("watch_id", "")], name)
                 done = "card_updated"
             elif action == "remove_card":
-                svc.unwatch_card(sub, data.get("watch_id", ""))
-                done = "card_removed"
+                # one row's Remove: the same keep and Undo as the bulk bar's Stop watching
+                wid = data.get("watch_id", "")
+                if not wid.startswith("w"):
+                    wid = next((w["id"] for w in svc.find(sub, wid)), wid)
+                token, rows = svc.stop_watching(sub, [wid])
+                if not rows:
+                    raise DeckError("not_found", "That card is not on your watchlist.")
+                done = "removed&" + said_of([w["name"] for w in rows]) + f"&undo={token}"
             elif action == "add_deck":
                 await svc.watch_deck(sub, data.get("deck", ""))
                 done = "deck_added"
@@ -249,6 +266,8 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             elif action == "list_delete":
                 svc.delete_list(sub, prices.clean_list_name(data.get("name", "")))
                 done = "list_deleted"
+            elif action == "rewatch":  # the notice's Undo of Stop watching
+                done = "rewatched&" + said_of(svc.rewatch(sub, data.get("token", "")))
             elif action == "bulk":
                 # the bulk bar: the ticked rows (watch_id, many) and what to do with them
                 ids = fields.get("watch_id") or []
@@ -260,8 +279,10 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
                     svc.move_to_list(sub, ids, list_of(data) or "")
                     done = "moved"
                 elif do == "remove":
-                    svc.unwatch_many(sub, ids)
-                    done = "removed"
+                    token, rows = svc.stop_watching(sub, ids)
+                    done = "removed&" + said_of([w["name"] for w in rows])
+                    if rows:
+                        done += f"&undo={token}"
                 else:
                     raise DeckError("invalid", "Choose what to do with the selected cards.")
             else:
