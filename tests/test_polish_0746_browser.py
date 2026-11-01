@@ -302,17 +302,24 @@ def test_the_scan_result_card_keeps_room_for_the_name_at_large_text(chromium, se
         assert page.evaluate(SCROLLS) == 0
 
 
-# Text recognition that takes a moment to get ready, then reads "Sol Ring" from any picture.
-SLOW_OCR = """
-() => { window.Tesseract = { createWorker: async () => {
+# Text recognition that takes a moment to get ready, then reads "Sol Ring" from any picture. It is
+# in place before the page's scripts run, so the page never fetches the real engine: under load the
+# real script used to arrive after the test had put its own in, replace it and report its download
+# progress in the middle of the scan's messages.
+SLOW_OCR_ENGINE = """
+window.Tesseract = { createWorker: async () => {
     await new Promise((r) => setTimeout(r, 400));
     const read = (c, o, out) => ({ data: { text: out && out.blocks ? '0472 R\\nCMR • EN' : 'Sol Ring',
       confidence: 92, blocks: [] } });
     return { setParameters: async () => {}, recognize: async (...a) => read(...a) }; } };
-  window.__status = []; const s = document.querySelector('#cam-status');
+"""
+STATUS_LOG = """
+() => { window.__status = []; const s = document.querySelector('#cam-status');
   new MutationObserver(() => window.__status.push(s.textContent))
     .observe(s, { childList: true, characterData: true, subtree: true }); }
 """
+# The page's own load (it starts with the camera tab) has finished, or has nothing to load.
+OCR_SETTLED = "() => ['ready', 'failed', 'missing'].includes(window.__scan.state.ocrState)"
 SCAN_ONE = """
 async () => { const cv = document.createElement('canvas'); cv.width = 400; cv.height = 560;
   cv.getContext('2d').fillStyle = '#fff'; cv.getContext('2d').fillRect(0, 0, 400, 560);
@@ -326,11 +333,15 @@ def test_ready_never_writes_over_a_scan_that_waited_for_text_recognition(chromiu
     middle of its own messages (Reading the card name… / Ready / Reading the set and number…)."""
     sid = server.sign_in()
     with _page(chromium, server, sid, 390) as page:
+        page.add_init_script(SLOW_OCR_ENGINE)
         _scan(page, server)
         page.evaluate("() => window.__scan.showTab('camera')")
-        # the engine not loaded yet (the page may have started a real load: forgotten)
+        # the load the camera tab starts is over before the test begins its own, so none of its
+        # messages land among the scan's
+        page.wait_for_function(OCR_SETTLED, timeout=60_000)
+        # the engine not loaded yet
         page.evaluate("() => { window.__scan.state.ocr = null; window.__scan.state.ocrState = 'idle'; }")
-        page.evaluate(SLOW_OCR)
+        page.evaluate(STATUS_LOG)
         statuses = page.evaluate(SCAN_ONE)
         assert "Reading the set and number…" in statuses, statuses
         assert statuses[-1].startswith("Matched. Tap Add, or pick another card."), statuses
