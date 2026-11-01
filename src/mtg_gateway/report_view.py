@@ -1304,6 +1304,7 @@ def _triggers_html(g: dict[str, Any]) -> str:
 FORGE_STATE_TEXT = {
     "queued": "Waiting for Forge.",
     "waiting": "Waiting for your earlier Forge run to finish.",
+    "starting": "Handing the games to Forge.",
     "running": "Games are going now.",
     "failed": "The games could not run.",
     "timeout": "The games ran out of time before finishing.",
@@ -1785,10 +1786,11 @@ def forge_stopped_text(f: dict[str, Any]) -> str:
         text = f"The gateway lost track of this run after {of}. The results below count only {those}."
     else:
         counted = "that one game" if played == 1 else f"the {played} games played"
-        text = (
-            f"Forge stopped after {of}, {FORGE_STOPPED_WHY[str(f['state'])]}. "
-            f"The results below count only {counted}."
-        )
+        mine = f.get("stopped_by") == "member"
+        why = "because you stopped the test" if mine else FORGE_STOPPED_WHY[str(f["state"])]
+        text = f"Forge stopped after {of}, {why}. The results below count only {counted}."
+        if mine:
+            return text
     error = str(f.get("error") or "")
     return f"{text} {error}" if error else text
 
@@ -1802,6 +1804,8 @@ def forge_stopped_early(f: dict[str, Any]) -> bool:
 def _forge_key(f: dict[str, Any]) -> str:
     if f.get("engine_busy"):
         return "busy"
+    if f.get("starting") and not f.get("job_id"):
+        return "starting"
     return "waiting" if f.get("waiting") else str(f.get("state"))
 
 
@@ -1868,7 +1872,7 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
     """What the report page's live view needs while the Forge games play: the run's state
     and section, the report's overall status, and the Forge card and the status as the page draws
     them, so forge-live.js swaps them in without fetching the whole page again."""
-    from .report_page import forge_solo_pending, forge_solo_section_html, testing_section_html
+    from .report_page import forge_solo_pending, forge_solo_section_html, progress_html, testing_section_html
 
     f = r.get("forge") if isinstance(r.get("forge"), dict) else None
     state = str((f or {}).get("state") or "") or None
@@ -1886,6 +1890,9 @@ def forge_status(r: dict[str, Any]) -> dict[str, Any]:
         # the quick solo test's section while it runs; once it is done the page is read again whole
         "research": r.get("research"),
         "research_html": testing_section_html(r, live=r.get("research") == "running"),
+        # where the test stands (the step, games played, the time so far) and its panel
+        "progress": r.get("progress"),
+        "progress_html": progress_html(r),
     }
     if fs:
         out["forge_solo"] = fs

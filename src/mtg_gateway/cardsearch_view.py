@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import cardquery as cq
+from . import prefs
 from . import searchpanel as sp
 from .deckpage import mana_html
 from .theme import esc as _esc
@@ -340,10 +341,19 @@ def _rows(kind: str, label: str, rows_html: list[str], add_label: str, *, group:
     )
 
 
-def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
+# Mockup screen 5 (owner 11-01): on a Fold and on desktop the filter groups wait behind the
+# Filters button phones have, in place, their last state kept on the account (prefs.CARDS_FILTERS).
+# False shows them open at those widths, as before.
+FOLD_FILTERS_WIDE = True
+
+
+def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: bool = True) -> str:
     """The search form, from the shared panel (searchpanel.py): the name row, the main filter
     groups, "More filters" with the rest of Scryfall's fields, and the results bar at the foot.
-    Phones open the filters as a sheet. ``total``: the count the bar shows (None: no search yet)."""
+    Phones open the filters as a sheet; a Fold or desktop folds them in place behind the same
+    button (FOLD_FILTERS_WIDE), ``folded`` saying how they start (the account's last state).
+    ``total``: the count the bar shows (None: no search yet)."""
+    fold: bool | None = (not folded) if FOLD_FILTERS_WIDE else None
     games = "".join(_toggle("g", g, label, g in f.games) for g, label in cq.GAMES)
     stat_rows = [_stat_row(*row) for row in f.stats] or [_stat_row("pow", "ge", "")]
     price_rows = [_price_row(*row) for row in f.prices] or [_price_row("usd", "le", "")]
@@ -451,6 +461,8 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
         main + more,
         show_html="<button type='button' class='btn-primary sp-show'>Show cards</button>",
         clear_html="<button type='button' class='sp-clear'>Clear filters</button>",
+        folded=folded if FOLD_FILTERS_WIDE else None,
+        pref=prefs.CARDS_FILTERS if FOLD_FILTERS_WIDE else "",
     )
     return (
         f"<form id='cs-form' class='cs' method='get' action='/cards' role='search' data-view='{_esc(view)}' "
@@ -464,6 +476,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None) -> str:
             search_label="Search cards",
             cross_html=sp.cross_link("Search decks instead", "/search", "decks"),
             attrs=f" maxlength='{cq.MAX_TEXT}'",
+            fold=fold,
         )
         + sheet
         + results_bar_html(f, view=view, total=total)

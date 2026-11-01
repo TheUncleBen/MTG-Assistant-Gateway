@@ -50,7 +50,7 @@ from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .theme import esc as _esc
@@ -634,8 +634,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     def categories_section(
         deck: Deck, csrf: str | None, note: str = "", values: dict[str, str] | None = None
     ) -> str:
-        """The deck's categories, as archidekt.com's deck settings has them (F7, Ben 21 Oct: option
-        a; create and delete, Ben 22 Oct): each name in its box and three switches, Premier, Not in
+        """The deck's categories, as archidekt.com's deck settings has them (F7, the owner 21 Oct: option
+        a; create and delete, the owner 22 Oct): each name in its box and three switches, Premier, Not in
         deck and Not in price; a plain Save categories (the main settings' Save changes stays the
         page's one orange button) and Undo changes, which puts the boxes back before saving. Each
         category with a record has a Delete button (an empty one is deleted; one with cards asks
@@ -1056,7 +1056,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/settings")
+            return login_redirect_here(request, f"/decks/{deck_id}/settings")
         # The deck (as its page last read it), the folder tree, the collaborators and the people
         # followed are independent reads: asked at once, not one after another.
         got = await asyncio.gather(
@@ -1143,7 +1143,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         confirmation)."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/settings")
+            return login_redirect_here(request, f"/decks/{deck_id}/settings")
         data = await form_with_lists(request)
         if not check_csrf(sid, data):
             if wants_json(data):
@@ -1611,7 +1611,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/delete")
+            return login_redirect_here(request, f"/decks/{deck_id}/delete")
         return await h.deck_page_response(request, sub, sid, deck_id, box="delete")
 
     @server.custom_route("/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
@@ -1619,7 +1619,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/delete")
+            return login_redirect_here(request, f"/decks/{deck_id}/delete")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Delete deck", EXPIRED, sub=sub, sid=sid, status=403)
@@ -1659,7 +1659,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         boxes themselves use companion_folders.py; this stays for a browser without scripts."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Folders", EXPIRED, sub=sub, sid=sid, status=403)
@@ -1698,7 +1698,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/settings")
+            return login_redirect_here(request, f"/decks/{deck_id}/settings")
         data = await form(request, limit=100_000)
         as_json = wants_json(data)  # the page's own instant save (static/decksettings.js)
         if not check_csrf(sid, data):

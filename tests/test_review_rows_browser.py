@@ -1,5 +1,5 @@
 """The review page's change list keeps a row's name readable when what follows it is long text
-(Ben, 2026-10-28: a new card package's name stood one letter a line beside its keywords, budget
+(the owner, 2026-10-28: a new card package's name stood one letter a line beside its keywords, budget
 and formats). The settings wrap in their own column; the name keeps its width. At 375, 840 and 1280
 px, light and dark. Skipped without a Chromium build."""
 

@@ -1,4 +1,4 @@
-"""Categories edited on the deck page itself (0.7.46 full review F8, Ben's T-191 note, mockup
+"""Categories edited on the deck page itself (0.7.46 full review F8, the owner's T-191 note, mockup
 screen 4): the member's own deck, grouped by category, carries what each category is
 (``data-catinfo``) for the stacks' ⋮ menus, and "+ Add category" after the last stack. Every change
 the page's script sends (static/deck.js) goes through Deck settings' own route,

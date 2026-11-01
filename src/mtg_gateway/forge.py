@@ -205,6 +205,8 @@ MORE_GONE = (
     "can't be played at the same table. Run the report (or its comparison) again."
 )
 FORGE_SILENT = "Forge stopped answering about this run."
+# Shown to members when Forge can't be reached (it is down, restarting or still loading its cards).
+FORGE_UNREACHABLE = "Forge couldn't be reached, so no Forge games were played. Run the test again later."
 
 
 async def _addresses(host: str, port: int) -> list[str]:
@@ -341,7 +343,9 @@ class ForgeClient:
         try:
             r = await self._client.request(method, path, json=body)
         except httpx.HTTPError as exc:
-            raise ForgeError("unavailable", f"Forge did not answer ({type(exc).__name__}).") from exc
+            # the cause for whoever runs the gateway goes to its log; the member reads plain words
+            logger.info("Forge did not answer %s %s: %s", method, path, type(exc).__name__)
+            raise ForgeError("unavailable", FORGE_UNREACHABLE) from exc
         try:
             data = r.json()
         except ValueError:
@@ -353,7 +357,11 @@ class ForgeClient:
         if r.status_code == 429:
             raise ForgeError("busy", "Forge's queue is full. Try again later.")
         if r.status_code >= 400:
-            raise ForgeError("invalid", data.get("error") or f"HTTP {r.status_code}")
+            if r.status_code >= 500 and not data.get("error"):
+                raise ForgeError(
+                    "unavailable", "Forge had a problem answering, so no Forge games were played."
+                )
+            raise ForgeError("invalid", data.get("error") or "Forge refused the request.")
         return data
 
     async def health(self) -> dict[str, Any]:

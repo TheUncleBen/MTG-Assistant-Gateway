@@ -1,4 +1,4 @@
-"""A big new deck (Ben, 27 Oct 2026: a 125-card new-deck proposal took many minutes, and his own
+"""A big new deck (the owner, 27 Oct 2026: a 125-card new-deck proposal took many minutes, and his own
 edits to the new deck meanwhile did not save): the cards go to Archidekt in a few batched requests
 instead of one request per card, each printing is looked up once per apply, and while the deck is
 still being made an edit to it is refused with how far the apply got, instead of racing it."""

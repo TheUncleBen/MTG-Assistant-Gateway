@@ -240,8 +240,10 @@ their review link.
 ### The other cards in the chat
 
 The same mechanism shows a card where you have something to pick: the
-**printings** of a card as pictures in a grid (tap the one you mean, filter by
-set or finish, expand it), and the **cards read from your photos or list**
+**printings** of a card as pictures in a grid (tap the one you mean to see it
+at the card's full width with its rules text, filter by set or finish, press
+**Bigger pictures** for one whole card across, or Expand where your chat
+offers a full screen), and the **cards read from your photos or list**
 with a tick per row and suggestions for names it was unsure about (press
 **Use these cards** when the list is right). A tap on these cards is passed to
 the assistant as plain text, which it reads with your next message (the card
@@ -276,7 +278,7 @@ another change first, one another app had a hand in, one that replaces another a
 that another app's waiting change would replace).
 Those numbers are the defaults: your Account page shows this gateway's
 numbers, and which modes it allows.
-Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. It is your own setting:
+Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck, deleting a deck and clearing your binder are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, clearing your binder, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In Semi-auto and Full auto the
 assistant applies what the mode allows with `apply_proposal` and tells you;

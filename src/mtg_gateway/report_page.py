@@ -66,7 +66,7 @@ from .report_view import (
     validation_html,
 )
 from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, source_label_html, status_label
-from .theme import icon
+from .theme import SPINNER, icon
 
 # The "Played with their effect" widget takes the orange edge below this share of the deck.
 COVERAGE_WARN = 70
@@ -439,11 +439,27 @@ def forge_section_html(
     )
 
 
+def again_html(r: dict[str, Any], csrf: str) -> str:
+    """Run again under a Forge section whose games ended without any played (failed, ran out of
+    time, lost by a restart, or stopped), in the place Play more games takes."""
+    f = r.get("forge") if isinstance(r.get("forge"), dict) else {}
+    played = (f.get("result") or {}).get("games") if isinstance(f.get("result"), dict) else None
+    if f.get("state") not in ("failed", "timeout", "lost", "cancelled") or played:
+        return "<div id='forge-more'></div>"
+    again = run_again_html(r, csrf)
+    if not again:
+        return "<div id='forge-more'></div>"
+    return (
+        f"<div id='forge-more' class='rv-more'>{again}<p class='ui-hint'>Tests the deck again "
+        "as it is now, with new Forge games.</p></div>"
+    )
+
+
 def more_html(f: Any, csrf: str, report_id: str) -> str:
-    """Play more games as the screen's one orange button, its line beside it."""
+    """Play more games as the screen's one orange button, its line beside it ('' when it has none)."""
     block = more_games_html(f, csrf, report_id)
     if "<form" not in block:
-        return block
+        return ""
     return (
         block.replace("id='forge-more' class='card more-games'", "id='forge-more' class='rv-more'")
         .replace("<button type='submit' class='btn' ", "<button type='submit' class='btn-primary' ")
@@ -1030,7 +1046,7 @@ def _row_items(cards: list[dict[str, Any]]) -> list[str]:
     return items
 
 
-# A long list shows its first rows and a "Show all" row for the rest (Ben, 10-25: less scrolling).
+# A long list shows its first rows and a "Show all" row for the rest (the owner, 10-25: less scrolling).
 SHOW_FIRST = 6
 
 
@@ -1584,6 +1600,78 @@ HEAD_TO_HEAD_CSS = """
 """
 
 
+# -- where a test still going stands (reports.run_progress), with the way to stop it -----------
+STOP_BOX = "rv-stop"
+STOP_HINT = "Games already played are kept."
+
+
+def progress_html(r: dict[str, Any], *, stoppable: bool = True) -> str:
+    """The panel at the top of a report whose test is still going: the step it is on in plain
+    words, the games played of those asked for as a bar, the time so far, and Stop the test while a
+    Forge part can still be stopped.
+    forge-live.js redraws it with the report's other live parts; once the test has ended it is
+    hidden. ``stoppable``: the member may stop it (the report page; never the export)."""
+    rid = str(r.get("report_id") or "")
+    p = r.get("progress") if isinstance(r.get("progress"), dict) else None
+    if p is None:
+        return (
+            f"<section id='rv-progress' class='ui-card rv-progress' data-report-id='{_esc(rid)}' hidden>"
+            + "</section>"
+        )
+    total, done = _int(p.get("games_total")), _int(p.get("games_done")) or 0
+    bar = ""
+    if total and str(p.get("phase") or "").endswith("playing"):  # games are being counted
+        bar = (
+            f"<progress class='rv-bar' max='{total}' value='{min(done, total)}' "
+            f"aria-label='Games played'>{done} of {total}</progress>"
+        )
+    # the time so far, never a time left: the gateway can't promise when Forge will finish
+    so_far = str(p.get("elapsed_text") or "")
+    time_line = _esc(so_far[:1].upper() + so_far[1:] + ".") if so_far else ""
+    forge_going = any(
+        isinstance(r.get(k), dict) and str(r[k].get("state") or "") in ("queued", "running")
+        for k in ("forge", "forge_solo")
+    )
+    stop = ""
+    if stoppable and forge_going and rid:
+        stop = (
+            "<p class='rv-stop-row'>"
+            + ui.box_opener("Stop the test", f"/history/reports/{rid}?box=stop", STOP_BOX, icon_name="x")
+            + f"<span class='ui-hint'>{_esc(STOP_HINT)}</span></p>"
+        )
+    return (
+        f"<section id='rv-progress' class='ui-card rv-progress' data-forge-live data-report-id='{_esc(rid)}' "
+        "aria-label='Test progress'>"
+        f"<p class='rv-step'>{SPINNER}<span aria-live='polite'>{_esc(str(p.get('text') or ''))}</span></p>"
+        f"{bar}<p class='ui-hint rv-time'>{time_line}</p>{stop}</section>"
+    )
+
+
+def stop_box_html(r: dict[str, Any], csrf: str, *, open: bool = False) -> str:
+    """The box Stop the test opens: what stopping does, and the button that does it."""
+    rid = str(r.get("report_id") or "")
+    if not (csrf and rid):
+        return ""
+    fid = f"{STOP_BOX}-f"
+    body = (
+        f"<form id='{fid}' method='post' action='/history/reports/{_esc(rid)}/forge/stop'>"
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'></form>"
+        "<p>Forge stops this test’s games now. The games already played stay in the report, and you "
+        "can run the test again later.</p>"
+    )
+    return ui.box(
+        STOP_BOX,
+        "Stop this test?",
+        body,
+        actions=[
+            ui.box_button("Keep it going", cancel=True),
+            ui.box_button("Stop the test", kind="danger-solid", form=fid, icon_name="x"),
+        ],
+        open=open,
+        close_href=f"/history/reports/{rid}",
+    )
+
+
 def status_label_html(status: Any, research: Any = None) -> str:
     """The report's overall status as its status label (the same words as the Reports list)."""
     if not (isinstance(status, str) and status in STATUS_LABEL):
@@ -1670,7 +1758,7 @@ def report_page_html(
         r.get("forge"),
         live=True,
         report_id=r.get("report_id"),
-        more=more_html(r.get("forge"), csrf, rid),
+        more=more_html(r.get("forge"), csrf, rid) or again_html(r, csrf),
         types=card_types,
     )
     solo_forge = forge_solo_section_html(
@@ -1727,6 +1815,7 @@ def report_page_html(
         + crumbs
         + head
         + notice_html
+        + progress_html(r, stoppable=bool(csrf))
         + changes_html
         + since_html
         + widgets_html(r, s, stats_section=bool(stats))
@@ -1911,6 +2000,22 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-more form{margin:0}
 .rv-page .rv-more button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
 .rv-page .rv-more .ui-hint{flex:1 1 18rem;margin:0}
+/* a test still going: its step, games played as a bar, the time so far, and Stop */
+.rv-page .rv-progress{margin:0 0 1rem}
+.rv-page .rv-progress[hidden]{display:none}
+.rv-page .rv-progress .rv-step{display:flex;align-items:center;gap:.6rem;margin:0;font-weight:600}
+.rv-page .rv-progress .rv-step .ui-spin{flex:none}
+.rv-page .rv-progress .rv-bar{display:block;width:100%;height:10px;margin:.6rem 0 0;border:0;
+  border-radius:5px;background:var(--surface-2);accent-color:var(--orange);-webkit-appearance:none;
+  appearance:none;overflow:hidden}
+.rv-page .rv-progress .rv-bar::-webkit-progress-bar{background:var(--surface-2);border-radius:5px}
+.rv-page .rv-progress .rv-bar::-webkit-progress-value{background:var(--orange);border-radius:5px}
+.rv-page .rv-progress .rv-bar::-moz-progress-bar{background:var(--orange);border-radius:5px}
+.rv-page .rv-progress .rv-time{margin:.5rem 0 0}
+.rv-page .rv-stop-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:.75rem 0 0;
+  padding-top:.75rem;border-top:1px solid var(--border-soft)}
+.rv-page .rv-stop-row .btn{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
+.rv-page .rv-stop-row .ui-hint{flex:1 1 14rem;margin:0}
 .rv-page .rv-again{margin:.5rem 0 0}
 .rv-page .rv-again button{display:inline-flex;align-items:center;gap:.4rem;margin:0;min-height:44px}
 .rv-page .rv-link{margin:.25rem 0}

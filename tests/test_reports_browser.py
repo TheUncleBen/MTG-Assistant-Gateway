@@ -217,7 +217,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
                 "result": {
                     "games": 2,
                     "games_requested": 2,
-                    "seats": [{"deck": "Immortal Reckoning", "wins": 1, "win_rate": 0.5}],
+                    "seats": [{"deck": "Liesa Test Deck", "wins": 1, "win_rate": 0.5}],
                 },
             }
         )
@@ -323,7 +323,7 @@ FORGE_DONE = {
     "job_id": "0" * 16,
     "seed": 7,
     "not_played": [],
-    "seats": ["Immortal Reckoning", "Riders of the Long Name Precon Deck", "Precon 2", "Precon 3"],
+    "seats": ["Liesa Test Deck", "Riders of the Long Name Precon Deck", "Precon 2", "Precon 3"],
     "result": {
         "games": 10,
         "games_requested": 10,
@@ -336,7 +336,7 @@ FORGE_DONE = {
         "ended": {"won": 9, "time_limit": 1},
         "seats": [
             {
-                "deck": "Immortal Reckoning",
+                "deck": "Liesa Test Deck",
                 "wins": 4,
                 "win_rate": 0.4,
                 "win_rate_95": [0.17, 0.69],
@@ -715,7 +715,7 @@ def test_play_more_games_fits_reads_and_starts(server: Server, width: int, schem
     server.app.state.gateway.reports.forge = fake.client()
     sid = server.sign_in_and_link()
     store_report(server.db, "user-1", "rep_more")
-    seats = ["Immortal Reckoning", "Precon 1", "Precon 2", "Precon 3"]
+    seats = ["Liesa Test Deck", "Precon 1", "Precon 2", "Precon 3"]
     played = [{"game": i, "ms": 60000, "winner": 1 + i % 4, "draw": False} for i in range(1, 5)]
     section = {
         **FORGE_DONE,
@@ -806,7 +806,7 @@ COMPARE_KEBABS = """() => [...document.querySelectorAll('.cmp-t .tr')]
 @pytest.mark.parametrize("width", [344, 1280])
 def test_each_compare_row_has_a_menu_button_beside_the_card(server: Server, width: int) -> None:
     """The Compare page's card rows get the shared card menu by right-click, press and hold and a
-    44 px ⋮ beside the card's name (Ben, 21 Oct), which opens the same menu and covers nothing."""
+    44 px ⋮ beside the card's name (the owner, 21 Oct), which opens the same menu and covers nothing."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()

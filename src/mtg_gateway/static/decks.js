@@ -92,7 +92,7 @@
     if (window.MtgMenu && window.MtgMenu.icon) return window.MtgMenu.icon("package");
     return el("span", null, "P");
   }
-  // My Decks (decks only) or Packages (packages only), the switch at the top of the page (Ben,
+  // My Decks (decks only) or Packages (packages only), the switch at the top of the page (the owner,
   // 2026-10-25; its value rides in the form)
   function showMode() {
     var s = form.querySelector("input[name=show]");

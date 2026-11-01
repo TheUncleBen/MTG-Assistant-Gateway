@@ -169,14 +169,14 @@ async def test_the_registration_pdf_answers_with_its_address_and_keeps_no_detail
         csrf = await b.csrf("/decks/42")
         r = await b.http.post(
             "/decks/42/registration",
-            data={"csrf": csrf, "first_name": "Ben", "last_name": "Smith", "event": "FNM", "sort": "type"},
+            data={"csrf": csrf, "first_name": "Sam", "last_name": "Smith", "event": "FNM", "sort": "type"},
             headers={"Accept": "application/json"},
         )
         assert r.status_code == 200 and r.json()["ok"] is True, r.text
         assert r.json()["pdf_url"] == "https://storage.example.com/pdf/1.pdf"
         assert ark.account.pdfs[0]["event"] == "FNM"
         # without scripts: the page with the box open and the link
-        r = await _post(b, "/decks/42/registration", first_name="Ben", last_name="Smith", event="FNM")
+        r = await _post(b, "/decks/42/registration", first_name="Sam", last_name="Smith", event="FNM")
         assert r.status_code == 200 and "Open the PDF" in r.text and "storage.example.com/pdf/2.pdf" in r.text
         rows = stack.h.app.state.gateway.db._conn.execute("SELECT detail_json FROM audit_log").fetchall()
         assert not [x for x in rows if x[0] and ("Smith" in x[0] or "FNM" in x[0])]
@@ -512,7 +512,7 @@ async def test_packages_json_rows_carry_budget_and_formats_for_the_tiles(stack: 
 
 
 async def test_my_decks_and_packages_is_a_switch_that_the_address_keeps(stack: Stack) -> None:
-    """The Decks page's switch (Ben, 2026-10-25): My Decks lists decks only, Packages packages
+    """The Decks page's switch (Sam, 2026-10-25): My Decks lists decks only, Packages packages
     only; the choice rides in the address and the list's form, and keeps the open folder."""
     b, _token = await _member(stack)
     try:

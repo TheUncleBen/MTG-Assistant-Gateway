@@ -236,7 +236,8 @@ PARTS: list[tuple[str, str, str, str, list[tuple[str, str, str]]]] = [
 ]
 
 
-# The closed fold at the end of the guide (Ben, 18:11Z 21 Oct): the one place member text shows a tool name.
+# The closed fold at the end of the guide (the owner, 18:11Z 21 Oct): the one place member text
+# shows a tool name.
 ADVANCED_INTRO = "Your assistant picks these for you. They are listed here in case you need the exact name."
 WATCH_TOOLS = frozenset({"watch_card", "watch_deck", "unwatch", "list_watchlist", "card_price_history"})
 # What each ask does, for the abilities table: a proposal you approve, your own press, applying, a
@@ -597,8 +598,8 @@ def build(
         "<li><strong>Undo</strong> and <strong>Redo</strong> (beside Select cards, and the toast's Undo) "
         "take back or redo any change saved on the page, with the editor's keys: Ctrl+Z, and Ctrl+Shift+Z "
         "or Ctrl+Y. Removing a card that has notes asks first: Archidekt gives the gateway no way to "
-        "write notes, so they do not come back. Stacks follow the deck's category order on "
-        "Archidekt.</li>"
+        "write notes, so they do not come back. Stacks come in the order Archidekt's own deck page "
+        "shows them.</li>"
         "<li><strong>Quick add</strong> adds one copy of the card you type, saved at once with Undo. A "
         "name it doesn't know is refused, and nothing is sent.</li></ul>"
         f"<p class='tip'>{_esc(writes)}</p>"
@@ -867,7 +868,7 @@ def build(
 
     # -- Reference --------------------------------------------------------------------------------
     # The abilities as plain asks (tool_labels.tool_ask), with what each does: no tool names in member
-    # text (Ben, 21 Oct). The watch asks show only with watchlists on. The real names sit in the
+    # text (the owner, 21 Oct). The watch asks show only with watchlists on. The real names sit in the
     # closed "Advanced: tool names" fold at the end of the guide.
     asks = [
         (raw, w.ask, _does(raw))

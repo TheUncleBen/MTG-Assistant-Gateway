@@ -129,7 +129,7 @@ def test_the_rows_menus_open_from_a_tap_and_a_right_click_and_restore_sends_its_
             # to /history), then the form is sent: wait for where it lands, not the first navigation
             page.locator(".ctxmenu [role=menuitem]", has_text="Restore (review first)").click()
             page.wait_for_url(re.compile(r"/proposals/[A-Za-z0-9_-]+$"), timeout=15000)
-            assert page.locator("main", has_text="Immortal Reckoning").count() == 1
+            assert page.locator("main", has_text="Liesa Test Deck").count() == 1
             assert errors == [], errors
             browser.close()
     finally:

@@ -1,4 +1,4 @@
-"""list_my_proposals' limit outside 1 to MAX_PROPOSALS_PAGE is clamped into that range, as before,
+"""list_my_proposals' limit outside 1 to MAX_PROPOSALS_PAGE is held to that range, as before,
 and its description now says so (0.7.46 audit: limit -1 and 100000 were answered silently, though
 the description said 1 to 100)."""
 
@@ -32,4 +32,4 @@ async def test_an_out_of_range_limit_is_brought_into_range_and_the_description_s
     tools = sse_json(await h.mcp(token, "tools/list"))["result"]["tools"]
     limit = next(t for t in tools if t["name"] == "list_my_proposals")["inputSchema"]["properties"]["limit"]
     assert f"1 to {MAX_PROPOSALS_PAGE}" in limit["description"], limit
-    assert "clamped" in limit["description"], limit
+    assert "held to" in limit["description"], limit

@@ -37,7 +37,7 @@ def _deck() -> Deck:
 def test_the_form_lists_the_main_deck_and_sideboard_as_the_site_sends_them() -> None:
     form = registration.fields(
         _deck(),
-        {"first_name": " Ben ", "last_name": "Smith", "dci_number": "12 34", "date": "10/24/2026"},
+        {"first_name": " Sam ", "last_name": "Smith", "dci_number": "12 34", "date": "10/24/2026"},
         "alpha",
     )
     assert [form[f"card_{i}"] for i in range(3)] == ["Counterspell", "Lightning Bolt", "Sol Ring"]
@@ -45,7 +45,7 @@ def test_the_form_lists_the_main_deck_and_sideboard_as_the_site_sends_them() -> 
     assert "card_3" not in form  # the Maybeboard card is left off
     assert (form["sideboard_0"], form["sideboard_0_qty"], form["sideboardSize"]) == ("Duress", 3, 3)
     assert form["deckSize"] == 8 and form["deckName"] == "Burn"
-    assert (form["firstName"], form["lastName"], form["firstOfLastName"]) == ("Ben", "Smith", "S")
+    assert (form["firstName"], form["lastName"], form["firstOfLastName"]) == ("Sam", "Smith", "S")
     assert [form[f"dci_{i}"] for i in range(4)] == ["1", "2", "3", "4"] and "dci_4" not in form
     assert form["date"] == "10/24/2026"
 
@@ -94,7 +94,7 @@ async def test_the_tool_answers_with_the_pdf_address_and_keeps_no_details(stack:
             stack.h,
             token,
             "get_registration_pdf",
-            {"deck_id": "42", "first_name": "Ben", "last_name": "Smith", "event": "FNM", "sort": "type"},
+            {"deck_id": "42", "first_name": "Sam", "last_name": "Smith", "event": "FNM", "sort": "type"},
         )
     )
     assert out["ok"] is True, out

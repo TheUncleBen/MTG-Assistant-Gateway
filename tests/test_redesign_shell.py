@@ -408,6 +408,44 @@ def test_the_page_tells_the_app_when_a_touch_may_pull(chromium, server: Server) 
         ctx.close()
 
 
+def test_no_pull_while_a_box_holds_typed_words(chromium, server: Server) -> None:
+    """A pull loads the page again: while a box holds words the member typed and has not sent, no
+    touch may start one. A page script filling a box doesn't count; sending the form, or typing the
+    box back to what the page came with, frees the pull again."""
+    ctx = chromium.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, user_agent=APP_UA
+    )
+    ctx.add_cookies([{"name": "mtg_session", "value": server.sign_in(), "url": server.base}])
+    ctx.add_init_script(STUB)
+    page = ctx.new_page()
+    try:
+        page.goto(f"{server.base}/decks", wait_until="load")
+        page.evaluate(
+            """() => {
+              const f = document.createElement('form'); f.id = 'f'; f.action = 'javascript:void 0';
+              f.innerHTML = '<textarea id=note></textarea><input id=other>';
+              document.querySelector('main').append(f);
+            }"""
+        )
+        may = "() => window.mtgMayPull(document.querySelector('h1'))"
+        assert page.evaluate(may) is True
+        page.evaluate("() => { document.querySelector('#other').value = 'filled by a script'; }")
+        assert page.evaluate(may) is True  # nothing typed
+        page.locator("#note").type("a reply half written")
+        assert page.evaluate(may) is False
+        page.locator("#note").fill("")
+        assert page.evaluate(may) is True  # typed back to what the page came with
+        page.locator("#note").type("again")
+        assert page.evaluate(may) is False
+        page.evaluate("() => document.querySelector('#f').requestSubmit()")
+        assert page.evaluate(may) is True  # sent
+        page.locator("#note").type("more")
+        page.evaluate("() => document.querySelector('#f').remove()")
+        assert page.evaluate(may) is True  # the box is gone from the page
+    finally:
+        ctx.close()
+
+
 def test_the_hook_waits_for_an_app_that_has_it(chromium, server: Server) -> None:
     """A browser, or an older app without the bridge method, gets no hook at all."""
     with _page(chromium, server, 390, 844, touch=True, app=True) as page:
@@ -420,7 +458,7 @@ def test_the_hook_waits_for_an_app_that_has_it(chromium, server: Server) -> None
 
 def test_the_app_offers_pull_to_refresh_on_list_pages_only() -> None:
     rule = (ANDROID / "PullRefresh.kt").read_text(encoding="utf-8")
-    assert "const val DECK_PAGE = true" in rule  # open for Ben
+    assert "const val DECK_PAGE = true" in rule  # open for the owner
     for path in (
         '"/"',
         '"/decks"',

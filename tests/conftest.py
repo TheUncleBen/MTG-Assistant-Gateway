@@ -24,6 +24,7 @@ import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
 from mcp import Client
+from mcp.server.lowlevel import Server
 from mcp.server.mcpserver import MCPServer
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -702,7 +703,7 @@ class StackOptions:
         default_factory=lambda: {"writes_enabled": True, "approval_mode_default": "auto"}
     )
     archidekt: Callable[[], FakeArchidekt] | None = FakeArchidekt
-    mystic_forge: Callable[[], MCPServer] | None = None
+    mystic_forge: Callable[[], MCPServer | Server[Any]] | None = None
     scryfall: bool = False
     started: Callable[[Stack], None] | None = None
 
@@ -774,3 +775,56 @@ def stack_options() -> StackOptions:
 async def stack(tmp_path: Path, idp: FakeIdP, stack_options: StackOptions):
     async with open_stack(tmp_path, idp, stack_options) as st:
         yield st
+
+
+# -- CI: a test may skip only for a reason it is meant to skip for ---------------------------------
+# With MTG_ONLY_EXPECTED_SKIPS=1 (CI's test job) the run fails when any test skips for a reason not
+# listed here, so a missing Chromium, OCR assets, font or tool can never turn the suite green by
+# skipping what needs it. The listed ones are by design: a live service only on request, the card
+# screenshots only on request, and parametrized cases that have nothing to test.
+EXPECTED_SKIPS = (
+    "set SCAN_LIVE=1 to query api.scryfall.com",
+    "screenshots only on request",
+    "the guard stands aside when going online",
+    "the text size is the same in both themes",
+    "no change",
+)
+_SKIPPED: list[tuple[str, str]] = []
+
+
+def _skip_reason(report: Any) -> str:
+    longrepr = report.longrepr
+    reason = longrepr[2] if isinstance(longrepr, tuple) and len(longrepr) == 3 else str(longrepr)
+    return reason.removeprefix("Skipped: ")
+
+
+def _note_skip(report: Any) -> None:
+    if report.skipped and not hasattr(report, "wasxfail"):
+        _SKIPPED.append((report.nodeid, _skip_reason(report)))
+
+
+def unexpected_skips(skipped: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The skips whose reason is none of EXPECTED_SKIPS."""
+    return [(node, why) for node, why in skipped if why not in EXPECTED_SKIPS]
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    _note_skip(report)
+
+
+def pytest_collectreport(report: pytest.CollectReport) -> None:
+    _note_skip(report)  # a whole module skipped (pytestmark skipif, importorskip)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if os.environ.get("MTG_ONLY_EXPECTED_SKIPS") != "1" or hasattr(session.config, "workerinput"):
+        return  # not asked, or a pytest-xdist worker: the controller sees every worker's reports
+    bad = unexpected_skips(_SKIPPED)
+    if not bad:
+        return
+    tr = session.config.pluginmanager.get_plugin("terminalreporter")
+    lines = [f"{len(bad)} test(s) skipped for a reason CI does not allow (tests/conftest.py EXPECTED_SKIPS):"]
+    lines += [f"  {node}: {why}" for node, why in bad]
+    if tr is not None:
+        tr.write_line("\n".join(lines), red=True)
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED

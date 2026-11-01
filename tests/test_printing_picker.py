@@ -131,7 +131,7 @@ async def test_one_printing_by_set_and_number(stack: Stack) -> None:
 
 
 async def test_a_token_is_found_by_its_own_printing_and_lists_its_printings(stack: Stack) -> None:
-    """Ben, 2026-10-28: "Goblin token" listed two Goblin creature cards and no token. The picker
+    """The owner, 2026-10-28: "Goblin token" listed two Goblin creature cards and no token. The picker
     finds a row's card by its own set and number (GET /scan/api/printing), and the list asks
     Scryfall to include extras (tokens, emblems), which its search leaves out otherwise."""
     stack.sf.extra_cards = goblin_cards()

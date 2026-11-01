@@ -497,6 +497,8 @@ def test_card_search_controls_read_at_200_percent_text_on_a_desktop(server: Serv
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, 1280, touch=False)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        page.locator(".sp-open").click()  # the filters wait folded on a desktop
+        page.locator("#p-t").wait_for(state="visible", timeout=3000)
         page.evaluate(TEXT_200)
         page.wait_for_timeout(200)
         got = page.evaluate(ZOOM_1280)
@@ -581,6 +583,8 @@ def test_a_drop_down_keeps_its_chevron_while_hovered(server: Server) -> None:
     with sync_playwright() as p:
         browser, page, errors = _open(p, server, sid, 1280, touch=False)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        page.locator(".sp-open").click()  # the filters wait folded on a desktop
+        page.locator("#p-t").wait_for(state="visible", timeout=3000)
         btn = page.locator(".spanel .colors .msel-btn").first
         btn.hover()
         page.wait_for_timeout(300)

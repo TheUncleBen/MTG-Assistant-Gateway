@@ -124,7 +124,7 @@ def test_label_options_and_escaping() -> None:
 
 
 def test_app_chip_names_the_app_and_never_guesses() -> None:
-    # 2026-10-21 (Ben): the app's full name beside its mark (Claude, ChatGPT: the official files,
+    # 2026-10-21 (the owner): the app's full name beside its mark (Claude, ChatGPT: the official files,
     # tests/test_app_logos.py) or the one neutral icon for any other app; never initials
     plug = theme.icon("app")
     assert ui.app_chip("Claude", client_id="https://claude.ai/oauth/c.json").endswith(

@@ -244,12 +244,10 @@ def add_summary_tool(server: MCPServer, state: AppState) -> None:
         name="get_summary",
         title="Get my summary",
         description=(
-            "The member's plain summary of the last day or week (period: day or week): watched card "
-            "prices that moved (cards lists those; cards_unchanged counts the rest) and watched deck "
-            "values (when the gateway has watchlists on), deck reports "
-            "finished, proposals waiting and applied, plus the same as sentences in `text`. Written by the "
-            "gateway from its own data, without AI; turn it into your own words for the member (for example "
-            "in a scheduled task). Read-only."
+            "The member's plain summary of the last day or week (period): watched card prices that moved "
+            "(cards; cards_unchanged counts the rest), watched deck values, reports finished, proposals "
+            "waiting and applied, and the same as sentences in text, written by the gateway without AI. Put "
+            "it in your own words for the member. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )

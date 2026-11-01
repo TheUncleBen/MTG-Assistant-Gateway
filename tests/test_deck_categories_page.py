@@ -1,4 +1,4 @@
-"""The Categories panel of Deck settings is editable (F7, Ben 21 Oct: option a): rename in place,
+"""The Categories panel of Deck settings is editable (F7, the owner 21 Oct: option a): rename in place,
 three switches per category (Premier, Not in deck, Not in price), a plain Save categories and Undo
 changes, a confirm step for anything touching Premier, the Commander or a commander's category,
 and the backend's own words (decks.category_line, decks.CATEGORIES_SAVED) everywhere."""
@@ -93,7 +93,7 @@ async def test_the_panel_is_editable_with_the_approved_controls(stack: Stack) ->
         assert "<button type='reset' class='btn'>Undo changes</button>" in page
         assert "Moving single cards between categories is in the deck editor and on the deck page." in page
         # each category with a record has a Delete button and its card count (create and delete,
-        # Ben 22 Oct: one pane of glass)
+        # The owner 22 Oct: one pane of glass)
         assert f"form='catdel' name='delete' value='{ids['Ramp']}' data-name='Ramp' data-cards='2'" in page
         assert "<span class='cnt'>2 cards</span>" in page
         # the box's extra sentence: Maybeboard decides what counts, Commander is the commander's
@@ -146,7 +146,7 @@ async def test_a_category_without_a_record_is_edited_like_any_other(stack: Stack
 
 
 async def test_a_new_deck_shows_archidekts_default_maybeboard_and_sideboard(stack: Stack) -> None:
-    """Ben, 2026-10-28: a new deck's Categories said "No categories yet." though every Archidekt
+    """The owner, 2026-10-28: a new deck's Categories said "No categories yet." though every Archidekt
     deck has a Maybeboard and a Sideboard. Missing from the deck's answer, they show as rows
     without a record (Not in deck on), edited like any other: the save gives one its record."""
     deck = stack.ark.decks[42]

@@ -74,9 +74,9 @@ Claude / ChatGPT / Android app / browser
 | **Docker host** | Runs the containers | Docker Compose on one machine ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) or a Swarm, with or without Portainer ([DEPLOY.md](DEPLOY.md)) |
 
 The project's images (the gateway, Mystic Forge and Forge) are multi-arch
-(`linux/amd64` and `linux/arm64`), so a Raspberry Pi 4 or 5 is fine. The gateway idles around 60 MB of memory and
-Mystic Forge around 115 to 170 MB. Those figures were measured on test machines rather than a Pi,
-by version 0.5.0 at the latest, and have not been measured again since.
+(`linux/amd64` and `linux/arm64`), so a Raspberry Pi 4 or 5 is fine. After the whole end-to-end test suite the gateway used about
+82 MB of memory and Mystic Forge about 91 MB, measured on GitHub's x86 build machines rather than a
+Pi; [HARDWARE.md](HARDWARE.md#measured-use) has every measured figure.
 
 ## What's fixed, and why
 

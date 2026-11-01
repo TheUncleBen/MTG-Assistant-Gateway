@@ -34,7 +34,7 @@ def _save(db: Database, pid: str, *, rows: list | None = None, deck: str = "42",
             "owner_sub": "u",
             "kind": "edit",
             "deck_id": deck,
-            "deck_name": "Immortal Reckoning",
+            "deck_name": "Liesa Test Deck",
             "baseline_fingerprint": "f",
             "changes": [],
             "diff_text": "+1 Sol Ring",
@@ -144,7 +144,7 @@ async def test_a_stored_tier_keeps_its_own_reason_and_an_unjudged_one_is_a_dash(
                     "owner_sub": sub,
                     "kind": "edit",
                     "deck_id": "42",
-                    "deck_name": "Immortal Reckoning",
+                    "deck_name": "Liesa Test Deck",
                     "baseline_fingerprint": "f",
                     "changes": [],
                     "diff_text": "+1 Sol Ring",
@@ -197,7 +197,7 @@ async def test_a_risk_nobody_can_judge_is_a_dash_while_waiting_too(stack: Stack)
                     "owner_sub": sub,
                     "kind": "edit",
                     "deck_id": "42",
-                    "deck_name": "Immortal Reckoning",
+                    "deck_name": "Liesa Test Deck",
                     "baseline_fingerprint": "f",
                     "changes": [],
                     "diff_text": "+1 Sol Ring",
@@ -240,7 +240,7 @@ def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
     counts = db.history_counts("u", deck_id=None, search="", since=None)
     assert counts["snapshots"] == 15 and counts["restores"] == 1  # p04, an applied restore
     # the search counts as the rows match: a restore by its deck's name or its change summary
-    for q in ("immortal", "sol ring", "card 4", "reap"):
+    for q in ("liesa", "sol ring", "card 4", "reap"):
         rows = db.list_proposals("u", limit=100, kinds=["restore"], states=["applied"], search=q)
         assert db.history_counts("u", search=q)["restores"] == len(rows), q
     assert db.history_counts("u", search="sol ring")["restores"] == 1

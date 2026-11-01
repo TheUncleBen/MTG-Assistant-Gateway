@@ -441,7 +441,7 @@ KEBABS = """() => [...document.querySelectorAll('#gf-hand .gf-c')].map(c => {
 
 @pytest.mark.parametrize("width", [344, 1280])
 def test_each_goldfish_card_has_a_menu_button_beside_it(server: Server, width: int) -> None:
-    """The approved ways into a card's menu are right-click, press and hold and a ⋮ (Ben, 21 Oct):
+    """The approved ways into a card's menu are right-click, press and hold and a ⋮ (the owner, 21 Oct):
     the ⋮ sits under each card, a 44 px button that covers none of the card, opens the same menu
     as the card itself (the game's moves above Copy name) and goes away with the small card size,
     where the cards are too narrow for it."""

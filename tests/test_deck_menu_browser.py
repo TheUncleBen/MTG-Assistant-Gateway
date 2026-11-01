@@ -1146,7 +1146,7 @@ def test_card_menu_rows_without_an_icon_keep_the_slot_so_text_lines_up(server: S
 
 
 def test_show_back_face_swaps_the_picture_at_once_and_the_viewer_opens_on_it(server: Server) -> None:
-    """L6 (Ben, 23 Oct): the card menu's Show back face swaps the tile's picture to the back face
+    """L6 (the owner, 23 Oct): the card menu's Show back face swaps the tile's picture to the back face
     without a reload, Undo (a refused save) swaps it back, the card view opens on the back with a
     Show front button, and switching it off brings the front back. The fake Scryfall pictures are
     a different PNG per face (tests/fake_faces.py), so the picture the browser drew, not only the

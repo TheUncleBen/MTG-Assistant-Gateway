@@ -21,6 +21,7 @@ import threading
 import weakref
 from typing import TYPE_CHECKING, Any
 
+from . import refusals
 from .archidekt_account import CUSTOM_CARD_FIELDS, HEX_COLOR_RE
 from .decklist import clean_text
 from .decks import DeckError, _row, needs_look_error
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 LISTS_TARGET = "lists"  # deck_id of a lists proposal: it is about the account, not one deck
 LISTS_NAME = "Your Archidekt lists"
-KINDS = ("templates", "default_categories", "color_tags", "pins", "custom_cards")
+KINDS = ("templates", "default_categories", "color_tags", "pins", "custom_cards", "collection_tags")
 # What each list is called in a sentence, and the operations each takes
 NOUNS = {
     "templates": "category templates",
@@ -38,6 +39,7 @@ NOUNS = {
     "color_tags": "color tags",
     "pins": "pinned cards",
     "custom_cards": "custom cards",
+    "collection_tags": "binder tags",
 }
 OPS = {
     "templates": ("create", "edit", "delete"),
@@ -45,12 +47,15 @@ OPS = {
     "color_tags": ("create", "edit", "delete"),
     "pins": ("pin", "edit", "unpin", "remove_all"),
     "custom_cards": ("create", "edit", "delete"),
+    # the tags on the member's binder entries (0.7.46, parity release 3; collection_tags.py)
+    "collection_tags": ("create", "edit", "delete"),
 }
 # Waits for the member's own press in every approval mode
 DELETES = frozenset(
     {
         ("templates", "delete"),
         ("color_tags", "delete"),
+        ("collection_tags", "delete"),
         ("custom_cards", "delete"),
         ("pins", "remove_all"),
         # they take entries out of a list as well (security review 0.7.43)
@@ -266,6 +271,11 @@ async def _read(decks: DeckService, sub: str, kind: str, *, page: int, search: s
             for t in rows
         ]
         return {"list": kind, "items": items, "total": len(items)}
+    if kind == "collection_tags":
+        from . import collection_tags
+
+        items = await collection_tags.read_tags(decks, sub)
+        return {"list": kind, "items": items, "total": len(items)}
     if kind == "pins":
         rows = await _get(decks, sub, lambda token, *_: client.pins(token))
         items = [_pin(p) for p in rows]
@@ -453,35 +463,40 @@ async def _plan(  # noqa: C901, PLR0912, PLR0915
                 f"Default categories of “{name}”: " + ", ".join(picked) + " (main: " + picked[0] + ")",
                 **({"premier": True, "note": f"{', '.join(premier)}: " + PREMIER_NOTE} if premier else {}),
             )
-        elif kind == "color_tags":
+        elif kind in ("color_tags", "collection_tags"):
+            what = "color tag" if kind == "color_tags" else "binder tag"
             if op == "create":
                 name = _name(c.get("name"), "name", TAG_NAME_MAX)
                 if any(_same(t["name"], name) for t in items):
-                    raise _err(f"You already have a color tag called “{name}”.")
+                    raise _err(f"You already have a {what} called “{name}”.")
                 color = _color(c.get("color"), DEFAULT_TAG_COLOR)
-                add({"op": op, "name": name, "color": color}, f"New color tag “{name}” ({color})")
+                add({"op": op, "name": name, "color": color}, f"New {what} “{name}” ({color})")
                 continue
-            t = _one(items, c.get("name"), "color tag")
+            t = _one(items, c.get("name"), what)
             if op == "delete":
                 add(
                     {"op": op, "id": t["id"], "name": t["name"]},
-                    f"Delete the color tag “{t['name']}”",
-                    note="Cards already tagged keep their color and name; the tag only leaves your list.",
+                    f"Delete the {what} “{t['name']}”",
+                    note="Cards already tagged keep their color and name; the tag only leaves your list."
+                    if kind == "color_tags"
+                    else await _binder_tag_note(decks, sub, t),
                 )
                 continue
             name = _name(c["new_name"], "new_name", TAG_NAME_MAX) if c.get("new_name") else t["name"]
-            color = _color(c.get("color"), t["color"].lower())
+            color = _color(c.get("color"), (t["color"] or DEFAULT_TAG_COLOR).lower())
             if not _same(name, t["name"]) and any(_same(x["name"], name) for x in items):
-                raise _err(f"You already have a color tag called “{name}”.")
-            if name == t["name"] and color == t["color"].lower():
-                raise _err(f"That changes nothing on the color tag “{t['name']}”.")
+                raise _err(f"You already have a {what} called “{name}”.")
+            if name == t["name"] and color == (t["color"] or DEFAULT_TAG_COLOR).lower():
+                raise _err(f"That changes nothing on the {what} “{t['name']}”.")
             said = ([f"renamed “{name}”"] if name != t["name"] else []) + (
-                [f"color {t['color']} -> {color}"] if color != t["color"].lower() else []
+                [f"color {t['color']} -> {color}"] if color != (t["color"] or "").lower() else []
             )
             add(
                 {"op": op, "id": t["id"], "was": t, "name": name, "color": color},
-                f"Color tag “{t['name']}”: " + ", ".join(said),
-                note="Cards already tagged keep their old name and color.",
+                f"{what.capitalize()} “{t['name']}”: " + ", ".join(said),
+                note="Cards already tagged keep their old name and color."
+                if kind == "color_tags"
+                else "Every entry with this tag shows the new name and color.",
             )
         elif kind == "pins":
             if op == "remove_all":
@@ -614,6 +629,19 @@ _FIELD_WORDS = {
     "setCode": "set code",
     "collectorNumber": "collector number",
 }
+
+
+async def _binder_tag_note(decks: DeckService, sub: str, tag: dict[str, Any]) -> str:
+    """How many binder entries carry ``tag`` (the delete takes it off them), from one whole read."""
+    from . import collection_tags
+
+    try:
+        records, _tags, complete = await collection_tags.whole_records(decks, sub)
+    except DeckError:
+        return "Every entry with this tag loses it. (The gateway could not count them just now.)"
+    n = sum(1 for r in records if tag["id"] in collection_tags.record_tag_ids(r))
+    entries = f"{n:,} {'entry' if n == 1 else 'entries'}" + ("" if complete else " or more")
+    return f"{entries} in your binder carry this tag and lose it. The entries themselves stay."
 
 
 def _copies(value: Any, default: int) -> int:
@@ -847,6 +875,20 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
                         token, o["oracle_id"], list(o["categories"])
                     ),
                 )
+            elif kind == "collection_tags":
+                if kind_op == "create":
+                    made[n] = await _send(
+                        decks,
+                        sub,
+                        lambda token, *_, o=op: client.create_collection_tag(token, o["name"], o["color"]),
+                    )
+                elif kind_op == "edit":
+                    tag = {"id": op["id"], "name": op["name"], "color": op["color"]}
+                    await _send(decks, sub, lambda token, *_, t=tag: client.update_collection_tag(token, t))
+                else:
+                    await _send(
+                        decks, sub, lambda token, *_, i=op["id"]: client.delete_collection_tag(token, i)
+                    )
             elif kind == "color_tags":
                 if kind_op == "create":
                     made[n] = await _send(
@@ -939,7 +981,9 @@ def _owner(decks: DeckService, sub: str) -> int:
     link = decks.db.get_link(sub)
     uid = str((link or {}).get("archidekt_user_id") or "")
     if not uid.isdigit():
-        raise DeckError("not_linked", "The linked Archidekt account has no user id; relink it.")
+        if link is None:
+            raise DeckError("not_linked", refusals.not_linked(decks.settings.public_url))
+        raise DeckError("not_linked", refusals.no_user_id(decks.settings.public_url))
     return int(uid)
 
 
@@ -1007,7 +1051,7 @@ async def _check(  # noqa: C901
             )
             if hit is None or {k: hit[k] for k in want} != want:
                 out.append(f"“{name}” does not read back as sent")
-        elif kind == "color_tags":
+        elif kind in ("color_tags", "collection_tags"):
             hit = (
                 by_id.get(op.get("id"))
                 if op["op"] == "edit"

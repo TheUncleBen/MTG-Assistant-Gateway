@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, Response
 from . import cardquery as cq
 from . import cardsearch_view as cv
 from . import prefs
-from .pages import NO_STORE, _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .scan.service import ScanError
 from .theme import esc as _esc
 from .theme import icon, render, stylesheet_link
@@ -531,7 +531,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
     async def cards_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/cards" + (f"?{request.url.query}" if request.url.query else ""))
+            return login_redirect_here(request)
         if state.scan is not None:
             # the pickers' lists start loading now, so they are ready when a picker is opened
             state.scan.ensure_search_options()
@@ -565,7 +565,10 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
                 )
         else:
             results = START_HTML
-        body = f"<section class='panel spanel cs-panel'>{cv.filters_html(f, view=view, total=total)}"
+        # the filter groups on a Fold or desktop start as the member left them (closed until opened)
+        folded = state.db.get_pref(sub, prefs.CARDS_FILTERS) != "open"
+        filters = cv.filters_html(f, view=view, total=total, folded=folded)
+        body = f"<section class='panel spanel cs-panel'>{filters}"
         if not linked:
             body += (
                 f"<p class='readonly'>{icon('link')}<span>Cards can be read but not added: no Archidekt "

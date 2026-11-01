@@ -35,6 +35,12 @@
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/undo"
                 android:visibility="gone" />
+            <!-- After a photo that found no card: keeps it in Pictures, to send to whoever runs the gateway (ScanPhoto). -->
+            <Button android:id="@+id/save_photo"
+                style="@style/CameraButton.Plain"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/save_photo"
+                android:visibility="gone" />
         </LinearLayout>
 
         <TextView android:id="@+id/camera_status"

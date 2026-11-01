@@ -113,7 +113,7 @@ def _switches() -> list[str]:
 
 
 def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
-    """Ben, 2026-10-25: every feature is on by default; an env variable only turns one off. Ben,
+    """The owner, 2026-10-25: every feature is on by default; an env variable only turns one off. The owner,
     2026-10-28: MTG_SERVER_NAME is back too, for the Gateway name, and the three sign-in times
     that had a stack variable keep it (their Settings page rows, 0.7.46)."""
     from mtg_gateway.config import MANAGED_SETTINGS, Settings
@@ -154,7 +154,7 @@ def test_example_env_files_leave_each_switch_empty_so_the_page_can_change_it(nam
 
 @pytest.mark.parametrize("name", ENV_FILES)
 def test_example_env_files_have_the_gateway_name_empty_with_its_reason(name: str):
-    """Ben, 2026-10-28: MTG_SERVER_NAME is in each example under a one-line note, and the Settings
+    """The owner, 2026-10-28: MTG_SERVER_NAME is in each example under a one-line note, and the Settings
     page keeps the Gateway name until someone sets it in the stack. Empty like every other optional
     line (0.7.46 review): a name typed after a commented-out ``#MTG_SERVER_NAME=`` in Portainer's
     Advanced mode was silently ignored."""
@@ -332,3 +332,12 @@ def test_every_value_the_older_examples_set_and_these_leave_empty_is_named_in_th
         assert env[var] == "", var
         assert f"`{var}={old}`" in step_one, var
         assert f"`{var}={old}`" in bullet, var
+
+
+def test_the_stacks_pass_no_variable_that_nothing_reads() -> None:
+    """DISABLE_IPV6 came from another project's image convention: the gateway, its Mystic Forge
+    image and Forge never read it, so the Swarm stack set it for nothing and Compose didn't at all."""
+    for name in ("deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"):
+        assert "DISABLE_IPV6" not in (ROOT / name).read_text(), name
+    code = list((ROOT / "src").rglob("*.py")) + [p for p in (ROOT / "docker").rglob("*") if p.is_file()]
+    assert not any("DISABLE_IPV6" in p.read_text(errors="ignore") for p in code)

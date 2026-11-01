@@ -594,7 +594,7 @@ adds the cards and checks it the same way. A waiting proposal expires after
 **Days a change waits for approval** on the Settings page (7 by default). The gateway deletes a deck only on its
 owner's own press: on a deletion proposal's review page, or with Delete deck
 on the deck's page. A proposal left in `applying` by a restart
-mid-apply is marked `failed` at startup, with the snapshot and deck ids in
+mid-apply is marked `failed` at startup, with the snapshot and deck IDs in
 its result; one somehow still `applying` six hours after it started is marked
 the same way by the regular clean-up.
 
@@ -720,7 +720,7 @@ on what the review page would show, not on what the assistant says:
 |---|---|
 | Low | A small edit to an existing deck or to your binder: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row, never a change to which cards are the commanders or to the categories of a row in the commander zone, and never fewer copies of a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard; a private copy of a deck (a clone), which changes nothing that exists; and a change to your Archidekt lists (category templates, default categories, color tags, pins or custom cards) of at most 5 entries, with no deletes. (The row limit is **Rows a small edit may have** on the Settings page, default 5.) |
 | High | Everything else: more rows than that, adding more than 10 cards from a card package, a commander change, a new deck, restoring a snapshot, the deck's details (name, format, bracket, description, visibility, folder, tags and cover), and its categories (a new category, a new name, Premier, Not in deck or Not in price, or deleting one). A commander change is a change to which cards are the deck's commanders or to the categories of a row in its commander zone (Archidekt's commander categories, whatever they are named): a card moved into or out of the zone, the commander removed, a new card added to it, or any other change to the categories of a row that has a commander category before or after. A commander is a card whose row in the commander zone is in the deck: a row whose primary category is Maybeboard or Sideboard (or another category the deck does not count) is not in the deck, so that card is no commander. It waits for the member's press in every mode. So does a lowered count on a card that has a row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard. Another copy, printing or finish of a commander already there is not a commander change. |
-| Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. |
+| Consent, destructive | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders, collaborator changes, deck help requests, reports to Archidekt's moderators, contest entries, and profile and email settings), deleting from your Archidekt lists, Premier in your default categories, taking custom cards out of a deck, deleting a deck and clearing your binder are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck, clearing your binder, and an edit of a comment that has formatting: on the review page only). An edit of a description that has formatting is also approved on its review page only. |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call
@@ -900,7 +900,7 @@ Archidekt busy for everyone:
   waiting;
 - at most 120 started per 10 minutes (**Archidekt work per member per 10
   minutes** on the Settings page), refilled evenly. Deck reads, proposals, applies, links and
-  research tools (solo test, precon) given an Archidekt deck id or link all
+  research tools (solo test, precon) given an Archidekt deck ID or link all
   count. Past it the member gets
   `rate_limited` until enough of the allowance has refilled;
 - at most five failed Archidekt link attempts (wrong username or password)

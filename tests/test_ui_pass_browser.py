@@ -103,7 +103,7 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
     """A plain fold-out (such as the Account page's "What your sign-in shares") lost its triangle on
     touch screens: the rule that makes every summary 40 px tall laid it out as a flex box, which
     drops the native marker. Every such fold-out shows a marker: the native one on a list item, or
-    the shared disclosure capsule's own chevron (Ben, 10-25: never bare text). (The admin's
+    the shared disclosure capsule's own chevron (the owner, 10-25: never bare text). (The admin's
     "Details and actions" fold, the first case, is a row menu now.)"""
     from playwright.sync_api import sync_playwright
 
@@ -183,7 +183,7 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
             assert owner_first is not None, order
             edit_at = page.evaluate("() => document.activeElement.innerText")
             assert "Edit deck" not in edit_at or owner_first < len(order) - 1, order
-            # the owner link lies above the deck's buttons, as the order now says
+            # The owner link lies above the deck's buttons, as the order now says
             tops = page.evaluate(
                 "() => [document.querySelector('.banner .owner').getBoundingClientRect().top,"
                 " document.querySelector('.banner .controls').getBoundingClientRect().top]"

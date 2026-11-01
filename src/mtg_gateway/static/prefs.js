@@ -58,7 +58,7 @@
   };
 
   // -- card size: the S / M / L switch next to "View as" (theme.card_size_control) and in the
-  // printing picker. Each page keeps its own (card.size.<page>, Ben 2026-10-28): the page's
+  // printing picker. Each page keeps its own (card.size.<page>, the owner 2026-10-28): the page's
   // applies at once on <html data-card-size>, the printing picker's on the picker and
   // <html data-card-size-printings>. It follows the account, with a copy on this device that a
   // page the account has no size for starts with.

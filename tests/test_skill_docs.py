@@ -102,7 +102,7 @@ def test_chatgpt_block_fits_custom_instructions() -> None:
 
 
 def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
-    """Ben, 0.7.31 test round: a ChatGPT test asked him to sign in to archidekt.com so it could
+    """The owner, 0.7.31 test round: a ChatGPT test asked him to sign in to archidekt.com so it could
     check its own changes. Both guides say it never needs that: the tools read changes back."""
     skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     assert "Apart from linking Archidekt on `/account` (and the first" in skill
@@ -113,7 +113,7 @@ def test_both_guides_say_never_to_ask_for_a_sign_in() -> None:
 
 
 def test_every_guide_says_to_finish_the_review_before_proposing() -> None:
-    """Ben, 0.7.31 test round: a card came up after every Approve, one after another. Claude's skill,
+    """The owner, 0.7.31 test round: a card came up after every Approve, one after another. Claude's skill,
     the ChatGPT block and the server instructions every app gets all say to propose once, after the
     review, and to amend a waiting proposal instead of proposing again."""
     from mtg_gateway.app import server_instructions

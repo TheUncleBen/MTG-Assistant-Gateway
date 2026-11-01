@@ -14,6 +14,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import android.widget.ToggleButton
 import androidx.activity.ComponentActivity
 import androidx.camera.core.Camera
@@ -34,6 +35,7 @@ import androidx.window.layout.FoldingFeature
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.util.concurrent.ExecutionException
 
 /**
@@ -94,6 +96,7 @@ class CameraPanel(
     private val status: TextView = view.findViewById(R.id.camera_status)
     private val result: TextView = view.findViewById(R.id.result_text)
     private val undo: Button = view.findViewById(R.id.undo)
+    private val savePhoto: Button = view.findViewById(R.id.save_photo)
     private val torchToggle: ToggleButton = view.findViewById(R.id.torch_toggle)
     private val torchStrength: SeekBar = view.findViewById(R.id.torch_strength)
     private val torchLabel: TextView = view.findViewById(R.id.torch_label)
@@ -124,6 +127,12 @@ class CameraPanel(
     private var capturing = false
     /** Counts shots, so a focus result that arrives after its shot was given up on starts nothing. */
     private var shotToken = 0
+    /** What the camera reported about focus for the shot being taken (for [ScanPhoto]'s note). */
+    private var focusNote = ""
+    /** The last photo handed to the page, with its dashed box and focus, for "Save this photo". */
+    private var lastShot: ByteArray? = null
+    private var lastGuide: FloatArray? = null
+    private var lastFocus = ""
 
     /** A photo is with the page until its `done` event (or the watchdog) comes back. */
     private var awaitingPage = false
@@ -146,6 +155,7 @@ class CameraPanel(
         previewView.scaleType = PreviewView.ScaleType.FILL_CENTER // centre crop: what the guide box assumes
         view.findViewById<Button>(R.id.done).setOnClickListener { host.close() }
         undo.setOnClickListener { if (canUndo) { canUndo = false; undo.isEnabled = false; host.undo() } }
+        savePhoto.setOnClickListener { saveLastPhoto() }
         torchToggle.setOnCheckedChangeListener { _, _ -> applyTorch() }
         torchStrength.max = STRENGTH_STEPS - 1
         torchStrength.contentDescription = activity.getString(R.string.torch_strength) // not the exposure slider's name
@@ -177,6 +187,8 @@ class CameraPanel(
         view.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
             if (r - l != or - ol || b - t != ob - ot) applyPosture()
         }
+        // The box follows the viewfinder's own size (a fold, a turn, the controls' split).
+        previewView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitGuide() }
     }
 
     // -- lifecycle, driven by MainActivity --------------------------------------
@@ -291,6 +303,7 @@ class CameraPanel(
         pv.setSurfaceProvider(previewView.surfaceProvider)
         camera = cam
         preview = pv
+        fitGuide()
         imageCapture = ic
         capturing = false
         readCapabilities(cam)
@@ -413,13 +426,30 @@ class CameraPanel(
         val cam = camera
         val box = guideView.guide()
         if (cam == null || box.isEmpty) {
+            focusNote = "not asked (no dashed box yet)"
             gate.fire()
             return
         }
+        focusNote = ""
         val point = previewView.meteringPointFactory.createPoint(box.centerX(), box.centerY())
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE).build()
-        cam.cameraControl.startFocusAndMetering(action).addListener({ gate.fire() }, activity.mainExecutor)
-        ui.postDelayed({ gate.fire() }, FOCUS_TIMEOUT_MS)
+        val focus = cam.cameraControl.startFocusAndMetering(action)
+        focus.addListener({
+            if (token == shotToken && focusNote.isEmpty()) {
+                focusNote = try {
+                    if (focus.get().isFocusSuccessful) "reported sharp" else "reported not sharp"
+                } catch (e: ExecutionException) {
+                    "not run (${e.cause?.javaClass?.simpleName ?: "error"})"
+                } catch (e: InterruptedException) {
+                    "not known"
+                }
+            }
+            gate.fire()
+        }, activity.mainExecutor)
+        ui.postDelayed({
+            if (token == shotToken && focusNote.isEmpty()) focusNote = "no answer within ${FOCUS_TIMEOUT_MS} ms"
+            gate.fire()
+        }, FOCUS_TIMEOUT_MS)
     }
 
     private fun takePicture(ic: ImageCapture) {
@@ -469,7 +499,23 @@ class CameraPanel(
         status.text = activity.getString(R.string.status_reading)
         ui.removeCallbacks(watchdog)
         ui.postDelayed(watchdog, PAGE_TIMEOUT_MS)
-        host.photo(bytes, guideFractions())
+        val guide = guideFractions()
+        lastShot = bytes
+        lastGuide = guide
+        lastFocus = focusNote
+        showSave(false)
+        host.photo(bytes, guide)
+    }
+
+    /**
+     * Sizes the dashed box so a card filling it fills [TorchMath.CARD_SHARE] of the photo, from
+     * how much of the preview's width the viewfinder shows. Until the preview's size is known the
+     * box keeps its default.
+     */
+    private fun fitGuide() {
+        val pr = preview?.resolutionInfo ?: return
+        val pu = TorchMath.uprightSize(pr.resolution.width, pr.resolution.height, pr.rotationDegrees)
+        TorchMath.guideWidthShare(previewView.width, previewView.height, pu[0], pu[1])?.let { guideView.widthShare = it }
     }
 
     /**
@@ -504,16 +550,19 @@ class CameraPanel(
     }
 
     private fun pageTimedOut() {
-        pageDone(activity.getString(R.string.scan_page_slow), stopAuto = true)
+        pageDone(activity.getString(R.string.scan_page_slow), stopAuto = true, missed = true)
     }
 
-    private fun pageDone(line: String?, stopAuto: Boolean = false) {
+    private fun pageDone(line: String?, stopAuto: Boolean = false, missed: Boolean = false) {
         ui.removeCallbacks(watchdog)
+        if (missed) missedLine = line.orEmpty()
         awaitingPage = false
         expectedSeq = -1
         shoot.isEnabled = camera != null
         if (line != null) status.text = line
         if (stopAuto && autoToggle.isChecked) autoToggle.isChecked = false
+        // Offered once shooting stops on a missed photo; Auto going on to the next shot doesn't flash it.
+        showSave(missed && lastShot != null && !autoToggle.isChecked)
         if (autoToggle.isChecked && !closed) ui.postDelayed(nextAuto, AUTO_GAP_MS)
     }
 
@@ -535,6 +584,48 @@ class CameraPanel(
             ui.removeCallbacks(watchdog)
             ui.postDelayed(watchdog, PAGE_TIMEOUT_MS)
         }
+    }
+
+    /** The line the last missed photo ended on, for its note. */
+    private var missedLine = ""
+
+    private fun showSave(on: Boolean) {
+        savePhoto.visibility = if (on) View.VISIBLE else View.GONE
+        savePhoto.isEnabled = on
+    }
+
+    /**
+     * Saves the last photo, as the page got it, with a note of where the dashed box lay, what the
+     * camera said about focus and what the photo came to (see [ScanPhoto]). Off the UI thread.
+     */
+    private fun saveLastPhoto() {
+        val jpeg = lastShot ?: return
+        val g = lastGuide
+        val note = ScanPhoto.note(
+            listOf(
+                "app" to "MTG Assistant Gateway ${BuildConfig.VERSION_NAME}",
+                "phone" to "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                "dashed box (x, y, w, h of the photo)" to (g?.joinToString(", ") { "%.4f".format(java.util.Locale.US, it) } ?: "not known"),
+                "focus" to lastFocus.ifEmpty { "not known" },
+                "zoom" to "%.2f".format(java.util.Locale.US, zoom),
+                "torch" to if (torchToggle.isChecked) "on" else "off",
+                "auto" to if (autoToggle.isChecked) "on" else "off",
+                "outcome" to missedLine,
+            ),
+        )
+        val name = ScanPhoto.fileName(System.currentTimeMillis())
+        val app = activity.applicationContext
+        savePhoto.isEnabled = false
+        Thread {
+            val said = try {
+                ScanPhoto.save(app, ScanPhoto.withNote(jpeg, note), name)
+                app.getString(R.string.scan_photo_saved, ScanPhoto.FOLDER)
+            } catch (e: IOException) {
+                Log.w(TAG, "scan photo not saved: ${e.message}")
+                app.getString(R.string.scan_photo_not_saved)
+            }
+            ui.post { Toast.makeText(app, said, Toast.LENGTH_LONG).show() }
+        }.start()
     }
 
     private fun showResult(text: String, undoable: Boolean) {
@@ -570,7 +661,7 @@ class CameraPanel(
             "undo" -> showResult(activity.getString(R.string.removed_card, name, cards), undoable)
             "unsure" -> showResult(activity.getString(R.string.unsure_card, name), undoable)
             "unidentified" -> showResult(activity.getString(R.string.unidentified_card, name), undoable)
-            "no-card" -> pageDone(activity.getString(R.string.no_card_outline))
+            "no-card" -> pageDone(activity.getString(R.string.no_card_outline), missed = true)
             "ocr" -> onOcr(ev.optString("state", ""), ev.optDouble("progress", 0.0))
             "photo-direct" -> {
                 // Only for the photo in flight (its number may not be known yet); the host checks
@@ -586,8 +677,8 @@ class CameraPanel(
                     ev.optString("read", ""), ev.optBoolean("blurry", false), autoToggle.isChecked,
                 )
                 when (o) {
-                    ShotLine.Outcome.PhotoLost -> pageDone(activity.getString(R.string.scan_photo_lost), stopAuto = true)
-                    is ShotLine.Outcome.Failed -> pageDone(activity.getString(R.string.scan_failed, o.error), stopAuto = true)
+                    ShotLine.Outcome.PhotoLost -> pageDone(activity.getString(R.string.scan_photo_lost), stopAuto = true, missed = true)
+                    is ShotLine.Outcome.Failed -> pageDone(activity.getString(R.string.scan_failed, o.error), stopAuto = true, missed = true)
                     is ShotLine.Outcome.Found -> pageDone(
                         activity.getString(if (o.autoPaused) R.string.shot_found_paused else R.string.shot_found, o.name, o.where),
                         stopAuto = o.autoPaused,
@@ -599,8 +690,9 @@ class CameraPanel(
                             else -> activity.getString(R.string.shot_no_match, o.read)
                         },
                         stopAuto = o.autoPaused,
+                        missed = true,
                     )
-                    is ShotLine.Outcome.Unreadable -> pageDone(activity.getString(R.string.shot_unreadable, o.pageStatus))
+                    is ShotLine.Outcome.Unreadable -> pageDone(activity.getString(R.string.shot_unreadable, o.pageStatus), missed = true)
                     is ShotLine.Outcome.PageSaid -> pageDone(o.status)
                     ShotLine.Outcome.Next -> pageDone(activity.getString(R.string.status_next))
                 }

@@ -62,7 +62,7 @@ download button. Then:
    updates ([Updates](#updates) below). Other phones have no such switch.
 3. Open the downloaded `mtg-assistant-gateway.apk`. Android asks you to allow installs from
    that browser once. Allow it and tap **Install**.
-4. Play Protect may warn that the developer is unknown or unverified, because
+4. Play Protect may warn that the app comes from an unknown developer, because
    the app is signed by whoever runs your gateway, not by an app store; the
    exact wording varies by phone and Android version. It may also offer to
    scan the app first: scanning it or not are both fine. Only continue if you got
@@ -264,7 +264,7 @@ else your gateway serves. A few things are native:
   once without a reload.
 - **Pull to refresh.** On a page that shows a list (Home, Decks, a deck page,
   Binder, Binder › Lists and each of its lists, Proposals, History, Reports,
-  Alerts, Precons, Card search, Forum, a member's profile), pulling down from
+  Alerts, Precons, Card search, the Forum and its sections, a member's profile), pulling down from
   the very top shows an orange disc under the top bar; letting go past the
   threshold loads the page again and reads it from Archidekt instead of the
   copy the gateway keeps for a while. On a deck page a pull always reads the
@@ -273,9 +273,11 @@ else your gateway serves. A few things are native:
   header; the reads still wait their turn in the gateway's shared Archidekt
   pacer and count against your own Archidekt limit. A pull loads the page's
   address again, so a page shown after sending a form never sends the form
-  twice. It is not offered on forms, the deck editor or the scanner, and a
-  touch that starts inside an open box, a menu, or a part of the page that
-  scrolls on its own never pulls the page.
+  twice. It is not offered on forms, a forum thread (it has the reply box), the
+  deck editor or the scanner, and a touch that starts inside an open box, a
+  menu, or a part of the page that scrolls on its own never pulls the page;
+  nor does any touch while a box on the page holds words you typed and haven't
+  sent, so a pull never throws them away.
 - **Back** goes back a page; on the first page it leaves the app.
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the
@@ -340,7 +342,10 @@ else your gateway serves. A few things are native:
 - **File pickers** (photo and CSV import) open for the gateway's pages only.
   Where a page takes several files, you can pick several. A HEIC or HEIF photo
   (what Samsung's camera saves when **High efficiency pictures** is on) reaches
-  the page as a JPEG, so the scanner can read it.
+  the page as a JPEG, so the scanner can read it, and a JPEG over 4,096 px on
+  its long side (a 50 or 200 MP photo) reaches it as a smaller JPEG of about
+  4,000 px, upright, so the page never has to open a picture of hundreds of
+  megabytes.
 - **The /scan page's own camera** works inside the app: the app asks for camera
   permission once, and grants it to the gateway's pages only.
 - **Look and theme.** The app's own screens (setup, error, menu) use the pages'
@@ -379,7 +384,9 @@ than a browser can, then hands it to that page, which keeps running underneath:
    the menu's **Scan with the app's camera**. The app opens `/scan` if you
    aren't on it. The page's **Auto** switch opens the phone camera with Auto
    already on (step 4).
-2. Fill the dashed card outline with the card. Controls, each shown only when
+2. Fill the dashed card outline with the card: that holds the phone about
+   15 cm (6 in) from it, as on the website, where a phone's main lens still
+   focuses. Controls, each shown only when
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
    - **Torch** on/off (the button reads *Torch: On* or *Torch: Off*).
@@ -405,9 +412,15 @@ than a browser can, then hands it to that page, which keeps running underneath:
    what it found for a tap (*Not sure*), never adding it on its own. Each shot is taken as soon as the
    page has finished with the previous one. **Done** closes the camera; the
    list tab shows what was added, or the camera tab shows a read that waits.
+5. When a shot finds no card and shooting has stopped, **Save this photo**
+   keeps that photo, exactly as the page got it, in the phone's
+   Pictures › MTG Gateway (no permission to give). Send it to whoever runs
+   your gateway: it carries a note of where the dashed box was, whether the
+   camera reported focus, and what the shot came to, so they can see why the
+   card wasn't found.
 
 The photo never leaves the phone except as the page's normal lookups to your
-gateway: it's decoded in the page, which sends what its own camera would send,
+gateway (and a photo you save yourself): it's decoded in the page, which sends what its own camera would send,
 the text it read plus the small art fingerprint that tells printings apart.
 
 ## 4. Foldables and large screens
@@ -662,7 +675,7 @@ programme, so check those pages before relying on any of it:
   needs identity verification. Google Play's own registration fee is the same
   amount.
 - **Power users.** Google says an "advanced flow", launched August 2026, lets a
-  user choose to install apps from unverified developers after a one-time setup.
+  user choose to install apps from developers who are not registered after a one-time setup.
 - **Registration** ties a package name to the SHA-256 fingerprint of its signing
   key. If several developers use the same package name with different keys,
   Google allocates the name by install counts.

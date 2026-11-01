@@ -83,7 +83,7 @@ _EUR_IN = "CASE {w}.finish WHEN 'foil' THEN {p}.eur_foil WHEN 'etched' THEN NULL
 SUMMARIES_KEPT = 16  # members whose watchlist rows are kept worked out (card_summaries)
 # The Watchlist as a want list (0.7.46, mockup screen 8). The alert every new watch gets unless the
 # member set their own defaults (prefs.WATCH_ALERTS): a drop of this much below the price the card
-# had when it was added; the other kinds are off. Ben's decision 1 on screen 8: flip to {} for no
+# had when it was added; the other kinds are off. The owner's decision 1 on screen 8: flip to {} for no
 # shipped default.
 DEFAULT_ALERTS: dict[str, float] = {"drop": 10.0}
 ALERT_KINDS = ("pct", "above", "below", "drop", "rise")
@@ -689,7 +689,11 @@ class PriceService:
                 raise DeckError(
                     "unavailable", f"Scryfall could not be asked about this printing: {exc}"
                 ) from exc
-            note = "Scryfall could not be asked just now; today's price comes with the next daily check."
+            # the name is kept as typed: say so, so a misspelt name is not taken for a checked one
+            note = (
+                f"Scryfall couldn't be reached, so the name “{name}” is not checked yet and has no price "
+                "today; the next daily check prices it."
+            )
         if card is not None:
             name = str(card.get("name") or name)
             # by name alone the finish is checked over every printing, below
@@ -822,6 +826,8 @@ class PriceService:
                 "collector_number": str(now_card.get("collector_number") or "") or None,
             }
         out["created"] = created
+        if card is None:
+            out["name_checked"] = False
         if note:
             out["note"] = note
         return out

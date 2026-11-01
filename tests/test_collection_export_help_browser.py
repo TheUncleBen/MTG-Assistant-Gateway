@@ -71,7 +71,7 @@ def test_export_help_fits_and_reads_at_every_width(server: Server, width: int, t
             " return [...d.querySelectorAll('summary > span')].filter(s => s.offsetParent)"
             ".every(s => s.getBoundingClientRect().right <= b.right - 1); }"
         )
-        # the shared disclosure capsule (Ben, 10-25): its words say what the fold holds at every width
+        # the shared disclosure capsule (the owner, 10-25): its words say what the fold holds at every width
         assert "column types" in fold.locator("summary").inner_text()
         assert "fold-btn" in (fold.locator("summary").get_attribute("class") or "")
         if SHOTS:

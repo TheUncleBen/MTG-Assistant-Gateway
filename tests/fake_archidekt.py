@@ -172,7 +172,8 @@ class FakeArchidekt:
         self.folder_details_fail: set[int] = set()  # folders whose listing answers 500
         self.fail_deck_update = False
         self.updates: list[dict[str, Any]] = []  # bodies of PATCH /decks/{id}/update/, with deck_id
-        self.fail_backup = False  # POST /decks/copy/ answers 503
+        # POST /decks/copy/ answers 503 (True), or this status (401: the session is no longer accepted)
+        self.fail_backup: bool | int = False
         # Copies made here (POST /decks/copy/) carry createdAt and updatedAt as the time they were
         # made, in Archidekt's "...Z" form with fractions, and an update moves their updatedAt to
         # its own time (inferred, not seen live). Every other deck keeps its fixed times.
@@ -190,6 +191,14 @@ class FakeArchidekt:
         # ((username, comment root) -> 1 up / 2 down) and comment threads (root id -> comments).
         self.collections: dict[str, dict[int, dict[str, Any]]] = {}
         self.next_coll_id = 5000
+        # The collection's own tags (parity release 3; routes from archidekt.com's scripts, bodies
+        # the gateway's guess: {name, color}): username -> tag id -> {id, name, color}. A record's
+        # ``tags`` holds tag ids. The listing sends the member's tags as its top-level ``tags``.
+        self.collection_tag_lists: dict[str, dict[int, dict[str, Any]]] = {}
+        self.next_collection_tag_id = 300
+        self.collection_clears = 0  # DELETE /collection/clear/ calls answered
+        self.fail_collection_clear = False  # the clear answers 503 and removes nothing
+        self.collection_tag_writes: list[tuple[str, str, dict[str, Any] | None]] = []
         self.follows: dict[str, set[int]] = {}
         self.bookmarks: dict[str, set[int]] = {}
         self.editors: dict[int, list[dict[str, Any]]] = {}  # deck id -> collaborator rows
@@ -444,6 +453,17 @@ class FakeArchidekt:
             "createdAt": now,
             "modifiedAt": now,
         }
+
+    def _bad_record_tags(self, who: str, body: dict[str, Any]) -> bool:
+        """A record's tags are the member's own collection tag ids (the gateway's reading; not seen
+        live): anything else is refused as a bad id."""
+        if "tags" not in body or body["tags"] is None:
+            return False
+        tags = body["tags"]
+        mine_tags = self.collection_tag_lists.get(who, {})
+        return not isinstance(tags, list) or any(
+            isinstance(t, bool) or not isinstance(t, int) or t not in mine_tags for t in tags
+        )
 
     @staticmethod
     def _bad_collection_enum(body: dict[str, Any]) -> bool:
@@ -860,8 +880,10 @@ class FakeArchidekt:
             # leaves unanswered is a request the gateway should never send
             raise AssertionError(f"the gateway called the category templates route {path}")
         if path == "/api/decks/copy/" and request.method == "POST":
-            if self.fail_backup:
+            if self.fail_backup is True:
                 return httpx.Response(503, json={"detail": "Service unavailable."})
+            if self.fail_backup:
+                return httpx.Response(self.fail_backup, json={"detail": "Invalid token."})
             body = json.loads(request.content)
             src = self.decks.get(body["copyId"])
             if src is None or (body["copyId"] in self.private and src["owner"]["username"] != who):
@@ -1052,7 +1074,7 @@ class FakeArchidekt:
                     "previous": None,
                     "page": page,
                     "totalPages": pages,
-                    "tags": [],
+                    "tags": [dict(t) for t in self.collection_tag_lists.get(who, {}).values()],
                     "isPublic": False,
                     "owner": {"id": self._user_id(who), "username": who, "avatar": None, "frame": None},
                 },
@@ -1064,6 +1086,8 @@ class FakeArchidekt:
                 return httpx.Response(400, json={"card": ["This field is required."]})
             if self._bad_collection_enum(body):
                 return httpx.Response(400, json={"condition": ["A valid integer is required."]})
+            if self._bad_record_tags(who, body):
+                return httpx.Response(400, json={"tags": ["Invalid pk - object does not exist."]})
             try:
                 card = self.printing(body["card"])
             except AssertionError:
@@ -1080,11 +1104,51 @@ class FakeArchidekt:
             body = json.loads(request.content)
             if self._bad_collection_enum(body):
                 return httpx.Response(400, json={"condition": ["A valid integer is required."]})
+            if self._bad_record_tags(who, body):
+                return httpx.Response(400, json={"tags": ["Invalid pk - object does not exist."]})
             for key in ("quantity", "modifier", "language", "condition", "tags", "purchasePrice"):
                 if key in body:
                     row[key] = body[key]
             row["modifiedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             return httpx.Response(200, json=row)
+        if path == "/api/collection/tags/" and request.method == "POST":
+            body = json.loads(request.content)
+            self.collection_tag_writes.append(("POST", path, body))
+            mine_tags = self.collection_tag_lists.setdefault(who, {})
+            name = body.get("name")
+            if not isinstance(name, str) or not name.strip() or not isinstance(body.get("color"), str):
+                return httpx.Response(400, json={"name": ["This field is required."]})
+            if any(t["name"].lower() == name.lower() for t in mine_tags.values()):
+                return httpx.Response(400, json={"name": ["A tag with this name already exists."]})
+            self.next_collection_tag_id += 1
+            tag = {"id": self.next_collection_tag_id, "name": name, "color": body["color"]}
+            mine_tags[tag["id"]] = tag
+            return httpx.Response(201, json=dict(tag))
+        if len(parts) == 4 and parts[1:3] == ["collection", "modifyTag"] and parts[3].isdigit():
+            mine_tags = self.collection_tag_lists.setdefault(who, {})
+            tid = int(parts[3])
+            if tid not in mine_tags:
+                return httpx.Response(404, json={"detail": "Not found."})
+            if request.method == "DELETE":
+                self.collection_tag_writes.append(("DELETE", path, None))
+                del mine_tags[tid]
+                for rec in self.collections.get(who, {}).values():
+                    rec["tags"] = [t for t in rec.get("tags") or [] if t != tid]
+                return httpx.Response(204)
+            if request.method == "PATCH":
+                body = json.loads(request.content)
+                self.collection_tag_writes.append(("PATCH", path, body))
+                for key in ("name", "color"):
+                    if isinstance(body.get(key), str) and body[key].strip():
+                        mine_tags[tid][key] = body[key]
+                return httpx.Response(200, json=dict(mine_tags[tid]))
+            return httpx.Response(405)
+        if path == "/api/collection/clear/" and request.method == "DELETE":
+            if self.fail_collection_clear:
+                return httpx.Response(503, text="unavailable")
+            self.collection_clears += 1
+            self.collections[who] = {}
+            return httpx.Response(204)
         if path == "/api/collection/bulk/" and request.method == "DELETE":
             body = json.loads(request.content)
             mine_rows = self.collections.get(who, {})

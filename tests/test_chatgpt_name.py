@@ -22,9 +22,9 @@ from .test_decks_and_proxy import Browser
 REPO_PLUGIN = Path(__file__).resolve().parent.parent / "plugin"
 
 # 85 characters once filtered, with markup in it.
-HOSTILE = 'Ben\'s <b>"Deck"</b> & Helper Gateway of Many Cards for the Thursday Commander Night Pod Crew'
-HOSTILE_LABEL = "Ben's b Deck b Helper Gateway of Many Cards for the Thursday Commander Night Pod Crew"
-HOSTILE_CUT = "Ben's b Deck b Helper Gateway of Many Cards for the Thursday Commander Night Pod"
+HOSTILE = 'Sam\'s <b>"Deck"</b> & Helper Gateway of Many Cards for the Thursday Commander Night Pod Crew'
+HOSTILE_LABEL = "Sam's b Deck b Helper Gateway of Many Cards for the Thursday Commander Night Pod Crew"
+HOSTILE_CUT = "Sam's b Deck b Helper Gateway of Many Cards for the Thursday Commander Night Pod"
 
 
 def test_the_limit_is_80() -> None:

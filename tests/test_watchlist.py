@@ -304,6 +304,26 @@ async def test_card_viewer_watch_button_needs_the_form_token(stack: Stack, monke
     assert "/watchlist/api/card?name=" in js and "/watchlist/api/watch" in js
 
 
+async def test_a_watch_made_while_scryfall_is_down_says_its_name_is_not_checked(
+    stack: Stack, monkeypatch
+) -> None:
+    """Whole-application audit (watch_card): with Scryfall down any name was watched with no word
+    that it went unchecked, so a misspelt name looked like a real card."""
+    Clock(monkeypatch)
+    b = await _browser(stack, link=True)
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    stack.sf.fail_with = 503
+    out = structured(await call(stack.h, token, "watch_card", {"name": "Sol Ringg"}))
+    assert out["ok"], out
+    assert out["watch"]["name_checked"] is False, out
+    assert "Scryfall couldn't be reached, so the name “Sol Ringg” is not checked yet" in out["watch"]["note"]
+    stack.sf.fail_with = None
+    stack.gw.scan.scryfall._retry_until = 0
+    checked = structured(await call(stack.h, token, "watch_card", {"name": "Sol Talisman"}))
+    assert checked["ok"] and "name_checked" not in checked["watch"], checked
+
+
 async def test_assistant_tools_watch_list_history_and_unwatch(stack: Stack, monkeypatch) -> None:
     clock = Clock(monkeypatch)
     h = stack.h

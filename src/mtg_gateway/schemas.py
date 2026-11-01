@@ -63,11 +63,16 @@ def compact_schema(schema: Any) -> Any:
     """The same schema in fewer characters, for the tool list every conversation pays for: no
     generated ``title`` on each field (the field's name says it), and an optional field written
     as its one real type rather than "this type or null, default null". A field whose description
-    mentions null (null clears it, say) keeps its null. Validation is untouched: the server checks
+    mentions null (null clears it, say) keeps its null. ``additionalProperties: true`` goes too:
+    it is JSON Schema's own default, so it says nothing. Validation is untouched: the server checks
     the arguments against its own model, never against this listing."""
     if not isinstance(schema, dict):
         return schema
-    node = {k: v for k, v in schema.items() if not (k == "title" and isinstance(v, str))}
+    node = {
+        k: v
+        for k, v in schema.items()
+        if not (k == "title" and isinstance(v, str)) and not (k == "additionalProperties" and v is True)
+    }
     branches = node.get("anyOf")
     if (
         isinstance(branches, list)
@@ -127,6 +132,38 @@ def without_item_descriptions(schema: dict[str, Any], param: str) -> dict[str, A
     if param not in props:
         return schema
     return {**schema, "properties": {**props, param: strip(props[param])}}
+
+
+def without_field_descriptions(schema: dict[str, Any], param: str | None = None) -> dict[str, Any]:
+    """``schema`` with the descriptions inside ``param`` left out (its own stays), or inside every
+    parameter when ``param`` is None: for a tool that takes the same fields as another tool and says
+    so, so the fields are explained once in tools/list (whole-application audit, row 2). Fields,
+    types and allowed values are kept."""
+
+    def bare(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        out = {k: v for k, v in node.items() if k != "description"}
+        for k in _SCHEMA_MAPS:
+            if isinstance(out.get(k), dict):
+                out[k] = {name: bare(sub) for name, sub in out[k].items()}
+        for k in _SCHEMA_LISTS:
+            if isinstance(out.get(k), list):
+                out[k] = [bare(sub) for sub in out[k]]
+        for k in _SCHEMA_ONE:
+            if isinstance(out.get(k), dict):
+                out[k] = bare(out[k])
+        return out
+
+    props = schema.get("properties") or {}
+    names = list(props) if param is None else [param] if param in props else []
+    kept = dict(props)
+    for name in names:
+        node = bare(props[name])
+        if param is not None and "description" in props[name]:
+            node["description"] = props[name]["description"]
+        kept[name] = node
+    return {**schema, "properties": kept}
 
 
 def flatten_params(schema: dict[str, Any]) -> dict[str, Any] | None:

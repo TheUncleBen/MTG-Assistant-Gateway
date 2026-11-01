@@ -1,4 +1,4 @@
-"""Archidekt's forum, read as its own pages read it (parity release 2, Ben's choice (a), 23 Oct).
+"""Archidekt's forum, read as its own pages read it (parity release 2, the owner's choice (a), 23 Oct).
 
 Archidekt has no API for the forum's sections or a section's thread list: its pages are drawn on
 its server, and the gateway reads the same page data (``ArchidektClient.site_page_data``). That

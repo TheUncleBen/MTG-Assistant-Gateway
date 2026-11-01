@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.service.chooser.ChooserAction
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 
 /**
  * The deck page's Share: the phone's own share sheet, never one of the app's making. What is shared
@@ -69,6 +70,7 @@ object DeckShare {
         if (!gatewayUrl.isNullOrEmpty()) append("\n\nOn the gateway (members): ").append(gatewayUrl)
     }
 
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE) // ChooserAction: the share sheet's own actions
     private fun copyAction(context: Context, code: Int, iconRes: Int, label: Int, text: String, said: Int): ChooserAction {
         val copy = Intent(context, CopyReceiver::class.java)
             .putExtra(EXTRA_COPY, text)

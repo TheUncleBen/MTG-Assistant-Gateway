@@ -631,7 +631,7 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         err = dialog.locator(".notice.error")
         err.wait_for()
         assert err.get_attribute("role") == "alert"
-        assert err.locator("span").inner_text() == "The deck list couldn't be loaded: no connection."
+        assert err.locator("span").inner_text() == "No connection; the deck list could not be loaded."
         assert go.get_attribute("aria-disabled") == "true" and go.get_attribute("aria-busy") is None
         assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
         box = dialog.locator(".pickbox").bounding_box()
@@ -663,8 +663,9 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         dialog.locator(".notice.error").wait_for()
         assert (
             dialog.locator(".notice.error span").inner_text()
-            == "You're signed out. Reload the page to sign in."
+            == "You're signed out, so the deck list could not be loaded."
         )
+        assert dialog.locator(".notice.error a", has_text="Sign in").count() == 1
         assert errors == []
         browser.close()
 
@@ -761,7 +762,8 @@ def test_the_box_shows_only_the_approved_messages(server: Server, width: int, sc
         dialog = _open_dialog(page, ready=False)
         err = dialog.locator(".notice.error")
         err.wait_for()
-        assert err.locator("span").inner_text() == "You're signed out. Reload the page to sign in."
+        assert err.locator("span").inner_text() == "You're signed out, so the deck list could not be loaded."
+        assert err.locator("a", has_text="Sign in").get_attribute("href") == "/login?next=%2Fdecks%2F42"
         assert (
             err.locator("button").count() == 0 and dialog.locator("button", has_text="Try again").count() == 0
         )
@@ -769,10 +771,10 @@ def test_the_box_shows_only_the_approved_messages(server: Server, width: int, sc
             "() => document.activeElement.getAttribute('aria-label') || document.activeElement.textContent"
         )
         cycle = []
-        for _ in range(3):
+        for _ in range(4):  # the Sign in link is in the loop, before the button it cannot help
             page.keyboard.press("Tab")
             cycle.append(page.evaluate(focus))
-        assert cycle == ["Close", "How to import", GO]
+        assert cycle == ["Close", "How to import", "Sign in", GO]
         assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
         _shot(page, f"q69-edhplay-signed-out-{width}-{scheme}")
         assert errors == []

@@ -124,8 +124,8 @@ def test_printings_tiles_are_whole_cards_big_enough_to_read_at_phone_widths() ->
                 card.locator(".tile img").nth(5).wait_for()
                 page.wait_for_timeout(300)
                 tiles = _tiles(card)
-                assert len(tiles) == 78
-                for t in tiles[:12]:
+                assert len(tiles) == 8  # a page; Show more adds the next (test_cards_audit_browser)
+                for t in tiles:
                     # a whole card (5:7), never a 48 px strip, and wide enough to read
                     assert t["w"] >= 100, (width, t)
                     assert abs(t["h"] - t["w"] * 7 / 5) <= 2, (width, t)
@@ -166,7 +166,7 @@ def test_a_tap_shows_the_printing_big_and_only_use_this_printing_sends_the_pick(
             card = _open(page, "printings-card", RESULT, width=375, theme="dark")
             card.locator(".tile").nth(5).wait_for()
             assert card.locator("#detail").is_hidden()
-            # this host offers no fullscreen (ChatGPT's Android app shows no Expand, Ben 10-31): the
+            # this host offers no fullscreen (ChatGPT's Android app shows no Expand, the owner 10-31): the
             # whole flow, look then pick, runs inline at the size the chat gives the card
             assert card.locator("#expand").get_attribute("class") == "small hidden"
             assert page.evaluate("() => !window.log.some(m => m.method === 'ui/request-display-mode')")
@@ -220,7 +220,7 @@ def test_the_frame_follows_the_card_both_ways_and_settles_in_a_report_or_two() -
             held: list = []
             _route(page, _long_list(), pictures="held", held=held)
             card = _open(page, "printings-card", RESULT, width=375, theme="light")
-            card.locator(".tile").nth(20).wait_for()
+            card.locator(".tile").nth(7).wait_for()
             page.wait_for_timeout(800)
             before = _tiles(card)
             n0 = len(_calls(page, "ui/notifications/size-changed"))
@@ -243,9 +243,10 @@ def test_the_frame_follows_the_card_both_ways_and_settles_in_a_report_or_two() -
             assert len(sizes) - n0 <= 1, [m["params"]["height"] for m in sizes]
             frame, body = _frame_and_body(page)
             assert abs(frame - body) <= 2, (frame, body)
-            # the list scrolls inside a fixed cap (560 px), not a share of the frame's own height
-            scroll_h = card.locator(".scroll").evaluate("s => s.getBoundingClientRect().height")
-            assert scroll_h <= 562, scroll_h
+            # the list never scrolls inside the chat's own scroll: it shows a page and grows with
+            # Show more (a nested scroll box stuck on Android hosts)
+            assert card.locator(".scroll").evaluate("s => getComputedStyle(s).overflowY") == "visible"
+            assert card.locator(".scroll").evaluate("s => getComputedStyle(s).maxHeight") == "none"
             # the list filtered to nothing: the frame drops to the card
             card.locator("#filter").fill("zzz")
             page.wait_for_timeout(500)

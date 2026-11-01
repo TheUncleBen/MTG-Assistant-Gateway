@@ -1,8 +1,8 @@
-# Deck report: Immortal Reckoning
+# Deck report: Liesa Test Deck
 
 | | |
 |---|---|
-| Deck | [Immortal Reckoning](https://archidekt.com/decks/42) |
+| Deck | [Liesa Test Deck](https://archidekt.com/decks/42) |
 | Commander | Liesa, Forgotten Archangel |
 | Run | 2025-10-28 12:00 UTC |
 | Status | Complete |
@@ -12,7 +12,7 @@
 ## Summary
 
 - Quick solo test — Commander cast (median turn): Turn 5; 40 damage dealt by turn 10: 57%.
-- Forge games: Immortal Reckoning won 4 of 10 (40%). Too few games to tell yet.
+- Forge games: Liesa Test Deck won 4 of 10 (40%). Too few games to tell yet.
 - Forge solo test: won by turn 10 in 213 of 300 games (71%).
 - Validation: issues found.
 
@@ -30,7 +30,7 @@
 
 - Games played: 10 of 10.
 - Only 10 games: that tells you very little, and the win rates could change a lot with more games (see the 95% intervals).
-- Immortal Reckoning: 4 wins, 40% (95% interval 17% to 69%). Lost by: life total 3, commander damage 2.
+- Liesa Test Deck: 4 wins, 40% (95% interval 17% to 69%). Lost by: life total 3, commander damage 2.
 - Riders of the Long Name Precon Deck: 3 wins, 30% (95% interval 11% to 60%). Lost by: life total 6.
 - Precon 2: 1 win, 10% (95% interval 2% to 40%). Lost by: life total 8.
 - Precon 3: 1 win, 10% (95% interval 2% to 40%). Lost by: life total 7, poison 1.

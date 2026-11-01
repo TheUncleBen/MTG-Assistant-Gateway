@@ -86,7 +86,8 @@ def fail(exc: DeckError) -> JSONResponse:
     )
 
 
-def _unauth(message: str = "Sign in to use the API.") -> JSONResponse:
+# the browser's own answer (a page script shows "You're signed out" with Sign in, static/fetchjson.js)
+def _unauth(message: str = "You're signed out. Sign in to carry on.") -> JSONResponse:
     return JSONResponse(
         {"ok": False, "error": "unauthenticated", "message": message, "login": "/login"},
         401,
@@ -777,6 +778,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             201,
         )
 
+    @route("/reports/running", "GET")
+    async def running_reports(request: Request, who: Caller) -> Response:
+        """The member's tests still going, newest first (``deck_id`` for one deck's): each report,
+        its deck and where it stands (``step``: the step in plain words, games done of those
+        asked for and the time so far), as Home and the deck page show them."""
+        return ok({"running": reports.running(who.sub, request.query_params.get("deck_id") or None)})
+
     @route("/reports/{rid}", "GET")
     async def get_report(request: Request, who: Caller) -> Response:
         return ok(reports.get(who.sub, request.path_params["rid"]))
@@ -797,6 +805,12 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         Never asks Archidekt."""
         report = await reports.play_more(who.sub, request.path_params["rid"])
         return ok(report, 202)
+
+    @route("/reports/{rid}/forge/stop", "POST", write=True)
+    async def report_stop(request: Request, who: Caller) -> Response:
+        """Stop a test, as the report page's Stop button does (reports.stop): its Forge parts still
+        waiting or playing end, the games already played stay. Never asks Archidekt."""
+        return ok(reports.stop(who.sub, request.path_params["rid"]))
 
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:

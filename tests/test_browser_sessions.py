@@ -1,4 +1,4 @@
-"""How long a sign-in lasts in a browser and in the Android app (Ben, 27 Oct 2026: asked to sign
+"""How long a sign-in lasts in a browser and in the Android app (the owner, 27 Oct 2026: asked to sign
 in again after a few hours, far more often than his identity provider's "stay signed in").
 
 A session lasts MTG_BROWSER_SESSION_TTL seconds unused (7 days by default) and is renewed by use:

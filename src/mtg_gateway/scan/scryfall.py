@@ -43,6 +43,12 @@ DEFAULT_BASE = "https://api.scryfall.com"
 COLLECTION_MAX = 75
 
 
+# What a member reads when Scryfall is down: plain words, no exception name or HTTP code
+# (whole-application audit, row 12); the log keeps the detail.
+SCRYFALL_UNREACHABLE = "Scryfall couldn't be reached. Try again in a few minutes."
+SCRYFALL_FAILING = "Scryfall had a problem answering. Try again in a few minutes."
+
+
 class ScryfallError(Exception):
     """kind: not_found, ambiguous, rate_limited, unavailable, contract."""
 
@@ -374,7 +380,8 @@ class ScryfallClient:
             try:
                 resp = await self.http.request(method, f"{self.base}{path}", headers=self.headers, **kw)
             except httpx.HTTPError as exc:
-                raise ScryfallError("unavailable", f"Scryfall unreachable: {exc.__class__.__name__}") from exc
+                logger.warning("Scryfall %s %s failed: %s", method, path, exc.__class__.__name__)
+                raise ScryfallError("unavailable", SCRYFALL_UNREACHABLE) from exc
             finally:
                 self._last = time.monotonic()
                 self.requests += 1
@@ -383,7 +390,8 @@ class ScryfallClient:
             logger.warning("Scryfall 429 on %s; pausing all lookups for %d s", path, self.retry_in())
             raise self._rate_limited()
         if resp.status_code >= 500:
-            raise ScryfallError("unavailable", f"Scryfall returned {resp.status_code}")
+            logger.warning("Scryfall answered %d on %s", resp.status_code, path)
+            raise ScryfallError("unavailable", SCRYFALL_FAILING)
         return resp
 
     @staticmethod
@@ -405,7 +413,8 @@ class ScryfallClient:
             kind = "ambiguous" if data.get("type") == "ambiguous" else "not_found"
             raise ScryfallError(kind, str(data.get("details") or f"No card found for {what}"))
         if resp.status_code >= 400 or data.get("object") == "error":
-            raise ScryfallError("unavailable", f"Scryfall returned {resp.status_code} for {what}")
+            logger.warning("Scryfall answered %d for %s", resp.status_code, what)
+            raise ScryfallError("unavailable", SCRYFALL_FAILING)
         if data.get("object") != "card" or not data.get("name"):
             raise ScryfallError("contract", "Scryfall returned something that is not a card")
         return data

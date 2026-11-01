@@ -1,4 +1,4 @@
-"""No form field reads as a payment card's to the browser (Ben, 2026-10-28: Android offered the
+"""No form field reads as a payment card's to the browser (the owner, 2026-10-28: Android offered the
 saved bank cards on the card name boxes). Browsers guess a field's purpose from its id, its name,
 its label, its placeholder and its aria-label; words such as "card", "number", "cc", "cvc" and
 "expiry" there make Chrome on Android treat a box as a payment card's. So none of a page's text

@@ -115,8 +115,9 @@ One deck:
   Ctrl+Y (Cmd on a Mac), except while you type in a field. A card's notes
   cannot come back: Archidekt gives the gateway no way to write them, so
   removing a card that has a note asks first.
-- Stacks follow the deck's category order on Archidekt, with Maybeboard and
-  Sideboard last.
+- Stacks come in the order Archidekt's own deck page shows them: the
+  commander's category first, then the categories in the deck by name, then
+  Sideboard, then Maybeboard and any other category not in the deck.
 - On your own deck, **Quick add** adds one copy of the card you type straight
   to the deck, with **Undo** on the message; a name Archidekt doesn't know is
   refused in red and nothing changes.
@@ -215,7 +216,7 @@ One deck:
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.
 - **Compare with another deck…** (More menu) pits the deck against a
-  preconstructed deck (pick one from Archidekt's list), any deck id or
+  preconstructed deck (pick one from Archidekt's list), any deck ID or
   link, or a pasted list: what the build took out of the other deck, what
   it put in, changed counts, basic lands, and the statistics' differences.
   Tap a card name for the whole card. Your own decks and this deck's
@@ -293,7 +294,10 @@ same confirmation when a change is large; kept for review while writes are
 off), so nothing skips your approval settings. Without a linked Archidekt
 account the button is disabled and says why. A card's menu (right-click, or
 press and hold) also has **Pin card**, which pins it on Archidekt: it then
-shows under **Pinned cards** in Binder › Lists.
+shows under **Pinned cards** in Binder › Lists. The filters wait behind the
+**Filters** button, which counts the ones in use: on a phone they open as a
+full-screen panel; on a Fold or desktop they unfold in place, and whether you
+left them open or closed is kept on your account.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,
@@ -316,12 +320,14 @@ build.
 recognition runs on the phone; the card is then matched on Scryfall through
 the gateway.
 
-1. **Camera.** Hold a card in the frame with its title in the dashed box
-   and tap the shutter, or switch on **Auto** and show cards one after
+1. **Camera.** Hold a card in the frame, about 15 cm (6 in) away, with its
+   title in the dashed box and tap the shutter, or switch on **Auto** and show cards one after
    another: sure matches are added on their own (with Undo), doubtful ones
    wait for your tap. A running count of the scan shows in the corner of
    the viewfinder. In the Android app the shutter and **Auto** use the
-   phone's own camera.
+   phone's own camera; when a shot finds no card, **Save this photo** keeps
+   it in the phone's Pictures › MTG Gateway, to send to whoever runs your
+   gateway so they can see why.
 2. **Check the list.** Fix a wrong match from the suggestions, pick the
    exact printing or foil, adjust quantities. Cards the camera could not
    read are kept with a picture of the title so you can type them.

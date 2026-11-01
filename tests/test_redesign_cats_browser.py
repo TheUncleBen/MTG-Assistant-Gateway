@@ -1,4 +1,4 @@
-"""Categories edited on the deck page (0.7.46 full review F8, Ben's T-191 note, mockup screen 4)
+"""Categories edited on the deck page (0.7.46 full review F8, the owner's T-191 note, mockup screen 4)
 in headless Chromium, on the phone in the Android app (375 px, a touch screen, the app's user
 agent), the open Fold (840 px, touch) and the desktop (1280 px, a mouse), light and dark:
 

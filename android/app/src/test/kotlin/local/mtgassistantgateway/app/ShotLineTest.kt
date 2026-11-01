@@ -68,8 +68,11 @@ class ShotLineTest {
         assertTrue(src.contains("startFocusAndMetering("))
         assertTrue(src.contains("FocusMeteringAction.FLAG_AF"))
         assertTrue(src.contains("OnceGate {"))
-        assertTrue(src.contains("addListener({ gate.fire() }, activity.mainExecutor)"))
-        assertTrue(src.contains("ui.postDelayed({ gate.fire() }, FOCUS_TIMEOUT_MS)"))
+        // the focus result is noted for "Save this photo" (ScanPhoto), then the gate opens
+        val listener = src.substringAfter("focus.addListener({").substringBefore("}, activity.mainExecutor)")
+        assertTrue(listener.contains("isFocusSuccessful") && listener.trimEnd().endsWith("gate.fire()"))
+        val timeout = src.substringAfter("ui.postDelayed({").substringBefore("}, FOCUS_TIMEOUT_MS)")
+        assertTrue(timeout.trimEnd().endsWith("gate.fire()"))
         assertEquals("one place takes the picture", 1, Regex("""\.takePicture\(""").findAll(src).count())
         assertTrue(src.contains("CAPTURE_MODE_MAXIMIZE_QUALITY"))
         assertFalse(src.contains("R.string.pending_on_page"))

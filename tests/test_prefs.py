@@ -257,7 +257,7 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
 
 
 async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
-    """Ben, 2026-10-28: one card size for every page meant a change in the printings dialog resized
+    """The owner, 2026-10-28: one card size for every page meant a change in the printings dialog resized
     the deck page. Each page keeps its own (card.size.<page>), M until chosen, or the one size
     chosen before for every page, so nobody's choice is lost."""
     b = await linked(stack)
@@ -301,3 +301,57 @@ def test_the_scan_intro_is_seen_or_dismissed() -> None:
     for bad in ("yes", "Seen", False, 1, None):
         assert not prefs.valid(prefs.SCAN_INTRO, bad), bad
     assert not prefs.valid(prefs.EDHPLAY_STEPS, "seen")
+
+
+def test_card_searchs_filters_are_open_or_closed() -> None:
+    """Card search keeps whether its filter groups sit open or folded on a Fold or desktop
+    (mockup screen 5): "open" or "closed", nothing else."""
+    assert prefs.valid(prefs.CARDS_FILTERS, "open") and prefs.valid(prefs.CARDS_FILTERS, "closed")
+    for bad in ("Open", True, 1, None, ""):
+        assert not prefs.valid(prefs.CARDS_FILTERS, bad), bad
+
+
+async def test_the_sort_picked_on_a_list_is_the_sort_the_next_visit_opens_with(stack: Stack) -> None:
+    """QOL-12 (0.7.46 audit QG-11): My decks, the Binder and a profile open sorted as they were
+    left, on every device; "Forget my view choices" clears it too."""
+    b = await linked(stack)
+    try:
+        db = stack.h.db
+        # My decks: Name picked, then opened plain
+        await b.http.get("/decks", params={"order": "name"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "name"}
+        page = (await b.http.get("/decks")).text
+        assert "<option value='name' selected>" in page
+        # the list's own ask without an order follows it, and the pick of the default is a pick
+        await b.http.get("/decks", params={"order": "updated"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "updated"}
+        # the Binder (with a card in it, so its sort is on the page): Set release, oldest first
+        r = await api(b, "POST", "/collection/api/add", {"items": [{"name": "Sol Ring"}]})
+        assert r.status_code == 200, r.text
+        await b.http.get("/collection", params={"sort": "edition", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.collection") == {"sort": "edition", "dir": "asc"}
+        page = (await b.http.get("/collection")).text
+        assert "<option value='edition' selected>" in page and "name='dir' value='asc'" in page
+        rows = await b.http.get("/collection/api/rows")  # the list's own ask follows it too
+        assert rows.status_code == 200 and rows.json()["ok"]
+        # a profile: Views, with a direction
+        await b.http.get("/users/alice", params={"order": "-viewCount", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.profile") == {"sort": "-viewCount", "dir": "asc"}
+        page = (await b.http.get("/users/alice")).text
+        assert "<option value='-viewCount' selected>" in page and "<option value='asc' selected>" in page
+        # an unknown sort in a link is ignored and nothing is remembered from it
+        await b.http.get("/decks", params={"order": "evil"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "updated"}
+        # a link from elsewhere shows its sort but does not remember it
+        await b.http.get("/decks", params={"order": "name"}, headers={"Sec-Fetch-Site": "cross-site"})
+        assert db.get_pref(SUB, "sort.decks") == {"sort": "updated"}
+        # Forget my view choices clears the sorts with the views
+        csrf = await b.csrf("/account/details")
+        r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices", "confirm": "yes"})
+        assert r.status_code == 303
+        assert db.get_pref(SUB, "sort.decks") is None and db.get_pref(SUB, "sort.collection") is None
+        assert db.get_pref(SUB, "sort.profile") is None
+        page = (await b.http.get("/decks")).text
+        assert "<option value='updated' selected>" in page
+    finally:
+        await b.aclose()

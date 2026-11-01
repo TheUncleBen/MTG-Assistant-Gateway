@@ -69,6 +69,7 @@ from .archidekt import (
     art_url,
     backup_name,
     backup_writes,
+    category_sort_key,
     finish_modifier,
     front_face,
     jwt_exp,
@@ -1013,7 +1014,8 @@ def row_line(r: dict[str, Any]) -> str:
             f", {r['game']}" if r.get("game") else ""
         )
         where = f" in folder “{r['folder']}”" if r.get("folder") else ""
-        count = f"{r['cards']} {'card' if int(r.get('cards') or 0) == 1 else 'cards'}"
+        n = int(r.get("cards") or 0)
+        count = f"{n} {'card' if n == 1 else 'cards'}"
         if r.get("package"):
             what = f"{count}{side}, {visibility}; {r['package']}"
             return f"New card package “{r['name']}”{where} ({what})"
@@ -1062,6 +1064,9 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
 # The ``via`` of DeckService.apply that only the review page's own form (pages.py) passes: the
 # one caller that may apply an Archidekt account action.
 REVIEW_PAGE = "review_page"
+# Account actions applied on their own review page only: never from the card in the chat, never
+# in Apply all (deleting a deck, clearing the whole binder)
+REVIEW_PAGE_ONLY = ("delete_deck", "clear_collection")
 # Who rejected a proposal (DeckService.reject records it; describe() shows it as closed_by).
 REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 # The reason the member typed when rejecting on the card, kept with the rejection (at most this long)
@@ -3957,14 +3962,11 @@ class DeckService:
         returned to callers of the service."""
         row = self.db.get_link(sub)
         if row is None:
-            raise DeckError(
-                "not_linked",
-                f"No Archidekt account is linked. Sign in at {self.settings.public_url}/account to link one.",
-            )
+            raise DeckError("not_linked", refusals.not_linked(self.settings.public_url))
         secret = self._open(sub, row["secret_enc"])
         access = secret.get("access") if secret is not None else None
         if not isinstance(access, str) or not access:
-            raise DeckError("not_linked", "The stored Archidekt session could not be read. Relink.")
+            raise DeckError("not_linked", refusals.relink(self.settings.public_url))
         row["_secret"] = secret
         return access, row
 
@@ -3994,14 +3996,10 @@ class DeckService:
 
         def expire(reason: str) -> DeckError:
             if background:
-                return DeckError("not_linked", "Archidekt did not accept the stored session.")
+                return DeckError("not_linked", refusals.relink(self.settings.public_url))
             if self.db.revoke_link(sub, only_secret=stored["secret_enc"]):
                 self._audit("archidekt_link_expired", sub=sub, detail={"reason": reason})
-            return DeckError(
-                "not_linked",
-                "Archidekt no longer accepts the stored session. "
-                f"Relink at {self.settings.public_url}/account.",
-            )
+            return DeckError("not_linked", refusals.relink(self.settings.public_url))
 
         async def refreshed(reason: str) -> str:
             if not isinstance(refresh, str) or not refresh:
@@ -6035,7 +6033,7 @@ class DeckService:
         which only its review page applies, and a change that keeps formatting.
         Account actions (likes, comments, folders, collaborators...) may since 0.7.29:
         the member's press on the card, never the assistant's own apply."""
-        if row.get("kind") == "action" and (row.get("changes") or {}).get("action") == "delete_deck":
+        if row.get("kind") == "action" and (row.get("changes") or {}).get("action") in REVIEW_PAGE_ONLY:
             return False
         # A change that keeps a description's or comment's formatting is approved where its
         # formatting is shown, the review page; the card asks the member to open it there
@@ -7817,15 +7815,18 @@ class DeckService:
                 sub=sub,
                 detail={"proposal_id": row["id"], "deck_id": deck.id, "error": exc.kind},
             )
+            # the way out depends on why: a session Archidekt no longer accepts needs a relink,
+            # never a wait (whole-application audit, row 12)
             then = (
-                "Relink your Archidekt account, then apply it again."
+                "Relink your Archidekt account, then apply it again"
                 if relink
-                else "It can be applied again once Archidekt answers."
+                else "It can be applied again once Archidekt answers"
             )
+            why = str(exc).rstrip(".")
             raise DeckError(
                 "backup_failed",
-                f"The backup copy of “{deck.name}” could not be made on Archidekt ({exc}). Nothing was "
-                f"changed; the proposal is still pending. {then}",
+                f"The backup copy of “{deck.name}” could not be made on Archidekt ({why}). Nothing was "
+                f"changed and the proposal is still pending. {then}.",
                 **({"relink": True} if relink else {}),
             ) from exc
         self._trim_backups(sub, deck.id)
@@ -8001,18 +8002,23 @@ class DeckService:
         extra: dict[str, Any] | None = None,
         missing: list[str] | None = None,
         unchecked: list[str] | None = None,
+        tags: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """A proposal (kind ``collection``) that adds cards to, or removes cards from, the member's
         Archidekt Collection. Like every write the assistant can start it waits for the member's
         approval (or their approval mode); the review rows are ``add`` and ``remove`` rows, so the
         same tiers apply as to a deck edit. ``adds`` are the items collection.add accepts (already
         validated), ``removes`` are ``{"id", "name", "quantity"}`` records resolved by the caller.
+        ``tags`` (0.7.46): entries whose binder tags change, ``{"id", "name", "printing", "tags",
+        "before", "new"}`` resolved by the caller (collection.py); their rows are ``binder_tags``,
+        which no low-risk edit has, so semi-auto never applies them by itself.
         ``missing`` and ``unchecked``: added names Archidekt doesn't have, or nothing could check
         (``check_new_names``), marked on their rows, which makes the change high risk."""
         self._token(sub)  # applied to the linked account: none, and it never could be
         self._room_for_proposal(sub)
-        if not adds and not removes:
-            raise DeckError("invalid", "nothing to change: give cards to add or remove")
+        tags = tags or []
+        if not adds and not removes and not tags:
+            raise DeckError("invalid", "nothing to change: give cards to add, remove or tag")
         rows = [
             _row(
                 "add",
@@ -8025,6 +8031,24 @@ class DeckService:
             _row("remove", name=str(r["name"]), qty=int(r["quantity"]), printing=r.get("printing"))
             for r in removes
         ]
+        for t in tags:
+            label = str(t["name"]) + (f" {t['printing']}" if t.get("printing") else "")
+            after = ", ".join(f"“{n}”" for n in t["tags"]) or "none"
+            before = ", ".join(f"“{n}”" for n in t.get("before") or []) or "none"
+            new = [n for n in t.get("new") or []]
+            rows.append(
+                _row(
+                    "binder_tags",
+                    name=str(t["name"]),
+                    printing=t.get("printing"),
+                    text=f"{label}: binder tags {before} -> {after}"
+                    + (
+                        f" (new tag{'s' if len(new) != 1 else ''} {', '.join(f'“{n}”' for n in new)})"
+                        if new
+                        else ""
+                    ),
+                )
+            )
         if missing or unchecked:
             rows = mark_name_checks(rows, missing or [], unchecked or [])
         pid = secrets.token_urlsafe(12)
@@ -8040,6 +8064,11 @@ class DeckService:
                     **{k: v for k, v in (extra or {}).items() if v},
                     "add": adds,
                     "remove": [{"id": r["id"], "quantity": r["quantity"]} for r in removes],
+                    **(
+                        {"tag": [{"id": t["id"], "name": t["name"], "tags": list(t["tags"])} for t in tags]}
+                        if tags
+                        else {}
+                    ),
                 },
             },
             rows,
@@ -9212,9 +9241,17 @@ class DeckService:
                 raise DeckError("invalid", f"{other} is not a proposal of this user")
 
     def snapshot(self, sub: str, snapshot_id: str) -> dict[str, Any]:
+        """A deck snapshot. A copy of the member's binder (kept before a clear, collection_bulk) is
+        not a deck: it is put back from History's Restore to my binder, never as a deck."""
         row = self.db.get_snapshot(snapshot_id, sub)
         if row is None:
             raise DeckError("not_found", "No such snapshot for your account.")
+        if str(row.get("deck_id") or "") == "collection":
+            raise DeckError(
+                "invalid",
+                "That snapshot is a copy of your binder from before it was cleared, not a deck. Put it "
+                "back with “Restore to my binder” under History, or download it there as a CSV.",
+            )
         return row
 
     def list_snapshots(self, sub: str, **narrow: Any) -> list[dict[str, Any]]:
@@ -11136,7 +11173,7 @@ def category_state(c: dict[str, Any]) -> dict[str, Any]:
 
 
 # Every Archidekt deck has these two, not in the deck or the price, even before its answer lists
-# them (a new deck's lists no category at all, Ben 2026-10-28).
+# them (a new deck's lists no category at all, the owner 2026-10-28).
 DEFAULT_CATEGORIES = ("Maybeboard", "Sideboard")
 
 
@@ -11185,7 +11222,8 @@ def deck_categories(deck: Deck) -> list[dict[str, Any]]:
                 "record": s["id"] is not None,
             }
         )
-    return sorted(out, key=lambda c: (not c["premier"], c["name"].casefold()))
+    # as archidekt.com's pages list them: Premier first, then by name as the site sorts it
+    return sorted(out, key=lambda c: (not c["premier"], category_sort_key(c["name"])))
 
 
 def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:
@@ -12593,6 +12631,16 @@ def applied_text(
                 "your backup folder."
             )
         return "The deck is deleted on Archidekt. A snapshot of it was kept."
+    if action == "clear_collection":
+        if r.get("verified") is False:
+            return (
+                "Sent to Archidekt, but reading your binder back still showed entries. A copy of it from "
+                "just before is kept under History."
+            )
+        return (
+            "Your binder is cleared on Archidekt. A copy of it from just before is kept under History, "
+            "where Restore to my binder puts it back."
+        )
     if action == "collaborator_add":
         return "They can edit your deck on Archidekt now."
     if action == "collaborator_remove":

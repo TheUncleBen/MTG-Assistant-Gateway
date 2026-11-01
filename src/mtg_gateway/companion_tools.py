@@ -43,7 +43,7 @@ from .pages import (
     _csrf,
     browser_session,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .reports import NO_FORGE_TO_SHARE, PAIR_NO_FORGE
@@ -105,7 +105,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/edit")
+            return login_redirect_here(request, f"/decks/{deck_id}/edit")
         try:
             # the deck as its page last read it (decks.page_deck_live): a change the gateway sent
             # to it forgets that read, and the save checks the deck on Archidekt itself
@@ -320,7 +320,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/export")
+            return login_redirect_here(request, f"/decks/{deck_id}/export")
         return await h.deck_page_response(request, sub, sid, deck_id, box="export")
 
     @server.custom_route("/decks/{deck_id}/export.archidekt.txt", methods=["GET"], include_in_schema=False)
@@ -345,7 +345,7 @@ def add_deck_tool_routes(
         """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
             return Response(
                 "Open this from the gateway's own pages.", 403, headers={"Cache-Control": "no-store"}
@@ -430,7 +430,7 @@ def add_deck_tool_routes(
 
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         if not prefs.from_this_site(request):  # a link on another site: Archidekt is not asked
             return Response(
                 "Open this from the gateway's own pages.", 403, headers={"Cache-Control": "no-store"}
@@ -515,7 +515,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request)
         if not check_csrf(sid, data):
             return page(
@@ -543,7 +543,7 @@ def add_deck_tool_routes(
         The gateway's own database only."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/reports")
+            return login_redirect_here(request, "/reports")
         query = ReportsQuery.parse(request.query_params)
         now = time.time()
         index = reports.index(sub)
@@ -616,7 +616,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/goldfish")
+            return login_redirect_here(request, f"/decks/{deck_id}/goldfish")
         try:
             deck, how = await decks.page_deck_live(sub, deck_id)
         except DeckError as exc:
@@ -700,7 +700,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/compare")
+            return login_redirect_here(request, f"/decks/{deck_id}/compare")
         data = await form(request)
         if not check_csrf(sid, data):
             return page(
@@ -795,7 +795,7 @@ def add_deck_tool_routes(
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/compare")
+            return login_redirect_here(request, f"/decks/{deck_id}/compare")
         try:
             deck, how = await decks.page_deck_live(sub, deck_id)
         except DeckError as exc:

@@ -79,8 +79,8 @@ class SharedLinkTest {
         assertEquals("example.org", SharedLink.hostOf("https://Example.org/a"))
     }
 
-    @Test fun ownersDeckLinkOpens() =
-        assertEquals("$gw/decks/27095317", open("https://archidekt.com/decks/27095317/immortal_reckoning"))
+    @Test fun eightDigitDeckLinkWithSlugOpens() =
+        assertEquals("$gw/decks/12345678", open("https://archidekt.com/decks/12345678/sample_deck"))
 
     @Test fun deckLinkInHtmlTextOpens() =
         assertEquals("$gw/decks/8", open(null, "<a href=\"https://archidekt.com/decks/8/x\">deck</a>"))

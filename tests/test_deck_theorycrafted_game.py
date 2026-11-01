@@ -1,4 +1,4 @@
-"""Deck settings' Theorycrafted and Game Type (Archidekt parity release 1, approved by Ben
+"""Deck settings' Theorycrafted and Game Type (Archidekt parity release 1, approved by the owner
 22 Oct 2026, "All as recommended"): the same PATCH /decks/{id}/update/ as the other settings
 (``theorycrafted``: true or false; ``game``: null for Any, 1 Paper, 2 MTGO, 3 Arena, as the
 site's deck settings code sends them), proposed, applied, read back and restored like them."""

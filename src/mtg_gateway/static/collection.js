@@ -1,6 +1,6 @@
 /* Collection page (the member's Archidekt Collection). Works without this file: every control is a
    form or a link. With it: the stepper, the Details box and Remove update a row in place through the
-   JSON API; − on the last copy and Remove ask first (the shared box); the name box narrows the list
+   JSON API; − on the last copy and Remove take the row out at once, with Undo; the name box narrows the list
    as you type; Load more appends the next rows; the drop-downs apply on change; notices are strips
    with a × to close. The shared menus.js reaches the row's hidden Remove form and Details hook. */
 (function () {
@@ -21,35 +21,44 @@
     var live = $("#live");
     if (live) live.textContent = text;
   }
-  /* a strip at the top of the page, with a × to close; errors are alerts */
-  function strip(text, kind) {
-    say(text);
-    if (!notes) return;
+  /* a strip at the top of the page, with a × to close; errors are alerts. One strip at a time
+     (a second press replaces the first), and the strip is the one live region that reads it:
+     the page's #live is used only when there is no place for a strip (QG-08). ``actions``: the
+     buttons that can help (Sign in, Undo), after the text. */
+  function strip(text, kind, actions) {
+    if (!notes) { say(text); return null; }
+    var old = notes.querySelector(".notice[data-strip]");
+    if (old) old.remove();
     var d = document.createElement("div");
     d.className = "notice " + (kind === "error" ? "error" : "ok");
     d.setAttribute("role", kind === "error" ? "alert" : "status");
+    d.setAttribute("data-strip", "");
     var x = document.createElement("button");
     x.type = "button"; x.className = "nx"; x.setAttribute("aria-label", "Close"); x.title = "Close";
     x.setAttribute("data-dismiss", ""); x.innerHTML = ICON_X;
     d.appendChild(x);
     d.appendChild(document.createTextNode(text));
+    (actions || []).forEach(function (a) { d.appendChild(document.createTextNode(" ")); d.appendChild(a); });
     notes.insertBefore(d, notes.firstChild);
+    return d;
+  }
+  /* what a failed change says: the one wording for signed out (with Sign in) and no connection
+     (static/fetchjson.js), Archidekt's own reason otherwise */
+  function failed(d, name) {
+    var what = (name || "the card") + " was not changed";
+    var why = d && d.error;
+    if (why === "unavailable" || why === "rate_limited" || why === "busy") { strip(name + " was not changed. " + NOT_ANSWERING, "error"); return; }
+    var pr = Fetch.problem(d, what);
+    strip(pr.signedOut || pr.noConnection ? pr.text : name + " was not changed. " + pr.text, "error", pr.actions);
   }
   document.addEventListener("click", function (e) {
     var x = e.target.closest ? e.target.closest("#col-notes [data-dismiss]") : null;
     if (x) { var n = x.closest(".notice"); if (n) n.remove(); }
   });
-  function failText(d, name) {
-    var why = d && d.error;
-    var msg = (why === "unavailable" || why === "rate_limited" || why === "busy") ? NOT_ANSWERING : ((d && d.message) || "That did not work.");
-    return (name ? name + " was not changed. " : "") + msg;
-  }
+  var Fetch = window.MtgFetch;
+  // never rejects: a lost connection or an ended session comes back as {ok: false} with the words
   function request(method, url, body) {
-    return fetch(url, {
-      method: method, credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
+    return Fetch.answer(url, { method: method, body: body === undefined ? undefined : JSON.stringify(body), csrf: CSRF });
   }
   function nameOf(item) {
     var n = $(".name", item);
@@ -60,45 +69,71 @@
     if (!c) return;
     var n = Math.max(0, (parseInt(c.textContent.replace(/,/g, ""), 10) || 0) + delta);
     c.textContent = n.toLocaleString() + (n === 1 ? " entry" : " entries");
+    // "All N entries shown." under the list follows the count too
+    var line = $(".loadmore p.muted");
+    if (line && /^All [\d,]+ (entry|entries) shown\.$/.test(line.textContent.trim())) {
+      line.textContent = "All " + n.toLocaleString() + (n === 1 ? " entry" : " entries") + " shown.";
+    }
   }
-  function gone(item) {
+  /* -- Remove: at once, with Undo (QOL-01, 0.7.46 audit QG-09) ------------------------------
+     − on the last copy, the hidden Remove form and the Details box's button all remove the row
+     at once; the strip offers Undo for as long as it stays, which adds the row back with its
+     copies, printing, finish, condition, language and price paid. Archidekt has no request to
+     put a row's tags back, so the strip says when Undo cannot bring those. */
+  function gone(item, removed) {
     var name = nameOf(item);
+    var next = item.nextElementSibling;
     item.remove();
     bumpCount(-1);
-    strip("Removed from your binder.", "ok");
-    if (list && !$("li[data-id]", list)) location.reload();
+    var tags = removed && removed.tags && removed.tags.length;
+    var undo = document.createElement("button");
+    undo.type = "button"; undo.className = "btn small"; undo.textContent = "Undo";
+    undo.addEventListener("click", function () { putBack(item, removed, next, undo); });
+    said("Removed from your binder." + (tags ? " Undo puts it back without its tags." : ""), removed ? [undo] : []);
+    if (list && !$("li[data-id]", list)) list.hidden = true;  // the page's empty state comes with the next load
     return name;
   }
-
-  /* -- the Remove box: − on the last copy, the hidden Remove form, the Details box's button --- */
-  function askRemove(item, returnFocus) {
-    var name = nameOf(item);
-    var out = $("form.qty output", item);
-    var qty = out ? parseInt(out.textContent, 10) || 1 : 1;
-    var fin = FIN[item.getAttribute("data-fin")] || "Normal";
-    var where = (item.getAttribute("data-setline") || "").trim();
-    var text = "This removes " + (qty === 1 ? "it" : "all " + qty + " copies") + " (" + (where ? where + ", " : "") + fin + ") from your binder.";
-    if (!window.MtgBox) {
-      if (window.confirm("Remove “" + name + "”? " + text)) doRemove(item);
-      return;
-    }
-    window.MtgBox.confirm({
-      title: "Remove “" + name + "”?", text: text, ok: "Remove", danger: true, icon: "trash",
-      returnFocus: returnFocus,
-      onOk: function () { return doRemove(item); }
+  /* what a removal (and its Undo) says: the shared toast at the foot of the screen, where the
+     row that was pressed is in view on a phone, with Undo for 15 s; the strip at the top of the
+     page without the shared menus */
+  function said(text, actions) {
+    var Menu = window.MtgMenu;
+    if (Menu && Menu.toast) { Menu.toast(text, { ok: true, actions: actions || [], ms: 15000 }); say(text); return; }
+    strip(text, "ok", actions);
+  }
+  function putBack(item, removed, next, undo) {
+    var name = removed.name || nameOf(item);
+    undo.disabled = true;
+    var spec = { name: name, quantity: removed.quantity || 1, finish: removed.finish || "nonfoil", condition: removed.condition || "", language: removed.lang || "EN" };
+    if (removed.set) spec.set_code = removed.set;
+    if (removed.collector_number) spec.collector_number = removed.collector_number;
+    request("POST", "/collection/api/add", { items: [spec], source: "manual" }).then(function (d) {
+      var row = d.ok && d.added && d.added[0];
+      if (!row) { undo.disabled = false; failed(d.ok ? { message: "Archidekt did not take the card back." } : d, name); return; }
+      item.setAttribute("data-id", row.id);
+      $$("button", item).forEach(function (b) { b.disabled = false; });
+      $$("output", item).forEach(function (o) { o.textContent = row.quantity; });
+      if (list) {
+        list.hidden = false;
+        if (next && next.parentNode === list) list.insertBefore(item, next); else list.appendChild(item);
+      }
+      bumpCount(1);
+      var paid = removed.purchase_price;
+      if (paid === null || paid === undefined || paid === "") { said(name + " is back in your binder."); return; }
+      request("POST", "/collection/api/rows/" + encodeURIComponent(row.id), { name: name, purchase_price: String(paid) }).then(function (u) {
+        if (u.ok) said(name + " is back in your binder.");
+        else strip(name + " is back in your binder, without the price you paid. " + Fetch.problem(u, "the price was not set").text, "error", Fetch.problem(u).actions);
+      });
     });
   }
+  function askRemove(item) { return doRemove(item); }
   function doRemove(item) {
     var id = item.getAttribute("data-id");
     var name = nameOf(item);
     $$("button", item).forEach(function (b) { b.disabled = true; });
     return request("DELETE", "/collection/api/rows/" + encodeURIComponent(id) + "?name=" + encodeURIComponent(name)).then(function (d) {
-      if (!d.ok) { strip(failText(d, name), "error"); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
-      gone(item);
-      return false;
-    }).catch(function () {
-      $$("button", item).forEach(function (b) { b.disabled = false; });
-      strip(failText(null, name), "error");
+      if (!d.ok) { failed(d, name); $$("button", item).forEach(function (b) { b.disabled = false; }); return false; }
+      gone(item, d.removed || null);
       return false;
     });
   }
@@ -128,13 +163,10 @@
       /* one more or one fewer than Archidekt holds now: another tab's presses add up, not overwrite */
       request("POST", "/collection/api/rows/" + encodeURIComponent(id), { delta: action === "inc" ? 1 : -1, name: name }).then(function (d) {
         $$("form.qty button", item).forEach(function (b) { b.disabled = false; });
-        if (!d.ok) { strip(failText(d, name), "error"); return; }
+        if (!d.ok) { failed(d, name); return; }
         if (!d.row || d.row.quantity === 0) { gone(item); return; }
         $$("output", item).forEach(function (o) { o.textContent = d.row.quantity; });
         say(name + ": " + d.row.quantity + (d.row.quantity === 1 ? " copy" : " copies"));
-      }).catch(function () {
-        $$("form.qty button", item).forEach(function (b) { b.disabled = false; });
-        strip(failText(null, name), "error");
       });
     });
     /* the shared menu's Details… opens the row's hidden hook; that opens the Details box */
@@ -178,7 +210,12 @@
     var tags = [];
     try { tags = JSON.parse(item.getAttribute("data-tags") || "[]"); } catch (err) { tags = []; }
     var tagbox = $(".tags", detailsBox), line = $(".tagline", detailsBox);
-    if (tagbox && line) {
+    var ticks = $$("input[data-tag]", detailsBox);
+    if (ticks.length) {
+      /* the member's binder tags as boxes: tick the row's own */
+      var low = tags.map(function (t) { return String(t).toLowerCase(); });
+      ticks.forEach(function (c) { c.checked = low.indexOf(c.getAttribute("data-tag").toLowerCase()) !== -1; });
+    } else if (tagbox && line) {
       line.textContent = "";
       tags.forEach(function (t) { var s = document.createElement("span"); s.className = "pill"; s.textContent = t; line.appendChild(s); });
       tagbox.hidden = tags.length === 0;
@@ -194,6 +231,7 @@
     item.setAttribute("data-cond", row.condition || "");
     item.setAttribute("data-lang", row.lang || "EN");
     item.setAttribute("data-paid", row.purchase_price == null ? "" : row.purchase_price);
+    if (row.tags) item.setAttribute("data-tags", JSON.stringify(row.tags));
     item.setAttribute("data-finish", row.finish === "foil" ? "Foil" : row.finish === "etched" ? "Etched" : "");
     var fin = FIN[row.finish] || "Normal", cond = row.condition || "", lang = row.lang || "EN";
     row.lang_name = LANG[lang] || lang;
@@ -246,16 +284,18 @@
         language: form.elements.language.value,
         purchase_price: form.elements.purchase_price.value
       };
+      var ticks = $$("input[data-tag]", form);
+      if (ticks.length) body.tags = ticks.filter(function (c) { return c.checked; }).map(function (c) { return c.getAttribute("data-tag"); });
       var name = nameOf(item);
       var btns = $$("button", detailsBox);
       btns.forEach(function (b) { b.disabled = true; });
       request("POST", "/collection/api/rows/" + encodeURIComponent(form.getAttribute("data-id")), body).then(function (d) {
         btns.forEach(function (b) { b.disabled = false; });
-        if (!d.ok) { strip(failText(d, name), "error"); return; }
+        if (!d.ok) { failed(d, name); return; }
         applyRow(item, d.row || {});
         if (window.MtgBox) window.MtgBox.close();
         strip("Card details saved to your binder.", "ok");
-      }).catch(function () { btns.forEach(function (b) { b.disabled = false; }); strip(failText(null, name), "error"); });
+      });
     });
   }
 
@@ -316,19 +356,21 @@
   /* then, once typing stops, the whole binder: Archidekt's own name filter, with the count */
   var searchSeq = 0, searchTimer = null;
   function search() {
-    var params = new URLSearchParams(new FormData(listform));
-    params.delete("offset");
-    if (!params.get("q")) params.delete("q");
-    /* the defaults stay out of the address, as the page's own links leave them */
+    var sent = new URLSearchParams(new FormData(listform));
+    sent.delete("offset");
+    if (!sent.get("q")) sent.delete("q");
+    if (!sent.get("tag")) sent.delete("tag");
+    /* the sort goes with every ask (a pick of the default is remembered as such, prefs.py); the
+       defaults stay out of the address, as the page's own links leave them */
+    var params = new URLSearchParams(sent);
     if (params.get("sort") !== "edition") { params.delete("sort"); params.delete("dir"); }
     else if (params.get("dir") === "desc") params.delete("dir");
     var mine = ++searchSeq;
     if (list) list.setAttribute("aria-busy", "true");
-    fetch("/collection/api/rows?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
-      .then(function (r) { return r.json(); }).then(function (d) {
+    Fetch.answer("/collection/api/rows?" + sent.toString()).then(function (d) {
         if (mine !== searchSeq) return;
         if (list) list.removeAttribute("aria-busy");
-        if (!d.ok) throw new Error(d.message || "");
+        if (!d.ok) throw d;
         if (list) { list.innerHTML = d.html; list.hidden = !d.total; }
         var c = $("#col-count");
         if (c) c.textContent = d.count_text;
@@ -343,10 +385,11 @@
         if (!/[?&]view=/.test(location.search)) params.delete("view");
         try { history.replaceState(history.state, "", "/collection" + (params.toString() ? "?" + params.toString() : "")); } catch (err) { /* keep the address */ }
         say(d.count_text + (params.get("q") ? " match “" + params.get("q") + "”." : "."));
-      }).catch(function () {
+      }).catch(function (d) {
         if (mine !== searchSeq) return;
         if (list) list.removeAttribute("aria-busy");
-        strip(NOT_ANSWERING, "error");
+        var pr = Fetch.problem(d, "the rows could not be read");
+        strip(pr.signedOut || pr.noConnection ? pr.text : NOT_ANSWERING, "error", pr.actions);
       });
   }
   if (listform) {
@@ -377,6 +420,8 @@
     if (sortc) sortc.addEventListener("change", function () { var p = sortc.value.split(":"); go(p[0], p[1]); });
     if (sortf) sortf.addEventListener("change", function () { go(sortf.value, dirIn ? dirIn.value : "desc"); });
     $$("input[name=view]", listform).forEach(function (r) { r.addEventListener("change", submit); });
+    var tagf = $("#col-tag", listform);
+    if (tagf) tagf.addEventListener("change", submit);
   }
 
   /* -- an import in the background: its strip follows it, and the page shows the result -------- */
@@ -429,8 +474,8 @@
     var wrap = a.closest(".loadmore");
     var href = a.getAttribute("href").replace(/^\/collection(\?|$)/, "/collection/api/rows$1");
     a.setAttribute("aria-busy", "true"); a.setAttribute("aria-disabled", "true");
-    fetch(href, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) { return r.json(); }).then(function (d) {
-      if (!d.ok) throw new Error(d.message || "");
+    Fetch.answer(href).then(function (d) {
+      if (!d.ok) throw d;
       var tmp = document.createElement("ul");
       tmp.innerHTML = d.html;
       var first = null;
@@ -449,9 +494,10 @@
       say(d.shown + " of " + d.total + " shown.");
       var focus = first ? $(".thumbbtn, .kebab", first) : null;
       if (focus) focus.focus({ preventScroll: true });
-    }).catch(function () {
+    }).catch(function (d) {
       a.removeAttribute("aria-busy"); a.removeAttribute("aria-disabled");
-      strip(NOT_ANSWERING, "error");
+      var pr = Fetch.problem(d, "more rows could not be read");
+      strip(pr.signedOut || pr.noConnection ? pr.text : NOT_ANSWERING, "error", pr.actions);
     });
   });
 })();

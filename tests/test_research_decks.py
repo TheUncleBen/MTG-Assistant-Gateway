@@ -136,7 +136,7 @@ async def test_annotate_passes_a_pasted_list_through(stack: Stack) -> None:
 
 
 def test_names_deck_is_an_id_or_a_link_never_a_list() -> None:
-    assert names_deck("27095317") and names_deck(27095317) and names_deck("archidekt.com/decks/1/x")
+    assert names_deck("12345678") and names_deck(12345678) and names_deck("archidekt.com/decks/1/x")
     assert not names_deck("1 Sol Ring\n// from https://archidekt.com/decks/1") and not names_deck(True)
     assert not names_deck("1 Sol Ring") and not names_deck(None)
 

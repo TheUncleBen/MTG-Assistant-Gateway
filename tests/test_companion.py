@@ -825,11 +825,11 @@ async def test_app_shell_routes(stack: Stack) -> None:
     m = await h.http.get("/app.webmanifest")
     assert m.status_code == 200 and m.json()["start_url"] == "/decks"
     assert m.headers["content-type"].startswith("application/manifest+json")
-    object.__setattr__(h.app.state.gateway.settings, "server_name", "Ben's MTG gateway")
+    object.__setattr__(h.app.state.gateway.settings, "server_name", "Sam's MTG gateway")
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
     # the offline page carries the gateway's own name and a 44 px Try again
-    assert "Ben&#x27;s MTG gateway" in sw.text
+    assert "Sam&#x27;s MTG gateway" in sw.text
     assert "MTG Assistant Gateway" not in sw.text and "min-height:44px" in sw.text
     # a dropped connection or a gateway restart doesn't show the offline page: about 5 s of
     # retries first, GET navigations only
@@ -1105,7 +1105,7 @@ async def test_new_deck_page_says_which_card_was_not_found(stack: Stack) -> None
         assert "Definitely Not A Card Zzz" in page.text  # the result names the card
         # the code for a proposal that really does not exist is unchanged
         gone = await b.http.get("/proposals/nope?err=not_found", headers=NAV)
-        assert "No such proposal" in gone.text
+        assert "This proposal could not be found." in gone.text and "Back to Assistant" in gone.text
     finally:
         await b.aclose()
 

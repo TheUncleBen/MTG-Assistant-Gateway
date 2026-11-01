@@ -239,7 +239,7 @@ def test_the_page_marks_reports_in_the_nav_and_is_wide(server: Server) -> None:
 
 
 def test_long_lists_show_six_rows_then_show_all_and_categories_open_on_tap() -> None:
-    """Ben, 10-25 (less scrolling): a list of more than 8 rows shows its first 6 and a Show all
+    """The owner, 10-25 (less scrolling): a list of more than 8 rows shows its first 6 and a Show all
     capsule for the rest; the cards that need opponents sit in their categories, each a row that
     opens; Details and Show all are capsules with a chevron, never bare blue text."""
     model = _page().split("id='rv-model'")[1].split("id='rv-valid'")[0]

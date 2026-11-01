@@ -35,10 +35,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from .. import prefs
-from ..pages import NO_STORE, _csrf, _safe_next, browser_session, csrf_header_ok, read_limited
+from ..pages import NO_STORE, _csrf, browser_session, csrf_header_ok, login_redirect_here, read_limited
 from ..theme import ICONS, render
 from .service import ScanError, ScanService, parse_cards
 
@@ -155,7 +155,7 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
     async def scan_page(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return RedirectResponse(f"/login?next={_safe_next('/scan')}", status_code=302)
+            return login_redirect_here(request, "/scan")
         user = state.db.get_user(sub) or {}
         who = user.get("preferred_username") or user.get("email") or sub
         config = {

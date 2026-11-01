@@ -76,7 +76,7 @@ APP_UA_MARK = "MTGAssistant/"
 # A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Card models, Forum)
 # as links and drops More ▾ once the bar is this wide (0.7.46 redesign, screen 1; a container
 # query in the bar's own em, so a narrower window or 200% text brings More ▾ back, with every page
-# still in it). None: More ▾ at every width, as before. Open for Ben.
+# still in it). None: More ▾ at every width, as before. Open for the owner.
 TOPBAR_FULL_FROM: str | None = "70em"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
@@ -478,7 +478,7 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
-/* Disclosure controls (Ben, 10-25: never bare blue text): a Details drop-down or a Show all is a
+/* Disclosure controls (the owner, 10-25: never bare blue text): a Details drop-down or a Show all is a
    grey capsule with its words and a chevron that turns when open, 36px inside a 44px tap area.
    summary.fold-btn is the capsule as a fold's own summary; .disc is the same capsule inside a
    summary that holds more (a heading, a count); .disc.round is its icon-only form for a tight row. */
@@ -597,7 +597,7 @@ button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;
 button.danger,.btn-danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.danger:hover,.btn-danger:hover{background:var(--danger-fill);color:#fff;filter:brightness(1.1)}
 button.secondary,.btn-ghost{background:transparent;border-color:transparent}
-/* A Show all or Show more button is the disclosure capsule (.disc) too (Ben, 10-25); its chevron
+/* A Show all or Show more button is the disclosure capsule (.disc) too (the owner, 10-25); its chevron
    turns once the list is open (aria-expanded). */
 button.disc{min-height:44px;border:4px solid transparent;background:var(--surface-2) padding-box;
   color:var(--text);font-weight:600;font-size:.9rem;border-radius:22px}
@@ -732,6 +732,13 @@ details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);pa
   border:1px solid var(--border);border-radius:var(--radius-sheet);background:var(--surface);padding:1rem;
   box-shadow:var(--shadow)}
 .toast.error{border-color:var(--red)}
+/* a toast stays above the phone's bottom tab bar (as .ui-bar does), and on a phone it spans the
+   width so its Undo sits where the thumb is (0.7.46 audit QG-09) */
+.has-tabbar .toast{bottom:calc(var(--tab-room,0px) + .75rem)}
+@media (max-width:599.98px){
+  .toast{right:.5rem;left:.5rem;width:auto;max-width:none}
+  .has-tabbar .toast{bottom:calc(var(--tab-room,calc(max(56px,
+  4rem) + env(safe-area-inset-bottom))) + .5rem)} }
 /* a toast's × keeps the top right corner at every width: out of the flow, so a message with
    buttons (Undo, History) wraps under the text instead of pushing the × onto a line of its own
    (0.7.43: it wrapped at 810 px); the toast keeps the corner clear for it, 44 px wide on touch
@@ -1011,6 +1018,14 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
   align-items:baseline}
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
+.home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.home details.connect .addrline code{word-break:break-all;font-size:.9rem}
+/* the keyboard shortcuts box (static/sitesearch.js) */
+.mtgbox dl.keys{display:grid;grid-template-columns:auto 1fr;gap:.4rem 1rem;margin:0}
+.mtgbox dl.keys dt{margin:0}.mtgbox dl.keys dd{margin:0}
+.mtgbox dl.keys kbd{font-family:inherit;font-size:.9rem;padding:.1rem .4rem;
+  border:1px solid var(--border-soft);
+  border-radius:4px;background:var(--surface-2);white-space:nowrap}
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
@@ -1219,7 +1234,7 @@ if TOPBAR_FULL_FROM:
 # 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
 # follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
 # (no flash) and by static/prefs.js when the S / M / L switch is pressed. Each page keeps its own
-# (Ben, 2026-10-28): the account's card.size.<page>, else the one size chosen for every page before
+# (the owner, 2026-10-28): the account's card.size.<page>, else the one size chosen for every page before
 # (card.size), else M. The printings dialog has its own too, on <html data-card-size-printings>
 # and on the dialog itself.
 CARD_SIZES = ("s", "m", "l")
@@ -1420,7 +1435,7 @@ main.wrap.ui-wide{max-width:1200px}
   background:var(--surface-2);color:var(--text);font-size:.8rem}
 
 /* quick-filter chips with counts: one row that scrolls sideways when it runs out of room, as a
-   phone's filter strips do, never a ragged second row (Ben, 2026-10-25) */
+   phone's filter strips do, never a ragged second row (the owner, 2026-10-25) */
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
@@ -2008,7 +2023,7 @@ _TOPSEARCH_CSS = """
   .topbar .topsearch{display:block} }
 @media (min-width:600px){ body.app .topbar .topsearch{display:block} }
 @media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
-/* Fill (Ben, 2026-10-25): where the box shows, it grows into the room between the brand (and a
+/* Fill (the owner, 2026-10-25): where the box shows, it grows into the room between the brand (and a
    computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it */
 @media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){
   .topbar .right{flex:1 1 auto;justify-content:flex-end} .topbar .left{flex:0 1 auto}
@@ -2076,6 +2091,11 @@ SEARCH_PANEL_CSS = """
   padding:0 .35rem;border-radius:.7rem;background:var(--orange);color:var(--on-orange);font-size:.8rem;
   font-weight:700}
 .spanel .fbtn .n:empty{display:none}
+/* card search on a Fold or desktop (mockup screen 5): the filter groups fold in place behind the
+   same Filters button, so the first result starts near the top; the last state follows the
+   account (searchpanel.filters_sheet, static/searchpanel.js) */
+.spanel .fbtn.fold{display:inline-flex}
+@media (min-width:600px){ .spanel .sp-filters.folded{display:none} }
 /* the filter groups: whole groups in a fluid row, each at least --gw wide, growing to fill its row */
 .spanel .fgrid{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start}
 .spanel .fgrid > *{flex:1 1 var(--gw,150px);min-width:0;margin:0}
@@ -2151,7 +2171,7 @@ SEARCH_PANEL_CSS = """
 .spanel .rbar .brk,.spanel .rbar .brka{display:none;flex-basis:100%;height:0;margin-top:-8px}
 /* A narrower panel (an open Fold) keeps the count, Sort, the view and the card size on one row:
    "Sort by" is read out but not shown (the box says what it sorts by), and the bar breaks only
-   when even that row can't fit (Ben, 2026-10-25: no empty corner under the row) */
+   when even that row can't fit (the owner, 2026-10-25: no empty corner under the row) */
 @container sp (max-width:799.98px){ .spanel .rbar{column-gap:8px}
   .spanel .rbar .sort > .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);
     white-space:nowrap} }
@@ -2532,7 +2552,7 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
     )
 
 
-# The site navigation (Ben, 2026-10-25): four places and More, the same on every screen. The top bar
+# The site navigation (the owner, 2026-10-25): four places and More, the same on every screen. The top bar
 # on a computer, the bottom tab bar on a phone and the rail (an unfolded Fold, a tablet, the app from
 # 600 px) list these; the rail adds More's pages and Alerts (the bell) instead of More. Assistant is the
 # assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
@@ -2580,7 +2600,7 @@ MORE_GROUPS = [
 # for its badge. The mockup's rail also listed Watchlist and My lists, which 0.7.46 had already
 # given homes (Binder's switch and the Account page): the rail follows the code. Forum was on the
 # rail but not in the mockup: it closes the second group, as Community closes More. The phone
-# keeps its tab bar and More sheet. Each choice still open for Ben is one constant here.
+# keeps its tab bar and More sheet. Each choice still open for the owner is one constant here.
 RAIL_PAGES = ("/scan", "/precons", "/history/models", "/forum")
 RAIL_ALERTS_AT_FOOT = True  # No: Alerts sits inside the second group, under Forum
 RAIL_GROUP_LINE = True  # the thin line between the four places and the rest
@@ -2897,6 +2917,11 @@ def render(
         # script that reads them (deferred scripts run in document order; pages add theirs in
         # head_extra)
         + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
+        # static/fetchjson.js: how every page script talks to the gateway, and the one wording
+        # for a signed-out or lost-connection answer; before the scripts that send
+        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
+        # static/draft.js: what is typed into a form marked data-draft is kept and put back
+        + ("<script src='/static/draft.js' defer></script>" if signed_in else "")
         # static/topbar.js: the scroll room above a focused element follows the bar's height
         + "<script src='/static/topbar.js' defer></script>"
         # static/box.js: the box (dialog) every pop-up shares, on every page, before the menus
@@ -2939,7 +2964,6 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
-        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
         + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )

@@ -129,10 +129,10 @@ async def test_default_is_manual_and_the_account_page_sets_the_mode(stack: Stack
 
 
 async def test_each_mode_is_one_line_with_its_explanation_folded(stack: Stack) -> None:
-    """Ben (2026-10-22): the Approval mode panel is a tight list, each mode one row with its
+    """The owner (2026-10-22): the Approval mode panel is a tight list, each mode one row with its
     name; what it means is in a closed fold opened by the chevron at the row's end, so the page is
     not a wall of text. The approved words are kept, and the cost of the auto modes is said in
-    those modes' own folds: no line about it under the list any more (Ben, "line hide")."""
+    those modes' own folds: no line about it under the list any more (the owner, "line hide")."""
     h = stack.h
     await linked_user(stack)
     b = Browser(h)
@@ -542,6 +542,7 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         "collaborator_add": "collaborator changes",
         "collaborator_remove": "collaborator changes",
         "delete_deck": "deleting a deck",
+        "clear_collection": "clearing your binder",
         "deck_help": "deck help requests",
         "report": "reports to Archidekt's moderators",
         "profile": "profile and email settings",
@@ -554,6 +555,8 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         assert modes.risk_of("action", [{"action": action}])[0] in modes.MEMBER_ONLY
     for mode in modes.MODES:
         assert "Archidekt account" in modes.mode_help(mode) and "deleting a deck" in modes.mode_help(mode)
+    for mode in ("semi", "auto"):
+        assert "clearing your binder" in modes.mode_help(mode) + modes.MEMBER_ONLY_TEXT
 
 
 async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> None:

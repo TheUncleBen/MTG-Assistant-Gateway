@@ -55,7 +55,7 @@ def test_side_stacks_come_after_every_stack_in_the_deck() -> None:
     side = {i for i, n in enumerate(names) if n in deck.excluded_categories()}
     main = {i for i, n in enumerate(names) if n not in deck.excluded_categories()}
     assert side and max(main) < min(side), names
-    assert names[-2:] == ["Maybeboard", "Sideboard"]
+    assert names[-2:] == ["Sideboard", "Maybeboard"]  # Sideboard before the boards out of the deck
 
 
 async def test_a_name_that_is_no_card_is_refused_in_plain_words(stack: Stack) -> None:
@@ -398,3 +398,32 @@ async def test_the_page_save_draws_a_new_card_for_the_view_it_names(stack: Stack
         assert r.status_code == 201 and "html" not in r.json()["rows"][0], r.text
     finally:
         await b.aclose()
+
+
+def test_stacks_sort_as_archidekts_deck_page_sorts_them() -> None:
+    """Archidekt's deck page does not show categories in the order its answer lists them (that
+    is record order): its editor sorts the stacks itself (its bundle, read 2026-11-01): Premier
+    categories first, then every category in the deck, each run by name (numeric-aware, any
+    case), then Sideboard, then the categories not in the deck. The gateway's stacks follow that,
+    the one order Archidekt shows (owner decision C4)."""
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).parent / "fixtures" / "live" / "archidekt_deck_blink_sample.json"
+    raw = json.loads(fixture.read_text())
+    # the live answer lists them by record: Haste, Lifegain, Fetches… with Commander in the middle
+    assert [c["name"] for c in raw["categories"]][:3] == ["Haste", "Lifegain", "Fetches"]
+    deck = parse_deck(raw)
+    names = [name for name, _cards in views.cards_by_category(deck)]
+    filed = {c.categories[0] for c in deck.cards if c.categories}
+    boards = ("Commander", "Sideboard", "Maybeboard")
+    in_deck = sorted((n for n in filed if n not in boards), key=views.category_sort_key)
+    side = ["Sideboard"] if "Sideboard" in filed else []
+    assert names == ["Commander", *in_deck, *side, "Maybeboard"], names
+
+
+def test_the_category_sort_key_is_numeric_aware_and_ignores_case() -> None:
+    """ "Ramp 2" before "Ramp 10", and "draw" with "Draw", as Archidekt's collator orders them."""
+    names = ["Ramp 10", "ramp 2", "Draw", "Boardwipe", "ramp 1", "Zombies"]
+    want = ["Boardwipe", "Draw", "ramp 1", "ramp 2", "Ramp 10", "Zombies"]
+    assert sorted(names, key=views.category_sort_key) == want

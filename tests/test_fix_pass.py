@@ -236,10 +236,12 @@ def test_the_compare_and_bookmark_boxes_and_the_unreadable_answer() -> None:
     assert '"Pick a deck, or paste an Archidekt link or deck ID."' in menus
     assert '"This adds “" + d.name + "” to your bookmarks on Archidekt."' in menus
     assert "deck id" not in menus and "deck Id" not in menus  # "deck ID" everywhere
+    # the unreadable-answer wording lives in the shared fetch helper every page script uses
     assert (
-        'var ODD = "The gateway sent an answer this page could not read. Reload the page to see whether '
-        'the change was made.";'
-    ) in _static("cardmenu.js")
+        'var UNREADABLE = "The gateway sent an answer this page could not read. '
+        'Reload the page to see whether the change was made.";'
+    ) in _static("fetchjson.js")
+    assert "ODD" not in _static("cardmenu.js") and "MtgFetch.UNREADABLE" in _static("cardmenu.js")
 
 
 def test_a_deck_with_no_name_reads_unnamed_deck_in_the_deck_list_card() -> None:
