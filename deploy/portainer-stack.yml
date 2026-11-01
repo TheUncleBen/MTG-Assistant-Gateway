@@ -86,7 +86,6 @@ services:
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
-      DISABLE_IPV6: "true"
     # Least privilege: root only to match PUID/PGID, then it drops to that user.
     cap_drop:
       - ALL
@@ -149,7 +148,6 @@ services:
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
-      DISABLE_IPV6: "true"
     cap_drop:
       - ALL
     cap_add:
@@ -245,7 +243,6 @@ services:
       PUID: ${PUID:?PUID REQUIRED}
       PGID: ${PGID:?PGID REQUIRED}
       TZ: ${TIMEZONE:-UTC}
-      DISABLE_IPV6: "true"
     cap_drop:
       - ALL
     cap_add:

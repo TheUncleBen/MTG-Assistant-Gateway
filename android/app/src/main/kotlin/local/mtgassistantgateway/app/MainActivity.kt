@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -635,6 +636,17 @@ class MainActivity : ComponentActivity() {
         return browser
     }
 
+    /** The browser a Custom Tab sign-in opens in ([BrowserSignIn.customTabBrowser]), or null. */
+    private fun customTabBrowser(): String? {
+        // Any https address but the gateway's: the applinks build claims the gateway's own.
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/")).addCategory(Intent.CATEGORY_BROWSABLE)
+        @Suppress("DEPRECATION")
+        val default = packageManager.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        @Suppress("DEPRECATION")
+        val browsers = packageManager.queryIntentActivities(probe, PackageManager.MATCH_ALL).mapNotNull { it.activityInfo?.packageName }
+        return BrowserSignIn.customTabBrowser(default, browsers, packageName, ::isSystemApp)
+    }
+
     /** Whether [pkg] came with the phone (a system app, or an update of one). */
     private fun isSystemApp(pkg: String): Boolean = try {
         val flags = packageManager.getApplicationInfo(pkg, 0).flags
@@ -673,8 +685,21 @@ class MainActivity : ComponentActivity() {
         }
         val url = Uri.parse(BrowserSignIn.startUrl(origin, next, challenge, fresh, customTab = true))
         try {
-            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, url)
-            Log.i(TAG, "sign-in: Custom Tab opened; it ends on the page that opens the app")
+            val tab = CustomTabsIntent.Builder().setShowTitle(true).build()
+            val pick = customTabBrowser()
+            if (pick != null) {
+                tab.intent.setPackage(pick)
+                tab.launchUrl(this, url)
+            } else {
+                // No default browser and no single built-in one: the person picks, this app left
+                // out, so the sign-in never comes back into the app's own page.
+                tab.intent.data = url
+                startActivity(
+                    Intent.createChooser(tab.intent, null)
+                        .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(this, MainActivity::class.java))),
+                )
+            }
+            Log.i(TAG, "sign-in: Custom Tab opened in ${pick ?: "the browser picked"}; it ends on the page that opens the app")
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, getString(R.string.sign_in_no_browser), Toast.LENGTH_LONG).show()
         }

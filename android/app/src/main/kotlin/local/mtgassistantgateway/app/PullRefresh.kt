@@ -17,7 +17,9 @@ import java.net.URISyntaxException
  * a dedicated header, not Cache-Control, because loadUrl's documentation says WebView may replace
  * its caching headers with its own. A GET of the page's own address: a page drawn from a form's
  * POST is never sent again. Forms, the deck editor, the scanner and the sign-in never offer it: a
- * pull there would throw away what is being typed, edited or scanned. Whether one touch may start a
+ * pull there would throw away what is being typed, edited or scanned. A forum thread is such a page
+ * (its reply box and contest entry are forms), so the forum's own lists offer it and a thread does
+ * not. Whether one touch may start a
  * pull is the page's call (static/topbar.js tells the app at each touch through
  * `MtgNative.pullAllowed`): not while a box or menu is open, not from a part of the page that
  * scrolls on its own, not while scrolled down.
@@ -38,6 +40,9 @@ object PullRefresh {
     )
     private val DECK = Regex("^/decks/\\d+$")
 
+    /** The forum's lists: the front page and a section (/forum/<group>/<section>), never a thread. */
+    private val FORUM = Regex("^/forum(/(?!thread(/|$))[^/]+/[^/]+)?$")
+
     /** Binder › Lists' own pages (lists_page.TABS), never the box addresses under them. */
     private val LIST = Regex("^/lists/(templates|defaults|tags|custom)$")
 
@@ -48,7 +53,7 @@ object PullRefresh {
     fun offered(origin: String, url: String?): Boolean {
         if (!GatewayUrl.isGateway(origin, url)) return false
         val path = pathOf(url!!) ?: return false
-        if (path in PAGES || path == "/forum" || path.startsWith("/forum/")) return true
+        if (path in PAGES || FORUM.matches(path)) return true
         if (LIST.matches(path) || PROFILE.matches(path)) return true
         return DECK_PAGE && DECK.matches(path)
     }

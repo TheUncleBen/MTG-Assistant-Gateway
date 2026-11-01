@@ -44,6 +44,29 @@ object TorchMath {
     }
 
     /**
+     * How wide the dashed box is drawn, as a share of the viewfinder's width, so a card filling it
+     * fills [CARD_SHARE] of the photo's width whatever the screen's shape. The preview covers the
+     * view with the buffer (upright [bufW] x [bufH]) scaled uniformly and centred, so a tall phone
+     * shows less of the photo's width than a Fold's inner screen does, and the box follows. Kept
+     * within 0.3 to 0.9 of the view; null when the sizes are not known yet.
+     */
+    fun guideWidthShare(viewW: Int, viewH: Int, bufW: Int, bufH: Int): Float? {
+        if (viewW <= 0 || viewH <= 0 || bufW <= 0 || bufH <= 0) return null
+        val scale = maxOf(viewW.toFloat() / bufW, viewH.toFloat() / bufH)
+        return (CARD_SHARE * bufW * scale / viewW).coerceIn(0.3f, 0.9f)
+    }
+
+    /**
+     * The card's share of the photo's width when it fills the dashed box, on the app and on the
+     * website alike (scan.js GUIDE_WIDTH, over a viewfinder that shows the whole frame). With a
+     * phone's main camera (about 23 mm equivalent) that is the card about 14 cm, "about 15 cm
+     * (6 in)", from the lens: past the close-focus limit of main lenses such as Samsung's Ultra
+     * models, while the card still spans some 800 px of the 2,048 px shot the panel takes (the
+     * scanner's tests read cards down to a quarter of the photo's width).
+     */
+    const val CARD_SHARE = 0.4f
+
+    /**
      * The dashed guide box as fractions `[x, y, w, h]` of the photo. The preview covers the view
      * with the camera buffer scaled uniformly and centred (centre crop), so a view pixel maps back
      * to the buffer by the inverse of that scale; the photo has the buffer's aspect, so fractions
