@@ -404,10 +404,24 @@ def test_the_deck_page_toolbar_shows_the_size_beside_the_view_with_the_drag_hint
         hint = page.locator(".toolbar .hint")  # the grip icon; the words are its hover text
         drag_words = "Drag a card onto another category to move it; on touch, hold it first."
         assert hint.get_attribute("title") == drag_words
-        view = page.locator(".toolbar #f-view-btn").bounding_box()
-        size = page.locator(".toolbar .cardsize .sizeseg").bounding_box()
-        assert view and size and abs(view["y"] - size["y"]) <= 2, (view, size)
-        assert page.get_by_role("button", name="Select cards").is_visible()
+        if width >= 600:
+            view = page.locator(".toolbar #f-view-btn").bounding_box()
+            size = page.locator(".toolbar .cardsize .sizeseg").bounding_box()
+            assert view and size and abs(view["y"] - size["y"]) <= 2, (view, size)
+            assert page.get_by_role("button", name="Select cards").is_visible()
+        else:
+            # a phone's toolbar is one row (Quick add, View, ⋮; redesign-deck, mockup screen 5):
+            # the View sheet holds the layout with the card size right under it, and Select cards
+            page.locator(".toolbar .viewbtn").click()
+            sheet = page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet")
+            sheet.wait_for(timeout=3000)
+            rows = [
+                t.strip() for t in sheet.locator(".vrow > label:not(.switch), .vrow > .lbl").all_inner_texts()
+            ]
+            assert rows[:2] == ["Layout", "Card size"] and "Select cards" in rows, rows
+            assert sheet.locator(".switch").is_visible()
+            page.keyboard.press("Escape")
+            page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert page.evaluate("() => document.documentElement.scrollWidth") <= width
         # the stack columns follow the card size: at least S 140 / M 170 / L 240 px wide
         if width >= 600:
