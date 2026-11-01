@@ -168,7 +168,7 @@ def _backup_name_refused(server: Server, width: int, theme: str) -> None:
         note = box.locator(".notice.error")
         note.wait_for(timeout=5000)
         assert note.inner_text() == (
-            "'mtg gateway backups' is the name of the gateway's backup folder. Pick another name."
+            "“mtg gateway backups” is the name of the gateway's backup folder. Pick another name."
         )
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, ".mtgbox .notice.error") == []
