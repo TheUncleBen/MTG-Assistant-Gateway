@@ -1488,6 +1488,52 @@ main.wrap.ui-wide{max-width:1200px}
     line-height:1;color:var(--text);flex-basis:auto}
   .ui-table .act.ui-cap{padding:0;background:none}
 }
+/* A row list (Proposals, History, Reports; the 0.7.46 redesign, screen 6): one line per entry at
+   every width. A tick box where the list has one, the title with its facts line (.sub) under it,
+   then the row's one main action as a capsule and its ⋮ together at the end, never on a line of
+   their own. The columns a wide table lined up are the facts line here, so there is no header to
+   fold away (the waiting list keeps its check-every row). */
+.ui-table.ui-rows .tr{grid-template-columns:var(--cols);gap:0 .6rem;padding:.5rem .75rem}
+.ui-table.ui-rows .tr.th{grid-template-columns:var(--cols)}
+.ui-table.ui-rows .title .t{font-weight:600}
+.ui-table.ui-rows .title .t a{font-weight:600}
+.ui-table.ui-rows .sub{display:flex;margin-top:.25rem}
+.ui-table.ui-rows .sub .ui-lbl{height:20px;font-size:.76rem}
+.ui-table.ui-rows .flag{margin-top:.2rem}
+.ui-table.ui-rows .tr .act{display:flex;align-items:center;justify-content:flex-end;gap:.15rem;
+  justify-self:end;margin-right:-8px}
+/* the actions sit on the title's line, whatever the lines under it (a History entry has three):
+   their 44 px boxes centre on the first line, at any text size */
+.ui-table.ui-rows .tr:not(.group) .act{align-self:start;margin-top:calc(.675em - 22px)}
+.ui-table.ui-rows .act .ui-cap{margin:0;white-space:nowrap}
+.ui-table.ui-rows .act .kebab{flex:none}
+.ui-table.ui-rows .act .acts[hidden]{display:none}
+/* a deck's group row: the name with its count under it, Open deck at the end */
+.ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
+.ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
+.ui-table.ui-rows .group .m{display:flex;flex-direction:column;min-width:0}
+.ui-table.ui-rows .group .m small{font-weight:400;color:var(--text-muted);font-size:.86rem}
+.ui-table.ui-rows .group .m a{font-weight:700}
+.ui-table.ui-rows .group .meta{white-space:normal}
+/* a capsule on the group row's darker ground stays visible */
+.ui-table.ui-rows .tr.group .ui-cap{background:var(--surface-3) padding-box}
+@media (max-width:599.98px){
+  .ui-table.ui-rows .tr{padding:.5rem .6rem}
+  .ui-table.ui-rows .tr .act{margin-right:-6px}
+  /* the main action is its chevron: the title keeps its line at any text size */
+  .ui-table.ui-rows .act > .ui-cap{padding:0;margin:0;border:0;background:none}
+  .ui-table.ui-rows .act > .ui-cap:hover{background:var(--surface-2)}
+  .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto}
+  .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
+  /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
+     grows above and below the words without moving the lines around it (F14) */
+  .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
+    margin:-13px 0}
+}
+@media (pointer:coarse){
+  .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
+    margin:-13px 0}
+}
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
 .btn-outline-danger,button.btn-outline-danger{background:transparent;color:var(--danger-text);
@@ -1687,6 +1733,15 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .act-table .evt .en svg.i{width:16px;height:16px;margin-top:.1rem;color:var(--text-muted)}
 """
 CSS += UI_CSS
+
+# The Assistant pages' toolbar on the open Fold (600 to 999 px): the search on a line of its own
+# and the filters sharing the next, so no filter is left alone and stretched across a whole line
+# (C-FINDINGS F13). Each of those pages appends it to its own styles.
+BALANCED_TOOLS_CSS = """
+@media (min-width:600px) and (max-width:999.98px){
+  .ui-tools .search{flex-basis:100%}
+}
+"""
 
 
 # The card menu and the Watch button (static/cardmenu.js): Card search's results, the deck page,

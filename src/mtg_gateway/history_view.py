@@ -15,14 +15,15 @@ from __future__ import annotations
 import calendar
 import re
 import time
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
 from .decks import actor_label
 from .reports_page import source_label_html
+from .theme import BALANCED_TOOLS_CSS, icon, time_html
 from .theme import esc as _esc
-from .theme import icon, time_html
 
 PAGE = ui.PER_PAGE
 MAX_OFFSET = 2000
@@ -44,9 +45,22 @@ WHENS = (
 WHEN_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
 GROUPS = (("day", "Group by day"), ("deck", "Group by deck"))
 DEFAULTS = {"type": "all", "group": "day"}
+# plain words: the Proposals tab is in the switch right above (C-FINDINGS F13)
 PAGE_SUB_TEXT = (
-    "Your decks' timeline: the changes applied to them, their snapshots and their tests. Changes waiting "
-    "for you are on"
+    "Your decks' timeline: the changes applied to them, their snapshots and their tests. Changes still "
+    "waiting for you are under Proposals."
+)
+# a snapshot's Details: one explanation, then its buttons in one row
+SNAPSHOT_WORDS = (
+    "Restore makes a proposal that puts the deck back to this snapshot; you review and confirm it "
+    "before anything changes on Archidekt. Test this version plays the deck as this snapshot recorded "
+    "it; the test is filed under the deck, and nothing changes on Archidekt."
+)
+GONE_DECK_WORDS = (
+    "This deck is no longer on your Archidekt account (deleted there?), so the snapshot cannot be "
+    "restored onto it. Make a new deck from this proposes a new deck with the snapshot's name, format, "
+    "cards and categories; you review and apply it before anything is made on Archidekt. Test this "
+    "version plays the deck as this snapshot recorded it; nothing changes on Archidekt."
 )
 NO_WHO = "Snapshots do not record who made them"
 NOTHING_YET = (
@@ -160,14 +174,10 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
         + " · "
         + ui.cap_link("Proposal", f"/proposals/{p['id']}")
     )
-    details = (
-        (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
-        + "<div class='ui-actions'>"
-        + ui.button_link("Open the review page", f"/proposals/{p['id']}")
-        + "</div>"
-    )
+    details = f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else ""
     return {
         "key": f"p-{p['id']}",
+        "panel_actions": [ui.button_link("Open the review page", f"/proposals/{p['id']}")],
         "ts": int(p.get("applied_at") or p.get("created_at") or 0),
         "kind": "change",
         "deck_id": p.get("deck_id"),
@@ -220,13 +230,7 @@ def build_events(
         when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
         line = f"{when} · " + ui.cap_link("Proposal", f"/proposals/{p['id']}")
         diff = str(p.get("diff_text") or "")
-        details = (
-            f"<p>{when}.</p>"
-            + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
-            + "<div class='ui-actions'>"
-            + ui.button_link("Open the review page", f"/proposals/{p['id']}")
-            + "</div>"
-        )
+        details = f"<p>{when}.</p>" + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
         events.append(
             {
                 "key": f"p-{p['id']}",
@@ -240,6 +244,7 @@ def build_events(
                 "who": True,
                 "action": "",
                 "details": details,
+                "panel_actions": [ui.button_link("Open the review page", f"/proposals/{p['id']}")],
             }
         )
     for x in snapshots:
@@ -283,10 +288,6 @@ def build_events(
             + "<button type='submit' class='btn-plain' data-busy-label='Testing…'>Test this version</button>"
             "</form>"
         )
-        tested = (
-            "<p>Test this version plays the deck as this snapshot recorded it. The test is filed under the "
-            f"deck; nothing changes on Archidekt.</p><div class='ui-actions'>{test_form}</div>"
-        )
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
             # The way back is a new deck made from the snapshot, reviewed like any new deck.
@@ -297,20 +298,10 @@ def build_events(
                 + "<button type='submit' class='btn-plain' data-busy-label='Proposing…'>"
                 "Make a new deck from this</button></form>"
             )
-            restore = (
-                "<p>This deck is no longer on your Archidekt account (deleted there?), so the snapshot "
-                "cannot be restored onto it. <strong>Make a new deck from this</strong> proposes a new "
-                "deck with the snapshot's name, format, cards and categories; you review and apply it "
-                "before anything is made on Archidekt.</p>"
-                f"<div class='ui-actions'>{new_deck_form}</div>"
-            )
+            restore = f"<p>{_esc(GONE_DECK_WORDS)}</p>"
             action = new_deck_form
         else:
-            restore = (
-                "<p>Restoring makes a proposal that puts the deck back to this snapshot; you review and "
-                "confirm it before anything changes on Archidekt.</p>"
-                f"<div class='ui-actions'>{restore_form}</div>"
-            )
+            restore = f"<p>{_esc(SNAPSHOT_WORDS)}</p>"
             action = restore_form
         backup = ""
         if x.get("backup_gone"):
@@ -343,8 +334,9 @@ def build_events(
                 "line": " · ".join(bits),
                 "app": None,
                 "who": False,
-                "action": action,
-                "details": link + backup + restore + tested,
+                "action": action + test_form,  # out of sight in the row; the ⋮ sends them
+                "details": link + backup + restore,
+                "panel_actions": [action, test_form],
             }
         )
     for r in reports:
@@ -440,16 +432,19 @@ def _day_label(day: str, today: str, yesterday: str) -> str:
     return time.strftime("%A %d %B %Y", t).replace(" 0", " ")
 
 
-COLS = ("8rem minmax(0,1fr) 4rem 6.5rem 17rem", "minmax(0,1fr) auto", "minmax(0,1fr) 44px")
+# one line per entry at every width (ui-rows): the deck and what, then the main action and the ⋮
+COLS = ("minmax(0,1fr) auto",) * 3
 
 
 def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
+    """One entry: the deck's name opens the entry (its Details, or a test's report), the line
+    under it says what it is, the facts line its type, who and when; then Details (or Open
+    report) as a capsule and the ⋮. The deck's own page is in the ⋮ and in the Details (F14).
+    A snapshot's Restore (or Make a new deck from this) is in the ⋮ and in its Details; the form
+    stays in the row, out of sight, for the menu to send."""
     name = _esc(e["deck_name"])
-    deck = (
-        f"<a class='t' href='/decks/{_esc(e['deck_id'])}'>{name}</a>"
-        if e.get("deck_id")
-        else f"<span class='t'>{name}</span>"
-    )
+    href = e.get("href") or "/history" + query_string(query, open=e["key"])
+    word = "Open report" if e.get("href") else "Details"
     who = (
         _chip(e)
         if e["who"]
@@ -457,20 +452,17 @@ def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
         f"<span class='sr-only'>{_esc(NO_WHO)}</span></span>"
     )
     when = ui.when(e["ts"], now=now)
-    details = "/history" + query_string(query, open=e["key"])
-    acts = e.get("action") or ""
-    if e["kind"] != "report":
-        acts += f"<a class='btn btn-plain' href='{_esc(details)}'>Details</a>"
-    chev_href = e.get("href") or details
-    chev_text = "Open report" if e.get("href") else "Details"
     cls = "tr" + (" open" if query.get("open") == e["key"] else "")
+    deck = f" data-deck='{_esc(e['deck_id'])}'" if e.get("deck_id") else ""
+    label = f"{KIND_LABELS[e['kind']][0]}: {e['deck_name']}"
+    acts = ui.row_actions(
+        ui.row_open(href, word), ui.row_menu(href, label), hidden_html=e.get("action") or ""
+    )
     return (
-        f"<div class='{cls}'><span class='md-hide'>{_type_html(e)}</span>"
-        f"<span class='title'>{deck}<span class='deck'>{e['line']}</span>"
-        f"<span class='sub'>{_type_html(e)}{_chip(e) if e['who'] else ''}{when}</span></span>"
-        f"<span class='md-hide'>{who}</span><span class='md-hide'>{when}</span>"
-        f"<span class='act'><span class='sm-hide acts'>{acts}</span>"
-        f"<a class='sm-only chev' href='{_esc(chev_href)}' aria-label='{chev_text}'>›</a></span></div>"
+        f"<div class='{cls}'{deck}>"
+        f"<span class='title'><a class='t' href='{_esc(href)}'>{name}</a>"
+        f"<span class='deck'>{e['line']}</span>"
+        f"<span class='sub'>{_type_html(e)}{who}{when}</span></span>{acts}</div>"
     )
 
 
@@ -487,19 +479,7 @@ def events_html(
     newest entry and each deck's rows newest first."""
     query = query or {}
     now = int(time.time()) if now is None else now
-    sort = f"<span class='hy-sort'>When {icon('sort')}</span>"
-    out = [
-        ui.table_open(*COLS, cls="hy-table", label="History"),
-        ui.table_header(
-            [
-                ui.Column("Type", "md-hide"),
-                ui.Column("Deck and what"),
-                ui.Column("By", "md-hide"),
-                ui.Column("When", "md-hide", html=sort),
-                ui.Column(""),
-            ]
-        ),
-    ]
+    out = [ui.table_open(*COLS, cls="hy-table ui-rows", label="History")]
     if group == "deck":
         order: list[str] = []
         by_deck: dict[str, list[dict[str, Any]]] = {}
@@ -518,10 +498,11 @@ def events_html(
             extra = ""
             if deck_id and not query.get("deck_id"):
                 own = query_string({**query, "offset": 0, "open": ""}, deck_id=str(deck_id))
-                extra = " · " + ui.cap_link("Only this deck", f"/history{own}")
+                extra = ui.cap_link("Only this deck", f"/history{own}")
             out.append(
-                f"<div class='tr group hy-group'><span>{heading}</span>"
-                f"<span class='meta'>{n} {'entry' if n == 1 else 'entries'}{extra}</span></div>"
+                f"<div class='tr group hy-group nochk'><span class='m'>{heading}"
+                f"<small>{n} {'entry' if n == 1 else 'entries'}</small></span>"
+                f"<span class='act'>{extra}</span></div>"
             )
             out += [_row_html(e, query, now=now) for e in rows]
     else:
@@ -578,10 +559,15 @@ def delete_box_html(
     return opener, box
 
 
-def details_panel(e: dict[str, Any], query: dict[str, Any], *, extra_html: str = "") -> str:
-    """One row's Details: beside the list from 1100 px, its own page below that. ``extra_html``
-    (a Delete opener and its box) goes under the row's own actions."""
+def details_panel(
+    e: dict[str, Any], query: dict[str, Any], *, extra_html: str = "", extra_actions: Sequence[str] = ()
+) -> str:
+    """One row's Details: beside the list from 1100 px, its own page below that. Its buttons
+    (Restore or Make a new deck from this, Test this version, then ``extra_actions``: Delete…)
+    are one row under the words; ``extra_html`` (the Delete box) follows."""
     word = KIND_LABELS[e["kind"]][0]
+    actions = [*e.get("panel_actions", ()), *extra_actions]
+    acts = f"<div class='ui-actions'>{''.join(actions)}</div>" if actions else ""
     body = (
         f"<div class='pills'>{_type_html(e)}</div>"
         f"<p class='ui-why'>{e['line']}</p>"
@@ -595,6 +581,7 @@ def details_panel(e: dict[str, Any], query: dict[str, Any], *, extra_html: str =
             ]
         )
         + e["details"]
+        + acts
         + extra_html
     )
     return ui.side_panel(
@@ -909,13 +896,11 @@ HISTORY_CSS_C = ""
 HISTORY_CSS = (
     """
 /* History (UI standard): the shared table, widgets and side panel are theme.UI_CSS */
-.hy-table .act .acts form{display:contents}
-.hy-table .act .acts .btn,.hy-table .act .acts button{margin:0}
 .hy-table .title .deck a{font-weight:400}
-.hy-table .group.hy-group{grid-template-columns:minmax(0,1fr) auto}
 .hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}
-.hy-table .th .hy-sort{display:inline-flex;align-items:center;gap:.2rem}
-.hy-table .th .hy-sort svg.i{width:14px;height:14px}
+/* the Details' buttons: one row, each form inline */
+.ui-drawer .ui-actions form{display:contents}
+.ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{margin:0}
 .hy-copies .act .btn{display:inline-flex;align-items:center;gap:.35rem;margin:0}
 .hy-copies .act .chev svg.i{width:20px;height:20px}
 h2.hy-backups{font-size:1.2rem}
@@ -950,6 +935,7 @@ h2.hy-backups{font-size:1.2rem}
 """
     + HISTORY_CSS_A
     + HISTORY_CSS_C
+    + BALANCED_TOOLS_CSS
 )
 
 __all__ = [
