@@ -321,6 +321,16 @@ def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> Non
         for path in pages:
             _goto(server, page, path)
             problems += [f"{path}: {f}" for f in page.evaluate(TARGETS)]
+            # a drop-down whose items a script writes on its first opening (the editor's row
+            # menu) is opened once by a tap, so the sweep measures its items too
+            opened: set[str] = set()
+            for summary in page.locator("details.dd:not(.more) > summary:visible").all():
+                kind = summary.evaluate("s => s.parentElement.className")
+                if kind in opened:
+                    continue
+                opened.add(kind)
+                summary.click()
+                page.wait_for_timeout(100)
             kebab = page.locator(".kebab").first
             if kebab.count() and kebab.is_visible() and not page.locator(".mtgbox-scrim.in").count():
                 before = page.url
@@ -335,7 +345,9 @@ def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> Non
                         problems.append(f"{path}: the first ⋮ opened no menu")
                     # else the row's ⋮ is its link to the row's own page (admin's card models)
             problems += [f"{path}: {f}" for f in page.evaluate(MENU_ITEMS)]
-            page.keyboard.press("Escape")
+            page.keyboard.press("Escape")  # a phone's sheet closes through the history it pushed
+            page.wait_for_function("() => !document.querySelector('.ctxmenu')")
+            page.wait_for_load_state("networkidle")
         browser.close()
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 60 else ""
