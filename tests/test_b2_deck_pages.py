@@ -20,7 +20,9 @@ async def test_the_deck_page_holds_its_boxes_and_one_orange_button(stack: Stack)
     b = await linked_browser(stack)
     try:
         page = (await b.http.get(DECK, headers=NAV)).text
-        assert page.count("btn-primary") == 1 and "Edit deck</a>" in page
+        # the button says Edit deck, and Edit on a phone (the redesigned phone top, mockup screen 5)
+        edit = "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></a>"
+        assert page.count("btn-primary") == 1 and edit in page
         assert "class='btn' data-box-open='clone'" in page and "form='clonef'" in page
         assert "data-deck-name='Sample Commander Deck'" in page and "data-own='1'" in page
         assert "details class='dd deckmore'" in page

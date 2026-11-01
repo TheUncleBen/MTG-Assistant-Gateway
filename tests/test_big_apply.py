@@ -181,7 +181,11 @@ async def test_an_edit_to_a_deck_still_being_made_is_refused_with_its_progress(
         assert f"data-made-poll='/decks/{deck_id}/made'" in notice
         # the edit controls are off meanwhile: Edit deck, Quick add, Add a package, the rows' edits
         assert f"href='/decks/{deck_id}/edit'" not in text
-        assert re.search(r"<button[^>]*disabled[^>]*>[^<]*<svg[^>]*>.*?</svg> Edit deck</button>", text)
+        assert re.search(
+            r"<button[^>]*btn-primary[^>]*disabled[^>]*>[^<]*<svg[^>]*>.*?</svg> "
+            r"<span class='lg'>Edit deck</span><span class='sm'>Edit</span></button>",
+            text,
+        )
         assert re.search(r"<input id='quick'[^>]* disabled", text)
         assert "class='btn addpkg' aria-disabled='true'" in text
         assert "data-own='1'" not in text.split("class='deckview", 1)[1].split(">", 1)[0]
