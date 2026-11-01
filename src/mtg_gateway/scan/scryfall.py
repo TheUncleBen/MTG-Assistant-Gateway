@@ -254,6 +254,29 @@ def _retry_after(value: str | None, default: float = 5.0, cap: float = 120.0) ->
         return default
 
 
+def _collection_key(ident: dict[str, Any]) -> str:
+    """The ``cards`` cache key of a /cards/collection identifier (its letter case aside)."""
+    asked = {str(k): str(v).strip().lower() for k, v in collection_ident(ident).items()}
+    return "coll:" + json.dumps(asked, sort_keys=True)
+
+
+def _answers(card: dict[str, Any], ident: dict[str, Any]) -> bool:
+    """Whether ``card`` is the one ``ident`` asks for (its id, its set and number, or its name, a
+    two-part card's front face too, in the set given)."""
+    if ident.get("id"):
+        return str(card.get("id") or "") == str(ident["id"])
+    if ident.get("set") and str(card.get("set") or "").lower() != str(ident["set"]).strip().lower():
+        return False
+    if ident.get("collector_number"):
+        return (
+            str(card.get("collector_number") or "").lower() == str(ident["collector_number"]).strip().lower()
+        )
+    want = re.sub(r"[^a-z0-9]", "", str(ident.get("name") or "").lower())
+    names = [str(card.get("name") or "")] + [str(f.get("name") or "") for f in card.get("card_faces") or []]
+    names.append(names[0].split(" // ")[0])
+    return bool(want) and any(re.sub(r"[^a-z0-9]", "", n.lower()) == want for n in names)
+
+
 class _Cache:
     def __init__(self, ttl: float, max_items: int):
         self.ttl = ttl
@@ -705,11 +728,48 @@ class ScryfallClient:
         return out[:limit]
 
     async def collection(
+        self, identifiers: list[dict[str, str]], *, interval: float | None = None, cached: bool = False
+    ) -> tuple[list[dict[str, Any]], list[dict]]:
+        """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers), the
+        cards in the identifiers' order. ``interval`` spaces the requests further apart than the
+        batch pacer (the daily price check uses the single-lookup pace: it is in no hurry).
+
+        ``cached`` (the card resolver: resolve_cards, save_scan_session, a card's printings by
+        name): an identifier answered in the last day is answered again from ``cards``, slimmed
+        as ``named`` keeps its cards (prices up to a day old, as there), and only the others are
+        asked, 75 a request. Never for prices or a legality check, which want the card now."""
+        if not cached:
+            return await self._collection(identifiers, interval=interval)
+        keys = [_collection_key(ident) for ident in identifiers]
+        held: dict[int, dict[str, Any]] = {}
+        for n, key in enumerate(keys):
+            if (hit := self.cards.get(key)) is not None:
+                held[n] = hit
+        ask = [n for n in range(len(identifiers)) if n not in held]
+        got: dict[int, dict[str, Any]] = {}
+        missing: list[dict[str, Any]] = []
+        for i in range(0, len(ask), COLLECTION_MAX):
+            part = ask[i : i + COLLECTION_MAX]
+            found, lost = await self._collection([identifiers[n] for n in part], interval=interval)
+            missing += lost
+            # Scryfall answers in the identifiers' order with the ones it did not find left out
+            lost_keys = {_collection_key(m) for m in lost}
+            cards = iter(found)
+            for n in part:
+                if keys[n] in lost_keys:
+                    continue
+                card = next(cards, None)
+                if card is None:
+                    break
+                got[n] = card
+                if _answers(card, identifiers[n]):  # never kept under another card's identifier
+                    self.cards.put(keys[n], slim(card))
+        out = [held.get(n) or got[n] for n in range(len(identifiers)) if n in held or n in got]
+        return out, missing
+
+    async def _collection(
         self, identifiers: list[dict[str, str]], *, interval: float | None = None
     ) -> tuple[list[dict[str, Any]], list[dict]]:
-        """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers).
-        ``interval`` spaces the requests further apart than the batch pacer (the daily price
-        check uses the single-lookup pace: it is in no hurry)."""
         found: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for i in range(0, len(identifiers), COLLECTION_MAX):
