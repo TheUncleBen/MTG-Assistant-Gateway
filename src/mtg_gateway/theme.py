@@ -1891,6 +1891,9 @@ CARD_MENU_CSS = """
   .wbtn.icon{width:44px}
   .suggest-list li.watchable{padding-right:4rem}
   .ctxmenu a,.ctxmenu button,.ctxmenu .item{min-height:44px}
+  /* every menu's items (the top bar's, a row's ⋮, More, the sort menus): finger-sized */
+  .menu a,.menu button,.menu .item,details.dd .menu a,details.dd .menu button,details.dd .menu .item{
+    min-height:44px}
 }
 /* a row without an icon keeps an empty slot the icon's width, so every row's text lines up */
 .ctxmenu .ic-slot{display:inline-block;width:18px;height:18px;flex:none}

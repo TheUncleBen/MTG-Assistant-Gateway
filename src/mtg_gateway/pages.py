@@ -3548,7 +3548,7 @@ def _proposal_body(
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to Archidekt?</h3>"
                 f"<p>Apply writes these changes to {where} on Archidekt, with a snapshot kept first so "
-                "Undo can put it back. <a href='/guide#how-approve'>How it works</a></p>"
+                "Undo can put it back. <a class='tap' href='/guide#how-approve'>How it works</a></p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-primary")
         if p.get("try_again"):  # Archidekt didn't answer the last apply; nothing changed
