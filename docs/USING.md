@@ -215,7 +215,7 @@ One deck:
   only across reports run the same way (Commander or 60-card game, same last
   turn), and the table of numbers shows each report's settings.
 - **Compare with another deck…** (More menu) pits the deck against a
-  preconstructed deck (pick one from Archidekt's list), any deck id or
+  preconstructed deck (pick one from Archidekt's list), any deck ID or
   link, or a pasted list: what the build took out of the other deck, what
   it put in, changed counts, basic lands, and the statistics' differences.
   Tap a card name for the whole card. Your own decks and this deck's
@@ -316,12 +316,14 @@ build.
 recognition runs on the phone; the card is then matched on Scryfall through
 the gateway.
 
-1. **Camera.** Hold a card in the frame with its title in the dashed box
-   and tap the shutter, or switch on **Auto** and show cards one after
+1. **Camera.** Hold a card in the frame, about 15 cm (6 in) away, with its
+   title in the dashed box and tap the shutter, or switch on **Auto** and show cards one after
    another: sure matches are added on their own (with Undo), doubtful ones
    wait for your tap. A running count of the scan shows in the corner of
    the viewfinder. In the Android app the shutter and **Auto** use the
-   phone's own camera.
+   phone's own camera; when a shot finds no card, **Save this photo** keeps
+   it in the phone's Pictures › MTG Gateway, to send to whoever runs your
+   gateway so they can see why.
 2. **Check the list.** Fix a wrong match from the suggestions, pick the
    exact printing or foil, adjust quantities. Cards the camera could not
    read are kept with a picture of the title so you can type them.

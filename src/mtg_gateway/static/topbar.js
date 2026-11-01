@@ -117,7 +117,9 @@
    page's layout, so the page says, at each touch, whether that touch may start a pull: not while
    the page is scrolled, not while a box, sheet, viewer or menu is open, not from a part of the page
    that scrolls on its own (the deck editor's panes, a printings sheet, a strip of chips), and not
-   from a text field. The app keeps the answer only until the next touch. */
+   from a text field, and not while a box on the page holds words the member typed and has not sent
+   (a pull loads the page again, which would throw them away). The app keeps the answer only until
+   the next touch. */
 (function () {
   "use strict";
   var app = window.MtgNative;
@@ -137,8 +139,25 @@
     return !!document.querySelector(
       "dialog[open], .ctxmenu, details.dd[open], .msel-list:not([hidden]), .suggest-list:not([hidden])");
   }
+  // Boxes the member typed in: only typing marks one (a page script that fills a box fires no
+  // input event), and sending its form, or typing it back to what the page came with, clears it.
+  var typed = [];
+  document.addEventListener("input", function (e) {
+    var el = e.target;
+    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT") && typed.indexOf(el) < 0) typed.push(el);
+  }, true);
+  document.addEventListener("submit", function (e) {
+    typed = typed.filter(function (el) { return el.form !== e.target; });
+  }, true);
+  function unsent() {
+    typed = typed.filter(function (el) { return el.isConnected; });
+    return typed.some(function (el) {
+      if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+      return el.value !== el.defaultValue;
+    });
+  }
   function mayPull(target) {
-    if (window.scrollY > 0 || boxOpen()) return false;
+    if (window.scrollY > 0 || boxOpen() || unsent()) return false;
     var el = target && target.nodeType === 1 ? target : null;
     if (el && el.closest("input, textarea, select, [contenteditable=''], [contenteditable=true]")) return false;
     return !scrollsItself(el);

@@ -267,7 +267,12 @@ Portainer and Docker pull them without a registry login or a GitHub token:
 - `ghcr.io/theuncleben/mtg-assistant-forge` (on by default; not pulled if you turn Forge off)
 
 The stack's ntfy server is the official `binwiederhier/ntfy` image from
-Docker Hub, pinned in the stack file.
+Docker Hub, pinned in the stack file by its tag and its digest: it is someone
+else's image, and the digest makes sure a moved tag can never change what runs.
+The three images above are this project's own, published by its release
+workflow under a version tag that only a deliberate rebuild publishes again, so the stack
+names them by tag (the gateway's `MTG_TAG`, `latest` by default, follows each
+release).
 
 Updating later is in [UPGRADING.md](UPGRADING.md).
 
@@ -329,7 +334,7 @@ name and tag: a version's tag exists only once its release is published
 
 ### Updating
 
-Every update, and the extra steps some versions need (0.7.30 among them), is in
+Every update, and the extra steps an update from an older version needs, is in
 [UPGRADING.md](UPGRADING.md).
 
 ### Without Portainer
@@ -347,8 +352,8 @@ docker stack deploy -c deploy/portainer-stack.yml mtg
 To update later, follow [UPGRADING.md](UPGRADING.md), which ends with the last two lines
 again.
 
-The gateway is one Python process. In the end-to-end test (amd64, idle after
-a few sign-ins) it sat at about 60 MB. The stack caps it at
+The gateway is one Python process. After the whole end-to-end test suite
+(amd64) it used about 82 MB ([HARDWARE.md](HARDWARE.md#measured-use)). The stack caps it at
 `MTG_MEMORY_LIMIT` (default 256 MB).
 
 If the gateway's logs say `configuration error: MTG_REQUIRED_GROUP is empty`,
@@ -541,7 +546,7 @@ Upstream code is unchanged apart from fourteen patches in
   `"categories": null` for cards that never got a category (it happens in
   some imported decks). Without the patch, Mystic Forge's Archidekt readers
   (`archidekt_deck`, `archidekt_export`, `validate_archidekt_deck`, and
-  `goldfish_run` given a deck id) crash on those decks. Since 0.7.2 those
+  `goldfish_run` given a deck ID) crash on those decks. Those
   tools are hidden behind the gateway's own (`get_deck`, `deck_stats`,
   `run_deck_report`), which read Archidekt themselves, but the patch still
   matters for a `deck` argument given as an Archidekt link. It fills in the
@@ -756,7 +761,7 @@ is its only user: it publishes each member's messages, with the `mtg_ntfy_token`
 member's own topic (`mtg-`, 16 random characters and a 6-character mark made with a key kept in the
 gateway's database), and ntfy refuses everything else. The gateway refuses an app connection whose
 topic has no valid mark, and at every start it gives a new topic to each member whose topic has none
-(after the update to 0.7.30, and after a rollback and a new update). The key is not one of the
+(one an older version made, for example after a rollback and a new update). The key is not one of the
 stack's secrets, so changing a secret doesn't disconnect any phone from its push notifications. Debug
 logs show a topic only as `mtg-…`. The app
 holds one long request open to the gateway's own address (`/app/notifications/stream`), and the
@@ -793,7 +798,7 @@ yet picked up.
 
 ### Archidekt alerts on members' phones
 
-Archidekt has no push or webhooks, so the gateway asks it (from 0.7.46, no setting to add). Every
+Archidekt has no push or webhooks, so the gateway asks it (no setting to add). Every
 15 minutes it reads the alert count of each member whose push notifications are on, who left **A new
 alert on Archidekt** ticked (the default) and whose phone is connected now or was in the last 12
 hours (the time ntfy keeps a message). That is one request per member a round, plus one read of the
@@ -879,7 +884,7 @@ Settings page row, which then shows it is set in your stack.
 | `MTG_CIMD_ALLOWED_HOSTS` | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
 | `MTG_ACCESS_TOKEN_TTL` | empty (the Settings page: 1 hour) | Assistant access token lifetime, seconds (60 to 86400). Usually set on the Settings page instead (**Sign-in → Assistant access**); a value here locks that row |
 | `MTG_REFRESH_TOKEN_TTL` | empty (the Settings page: 30 days) | Assistant refresh token lifetime, seconds (3600 to 31536000), counted from the assistant's sign-in: after it the member connects the assistant again. Group membership doesn't wait for this: it is checked live. Usually set on the Settings page instead (**Sign-in → Assistant refresh**); a value here locks that row |
-| `MTG_BROWSER_SESSION_TTL` | empty (the Settings page: 7 days) | How long a sign-in in a browser or the Android app lasts while it is not used, seconds (300 to 2592000). Using the gateway renews it, at most once per half of this time. Whatever the use, a sign-in ends after the Settings page's **Longest website sign-in** (30 days by default; it has no stack variable). Usually set on the Settings page instead (**Sign-in → Website sign-in when unused**); a value here locks that row. Before 0.7.46 this was the whole lifetime (2 hours by default): a stack file that still sets `7200` keeps sign-ins to 2 hours unused |
+| `MTG_BROWSER_SESSION_TTL` | empty (the Settings page: 7 days) | How long a sign-in in a browser or the Android app lasts while it is not used, seconds (300 to 2592000). Using the gateway renews it, at most once per half of this time. Whatever the use, a sign-in ends after the Settings page's **Longest website sign-in** (30 days by default; it has no stack variable). Usually set on the Settings page instead (**Sign-in → Website sign-in when unused**); a value here locks that row. A `7200` left from an older example file keeps sign-ins to 2 hours unused ([UPGRADING.md](UPGRADING.md#coming-from-an-older-version)) |
 | `MTG_MEMBERSHIP_CHECK_TTL` | `5` | Seconds a group-membership answer from the identity provider is reused. After that, a read is answered at once and the provider asked in the background, so the first one after a pause never waits: a page being read (outside `/admin` and `/api/v1/admin`), or an assistant's call of a tool marked read only (reading, proposing, amending, withdrawing, combining). Changes, applies (`apply_proposal` and every tool not marked read only), admin pages and the admin API wait for the answer, so a removed member is refused on their next one and can read only for the moment the background check takes. `0` makes every request wait for the provider's answer; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
 | `MTG_ALLOW_ANY_IDP_USER` | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
 

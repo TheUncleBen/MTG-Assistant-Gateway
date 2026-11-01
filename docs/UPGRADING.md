@@ -219,6 +219,21 @@ reach past the stack, so if your old version is older than the one named, also:
 - **0.7.45 or older:** delete the `MTG_REAUTH_INTERVAL` line from your variables; it does nothing
   now. Assistants connect again when the Settings page's **Assistant refresh** time (30 days by
   default) has passed since they signed in, not after a week. To keep a week, set that row to 7 days.
+- **0.7.45 or older:** a few steps for your members, which you may want to pass on:
+  - **Update the Android app** from inside the app (it offers the update) after the gateway
+    update. Auto opening the phone's camera already scanning, pull to refresh, push notifications
+    that come back after the phone's deep sleep, picking several files, HEIC photos and saving a
+    photo the scanner couldn't read need the 0.7.46 app.
+  - **Samsung phones:** add MTG Assistant Gateway to **Never sleeping apps** (Settings › Battery ›
+    Background usage limits), or Samsung's battery saving can stop push notifications. The Push
+    notifications page under Account details says this too.
+  - **ChatGPT:** paste the instructions block from the gateway's ChatGPT setup page again, over
+    the old one.
+  - **Scripts that call the gateway's tools:** the seven account-action tools
+    `propose_deck_social`, `propose_comment`, `propose_create_folder`, `propose_collaborator`,
+    `propose_deck_help`, `propose_report` and `propose_contest_entry` are now one tool,
+    `propose_account_action`; a script that calls the old names must switch. Assistants pick up
+    the new tool by themselves.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.
@@ -252,7 +267,7 @@ themselves: the 21 settings `MTG_AUTO_BIG_EDIT_ROWS`, `MTG_PROPOSAL_EXPIRY_DAYS`
 `MTG_ARCHIDEKT_BACKUP_COPIES`, `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT`, `MTG_SNAPSHOTS_PER_DECK`,
 `MTG_FORGE_PARALLEL_GAMES` and the 15 `MTG_SCAN_*` settings, and also `MTG_ANDROID_PACKAGE`,
 `MTG_ANDROID_ASSETLINKS`, `MTG_PLUGIN_DIR`, `MTG_APP_DIR`, `FORGE_MAX_METASPACE` and
-`FORGE_OOM_SCORE_ADJ`. The Compose file passes `MTG_ARCHIDEKT_BASE` too. Before 0.7.32 the guides
+`FORGE_OOM_SCORE_ADJ`. The Compose file of that version passed `MTG_ARCHIDEKT_BASE` too. Before 0.7.32 the guides
 said to add a line under `environment:` in the stack file for these.
 
 1. When you make your own edits again in the new file (the update steps above), **don't copy a

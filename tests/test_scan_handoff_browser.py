@@ -207,7 +207,7 @@ def test_the_app_answers_the_photo_on_either_webview_path() -> None:
     assert '"photo-direct" ->' in panel and "host.photoDirect(seq)" in panel
     lost = (
         "ShotLine.Outcome.PhotoLost -> "
-        + "pageDone(activity.getString(R.string.scan_photo_lost), stopAuto = true)"
+        + "pageDone(activity.getString(R.string.scan_photo_lost), stopAuto = true, missed = true)"
     )
     assert lost in panel
     strings = (APP.parents[3] / "res" / "values" / "strings.xml").read_text(encoding="utf-8")

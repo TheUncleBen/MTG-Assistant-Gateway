@@ -15,7 +15,7 @@ class PullRefreshTest {
         for (path in listOf(
             "/", "/decks", "/decks?folder=Commander", "/collection", "/collection/wants", "/watchlist",
             "/proposals", "/history", "/reports", "/notifications", "/precons", "/cards?q=sol+ring",
-            "/search?q=meren", "/forum", "/forum/general/rules", "/activity", "/decks/",
+            "/search?q=meren", "/forum", "/forum/general/rules", "/forum/threads/all", "/activity", "/decks/",
             "/collection/lists", "/lists/templates", "/lists/defaults?page=2", "/lists/tags",
             "/lists/custom?q=elf", "/users/alice", "/users/Some%20One?order=name",
         )) {
@@ -28,12 +28,15 @@ class PullRefreshTest {
         assertEquals(PullRefresh.DECK_PAGE, PullRefresh.offered(origin, "$origin/decks/12345/"))
     }
 
-    @Test fun formsTheEditorAndTheScannerNeverOfferIt() {
+    @Test fun formsTheEditorTheScannerAndAThreadNeverOfferIt() {
         for (path in listOf(
             "/decks/12345/edit", "/decks/12345/settings", "/decks/12345/goldfish", "/decks/new",
             "/decks/new-package", "/scan", "/scan/sessions", "/account", "/account/details",
             "/admin/settings", "/login", "/install?for=android", "/guide", "/lists/templates/new",
             "/lists/custom/picture", "/users/alice/decks", "/users",
+            // a forum thread: its reply box and contest entry are forms
+            "/forum/thread/123", "/forum/thread/123/", "/forum/thread/123/enter", "/forum/thread?thread=123",
+            "/forum/general/rules/more",
         )) {
             assertFalse(path, PullRefresh.offered(origin, "$origin$path"))
         }

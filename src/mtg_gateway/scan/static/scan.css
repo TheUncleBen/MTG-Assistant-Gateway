@@ -170,12 +170,12 @@ body.picker-open{overflow:hidden}
   aspect-ratio:3/4;max-height:54vh;width:min(100%,calc(54vh * 3 / 4));margin:0 auto}
 .scan .camera video{width:100%;height:100%;object-fit:cover;display:block}
 /* once there is a match to confirm, the preview gives up room so the result shows above the controls.
-   Shrinking by width keeps the 3:4 box and the guide's 50% width (GUIDE_WIDTH), which scan.js relies on for the crop
+   Shrinking by width keeps the 3:4 box and the guide's 40% width (GUIDE_WIDTH), which scan.js relies on for the crop
    (and keeps the guide's card name box inside the preview). */
 .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
 .scan .cam-panel.has-result .cam-hint{display:none}
 .scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:50%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
+  width:40%;aspect-ratio:63/88;border:2px solid var(--navbar-text);border-radius:4.5%/3.3%;
   box-shadow:0 0 0 999px var(--scrim);pointer-events:none}
 .scan .camera .guide::before,.scan .camera .guide::after{content:"";position:absolute;width:14%;height:10%;
   border:3px solid var(--orange);pointer-events:none}

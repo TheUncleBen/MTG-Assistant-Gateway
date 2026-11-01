@@ -105,7 +105,12 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
-    lint { abortOnError = false }
+    // A lint error fails the build (CI's android-check runs lintPlainDebug on every pull request
+    // that changes android/); warnings are reported, not fatal.
+    lint {
+        abortOnError = true
+        textReport = true // build/reports/lint-results-<variant>.txt, which CI prints when lint fails
+    }
 }
 
 dependencies {
