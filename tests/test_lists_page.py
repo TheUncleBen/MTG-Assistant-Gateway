@@ -469,7 +469,7 @@ async def test_the_account_page_links_to_my_lists_and_more_does_not(member: Brow
     # the Account page's panel, with the counts of the tabs read so far
     account_lists.forget_counts("user-1")  # as before any tab was opened
     acc = (await member.http.get("/account/details")).text
-    assert "<h2>Your Archidekt lists</h2>" in acc
+    assert "<span class='lbl'>Your Archidekt lists</span>" in acc  # a row that folds open
     assert "Lists that shape every deck, kept on Archidekt:" in acc
     assert "<a class='ui-cap' href='/lists/templates'>category templates</a>" in acc  # not read yet: no count
     assert "<a class='btn' href='/lists'>" in acc and "Open My lists</a>" in acc

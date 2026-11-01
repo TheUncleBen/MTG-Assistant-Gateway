@@ -2324,7 +2324,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "<p>Link your Archidekt account to see it here. Your cards stay on Archidekt (your "
                 "Archidekt collection).</p><div class='actions'>"
                 + ui.button_link(
-                    "Link Archidekt", "/account/details#archidekt", kind="primary", icon_name="account"
+                    "Link Archidekt", "/account/details/archidekt", kind="primary", icon_name="account"
                 )
                 + "</div></section>"
             )

@@ -48,9 +48,9 @@ def _card(page: str, card_id: str) -> str:
 
 
 async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack: Stack) -> None:
-    page = (await member.http.get("/account/details")).text
-    prof = _card(page, "profile")
+    prof = _card((await member.http.get("/account/details/profile")).text, "profile")
     assert "A JPEG or PNG up to 1 MB." in prof and "Only you can change it" not in prof
+    page = (await member.http.get("/account/details/email")).text
     mail = _card(page, "email")
     # the inverted switch reads the right way round: on means notifications
     assert "Archidekt alerts</label>" in mail and esc("Shows Archidekt's alerts in the bell.") in mail
@@ -59,7 +59,7 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
     off = bool(stack.ark.account.profile("alice")["accountSettings"].get("noArchidektNotifications"))
     checked = "id='pr-site_notifications' type='checkbox' name='on' value='1' checked" in mail
     assert checked is (not off)
-    defaults = _card(page, "defaults")
+    defaults = _card((await member.http.get("/account/details/defaults")).text, "defaults")
     assert "The deck page shows prices from these two shops, first one first." in defaults
     assert "Two shops, in order." not in defaults
     assert ">EDH bracket</option>" in defaults and "EDH Bracket Info" not in defaults
@@ -74,13 +74,13 @@ async def test_the_words_say_only_what_the_gateway_knows(member: Browser, stack:
 
 
 async def test_the_account_switches_and_the_price_sources_row(member: Browser) -> None:
-    page = (await member.http.get("/account/details")).text
+    page = (await member.http.get("/account/details/email")).text
     mail = _card(page, "email")
     # each switch names itself for a reader only: the row's bold label is the one shown
     assert "<span class='sr-only'>Other members can contact me</span>" in mail
     assert "sw-text" not in page
     assert mail.count("class='ui-row sw'") == 4
-    defaults = _card(page, "defaults")
+    defaults = _card((await member.http.get("/account/details/defaults")).text, "defaults")
     two = re.search(r"<div class='ui-row two'>.*?</div></div>", defaults, re.S).group(0)
     assert "Price sources" in two and "aria-label='First price source'" in two
     assert "aria-label='Second price source'" in two

@@ -226,10 +226,13 @@ async def test_the_account_page_names_archidekt_writes_in_plain_words(stack: Sta
     )
     try:
         page = (await b.http.get("/account/details", headers=NAV)).text
-        assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl green'>" in page and note in page
+        # the row on the settings list carries the state; the fold under it the label and the note
+        assert "<span class='lbl'>Archidekt writes</span><span class='val'>On</span>" in page
+        assert "<p><span class='ui-lbl green'>" in page and note in page
         decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
         page = (await b.http.get("/account/details", headers=NAV)).text
-        assert "<dt>Archidekt writes</dt><dd><span class='ui-lbl grey'>" in page and note in page
+        assert "<span class='lbl'>Archidekt writes</span><span class='val'>Off</span>" in page
+        assert "<p><span class='ui-lbl grey'>" in page and note in page
         for old in ("Deck writes", "MTG_WRITES_ENABLED", "by its operator"):
             assert old not in page, old
     finally:

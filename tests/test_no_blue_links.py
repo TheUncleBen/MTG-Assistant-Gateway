@@ -106,6 +106,8 @@ SHELL_PAGES = [
     "/forum",
     "/forum/thread/700002",
     "/account/details",
+    "/account/details/archidekt",
+    "/account/details/notifications",
     "/guide",
     "/guide/tut-start",
     "/install?for=chatgpt",

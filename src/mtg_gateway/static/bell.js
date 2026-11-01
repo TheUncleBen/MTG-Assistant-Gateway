@@ -71,7 +71,7 @@
     var body = el("div");
     body.appendChild(el("p", "muted", "Reading your Archidekt alerts…"));
     var settings = el("a", "btn btn-plain");
-    settings.href = "/account/details#email";
+    settings.href = "/account/details/email";
     var gear = window.MtgCardMenu && window.MtgCardMenu.icon ? window.MtgCardMenu.icon("settings") : null;
     if (gear) { settings.appendChild(gear); settings.appendChild(document.createTextNode(" ")); }
     settings.appendChild(document.createTextNode("Settings"));

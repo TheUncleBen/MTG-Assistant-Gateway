@@ -998,18 +998,25 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
 
 
 def account_card_html(
-    state: AppState, sub: str, csrf_in: str, *, ok: str | None = None, err: str | None = None
+    state: AppState,
+    sub: str,
+    csrf_in: str,
+    *,
+    ok: str | None = None,
+    err: str | None = None,
+    heading: bool = True,
 ) -> str:
     """The Account page's Notifications card and, beside it, the Summary card: a note when the
     gateway has no notification server, otherwise the member's choices (one switch for the whole
     account), "Your phones" (this phone's part inside the app), Send test, Disconnect my phones,
     and the summary's own card. A notice from one of their forms (``ok`` / ``err``) shows inside
-    the card it came from."""
+    the card it came from. ``heading`` False leaves out the card's own heading (its page names it)."""
     n = state.notifier
+    h2 = "<h2 id='n-h'>Push notifications</h2>" if heading else ""
     if n is None or not n.enabled:
         watched = ", a watched card crosses your alert" if state.prices is not None else ""
         return (
-            "<div class='card' id='notifications'><h2>Push notifications</h2><p class='muted'>This gateway "
+            f"<div class='card' id='notifications'>{h2}<p class='muted'>This gateway "
             "has no notification server set up, so the Android app can't get push notifications. The "
             "person who runs "
             "this gateway can turn them on. The app then tells you when an assistant leaves changes waiting "
@@ -1066,10 +1073,10 @@ def account_card_html(
     # inside the app the part is about this phone and has its own heading (_phone_html)
     head = "" if in_app() else "<h3>Your phones</h3>"
     phones = f"<div class='part'>{head}{phone}{test}</div>" if phone or test else ""
+    named = "aria-labelledby='n-h'" if heading else "aria-label='Push notifications'"
     return (
-        f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' aria-labelledby='n-h'>"
-        "<div class='gh'><h2 id='n-h'>Push notifications</h2>"
-        f"{label('On', 'green', 'check') if on else ''}</div>"
+        f"{ACCOUNT_CSS}<section class='card nf-card' id='notifications' {named}>"
+        f"<div class='gh'>{h2}{label('On', 'green', 'check') if on else ''}</div>"
         "<p class='intro'>The gateway's Android app can show you a short message when something happens. "
         "Each message says only what happened and links to the right page on this gateway. It never lists "
         "your deck's cards. The choices below apply to your whole account and to every phone you connect.</p>"
@@ -1139,7 +1146,7 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
             "test",
             "Test from your MTG gateway",
             "Push notifications work. This is the only test message.",
-            "/account/details#notifications",
+            "/account/details/notifications",
         )
         return "ok=notify_test_sent" if ok else "err=notify_test_failed"
     if action == "summary_send":

@@ -13,7 +13,7 @@ from .test_decks_and_proxy import Browser, linked_user
 
 stack_options = stack_with(SHIPPED)
 SECTION = "/forum/Archidekt/General"
-LINK = "<a class='btn btn-primary' href='/account/details#archidekt'>"
+LINK = "<a class='btn btn-primary' href='/account/details/archidekt'>"
 
 
 @pytest.fixture

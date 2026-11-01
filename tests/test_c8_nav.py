@@ -140,6 +140,6 @@ async def test_my_lists_lives_under_account_without_the_pins_tab(member: Browser
     hub = (await member.http.get("/account")).text
     assert "href='/lists'" in hub and "My lists" in hub
     details = (await member.http.get("/account/details")).text
-    lists = details.split("<div class='card' id='lists'>")[1].split("</div></div>")[0]
+    lists = details.split("<details class='yrow' id='lists'>")[1].split("</details>")[0]
     assert "href='/lists/pins'" not in lists and "pinned" not in lists
     assert "href='/collection/wants'" in details

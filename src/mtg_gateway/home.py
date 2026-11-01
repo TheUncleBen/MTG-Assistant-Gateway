@@ -354,7 +354,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
             + "</div>"
             + (
-                "<a class='btn btn-primary' href='/account/details#archidekt'>"
+                "<a class='btn btn-primary' href='/account/details/archidekt'>"
                 f"{icon('account')} Link Archidekt</a>"
                 if not link["linked"]
                 else f"<a class='{new_deck_cls}' href='/decks/new' data-box-open='newdeck'>{icon('plus')} "

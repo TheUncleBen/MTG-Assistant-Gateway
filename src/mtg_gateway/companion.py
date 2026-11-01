@@ -297,6 +297,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         extra_scripts: tuple[str, ...] = (),
         extra_css: str = "",
         main_class: str = "",
+        head_extra: str = "",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -319,7 +320,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             # (Goldfish, Compare) loads the card viewer without deck.js
             + ("<script src='/static/cardview.js' defer></script>" if scripts or viewer_only else "")
             + ("<script src='/static/deck.js' defer></script>" if scripts and not viewer_only else "")
-            + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
+            + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts)
+            + head_extra,
         )
         if csp:
             resp.headers["Content-Security-Policy"] = csp
@@ -413,7 +415,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return (
             "<div class='card'><h2>Link your Archidekt account</h2><p>Your decks appear here once Archidekt "
             "is linked. Public decks can still be opened by their Archidekt link.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/account/details#archidekt'>"
+            "<div class='actions'><a class='btn btn-primary' href='/account/details/archidekt'>"
             "Link Archidekt</a></div></div>"
         )
 
