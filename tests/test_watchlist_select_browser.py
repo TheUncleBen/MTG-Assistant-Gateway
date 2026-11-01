@@ -248,8 +248,8 @@ def test_every_surface_fits_at_100_and_200_percent_text(
         # counts filled by the script; the watchlist's lists under them
         page.goto(f"{server.base}/collection/lists", wait_until="networkidle")
         rows = page.locator(".lp-hubrows a.yrow")
-        assert rows.count() == 5
-        for i in range(5):
+        assert rows.count() == 6  # five Archidekt lists and Binder tags
+        for i in range(6):
             b = rows.nth(i).bounding_box()
             assert b and b["x"] >= 0 and b["x"] + b["width"] <= width and b["height"] >= 44, (i, b)
         pins_val = '.lp-hubrows a[href="/collection/wants"] .val'
