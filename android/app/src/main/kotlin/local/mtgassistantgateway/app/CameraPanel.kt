@@ -75,6 +75,8 @@ class CameraPanel(
         fun photo(jpeg: ByteArray, guide: FloatArray?)
         /** The page's continuous-mode rules on or off for the photos that follow. */
         fun continuous(on: Boolean)
+        /** The page could not load photo [seq] from its URL: hand that one over directly (see [ScanGlue.photoData]). */
+        fun photoDirect(seq: Int)
         /** Take the last automatic add back. */
         fun undo()
         /** The person tapped Done. */
@@ -570,6 +572,12 @@ class CameraPanel(
             "unidentified" -> showResult(activity.getString(R.string.unidentified_card, name), undoable)
             "no-card" -> pageDone(activity.getString(R.string.no_card_outline))
             "ocr" -> onOcr(ev.optString("state", ""), ev.optDouble("progress", 0.0))
+            "photo-direct" -> {
+                // Only for the photo in flight (its number may not be known yet); the host checks
+                // that it still holds that very photo.
+                val seq = ev.optInt("seq", -1)
+                if (awaitingPage && seq > 0 && (expectedSeq < 0 || seq == expectedSeq)) host.photoDirect(seq)
+            }
             "done" -> {
                 // What this photo came to, never what an earlier one left waiting on the page.
                 val o = ShotLine.of(
@@ -578,6 +586,7 @@ class CameraPanel(
                     ev.optString("read", ""), ev.optBoolean("blurry", false), autoToggle.isChecked,
                 )
                 when (o) {
+                    ShotLine.Outcome.PhotoLost -> pageDone(activity.getString(R.string.scan_photo_lost), stopAuto = true)
                     is ShotLine.Outcome.Failed -> pageDone(activity.getString(R.string.scan_failed, o.error), stopAuto = true)
                     is ShotLine.Outcome.Found -> pageDone(
                         activity.getString(if (o.autoPaused) R.string.shot_found_paused else R.string.shot_found, o.name, o.where),
