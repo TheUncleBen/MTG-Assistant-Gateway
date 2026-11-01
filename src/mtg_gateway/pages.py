@@ -563,9 +563,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action in ("disconnect", "disconnect_all"):
             client_id = data.get("client_id") if action == "disconnect" else None
             n = state.db.revoke_client_for_user(sub, client_id)
-            # the mode chosen for it goes too (an assistant of its own; all of them with every app)
+            # the mode chosen for it goes too, once none of the assistant's apps is connected (all
+            # of them with every app): the member's Disconnect, by either route (R3-03)
             key = assistants.assistant_key(state.db, client_id) if client_id else None
-            if client_id is None or (key and key.startswith(assistants.APP_PREFIX)):
+            if client_id is None:
+                state.db.forget_assistant(sub, None)
+            elif key and not any(a.key == key for a in assistants.connected(state.db, sub)):
                 state.db.forget_assistant(sub, key)
             # A disconnected app's pending proposals go with it: they stay visible, rejected, and
             # can no longer be applied from the review page.

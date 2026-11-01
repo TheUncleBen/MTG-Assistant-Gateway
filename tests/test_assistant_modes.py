@@ -329,6 +329,46 @@ async def test_disconnecting_forgets_the_mode(stack: Stack) -> None:
     assert structured(await call(h, again, "account_status"))["approval_mode"] == "manual"
 
 
+async def test_the_older_one_app_disconnect_forgets_the_mode_with_the_last_app(stack: Stack) -> None:
+    """Security review 3, R3-03: the module docstring says disconnecting an assistant forgets its
+    mode, but POST /account's one-app Disconnect kept a brand's. The member's own Disconnect, by
+    either route, forgets the mode once none of the assistant's apps is connected; while another
+    of its apps still is (Claude on a second device), the assistant is still there and keeps it."""
+    h = stack.h
+    await linked_member(stack)
+    _t1, first = await connect(h, CLAUDE_CB, "Claude")
+    _t2, second = await connect(h, CLAUDE_CB, "Claude")
+    b = await browser(h)
+    assert (await set_app_mode(b, "claude", "auto")).status_code == 303
+
+    async def disconnect(cid: str) -> None:
+        data = {"csrf": await b.csrf("/account/details"), "action": "disconnect", "client_id": cid}
+        assert (await b.http.post("/account", data=data)).status_code == 303
+
+    await disconnect(first)
+    assert h.db.assistant_mode("user-1", "claude") == "auto"  # Claude is still connected
+    await disconnect(second)
+    assert h.db.assistant_mode("user-1", "claude") is None
+    await b.aclose()
+    again, _ = await connect(h, CLAUDE_CB, "Claude")
+    assert structured(await call(h, again, "account_status"))["approval_mode"] == "manual"
+
+
+async def test_a_lapsed_sign_in_keeps_the_mode(stack: Stack) -> None:
+    """What the member did not do forgets nothing: an assistant whose tokens lapsed (or that an
+    administrator disconnected) gets the mode the member chose back when it connects again."""
+    h = stack.h
+    await linked_member(stack)
+    _t, cid = await connect(h, CLAUDE_CB, "Claude")
+    b = await browser(h)
+    assert (await set_app_mode(b, "claude", "semi")).status_code == 303
+    await b.aclose()
+    h.db.revoke_client_for_user("user-1", cid)  # the tokens are gone, not by the member's press
+    assert h.db.user_clients("user-1") == []
+    again, _ = await connect(h, CLAUDE_CB, "Claude")
+    assert structured(await call(h, again, "account_status"))["approval_mode"] == "semi"
+
+
 async def test_an_assistant_cannot_set_a_mode(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)

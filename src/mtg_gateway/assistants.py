@@ -16,8 +16,12 @@ Each assistant follows the member's default (``users.approval_mode``, "Default f
 assistants") until the member picks a mode for it; a newly connected one always starts at that
 default and never copies another assistant's mode. The mode that governs a proposal is its
 creator's (only the app that made a proposal may apply it, decks.py), always under the admin's cap.
-Only the member's own browser sets a mode, never an assistant over MCP or the API (modes.py), and
-disconnecting an assistant forgets its mode.
+Only the member's own browser sets a mode, never an assistant over MCP or the API (modes.py).
+The member's own Disconnect (the assistant's page, Disconnect all, or the older one-app Disconnect
+on POST /account) forgets the assistant's mode once none of its apps is connected, so connected
+again it starts at the default. What the member did not do forgets nothing: an assistant whose
+sign-in lapsed, or that an administrator disconnected, gets the mode the member chose back when it
+connects again (security review 3, R3-03).
 """
 
 from __future__ import annotations
