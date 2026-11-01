@@ -503,4 +503,63 @@
       strip(pr.signedOut || pr.noConnection ? pr.text : NOT_ANSWERING, "error", pr.actions);
     });
   });
+
+  // -- Select and the bulk bar (0.7.46 audit QG-17) --------------------------------------------
+  // A tick on any tile or row shows the bar (its count, Condition…, Finish…, Tags…, Remove,
+  // Cancel); the tick boxes and the boxes' fields belong to the one hidden form (#col-bulk), so a
+  // press sends the ticked cards with the box's choice. Select ticks every card on screen (the
+  // ones the name box left showing), or clears them all. Without this script there is no Select
+  // button, and the boxes open as pages of their own.
+  function boxes() { return $$(".collection #cards .chk input[name=sel]"); }
+  function ticked() { return boxes().filter(function (b) { return b.checked; }); }
+  function shown() { return boxes().filter(function (b) { var li = b.closest("li"); return li && !li.hidden; }); }
+  function redraw() {
+    var n = ticked().length, bar = $(".collection .ui-bar[aria-label='Selected cards']");
+    boxes().forEach(function (b) { var li = b.closest("li"); if (li) li.classList.toggle("sel", b.checked); });
+    if (bar) {
+      bar.hidden = n === 0;
+      var c = $(".count", bar);
+      if (c) c.textContent = n + " selected";
+    }
+    var sel = $(".collection .col-select"), on = shown();
+    if (sel) sel.setAttribute("aria-pressed", n > 0 && on.length > 0 && on.every(function (b) { return b.checked; }) ? "true" : "false");
+    $$("[data-bulk-count]").forEach(function (w) { w.textContent = n === 1 ? "The selected card" : "The " + n + " selected cards"; });
+    $$("#col-bulk-cond p, #col-bulk-finish p, #col-bulk-tags p").forEach(function (w) {
+      var t = w.childNodes[1];
+      if (t && t.nodeType === 3) t.textContent = t.textContent.replace(/^ gets? /, n === 1 ? " gets " : " get ");
+    });
+  }
+  function setAll(on) { shown().forEach(function (b) { b.checked = on; }); if (!on) boxes().forEach(function (b) { b.checked = false; }); redraw(); }
+  var selectBtn = $(".collection .col-select");
+  if (selectBtn) selectBtn.hidden = false;
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t && t.name === "sel" && t.closest && t.closest(".collection #cards")) redraw();
+  });
+  document.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var sel = e.target.closest ? e.target.closest(".collection .col-select") : null;
+    if (sel) { setAll(sel.getAttribute("aria-pressed") !== "true"); return; }
+    var bar = e.target.closest ? e.target.closest(".collection .ui-bar[aria-label='Selected cards']") : null;
+    if (!bar) return;
+    if (e.target.closest(".col-clear")) { setAll(false); return; }
+    var opener = e.target.closest("a[data-box-open]");
+    if (opener && ticked().length === 0) {
+      e.preventDefault();
+      var Menu = window.MtgMenu;
+      if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true }); else say("Tick a card first.");
+    }
+  }, true);
+  var bulkForm = $("#col-bulk");
+  if (bulkForm) bulkForm.addEventListener("submit", function (e) {
+    if (ticked().length === 0) {
+      e.preventDefault();
+      var Menu = window.MtgMenu;
+      if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true }); else say("Tick a card first.");
+      return;
+    }
+    var bar = $(".collection .ui-bar[aria-label='Selected cards']");
+    if (bar) { bar.setAttribute("aria-busy", "true"); $$("a, button", bar).forEach(function (b) { b.setAttribute("aria-disabled", "true"); }); }
+  });
+  redraw();
 })();
