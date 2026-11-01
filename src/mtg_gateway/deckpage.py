@@ -3424,6 +3424,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .viewsheet .vrow select,.viewsheet .vrow input[type=search]{width:auto;max-width:58%;min-width:0;margin:0;
   min-height:44px}
 .viewsheet .vrow .sizeseg{margin:0}
+/* the sheet is for a phone: its size buttons are as tall as its selects (44 px), mouse or touch */
+.viewsheet .vrow .sizeseg button{min-height:44px;min-width:44px}
 .viewsheet .vrow .switch{margin:0}
 /* with the card size switch (0.7.29) next to View as: it takes only its own width. Above 1200 px the
    boxes share one row while they fit and wrap onto the next row when large text makes them wider
