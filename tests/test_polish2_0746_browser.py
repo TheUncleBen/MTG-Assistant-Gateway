@@ -66,13 +66,15 @@ def _page(browser, server: Server, sid: str, width: int, *, touch: bool = True):
 
 # -- a row's ⋮ ----------------------------------------------------------------------------------------
 
-# Every row's ⋮ against its title cell: on the title's first line (its top above the name's
-# bottom) and at the cell's right edge.
+# Every row's ⋮ against its row: on the title's first line (its top above the name's bottom) and
+# at the row's right edge (the page's own ⋮ beside the main action, 0.7.46 redesign; the row's
+# padding is the ⋮'s own margin there).
 KEBABS = """
-(sel) => [...document.querySelectorAll(sel + ' .tr .title > .kebab.inline')].map((k) => {
-  const cell = k.parentElement.getBoundingClientRect(), r = k.getBoundingClientRect();
-  const t = k.parentElement.querySelector('.t').getBoundingClientRect();
-  return { firstLine: r.top < t.bottom, right: r.right >= cell.right - 1,
+(sel) => [...document.querySelectorAll(sel + ' .tr .act > .kebab')].map((k) => {
+  const tr = k.closest('.tr'), cell = tr.getBoundingClientRect(), r = k.getBoundingClientRect();
+  const pad = parseFloat(getComputedStyle(tr).paddingRight);
+  const t = tr.querySelector('.title .t').getBoundingClientRect();
+  return { firstLine: r.top < t.bottom, right: r.right >= cell.right - pad - 1,
            inside: r.right <= cell.right + 1 }; })
 """
 
@@ -81,7 +83,8 @@ KEBABS = """
 @pytest.mark.parametrize("path,table", [("/reports", ".rp-t")])
 def test_a_rows_menu_button_sits_at_the_right_of_its_title_line(chromium, server, path, table, zoom) -> None:
     """The ⋮ added beside the title (menus.js) followed the name as a block, so on a phone it sat
-    on a line of its own under the status label. It is pinned at the title's right now."""
+    on a line of its own under the status label. It is the page's own now, beside Open at the
+    row's right, on the title's line."""
     sid = _link(server)
     for i in range(3):
         store_report(server.db, "user-1", f"r{i}", deck_name=f"Deck {i} with a long name for the row")

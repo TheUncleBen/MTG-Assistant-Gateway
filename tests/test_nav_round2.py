@@ -91,8 +91,9 @@ def test_history_and_reports_mark_assistant_as_the_place(server: Server) -> None
 
 def test_the_history_purpose_line_links_to_proposals(server: Server) -> None:
     page = _client(server).get("/history").text
-    # History is the decks' timeline (owner decision C7); the changes still waiting are on Proposals
-    assert "Changes waiting for you are on <a class='ui-cap' href='/proposals'>Proposals</a>.</p>" in page
+    # History is the decks' timeline (owner decision C7); the changes still waiting are on Proposals,
+    # named in plain words (the tab is in the switch above; no capsule mid-sentence, 0.7.46)
+    assert "Changes still waiting for you are under Proposals.</p>" in page
     assert "&lt;a href" not in page
 
 

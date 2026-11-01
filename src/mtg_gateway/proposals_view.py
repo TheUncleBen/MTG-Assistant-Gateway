@@ -23,8 +23,17 @@ from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
-from .theme import esc, icon
+from .theme import BALANCED_TOOLS_CSS, esc
 from .waiting_strip import line_for
+
+# -- the redesign's defaults (mockup screen 6, 0.7.46), each one line to flip --------------------
+# The fifth widget, "Waiting by app", is gone: its counts are in the Waiting widget's line, and
+# Connected apps stays on Account details. Mockup decision 1, default yes.
+BY_APP_WIDGET = False
+# The third widget keeps the approved word list's name ("Only you can apply", decision C6); the
+# mockup's "Always need your press" and its "Need your OK" (decision 2) are not on the list.
+PRESS_TITLE = "Only you can apply"
+PRESS_DETAIL = "A delete, or a change that needs your press: the assistant never applies these."
 
 # The chips: the value in the query string, then the words.
 SHOWS = (
@@ -91,18 +100,10 @@ _UNTIED_KINDS = ("create_deck", "clone", "collection", "lists")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")
 UNDO_KINDS = ("edit", "details", "restore", "categories")
 
-# Waiting table: tick box, change, risk, status, from, made, the open link.
-WAIT_COLS = (
-    "32px minmax(0,1fr) 7.5rem 10rem 6.5rem 6.5rem 5rem",
-    "32px minmax(0,1fr) 10rem 5rem",
-    "32px minmax(0,1fr) 44px",
-)
-# Every other chip: change, risk, status (with its closing line), from, made.
-ALL_COLS = (
-    "minmax(0,1fr) 7.5rem 13rem 6.5rem 6.5rem",
-    "minmax(0,1fr) 11rem",
-    "minmax(0,1fr)",
-)
+# Waiting list: tick box, the change with its facts, then Review and the ⋮ (one line at every
+# width, ui-rows); every other chip: the change with its facts, then Review and the ⋮.
+WAIT_COLS = ("32px minmax(0,1fr) auto",) * 3
+ALL_COLS = ("minmax(0,1fr) auto",) * 3
 
 
 def read_query(params: Any) -> dict[str, Any]:
@@ -327,6 +328,14 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         if untied_n:
             bits.append(f"{untied_n} not tied to a deck")
         det = ", ".join(bits)
+        if not BY_APP_WIDGET:
+            by_app: dict[str, int] = {}
+            for it in waiting:
+                name = it["app"] or "No app"
+                by_app[name] = by_app.get(name, 0) + 1
+            if len(by_app) > 1:  # which apps they came from, when it is more than one
+                order = sorted(by_app.items(), key=lambda kv: (-kv[1], kv[0]))
+                det += " · " + ", ".join(f"{n} from {name}" for name, n in order)
         det += f" · oldest {_span(now - min(it['created_at'] for it in waiting))}"
         soon = [it["expires_at"] for it in waiting if it["expires_at"] > now]
         if soon:
@@ -372,7 +381,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     det3 = (
         (ui.label_for("your_press", word=f"Your press {press}") if press else "")
         + (ui.label_for("delete", word=f"Delete {delete}") if delete else "")
-        + "<span class='tx'>in every approval mode</span>"
+        + f"<span class='tx'>{esc(PRESS_DETAIL)}</span>"
     )
     acts3 = (
         [
@@ -383,7 +392,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         if press + delete
         else []
     )
-    w3 = ui.widget("Only you can apply", "hand", press + delete, detail_html=det3, actions=acts3)
+    w3 = ui.widget(PRESS_TITLE, "hand", press + delete, detail_html=det3, actions=acts3)
     # 4. Last 7 days
     week = now - 7 * 86400
 
@@ -400,8 +409,10 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     undo = [it for it in sorted(applied, key=closed_at, reverse=True) if _undoable(it, csrf)]
     acts4 = [_undo_form(undo[0], csrf, "Undo last apply", "btn-plain")] if undo else []
     w4 = ui.widget("Last 7 days", "check", len(applied), unit="applied", detail=det4, actions=acts4)
+    if not BY_APP_WIDGET:
+        return ui.widgets([w1, w2, w3, w4])
     # 5. Waiting by app
-    by_app: dict[str, int] = {}
+    by_app = {}
     for it in waiting:
         name = it["app"] or "No app"
         by_app[name] = by_app.get(name, 0) + 1
@@ -516,9 +527,16 @@ def _deck_attr(it: dict[str, Any]) -> str:
     return f" data-deck='{esc(it['deck_id'])}'"
 
 
+def _row_actions(it: dict[str, Any], href: str, word: str) -> str:
+    """The row's end: its main action (Review, or Try again) as a capsule, then its ⋮."""
+    name = f"{_no(it)} {it['summary']}".strip()[:80]
+    return ui.row_actions(ui.row_open(href, word), ui.row_menu(href, name))
+
+
 def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, open_id: str, qs: str) -> str:
-    """One waiting change: a tick box (the whole row is its target), the change and its flags,
-    risk, status, the app, when, and Review (the panel or the page)."""
+    """One waiting change on one line: a tick box (the whole row is its target), the change with
+    its flags and its facts line (risk, a status other than plain waiting, the app, when), then
+    Review (the panel or the page) and the ⋮."""
     pid = esc(it["id"])
     no = _no(it)
     box = f"pk-{it['id']}"
@@ -530,21 +548,19 @@ def waiting_row(it: dict[str, Any], *, group: str, now: float, checked: bool, op
         + f" aria-label='{esc(aria)}'{' checked' if checked else ''}></label>"
     )
     num = f"<span class='no'>{esc(no)}</span><wbr>" if no else ""  # the number and the words may part
+    # the Waiting chip's own word is not repeated on every row; another status is
+    status = _status_label(it) if it["status"] in ("needs_look", "held", "updated") else ""
     title = (
-        f"<label class='title' for='{esc(box)}'><span class='t'>{num}{esc(it['summary'])}"
-        f"<span class='stin'>{_status_label(it)}</span></span>{_waiting_flags(it, now)}"
-        f"<span class='sub'>{_risk_label(it)}{_chip(it)}{ui.when(it['created_at'], now=now)}"
+        f"<label class='title' for='{esc(box)}'><span class='t'>{num}{esc(it['summary'])}</span>"
+        f"{_waiting_flags(it, now)}"
+        f"<span class='sub'>{_risk_label(it)}{status}{_chip(it)}{ui.when(it['created_at'], now=now)}"
         "</span></label>"
     )
     cls = "tr" + (" sel" if checked else "") + (" open" if it["id"] == open_id else "")
     return (
         f"<div class='{cls}'{_deck_attr(it)}>{chk}{title}"
-        f"<label class='md-hide' for='{esc(box)}'>{_risk_label(it)}</label>"
-        f"<label class='sm-hide' for='{esc(box)}'>{_status_label(it)}</label>"
-        f"<label class='md-hide' for='{esc(box)}'>{_chip(it)}</label>"
-        f"<label class='md-hide' for='{esc(box)}'>{ui.when(it['created_at'], now=now)}</label>"
         f"<input type='hidden' name='v_{pid}' value='{int(it['version'])}'>"
-        + ui.open_link(f"/proposals/{it['id']}{qs}", "Try\u00a0again" if _try_again(it) else "Review")
+        + _row_actions(it, f"/proposals/{it['id']}{qs}", "Try\u00a0again" if _try_again(it) else "Review")
         + "</div>"
     )
 
@@ -617,25 +633,23 @@ def list_row(
     open_id: str,
     qs: str,
 ) -> str:
-    """One proposal on every chip but Waiting: the change (a link to it) and its deck, risk,
-    status with its closing line, the app, when."""
+    """One proposal on every chip but Waiting, on one line: the change (a link to it) and its
+    deck, the facts line (risk, status, the app, when) with the closing line under it, then
+    Review and the ⋮."""
     no = _no(it)
     num = f"<span class='no'>{esc(no)}</span><wbr>" if no else ""  # the number and the words may part
     closing = _closing_html(it, csrf=csrf, replaced_by=replaced_by, now=now)
-    sm = f"<span class='sm-only'>{closing}</span>" if closing else ""
     flag = f"<span class='flag'>{closing}</span>" if closing else ""
     cls = "tr" + (" open" if it["id"] == open_id else "")
+    href = f"/proposals/{it['id']}{qs}"
     return (
         f"<div class='{cls}'{_deck_attr(it)}><span class='title'>"
-        f"<a class='t' href='/proposals/{esc(it['id'])}{esc(qs)}'>"
-        f"{num}{esc(it['summary'])}</a><span class='deck'>{esc(_deck_line(it))}"
-        f"<span class='stin'>{_status_label(it)}</span></span>"
-        f"<span class='sub'>{_risk_label(it)}{_chip(it)}{ui.when(it['created_at'], now=now)}{sm}"
-        "</span></span>"
-        f"<span class='md-hide'>{_risk_label(it)}</span>"
-        f"<span class='sm-hide'>{_status_label(it)}{flag}</span>"
-        f"<span class='md-hide'>{_chip(it)}</span>"
-        f"<span class='md-hide'>{ui.when(it['created_at'], now=now)}</span></div>"
+        f"<a class='t' href='{esc(href)}'>{num}{esc(it['summary'])}</a>"
+        f"<span class='deck'>{esc(_deck_line(it))}</span>"
+        f"<span class='sub'>{_risk_label(it)}{_status_label(it)}{_chip(it)}"
+        f"{ui.when(it['created_at'], now=now)}</span>{flag}</span>"
+        + _row_actions(it, href, "Review")
+        + "</div>"
     )
 
 
@@ -713,7 +727,7 @@ def _waiting_table(
             groups.setdefault(it["deck_id"], []).append(it)
     check_low = query["check"] == "low"
     out = [
-        ui.table_open(*WAIT_COLS, cls="pr-table", label="Waiting changes"),
+        ui.table_open(*WAIT_COLS, cls="pr-table ui-rows", label="Waiting changes"),
         ui.table_header(
             [
                 ui.Column(
@@ -722,10 +736,6 @@ def _waiting_table(
                     "aria-label='Check every waiting change'></label>",
                 ),
                 ui.Column("Change"),
-                ui.Column("Risk", "md-hide"),
-                ui.Column("Status", "sm-hide"),
-                ui.Column("From", "md-hide"),
-                ui.Column("Made", "md-hide"),
                 ui.Column(""),
             ]
         ),
@@ -733,14 +743,13 @@ def _waiting_table(
 
     def group(key: str, title_html: str, aria: str, lines: list[dict[str, Any]], open_deck: str) -> None:
         oldest = _span(now - min(x["created_at"] for x in lines))
-        meta = f"{len(lines)} waiting · oldest {oldest}" + (
-            " · " + ui.cap_link("Open deck", open_deck) if open_deck else ""
-        )
+        meta = f"{len(lines)} waiting · oldest {oldest}"
         box = (
             f"<label class='chk'><input type='checkbox' class='all' data-all='{esc(key)}' "
             f"aria-label='{esc(aria)}'></label>"
         )
-        out.append(ui.group_row(title_html, meta, check_html=box))
+        open_html = ui.cap_link("Open deck", open_deck) if open_deck else " "
+        out.append(ui.group_row(title_html, meta, check_html=box, action_html=open_html))
         for x in lines:
             out.append(
                 waiting_row(
@@ -799,23 +808,7 @@ def _all_table(
 ) -> str:
     by_id = {it["id"]: it for it in data["items"]}
     repl = _replacements(state, sub, rows, by_id)
-    newer = "old" if query["order"] != "old" else ""
-    sort = (
-        f"<a class='pr-sort' href='/proposals{esc(query_string(query, order=newer, offset=0))}' "
-        f"aria-label='{'Made, oldest first' if newer else 'Made, newest first'}'>Made {icon('sort')}</a>"
-    )
-    out = [
-        ui.table_open(*ALL_COLS, cls="pr-table", label="Proposals"),
-        ui.table_header(
-            [
-                ui.Column("Change"),
-                ui.Column("Risk", "md-hide"),
-                ui.Column("Status", "sm-hide"),
-                ui.Column("From", "md-hide"),
-                ui.Column("Made", "md-hide", html=sort),
-            ]
-        ),
-    ]
+    out = [ui.table_open(*ALL_COLS, cls="pr-table ui-rows", label="Proposals")]
     if query["group"] == "deck":
         order: list[str] = []
         groups: dict[str, list[dict[str, Any]]] = {}
@@ -834,8 +827,8 @@ def _all_table(
             )
             n = len(groups[key])
             out.append(
-                f"<div class='tr group pr-nochk'><span>{title}</span>"
-                f"<span class='meta'>{n} shown</span></div>"
+                f"<div class='tr group nochk'><span class='m'>{title}<small>{n} shown</small></span>"
+                "<span class='act'></span></div>"
             )
             out += [
                 list_row(it, csrf=csrf, replaced_by=repl.get(it["id"]), now=now, open_id=open_id, qs=qs)
@@ -888,9 +881,15 @@ def list_html(
             + ui.cap_link("Show oldest first", "/proposals" + query_string(query, group="", offset=0))
         )
     else:
-        first = "Oldest first" if query["order"] == "old" else "Newest first"
+        # the order and its switch (once the table's Made header), then Group by deck
+        newer = "" if query["order"] == "old" else "old"
+        side = ui.order_note(
+            "Oldest first" if query["order"] == "old" else "Newest first",
+            "Oldest first" if newer else "Newest first",
+            "/proposals" + query_string(query, order=newer, offset=0),
+        )
         grouped = query_string(query, group="deck", offset=0)
-        side = f"{first} · " + ui.cap_link("Group by deck", "/proposals" + grouped)
+        side += " · " + ui.cap_link("Group by deck", "/proposals" + grouped)
     head = (
         f"<div class='list-head'><h2>All proposals <span class='ui-sub'>{counts['all']:,}</span></h2>"
         f"<span class='ui-sub'>{side if not waiting_view else esc(side)}</span></div>"
@@ -975,15 +974,14 @@ __all__ = [
 
 # The Proposals page's own styles (pages.py puts them in the page's head; the shared pieces are
 # theme.UI_CSS). Theme tokens only.
-PROPOSALS_CSS = """
+PROPOSALS_CSS = (
+    """
 /* a waiting row's cells are labels of its tick box: the whole row is the tap target */
 .pr-table label{margin:0;font-weight:inherit;cursor:pointer}
 .pr-table label.title{display:block}
 .pr-table .flag .ui-lbl{height:20px;font-size:.76rem;margin-right:.25rem}
-.pr-table .sm-hide .flag{margin-top:.25rem}
-.pr-table .group.pr-nochk{grid-template-columns:minmax(0,1fr) auto}
-.pr-table .th .pr-sort{color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:.2rem}
-.pr-table .th .pr-sort svg.i{width:14px;height:14px}
+/* the waiting list's one header row: the check-every box and the word */
+.pr-table .tr.th{min-height:40px}
 .ui-drawer .apply{background:none;border:0;padding:0;margin-top:1rem}
 .ui-drawer details>summary:not(.fold-btn){align-items:center;gap:.4rem}
 .ui-drawer details>summary:not(.fold-btn)::before{content:"";border:5px solid transparent;
@@ -1032,3 +1030,5 @@ PROPOSALS_CSS = """
 .wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
 .wdg .big small{margin-left:0}
 """
+    + BALANCED_TOOLS_CSS
+)

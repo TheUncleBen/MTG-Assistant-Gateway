@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 from . import ui
 from .bracket_view import ESTIMATE_LABEL, bracket_name
-from .theme import esc, icon
+from .theme import BALANCED_TOOLS_CSS, esc, icon
 
 PAGE = ui.PER_PAGE
 BROWSER_CLIENT = "__browser__"  # decks.BROWSER_CLIENT: the member's own browser
@@ -233,28 +233,22 @@ def deck_line(r: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
-def _ci_bar(win: dict[str, Any]) -> str:
-    lo, hi = win.get("lo"), win.get("hi")
-    if lo is None or hi is None:
-        return ""
-    lo, hi = max(0.0, float(lo)), min(1.0, float(hi))
-    return (
-        f"<span class='ci' title='95% interval {_pct(lo)} to {_pct(hi)}' aria-hidden='true'>"
-        f"<i style='left:{100 * lo:.1f}%;width:{max(1.0, 100 * (hi - lo)):.1f}%'></i></span>"
-    )
-
-
 FEW_GAMES_CELL = "{n} games, too few"
 
 
 def won_cell(r: dict[str, Any]) -> tuple[str, str]:
-    """(the Won vs precons cell, the phone line's short value)."""
+    """(the Won vs precons words on the row's facts line, a title with the 95% interval or "")."""
     win = r.get("win")
     if win and win.get("enough", True):
-        return f"<span class='md-hide wr'><b>{_pct(win['rate'])}</b>{_ci_bar(win)}</span>", _pct(win["rate"])
+        lo, hi = win.get("lo"), win.get("hi")
+        tip = (
+            f"95% interval {_pct(max(0.0, float(lo)))} to {_pct(min(1.0, float(hi)))}"
+            if lo is not None and hi is not None
+            else ""
+        )
+        return _pct(win["rate"]), tip
     if win:  # a few games say little (owner decision C7): no headline rate
-        games = int(win.get("games") or 0)
-        return f"<span class='md-hide muted'>{FEW_GAMES_CELL.format(n=games)}</span>", "–"
+        return FEW_GAMES_CELL.format(n=int(win.get("games") or 0)), ""
     state = r.get("forge_state")
     if r.get("research") == "running":
         text = "waiting"
@@ -266,24 +260,26 @@ def won_cell(r: dict[str, Any]) -> tuple[str, str]:
         text = "did not run"
     else:
         text = "no Forge"
-    return f"<span class='md-hide muted'>{text}</span>", "–"
+    return text, ""
 
 
-def damage_cell(r: dict[str, Any]) -> tuple[str, str]:
+def damage_cell(r: dict[str, Any]) -> str:
+    """The Lethal by words on the row's facts line."""
     turn = _turn(r.get("kill_median_turn"))
     if turn:
-        return f"<span class='md-hide num'>turn {turn}</span>", f"T{turn}"
+        return f"T{turn}"
     if not r.get("has_goldfish"):
-        return "<span class='md-hide muted'>no solo test</span>", "–"
-    return "<span class='md-hide muted'>not reached</span>", "–"
+        return "no solo test"
+    return "not reached"
 
 
 def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
     rid = esc(r["report_id"])
     href = f"/history/reports/{rid}"
     name = esc(r.get("deck_name") or "Unnamed deck")
-    won, won_short = won_cell(r)
-    dmg, dmg_short = damage_cell(r)
+    won, won_tip = won_cell(r)
+    dmg = damage_cell(r)
+    tip = f" title='{esc(won_tip)}'" if won_tip else ""
     who = asked_by(r, apps)
     client = r.get("created_by_client")
     app = ui.app_chip(who, client_id=str(client) if client else None)
@@ -292,17 +288,19 @@ def row_html(r: dict[str, Any], apps: dict[str, str], *, now: float) -> str:
     line = deck_line(r)
     # the row's deck, for its menu's "Open the deck" (static/menus.js)
     deck = f" data-deck='{esc(str(r['deck_id']))}'" if r.get("deck_id") else ""
+    # one line at every width (ui-rows): the deck opens the report, the line under it says what
+    # the report is, the facts line its numbers, who and when; then Open and the ⋮
+    menu = ui.row_menu(href, f"Report: {r.get('deck_name') or 'Unnamed deck'}")
+    acts = ui.row_actions(ui.row_open(href, "Open"), menu)
     return (
         "<div class='tr'>"
         f"<span class='title'{deck}><span class='t'><a href='{href}'>{name}</a>"
         f"{status_label(r.get('status'), cls='stin', research=r.get('research'))}</span>"
         + (f"<span class='deck'>{line}</span>" if line else "")
         + "<span class='sub'>"
-        f"<span class='kv'>Won <b>{esc(won_short)}</b></span>"
-        f"<span class='kv'>{esc(kill)} <b>{esc(dmg_short)}</b></span>{app}{ran}</span></span>"
-        f"<span class='sm-hide'>{status_label(r.get('status'), research=r.get('research'))}</span>"
-        f"{won}{dmg}<span class='md-hide'>{app}</span><span class='md-hide'>{ran}</span>"
-        f"{ui.open_link(href, 'Open')}</div>"
+        f"<span class='kv'{tip}>Won <b>{esc(won)}</b></span>"
+        f"<span class='kv'>{esc(kill)} <b>{esc(dmg)}</b></span>{app}{ran}</span></span>"
+        f"{acts}</div>"
     )
 
 
@@ -498,22 +496,17 @@ def reports_page_html(
         ui.Chip(text, counts.get(key, 0), query.href(show=key, offset=0), current=query.show == key)
         for key, text in CHIPS
     )
+    # the order and its switch (once the table's Ran header) beside the heading
     order_note = "Oldest first" if query.order else "Newest first"
-    listing = ui.list_head("All reports", len(index), order_note)
-    sort = (
-        f"<a class='rp-sort' href='{esc(query.href(order='' if query.order else 'oldest', offset=0))}' "
-        f"aria-label='Ran, {order_note.lower()}: show {'newest' if query.order else 'oldest'} first'>"
-        f"Ran {icon('sort')}</a>"
+    listing = ui.list_head(
+        "All reports",
+        len(index),
+        note_html=ui.order_note(
+            order_note,
+            "Newest first" if query.order else "Oldest first",
+            query.href(order="" if query.order else "oldest", offset=0),
+        ),
     )
-    cols = [
-        ui.Column("Deck"),
-        ui.Column("Status", "sm-hide"),
-        ui.Column("Won vs precons", "md-hide"),
-        ui.Column("Lethal by", "md-hide"),
-        ui.Column("Asked by", "md-hide"),
-        ui.Column("Ran", "md-hide", html=sort),
-        ui.Column(""),
-    ]
     if rows:
         body = "".join(row_html(r, apps, now=now) for r in rows)
     else:
@@ -530,17 +523,7 @@ def reports_page_html(
             empty = "No reports match. Clear the search or the filters to see them all."
         body = f"<div class='tr rp-empty'><p>{empty}</p></div>"
     table = (
-        ui.table_open(
-            "minmax(0,1fr) minmax(0,9.5rem) minmax(0,8rem) minmax(0,6.5rem) minmax(0,7rem) minmax(0,6.5rem) "
-            "minmax(0,4rem)",
-            "minmax(0,1fr) minmax(0,9.5rem) minmax(0,4rem)",
-            "minmax(0,1fr) auto",
-            cls="rp-t",
-            label="Reports",
-        )
-        + ui.table_header(cols)
-        + body
-        + "</div>"
+        ui.table_open(*(("minmax(0,1fr) auto",) * 3), cls="rp-t ui-rows", label="Reports") + body + "</div>"
     )
     # Load more (the standard's button; reports.js adds the next rows in place), never a pager
     shown_to = min(query.offset + PAGE, total)
@@ -631,24 +614,12 @@ REPORTS_PAGE_CSS = (
 .reports-page .kd-trend .dl.up{color:var(--red-text)}
 .reports-page .rp-prog{width:100%}
 .reports-page .rp-t .title .t a{font-weight:700}
-/* the deck name is a finger-sized link on a touch screen */
-@media (pointer:coarse){.reports-page .rp-t .title .t a{display:inline-flex;align-items:center;
-  min-height:44px}}
 .reports-page .rp-t .title .deck .muted{color:var(--text-muted)}
-.reports-page .rp-t .wr{display:none;flex-direction:column;gap:.2rem;font-variant-numeric:tabular-nums}
-@media (min-width:900px){.reports-page .rp-t .wr{display:flex}}
-.reports-page .rp-t .ci{position:relative;display:block;height:6px;width:5.5rem;max-width:100%;
-  border-radius:3px;background:var(--surface-2)}
-.reports-page .rp-t .ci i{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--orange)}
-.reports-page .rp-t .num{font-variant-numeric:tabular-nums}
 .reports-page .rp-t .muted{color:var(--text-muted);font-size:.9rem}
 .reports-page .rp-t .kv{color:var(--text-muted);font-size:.88rem;white-space:nowrap}
 .reports-page .rp-t .kv b{color:var(--text)}
 .reports-page .rp-t .rp-empty{grid-template-columns:1fr}
 .reports-page .rp-t .rp-empty p{margin:.25rem 0}
-.reports-page .rp-sort{display:inline-flex;align-items:center;gap:.2rem;color:inherit;text-decoration:none;
-  min-height:24px}
-.reports-page .rp-sort svg.i{width:14px;height:14px}
-@media (pointer:coarse){.reports-page .rp-sort{min-height:44px}}
 """
+    + BALANCED_TOOLS_CSS
 )

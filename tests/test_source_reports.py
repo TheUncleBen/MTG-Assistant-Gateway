@@ -92,7 +92,7 @@ async def test_a_pasted_list_is_listed_on_reports_and_history_with_no_deck(stack
     b = await _browser(stack)
     try:
         reports = (await b.http.get("/reports", headers=NAV)).text
-        table = reports.split("class='ui-table rp-t'", 1)[1]
+        table = reports.split("class='ui-table rp-t ui-rows'", 1)[1]
         row = table.split(f"/history/reports/{rep['report_id']}'", 1)[1].split("<div class='tr'>", 1)[0]
         assert "<span class='ui-lbl blue src'>Pasted list</span>" in row, row
         assert "data-deck=" not in table  # no deck to open from its menu
