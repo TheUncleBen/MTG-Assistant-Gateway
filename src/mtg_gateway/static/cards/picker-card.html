@@ -19,7 +19,6 @@ button.picbtn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 /* the big picture of one row takes the list's place */
 .card.viewing .scroll,.card.viewing #note,.card.viewing #actions{display:none}
 .detail.flow{position:static;padding:0;overflow:visible;z-index:auto}
-.detail.flow img.big{max-width:340px}
 #detail .cap{font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere}
 #detail .cap b{color:var(--text);font-weight:600;font-size:.9375rem}
 /* the pictures could not load: the rows keep their names, set and number, without empty boxes */
@@ -69,7 +68,8 @@ button.picbtn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
   // Scryfall lookup at each size
   function pics(c) {
     return [c.image_small || B.scryfallImage(c.scryfall_id, c.name),
-      c.image_normal || B.scryfallImage(c.scryfall_id, c.name, "normal")];
+      c.image_normal || B.scryfallImage(c.scryfall_id, c.name, "normal"),
+      c.image_large || B.scryfallImage(c.scryfall_id, c.name, "large")];
   }
   // a row's picture is a button that shows the card big (view), in the list's place
   function thumb(c) {
@@ -85,7 +85,7 @@ button.picbtn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     $("dcap").appendChild(el("b", "", c.name || ""));
     if (label(c)) { $("dcap").appendChild(document.createElement("br")); $("dcap").appendChild(document.createTextNode(label(c))); }
     var pic = $("dpic"); pic.replaceChildren();
-    var p = pics(c), img = B.picture(p[0], "big", p[1], { sizes: "340px" });
+    var p = pics(c), img = B.picture(p[0], "big", p[1], { sizes: "(max-width: 520px) 92vw, 480px", large: p[2] });
     img.loading = "eager";
     pic.appendChild(img);
     $("detail").className = "detail flow";
@@ -104,11 +104,14 @@ button.picbtn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     var images = 0, unresolved = 0;
     rows.forEach(function (r, i) {
       var c = r.card, st = STATUS[r.status] || ["", r.status || ""];
-      var li = el("div", "row" + (keep[i] === false ? " dim" : "")); li.setAttribute("role", "listitem");
+      // dimmed only when the person unticked a recognised card: a row that still asks "which
+      // one?" has nothing to keep yet and reads at full strength, as the thing to look at
+      var li = el("div", "row" + (keep[i] === false && (c || picks[i]) ? " dim" : "")); li.setAttribute("role", "listitem");
       var cb = el("input", "check"); cb.type = "checkbox"; cb.checked = keep[i] !== false; cb.disabled = done || (!c && !picks[i]);
       cb.setAttribute("aria-label", "Keep " + ((c && c.name) || r.input_name || ""));
       cb.onchange = function () { keep[i] = cb.checked; li.classList.toggle("dim", !cb.checked); };
-      li.appendChild(cb);
+      var ck = el("label", "ck"); ck.appendChild(cb);
+      li.appendChild(ck);
       var n = el("span");
       var name = el("span", "name", (picks[i] || (c && c.name) || r.input_name || "?"));
       var pill = el("span", "pill " + st[0], picks[i] ? "picked" : st[1]); name.appendChild(pill);
