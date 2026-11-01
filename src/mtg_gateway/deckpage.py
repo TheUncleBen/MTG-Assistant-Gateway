@@ -987,7 +987,7 @@ def toolbar_html(
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         # the placeholder is short enough to read whole in the phone toolbar's field (the full
         # name of the control is its label, "Add to the deck", and the + beside it says Add)
-        "<input id='quick' type='text' name='add' placeholder='Add a card' data-suggest='cards' "
+        "<input id='quick' type='text' name='add' placeholder='Type a name' data-suggest='cards' "
         "data-suggest-submit "
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same. The
