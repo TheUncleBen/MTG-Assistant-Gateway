@@ -1952,6 +1952,7 @@
     menu = null; menuCard = null; menuStack = null; menuFocusBack = false;
     m.remove();
     if (menuScrim) { menuScrim.remove(); menuScrim = null; }
+    $$(".deck-toast.under-menu").forEach(function (t) { t.classList.remove("under-menu"); });
     if (menuPushed && !fromHistory) {
       // going back over the menu's entry fires popstate later; that one is ours, not a Back press
       menuPushed = false;
@@ -2265,6 +2266,10 @@
       document.body.appendChild(menuScrim);
     }
     document.body.appendChild(m);
+    // a note already showing goes under the menu the member has just opened (a tall menu reaches
+    // the corner it sits in); one that comes while the menu is open, such as a quantity step's
+    // Undo, sits above it
+    $$(".deck-toast").forEach(function (t) { t.classList.add("under-menu"); });
     m.style.left = x + "px";
     m.style.top = y + "px";
     fit(m);
