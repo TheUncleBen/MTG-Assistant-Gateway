@@ -691,8 +691,10 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             # Proposals: a waiting change may be applied from its row
             page.goto(f"{server.base}/proposals", wait_until="networkidle")
             row = page.locator(".pr-table .tr", has_text="Arcane Signet").first
-            assert row.locator("button.kebab.inline").count() == 1 and row.locator("a button").count() == 0
-            row.locator("button.kebab").click()
+            # the row's ⋮ is the page's own (a link without scripts), beside Review, never inline
+            assert row.locator("a.kebab").count() == 1 and row.locator("a button").count() == 0
+            assert row.locator(".kebab.inline").count() == 0
+            row.locator("a.kebab").click()
             _menu(page)
             assert _items(page) == ["Review", "Apply", "Reject", "Open the deck"]
             assert page.locator(".ctxmenu a[href='/decks/42']").count() == 1
@@ -711,9 +713,11 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert {"Details", "Open the deck"} <= found, found
             assert "Restore (review first)" in found and "Delete…" in found, found
             assert "Open report" in found, found
+            assert "Test this version" in found, found  # a snapshot's, from its row too (0.7.46)
             assert found <= {
                 "Details",
                 "Restore (review first)",
+                "Test this version",
                 "Open report",
                 "Open the deck",
                 "Delete…",
@@ -721,8 +725,8 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             # Reports
             page.goto(f"{server.base}/reports", wait_until="networkidle")
             row = page.locator(".rp-t .tr", has_text="Sample Commander Deck").first
-            assert row.locator("a button").count() == 0
-            row.locator("button.kebab.inline").click()
+            assert row.locator("a button").count() == 0 and row.locator(".kebab.inline").count() == 0
+            row.locator("a.kebab").click()
             _menu(page)
             assert _items(page) == ["Open", "Play more games", "Copy as Markdown", "Open the deck", "Delete…"]
             assert page.locator(".ctxmenu a[href='/history/reports/rep_menu#forge-more']").count() == 1

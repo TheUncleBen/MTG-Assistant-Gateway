@@ -262,9 +262,11 @@ async def test_history_lists_a_lists_change_with_the_copy_from_just_before(stack
         await b.login()
         history = (await b.http.get("/history")).text
         assert "Changed your Archidekt lists: Color tag “Cut”: color #ff0000 -&gt; #00ff00" in history
-        assert "<a class='t' href='/lists'>Your Archidekt lists</a>" in history
-        assert "href='/decks/lists'" not in history
+        # the name opens the entry's Details; the row's menu and the Details lead to My lists
+        assert "data-deck-href='/lists'" in history
+        assert "href='/decks/lists'" not in history and "data-deck-href='/decks/lists'" not in history
         details = (await b.http.get(f"/history?open=p-{p['proposal_id']}")).text
+        assert "<a href='/lists'>Your Archidekt lists</a>" in details
         assert "Before: your list as it was just before" in details and "Cut: #ff0000" in details
         assert f"/proposals/{p['proposal_id']}" in details
         # narrowed to the lists, it is the one entry; the chips count it

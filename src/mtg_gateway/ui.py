@@ -415,11 +415,19 @@ def binder_head(current: str, title: str, sub: str = "", *, actions_html: str = 
     )
 
 
-def list_head(title: str, total: int | None = None, note: str = "") -> str:
-    """The full list's heading with its total count, and an optional note beside it."""
+def list_head(title: str, total: int | None = None, note: str = "", *, note_html: str = "") -> str:
+    """The full list's heading with its total count, and an optional note beside it (``note`` as
+    text, or ``note_html`` already escaped: the order with its switch, as a capsule)."""
     count = f" <span class='ui-sub'>{total:,}</span>" if total is not None else ""
-    side = f"<span class='ui-sub'>{esc(note)}</span>" if note else ""
+    note_html = note_html or esc(note)
+    side = f"<span class='ui-sub'>{note_html}</span>" if note_html else ""
     return f"<div class='list-head'><h2>{esc(title)}{count}</h2>{side}</div>"
+
+
+def order_note(current: str, other: str, href: str) -> str:
+    """The list's order beside its heading, with the switch to the other order as a capsule:
+    "Newest first · Show oldest first"."""
+    return f"{esc(current)} · " + cap_link(f"Show {other.lower()}", href)
 
 
 BUTTON_KINDS = {
@@ -568,11 +576,48 @@ def check_cell(name: str, value: str, label: str, *, checked: bool = False, form
     )
 
 
-def group_row(title_html: str, meta_html: str = "", *, check_html: str = "") -> str:
-    """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta line."""
+def group_row(title_html: str, meta_html: str = "", *, check_html: str = "", action_html: str = "") -> str:
+    """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta
+    line. With ``action_html`` (a row list, ``.ui-rows``): the meta line sits under the title and
+    the action (Open deck, as a capsule) ends the row."""
     chk = check_html or "<span></span>"
+    if action_html:
+        small = f"<small>{meta_html}</small>" if meta_html else ""
+        return (
+            f"<div class='tr group'>{chk}<span class='m'>{title_html}{small}</span>"
+            f"<span class='act'>{action_html}</span></div>"
+        )
     meta = f"<span class='meta'>{meta_html}</span>" if meta_html else ""
     return f"<div class='tr group'>{chk}<span>{title_html}</span>{meta}</div>"
+
+
+def row_menu(href: str, name: str) -> str:
+    """A row's ⋮ (the menu static/menus.js opens; a right-click or a hold on the row opens it
+    too): a 44 px button at the row's end, beside its main action. Without scripts it is a link to
+    ``href``, the row's own page, where the same actions are."""
+    return (
+        f"<a class='kebab' href='{esc(href)}' aria-label='Menu for {esc(name)}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</a>"
+    )
+
+
+def row_open(href: str, word: str) -> str:
+    """A row list's main action (Review, Details, Open): the word in a capsule from 600 px; on a
+    phone a 44 px chevron, so the title keeps its line at any text size (the word stays for
+    screen readers)."""
+    return (
+        f"<a class='ui-cap' href='{esc(href)}' aria-label='{esc(word)}'>"
+        f"<span class='sm-hide'>{esc(word)}</span>"
+        "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
+    )
+
+
+def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str:
+    """A row list's action cell: the one main action as a capsule (cap_link), then the ⋮
+    (row_menu). ``hidden_html``: forms the menu submits (a snapshot's Restore) that the row no
+    longer shows; the row's page has them in view."""
+    hid = f"<span class='acts' hidden>{hidden_html}</span>" if hidden_html else ""
+    return f"<span class='act'>{hid}{main_html}{menu_html}</span>"
 
 
 def day_row(text: str) -> str:
