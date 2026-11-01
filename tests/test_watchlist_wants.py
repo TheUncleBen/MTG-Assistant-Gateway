@@ -457,3 +457,50 @@ async def test_the_assistant_watches_into_a_list_with_a_drop_alert(stack: Stack,
     tools = (await h.mcp(token, "tools/list")).json()["result"]["tools"]
     schema = next(t for t in tools if t["name"] == "watch_card")["inputSchema"]["properties"]
     assert "alert_drop" in schema and "list_name" in schema
+
+
+async def test_a_call_on_a_watched_card_that_names_no_alert_keeps_its_alerts(
+    stack: Stack, monkeypatch
+) -> None:
+    """Independent review 2, H1: "put Sol Ring in my Trades list" (or a plain "watch Sol Ring"
+    again) on a card already watched must keep its alerts, as the upgrade note promises; an alert
+    the call names changes that one alert only, and clear_alerts turns the others off."""
+    Clock(monkeypatch)
+    h = stack.h
+    svc = stack.gw.prices
+    b = await _browser(stack, link=True)
+    try:
+        token = await mcp_token(h)
+        first = structured(await call(h, token, "watch_card", {"name": "Sol Ring", "alert_below": 1}))
+        assert first["ok"] and first["watch"]["alerts"] == {"below": 1.0}, first
+        moved = structured(await call(h, token, "watch_card", {"name": "Sol Ring", "list_name": "Trades"}))
+        assert moved["ok"] and moved["watch"]["list"] == "Trades", moved
+        assert moved["watch"]["alerts"] == {"below": 1.0}
+        again = structured(await call(h, token, "watch_card", {"name": "Sol Ring"}))
+        assert again["watch"]["alerts"] == {"below": 1.0} and again["watch"]["list"] == "Trades"
+        # one alert named: that one changes, the others stay
+        more = structured(await call(h, token, "watch_card", {"name": "Sol Ring", "alert_drop": 20}))
+        assert more["watch"]["alerts"] == {"below": 1.0, "drop": 20.0}
+        # clear_alerts: only the alerts this call names are left
+        only = structured(
+            await call(h, token, "watch_card", {"name": "Sol Ring", "alert_pct": 5, "clear_alerts": True})
+        )
+        assert only["watch"]["alerts"] == {"pct": 5.0}
+        # the Watchlist page's Add form on a card already watched, with no alert: kept too
+        await _watch(b, name="Sol Ring")
+        assert {w["name"]: w["alert_pct"] for w in svc.watched_cards(SUB)}["Sol Ring"] == 5
+        row = next(w for w in svc.watched_cards(SUB) if w["name"] == "Sol Ring")
+        # moving it in bulk, renaming and deleting its list keep its alert as well
+        svc.move_to_list(SUB, [row["id"]], "Other")
+        svc.rename_list(SUB, "Other", "Renamed")
+        svc.delete_list(SUB, "Renamed")
+        row = next(w for w in svc.watched_cards(SUB) if w["name"] == "Sol Ring")
+        assert row["alert_pct"] == 5 and row["list_name"] == ""
+        # the card viewer's Watch on a watched card (keep_alerts) changes nothing either
+        csrf = await b.csrf("/watchlist")
+        r = await b.http.post("/watchlist/api/watch", json={"name": "Sol Ring"}, headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 200 and r.json()["watch"]["created"] is False, r.text
+        row = next(w for w in svc.watched_cards(SUB) if w["name"] == "Sol Ring")
+        assert row["alert_pct"] == 5
+    finally:
+        await b.aclose()

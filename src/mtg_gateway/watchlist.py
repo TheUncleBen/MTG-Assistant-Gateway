@@ -419,9 +419,10 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         name="watch_card",
         title="Watch a card's price",
         description=(
-            "Add a card to the member's watchlist (or change its alerts when it is already there). By name "
+            "Add a card to the member's watchlist, or change a watched one's list or the alerts named "
+            "(others kept). By name "
             "alone it follows the printing Scryfall gives for that name; set_code and collector_number "
-            "follow one printing. Optional alerts: alert_pct, alert_above and alert_below (a price "
+            "follow one printing. Alerts: alert_pct, alert_above and alert_below (a price "
             "crossed, in dollars, or euros when the card has no dollar price) and alert_drop. A new watch "
             "that names no alert gets the member's defaults; list_name groups it. The gateway checks "
             "prices once a day; alerts reach the member through their push notifications. Changes only the "
@@ -457,6 +458,9 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
                 description="The watchlist list (group) to put the card in; made when new. Empty: no list."
             ),
         ] = None,
+        clear_alerts: Annotated[
+            bool, Field(description="Also turn off alerts not named.")
+        ] = False,
     ) -> dict[str, object]:
         sub = _sub()
         try:
@@ -470,6 +474,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
                 alert_above=alert_above,
                 alert_below=alert_below,
                 alert_drop=alert_drop,
+                clear_alerts=clear_alerts,
                 defaults=prefs.alert_defaults(state.db, sub),
                 list_name=list_name,
             )

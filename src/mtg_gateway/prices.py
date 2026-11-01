@@ -623,6 +623,7 @@ class PriceService:
         alert_drop: float | None = None,
         alert_rise: float | None = None,
         keep_alerts: bool = False,
+        clear_alerts: bool = False,
         default_pct: float | None = None,
         defaults: dict[str, Any] | None = None,
         list_name: str | None = None,
@@ -630,8 +631,10 @@ class PriceService:
         """Watch a card (or change the alerts of one already watched). The printing is looked
         up at once, so today's price shows right away (a watch by name alone: its cheapest
         printing's); when Scryfall is busy the watch is kept and priced by the next daily check.
-        ``keep_alerts``: a card already watched keeps its alerts (the Watch buttons, which set
-        none). A new watch that names no alert of its own gets the member's defaults
+        On a card already watched, only the alerts the call names change and the others are kept
+        (a call naming none, such as a move to a list, keeps them all); ``clear_alerts`` turns
+        off the ones it does not name. ``keep_alerts``: a card already watched keeps its alerts
+        whatever is named (the Watch buttons). A new watch that names no alert of its own gets the member's defaults
         (``defaults``, as prefs.alert_defaults gives them; ``default_pct`` alone is the remembered
         one-day move) and remembers the price it was added at, the reference for the "drop below"
         and "rise above" alerts. ``list_name``: the watchlist list to put it in (None: leave a
@@ -730,7 +733,14 @@ class PriceService:
         with self.db.tx() as c:
             if existing:
                 wid = existing[0]["id"]
-                if not keep_alerts:
+                if not keep_alerts and (clear_alerts or any(a is not None for a in alerts)):
+                    if not clear_alerts:
+                        was = c.execute(
+                            "SELECT alert_pct, alert_above, alert_below, alert_drop_pct, alert_rise_pct "
+                            "FROM watch_cards WHERE id = ?",
+                            (wid,),
+                        ).fetchone()
+                        alerts = tuple(a if a is not None else w for a, w in zip(alerts, tuple(was), strict=True))
                     c.execute(_SET_ALERTS + " WHERE id = ?", (*alerts, wid))
                 if list_name is not None:
                     self._ensure_list(c, sub, list_name, t)
