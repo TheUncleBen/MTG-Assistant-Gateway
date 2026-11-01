@@ -49,7 +49,7 @@ from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
-    login_redirect,
+    login_redirect_here,
 )
 from .theme import (
     SPINNER,
@@ -500,7 +500,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def decks_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         qp = request.query_params
         # Try again on the notice that the deck list couldn't be read: read it again, then show it
         if qp.get("reread"):
@@ -641,7 +641,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def open_deck(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         ref = (request.query_params.get("ref") or "").strip()
         try:
             from .decks import _clean_deck_id
@@ -656,7 +656,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_deck_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new")
+            return login_redirect_here(request, "/decks/new")
         values: dict[str, str] = {}
         scan_name = ""
         scan_ref = (request.query_params.get("scan_session") or "").strip()[:80]
@@ -677,7 +677,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_deck_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new")
+            # the sign-in ended while the form was filled in: after signing in the box opens
+            # again with what was typed (its draft, static/newdeck.js) (QG-04)
+            return login_redirect_here(request, "/decks/new?draft=1")
         data = await form(request, limit=4_200_000)  # a deck .json export can reach a few MB
         values = {
             k: v
@@ -727,7 +729,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_package_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new-package")
+            return login_redirect_here(request, "/decks/new-package")
         return await my_decks_response(request, sub, sid, new_package={"values": {}})
 
     @server.custom_route("/decks/new-package", methods=["POST"], include_in_schema=False)
@@ -736,7 +738,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         (decks.propose_new_deck with ``package``), applied at once as Create deck is."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new-package")
+            return login_redirect_here(request, "/decks/new-package")
         data = await deck_extras.read_form(request, lists=("format",))
         values = {
             "name": data.get("name", ""),
@@ -976,7 +978,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return RedirectResponse(f"/forum/thread/{thread_of(deck_id)}", status_code=303)
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         return await deck_page_response(request, sub, sid, deck_id)
 
     @server.custom_route("/decks/{deck_id}/check", methods=["GET"], include_in_schema=False)
@@ -1020,7 +1022,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Deck", EXPIRED, sub=sub, sid=sid, status=403)

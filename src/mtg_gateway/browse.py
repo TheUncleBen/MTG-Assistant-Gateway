@@ -39,7 +39,7 @@ from .deckpage import (
     deck_list_html,
 )
 from .decks import DeckError, _clean_deck_id
-from .pages import NO_STORE, _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .theme import esc as _esc
 from .theme import icon, render, stylesheet_link
 
@@ -686,7 +686,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     async def search_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/search" + (f"?{request.url.query}" if request.url.query else ""))
+            return login_redirect_here(request)
         query = read_query(request.query_params)
         view, remember = view_of(request, sub)
         asked = bool(
@@ -797,7 +797,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         public deck and can be cloned from there."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/precons")
+            return login_redirect_here(request, "/precons")
         pq = precon_query(request.query_params)
         view, remember = view_of(request, sub)
         view_in_link = view if request.query_params.get("view") in VIEWS else None
@@ -856,7 +856,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         username = request.path_params["username"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/users/{username}")
+            return login_redirect_here(request, f"/users/{username}")
         query = read_query({**request.query_params, "owner": username})
         query["order_by"] = (
             request.query_params.get("order")
