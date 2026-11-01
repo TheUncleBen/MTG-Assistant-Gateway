@@ -721,8 +721,13 @@ def test_the_rows_of_the_list_pages_have_their_menus(tmp_path: Path) -> None:
             assert "Restore (review first)" in found and "Delete…" in found, found
             assert "Open report" in found, found
             assert "Test this version" in found, found  # a snapshot's, from its row too (0.7.46)
+            # a change's review page and the change a snapshot was taken before: from the ⋮,
+            # not capsules in the line (L9)
+            assert {"Open the review page", "The change it was taken before"} <= found, found
             assert found <= {
                 "Details",
+                "Open the review page",
+                "The change it was taken before",
                 "Restore (review first)",
                 "Test this version",
                 "Open report",

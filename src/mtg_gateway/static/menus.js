@@ -852,8 +852,13 @@
     var report = $("a[href^='/history/reports/']", tr), deck = tr.getAttribute("data-deck");
     var deckHref = tr.getAttribute("data-deck-href") || (deck ? "/decks/" + enc(deck) : "");  // a lists change opens My lists
     var test = $("form.hy-test button", tr);  // the forms stay in the row, out of sight, for the menu
+    // the review page of a change (or the one a snapshot was taken before) and the snapshot's
+    // backup copy: links the row carries, never capsules in its line (review 2, L9)
+    var review = tr.getAttribute("data-review"), backup = tr.getAttribute("data-backup");
     var items = [];
     if (details) items.push(link("Details", "eye", details.getAttribute("href")));
+    if (review) items.push(link(restore || remake || test ? "The change it was taken before" : "Open the review page", "proposals", review));
+    if (backup) items.push(link("Backup copy on Archidekt", "external", backup, { ext: true }));
     if (restore) items.push(item("Restore (review first)", "undo", function () { restore.click(); }));
     if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
