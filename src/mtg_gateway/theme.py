@@ -1229,7 +1229,9 @@ CSS += """
 .sizeseg button + button{border-left:1px solid var(--control-border)}
 .sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
 .sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px} }
+@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px}
+  /* the Grid / List switch: its own rule takes 2 px off --ctl for the border; a finger gets 44 */
+  .spanel .segc label{min-height:44px;min-width:44px} }
 .field.cardsize .sizeseg{display:flex;width:max-content}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){

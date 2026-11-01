@@ -376,11 +376,9 @@ def banner_html(
     )
     brackets = banner_bracket_html(deck, stats)  # bracket_view.py
     salt = stats.get("salt_total") if stats.get("salt_total") is not None else "–"
-    tags = (
-        "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
-        if deck.tags
-        else "<span class='notags'>No deck tags</span>"
-    )
+    # the deck's tags; none: no "No deck tags" line (noise, as on the tiles)
+    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
+    tags = f"<div class='tags'>{icon('tag')} {pills}</div>" if deck.tags else ""
     csrf_in = f"<input type='hidden' name='csrf' value='{esc(csrf)}'>" if csrf else ""
     did = esc(deck.id)
     title = deck_title(deck)
@@ -388,10 +386,14 @@ def banner_html(
     if own and csrf and making:
         primary += (
             "<button type='button' class='btn btn-primary' disabled "
-            f"title='Changes wait until the deck is made'>{icon('edit')} Edit deck</button>"
+            f"title='Changes wait until the deck is made'>{icon('edit')} "
+            "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></button>"
         )
     elif own and csrf:
-        primary += f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} Edit deck</a>"
+        primary += (
+            f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} "
+            "<span class='lg'>Edit deck</span><span class='sm'>Edit</span></a>"
+        )
     if csrf:
         # Any deck the member can read can be cloned into their own account, as on archidekt.com
         # (its Clone button is on public decks and precons too). The button opens the Clone box
@@ -399,7 +401,7 @@ def banner_html(
         primary += (
             f"<button type='submit' form='clonef' class='btn' {ui.box_open_attr('clone')} "
             "title='Copy this deck into your own Archidekt account'>"
-            f"{icon('clone')} Clone deck</button>"
+            f"{icon('clone')} <span class='lg'>Clone deck</span><span class='sm'>Clone</span></button>"
         )
     # Test and play: the ways to try the deck out, on the gateway and on other sites, in one menu
     # (static/deck.js opens it as the shared menu; without scripts it is this drop-down).
@@ -487,6 +489,34 @@ def banner_html(
         else ""
     )
     when = updated_when(deck.updated_at)
+    # The facts, in three rows on a wide screen. On a phone (mockup screen 5) the rows flow as
+    # one wrapping line beside a 64 px art thumbnail: the long labels (.lg: "72 distinct cards",
+    # "Size:", "(Archidekt prices)", "Salt sum:") give way to short ones (.sm: "100 cards",
+    # "Est", "Salt"), and the owner's name joins the line, as the avatar is not shown there.
+    size = stats.get("card_count", sum(c.quantity for c in deck.main_cards))
+    owner_sm = (
+        f"<a class='owner-sm sm' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
+        f"{esc(deck.owner or 'unknown')}</a>"
+    )
+    thumb = (
+        f"<img class='thumb' src='{esc(art_url)}' alt='' loading='lazy' decoding='async'>" if art_url else ""
+    )
+    rows = (
+        "<div class='rows'><div class='row'>"
+        + owner_sm
+        + (f"<span>{when}</span>" if when else "")
+        + f"<span class='lg'>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
+        "</div><div class='row'>"
+        f"<span class='fmt'>{esc(format_label(deck.format))}</span>{legality}{brackets}"
+        f"<span class='sm'>{plural(size, 'card')}</span>"
+        "</div><div class='row'>"
+        f"<span class='lg'>Size: {size}</span>"
+        "<span><span class='lg'>Est cost: </span><span class='sm'>Est </span>"
+        f"<b class='orange'>{est_cost_html(stats)}</b><span class='lg'> (Archidekt prices)</span></span>"
+        "<span><span class='lg'>Salt sum: </span><span class='sm'>Salt </span>"
+        f"<b class='orange'>{esc(salt)}</b></span>"
+        "</div></div>"
+    )
     data = (
         f" data-deck-id='{did}' data-deck-name='{esc(title)}' data-own='{1 if own and csrf else 0}'"
         f" data-can='{1 if csrf else 0}' data-forge='{1 if forge_on and csrf else 0}'"
@@ -499,19 +529,11 @@ def banner_html(
         f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "<div class='info'>"
+        f"<div class='top'>{thumb}<div class='titles'>"
         f"<h1 class='deckname{'' if deck.name else ' unnamed'}'>{privacy}"
         f"<span title='{esc(title)}'>{esc(title)}</span></h1>"
-        "<div class='row'>"
-        + (f"<span>{when}</span>" if when else "")
-        + f"<span>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
-        "</div><div class='row'>"
-        f"<span>{esc(format_label(deck.format))}</span>{legality}{brackets}"
-        "</div><div class='row'>"
-        f"<span>Size: {stats.get('card_count', sum(c.quantity for c in deck.main_cards))}</span>"
-        f"<span>Est cost: <b class='orange'>{est_cost_html(stats)}</b> (Archidekt prices)</span>"
-        f"<span>Salt sum: <b class='orange'>{esc(salt)}</b></span>"
-        "</div>"
-        f"<div class='tags'>{icon('tag')} {tags}</div>"
+        f"{rows}</div></div>"
+        f"{tags}"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
         f"{social_html(deck, own=own, writes_enabled=writes_enabled, waiting=waiting) if csrf else ''}"
         "</div>"
@@ -546,10 +568,12 @@ def _export_pane(key: str, title: str, text: str, *, current: bool) -> str:
     )
 
 
-def export_box_html(deck: Deck, *, open: bool = False) -> str:
+def export_box_html(deck: Deck, *, open: bool = False, pdf: bool = False) -> str:
     """The Export box (F3): tabs Archidekt text, Plain list, Side and maybe (when the deck has
-    rows outside the deck) and Files, with the seven downloads. Without scripts every pane
-    shows, one under the other."""
+    rows outside the deck) and Files, with the seven downloads and, on the member's own deck
+    (``pdf``), the Registration PDF (mockup screen 2: it is an export format, so the More menu's
+    own item for it went; the row opens the Registration PDF box, deck_extras.py). Without
+    scripts every pane shows, one under the other."""
     from .decks import deck_to_archidekt_text, deck_to_text
     from .export_formats import to_plain
 
@@ -576,6 +600,11 @@ def export_box_html(deck: Deck, *, open: bool = False) -> str:
         f"<a class='btn' href='/decks/{did}/{path}' download>{icon('download')} {esc(label)}</a>"
         for path, label in EXPORT_FILES
     )
+    if pdf:
+        files += (
+            f"<a class='btn regpdf' href='/decks/{did}/registration' {ui.box_open_attr('pdf')}>"
+            f"{icon('pdf')} Registration PDF…</a>"
+        )
     panes += (
         "<div class='xpane' data-pane='exp-files' hidden>"
         "<p class='muted small'>Downloads are made in this browser from the deck as read now.</p>"
@@ -728,7 +757,7 @@ def deck_boxes_html(
     ``box_error`` shows in it)."""
     if not csrf:
         return ""
-    out = export_box_html(deck, open=open_box == "export")
+    out = export_box_html(deck, open=open_box == "export", pdf=own)
     out += compare_box_html(deck, open=open_box == "compare")
     out += clone_box_html(
         deck,
@@ -3175,10 +3204,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .deltatable th{text-align:left;font-weight:500;padding:.3rem 1rem .3rem 0}
 .deltatable td{text-align:right;font-variant-numeric:tabular-nums}
 .banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
-/* a phone: the four pills (Like, Bookmark, then Comments and Proposals, or Follow and Comments)
-   two by two, even, instead of three and a lone fourth */
-@media (max-width:599.98px){ .banner .social{display:grid;grid-template-columns:1fr 1fr}
-  .banner .social .soc{justify-content:center} .banner .social .confirm{grid-column:1/-1} }
+/* a phone (mockup screen 5): the chips on one row, each its icon and count, the words for a
+   screen reader; a confirmation (social.js) takes the row under them */
+@media (max-width:599.98px){
+  .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
+  .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
+  .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap}
+  .banner .social .confirm{flex-basis:100%} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
   font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1}
@@ -3263,27 +3296,48 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .banner .avatar{background:#3a3a3a;color:#fff;border-color:rgba(255,255,255,.4)}
 .avatar.lg{width:50px;height:50px;font-size:1.4rem} .avatar.sm{width:40px;height:40px;font-size:1.1rem}
 .avatar.xl{width:80px;height:80px;font-size:2rem}
-@media (max-width:600px){
+/* the wide banner: no thumbnail, the long labels, the three fact rows as they were */
+.banner .thumb,.banner .sm{display:none}
+.banner .top,.banner .titles,.banner .rows{display:contents}
+/* a phone (mockup screen 5): a slim header. A 64 px art thumbnail beside the name and one
+   wrapping line of facts (the short labels), the owner's name in it; Edit / Clone / Test / More
+   as four equal buttons; the social chips on one row with the deck's tags at its end. The cards
+   start at about 300 px instead of 1100. */
+@media (max-width:599.98px){
+  .banner{margin-bottom:.5rem}
   .banner .shade{padding:0}
   .banner .content{flex-direction:column;gap:0}
-  .banner .strip{display:block;height:110px;background:var(--surface-2) var(--art,
-    none) center 30%/cover no-repeat}
-  .banner .info{padding:0 1rem 1rem}
-  .banner h1.deckname{font-size:24px;margin-top:.5rem}
-  .banner .row{font-size:13px}
-  .banner .owner{flex-direction:row;justify-content:flex-end;max-width:none;padding:.5rem 1rem 0;order:-1}
-  .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:0;
-    border-width:3px;border-color:var(--bg)}
-  /* phones: the actions in two columns instead of five full-width rows; a column is at least 9rem,
-     so at large text sizes they go one a row, and a long label wraps whole instead of being cut */
-  .banner .controls .primary{display:grid;width:100%;gap:.5rem;
-    grid-template-columns:repeat(auto-fill,minmax(min(100%,9rem),1fr))}
+  .banner .strip,.banner .owner{display:none}
+  .banner .info{padding:.65rem .75rem .6rem;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .6rem}
+  .banner .top{display:flex;gap:.7rem;align-items:flex-start;flex-basis:100%;min-width:0;max-width:100%}
+  .banner .thumb{display:block;width:64px;height:64px;border-radius:8px;object-fit:cover;flex:none;
+    background:var(--surface-2);border:1px solid rgba(255,255,255,.25)}
+  .banner .titles{display:block;min-width:0;flex:1 1 auto}
+  .banner h1.deckname{font-size:19px;margin:0 0 .15rem;line-height:1.25}
+  /* the facts flow as one wrapping text (inline rows, each part spaced by a margin), so 200% text
+     wraps rather than widens the page; each row keeps a box of its own (the contrast checks) */
+  .banner .rows{display:block;font-size:13px;color:#d6d6d6;line-height:1.5;min-width:0}
+  .banner .rows .row{display:inline;margin:0}
+  /* each part its own inline block: a line can break between parts that the markup does not
+     separate with a space */
+  .banner .rows .row > :not(.lg):not(.legal){display:inline-block;margin-right:.6rem}
+  .banner .rows .row > .legal{margin-right:.6rem}
+  .banner .rows .fmt,.banner .rows .owner-sm{font-weight:700;color:#fff}
+  .banner .rows .owner-sm{text-decoration:none}
+  .banner .rows .owner-sm:hover,.banner .rows .owner-sm:focus-visible{color:var(--orange);
+    text-decoration:underline}
+  .banner .lg{display:none} .banner .sm{display:inline}
+  .banner .tags{margin:0 0 0 auto;order:6;font-size:13px}
+  .banner .controls{flex-basis:100%;margin:0;order:4}
+  .banner .controls .primary{display:grid;width:100%;gap:.4rem;
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}
   .banner .controls .primary .btn,.banner .controls .primary button,.banner .controls details.dd{width:100%;
     min-width:0}
-  .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.5rem;padding-right:.5rem;
-    white-space:normal;overflow-wrap:normal;text-align:center}
+  .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.35rem;padding-right:.35rem;
+    white-space:normal;overflow-wrap:normal;text-align:center;min-height:44px;gap:.3rem}
   .banner .controls .primary form.inline{display:contents}
   .banner .controls details.dd > summary.btn{width:100%}
+  .banner .social-off{flex-basis:100%;margin:0;order:7}
 }
 
 /* toolbar panel (filterBar) */
@@ -3299,6 +3353,39 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
 .toolbar .views .hint{grid-column:1 / -1;margin:0;color:var(--text-muted);font-size:.9rem;align-self:center}
+/* a phone (mockup screen 5): one row, Quick add with its +, View and ⋮. View opens a sheet with
+   Layout, Group by, Sort by, Filter and Select cards (deck.js); ⋮ holds Add a package, Undo and
+   Redo. The server's View as / Group by / Sort by form and the Add a package button stay for
+   wider screens and for a page without scripts. */
+.toolbar .viewbtn,.toolbar .toolmore{display:none}
+@media (max-width:599.98px){
+  .toolbar.compact{padding:.5rem .75rem}
+  .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+  .toolbar.compact form.quick{flex:1 1 11rem;min-width:0;margin:0}
+  .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0)}
+  .toolbar.compact .quickrow{flex-wrap:nowrap}
+  .toolbar.compact .quickrow .addpkg,.toolbar.compact form.views{display:none}
+  .toolbar.compact .viewbtn{display:inline-flex;flex:1 0 auto;margin:0;min-height:var(--ctl);gap:.35rem;
+    justify-content:center;max-width:100%}
+  .toolbar.compact .controls > .viewbtn:first-child{flex:1 1 auto;justify-content:center}
+  .toolbar.compact .toolmore{display:inline-flex;flex:0 0 auto;margin:0;width:var(--ctl);min-width:var(--ctl);
+    min-height:var(--ctl);padding:0;justify-content:center}
+  /* the select bar shows while cards are being selected (the View sheet's switch) */
+  .bulkbar:not(.on){display:none}
+  /* the one "hold a card to move it" line, at the top (deck.js), instead of one under every category */
+  .movehint{margin:-.25rem 0 .4rem;font-size:.85rem;color:var(--text-muted)}
+  .deckview[data-drop][data-hint-top] .stackhead .meta::after{content:none}
+}
+/* the View sheet's rows */
+.viewsheet .vrow{display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-height:52px;
+  border-top:1px solid var(--border-soft)}
+.viewsheet .vrow:first-child{border-top:0}
+.viewsheet .vrow > label,.viewsheet .vrow > .lbl{font-weight:600;flex:0 0 auto}
+.viewsheet .vrow select,.viewsheet .vrow input[type=search]{width:auto;max-width:58%;min-width:0;margin:0;
+  min-height:44px}
+.viewsheet .vrow .sizeseg{margin:0}
+.viewsheet .vrow .switch{margin:0}
 /* with the card size switch (0.7.29) next to View as: it takes only its own width. Above 1200 px the
    boxes share one row while they fit and wrap onto the next row when large text makes them wider
    (one grid row let Group by and Sort by run over each other at 200% text) */
@@ -3568,8 +3655,19 @@ html.cardview-open{overflow:hidden}
 .cardview .prices table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:.3rem 0}
 .cardview .prices th,.cardview .prices td{padding:.15rem .6rem .15rem 0;text-align:left;
   border-bottom:1px solid var(--border-soft)}
+/* the Printing row: a button the width of the text column that opens the Printings sheet */
+.cardview .printrow{display:flex;align-items:center;gap:.6rem;width:100%;min-height:44px;margin:0;
+  padding:.5rem .85rem;text-align:left;font:inherit;color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius);background:var(--surface-2);cursor:pointer}
+.cardview .printrow:hover,.cardview .printrow:focus-visible{border-color:var(--orange)}
+.cardview .printrow .pic{display:inline-flex;flex:none;color:var(--orange-text)}
+.cardview .printrow .lbl{flex:none;color:var(--text-muted);font-weight:700}
+.cardview .printrow .val{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.cardview .printrow .chev{flex:none;color:var(--text-muted);font-size:1.4rem;line-height:1}
+/* the action rows: [− n +] [Move to…] [Remove], then (after .br) [Add to binder] [Edit in deck editor] */
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;padding-top:.25rem}
-.cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
+.cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto;justify-content:center;text-align:center}
+.cardview .acts .br{flex-basis:100%;height:0;margin:-.5rem 0 0}
 @media (max-width:700px){
   .cardview{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
   .cardview .box{grid-template-columns:minmax(0,44%) minmax(0,1fr);grid-template-rows:auto auto;
@@ -3580,11 +3678,18 @@ html.cardview-open{overflow:hidden}
   .cardview .head{flex-direction:column-reverse;align-items:flex-end;justify-content:flex-end;gap:.5rem}
   .cardview .head h3{align-self:stretch;font-size:1.2rem}
   .cardview .cardtext,.cardview .rulings{overflow:visible}
-  .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
+  .cardview .acts .btn,.cardview .acts button{min-height:44px}
+  .cardview .more .btn{min-height:44px} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
 /* the card menu (deck.js): its base is theme.CARD_MENU_CSS */
-.ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
+/* the menu's head: the card's name, and on your own deck its count with − and + at the end */
+/* the head row (mockup screen 3): the card's name with its count and − and + beside it */
+.ctxmenu .headrow{display:flex;align-items:center;gap:.5rem;padding:0 .5rem .35rem 0;margin-bottom:.25rem;
+  border-bottom:1px solid var(--border)}
+.ctxmenu .headrow .head{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-weight:700;border-bottom:0;
+  margin-bottom:0;padding-bottom:0}
+.ctxmenu .qtyrow{display:flex;align-items:center;gap:.35rem;flex:none;min-height:38px;cursor:default}
 .ctxmenu .qtyrow .lbl{flex:1}
 .ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
 .ctxmenu .mvform label{font-weight:600}
@@ -3602,9 +3707,16 @@ html.cardview-open{overflow:hidden}
   font-weight:700;line-height:1}
 .ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
 .ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
-.ctxmenu .more .chev,.ctxmenu .finbtn .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;
-  line-height:1}
-.ctxmenu .more[aria-expanded=true] .chev,.ctxmenu .finbtn[aria-expanded=true] .chev{transform:rotate(90deg)}
+/* a folded group (More on a phone): its name as a row that opens it, the chevron turning */
+.ctxmenu button.ghead.fold{display:flex;align-items:center;gap:.5rem;width:100%;padding:.35rem 1rem;
+  font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--menu-head);
+  min-height:44px}
+.ctxmenu .grp{display:flex;flex-direction:column}
+.ctxmenu .grp[hidden]{display:none}
+.ctxmenu .fold .chev,.ctxmenu .more .chev,.ctxmenu .finbtn .chev{margin-left:auto;color:var(--text-muted);
+  font-size:1.2rem;line-height:1}
+.ctxmenu .fold[aria-expanded=true] .chev,.ctxmenu .more[aria-expanded=true] .chev,
+.ctxmenu .finbtn[aria-expanded=true] .chev{transform:rotate(90deg)}
 .ctxmenu .sub,.ctxmenu .finsub{display:flex;flex-direction:column;background:var(--surface);
   border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
@@ -3657,10 +3769,14 @@ html.cardview-open{overflow:hidden}
 .edhplay-dialog .notice.error{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .75rem;margin:0}
 .edhplay-dialog .notice.error span{flex:1 1 12rem}
 .edhplay-dialog .notice.error .btn{margin:0}
-@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
+@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none}
+  /* while a card menu sheet is open the toast moves to the top: Undo stays in reach, and the
+     sheet's own rows and forms (Mana value, Finish) are never under it */
+  body:has(.ctxmenu.cs-menu) .deck-toast{bottom:auto!important;
+    top:calc(50px + .5rem + env(safe-area-inset-top))} }
 @media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
 /* the viewer's own copies control: one fewer, the count, one more */
-.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:1 1 auto}
+.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:0 0 auto}
 .cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
@@ -4039,6 +4155,9 @@ html.printpick-open{overflow:hidden}
   color:var(--text-muted);pointer-events:none}
 .printpick .ppq input{width:100%;padding-left:2.4rem}
 .printpick .ppfiltbtn{display:none;margin:0;flex:none}
+/* the chips: All, Different art, In my binder (mockup screen 3); on a phone the row scrolls sideways */
+.printpick .ppscope{display:flex;gap:.5rem;min-width:0;overflow-x:auto;padding:1px 0}
+.printpick .ppscope .ui-chip{margin:0;min-width:44px;justify-content:center}
 /* the card size switch (0.7.29) keeps its size; on a narrow phone it wraps under the search */
 .printpick .ppsearch{flex-wrap:wrap}
 .printpick .ppsearch input{flex-basis:10rem}
@@ -4156,7 +4275,14 @@ html.printpick-open{overflow:hidden}
   .printpick input[type=search],.printpick .msel-btn,.printpick select{height:44px;min-height:44px}
   .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,
   .printpick .ppstatus .btn{min-height:44px}
-  .printpick .ppall{min-height:44px} }
+  .printpick .ppall{min-height:44px}
+  /* the deck editor's − and + steps and the count box, its Foil and backup check boxes (the
+     label is the finger area) and the deck page's Undo and Redo: 44 px (review 0.7.46, F18) */
+  .erow .qty button.mini,.erow .qty input{width:44px;min-width:44px;height:44px;min-height:44px}
+  .erow details.dd summary.mini{width:44px;height:44px;min-height:44px}
+  .editbar .backup,.addbox form.addcard .go .foil{min-height:44px;padding:0 .25rem}
+  .editbar .backup input,.addbox form.addcard .go .foil input{width:22px;height:22px;margin:0}
+  .bulkbar .histtools button,.bulkbar .btn-ghost.small{min-height:44px} }
 /* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
    tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
    showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room
