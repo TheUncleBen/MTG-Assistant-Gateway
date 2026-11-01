@@ -84,7 +84,8 @@ name per thing.
     `list_name` and `clear_alerts`, and `list_watchlist` rows carry `list` and `added_price`.
   - `watch_card` on a card already watched changes only the price alerts it names and keeps the
     others (a call that names none, such as a move to a list, keeps them all); `clear_alerts`
-    turns off the ones it doesn't name.
+    turns off the ones it doesn't name, and on a new watch means no alerts instead of your
+    default one.
 
 ### Added
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a
@@ -158,8 +159,8 @@ name per thing.
 - Admin has a “Speed, last 24 h” card showing which pages were slow and why, with how much of the
   time went to the identity provider, and a request that takes over 3 seconds is logged as a
   warning, split into Archidekt and identity provider time.
-- More lists Card models. The rail lists every page instead of More, and so does a computer's top
-  bar when the window is wide enough; a phone keeps More.
+- More lists Card models, with its own icon. The rail lists every page instead of More, and so
+  does a computer's top bar when the window is wide enough; a phone keeps More.
 - Card search: Commander-legal identity searches, 20 cards a page, the newest paper printing,
   better rules search, and precons by set name. `list_card_packages` takes a limit.
 - `compare_decks` compares decks of different sizes, unpaired.
@@ -263,7 +264,8 @@ name per thing.
   Files, and Add a package… is a toolbar button.
 - On a phone the deck page's top is shorter: Edit, Clone, Test and More in one row, and one
   toolbar row with Quick add, a View sheet (layout, card size, grouping, sort, filter and Select
-  cards) and ⋮ for Add a package…, Undo and Redo; steppers and buttons are 44 px.
+  cards) and ⋮ for Add a package…, Undo and Redo; steppers, buttons and the owner's name in the
+  banner are 44 px targets.
 - Deck settings and categories save each change as you make it, with Undo, and stay on the page;
   leaving while a save runs asks first. A save Archidekt never answered shows what the deck has
   now, a refused save offers Try again when trying again could work (Search cards for a name
@@ -289,13 +291,17 @@ name per thing.
 - Home greets you by name, and its search suggests your own decks first.
 - **Account details is a settings list**: your card, then Archidekt, Assistant, This gateway and
   Your data. Each row shows its state and opens its own page, or folds open in place; two columns
-  on a wide screen. The list no longer waits on your Archidekt profile, and old links land on the
-  right page. Sign out on all my devices and Delete my data… ask first in a box, like Unlink
-  Archidekt…. “Connected apps” is now “Assistants” everywhere.
-- **Proposals, History and Reports** show each entry on one line at every width: the title with its
-  facts under it, then its main action and its menu together (a chevron on a phone). Proposals has
-  four tiles and groups waiting changes by deck; History's deck name opens the entry's details;
-  the order switch is a capsule above the list.
+  on a wide screen (Archidekt over Your data, Assistant over This gateway). The list no longer
+  waits on your Archidekt profile, and old links land on the right page. Sign out on all my
+  devices… and Delete my data… ask first in a box, like Unlink Archidekt…. “Connected apps” is
+  now “Assistants” everywhere.
+- **Proposals, History and Reports** show each entry as one row at every width: the title, what
+  the entry is on one line (the rest is in its details), and its facts under it, then its main
+  action and its menu together (a chevron on a phone). On a narrow phone the facts wrap by word
+  when they don't fit. History's links (an entry's review page, a snapshot's backup copy) are in
+  the row's ⋮ and its Details, never in the line. Proposals has four tiles and groups waiting
+  changes by deck; History's deck name opens the entry's details; the order switch is a capsule
+  above the list.
 - Card search shows two cards a row on a narrow phone, and Deck search applies a filter in place.
 - Restore makes a deleted Maybeboard or Sideboard record again.
 - Someone you followed on Archidekt a moment ago can be added as a collaborator at once.
@@ -352,9 +358,12 @@ name per thing.
   (tried in the Android app). The website footer says “Assistant skill”.
 - **Deleting a category on the deck page** can leave its cards in the deck with “No category”,
   listed by type (the cards are cleared first, then the empty category deleted). The box picks the
-  biggest plain category, else “No category”, never Commander, a Premier category or a board out
-  of the deck; each choice says what it does (“Commander (makes them commanders)”, “Maybeboard
-  (leaves the deck)”) and the sentence under it follows the pick. A Premier pick asks once more.
+  biggest category like the one deleted (a plain one, or another board out of the deck), else “No
+  category”, never Commander, a Premier category or a board that changes whether the cards
+  count; each choice says what it does to the cards from where they are (“Commander (makes them
+  commanders)”, “Maybeboard (leaves the deck)”; a Maybeboard's cards “join the deck”, and
+  Commander's are “no longer commanders”) and the sentence under it follows the pick. A Premier
+  pick asks once more.
 - Large text on a phone: the Watchlist's list and card names wrap between words, not one letter
   per line; Proposals, History and Reports rows drop the phone chevron so the title keeps its room;
   the Account details, Assistants and Binder › Lists rows put the value under the label, with the
@@ -364,14 +373,8 @@ name per thing.
 - The deck page's Companion switch answers faster: a change in one row no longer lays out every
   column of the text view again. A row's card picture on hover stays on screen and follows the
   scroll, and a row's focus ring draws inside the row.
-- History: the Proposal capsule follows the words with a space instead of a “ · ” that wrapped onto
-  a line of its own, and a lists change's menu says “Open Binder › Lists”, not “Open the deck”.
+- History: a lists change's ⋮ offers “Open Binder › Lists”.
 - The deck page's link to category templates says “Binder › Lists › Category templates”.
-- The More menu gives Card models its own icon instead of Precons' box.
-- Deck page on a phone: the owner's name in the banner is a 44 px target.
-- Account details: the two columns are balanced (Archidekt over Your data, Assistant over This
-  gateway); “Sign out on all my devices…” ends in an ellipsis like its neighbours; Price alert
-  defaults says “10% drop” on one line.
 
 ### Fixed
 - Large text: the Binder and Assistant switches show their current page and fade the edge that
