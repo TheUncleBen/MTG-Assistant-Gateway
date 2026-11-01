@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .pages import browser_session, login_redirect_here
+from .pages import browser_session, login_redirect
 from .plugin_page import MAX_FILE_BYTES, PLUGIN_NAME, plugin_dir, shipped_files, zip_bytes
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
     async def skill_zip(request: Request) -> Response:
         sub, _sid = signed_in(request)
         if not sub:
-            return login_redirect_here(request, "/skill")
+            return login_redirect("/skill")  # a download: the sign-in comes back to its page
         base = skill_dir()
         if base is None:
             return Response("skill not installed", status_code=503, media_type="text/plain")

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
-from .pages import browser_session, login_redirect_here
+from .pages import browser_session, login_redirect
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -183,7 +183,7 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
     async def apk(request: Request) -> Response:
         sub, _sid = signed_in(request)
         if not sub:
-            return login_redirect_here(request, "/app")
+            return login_redirect("/app")  # a download: the sign-in comes back to its page
         base = app_dir()
         if base is None:
             return Response("app not shipped on this gateway", status_code=404, media_type="text/plain")
