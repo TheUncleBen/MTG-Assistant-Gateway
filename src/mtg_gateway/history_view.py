@@ -175,11 +175,9 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
         summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
         lead = f"{len(session)} edits on the deck page"
         diff = "\n".join(lines)
-    line = (
-        _esc(f"{lead}: {summary}" if summary else lead)
-        + " "  # the capsule follows the words with no "·" to orphan on a phone (review 2, L9)
-        + ui.cap_link("Proposal", f"/proposals/{p['id']}")
-    )
+    # the line is words only: the review page is in the ⋮ (``review``) and in the Details, never
+    # a capsule that wraps onto a line of its own on a phone (review 2, L9)
+    line = _esc(f"{lead}: {summary}" if summary else lead)
     details = (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "") + str(
         p.get("before_html") or ""
     )  # a lists change: the list as it was (pages._lists_before)
@@ -191,6 +189,7 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
         "deck_id": p.get("deck_id"),
         "deck_name": p.get("deck_name") or p.get("deck_id"),
         "line": line,
+        "review": f"/proposals/{p['id']}",
         "app": _app(p.get("created_by")),
         "client": _client(p.get("created_by")),
         "who": True,
@@ -236,7 +235,7 @@ def build_events(
             continue
         taken = _taken(p.get("taken") or "")
         when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
-        line = f"{when} " + ui.cap_link("Proposal", f"/proposals/{p['id']}")
+        line = when
         diff = str(p.get("diff_text") or "")
         details = f"<p>{when}.</p>" + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
         events.append(
@@ -247,6 +246,7 @@ def build_events(
                 "deck_id": p.get("deck_id"),
                 "deck_name": p.get("deck_name") or p.get("deck_id"),
                 "line": line,
+                "review": f"/proposals/{p['id']}",
                 "app": _app(p.get("created_by")),
                 "client": _client(p.get("created_by")),
                 "who": True,
@@ -272,18 +272,10 @@ def build_events(
             elif x.get("proposal_id"):
                 summary += " just before a change was applied"
             bits.append(_esc(summary))
-        if x.get("proposal_id"):
-            bits.append(ui.cap_link("The change", f"/proposals/{x['proposal_id']}"))
+        # the change it was taken before and its backup copy are in the ⋮ (``review``,
+        # ``backup``) and in the Details, not capsules in the line (review 2, L9)
         if x.get("backup_gone"):
             bits.append("its backup copy is no longer on Archidekt")
-        elif x.get("backup_url"):
-            bits.append(
-                ui.cap_link(
-                    "Backup copy on Archidekt",
-                    str(x["backup_url"]),
-                    attrs="target='_blank' rel='noopener noreferrer'",
-                )
-            )
         restore_form = (
             "<form method='post' action='/history/restore' class='hy-restore'>"
             + csrf_input
@@ -321,7 +313,7 @@ def build_events(
             backup = (
                 "<p>"
                 + ui.cap_link(
-                    "Archidekt backup copy",
+                    "Backup copy on Archidekt",
                     str(x["backup_url"]),
                     attrs="target='_blank' rel='noopener noreferrer'",
                 )
@@ -340,6 +332,8 @@ def build_events(
                 "deck_id": x.get("deck_id"),
                 "deck_name": x.get("deck_name") or x.get("deck_id"),
                 "line": " · ".join(bits),
+                "review": f"/proposals/{x['proposal_id']}" if x.get("proposal_id") else None,
+                "backup": str(x["backup_url"]) if x.get("backup_url") and not x.get("backup_gone") else None,
                 "app": None,
                 "who": False,
                 "action": action + test_form,  # out of sight in the row; the ⋮ sends them
@@ -440,7 +434,8 @@ def _day_label(day: str, today: str, yesterday: str) -> str:
     return time.strftime("%A %d %B %Y", t).replace(" 0", " ")
 
 
-# one line per entry at every width (ui-rows): the deck and what, then the main action and the ⋮
+# one row per entry at every width (ui-rows): the deck's name, what the entry is on one line and
+# its facts under it, then the main action and the ⋮
 COLS = ("minmax(0,1fr) auto",) * 3
 
 
@@ -472,11 +467,15 @@ def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
         else ""
     )
     label = f"{KIND_LABELS[e['kind']][0]}: {e['deck_name']}"
+    # the ⋮ (static/menus.js) offers the review page and the backup copy from these
+    links = (f" data-review='{_esc(e['review'])}'" if e.get("review") else "") + (
+        f" data-backup='{_esc(e['backup'])}'" if e.get("backup") else ""
+    )
     acts = ui.row_actions(
         ui.row_open(href, word), ui.row_menu(href, label), hidden_html=e.get("action") or ""
     )
     return (
-        f"<div class='{cls}'{deck}>"
+        f"<div class='{cls}'{deck}{links}>"
         f"<span class='title'><a class='t' href='{_esc(href)}'>{name}</a>"
         f"<span class='deck'>{e['line']}</span>"
         f"<span class='sub'>{_type_html(e)}{who}{when}</span></span>{acts}</div>"
@@ -918,6 +917,11 @@ HISTORY_CSS = (
 /* History (UI standard): the shared table, widgets and side panel are theme.UI_CSS */
 .hy-table .title .deck a{font-weight:400}
 .hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}
+/* a row is its deck's name, what the entry is on one line (the rest is in its Details) and its
+   facts under it, which wrap by word on a narrow phone when they don't fit; links are in the ⋮
+   and the Details, never a capsule that wraps onto a line of its own (review 2, L9) */
+.hy-table .title .deck{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hy-table .title .sub{min-width:0}
 /* the Details' buttons: one row, each form inline */
 .ui-drawer .ui-actions form{display:contents}
 .ui-drawer .ui-actions .btn,.ui-drawer .ui-actions button{margin:0}

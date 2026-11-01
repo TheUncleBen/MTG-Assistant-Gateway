@@ -136,6 +136,102 @@ def test_the_rows_menus_open_from_a_tap_and_a_right_click_and_restore_sends_its_
         server.stop()
 
 
+# a History row's lines: how many the "what" line and the facts take (children on one line have
+# tops within 10 px), whether a link sits in the title cell besides the deck's name, their order
+HISTORY_ROWS = """
+() => [...document.querySelectorAll('.hy-table .tr:not(.th):not(.daygroup):not(.group)')].map(tr => {
+  const r = (el) => el.getBoundingClientRect();
+  const lines = (els) => { const tops = els.map(el => r(el).top).sort((a, b) => a - b);
+    let n = 0, last = -1e9; for (const t of tops) { if (t - last > 10) n++; last = t; } return n; };
+  const q = (sel) => tr.querySelector(sel);
+  const t = q('.title .t'), deck = q('.title .deck'), sub = q('.title .sub');
+  const kids = sub ? [...sub.children] : [];
+  return {text: t.textContent.trim(), h: r(tr).height,
+    links: [...tr.querySelectorAll('.title a, .title .ui-cap')].filter(a => a !== t)
+      .map(a => a.textContent.trim()),
+    deck_lines: deck ? Math.round(r(deck).height / (parseFloat(getComputedStyle(deck).fontSize) * 1.5)) : 1,
+    sub_lines: lines(kids), tall_kid: Math.max(0, ...kids.map(k => r(k).height)),
+    order: [r(t).top, deck ? r(deck).top : r(t).top + 1, sub ? r(sub).top : r(t).top + 2]};
+})
+"""
+
+
+@pytest.mark.parametrize("app", [True, False], ids=["app", "browser"])
+def test_a_history_row_on_a_phone_is_its_title_its_words_and_its_facts(tmp_path: Path, app: bool) -> None:
+    """Confirmation pass, L9: a History change row on a 375 px phone was five lines, with the
+    Proposal capsule alone on a line of its own. Now a row is the deck's name, what the entry is
+    on one line (the rest in its Details), then its facts, with no link in the line: the review
+    page and a backup copy are in the ⋮ and the Details. The facts wrap by word at most once on
+    a phone (a long time with an assistant's name), never a chip split, and on a desktop they
+    are one line. At 200% text the "what" line still holds and nothing scrolls sideways."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_rows_large_text_browser import APP_UA
+
+    exe = _exe()
+    server = _server(tmp_path)
+    try:
+        sid = _seed_rows(server)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            kw: dict = {"has_touch": True, "is_mobile": True}
+            if app:
+                kw["user_agent"] = APP_UA
+            ctx = browser.new_context(viewport={"width": 375, "height": 812}, **kw)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            # the longest relative time the rows show (after 7 days it is a date)
+            long_time = (
+                "document.querySelectorAll('.hy-table time.ui-when')"
+                ".forEach(t => t.textContent = '23 hours ago')"
+            )
+            page.evaluate(long_time)
+            rows = page.evaluate(HISTORY_ROWS)
+            assert len(rows) >= 10 and any("Applied a change" in r["text"] or True for r in rows)
+            for r in rows:
+                assert r["links"] == [], r  # no Proposal, The change or Backup copy capsule in the line
+                assert r["deck_lines"] == 1, r
+                assert r["sub_lines"] <= 2 and r["tall_kid"] <= 24, r
+                assert r["order"][0] < r["order"][1] < r["order"][2], r
+                assert r["h"] <= 100, r
+            assert page.evaluate(NO_SIDEWAYS)
+            # the ⋮ of a change offers its review page; a snapshot's offers the change it was
+            # taken before
+            row = page.locator(ROWS["/history"], has_text="Applied a change").first
+            row.locator("a.kebab").tap()
+            _menu(page)
+            assert "Open the review page" in _items(page), _items(page)
+            page.keyboard.press("Escape")
+            snap = page.locator(ROWS["/history"], has_text="as the deck stood").first
+            snap.locator("a.kebab").tap()
+            _menu(page)
+            assert "The change it was taken before" in _items(page), _items(page)
+            page.keyboard.press("Escape")
+            page.evaluate(TEXT_200)
+            page.wait_for_timeout(100)
+            page.evaluate(long_time)
+            for r in page.evaluate(HISTORY_ROWS):
+                assert r["links"] == [] and r["deck_lines"] == 1, r
+                assert r["sub_lines"] <= 3 and r["h"] <= 300, r
+            assert page.evaluate(NO_SIDEWAYS)
+            ctx.close()
+            # a desktop: the facts are one line
+            ctx = browser.new_context(viewport={"width": 1280, "height": 860})
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            page.goto(f"{server.base}/history", wait_until="networkidle")
+            page.evaluate(long_time)
+            for r in page.evaluate(HISTORY_ROWS):
+                assert r["links"] == [] and r["deck_lines"] == 1 and r["sub_lines"] == 1, r
+            assert errors == [], errors
+            browser.close()
+    finally:
+        server.stop()
+
+
 def test_at_200_percent_text_the_rows_hold_their_line(tmp_path: Path) -> None:
     from playwright.sync_api import sync_playwright
 

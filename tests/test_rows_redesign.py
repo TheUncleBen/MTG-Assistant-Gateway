@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 
 from mtg_gateway import history_view, proposals_view, reports_page, ui
 from mtg_gateway.theme import esc
@@ -141,9 +142,9 @@ async def test_history_rows_open_their_details_and_keep_restore_in_the_menu(stac
         assert rows and "<div class='tr th'>" not in table and "hy-sort" not in body
         snap = next(r for r in rows if "open=s-s00'" in r)
         # the deck's name is the row's main action, Details (F14), on a row that knows its deck
-        assert snap.startswith("' data-deck='42' data-deck-href='/decks/42'>") or snap.startswith(
-            " open' data-deck='42' data-deck-href='/decks/42'>"
-        )
+        # (the snapshot's ⋮ offers the change it was taken before from data-review, L9)
+        attrs = " data-deck='42' data-deck-href='/decks/42' data-review='/proposals/p00'>"
+        assert snap.startswith("'" + attrs) or snap.startswith(" open'" + attrs)
         assert "<a class='t' href='/history?open=s-s00'>Liesa Test Deck</a>" in snap
         restore = "<form method='post' action='/history/restore' class='hy-restore'>"
         assert f"<span class='act'><span class='acts' hidden>{restore}" in snap
@@ -211,9 +212,48 @@ def test_the_row_menu_button_and_the_balanced_toolbar() -> None:
     assert ".ui-table.ui-rows" in UI_CSS
 
 
-def test_a_history_line_never_ends_in_a_dot_before_its_capsule() -> None:
-    """The Proposal capsule follows the words with a space, not " · ": on a phone the dot
-    wrapped onto a line of its own (review 2, L9); the same for a restore's line."""
+def test_a_history_line_is_words_only_and_its_links_are_in_the_menu() -> None:
+    """A History line holds no capsule (on a phone the Proposal capsule wrapped onto a line of
+    its own; review 2 L9, confirmation L9): a change's or a restore's review page and a
+    snapshot's backup copy are the row's ``data-review`` and ``data-backup``, which the ⋮
+    (static/menus.js) offers, and the Details keep them. The line keeps to one line, the rest in
+    the Details."""
     e = history_view._change_event({"id": "p1", "summary": "+1 Sol Ring", "kind": "deck_changes"})
-    words, _cap = e["line"].split("<a class='ui-cap'", 1)
-    assert words == "Applied a change: +1 Sol Ring " and "·" not in e["line"]
+    assert e["line"] == "Applied a change: +1 Sol Ring" and e["review"] == "/proposals/p1"
+    row = history_view._row_html({**e, "deck_id": "42", "deck_name": "Deck"}, {}, now=0)
+    assert " data-review='/proposals/p1'" in row and "data-backup" not in row
+    assert "<span class='deck'>Applied a change: +1 Sol Ring</span>" in row
+    events = history_view.build_events(
+        [{"id": "p2", "kind": "restore", "taken": "2026-10-11 16:10 UTC", "deck_id": "42"}],
+        [
+            {
+                "snapshot_id": "s1",
+                "deck_id": "42",
+                "deck_name": "Deck",
+                "taken_at": 10,
+                "proposal_id": "p3",
+                "backup_url": "https://archidekt.com/decks/9",
+                "card_count": 99,
+            },
+            {"snapshot_id": "s2", "deck_id": "42", "deck_name": "Deck", "taken_at": 9, "backup_gone": True},
+        ],
+        [],
+        csrf_input="",
+    )
+    by_key = {e["key"]: e for e in events}
+    restore, snap, gone = by_key["p-p2"], by_key["s-s1"], by_key["s-s2"]
+    assert restore["review"] == "/proposals/p2" and "<a" not in restore["line"]
+    assert snap["review"] == "/proposals/p3" and snap["backup"] == "https://archidekt.com/decks/9"
+    assert "<a" not in snap["line"] and "<a" not in gone["line"]
+    assert gone.get("review") is None and gone.get("backup") is None
+    assert "its backup copy is no longer on Archidekt" in gone["line"]
+    snap_row = history_view._row_html(snap, {}, now=0)
+    assert " data-review='/proposals/p3' data-backup='https://archidekt.com/decks/9'" in snap_row
+    assert "Backup copy on Archidekt</a>" in history_view.details_panel(snap, {})
+    js = (Path(history_view.__file__).parent / "static" / "menus.js").read_text()
+    assert 'tr.getAttribute("data-review")' in js and 'tr.getAttribute("data-backup")' in js
+    assert '"Open the review page"' in js and '"The change it was taken before"' in js
+    assert '"Backup copy on Archidekt"' in js
+    assert ".hy-table .title .deck{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" in (
+        history_view.HISTORY_CSS
+    )
