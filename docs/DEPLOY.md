@@ -841,9 +841,9 @@ without touching the stack.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `MTG_TAG` | `latest` | Gateway image tag. A version such as `0.7.45` stays on it |
+| `MTG_TAG` | `latest` | Gateway image tag. A version such as `0.7.46` stays on it |
 | `TIMEZONE` | `UTC` | Passed to the containers as `TZ` |
-| `MTG_SERVER_NAME` | empty (the Settings page's **Gateway name**, `MTG Assistant Gateway` until changed there) | Commented out in the example files. The name in the top bar, on sign-in and in the assistants' connector lists, up to 100 characters. A name here locks the Settings page's **Gateway name** row, which then shows it is set in your stack |
+| `MTG_SERVER_NAME` | empty (the Settings page's **Gateway name**, `MTG Assistant Gateway` until changed there) | Empty in the example files. The name in the top bar, on sign-in and in the assistants' connector lists, up to 100 characters. A name here locks the Settings page's **Gateway name** row, which then shows it is set in your stack |
 | `MTG_BACKUP_COPY_DIR` | empty (no second copy) | A host folder (another disk, or shared storage) every backup is also copied to and pruned the same way. It must already exist. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |
 | `MTG_MEMORY_LIMIT` | `256M` | The gateway's memory cap |
 
