@@ -6,7 +6,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- The app installs its own updates from the project's GitHub releases (Updater.kt). Android asks
+    <!-- The app installs its own updates, the APK the gateway it is set up for ships (Updater.kt). Android asks
          the person once to allow installs from this app; from Android 12 an app updating itself may
          then skip the confirmation, which is what the second permission asks for. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -44,6 +44,12 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
+        </intent>
+        <!-- Android's install confirmation, which Updater checks is a system app before starting it:
+             without this the phone may hide the installer from the app, and an update that needs a
+             tap would then do nothing. -->
+        <intent>
+            <action android:name="android.content.pm.action.CONFIRM_INSTALL" />
         </intent>
     </queries>
 

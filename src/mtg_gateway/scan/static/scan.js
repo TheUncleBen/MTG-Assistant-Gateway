@@ -17,11 +17,13 @@
     cfg.thresholds || {});
   const G = window.ScanGeometry || null; // card edge detection and flattening (geometry.js)
   const PHOTO_MAX = 2400; // long side of the working copy of an uploaded photo, in pixels
-  // The card guide's width as a share of the viewfinder's (scan.css .guide). Filling it holds a
-  // phone's main camera about 12 cm from the card: the main lens of some phones (Samsung's Ultra
-  // models among them) cannot focus much closer, and a card held closer comes out blurred. The
-  // outline search finds a card smaller or larger than the guide too.
-  const GUIDE_WIDTH = 0.5;
+  // The card guide's width as a share of the viewfinder's (scan.css .guide), which shows a phone's
+  // whole portrait frame: a card filling it fills 40% of the picture's width, as in the Android
+  // app (TorchMath.CARD_SHARE). That holds a phone's main camera about 15 cm from the card: the
+  // main lens of some phones (Samsung's Ultra models among them) cannot focus much closer, and a
+  // card held closer comes out blurred. The outline search finds a card smaller or larger than the
+  // guide too.
+  const GUIDE_WIDTH = 0.4;
   // Below this edge steepness (see sharpnessOf) a title strip that read nothing useful is called
   // blurred, and the status line says how to get a sharp picture instead of "No match".
   // Drawn cards on the page's tests measure 70 to 115 in focus and 10 to 35 out of focus.
@@ -391,7 +393,7 @@
     // Under the viewfinder, not over it: at large text sizes it would cover the dashed name box.
     const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app
       ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
-      : 'Hold the phone about 12 cm (5 in) from the card, the card in the frame and its name in the dashed box.' });
+      : 'Hold the phone about 15 cm (6 in) from the card, the card in the frame and its name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
     // open the camera with one, the app's file chooser never does); the shutter is the camera.

@@ -54,7 +54,11 @@ like an app.
 What's on it:
 
 - **Camera.** Hold a card in the card-shaped frame with its title inside the
-  dashed box and tap the shutter. The page finds the card's edges and
+  dashed box and tap the shutter. Filling the frame holds the phone about
+  15 cm (6 in) from the card, in the browser and in the Android app alike: a
+  card there fills about 40% of the picture's width, which reads well, and
+  the main lens of some phones (Samsung's Ultra models among them) cannot
+  focus much closer. The page finds the card's edges and
   straightens it out first, so a card held at an angle reads as if you'd
   shot it straight on. Then it reads the title *on the phone* and checks it
   against Scryfall through the gateway. Tap **Add**, or pick from the
