@@ -119,12 +119,14 @@ def test_the_stepper_removes_the_last_copy_with_undo_and_the_menu_reaches_the_de
         page.wait_for_function(f"() => !document.querySelector(\"[data-id='{one_id}']\")")
         assert page.locator(".mtgbox[role=dialog]:visible").count() == 0 and dialogs == []
         assert int(one_id) not in server.ark.collections["alice"]
-        strip = page.locator("#col-notes .notice.ok[role=status]")
-        assert strip.inner_text().strip().startswith("Removed from your binder.")
+        # the shared toast at the foot of the screen (in view on a phone), with Undo
+        toast = page.locator(".toast.cards-toast[role=status]")
+        toast.wait_for(timeout=3000)
+        assert toast.locator(".msg").inner_text().strip().startswith("Removed from your binder.")
         assert page.locator("#col-count").inner_text() == "2 entries"
         # Undo: the row is back on the page and on Archidekt, the same printing, finish and price
-        strip.locator("button", has_text="Undo").click()
-        page.locator("#col-notes .notice.ok", has_text="is back in your binder.").wait_for(timeout=8000)
+        toast.locator("button", has_text="Undo").click()
+        page.locator(".toast.cards-toast .msg", has_text="is back in your binder.").wait_for(timeout=8000)
         assert page.locator("#cards > li[data-id]").count() == 3
         assert page.locator("#col-count").inner_text() == "3 entries"
         back = [r for r in server.ark.collections["alice"].values() if r["card"]["id"] == was["card"]["id"]]
@@ -133,13 +135,17 @@ def test_the_stepper_removes_the_last_copy_with_undo_and_the_menu_reaches_the_de
         assert back[0].get("purchasePrice") in (2.5, "2.50", "2.5")
         new_id = str(back[0]["id"])
         assert page.locator(f"#cards > li[data-id='{new_id}']").count() == 1
-        # removed again: a strip with a × says so
+        # removed again: the toast says so, and its × dismisses it
         page.locator(f"#cards > li[data-id='{new_id}'] button[value=dec]").click()
         page.wait_for_function(f"() => !document.querySelector(\"[data-id='{new_id}']\")")
-        strip = page.locator("#col-notes .notice.ok[role=status]")
+        toast = page.locator(".toast.cards-toast[role=status]")
+        toast.wait_for(timeout=3000)
         assert page.locator("#col-count").inner_text() == "2 entries"
-        strip.locator("[data-dismiss]").click()
-        assert page.locator("#col-notes .notice").count() == 0
+        toast.locator("button[aria-label=Dismiss]").click()
+        assert (
+            page.locator(".toast.cards-toast").count() == 0
+            and page.locator("#col-notes .notice").count() == 0
+        )
         # the ⋮ opens the shared menu; Details… opens the Details box filled from the row
         first.locator(".kebab").click()
         menu = page.locator(".ctxmenu")

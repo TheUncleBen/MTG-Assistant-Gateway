@@ -732,6 +732,13 @@ details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);pa
   border:1px solid var(--border);border-radius:var(--radius-sheet);background:var(--surface);padding:1rem;
   box-shadow:var(--shadow)}
 .toast.error{border-color:var(--red)}
+/* a toast stays above the phone's bottom tab bar (as .ui-bar does), and on a phone it spans the
+   width so its Undo sits where the thumb is (0.7.46 audit QG-09) */
+.has-tabbar .toast{bottom:calc(var(--tab-room,0px) + .75rem)}
+@media (max-width:599.98px){
+  .toast{right:.5rem;left:.5rem;width:auto;max-width:none}
+  .has-tabbar .toast{bottom:calc(var(--tab-room,calc(max(56px,
+  4rem) + env(safe-area-inset-bottom))) + .5rem)} }
 /* a toast's × keeps the top right corner at every width: out of the flow, so a message with
    buttons (Undo, History) wraps under the text instead of pushing the × onto a line of its own
    (0.7.43: it wrapped at 810 px); the toast keeps the corner clear for it, 44 px wide on touch

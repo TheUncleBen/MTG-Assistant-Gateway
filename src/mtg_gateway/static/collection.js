@@ -69,6 +69,11 @@
     if (!c) return;
     var n = Math.max(0, (parseInt(c.textContent.replace(/,/g, ""), 10) || 0) + delta);
     c.textContent = n.toLocaleString() + (n === 1 ? " entry" : " entries");
+    // "All N entries shown." under the list follows the count too
+    var line = $(".loadmore p.muted");
+    if (line && /^All [\d,]+ (entry|entries) shown\.$/.test(line.textContent.trim())) {
+      line.textContent = "All " + n.toLocaleString() + (n === 1 ? " entry" : " entries") + " shown.";
+    }
   }
   /* -- Remove: at once, with Undo (QOL-01, 0.7.46 audit QG-09) ------------------------------
      − on the last copy, the hidden Remove form and the Details box's button all remove the row
@@ -84,9 +89,17 @@
     var undo = document.createElement("button");
     undo.type = "button"; undo.className = "btn small"; undo.textContent = "Undo";
     undo.addEventListener("click", function () { putBack(item, removed, next, undo); });
-    strip("Removed from your binder." + (tags ? " Undo puts it back without its tags." : ""), "ok", removed ? [undo] : []);
+    said("Removed from your binder." + (tags ? " Undo puts it back without its tags." : ""), removed ? [undo] : []);
     if (list && !$("li[data-id]", list)) list.hidden = true;  // the page's empty state comes with the next load
     return name;
+  }
+  /* what a removal (and its Undo) says: the shared toast at the foot of the screen, where the
+     row that was pressed is in view on a phone, with Undo for 15 s; the strip at the top of the
+     page without the shared menus */
+  function said(text, actions) {
+    var Menu = window.MtgMenu;
+    if (Menu && Menu.toast) { Menu.toast(text, { ok: true, actions: actions || [], ms: 15000 }); say(text); return; }
+    strip(text, "ok", actions);
   }
   function putBack(item, removed, next, undo) {
     var name = removed.name || nameOf(item);
@@ -106,9 +119,9 @@
       }
       bumpCount(1);
       var paid = removed.purchase_price;
-      if (paid === null || paid === undefined || paid === "") { strip(name + " is back in your binder.", "ok"); return; }
+      if (paid === null || paid === undefined || paid === "") { said(name + " is back in your binder."); return; }
       request("POST", "/collection/api/rows/" + encodeURIComponent(row.id), { name: name, purchase_price: String(paid) }).then(function (u) {
-        if (u.ok) strip(name + " is back in your binder.", "ok");
+        if (u.ok) said(name + " is back in your binder.");
         else strip(name + " is back in your binder, without the price you paid. " + Fetch.problem(u, "the price was not set").text, "error", Fetch.problem(u).actions);
       });
     });
