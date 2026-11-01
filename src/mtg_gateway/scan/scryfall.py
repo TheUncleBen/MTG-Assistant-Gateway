@@ -45,8 +45,8 @@ COLLECTION_MAX = 75
 
 # What a member reads when Scryfall is down: plain words, no exception name or HTTP code
 # (whole-application audit, row 12); the log keeps the detail.
-SCRYFALL_UNREACHABLE = "Scryfall couldn't be reached. Try again in a few minutes."
-SCRYFALL_FAILING = "Scryfall had a problem answering. Try again in a few minutes."
+SCRYFALL_UNREACHABLE = "Scryfall couldn't be reached. Try again later."
+SCRYFALL_FAILING = "Scryfall had a problem answering. Try again later."
 
 
 class ScryfallError(Exception):

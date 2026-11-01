@@ -571,6 +571,7 @@ EVENT_LABELS = {
     "collection_added": "Cards added to the binder",
     "collection_removed": "Cards removed from the binder",
     "collection_changed": "Binder changed",
+    "collection_cleared": "Binder cleared",
     "deck_voted": "Liked a deck",
     "deck_bookmarked": "Bookmarked a deck",
     "deck_commented": "Commented on a deck",

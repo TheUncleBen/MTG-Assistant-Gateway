@@ -154,6 +154,7 @@ ICONS = {
     "collection_removed": "collection",
     "collection_updated": "collection",
     "collection_changed": "collection",
+    "collection_cleared": "trash",
     "scan_session_created": "collection",
     "scan_session_saved": "collection",
     "scan_session_deleted": "collection",

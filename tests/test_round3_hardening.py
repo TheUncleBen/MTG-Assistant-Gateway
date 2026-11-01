@@ -332,7 +332,7 @@ async def test_category_text_cannot_forge_review_rows(stack: Stack) -> None:
     page = (await b.http.get(f"/proposals/{p2['proposal_id']}")).text
     await b.aclose()
     assert _acts(page) == ["New deck", "Add"]
-    assert "commander, 1 cards, PUBLIC" in page
+    assert "commander, 1 card, PUBLIC" in page
 
 
 # -- 27: categories from a public deck cannot add card lines to decklist text --------------------
