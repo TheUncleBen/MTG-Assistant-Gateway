@@ -620,9 +620,68 @@ def _gateway_url(url: str | None) -> str | None:
     return url
 
 
-def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
-    """The bell's list: each row the notification's text and kind, tinted while unseen, a link to
-    its target where Archidekt names one (the gateway's own page where it has one)."""
+GATEWAY_KIND_WORDS = {"prices": "Price alert", "reports": "Deck report", "summary": "Summary"}
+
+
+def _row_html(cls: str, mark: str, text: str, sub_text: str, href: str) -> str:
+    inner = (
+        f"<i aria-hidden='true'>{esc(mark)}</i><span class='t'>{esc(text)}"
+        f"<span class='s'>{esc(sub_text)}</span></span>"
+    )
+    if href and href.startswith("/"):
+        return f"<li><a class='{cls}' href='{esc(href)}'>{inner}</a></li>"
+    if href:
+        return (
+            f"<li><a class='{cls}' href='{esc(href)}' target='_blank' rel='noopener noreferrer'>"
+            f"{inner}</a></li>"
+        )
+    return f"<li><div class='{cls}'>{inner}</div></li>"
+
+
+def gateway_rows_html(alerts: list[dict[str, Any]], waiting: dict[str, tuple[str, int, str]]) -> str:
+    """The gateway's own part of the bell (0.7.46 audit QG-16): what waits for the member's
+    press now (read live, one row per deck, the words of the phone's message), then the kept
+    alerts (a price alert that fired, a report that finished, a summary), newest first."""
+    out = []
+    for deck_id, (name, count, pid) in sorted(waiting.items(), key=lambda kv: kv[1][0].lower()):
+        if count <= 0:
+            continue
+        title = notify.new_decks_title(count) if deck_id == "new" else notify.waiting_title(count, name)
+        if count == 1 and pid:
+            href = f"/proposals/{pid}"
+        else:
+            href = "/proposals" if deck_id == "new" else f"/decks/{deck_id}"
+        out.append(_row_html("bell-row new", "W", title, "Waiting for you", href))
+    for a in alerts:
+        kind = GATEWAY_KIND_WORDS.get(a["event"], "Gateway")
+        cls = "bell-row" + ("" if a.get("seen_at") else " new")
+        sub_text = kind + ("" if a.get("seen_at") else " · new") + " · " + ui.when_text(a["created_at"])
+        out.append(_row_html(cls, kind[:1], a["title"], sub_text, a["path"]))
+    if not out:
+        return (
+            "<p class='muted'>Nothing from this gateway yet: a price alert that fires, a deck report that "
+            "finishes and your summary show here.</p>"
+        )
+    return f"<ul class='bell-list' role='list'>{''.join(out)}</ul>"
+
+
+def notifications_html(
+    got: dict[str, Any],
+    *,
+    linked: bool = True,
+    gateway: list[dict[str, Any]] | None = None,
+    waiting: dict[str, tuple[str, int, str]] | None = None,
+) -> str:
+    """The bell's list in two parts: the gateway's own (``gateway``, ``waiting``), then
+    Archidekt's: each row the notification's text and kind, tinted while unseen, a link to its
+    target where Archidekt names one (the gateway's own page where it has one)."""
+    if gateway is not None or waiting is not None:
+        return (
+            "<h3 class='bell-part'>From this gateway</h3>"
+            + gateway_rows_html(gateway or [], waiting or {})
+            + "<h3 class='bell-part'>From Archidekt</h3>"
+            + notifications_html(got, linked=linked)
+        )
     if not linked:
         return (
             "<p class='muted'>Link your Archidekt account under Account details to see its alerts here.</p>"
@@ -652,8 +711,9 @@ def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
 
 
 BELL_NOTE = (
-    "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. "
-    "Turn them off under Account › Account details › Email and alerts on Archidekt."
+    "The count clears when you open this list. This gateway keeps its newest alerts here; Archidekt's "
+    "stay for as long as Archidekt keeps them. Choose which of the gateway's alerts you get under Account "
+    "› Account details › Notifications, and Archidekt's under Email and alerts on Archidekt."
 )
 
 
@@ -826,12 +886,12 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, _sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False}, status_code=401, headers={"Cache-Control": "no-store"})
-        n = 0
+        n = state.db.unseen_gateway_alerts(sub)
         if linked(sub):
             try:
-                n = await unseen_count(decks, sub)
+                n += await unseen_count(decks, sub)
             except DeckError:
-                n = 0
+                pass
         return JSONResponse({"ok": True, "unseen": n}, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/notifications", methods=["GET"], include_in_schema=False)
@@ -851,22 +911,39 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 got = await notification_list(decks, sub)
             except DeckError as exc:
                 error = str(exc)
-        if cross_site and is_linked:
+        unseen = int(got.get("unseen") or 0)
+        if cross_site:
             body = f"<p><a class='btn' href='/notifications'>{icon('bell')} Show my alerts</a></p>"
-        elif error:
-            body = ui.notice(error, "error", role="alert")
         else:
-            body = notifications_html(got, linked=is_linked)
+            # the gateway's own part: what waits for the press now, and the kept alerts; seen
+            # once this list was read (the count clears, the rows stay)
+            mine = state.db.gateway_alerts(sub)
+            unseen += sum(1 for a in mine if a["seen_at"] is None)
+            state.db.mark_gateway_alerts_seen(sub)
+            try:
+                waiting = await asyncio.to_thread(decks.waiting_by_deck, sub)
+            except Exception:  # noqa: BLE001 - the bell never fails for its waiting rows
+                waiting = {}
+            if error:
+                ark = ui.notice(error, "error", role="alert")
+            else:
+                ark = notifications_html(got, linked=is_linked)
+            body = (
+                "<h3 class='bell-part'>From this gateway</h3>"
+                + gateway_rows_html(mine, waiting)
+                + "<h3 class='bell-part'>From Archidekt</h3>"
+                + ark
+            )
         if wants_json(request):
             return JSONResponse(
-                {"ok": not error, "unseen": int(got.get("unseen") or 0), "html": body, "message": error},
+                {"ok": not error, "unseen": unseen, "html": body, "message": error},
                 headers={"Cache-Control": "no-store"},
             )
-        badge = f" <span class='bell-badge'>{got['unseen']} new</span>" if got.get("unseen") else ""
+        badge = f" <span class='bell-badge'>{unseen} new</span>" if unseen else ""
         return page(
             "Alerts",
             f"<div class='bell-page'><div class='ui-head'><h1>Alerts{badge}</h1></div>"
-            "<p class='ui-sub'>Your alerts from Archidekt.</p>"
+            "<p class='ui-sub'>Alerts from this gateway and from Archidekt.</p>"
             f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
             f"<div class='ui-actions'><a class='btn btn-plain' href='{section_href('email')}'>"
             f"{icon('settings')} Settings</a>"

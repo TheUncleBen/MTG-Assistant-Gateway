@@ -1,4 +1,5 @@
-/* The bell in the top bar (theme.py, profile_page.py): Archidekt's unseen count, asked once the
+/* The bell in the top bar (theme.py, profile_page.py): the unseen count (the gateway's own alerts
+   and Archidekt's), asked once the
    page has loaded (never during the page's own render, so the bar never slows a page), and the
    list as a box when the bell or Home's "On Archidekt" widget is pressed. Without this file the
    bell is a link to the /notifications page. Needs static/box.js (window.MtgBox) and
@@ -69,7 +70,7 @@
     var Box = window.MtgBox;
     if (!Box) { location.href = "/notifications"; return; }
     var body = el("div");
-    body.appendChild(el("p", "muted", "Reading your Archidekt alerts…"));
+    body.appendChild(el("p", "muted", "Reading your alerts…"));
     var settings = el("a", "btn btn-plain");
     settings.href = "/account/details/email";
     var gear = window.MtgCardMenu && window.MtgCardMenu.icon ? window.MtgCardMenu.icon("settings") : null;
@@ -94,11 +95,12 @@
           var h = box.panel.querySelector(".bh h2");
           if (h) { h.appendChild(document.createTextNode(" ")); h.appendChild(el("span", "bell-badge", d.unseen + " new")); }
         }
-        // no mark-as-read request was seen in Archidekt's scripts: the count clears once the list was opened
+        // the gateway marks its own alerts seen as the list is read; no mark-as-read request was seen
+        // in Archidekt's scripts: the count clears once the list was opened
         setCount(0);
         keep(0);
       }
-      var note = el("p", "muted small bell-foot", "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. Turn them off under Account › Account details › Email and alerts on Archidekt.");
+      var note = el("p", "muted small bell-foot", "The count clears when you open this list. This gateway keeps its newest alerts here; Archidekt’s stay for as long as Archidekt keeps them. Choose which of the gateway’s alerts you get under Account › Account details › Notifications, and Archidekt’s under Email and alerts on Archidekt.");
       wrap.appendChild(note);
       box.setBody(wrap);
       box.focusFirst();

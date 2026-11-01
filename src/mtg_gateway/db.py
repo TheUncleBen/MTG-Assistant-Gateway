@@ -950,6 +950,25 @@ def _step_21(conn: sqlite3.Connection) -> None:
     _add_column(conn, "watch_cards", "alert_rise_pct", "REAL")
 
 
+def _step_22(conn: sqlite3.Connection) -> None:
+    """0.7.46 audit (QG-16): the gateway's own alerts for the website's bell
+    (``gateway_alerts``: a price alert that fired, a report that finished, a summary, kept per
+    member whether or not push notifications are on; ``seen_at`` once the list was opened)."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS gateway_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sub TEXT NOT NULL,
+            event TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            seen_at INTEGER
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS gateway_alerts_sub ON gateway_alerts (sub, id)")
+
+
 # A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
 # result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
 RISK_REASON_KEY = "_risk_reason"
@@ -977,6 +996,7 @@ MIGRATIONS = [
     _step_19,
     _step_20,
     _step_21,
+    _step_22,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -4238,6 +4258,48 @@ class Database:
             return json.loads(row["value_json"])
         except ValueError:
             return default
+
+    # the gateway's own alerts for the bell (notify.py records them) ---------------------------
+    def add_gateway_alert(
+        self, sub: str, event: str, title: str, message: str, path: str, *, keep: int = 50
+    ) -> None:
+        """Keep one alert for the member's bell; only the newest ``keep`` stay."""
+        with self.tx() as c:
+            if c.execute("SELECT 1 FROM users WHERE sub = ?", (sub,)).fetchone() is None:
+                return
+            c.execute(
+                "INSERT INTO gateway_alerts (sub, event, title, message, path, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (sub, event[:32], title[:120], message[:1000], path[:500], int(time.time())),
+            )
+            c.execute(
+                "DELETE FROM gateway_alerts WHERE sub = ? AND id NOT IN (SELECT id FROM gateway_alerts "
+                "WHERE sub = ? ORDER BY id DESC LIMIT ?)",
+                (sub, sub, max(1, keep)),
+            )
+
+    def gateway_alerts(self, sub: str, *, events: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        """The member's kept alerts, newest first (``events``: only those kinds)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, event, title, message, path, created_at, seen_at FROM gateway_alerts "
+                "WHERE sub = ? ORDER BY id DESC",
+                (sub,),
+            ).fetchall()
+        out = [dict(r) for r in rows]
+        if events is not None:
+            out = [r for r in out if r["event"] in events]
+        return out
+
+    def unseen_gateway_alerts(self, sub: str, *, events: tuple[str, ...] | None = None) -> int:
+        return sum(1 for r in self.gateway_alerts(sub, events=events) if r["seen_at"] is None)
+
+    def mark_gateway_alerts_seen(self, sub: str) -> None:
+        with self.tx() as c:
+            c.execute(
+                "UPDATE gateway_alerts SET seen_at = ? WHERE sub = ? AND seen_at IS NULL",
+                (int(time.time()), sub),
+            )
 
     def set_pref(
         self, sub: str, name: str, value: Any, *, keep_newest: tuple[str, int] | None = None
