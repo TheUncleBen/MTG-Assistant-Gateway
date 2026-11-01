@@ -178,7 +178,7 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
     snaps = db.list_snapshots("u", limit=100, deck_id="42")
     assert len(snaps) == 15 and {x["deck_id"] for x in snaps} == {"42"}
     # only applied proposals (every fourth, all deck 42's) have a snapshot
-    assert len(db.list_snapshots("u", limit=100, search="immortal")) == 15
+    assert len(db.list_snapshots("u", limit=100, search="liesa")) == 15
     assert db.list_snapshots("u", limit=100, search="Reap") == []
     assert len(db.list_snapshots("u", limit=4, deck_id="42", offset=13)) == 2
     assert db.history_decks("u") == {"42": "Liesa Test Deck", "43": "Reap the Tides"}
@@ -474,9 +474,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert "/static/export.js" in page.text  # the Copy button's script
         md = await b.http.get("/history/reports/rep_real/export.md")
         assert md.status_code == 200 and md.headers["content-type"].startswith("text/markdown")
-        assert md.headers["content-disposition"].startswith(
-            'attachment; filename="Liesa_Test_Deck-report-'
-        )
+        assert md.headers["content-disposition"].startswith('attachment; filename="Liesa_Test_Deck-report-')
         assert md.text.startswith("# Deck report: Liesa Test Deck") and "## Metrics" not in md.text
         # the raw output is left on the report's page, which the file links to
         assert "https://mtg.test/history/reports/rep_real" in md.text

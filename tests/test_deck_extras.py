@@ -512,7 +512,7 @@ async def test_packages_json_rows_carry_budget_and_formats_for_the_tiles(stack: 
 
 
 async def test_my_decks_and_packages_is_a_switch_that_the_address_keeps(stack: Stack) -> None:
-    """The Decks page's switch (the owner, 2026-10-25): My Decks lists decks only, Packages packages
+    """The Decks page's switch (Sam, 2026-10-25): My Decks lists decks only, Packages packages
     only; the choice rides in the address and the list's form, and keeps the open folder."""
     b, _token = await _member(stack)
     try:
