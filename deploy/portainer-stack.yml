@@ -70,7 +70,6 @@ services:
       MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-}
       MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-}
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-}
-      MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
       MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
       # Fixed: secrets, the stack's own services, the backup copy folder (mounted below)
       # and Forge on or off (FORGE_REPLICAS).

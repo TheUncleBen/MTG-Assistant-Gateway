@@ -407,8 +407,8 @@ async def test_refresh_reuse_revokes_the_successor_family(gw: Harness):
 
 async def test_refresh_rechecks_group_and_sign_in_age(tmp_path, idp: FakeIdP):
     """A refresh is refused, and the token family revoked, once the user's recorded groups no
-    longer hold the required group or their last sign-in is older than MTG_REAUTH_INTERVAL."""
-    settings = make_settings(tmp_path, required_group="mtg-users", reauth_interval=3600)
+    longer hold the required group or their last sign-in is older than the Assistant refresh time."""
+    settings = make_settings(tmp_path, required_group="mtg-users", refresh_token_ttl=3600)
     async with running(Harness(settings, idp)) as h:
         client = await h.register()
         t1 = await h.tokens_for(client)

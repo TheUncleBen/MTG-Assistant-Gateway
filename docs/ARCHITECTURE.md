@@ -155,8 +155,9 @@ time). Someone taken
 out of the group is cut off everywhere on their next request; a sign-in
 the provider no longer honours (an expired refresh token, a deactivated
 account) ends alone, and the member's AI apps keep their tokens but are
-refused until they sign in on the website again. Separately, every assistant has to sign in again after
-`MTG_REAUTH_INTERVAL` (a week by default).
+refused until they sign in on the website again. Separately, every assistant has to sign in again
+once its sign-in is older than the Settings page's **Assistant refresh** time (30 days by default;
+`MTG_REFRESH_TOKEN_TTL` locks it).
 
 ## How deck edits work
 
@@ -234,7 +235,7 @@ For the exact devices and plans tested, see
   hashed. Refresh tokens rotate, and reusing an old one revokes the whole
   chain. Authorization codes are single-use and bound to PKCE. Clients can
   only register `https` redirect addresses, or `http` on localhost.
-- **Consent.** Every connection from an AI client, including each weekly
+- **Consent.** Every connection from an AI client, including each
   re-sign-in, shows the gateway's own page naming the client and where it
   will send the sign-in, with Approve and sign in, and Deny, before the identity
   provider is involved. An identity provider that signs people in silently
