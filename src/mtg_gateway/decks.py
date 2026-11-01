@@ -2884,7 +2884,7 @@ def _pinned_entries(
     if qty < sum(c.quantity for c in rest):
         # parse_changes refuses the combinations that get here; never send writes that
         # shrink other rows below what the reviewed diff says
-        raise DeckError("invalid", f"the pinned add of '{name}' does not match the planned count")
+        raise DeckError("invalid", f"the pinned add of “{name}” does not match the planned count")
     # whatever the proposal's other changes do to this card's remaining rows
     return qty, rest
 
@@ -7494,7 +7494,7 @@ class DeckService:
             )
             raise DeckError(
                 "backup_failed",
-                f"The backup copy of '{deck.name}' could not be made on Archidekt ({exc}). Nothing was "
+                f"The backup copy of “{deck.name}” could not be made on Archidekt ({exc}). Nothing was "
                 "changed; the proposal is still pending, so it can be applied again once Archidekt "
                 "answers.",
             ) from exc
@@ -9055,7 +9055,7 @@ class DeckService:
         for name in _names(raw.get("remove_tags"), "remove_tags"):
             rel = on_deck.get(self._tag_name(name).casefold())
             if rel is None:
-                raise DeckError("invalid", f"The deck has no tag '{name}'.")
+                raise DeckError("invalid", f"The deck has no tag “{name}”.")
             remove.append({"id": int(rel["id"]), "name": str(rel.get("name") or name)})
         if len(deck.tag_relations) - len(remove) + len(add) > self.MAX_TAGS:
             raise DeckError("invalid", f"A deck has at most {self.MAX_TAGS} tags here.")
@@ -9081,7 +9081,7 @@ class DeckService:
             pick = clean_text(str(raw["cover"] or "")).casefold()
             card = next((c for c in deck.cards if c.name.casefold() == pick and c.scryfall_uid), None)
             if card is None:
-                raise DeckError("invalid", f"'{raw['cover']}' is not a card in this deck.")
+                raise DeckError("invalid", f"“{raw['cover']}” is not a card in this deck.")
             chosen = str(deck.raw.get("customFeatured") or "").lower()
             if not _cover_is(deck, card.scryfall_uid.lower()):
                 plan["cover_uid"] = card.scryfall_uid
@@ -9724,7 +9724,7 @@ class DeckService:
         if not gone:
             raise DeckError(
                 "verify_mismatch",
-                f"Archidekt accepted the request but '{deck.name}' can still be read. Check it on Archidekt.",
+                f"Archidekt accepted the request but “{deck.name}” can still be read. Check it on Archidekt.",
             )
         return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id}
 
@@ -9927,7 +9927,7 @@ class DeckService:
         behaviour; a change goes through the owner of the folder helpers."""
         if self._is_backup_folder(name, depth):
             raise DeckError(
-                "invalid", f"'{name}' is the name of the gateway's backup folder. Pick another name."
+                "invalid", f"“{name}” is the name of the gateway's backup folder. Pick another name."
             )
 
     async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
@@ -10355,7 +10355,7 @@ class DeckService:
         close = [str(t.get("name")) for t in found if t.get("name")][:8]
         raise DeckError(
             "invalid",
-            f"Archidekt has no deck tag called '{name}'. Tags are picked from Archidekt's own list"
+            f"Archidekt has no deck tag called “{name}”. Tags are picked from Archidekt's own list"
             + (f"; close ones: {', '.join(close)}." if close else "; try a shorter or different word."),
         )
 
@@ -10394,7 +10394,7 @@ class DeckService:
         name = self._tag_name(name)
         deck = await self.get_own_deck(sub, deck_id)
         if any(str(r.get("name") or "").casefold() == name.casefold() for r in deck.tag_relations):
-            raise DeckError("invalid", f"This deck already has the tag '{name}'.")
+            raise DeckError("invalid", f"This deck already has the tag “{name}”.")
         if len(deck.tag_relations) >= self.MAX_TAGS:
             raise DeckError("invalid", f"A deck has at most {self.MAX_TAGS} tags here.")
         tag_id, name = await self._archidekt_tag(sub, name)
@@ -11544,7 +11544,7 @@ def _no_such_folder(info: dict[str, Any], name: Any, *, several: bool = False) -
     goes through the owner of the folder helpers."""
     names = ", ".join(sorted({f["name"] for f in _shown_folders(info)})[:30])
     what = "More than one folder" if several else "No folder"
-    return DeckError("invalid", f"{what} is called '{name}'. Your folders: {names}")
+    return DeckError("invalid", f"{what} is called “{name}”. Your folders: {names}")
 
 
 def _category_mismatches(verified: Deck, want: dict[int, list[str]]) -> list[str]:

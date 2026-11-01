@@ -403,7 +403,7 @@ async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(st
     for name in ("MTG Gateway Backups", "mtg gateway backups"):
         p = structured(await account_call(h, token, "propose_create_folder", {"name": name}))
         assert p["ok"] is False and p["message"] == (
-            f"'{name}' is the name of the gateway's backup folder. Pick another name."
+            f"“{name}” is the name of the gateway's backup folder. Pick another name."
         ), p
     assert not any(f["name"].casefold() == "mtg gateway backups" for f in ark.folders.get("alice", []))
     # the same name in other capitals inside another folder is not the backup folder's
