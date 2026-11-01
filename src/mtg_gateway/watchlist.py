@@ -25,7 +25,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 
 from . import prefs, prices
 from .decks import DeckError
-from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
+from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect_here, read_limited
 from .theme import render
 from .watchlist_page import WATCH_PAGE_CSS, Query, alert_text, watchlist_fragment_html, watchlist_page_html
 
@@ -123,7 +123,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
     async def watchlist_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/watchlist")
+            return login_redirect_here(request, "/watchlist")
         qp = request.query_params
         ok = qp.get("ok", "")
         query = Query.parse(qp)
@@ -188,7 +188,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
     async def watchlist_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/watchlist")
+            return login_redirect_here(request, "/watchlist")
         raw = await read_limited(request, MAX_FORM * 8)  # the bulk form carries up to 5,000 ids
         fields = parse_qs((raw or b"").decode("utf-8", "replace"))
         data = {k: v[0] for k, v in fields.items()}
@@ -433,15 +433,12 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         name="watch_card",
         title="Watch a card's price",
         description=(
-            "Add a card to the member's watchlist, or change a watched one's list or the alerts named "
-            "(others kept). By name "
-            "alone it follows the printing Scryfall gives for that name; set_code and collector_number "
-            "follow one printing. Alerts: alert_pct, alert_above and alert_below (a price "
-            "crossed, in dollars, or euros when the card has no dollar price) and alert_drop. A new watch "
-            "that names no alert gets the member's defaults; list_name groups it. The gateway checks "
-            "prices once a day; alerts reach the member through their push notifications. Changes only the "
-            "member's gateway data, never Archidekt. Returns today's price when Scryfall answered, with "
-            "printing_now, the printing that price is for."
+            "Add a card to the member's watchlist, or change a watched one's list or named alerts (others "
+            "kept). By name it follows Scryfall's printing for the name; set_code and collector_number "
+            "follow one printing. Alerts: alert_pct, alert_above, alert_below (dollars, or euros when it has "
+            "no dollar price) and alert_drop; a new watch with none gets the member's defaults. Prices are "
+            "checked daily; alerts go out as push notifications. Changes only gateway data. Returns today's "
+            "price when Scryfall answered (printing_now: its printing)."
         ),
         annotations={
             "readOnlyHint": False,
@@ -584,6 +581,8 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
                     DeckError("not_found", "That deck is not on your watchlist; watch it with watch_deck.")
                 )
             return {"ok": True, "deck": state.prices.deck_view(sub, row[0], days)}
+        if not (card or "").strip():
+            return fail(DeckError("invalid", "Give the card (its watch_id or name) or a deck_id."))
         rows = state.prices.find(sub, card or "")
         if not rows:
             return fail(

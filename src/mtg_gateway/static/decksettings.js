@@ -117,13 +117,10 @@
     fd.set("json", "1");
     Object.keys(extra || {}).forEach(function (k) { fd.set(k, extra[k]); });
     inFlight++;
-    return fetch(form.getAttribute("action").split("#")[0], {
-      method: "POST", credentials: "same-origin", body: new URLSearchParams(fd),
-      headers: { Accept: "application/json" }
-    }).then(function (r) { return r.json(); }).then(function (d) { inFlight--; return d || { ok: false }; }, function () {
-      inFlight--;
-      return { ok: false, message: "No connection; nothing was changed." };
-    });
+    // never rejects: signed out and no connection come back as {ok: false} in the site's words
+    return window.MtgFetch.answer(form.getAttribute("action").split("#")[0], {
+      method: "POST", body: new URLSearchParams(fd).toString(), form: true
+    }).then(function (d) { inFlight--; return d; });
   }
   function nothingToSave(d) { return /^Nothing to save/.test(d.message || ""); }
 

@@ -26,15 +26,11 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         name="get_registration_pdf",
         title="Make a deck registration sheet (PDF)",
         description=(
-            "Archidekt's Deck Registration PDF for a tournament, for any deck the user can open: "
-            "Archidekt fills the sheet and answers with the PDF's address (pdf_url; give it to the user "
-            "as a link; how long the address keeps working is not known). The main deck is every card "
-            "whose first category counts in the deck; the sideboard is every card whose first category "
-            "is Sideboard; other categories left out of the deck (a Maybeboard) are left off the sheet. "
-            "sort: alpha (the default, by name), manaValue, color or type. The details are optional, "
-            "60 characters each (date 20, free text such as 10/24/2026; dci_number digits only, at "
-            "most 10) and go to Archidekt only: only pass what the user gave you for this sheet. "
-            "Changes nothing in the deck or the account."
+            "Archidekt's Deck Registration PDF for a tournament, for any deck the user can open: pdf_url, "
+            "the sheet Archidekt filled (give it as a link). Main deck: cards whose first category counts in "
+            "the deck; sideboard: first category Sideboard; a Maybeboard is left off. sort: alpha (by name, "
+            "the default), manaValue, color or type. The details are optional and go to Archidekt only: pass "
+            "only what the user gave you for this sheet. Changes nothing in the deck or the account."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
@@ -109,19 +105,15 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         name="propose_profile_change",
         title="Propose a change to my Archidekt profile or settings (two-step)",
         description=(
-            "Step 1 of changing one thing on the user's own Archidekt account, as its settings page "
-            "does, one change a proposal. field: bio (bio, plain text, 1000 characters at most here; "
-            "empty clears it), username (username), email (switch: contactable, newsletter, "
-            "comment_emails or site_notifications; on: true or false), preference (preference: "
-            "deck_view card/text/grid/scroll/table/brewer, group_by (categories, type, mana value, color, "
-            "rarity, price and Archidekt's other groupings, by their names in lower case), sort_by "
-            "(alphabet, mana value, price, color, rarity and the rest, the same way), price_source_1 and "
-            "price_source_2 (card kingdom, tcgplayer, mana pool, star city games, cardsphere, "
-            "cardhoarder, cardmarket, card trader, tcg land or none), search_game paper/mtgo/arena, "
-            "unique_search on/off, use_default_categories on/off, show_custom_uploads on/off; value) "
-            "or collection_public (on: true or false). A profile picture is changed only on the "
-            "gateway's Account page, by the user. Returns the proposal (kind 'action'); only the user's "
-            "own press applies it, in every approval mode. Changes nothing on Archidekt by itself."
+            "Step 1 of changing one setting of the user's own Archidekt account, one change a proposal. "
+            "field, then: bio (bio: plain text, at most 1000 characters; empty clears it), username "
+            "(username), email (switch: contactable, newsletter, comment_emails or site_notifications; on), "
+            "preference (preference and value: deck_view card/text/grid/scroll/table/brewer; group_by, "
+            "sort_by: Archidekt's own, in lower case; price_source_1, price_source_2: card kingdom, "
+            "tcgplayer, mana pool, star city games, cardsphere, cardhoarder, cardmarket, card trader, tcg "
+            "land or none; search_game paper/mtgo/arena; unique_search, use_default_categories, "
+            "show_custom_uploads on/off) or collection_public (on). Returns a proposal (kind 'action') that "
+            "only the user's own press applies. Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,

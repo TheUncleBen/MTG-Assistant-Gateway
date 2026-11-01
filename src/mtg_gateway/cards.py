@@ -45,6 +45,7 @@ from mcp_types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from . import refusals
 from .approve import CARD_IMAGE_HOSTS
 
 if TYPE_CHECKING:
@@ -67,7 +68,7 @@ WAITING_CARD_URI = URI_BASE + "waiting-card"  # show_waiting_changes (0.7.29)
 CARD_META_KEY = "mtg/card"  # tool-result _meta key a card reads its link or data from
 LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
-SCRYFALL_API = "https://api.scryfall.com"  # the deck card (older chats) reads rules text from Scryfall
+SCRYFALL_API = "https://api.scryfall.com"  # the printings and deck cards read rules text from Scryfall
 STATIC = Path(__file__).parent / "static" / "cards"
 LINK_KINDS = ("printings",)
 
@@ -180,7 +181,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         name="printings-card",
         title="Printings of a card",
         description="Every printing of one card with its picture; tap one to pick it.",
-        csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway]),
+        csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway, SCRYFALL_API]),
         prefers_border=True,
     )
     _add_card(
@@ -404,7 +405,7 @@ def with_card(data: dict[str, Any], card: dict[str, Any] | None) -> CallToolResu
 FIXED_MESSAGES = {
     "not_found": "The card behind this link no longer exists.",
     "invalid": "The card behind this link no longer exists.",
-    "not_linked": "No Archidekt account is linked; link one under Account details on the gateway.",
+    "not_linked": refusals.not_linked(),
     "rate_limited": "Scryfall asked the gateway to wait. Ask your assistant for the printings again.",
     "unavailable": "The data behind this link could not be loaded right now.",
 }

@@ -857,7 +857,7 @@ def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
     With Archidekt writes switched off the thread is read-only: no form, no Reply, votes or edits."""
     did = esc(deck.id)
     form = (
-        "<form class='newcomment'><label for='ctext'>Add a comment</label>"
+        f"<form class='newcomment' data-draft='comment:{did}'><label for='ctext'>Add a comment</label>"
         "<textarea id='ctext' name='text' rows='3' maxlength='2000' "
         "placeholder='Say something about this deck…'></textarea>"
         "<div class='replyto' hidden></div>"
@@ -987,7 +987,7 @@ def toolbar_html(
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         # the placeholder is short enough to read whole in the phone toolbar's field (the full
         # name of the control is its label, "Add to the deck", and the + beside it says Add)
-        "<input id='quick' type='text' name='add' placeholder='Add a card' data-suggest='cards' "
+        "<input id='quick' type='text' name='add' placeholder='Type a name' data-suggest='cards' "
         "data-suggest-submit "
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same. The

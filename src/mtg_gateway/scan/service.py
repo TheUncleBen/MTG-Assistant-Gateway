@@ -11,13 +11,13 @@ import re
 import secrets
 import time
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
-from .names import NameCatalog
+from .names import NameCatalog, fold
 from .scryfall import (
     PRINT_BORDERS,
     PRINT_FINISHES,
@@ -26,6 +26,7 @@ from .scryfall import (
     PRINT_PAGES,
     ScryfallClient,
     ScryfallError,
+    _Cache,
     default_printing,
     good_default,
     summarize,
@@ -43,7 +44,16 @@ MAX_SUGGESTIONS = 8
 # Recovery for names Scryfall cannot place at all (fuzzy 404, empty autocomplete):
 # retry with common OCR confusions swapped, then autocomplete on shorter prefixes.
 MAX_VARIANT_LOOKUPS = 4
-MAX_PREFIX_LOOKUPS = 5
+MAX_PREFIX_LOOKUPS = 5  # answered by the card-name catalog: no Scryfall request
+# The same walk while the catalog is not loaded costs a paced Scryfall autocomplete each. In the
+# resolver's tests every name it recovered was found by the first or second shorter prefix; the
+# rest only ever ran for names that matched nothing (whole-application audit, row 5).
+MAX_SCRYFALL_PREFIX_LOOKUPS = 2
+# A name no lookup could place is remembered this long, so asking again (a proposal retried, the
+# same list resolved twice) costs no Scryfall request at all: a full miss is about eight paced
+# lookups, four seconds at the production pace (whole-application audit, row 5). An hour, so a
+# card Scryfall adds (a new set's previews) is found the same day.
+NOT_FOUND_TTL = 3600
 MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
@@ -467,6 +477,8 @@ class ScanService:
         self.scryfall = scryfall
         self.call_seconds = call_seconds
         self.names = NameCatalog(lambda: self.scryfall)
+        # names that resolved to nothing, by their folded spelling (NOT_FOUND_TTL)
+        self.not_found = _Cache(ttl=NOT_FOUND_TTL, max_items=2000)
         self.t = thresholds or ScanThresholds()
         self.art_matcher = art_matcher
         self.store = ScanStore(db)
@@ -569,11 +581,17 @@ class ScanService:
         # The wall-clock budget runs from the start of the call, batched pass included.
         budget = _Budget(MAX_RECOVERY_LOOKUPS_PER_CALL, time.monotonic() + self.call_seconds)
         results: list[Resolution | None] = [None] * len(inputs)
+        # 0. A name that found nothing a short while ago finds nothing now: no lookup at all.
+        for i, inp in enumerate(inputs):
+            if (missed := self._missed(inp)) is not None:
+                results[i] = missed
 
         # 1. One batched exact pass for everything that has a name or a printing.
         idents: list[dict[str, str]] = []
         owners: list[int] = []
         for i, inp in enumerate(inputs):
+            if results[i] is not None:
+                continue
             if inp.set_code and inp.collector_number:
                 idents.append({"set": inp.set_code, "collector_number": inp.collector_number})
             elif inp.name and inp.set_code:
@@ -585,11 +603,13 @@ class ScanService:
             async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
                 found, missing = await self.scryfall.collection(idents, cached=True)
         except TimeoutError:
-            return [self._deferred(inp, "budget") for inp in inputs]
+            return [r or self._deferred(inp, "budget") for r, inp in zip(results, inputs, strict=True)]
         except ScryfallError as exc:
             if exc.kind == "rate_limited":
                 # Nothing has been looked up yet: hand everything back as deferred, with the wait.
-                return [self._deferred(inp, "rate_limited") for inp in inputs]
+                return [
+                    r or self._deferred(inp, "rate_limited") for r, inp in zip(results, inputs, strict=True)
+                ]
             if exc.kind == "unavailable":
                 raise ScanError(exc.kind, str(exc)) from exc
             found, missing = [], idents  # fall back to per-card lookups below
@@ -649,6 +669,8 @@ class ScanService:
                 break
             if i in checks:
                 res = self._settle_printing(inputs[i], checks[i], res)
+            elif res.status == "not_found" and inp.name:
+                self.not_found.put(_miss_key(inp), res)
             results[i] = res
         # 2b. A card matched by name stands on Scryfall's default printing, its newest, which can be
         # a preview that is not out yet or a printing that is not on paper. Swap in the newest
@@ -910,6 +932,11 @@ class ScanService:
         for base in bases[1:]:
             variants += [base, *ocr_variants(base, MAX_VARIANT_LOOKUPS)]
         for variant in dict.fromkeys(variants):
+            # A swapped letter or digit is worth a lookup only when it makes a card's name: with the
+            # card-name catalog loaded, one it does not know is skipped (no Scryfall request). The
+            # name without a stray first letter is still asked, as a fuzzy lookup may place it.
+            if variant not in bases and self.names.known(variant) is False:
+                continue
             if not spend():
                 return None
             try:
@@ -945,11 +972,12 @@ class ScanService:
             if len(prefix) < MIN_PREFIX or prefix in tried:
                 continue
             tried.add(prefix)
-            if lookups >= MAX_PREFIX_LOOKUPS or not spend():
+            most = MAX_PREFIX_LOOKUPS if self.names.loaded else MAX_SCRYFALL_PREFIX_LOOKUPS
+            if lookups >= most or not spend():
                 break
             lookups += 1
             try:
-                names = await self.scryfall.autocomplete(prefix)
+                names = await self._complete(prefix)
             except ScryfallError as exc:
                 if exc.kind in ("unavailable", "rate_limited"):
                     raise ScanError(exc.kind, str(exc)) from exc
@@ -982,10 +1010,28 @@ class ScanService:
             )
         return None
 
+    def _missed(self, inp: CardInput) -> Resolution | None:
+        """The remembered "not found" for this input's name (NOT_FOUND_TTL), as this input's."""
+        if not inp.name:
+            return None
+        kept = self.not_found.get(_miss_key(inp))
+        return replace(kept, input=inp) if kept is not None else None
+
+    async def _complete(self, text: str) -> list[str]:
+        """Card names that complete ``text`` (up to 20): from the in-memory card-name catalog
+        (names.py) when it is loaded, which costs no Scryfall request; Scryfall's autocomplete,
+        paced, while it loads. An unknown name walks several of these (_recover_prefix), so this
+        is most of what a miss used to cost."""
+        self.names.ensure()
+        local = self.names.suggest(text)
+        if local is not None:
+            return local
+        return await self.scryfall.autocomplete(text)
+
     async def _suggest(self, name: str) -> list[str]:
-        """All of Scryfall's completions (up to 20); callers shorten what they show."""
+        """All the completions (up to 20); callers shorten what they show."""
         try:
-            return await self.scryfall.autocomplete(name)
+            return await self._complete(name)
         except ScryfallError as exc:
             if exc.kind == "rate_limited":
                 raise ScanError("rate_limited", str(exc)) from exc
@@ -1490,6 +1536,11 @@ def _norm(s: str) -> str:
 _DIGITS_TO_L = str.maketrans({"0": "o", "1": "l", "5": "s", "8": "B"})
 _DIGITS_TO_I = str.maketrans({"0": "o", "1": "i", "5": "s", "8": "B"})
 _SWAPS = (("l", "i"), ("i", "l"), ("I", "l"), ("rn", "m"), ("m", "rn"))
+
+
+def _miss_key(inp: CardInput) -> str:
+    """The not-found memory's key: the name as matching folds it, with any set and number."""
+    return f"{fold(inp.name)}|{inp.set_code.lower()}|{inp.collector_number.lower()}"
 
 
 def ocr_variants(name: str, limit: int) -> list[str]:

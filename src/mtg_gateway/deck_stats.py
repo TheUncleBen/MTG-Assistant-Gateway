@@ -351,7 +351,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "extra_turns": sum(c.quantity for c in cards if c.extra_turns),
         "mass_land_denial": sum(c.quantity for c in cards if c.mass_land_denial),
         "salt_total": _round(sum(c.salt * c.quantity for c in cards if c.salt is not None)),
-        "commanders": [c.name for c in commanders],
+        "commanders": list(dict.fromkeys(c.name for c in commanders)),  # one name per commander, not per row
         # a Commander deck's identity is its commander's; the cards' own colors are said apart, so a
         # card outside the identity never widens it (out_of_identity lists such cards)
         "color_identity": colour_identity(commanders) if commanders else colour_identity(cards),
@@ -1098,7 +1098,7 @@ def compute_from_text(cards: list[ListCard]) -> dict[str, Any]:
         "card_count": qty,
         "distinct": len({c.name for c in main}),
         "sideboard_count": sum(c.quantity for c in side),
-        "commanders": commanders,
+        "commanders": list(dict.fromkeys(commanders)),
         "card_data": "unavailable",
         "checks": {
             "deck_size": {

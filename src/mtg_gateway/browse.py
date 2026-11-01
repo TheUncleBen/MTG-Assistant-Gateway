@@ -39,7 +39,7 @@ from .deckpage import (
     deck_list_html,
 )
 from .decks import DeckError, _clean_deck_id
-from .pages import NO_STORE, _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .theme import esc as _esc
 from .theme import icon, render, stylesheet_link
 
@@ -686,7 +686,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     async def search_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/search" + (f"?{request.url.query}" if request.url.query else ""))
+            return login_redirect_here(request)
         query = read_query(request.query_params)
         view, remember = view_of(request, sub)
         asked = bool(
@@ -797,7 +797,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         public deck and can be cloned from there."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/precons")
+            return login_redirect_here(request, "/precons")
         pq = precon_query(request.query_params)
         view, remember = view_of(request, sub)
         view_in_link = view if request.query_params.get("view") in VIEWS else None
@@ -856,12 +856,19 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         username = request.path_params["username"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/users/{username}")
+            return login_redirect_here(request, f"/users/{username}")
         query = read_query({**request.query_params, "owner": username})
-        query["order_by"] = (
-            request.query_params.get("order")
-            if request.query_params.get("order") in SEARCH_ORDERS
-            else "-updatedAt"
+        # the profile opens sorted as it was left (prefs.sort_choice)
+        query["order_by"], query["direction"] = prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "profile",
+            sorts=SEARCH_ORDERS,
+            default="-updatedAt",
+            name="order",
+            dirs=dict(DIRECTIONS),
+            default_dir="auto",
         )
         view, remember = view_of(request, sub)
         asked = archidekt_query(query)
@@ -950,16 +957,11 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         name="search_decks",
         title="Search public Archidekt decks",
         description=(
-            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: "
-            "`name` (part of the deck name), `commander` (a commander's card name; a partial name is "
-            "looked up and, if several commanders match, returned as commander_suggestions), "
-            "`owner` (Archidekt username), `format` (" + ", ".join(sorted(FORMAT_IDS)) + "), "
-            "`colors` (letters from WUBRG: color identity within those colors), "
-            "`order_by` (-viewCount, -updatedAt, -createdAt, -size, edhBracket), `page` (60 decks a "
-            "page) and `limit` (how many of the page to return, default 20). For one user's decks "
-            "(their profile), give `owner` with order_by -updatedAt. Each result has an id and url; "
-            "read one with get_deck. This is the one tool for public deck lists; list_my_decks lists "
-            "the signed-in member's own decks, private ones included. Read-only."
+            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: name, "
+            "commander (a partial name is looked up; several matching commanders come back as "
+            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their profile's "
+            "decks), format, colors, order_by, page and limit. Each result has an id and url; read one with "
+            "get_deck. list_my_decks lists the member's own decks, private ones included. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )

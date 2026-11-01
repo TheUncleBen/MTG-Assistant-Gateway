@@ -400,6 +400,17 @@ class ArchidektError(Exception):
 
 BACKUP_FOLDER_NAME = "MTG Gateway Backups"
 DECK_ID_RE = re.compile(r"[0-9]{1,12}")
+_DIGITS_RE = re.compile(r"(\d+)")
+
+
+def category_sort_key(name: str) -> tuple[Any, ...]:
+    """How archidekt.com's deck page orders category names: a numeric-aware, case-insensitive
+    comparison (its ``Intl.Collator`` with ``numeric`` and ``sensitivity: "base"``, read from its
+    bundle on 2026-11-01), so "Ramp 2" comes before "Ramp 10" and "draw" sorts with "Draw". The
+    deck answer itself lists categories by record, which the site never shows; it keeps no order
+    of its own (no field, no route), so this rule is the one order there is."""
+    parts = _DIGITS_RE.split(name.casefold())
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in parts if p), name
 
 
 def backup_name(deck_name: str, when: float) -> str:
@@ -2256,10 +2267,14 @@ class ArchidektClient(AccountRequests):
         modifier: str = "Normal",
         condition: str | None = None,
         language: str | None = None,
+        tags: list[int] | None = None,
+        purchase_price: float | None = None,
     ) -> dict[str, Any]:
         """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id).
         ``condition`` and ``language`` are the gateway's codes (NM, EN, ...), sent as Archidekt's
-        numbers (CONDITION_IDS, LANGUAGE_IDS)."""
+        numbers (CONDITION_IDS, LANGUAGE_IDS). ``tags`` (collection tag ids) and
+        ``purchase_price`` are record fields the site's own create sends too (REQUESTS.md §14;
+        how it writes a tag inside ``tags`` was not recorded: ids, as collection_tags sends)."""
         body: dict[str, Any] = {
             "game": 1,
             "quantity": int(quantity),
@@ -2270,6 +2285,10 @@ class ArchidektClient(AccountRequests):
             body["condition"] = _condition_id(condition)
         if language:
             body["language"] = _language_id(language)
+        if tags:
+            body["tags"] = [int(t) for t in tags]
+        if purchase_price is not None:
+            body["purchasePrice"] = purchase_price
         resp = await self._request("POST", "/collection/v2/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection create response shape")
@@ -2277,7 +2296,8 @@ class ArchidektClient(AccountRequests):
 
     async def collection_set(self, token: str, record: dict[str, Any], **changes: Any) -> dict[str, Any]:
         """PATCH /collection/v2/{id}/ with the record's full body (the site sends every field on an
-        edit) and ``changes`` applied: quantity, modifier, condition, language, purchasePrice."""
+        edit) and ``changes`` applied: quantity, modifier, condition, language, purchasePrice, tags
+        (tag ids)."""
         rid = record.get("id")
         if isinstance(rid, bool) or not isinstance(rid, int):
             raise ArchidektError("contract", "collection record has no integer id")
@@ -2292,9 +2312,15 @@ class ArchidektClient(AccountRequests):
             "card": card_id,
             "modifier": record.get("modifier") or "Normal",
         }
-        for key in ("tags", "purchasePrice"):
-            if record.get(key) is not None:
-                body[key] = record[key]
+        if record.get("purchasePrice") is not None:
+            body["purchasePrice"] = record["purchasePrice"]
+        if isinstance(record.get("tags"), list):
+            # tags go back as ids, whether the listing sent ids or tag objects (collection_tags)
+            body["tags"] = [
+                t.get("id") if isinstance(t, dict) else t
+                for t in record["tags"]
+                if isinstance(t.get("id") if isinstance(t, dict) else t, int)
+            ]
         # Archidekt keeps condition and language as numbers (see CONDITION_IDS). A value copied
         # from the record goes back as it came when it is a number, as its number when it is a
         # known code, and is left out when it is neither (an edit never fails on a stored value

@@ -689,7 +689,11 @@ class PriceService:
                 raise DeckError(
                     "unavailable", f"Scryfall could not be asked about this printing: {exc}"
                 ) from exc
-            note = "Scryfall could not be asked just now; today's price comes with the next daily check."
+            # the name is kept as typed: say so, so a misspelt name is not taken for a checked one
+            note = (
+                f"Scryfall couldn't be reached, so the name “{name}” is not checked yet and has no price "
+                "today; the next daily check prices it."
+            )
         if card is not None:
             name = str(card.get("name") or name)
             # by name alone the finish is checked over every printing, below
@@ -822,6 +826,8 @@ class PriceService:
                 "collector_number": str(now_card.get("collector_number") or "") or None,
             }
         out["created"] = created
+        if card is None:
+            out["name_checked"] = False
         if note:
             out["note"] = note
         return out

@@ -50,10 +50,13 @@ LABELS = {
     "profile": "Profile and settings",
     "contest_enter": "Contest entry",
     "contest_withdraw": "Withdraw contest entry",
+    # 0.7.46 (Archidekt parity release 3)
+    "clear_collection": "Clear binder",
 }
 ACTIONS = frozenset(LABELS)
-DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
-CANNOT_UNDO = frozenset({"delete_deck", "comment_delete"})
+# never applied by an assistant on its own; applied on their review page only (not the card)
+DESTRUCTIVE = frozenset({"delete_deck", "clear_collection"})
+CANNOT_UNDO = frozenset({"delete_deck", "comment_delete", "clear_collection"})
 # the comment actions, on a deck's thread or a forum thread (thread_id)
 COMMENT_ACTIONS = frozenset({"comment_post", "comment_edit", "comment_delete", "comment_vote"})
 VOTES = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}
@@ -195,6 +198,8 @@ def report_url(kind: str, deck_id: str | None, comment_id: int | None) -> str:
 def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
     """The approval tier of an action proposal (modes.risk_of hands ``action`` proposals here)."""
     action = str((rows or [{}])[0].get("action") or "")
+    if action == "clear_collection":
+        return "destructive", "clears your whole binder; an assistant never applies this by itself"
     if action in DESTRUCTIVE:
         return "destructive", "deletes a deck; an assistant never applies this by itself"
     if action == "create_folder":
@@ -353,7 +358,16 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         raise DeckError("invalid", f"unknown action {action!r}")
     social = (
         _social(decks)
-        if action not in ("delete_deck", "create_folder", "deck_help", "report", "profile", *CONTEST_ACTIONS)
+        if action
+        not in (
+            "delete_deck",
+            "create_folder",
+            "deck_help",
+            "report",
+            "profile",
+            "clear_collection",
+            *CONTEST_ACTIONS,
+        )
         else None
     )
     if social is not None:
@@ -372,7 +386,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         forum_thread = await forum.thread(decks, sub, params["thread_id"])
         changes["deck_id"] = forum.target(forum_thread["id"])
         where = "in the forum thread"
-    elif action not in ("create_folder", "profile") and not by_name:
+    elif action not in ("create_folder", "profile", "clear_collection") and not by_name:
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
@@ -495,6 +509,22 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         row["note"] = (
             "Archidekt itself has no undo for a deleted deck. The gateway keeps a snapshot of it first "
             "(no backup copy is made on Archidekt)."
+        )
+    elif action == "clear_collection":
+        from . import collection_bulk
+
+        entries, copies = await collection_bulk.binder_count(decks, sub)
+        if not entries:
+            raise DeckError("invalid", "Your binder is already empty; there is nothing to clear.")
+        changes.update(entries=entries, cards=copies, deck_id=collection_bulk.TARGET)
+        size = f"{entries:,} {'entry' if entries == 1 else 'entries'}" + (
+            f", {copies:,} {'card' if copies == 1 else 'cards'}" if copies is not None else ""
+        )
+        row["text"] = f"Clear your whole binder: remove all {size} from your binder on Archidekt"
+        row["note"] = (
+            "Archidekt itself has no undo. The gateway keeps a copy of your whole binder under History "
+            "first (download it as a CSV, or put it back with Restore to my binder) and checks that your "
+            "binder still has these entries."
         )
     elif action == "create_folder":
         name = decks._folder_name(params.get("name"))
@@ -674,8 +704,18 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             "id": pid,
             "owner_sub": sub,
             "kind": "action",
-            "deck_id": deck.id if deck else changes["deck_id"] if forum_thread else ACCOUNT_TARGET,
-            "deck_name": deck.name if deck else forum_thread["title"] if forum_thread else ACCOUNT_NAME,
+            "deck_id": deck.id
+            if deck
+            else changes["deck_id"]
+            if forum_thread or action == "clear_collection"
+            else ACCOUNT_TARGET,
+            "deck_name": deck.name
+            if deck
+            else forum_thread["title"]
+            if forum_thread
+            else "Your binder"
+            if action == "clear_collection"
+            else ACCOUNT_NAME,
             "baseline_fingerprint": deck.fingerprint() if action == "delete_deck" else "",
             "changes": changes,
         },
@@ -784,6 +824,10 @@ async def apply(
         result = await _social(decks).add_collaborator(sub, deck_id, int(c["user_id"]))
     elif action == "collaborator_remove":
         result = await _social(decks).remove_collaborator(sub, deck_id, int(c["user_id"]))
+    elif action == "clear_collection":
+        from . import collection_bulk
+
+        result = await collection_bulk.clear(decks, sub, row, progress)
     elif action == "create_folder":
         folder = await decks.create_folder(sub, str(c["name"]), int(c["parent"]))
         result = {"folder_id": folder["id"], "name": folder["name"], "verified": True}

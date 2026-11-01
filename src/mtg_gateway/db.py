@@ -1043,6 +1043,7 @@ MEMBER_TABLES = (
     ("deck_values", "sub"),
     ("binder_records", "sub"),  # their Binder as last read, for its value
     ("binder_reads", "sub"),
+    ("binder_jobs", "sub"),  # their binder import or restore job (collection_bulk)
     ("owned_decks", "sub"),  # the printings of their decks, for the price history
     ("notify_prefs", "sub"),
     ("account_prefs", "sub"),

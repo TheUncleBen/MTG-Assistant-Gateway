@@ -87,6 +87,7 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
     more = structured(await call(h, token, "play_more_games", {"report_id": rid}))
     assert more["ok"] and more["started"] is True and "message" not in more
     assert more["report_id"] == rid and more["forge_status"]["state"] in ("queued", "running")
+    await reports.starts_settled()  # handed to Forge in the background, after the answer
     assert len(fake.started) == 2 and fake.started[1]["games"] == 4
     assert fake.started[1]["decks"] == fake.started[0]["decks"]
     audit = h.db._conn.execute(
@@ -99,6 +100,7 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
     api = await h.http.post(f"/api/v1/reports/{rid}/forge/more", headers=auth)
     assert api.status_code == 202, api.text
     assert api.json()["ok"] and api.json()["forge"]["games_requested"] == 12
+    await reports.starts_settled()
     assert len(fake.started) == 3
     fake.finish(_section(stack, rid)["job_id"], [1, 1, 1, 1])
     await _until(lambda: _section(stack, rid).get("state") == "done")
@@ -107,6 +109,7 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
         view = structured(await call(h, token, "get_deck_report", {"report_id": rid}))
         assert view["forge"]["more_games"] == games
         step = structured(await call(h, token, "play_more_games", {"report_id": rid}))
+        await reports.starts_settled()
         assert step["ok"] and fake.started[-1]["games"] == games
         fake.finish(_section(stack, rid)["job_id"], [1] * games)
         await _until(lambda: _section(stack, rid).get("state") == "done")
@@ -211,3 +214,36 @@ async def test_a_read_only_app_is_refused_on_both_paths_and_starts_nothing(stack
     )
     assert api_again.status_code == 400 and api_again.json()["reason"] == "forge_running"
     assert len(fake.started) == started + 1
+
+
+async def test_more_games_on_a_report_whose_forge_was_down_says_so(stack: Stack) -> None:
+    """Forge couldn't be reached, so the report's Forge part failed before a game. Play more games
+    names that (reason notrun: its Forge section says why), not "it has no Forge games, or it was made
+    before this gateway kept what more games need" (whole-application audit, BACKEND play_more_games)."""
+    h = stack.h
+    fake = FakeForge(brackets=BRACKETED)
+    _forge(stack, fake)
+    fake.up = False
+    real = fake.handler
+
+    def down(request: Any) -> Any:  # every Forge call fails, not only the health probe
+        import httpx
+
+        if not fake.up:
+            raise httpx.ConnectError("down", request=request)
+        return real(request)
+
+    fake.handler = down  # type: ignore[method-assign]
+    stack.h.app.state.gateway.reports.forge = fake.client()
+    token = await mcp_token(h)
+    out = structured(
+        await call(h, token, "run_deck_report", {"deck_ref": "42", "forge": True, "simulate": False})
+    )
+    rid = out["report_id"]
+    await _until(lambda: _section(stack, rid).get("state") in ("failed", "skipped"))
+    section = _section(stack, rid)
+    assert "ConnectError" not in json.dumps(section), section
+    more = structured(await call(h, token, "play_more_games", {"report_id": rid}))
+    assert more["ok"] is False and more["reason"] == "notrun", more
+    assert more["message"] == reports_module.MORE_NOT_RUN
+    assert "Forge" in section["error"], section

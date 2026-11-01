@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -32,6 +33,11 @@ if TYPE_CHECKING:
     from .db import Database
 
 VIEW = "view."  # + one of theme.VIEW_KINDS
+# SORT + one of SORT_KINDS: the list's sort as last picked, {"sort": word, "dir": word} (0.7.46
+# audit QG-11): My decks, the Binder and a member's profile open sorted the way they were left
+SORT = "sort."
+SORT_KINDS = ("decks", "collection", "profile")
+_SORT_WORD = re.compile(r"^-?[A-Za-z0-9_]{1,40}$")
 # CARD_SIZE: the one size every page used before 2026-10-28, still read by a page without its own;
 # CARD_SIZE + "." + one of theme.CARD_SIZE_PAGES: that page's own size
 CARD_SIZES = ("s", "m", "l")
@@ -58,6 +64,10 @@ MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
 # the update can't bring the forgotten choices back. Not a choice: the pages' API can't read or
 # set it.
 FORGOTTEN = "prefs.forgotten"
+# Card search's filter groups on a Fold or desktop: folded behind the Filters button ("closed",
+# the default) or open (mockup screen 5, 2026-11-01); phones always open them as a sheet
+CARDS_FILTERS = "cards.filters"
+CARDS_FILTERS_STATES = ("open", "closed")
 
 CARD_SIZE_NAMES = (CARD_SIZE, *(f"{CARD_SIZE}.{page}" for page in CARD_SIZE_PAGES))
 
@@ -68,12 +78,23 @@ _WORD = re.compile(r"^[a-z0-9_-]{1,40}$")
 def valid(name: str, value: Any) -> bool:
     """Whether ``value`` is a well-formed choice called ``name`` (anything else is refused, so the
     store holds only what the pages read back)."""
+    if name.startswith(SORT):
+        return (
+            name[len(SORT) :] in SORT_KINDS
+            and isinstance(value, dict)
+            and set(value) <= {"sort", "dir"}
+            and isinstance(value.get("sort"), str)
+            and bool(_SORT_WORD.match(value["sort"]))
+            and (value.get("dir") is None or value["dir"] in ("auto", "asc", "desc"))
+        )
     if name.startswith(VIEW):
         return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.match(value))
     if name in CARD_SIZE_NAMES:
         return value in CARD_SIZES
     if name == EDHPLAY_STEPS:
         return value is True
+    if name == CARDS_FILTERS:
+        return value in CARDS_FILTERS_STATES
     if name == SCAN_INTRO:  # "seen": shown once, folded from then on; True: dismissed with Got it
         return value is True or value == "seen"
     if name == BINDER_ADD:
@@ -140,6 +161,7 @@ def save(db: Database, sub: str, name: str, value: Any) -> bool:
 def valid_name(name: str) -> bool:
     return (
         (name.startswith(VIEW) and name[len(VIEW) :] in VIEW_KINDS)
+        or (name.startswith(SORT) and name[len(SORT) :] in SORT_KINDS)
         or name
         in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD, WATCH_ALERTS)
         or bool(_STACK_NAME.match(name))
@@ -147,12 +169,12 @@ def valid_name(name: str) -> bool:
 
 
 def forget(db: Database, sub: str) -> int:
-    """ "Forget my view choices": views, card size, stack orders, stats toggles and the
+    """ "Forget my view choices": views, sorts, card size, stack orders, stats toggles and the
     dismissed tips. Other things kept on the account (notifications, approval mode) stay."""
     n = db.delete_prefs(
         sub,
         names=(*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO),
-        prefixes=(VIEW, STACK),
+        prefixes=(VIEW, SORT, STACK),
     )
     db.set_pref(sub, FORGOTTEN, True)
     return n
@@ -239,6 +261,49 @@ def view_choice(
             return default, True
         return cookie, True
     return default, False
+
+
+def sort_choice(
+    db: Database,
+    sub: str,
+    request: Request,
+    kind: str,
+    *,
+    sorts: Iterable[str],
+    default: str,
+    name: str = "sort",
+    dirs: Iterable[str] = (),
+    default_dir: str = "",
+    dir_name: str = "dir",
+) -> tuple[str, str]:
+    """The sort (and direction) a list opens with: the address's when it names a known one
+    (remembered on the account when the pick came from this site), else the one remembered,
+    else ``default``. So a sort picked once is the sort the next visit opens with, until
+    "Forget my view choices" (QOL-12)."""
+    assert kind in SORT_KINDS
+    sorts, dirs = tuple(sorts), tuple(dirs)
+    stored = db.get_pref(sub, SORT + kind)
+    if not isinstance(stored, dict):
+        stored = {}
+    asked = request.query_params.get(name)
+    asked_dir = request.query_params.get(dir_name) if dirs else None
+    if asked in sorts:
+        direction = (
+            asked_dir if asked_dir in dirs else (stored.get("dir") if asked == stored.get("sort") else None)
+        )
+        if direction not in dirs:
+            direction = default_dir
+        if from_this_site(request):
+            want: dict[str, Any] = {"sort": asked}
+            if dirs:
+                want["dir"] = direction
+            if want != stored:
+                db.set_pref(sub, SORT + kind, want)
+        return asked, direction
+    if stored.get("sort") in sorts:
+        direction = stored.get("dir")
+        return stored["sort"], direction if direction in dirs else default_dir
+    return default, default_dir
 
 
 def remember_view(

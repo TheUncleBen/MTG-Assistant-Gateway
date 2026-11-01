@@ -26,6 +26,7 @@ from .companion import (
 )
 from .deckpage import (
     DECK_BOXES,
+    LIST_ORDERS,
     VIEWS,
     compare_mine_html,
     covers_for,
@@ -49,8 +50,9 @@ from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
-    login_redirect,
+    login_redirect_here,
 )
+from .running_view import deck_notice_html
 from .theme import (
     SPINNER,
     hub_switch,
@@ -153,7 +155,10 @@ def new_deck_box_html(
             if scan_name
             else ""
         )
-        + f"<form id='ndf' method='post' action='/decks/new' class='nd-form' data-src='{src}' novalidate>"
+        # what is typed is kept and put back (static/draft.js), unless a scan filled the form
+        + f"<form id='ndf' method='post' action='/decks/new' class='nd-form' data-src='{src}' novalidate"
+        + ("" if scan_name else " data-draft='newdeck'")
+        + ">"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<div class='nd-grid'><div class='nd-fields'>"
         "<div class='nd-top'><div class='field nd-name'><label for='name'>Deck name</label>"
@@ -338,6 +343,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         qp = request.query_params
         chosen, remember = prefs.view_choice(state.db, sub, request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
+        order, _dir = prefs.sort_choice(
+            state.db, sub, request, "decks", sorts=LIST_ORDERS, default="updated", name="order"
+        )
         filters = read_filters(qp)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait, last_read_ok=True)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
@@ -500,7 +508,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def decks_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         qp = request.query_params
         # Try again on the notice that the deck list couldn't be read: read it again, then show it
         if qp.get("reread"):
@@ -529,6 +537,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         qp = request.query_params
         shape = qp.get("shape") if qp.get("shape") in ("recent", "pick") else "list"
         q, order, view, folder = list_query(qp)
+        if shape == "list":  # the page's list opens sorted as it was left (the panel sends its pick)
+            order, _dir = prefs.sort_choice(
+                state.db, sub, request, "decks", sorts=LIST_ORDERS, default="updated", name="order"
+            )
         filters = read_filters(qp)
         try:
             rows = await asyncio.wait_for(decks.list_decks(sub), DECKS_JSON_TIMEOUT)
@@ -641,7 +653,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def open_deck(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks")
+            return login_redirect_here(request, "/decks")
         ref = (request.query_params.get("ref") or "").strip()
         try:
             from .decks import _clean_deck_id
@@ -656,7 +668,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_deck_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new")
+            return login_redirect_here(request, "/decks/new")
         values: dict[str, str] = {}
         scan_name = ""
         scan_ref = (request.query_params.get("scan_session") or "").strip()[:80]
@@ -677,7 +689,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_deck_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new")
+            # the sign-in ended while the form was filled in: after signing in the box opens
+            # again with what was typed (its draft, static/newdeck.js) (QG-04)
+            return login_redirect_here(request, "/decks/new?draft=1")
         data = await form(request, limit=4_200_000)  # a deck .json export can reach a few MB
         values = {
             k: v
@@ -727,7 +741,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     async def new_package_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new-package")
+            return login_redirect_here(request, "/decks/new-package")
         return await my_decks_response(request, sub, sid, new_package={"values": {}})
 
     @server.custom_route("/decks/new-package", methods=["POST"], include_in_schema=False)
@@ -736,7 +750,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         (decks.propose_new_deck with ``package``), applied at once as Create deck is."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/decks/new-package")
+            return login_redirect_here(request, "/decks/new-package")
         data = await deck_extras.read_form(request, lists=("format",))
         values = {
             "name": data.get("name", ""),
@@ -861,17 +875,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # a test of this deck still going (the member pressed Run test, or an assistant ran one):
         # the spinner and how far it is, with the way to its report, until every part is done
         running = state.reports.running(sub, deck.id) if state.reports is not None else []
-        if running:
-            one = running[0]
-            words = (
-                f"Test running: {one['progress']}."
-                if len(running) == 1
-                else f"{len(running)} tests running: {one['progress']}."
-            )
-            open_report = ui.cap_link("Open the report", f"/history/reports/{one['report_id']}")
-            notice = (
-                f"<p class='notice testing' role='status'>{SPINNER} {_esc(words)} {open_report}</p>" + notice
-            )
+        if running:  # running-live.js keeps it current (running_view)
+            notice = deck_notice_html(running, str(deck.id)) + notice
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
@@ -960,6 +965,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 "export.js",
                 "deckextras.js",
                 "undo-box.js",
+                # a test still going: its mark kept current (running_view)
+                *(("running-live.js",) if running else ()),
             ),
             extra_css=deck_extras.CSS,
         )
@@ -976,7 +983,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return RedirectResponse(f"/forum/thread/{thread_of(deck_id)}", status_code=303)
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         return await deck_page_response(request, sub, sid, deck_id)
 
     @server.custom_route("/decks/{deck_id}/check", methods=["GET"], include_in_schema=False)
@@ -1020,7 +1027,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request)
         if not check_csrf(sid, data):
             return page("Deck", EXPIRED, sub=sub, sid=sid, status=403)

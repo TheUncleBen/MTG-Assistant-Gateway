@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .pages import _safe_next, browser_session
+from .pages import browser_session, login_redirect
 from .plugin_page import MAX_FILE_BYTES, PLUGIN_NAME, plugin_dir, shipped_files, zip_bytes
 
 if TYPE_CHECKING:
@@ -64,9 +64,6 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
     def signed_in(request: Request) -> tuple[str | None, str | None]:
         return browser_session(state, request)
 
-    def to_login(next_path: str) -> Response:
-        return RedirectResponse(f"/login?next={_safe_next(next_path)}", status_code=302)
-
     @server.custom_route("/skill", methods=["GET"], include_in_schema=False)
     async def skill(request: Request) -> Response:
         """The skill's steps are the setup hub's skill section (setup_hub.py), which reads signed
@@ -77,7 +74,7 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
     async def skill_zip(request: Request) -> Response:
         sub, _sid = signed_in(request)
         if not sub:
-            return to_login("/skill")
+            return login_redirect("/skill")  # a download: the sign-in comes back to its page
         base = skill_dir()
         if base is None:
             return Response("skill not installed", status_code=503, media_type="text/plain")

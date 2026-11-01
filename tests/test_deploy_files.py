@@ -332,3 +332,12 @@ def test_every_value_the_older_examples_set_and_these_leave_empty_is_named_in_th
         assert env[var] == "", var
         assert f"`{var}={old}`" in step_one, var
         assert f"`{var}={old}`" in bullet, var
+
+
+def test_the_stacks_pass_no_variable_that_nothing_reads() -> None:
+    """DISABLE_IPV6 came from another project's image convention: the gateway, its Mystic Forge
+    image and Forge never read it, so the Swarm stack set it for nothing and Compose didn't at all."""
+    for name in ("deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"):
+        assert "DISABLE_IPV6" not in (ROOT / name).read_text(), name
+    code = list((ROOT / "src").rglob("*.py")) + [p for p in (ROOT / "docker").rglob("*") if p.is_file()]
+    assert not any("DISABLE_IPV6" in p.read_text(errors="ignore") for p in code)

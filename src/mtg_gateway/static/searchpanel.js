@@ -6,6 +6,8 @@
      under 600 px or with a coarse pointer the list is a bottom sheet with a dimmed page behind it;
    - on phones the Filters button opens the filter groups as a full-screen sheet, which × , Esc
      and the sheet's own button close; the button counts the filters in use;
+   - on a Fold or desktop a panel whose button is marked "fold" (card search) folds the groups in
+     place behind that button instead, and keeps the last state on the account (data-pref);
    - on phones Sort and its direction fold into one drop-down ("Name ↑", "Name ↓");
    - More filters (card search) opens the extra filters from the results bar;
    - a form marked data-apply=submit sends itself when a drop-down or the view changes (deck search:
@@ -68,8 +70,20 @@
     if (e.key === "Escape" && openPick) { e.preventDefault(); e.stopPropagation(); closePick(true); }
   }, true);
 
-  // -- the phone sheet ---------------------------------------------------------------------------
+  // -- the phone sheet, and the in-place fold on a Fold or desktop -----------------------------
   var sheet = $("#sp-filters", panel), openBtn = $(".sp-open", panel), badgeEl = openBtn ? $(".n", openBtn) : null;
+  var phoneQuery = window.matchMedia ? window.matchMedia("(max-width:599.98px)") : null;
+  var folds = !!(sheet && openBtn && openBtn.classList.contains("fold"));
+  function inPlace() { return folds && !(phoneQuery && phoneQuery.matches); }
+  function folded() { return inPlace() && sheet.classList.contains("folded"); }
+  // open or fold the groups in place; the choice follows the account (prefs.js), the focus stays
+  // on the button, which says what it did (aria-expanded)
+  function setFold(open) {
+    sheet.classList.toggle("folded", !open);
+    openBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    var pref = sheet.getAttribute("data-pref");
+    if (pref && window.MtgPrefs) window.MtgPrefs.set(pref, open ? "open" : "closed");
+  }
   function sheetOpen() { return !!(sheet && sheet.classList.contains("open")); }
   function openSheet() {
     if (!sheet) return;
@@ -99,7 +113,7 @@
     badgeEl.textContent = n ? String(n) : "";
   }
   panel.addEventListener("click", function (e) {
-    if (e.target.closest(".sp-open")) { openSheet(); return; }
+    if (e.target.closest(".sp-open")) { if (inPlace()) setFold(sheet.classList.contains("folded")); else openSheet(); return; }
     if (e.target.closest(".sp-sheet-head .close")) { closeSheet(); return; }
     var show = e.target.closest(".sp-show");
     if (show && show.type === "button") { closeSheet(); return; }
@@ -116,6 +130,17 @@
     form.addEventListener("change", badge);
   }
   badge();
+  // a window that grows past phone width while the sheet is open: the sheet goes, the groups
+  // show as the page's own (folded or open as the button says)
+  // the button says whether the groups show: on a phone that is the sheet, else the fold
+  if (phoneQuery && folds) {
+    var onWidth = function () {
+      if (!phoneQuery.matches && sheetOpen()) closeSheet();
+      openBtn.setAttribute("aria-expanded", (phoneQuery.matches ? sheetOpen() : !sheet.classList.contains("folded")) ? "true" : "false");
+    };
+    onWidth();
+    if (phoneQuery.addEventListener) phoneQuery.addEventListener("change", onWidth); else if (phoneQuery.addListener) phoneQuery.addListener(onWidth);
+  }
 
   // -- Sort and its direction as one drop-down on phones ----------------------------------------
   $$(".rbar .g.sort", panel).forEach(function (g) {
@@ -159,6 +184,8 @@
     btn.hidden = false;
     btn.setAttribute("aria-expanded", more.open ? "true" : "false");
     btn.addEventListener("click", function () {
+      // More filters sits inside the folded groups: they open first, else nothing would show
+      if (folded()) { setFold(true); more.open = false; }
       more.open = !more.open;
       btn.setAttribute("aria-expanded", more.open ? "true" : "false");
       if (more.open) { var f = $("input, select, button", more); if (f) f.focus(); }

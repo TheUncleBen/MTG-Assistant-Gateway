@@ -184,7 +184,8 @@ async def test_a_thread_shows_its_first_post_and_the_comment_panel_over_its_repl
     assert pre["count"] == 1 and pre["has_more"] is False and isinstance(pre["me"], int)
     assert ark.calls.count(("GET", "/api/comments/700002/")) == 1
     # the reply box, public under the member's name, posting through the same panel
-    assert "<form class='newcomment' data-forum='1' data-me-name='alice'>" in page and "Your reply" in page
+    assert "<form class='newcomment' data-forum='1' data-me-name='alice' data-draft='reply:700002'>" in page
+    assert "Your reply" in page
     assert esc("Public under “alice”. An assistant's reply always waits for your press.") in page
     # the text style buttons above the box, the one orange button under it
     assert "role='toolbar' aria-label='Text style'" in page
@@ -240,7 +241,8 @@ async def test_a_thread_that_is_not_there_and_a_bad_number(member: Browser, stac
     assert r.status_code == 404, r.text
     r = await member.http.get("/forum/thread/abc")
     assert r.status_code == 400, r.text
-    assert esc("thread's number or its link") in r.text
+    assert esc("thread's number or its link") in r.text and "thread_id" not in r.text
+    assert "Back to the forum" in r.text
 
 
 async def test_the_forum_is_in_the_menus_and_needs_a_sign_in(stack: Stack, member: Browser) -> None:

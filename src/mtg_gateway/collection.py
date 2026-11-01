@@ -29,7 +29,7 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import prefs, refusals, ui
+from . import collection_tags, prefs, refusals, ui
 from . import searchpanel as sp
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import (
@@ -48,13 +48,14 @@ from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
 from .decks import DeckError, _writing, archidekt_wait, current_client, no_card_called, reloading
 from .pages import (
+    BROWSER_CLIENT_ID,
     NO_STORE,
     _csrf,
     _safe_next,
     browser_session,
     csrf_form_ok,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     press_stamp,
     read_limited,
 )
@@ -82,6 +83,8 @@ WHOLE_READ_SIZE = 200
 FILTERED_PAGES = 5
 PAGE_SIZE = COLLECTION_PAGE_SIZE
 FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
+WHOLE_TTL = 60.0  # and the Binder read whole for a tag filter (CollectionService.whole)
+IMPORT_PAUSE_POLL = 5.0  # seconds a paused import or restore waits before looking at the allowance again
 FINISHES = ("nonfoil", "foil", "etched")
 MODIFIERS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
@@ -178,14 +181,19 @@ async def _finish_warnings(adds: list[dict[str, Any]], scan: Any) -> list[str]:
     return out
 
 
-def normalise_items(items: Any) -> list[dict[str, Any]]:
+def normalise_items(
+    items: Any, *, limit: int = MAX_ITEMS_PER_CALL, trusted: bool = False
+) -> list[dict[str, Any]]:
     """Validate the cards an add names (a scan item with ``card``, ``{name, set?, collector_number?,
     scryfall_id?, quantity?, finish?, condition?}`` or a plain name) into flat records the add and
-    a stored proposal both accept. Raises CollectionError for anything unusable."""
+    a stored proposal both accept. Raises CollectionError for anything unusable. ``limit``: the
+    most cards (an import takes more, a card at a time). ``trusted``: the gateway's own binder
+    snapshot (a restore), whose Archidekt printing id (``card_id``), tag ids (``tag_ids``) and
+    price paid (``purchase_price``) are kept; never anything an assistant or a file sent."""
     if not isinstance(items, list) or not items:
         raise CollectionError("invalid", "give a non-empty list of cards")
-    if len(items) > MAX_ITEMS_PER_CALL:
-        raise CollectionError("invalid", f"at most {MAX_ITEMS_PER_CALL} cards per call")
+    if len(items) > limit:
+        raise CollectionError("invalid", f"at most {limit} cards per call")
     out: list[dict[str, Any]] = []
     for i, raw in enumerate(items):
         if isinstance(raw, str):
@@ -205,16 +213,23 @@ def normalise_items(items: Any) -> list[dict[str, Any]]:
             raise CollectionError("invalid", f"card {i}: give a name, or a set and collector number")
         if not spec["name"] and spec["scryfall_id"]:
             spec["name"] = "?"
+        if trusted:
+            cid = raw.get("card_id")
+            if isinstance(cid, int) and not isinstance(cid, bool) and cid > 0:
+                spec["card_id"] = cid
+            spec["tag_ids"] = [t for t in raw.get("tag_ids") or [] if isinstance(t, int) and t > 0]
+            price = raw.get("purchase_price")
+            if isinstance(price, (int, float)) and not isinstance(price, bool):
+                spec["purchase_price"] = float(price)
         out.append({**spec, **opts})
     return out
 
 
-MAX_IMPORT_ROWS = MAX_ITEMS_PER_CALL  # one import is one add call; Archidekt is written a card at a time
+# An import's lines: it runs in the background a card at a time (collection_bulk), up to the
+# parser's 2 MB of text
+MAX_IMPORT_ROWS = 5_000
+IMPORT_FORM_BYTES = 6_500_000  # 2 MB of text, form-encoded (a quote or a comma takes three bytes)
 IMPORT_RESULT_TTL = 300.0  # seconds an import's result waits for the page the redirect lands on
-# An import runs in the background (``import_job``): while the member's Archidekt budget is below
-# a quarter of it (kept for the member's own changes) it pauses, looking again this often.
-IMPORT_PAUSE_POLL = 5.0
-IMPORT_JOBS_MAX = 2_000
 IMPORT_RESULTS_MAX = 2_000
 QUOTED_CELL_CHARS = 20  # a cell quoted in a refusal is cut to this
 REFUSAL_CHARS = 300  # and a kept refusal to this, whatever made it (none is longer today)
@@ -290,10 +305,10 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
     if len(items) > MAX_IMPORT_ROWS:
         raise CollectionError(
             "invalid",
-            f"that is {len(items)} rows; an import adds at most {MAX_IMPORT_ROWS} at a time "
-            "(Archidekt is written one card at a time). Split the file and import the rest after.",
+            f"that is {len(items):,} rows; an import adds at most {MAX_IMPORT_ROWS:,} at a time. Split the "
+            "file and import the rest after.",
         )
-    out = normalise_items(items)
+    out = normalise_items(items, limit=MAX_IMPORT_ROWS)
     for item, raw in zip(out, items, strict=True):
         for key in ("line", "language_given", "condition_given"):
             if key in raw:
@@ -459,6 +474,9 @@ class _Found:
         self.tried_whole = False
         self.whole = False  # one read held the whole binder
         self.stamp: int | None = None  # the member's collection writes when these were read
+        # printings resolved so far, by (name folded, set, number, Scryfall id): kept through a
+        # re-read, so an import resolves each distinct card once
+        self.printings: dict[tuple[str, str, str, str], dict[str, Any]] = getattr(self, "printings", {})
 
     def take(self, results: Any) -> None:
         for rec in results if isinstance(results, list) else []:
@@ -484,6 +502,9 @@ class CollectionService:
         self._first_pages: dict[str, dict[str, tuple[float, dict[str, Any]]]] = {}
         self.first_page_ttl = FIRST_PAGE_TTL
         self._writes: dict[str, int] = {}  # collection writes sent per member (_on_write)
+        # The Binder read whole for a tag filter, per member (WHOLE_TTL seconds; any collection
+        # write drops it): (when, records, tags, complete)
+        self._whole: dict[str, tuple[float, list[dict[str, Any]], list[dict[str, Any]], bool]] = {}
         decks.write_hooks.append(self._on_write)
         # the Binder as last read whole, for its value and the price sort (binder_prices.py): the
         # gateway's own writes keep it current
@@ -492,6 +513,7 @@ class CollectionService:
     def _on_write(self, sub: str, path: str) -> None:
         if not path or path.startswith("/collection"):
             self._first_pages.pop(sub, None)
+            self._whole.pop(sub, None)
             # counted, so records an add read before another write are read again (_records_for);
             # the add's own writes keep what it read current, so they are not
             if not _own_write.get():
@@ -500,12 +522,10 @@ class CollectionService:
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
         if link is None:
-            raise CollectionError(
-                "not_linked", "No Archidekt account is linked. Link one on the Account page first."
-            )
+            raise CollectionError("not_linked", refusals.not_linked(self.decks.settings.public_url))
         uid = link.get("archidekt_user_id")
         if not uid or not str(uid).isdigit():
-            raise CollectionError("not_linked", "The linked Archidekt account has no user id; relink it.")
+            raise CollectionError("not_linked", refusals.no_user_id(self.decks.settings.public_url))
         return str(uid)
 
     def _writes_on(self) -> None:
@@ -555,11 +575,15 @@ class CollectionService:
                 token, uid, page=page, page_size=page_size, card_name=q, order_by=order, descending=descending
             ),
         )
-        rows = [row_out(r) for r in body["results"] if isinstance(r, dict)]
+        records = [r for r in body["results"] if isinstance(r, dict)]
+        rows = [row_out(r) for r in records]
+        tags = collection_tags.tag_list(body)
+        collection_tags.name_rows(rows, records, tags)
         count = body.get("count")
         total_pages = body.get("totalPages")
         out = {
             "rows": rows,
+            "tags": tags,
             "count": count if isinstance(count, int) else len(rows),
             "page": body.get("page") if isinstance(body.get("page"), int) else page,
             "total_pages": total_pages if isinstance(total_pages, int) else 1,
@@ -617,6 +641,57 @@ class CollectionService:
             totals["cards"] = sum(int(r["quantity"]) for r in out["rows"])
         return totals
 
+    async def tags(self, sub: str) -> list[dict[str, Any]]:
+        """The member's collection tags, from the first page (served from memory a short while)."""
+        return list((await self.page(sub))["tags"])
+
+    async def whole(self, sub: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
+        """(every record, the tag list, whether that is the whole Binder), read in pages of 500 and
+        kept WHOLE_TTL seconds; any collection write the gateway sends drops it."""
+        hit = self._whole.get(sub)
+        fresh = hit is not None and time.monotonic() - hit[0] < WHOLE_TTL
+        if hit is not None and fresh and not reloading((id(self), sub, "whole")):
+            return hit[1], hit[2], hit[3]
+        try:
+            records, tags, complete = await collection_tags.whole_records(self.decks, sub)
+        except (DeckError, ArchidektError) as exc:
+            raise _wrap(exc) from exc
+        if len(self._whole) > 1_000:
+            self._whole.clear()
+        self._whole[sub] = (time.monotonic(), records, tags, complete)
+        return records, tags, complete
+
+    async def tagged(
+        self, sub: str, tag: str, *, q: str = "", offset: int = 0, limit: int = PAGE_SIZE
+    ) -> dict[str, Any]:
+        """The entries carrying the tag ``tag`` (by name, ignoring case), newest first, with a name
+        filter ``q``: Archidekt's own tag filter was not recorded, so the Binder is read whole
+        (``whole``) and filtered here. ``rows`` from ``offset``, ``total``, ``complete`` (False when
+        the Binder is larger than a whole read takes) and ``known`` (the member has that tag)."""
+        records, tags, complete = await self.whole(sub)
+        want = next((t for t in tags if collection_tags.same_name(t["name"], tag)), None)
+        if want is None:
+            return {"rows": [], "total": 0, "complete": complete, "tags": tags, "known": False}
+        by_id = {t["id"]: t for t in tags}
+        needle = q.casefold()
+        hits = []
+        for rec in records:
+            names = collection_tags.record_tag_names(rec, by_id)
+            if not any(collection_tags.same_name(n, want["name"]) for n in names):
+                continue
+            row = row_out(rec)
+            row["tags"] = names
+            if needle and needle not in row["name"].casefold():
+                continue
+            hits.append(row)
+        return {
+            "rows": hits[offset : offset + limit],
+            "total": len(hits),
+            "complete": complete,
+            "tags": tags,
+            "known": True,
+        }
+
     async def find_by_name(self, sub: str, name: str) -> list[dict[str, Any]]:
         want = _clean(name, 200).casefold()
         out = await self.page(sub, q=want[:80], page_size=200)
@@ -634,6 +709,10 @@ class CollectionService:
         on_item: Callable[[int], None] | None = None,
         retry: Callable[[CollectionError], Awaitable[bool]] | None = None,
         before_item: Callable[[], Awaitable[None]] | None = None,
+        found: _Found | None = None,
+        limit: int = MAX_ITEMS_PER_CALL,
+        trusted: bool = False,
+        first_index: int = 0,
     ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
@@ -647,17 +726,23 @@ class CollectionService:
         into as they are written (an import keeps what was added when it stops part way);
         ``on_item(n)`` is told after each card; ``retry(exc)`` decides, after a refusal of the
         member's Archidekt budget, whether to try that card again (an import waits for room);
-        ``before_item()`` is awaited before each card (an import's pause while the budget is low)."""
+        ``before_item()`` is awaited before each card (an import's pause while the budget is low).
+        A long import (collection_bulk) passes its own ``found`` (what it has read of the Binder,
+        kept between its chunks), ``limit``, ``trusted`` (a restore: normalise_items) and
+        ``first_index`` (its chunk's first line); the rows' ``index`` count from it."""
         self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition", "language")})
-            for it in normalise_items(items)
+            for it in normalise_items(items, limit=limit, trusted=trusted)
         ]
         self._user_id(sub)  # fail early when no account is linked
-        found = _Found()
+        found = found if found is not None else _Found()
         out = result if result is not None else {}
-        out.update(added=[], skipped=[])
-        for index, (spec, opts) in enumerate(wanted):
+        out.setdefault("added", [])
+        out.setdefault("skipped", [])
+        start = len(out["added"])
+        for n, (spec, opts) in enumerate(wanted):
+            index = first_index + n
             while True:
                 if before_item is not None:
                     await before_item()
@@ -665,17 +750,14 @@ class CollectionService:
                     await self._add_one(sub, index, spec, opts, found, out, progress)
                     break
                 except CollectionError as exc:
-                    # ``retry``: an import waits out a refusal of the member's budget (nothing sent)
-                    if (
-                        retry is not None
-                        and getattr(exc, "busy_cause", None) == "budget"
-                        and await retry(exc)
-                    ):
+                    # ``retry``: an import waits out a refusal of the member's budget, or Archidekt
+                    # asking it to slow down (nothing was sent either way); it decides which
+                    if retry is not None and await retry(exc):
                         continue
                     raise
             if on_item is not None:
-                on_item(index + 1)
-        added = out["added"]
+                on_item(n + 1)
+        added = out["added"][start:]
         self.decks.db.audit(
             "collection_added",
             sub=sub,
@@ -739,25 +821,40 @@ class CollectionService:
         progress: dict[str, Any] | None,
     ) -> None:
         """One card of ``add``: resolve its printing, find a record of it in that finish (found),
-        and add the copies there or create one. Its row lands in ``out``."""
-        try:
-            printing = await self._run(
-                sub,
-                lambda token: self.client.resolve_card(
-                    token,
-                    spec["name"],
-                    set_code=spec["set"] or None,
-                    collector_number=spec["collector_number"] or None,
-                    scryfall_id=spec["scryfall_id"] or None,
-                ),
-            )
-        except CollectionError as exc:
-            if exc.kind in ("not_found", "contract", "invalid", "unavailable"):
-                out["skipped"].append(
-                    {"input": spec, "status": "not_found", "note": str(exc), "index": index}
+        and add the copies there or create one. Its row lands in ``out``. A printing already
+        resolved in this add (``found.printings``: the same name, set, number and Scryfall id) and
+        a restore's own Archidekt printing id (``card_id``) cost no lookup."""
+        ident = (spec["name"].casefold(), spec["set"], spec["collector_number"], spec["scryfall_id"])
+        printing = found.printings.get(ident)
+        if printing is None and spec.get("card_id"):
+            printing = {
+                "id": spec["card_id"],
+                "name": spec["name"],
+                "set_code": spec["set"],
+                "collector_number": spec["collector_number"],
+                "options": [],
+            }
+        if printing is None:
+            try:
+                printing = await self._run(
+                    sub,
+                    lambda token: self.client.resolve_card(
+                        token,
+                        spec["name"],
+                        set_code=spec["set"] or None,
+                        collector_number=spec["collector_number"] or None,
+                        scryfall_id=spec["scryfall_id"] or None,
+                    ),
                 )
-                return
-            raise
+            except CollectionError as exc:
+                if exc.kind in ("not_found", "contract", "invalid", "unavailable"):
+                    out["skipped"].append(
+                        {"input": spec, "status": "not_found", "note": str(exc), "index": index}
+                    )
+                    return
+                raise
+            if len(found.printings) < 5_000:
+                found.printings[ident] = printing
         finish = opts["finish"]
         options = printing.get("options") or []
         if options and MODIFIERS[finish] not in options and len(options) == 1:
@@ -790,6 +887,8 @@ class CollectionService:
                     # record (its site code)
                     condition=opts["condition"] or "NM",
                     language=opts["language"],
+                    tags=spec.get("tag_ids") or None,
+                    purchase_price=spec.get("purchase_price"),
                 ),
                 progress,
             )
@@ -873,11 +972,40 @@ class CollectionService:
         self.binder.put(sub, row)
         return {"row": row}
 
-    async def update(self, sub: str, rid: int, data: dict[str, Any], *, name: str = "") -> dict[str, Any]:
-        """Change a record's details: finish, condition, language and price paid (the fields
-        Archidekt's own row editor offers; tags are read-only here)."""
+    async def update(
+        self,
+        sub: str,
+        rid: int,
+        data: dict[str, Any],
+        *,
+        name: str = "",
+        progress: dict[str, Any] | None = None,
+        raise_wrong: bool = True,
+    ) -> dict[str, Any]:
+        """Change a record's details: finish, condition, language, price paid and tags (the fields
+        Archidekt's own row editor offers). ``tags``: the entry's tags by name, all of them (the
+        member's binder tags; a name they have no tag for is refused). ``progress``: a collection
+        proposal's apply (``_run``); with ``raise_wrong`` False, an answer that does not show the
+        change is returned as ``wrong`` (the fields) instead of refused."""
         self._writes_on()
         rec = await self._record(sub, rid, name)
+        tags: list[dict[str, Any]] = []
+        tag_ids: list[int] | None = None
+        if "tags" in data:
+            try:
+                names = collection_tags.clean_names(data["tags"])
+            except DeckError as exc:
+                raise CollectionError("invalid", str(exc)) from exc
+            tags = await self.tags(sub)
+            tag_ids, missing = collection_tags.ids_for(names, tags)
+            if missing:
+                raise CollectionError(
+                    "not_found",
+                    f"You have no binder tag called “{missing[0]}”. Make it first under Binder › Lists › "
+                    "Binder tags.",
+                )
+            if sorted(tag_ids) == sorted(collection_tags.record_tag_ids(rec)):
+                tag_ids = None  # the same tags: nothing to send for them
         opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
         changes: dict[str, Any] = {}
         if "finish" in data or "foil" in data:
@@ -888,28 +1016,44 @@ class CollectionService:
             changes["language"] = _language(data.get("language", data.get("lang")))
         if "purchase_price" in data:
             changes["purchasePrice"] = _price(data["purchase_price"])
+        if tag_ids is not None:
+            changes["tags"] = tag_ids
         if not changes:
+            if "tags" in data:  # tags alone, and they are already so
+                row = row_out(rec)
+                collection_tags.name_rows([row], [rec], tags)
+                return {"row": row}
             raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
-        out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
-        row = row_out({**rec, **out, "card": rec.get("card")})
+        if not tags and rec.get("tags"):
+            # the row's tags by name (the first page is usually still in memory: no read)
+            tags = await self.tags(sub)
+        out = await self._run(
+            sub, lambda token: self.client.collection_set(token, rec, **changes), progress=progress
+        )
+        merged = {**rec, **out, "card": rec.get("card")}
+        row = row_out(merged)
+        collection_tags.name_rows([row], [merged], tags)
         self.binder.put(sub, row)
         read = {  # what Archidekt answered, in the gateway's terms (it keeps numbers for two)
             "purchasePrice": _price(out.get("purchasePrice")),
             "condition": condition_code(out.get("condition")) or None,
             "language": language_code(out.get("language")),
+            "tags": sorted(collection_tags.record_tag_ids(out)) if "tags" in out else None,
         }
+        if "tags" in changes:
+            changes = {**changes, "tags": sorted(changes["tags"])}
         wrong = [k for k, want in changes.items() if read.get(k, out.get(k)) != want]
         self.decks.db.audit(
             "collection_updated",
             sub=sub,
             detail={"id": rid, "fields": sorted(changes), "verified": not wrong},
         )
-        if wrong:
+        if wrong and raise_wrong:
             raise CollectionError(
                 "unavailable",
                 "Archidekt accepted the change but answered with other values for: " + ", ".join(wrong),
             )
-        return {"row": row}
+        return {"row": row, "wrong": wrong}
 
     async def remove(
         self,
@@ -1136,19 +1280,27 @@ def import_result_html(result: dict[str, Any]) -> str:
         )
     if result.get("missing"):
         notes.append(f"Not found, so not imported: {rows(result['missing'])}.")
+    restore = bool(result.get("restore"))
     if result.get("stopped"):
-        # an import that stopped part way: what went in, why it stopped, and what to do
+        # a job that stopped part way: what went in, why it stopped, and what to do
         n = int(result.get("cards") or 0)
+        where = "entry" if restore else "line"
         lead = (
-            f"Imported {n} {'card' if n == 1 else 'cards'}, then the import stopped at line "
-            f"{int(result.get('stopped_at') or 0)} of {int(result.get('of') or 0)}: "
-            f"{str(result['stopped']).rstrip('.')}. Nothing after that line was added; import the rest "
-            "of the list again."
+            f"{'Put back' if restore else 'Imported'} {n:,} {'card' if n == 1 else 'cards'}, then the "
+            f"{'restore' if restore else 'import'} stopped at {where} "
+            f"{int(result.get('stopped_at') or 0):,} of {int(result.get('of') or 0):,}: "
+            f"{str(result['stopped']).rstrip('.')}. Nothing after that {where} was added"
+            + ("." if restore else "; import the rest of the list again.")
         )
         cls = "error"
     elif result.get("added"):
         n = int(result.get("cards") or 0)
-        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your binder.", "ok"
+        lead = (
+            f"Put {n:,} {'card' if n == 1 else 'cards'} back into your binder."
+            if restore
+            else f"Imported {n:,} {'card' if n == 1 else 'cards'} into your binder."
+        )
+        cls = "ok"
     else:
         lead, cls = "Nothing was imported: no card in the list was found.", "error"
     items = "".join(f"<li>{_esc(n)}</li>" for n in notes)
@@ -1406,7 +1558,7 @@ def _stepper(r: dict[str, Any], csrf_in: str, rid: str) -> str:
 
 def _shims(r: dict[str, Any], csrf_in: str) -> str:
     """Hidden pieces the shared card menu (static/menus.js) reaches for: the Remove from collection
-    form (the page's script asks first, then removes) and the Details… hook (opening it opens the
+    form (the page's script removes at once, with Undo) and the Details… hook (opening it opens the
     Details box)."""
     name = _esc(r["name"])
     return (
@@ -1530,10 +1682,33 @@ def _lang_opts(current: str) -> str:
     return _opts(langs, current or "EN", {k: _language_name(k) for k in langs})
 
 
-def details_box_html(r: dict[str, Any] | None, csrf: str, *, open: bool = False) -> str:
-    """The Details box: finish, condition, language and price paid, saved to Archidekt (tags are
-    shown as Archidekt holds them). With ``r`` it is drawn for that row (the old ``?details=ID``
-    address renders it open); without, it is the template the page's script fills from a row."""
+def _tag_boxes(all_tags: list[str], on: list[str]) -> str:
+    """The Details box's Tags: one box to tick per binder tag the member has (``tag:NAME`` fields,
+    so the form works without scripts), and the link to make or change them."""
+    if not all_tags:
+        return (
+            "<div class='field tags'><span>Tags</span><span class='muted small'>No binder tags yet. "
+            "<a href='/lists/btags'>Make one</a></span></div>"
+        )
+    ticks = "".join(
+        f"<label class='tagck'><input type='checkbox' name='tag:{_esc(t)}' value='1' data-tag='{_esc(t)}'"
+        f"{' checked' if any(collection_tags.same_name(t, x) for x in on) else ''}> {_esc(t)}</label>"
+        for t in all_tags
+    )
+    return (
+        "<fieldset class='field tags'><legend>Tags <a class='small' href='/lists/btags'>Manage tags</a>"
+        f"</legend><input type='hidden' name='tags_shown' value='1'><span class='tagline'>{ticks}</span>"
+        "</fieldset>"
+    )
+
+
+def details_box_html(
+    r: dict[str, Any] | None, csrf: str, *, open: bool = False, all_tags: list[str] | None = None
+) -> str:
+    """The Details box: finish, condition, language, price paid and tags, saved to Archidekt.
+    ``all_tags``: the member's binder tags, each a box to tick (None: the row's tags are only
+    shown). With ``r`` it is drawn for that row (the old ``?details=ID`` address renders it open);
+    without, it is the template the page's script fills from a row."""
     r = r or {}
     rid = _esc(r.get("id", ""))
     finish = r.get("finish") or "nonfoil"
@@ -1556,9 +1731,13 @@ def details_box_html(r: dict[str, Any] | None, csrf: str, *, open: bool = False)
         f"<label class='field'><span>Price paid</span><input type='number' name='purchase_price' min='0' "
         f"max='{int(MAX_PRICE)}' step='0.01' inputmode='decimal' value='{_esc(_price_value(r))}' "
         "placeholder='None'></label>"
-        f"<div class='field tags'{'' if tags else ' hidden'}>"
-        "<span>Tags <span class='muted small'>· change them "
-        f"on Archidekt</span></span><span class='tagline'>{tagline}</span></div></div></form>"
+        + (
+            _tag_boxes(all_tags, [str(t) for t in (r.get("tags") or [])])
+            if all_tags is not None
+            else f"<div class='field tags'{'' if tags else ' hidden'}><span>Tags</span>"
+            f"<span class='tagline'>{tagline}</span></div>"
+        )
+        + "</div></form>"
     )
     title = f"Details: {r['name']}" if r.get("name") else "Details"
     return ui.box(
@@ -1637,11 +1816,12 @@ def add_box_html(
     )
     import_form = (
         f"<form method='post' action='/collection' id='col-importform' class='importform' role='tabpanel' "
-        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'}>"
+        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'} "
+        "data-draft='binder-import'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<input type='hidden' name='action' value='import'>"
         "<p class='muted small'>A collection CSV or a card list, one card per line, "
-        f"up to {MAX_IMPORT_ROWS} rows "
+        f"up to {MAX_IMPORT_ROWS:,} rows "
         "at a time. Copies join an entry you already have only when its printing, finish, condition and "
         "language all match.</p>"
         "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
@@ -1837,10 +2017,20 @@ def widgets_html(
     return ui.widgets(items)
 
 
-def panel_html(*, q: str, sort: str, direction: str, view: str, count: int, priced: bool = True) -> str:
+def panel_html(
+    *,
+    q: str,
+    sort: str,
+    direction: str,
+    view: str,
+    count: int,
+    priced: bool = True,
+    tags: list[str] | None = None,
+    tag: str = "",
+) -> str:
     """The shared search panel: the name box, then the results bar (count, Sort with a direction
     for Set release and Price, Grid or List, the card size, Clear filters). ``priced``: Price is
-    offered (prices on)."""
+    offered (prices on). ``tags``: the member's binder tags, a Tag drop-down (``tag`` chosen)."""
     sorts = {k: v for k, v in SORTS.items() if priced or k != "price"}
     sort_opts = "".join(
         f"<option value='{k}'{' selected' if k == sort else ''}>{v}</option>" for k, v in sorts.items()
@@ -1871,6 +2061,16 @@ def panel_html(*, q: str, sort: str, direction: str, view: str, count: int, pric
         f"<select class='sortf' id='col-sort' name='sort'>{sort_opts}</select></span>{dir_html}"
         f"<span class='sortcw'><select class='sortc' aria-label='Sort by'>{sortc}</select></span></span>"
     )
+    if tags:
+        tag_opts = "<option value=''>All cards</option>" + "".join(
+            f"<option value='{_esc(t)}'{' selected' if collection_tags.same_name(t, tag) else ''}>{_esc(t)}"
+            "</option>"
+            for t in tags
+        )
+        sort_html = (
+            "<span class='g tagg'><label class='lbl' for='col-tag'>Tag</label>"
+            f"<select id='col-tag' name='tag'>{tag_opts}</select></span>" + sort_html
+        )
     count_text = f"{count:,} {'entry' if count == 1 else 'entries'}"
     bar = sp.results_bar(
         count_html=sp.count_html(count_text, count_id="col-count"),
@@ -1898,6 +2098,9 @@ COLLECTION_CSS = """
 .value-reading .ui-spin{margin-right:.35em}
 .collection .ui-head .acts{margin-left:auto;display:inline-flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .collection .ui-head .acts .btn{margin:0}
+.collection .ui-head .acts form.clearf{display:inline-flex;margin:0}
+.mtgbox .body fieldset.tags{border:0;padding:0;margin:0;grid-column:1/-1;min-width:0}
+.mtgbox .body .tagck{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;margin-right:.75rem}
 .collection .ui-head.phead{align-items:center}
 @media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%}
   .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center} }
@@ -2094,7 +2297,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def form(request: Request) -> dict[str, str]:
         from urllib.parse import parse_qs
 
-        raw = await read_limited(request, 400_000)  # an import pastes a CSV of up to 100 rows
+        raw = await read_limited(request, IMPORT_FORM_BYTES)  # an import pastes up to 2 MB of text
         if raw is None:
             return {}
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
@@ -2158,10 +2361,14 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         results.pop(token or "", None)
         return hit[2] if time.monotonic() - hit[1] <= IMPORT_RESULT_TTL else None
 
-    # -- an import, in the background -------------------------------------------------------------
-    # One import per member at a time, kept in memory by a random id (a restart forgets it; the
-    # cards it added stay on Archidekt). The page polls /collection/api/import/{id} for its strip.
-    imports: dict[str, dict[str, Any]] = {}
+    # -- an import or a restore, in the background (collection_bulk) -------------------------------
+    # One job per member at a time, its state in the database: the page polls
+    # /collection/api/import/{id} for its strip, and a job that stopped (or was stopped by a
+    # restart) offers Resume.
+    from . import collection_bulk
+
+    jobs = collection_bulk.BulkJobs(service)
+    state.collection_jobs = jobs  # type: ignore[attr-defined]
     tasks: set[asyncio.Task[Any]] = set()
     # "Work it out now" on the Value widget: the member's first whole read, in the background
     # (PriceService.first_read), one per member at a time
@@ -2190,89 +2397,77 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         task.add_done_callback(tasks.discard)
 
     def import_text(job: dict[str, Any]) -> str:
-        done, of = job["done"], job["of"]
+        done, of = int(job["done"]), int(job["total"])
+        what = (
+            "Putting your binder back" if job["kind"] == "restore" else "Importing your list into your binder"
+        )
+        noun = "entries" if job["kind"] == "restore" else "lines"
         if job["state"] == "paused":
             return (
-                f"Paused at {done} of {of} lines: your account has used most of its Archidekt actions "
-                "for now. The import goes on by itself when there is room, and keeps some back for "
-                "your own changes."
+                f"Paused at {done:,} of {of:,} {noun}: your account has used most of its Archidekt actions "
+                "for now, or Archidekt asked the gateway to slow down. It goes on by itself when there is "
+                "room, and keeps some back for your own changes."
             )
-        if job["state"] in ("done", "failed"):
-            return f"The import has ended: {done} of {of} lines done."
-        return (
-            f"Importing your list into your binder: {done} of {of} lines done. "
-            "You can leave this page; the import goes on."
-        )
+        if job["state"] == "stopped":
+            reason = str((job.get("result") or {}).get("stopped") or "it could not go on").rstrip(".")
+            restore = job["kind"] == "restore"
+            n = int(job_result(job).get("cards") or 0)
+            return (
+                f"{'Put back' if restore else 'Imported'} {n:,} {'card' if n == 1 else 'cards'}, then the "
+                f"{'restore' if restore else 'import'} stopped at {'entry' if restore else 'line'} "
+                f"{done + 1:,} of {of:,}: {reason}. Everything before that is in your binder. Resume carries "
+                "on from there."
+            )
+        if job["state"] == "done":
+            return f"Finished: {done:,} of {of:,} {noun} done."
+        return f"{what}: {done:,} of {of:,} {noun} done. You can leave this page; it goes on."
 
-    def import_strip(job: dict[str, Any]) -> str:
+    def import_strip(job: dict[str, Any], csrf: str) -> str:
         jid = _esc(job["id"])
+        done, of = int(job["done"]), max(1, int(job["total"]))
+        bar = (
+            f"<progress class='iprog' max='{of}' value='{done}' aria-label='Lines done'>"
+            f"{done} of {of}</progress>"
+        )
+        if job["state"] == "stopped":
+            hidden = (
+                f"<input type='hidden' name='csrf' value='{_esc(csrf)}'><input type='hidden' name='job' "
+                f"value='{jid}'>"
+            )
+            return (
+                f"<div class='notice error importing stopped' role='alert' data-import-stopped='{jid}'>"
+                f"<span class='itext'>{_esc(import_text(job))}</span>{bar}"
+                "<span class='iacts'>"
+                f"<form method='post' action='/collection' class='inline'>{hidden}"
+                "<button type='submit' name='action' value='import_resume' class='btn btn-primary'>"
+                f"{icon('refresh')}Resume</button></form>"
+                f"<form method='post' action='/collection' class='inline'>{hidden}"
+                "<button type='submit' name='action' value='import_done' class='btn'>"
+                "Stop here and show what went in</button></form></span></div>"
+            )
         return (
             f"<div class='notice ok importing' role='status' data-import='{jid}'>"
             f"<span class='ui-spin' aria-hidden='true'></span><span class='itext'>{_esc(import_text(job))}"
-            f"</span> {ui.button_link('Refresh', f'/collection?import={jid}', icon_name='refresh')}</div>"
+            f"</span>{bar} "
+            + ui.button_link("Refresh", f"/collection?import={jid}", icon_name="refresh")
+            + "</div>"
         )
 
-    def start_import(sub: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-        running = imports.get(sub)
-        if running is not None and running["state"] in ("running", "paused"):
-            return running
-        if len(imports) >= IMPORT_JOBS_MAX:
-            for k in [k for k, j in imports.items() if j["state"] in ("done", "failed")]:
-                imports.pop(k, None)
-        job = {"id": secrets.token_urlsafe(9), "state": "running", "done": 0, "of": len(items), "next": ""}
-        imports[sub] = job
-        task = asyncio.create_task(import_job(sub, items, job))
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
-        return job
-
-    async def import_job(sub: str, items: list[dict[str, Any]], job: dict[str, Any]) -> None:
-        """Add ``items`` a card at a time (service.add), counting lines done. While the member's
-        Archidekt budget is below a quarter of it the job waits (paused), so the member's own
-        changes still go through; a budget refusal that slips past is waited out the same way
-        (nothing was sent). Ends with the page's import notice, or what went in before a stop."""
-
-        def low() -> bool:
-            budget = service.decks.archidekt_budget
-            return budget.room(sub) < budget.per_window // 4 + 4  # a card costs up to three calls
-
-        async def room() -> None:
-            while low():
-                job["state"] = "paused"
-                await asyncio.sleep(IMPORT_PAUSE_POLL)
-            job["state"] = "running"
-
-        async def wait(_exc: CollectionError) -> bool:
-            job["state"] = "paused"
-            await asyncio.sleep(IMPORT_PAUSE_POLL)
-            await room()
-            return True
-
-        def counted(n: int) -> None:
-            job["done"] = n
-
-        out: dict[str, Any] = {}
-        try:
-            await service.add(
-                sub, items, source="manual", result=out, on_item=counted, retry=wait, before_item=room
+    def job_result(job: dict[str, Any]) -> dict[str, Any]:
+        """The page's notice for a job that ended or stopped (import_result_html)."""
+        items = job["items"]
+        result = job.get("result") or {}
+        done = int(job["done"])
+        got = import_result(items[:done], result)
+        if job["state"] != "done":
+            got.update(
+                stopped=str(result.get("stopped") or "you stopped it"),
+                stopped_at=done + 1,
+                of=int(job["total"]),
             )
-        except Exception as exc:  # anything: the strip must end, and say what went in
-            if not isinstance(exc, CollectionError):
-                log.exception("collection import failed")
-            reason = (
-                str(exc)
-                if isinstance(exc, CollectionError)
-                and exc.kind not in ("unavailable", "rate_limited", "busy")
-                else "Archidekt is not answering right now"
-            )
-            result = import_result(items[: job["done"]], out)
-            result.update(stopped=reason, stopped_at=job["done"] + 1, of=job["of"])
-            job["next"] = "/collection?err=imported&r=" + keep_result(sub, result)
-            job["state"] = "failed"
-            return
-        code = "ok=imported" if out.get("added") else "err=nothingimported"
-        job["next"] = f"/collection?{code}&r=" + keep_result(sub, import_result(items, out))
-        job["state"] = "done"
+        if job["kind"] == "restore":
+            got["restore"] = True
+        return got
 
     def strip(text: str, kind: str, *, html: bool = False) -> str:
         """A notice strip at the top of the page, with a × to close (the page's script hides it)."""
@@ -2304,8 +2499,11 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
             "nothingimported": "Nothing was imported: no card in the list was found.",
             "imported": "Imported into your binder.",
-            "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
+            "toomany": f"An import adds at most {MAX_IMPORT_ROWS:,} rows at a time. Split the file and "
             "import the rest after.",
+            "busyimport": "One import runs at a time. This one goes on (or waits for Resume); start the "
+            "next when it has ended.",
+            "empty": "Your binder is already empty.",
             "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
@@ -2346,11 +2544,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "Archidekt is slow or down the page cannot show it.</p></section>"
         )
 
-    def listing_query(qp: Any) -> dict[str, Any]:
-        """The list's address: name filter, sort and direction, offset (the old ``page`` too)."""
+    def listing_query(qp: Any, request: Request | None = None, sub: str | None = None) -> dict[str, Any]:
+        """The list's address: name filter, sort and direction, offset (the old ``page`` too).
+        With ``request`` and ``sub``, the sort is the one remembered on the account when the
+        address names none, and a pick from this site is remembered (prefs.sort_choice)."""
         q = _clean(qp.get("q"), 80)
-        sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
-        direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
+        if request is not None and sub:
+            sort, direction = prefs.sort_choice(
+                state.db,
+                sub,
+                request,
+                "collection",
+                sorts=SORTS,
+                default="added",
+                dirs=DIRECTION_WORDS,
+                default_dir="desc",
+            )
+        else:
+            sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
+            direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
         try:
             offset = max(0, min(int(qp.get("offset") or 0), 1_000_000))
         except ValueError:
@@ -2360,7 +2572,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 offset = (max(1, min(int(qp.get("page")), 10_000)) - 1) * PAGE_SIZE
             except ValueError:
                 offset = 0
-        return {"q": q, "sort": sort, "dir": direction, "offset": offset}
+        tag = _clean(qp.get("tag"), collection_tags.TAG_NAME_MAX)
+        return {"q": q, "sort": sort, "dir": direction, "offset": offset, "tag": tag}
 
     def link_to(lq: dict[str, Any], view: str | None, offset: int, *, api: bool = False) -> str:
         from urllib.parse import urlencode
@@ -2368,6 +2581,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         qs: dict[str, Any] = {}
         if lq["q"]:
             qs["q"] = lq["q"]
+        if lq.get("tag"):
+            qs["tag"] = lq["tag"]
         if lq["sort"] != "added":
             qs["sort"] = lq["sort"]
             if lq["dir"] != "desc":
@@ -2397,6 +2612,20 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         Binder as last read whole (binder_prices), with no Archidekt read; before that first read,
         in the default order. Rows carry their price when prices are kept."""
         offset = lq["offset"]
+        if lq.get("tag"):
+            # one tag: the Binder read whole and filtered here (CollectionService.tagged), newest
+            # first whatever the sort
+            got = await service.tagged(sub, lq["tag"], q=lq["q"], offset=offset, limit=SHOWN)
+            rows = service.binder.with_prices([dict(r) for r in got["rows"]]) if priced() else got["rows"]
+            shown = offset + len(rows)
+            return {
+                "out": None,
+                "rows": rows,
+                "total": got["total"],
+                "shown": shown,
+                "has_more": shown < got["total"],
+                "tag": got,
+            }
         if by_price(sub, lq):
             got = service.binder.listing(
                 sub, q=lq["q"], offset=offset, limit=SHOWN, descending=lq["dir"] == "desc"
@@ -2437,9 +2666,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def collection_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         qp = request.query_params
-        lq = listing_query(qp)
+        lq = listing_query(qp, request, sub)
         view, remember = prefs.view_choice(state.db, sub, request, "collection", ("grid", "list"), "grid")
         view_in_link = view if qp.get("view") in ("grid", "list") else None
         csrf = _csrf(s, sid) or ""
@@ -2479,20 +2708,21 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
         else:
             value, reading = None, False
-        if qp.get("import"):
-            job = imports.get(sub)
-            if job is not None and job["id"] == qp.get("import"):
-                if job["state"] in ("done", "failed") and job["next"]:
-                    return RedirectResponse(job["next"], status_code=303)
-                notes = import_strip(job) + notes
-            else:
-                notes = (
-                    strip(
-                        "That import is no longer running. The cards it added are in your binder.",
-                        "ok",
-                    )
-                    + notes
-                )
+        # the member's import or restore: its strip while it runs or after it stopped, and once it
+        # has ended, what it did (shown once, wherever the member opens the Binder next)
+        job = jobs.job(sub)
+        if job is not None and job["state"] == "done":
+            jobs.finish(sub)
+            said = job_result(job)
+            code = "ok=imported" if said.get("added") else "err=nothingimported"
+            return RedirectResponse(f"/collection?{code}&r={keep_result(sub, said)}", status_code=303)
+        if job is not None:
+            notes = import_strip(job, _csrf(s, sid) or "") + notes
+        elif qp.get("import"):
+            notes = (
+                strip("That import is no longer running. The cards it added are in your binder.", "ok")
+                + notes
+            )
         # the profile (the Visibility line by the title) is read beside the collection, not after
         # it: one wait on Archidekt for the page, not two in a row
         profile_read = asyncio.ensure_future(profile_or_none(state.decks, sub))
@@ -2531,6 +2761,16 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 heading=False,
             )
         rows = got["rows"]
+        tag_names = [str(t["name"]) for t in whole.get("tags") or [] if t.get("name")]
+        if got.get("tag") is not None and not got["tag"]["known"]:
+            notes += strip(f"You have no binder tag called “{lq['tag']}”.", "error")
+        elif got.get("tag") is not None and not got["tag"]["complete"]:
+            most = collection_tags.WHOLE_PAGES * collection_tags.WHOLE_PAGE_SIZE
+            notes += strip(
+                "Your binder is larger than the gateway reads at once: the tag filter shows the "
+                f"tagged cards among your newest {most:,}.",
+                "ok",
+            )
         link = state.db.get_link(sub) or {}
         arch_user = str(link.get("archidekt_user_id") or "")
         live = "<p class='sr-only' id='live' role='status' aria-live='polite'></p>"
@@ -2540,10 +2780,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 rid = _rid(qp.get("details"))
                 details_row = next((r for r in rows if int(r["id"]) == rid), None)
                 if details_row is None:
-                    details_row = row_out(await service._record(sub, rid))
+                    rec = await service._record(sub, rid)
+                    details_row = row_out(rec)
+                    collection_tags.name_rows([details_row], [rec], list(whole.get("tags") or []))
             except CollectionError:
                 details_row = None
-        details_box = details_box_html(details_row, csrf, open=details_row is not None)
+        details_box = details_box_html(details_row, csrf, open=details_row is not None, all_tags=tag_names)
         add_box = add_box_html(
             csrf, tab=add_tab, open=open_add, defaults=prefs.choices(state.db, sub, prefs.BINDER_ADD)
         )
@@ -2556,7 +2798,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             open_box=bool(qp.get("visibility")),
             ok=qp.get("ok") or "",
         )
-        if not rows and not lq["q"] and not lq["offset"]:
+        if not rows and not lq["q"] and not lq["offset"] and not lq["tag"]:
             body = (
                 head(sub=sub, total=0)
                 + vis
@@ -2574,9 +2816,18 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 + add_box
             )
         else:
-            acts = ui.button_link(
-                "Export CSV", "/collection/export.csv", icon_name="download"
-            ) + ui.box_opener("Add cards", "/collection?add=1", "col-add", kind="primary", icon_name="plus")
+            # Clear binder: a proposal; its review page holds the typed confirmation (actions.py)
+            clear_form = (
+                "<form method='post' action='/collection' class='inline clearf'>"
+                f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+                f"<button type='submit' class='btn {ui.BUTTON_KINDS['danger']}' name='action' "
+                f"value='clear'>{icon('trash')}Clear binder…</button></form>"
+            )
+            acts = (
+                ui.button_link("Export CSV", "/collection/export.csv", icon_name="download")
+                + clear_form
+                + ui.box_opener("Add cards", "/collection?add=1", "col-add", kind="primary", icon_name="plus")
+            )
             cards = (
                 list_html(rows, csrf, view=view)
                 if rows
@@ -2605,6 +2856,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     view=view,
                     count=got["total"],
                     priced=priced(),
+                    tags=tag_names,
+                    tag=lq["tag"],
                 )
                 + live
                 + cards
@@ -2631,7 +2884,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return who
         sub, sid = who
         qp = request.query_params
-        lq = listing_query(qp)
+        lq = listing_query(qp, request, sub)
         view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
         try:
             got = await listing(sub, lq)
@@ -2685,7 +2938,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         """The page's own forms (no script needed): add by name, one more, one fewer, remove."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         data = await form(request)
         back = _safe_next(data.get("next") or "/collection")
         if not back.startswith("/collection"):
@@ -2746,21 +2999,49 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 # paced Archidekt calls, too long for one request)
                 service._user_id(sub)  # not linked: said at once
                 service._writes_on()
-                job = start_import(sub, items)
+                have = jobs.job(sub)
+                if have is not None and have["state"] in ("running", "paused", "stopped"):
+                    # one at a time: the one there is goes on (or waits for Resume or Done)
+                    return RedirectResponse(
+                        f"/collection?err=busyimport&import={have['id']}", status_code=303
+                    )
+                job = jobs.start(sub, items)
                 return RedirectResponse(f"/collection?import={job['id']}", status_code=303)
+            elif action in ("import_resume", "import_done"):
+                have = jobs.job(sub)
+                if have is None or have["id"] != data.get("job"):
+                    code = ""
+                elif action == "import_resume":
+                    service._writes_on()
+                    jobs.resume(sub)
+                    return RedirectResponse(f"/collection?import={have['id']}", status_code=303)
+                else:
+                    ended = jobs.finish(sub)
+                    code = ""
+                    if ended is not None:
+                        code = "err=imported&r=" + keep_result(sub, job_result(ended))
+            elif action == "clear":
+                # the whole binder: a proposal that only the member's press on its review page
+                # applies, in every approval mode (actions.py clear_collection)
+                current_client.set(BROWSER_CLIENT_ID)
+                try:
+                    made = await service.decks.propose_action(sub, "clear_collection")
+                except DeckError as exc:
+                    if "already empty" in str(exc):
+                        return RedirectResponse("/collection?err=empty", status_code=303)
+                    raise CollectionError(exc.kind, str(exc)) from exc
+                return RedirectResponse(f"/proposals/{made['proposal_id']}", status_code=303)
             elif action == "details":
                 rid = _rid(data.get("id"))
-                await service.update(
-                    sub,
-                    rid,
-                    {
-                        "finish": data.get("finish", "nonfoil"),
-                        "condition": data.get("condition", ""),
-                        "language": data.get("language", "EN"),
-                        "purchase_price": data.get("purchase_price", ""),
-                    },
-                    name=_clean(data.get("name"), 200),
-                )
+                fields: dict[str, Any] = {
+                    "finish": data.get("finish", "nonfoil"),
+                    "condition": data.get("condition", ""),
+                    "language": data.get("language", "EN"),
+                    "purchase_price": data.get("purchase_price", ""),
+                }
+                if data.get("tags_shown") == "1":  # the boxes were on the form: the ticked ones
+                    fields["tags"] = [k[4:] for k, v in data.items() if k.startswith("tag:") and v]
+                await service.update(sub, rid, fields, name=_clean(data.get("name"), 200))
                 code = "ok=updated"
             elif action in ("inc", "dec", "remove"):
                 rid = _rid(data.get("id"))
@@ -2789,7 +3070,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def export_csv(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         try:
             text = await service.export_csv(sub)
         except CollectionError as exc:
@@ -2802,6 +3083,93 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             media_type="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": 'attachment; filename="collection.csv"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    def binder_copy(sub: str, snap_id: str) -> dict[str, Any] | None:
+        """A copy of the member's Binder kept before a clear (collection_bulk.clear), else None."""
+        snap = state.db.get_snapshot(snap_id[:60], sub) if snap_id else None
+        return snap if collection_bulk.is_binder_snapshot(snap) else None
+
+    def restore_refused(sub: str, sid: str | None, text: str, status: int = 400) -> Response:
+        return page(
+            "Restore not started",
+            f"<div class='card'><p class='notice error'>{_esc(text)}</p><div class='actions'>"
+            "<a class='btn btn-primary' href='/history?type=snapshots'>Back to History</a>"
+            "<a class='btn' href='/collection'>Open your binder</a></div></div>",
+            sub=sub,
+            sid=sid,
+            status=status,
+        )
+
+    @server.custom_route("/collection/restore", methods=["POST"], include_in_schema=False)
+    async def restore_binder(request: Request) -> Response:
+        """History's Restore to my binder: every entry of a copy kept before a clear added back,
+        as a background job with the import's strip on the Binder page (resumable, paced). A Binder
+        that is not empty asks first: the copies are added to what is there, never replace it."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect_here(request, "/history")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return restore_refused(sub, sid, "This form expired. Reload History and try again.", 403)
+        snap_id = str(data.get("snapshot_id") or "")
+        snap = binder_copy(sub, snap_id)
+        if snap is None:
+            return restore_refused(sub, sid, "That copy of your binder is no longer kept.", 404)
+        try:
+            service._user_id(sub)
+            service._writes_on()
+            have = jobs.job(sub)
+            if have is not None and have["state"] in ("running", "paused", "stopped"):
+                return RedirectResponse(f"/collection?err=busyimport&import={have['id']}", status_code=303)
+            items = collection_bulk.restore_items(snap)
+            if not items:
+                return restore_refused(sub, sid, "That copy of your binder holds no cards.")
+            if data.get("confirm") != "1":
+                now = int((await service.page(sub))["count"])
+                if now:
+                    copies = sum(int(i["quantity"]) for i in items)
+                    return page(
+                        "Restore to my binder",
+                        "<div class='card'><h2>Your binder is not empty</h2>"
+                        f"<p>It holds {now:,} {'entry' if now == 1 else 'entries'} now. Restoring adds "
+                        f"the {copies:,} cards of this copy to them: a card already there gets more "
+                        "copies, nothing is replaced or removed.</p>"
+                        "<form method='post' action='/collection/restore' class='actions'>"
+                        f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid) or '')}'>"
+                        f"<input type='hidden' name='snapshot_id' value='{_esc(snap_id)}'>"
+                        "<input type='hidden' name='confirm' value='1'>"
+                        "<button type='submit' class='btn btn-primary'>Add them to my binder</button>"
+                        "<a class='btn' href='/history?type=snapshots'>Keep my binder as it is</a>"
+                        "</form></div>",
+                        sub=sub,
+                        sid=sid,
+                    )
+        except CollectionError as exc:
+            if exc.kind == "writes_disabled":
+                return restore_refused(sub, sid, refusals.WRITES_OFF, 503)
+            return restore_refused(sub, sid, str(exc), _STATUS.get(exc.kind, 400))
+        job = jobs.start(sub, items, kind="restore", snapshot_id=snap_id)
+        return RedirectResponse(f"/collection?import={job['id']}", status_code=303)
+
+    @server.custom_route("/collection/snapshots/{snap_id}.csv", methods=["GET"], include_in_schema=False)
+    async def binder_copy_csv(request: Request) -> Response:
+        """A copy of the Binder kept before a clear, as a CSV (History's Download CSV)."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect_here(request, "/history")
+        snap = binder_copy(sub, str(request.path_params["snap_id"]))
+        if snap is None:
+            return Response("That copy of your binder is no longer kept.", status_code=404)
+        day = time.strftime("%Y-%m-%d", time.gmtime(int(snap.get("taken_at") or 0)))
+        return Response(
+            collection_bulk.snapshot_csv(snap),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="binder-before-clear-{day}.csv"',
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
             },
@@ -2878,17 +3246,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         who = api_user(request, write=False)
         if isinstance(who, Response):
             return who
-        job = imports.get(who[0])
+        job = jobs.job(who[0])
         if job is None or job["id"] != request.path_params["jid"]:
             return JSONResponse({"ok": False, "error": "not_found", "message": "no such import"}, 404)
+        nxt = "/collection" if job["state"] == "stopped" else ""
+        if job["state"] == "done":
+            # ended: its result goes with the address the page's script opens (shown once)
+            jobs.finish(who[0])
+            said = job_result(job)
+            code = "ok=imported" if said.get("added") else "err=nothingimported"
+            nxt = f"/collection?{code}&r={keep_result(who[0], said)}"
         return JSONResponse(
             {
                 "ok": True,
-                "state": job["state"],
+                # "failed": a stop (the page then offers Resume); the page's script reloads on both
+                "state": "failed" if job["state"] == "stopped" else job["state"],
                 "done": job["done"],
-                "of": job["of"],
+                "of": job["total"],
                 "text": import_text(job),
-                "next": job["next"],
+                "next": nxt,
             },
             headers=NO_STORE,
         )
@@ -2948,18 +3324,47 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="list_collection",
         title="List the cards I own",
         description=(
-            "The signed-in user's binder, their Archidekt collection (the account they linked): the "
-            "cards they own, one row per printing and finish with a quantity, 100 a page in Archidekt's "
-            "newest-first order. Optional `query` filters by card name; `sort` is added, edition "
-            "(set release) or price (highest first, from the binder as the daily price check last "
-            "read it, with each card's price; only once the member opened their Binder); `page` pages. "
-            "Returns cards, count and total_pages. Read-only."
+            "The user's binder, their linked Archidekt collection: one row per printing and finish with a "
+            "quantity, 100 a page, newest first. query filters by card name; sort: added, edition or price "
+            "(highest first, from the daily price check, once the member opened their Binder); page pages; "
+            "tag: one binder tag's cards. Returns cards, count, total_pages and tags. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def list_collection(query: str | None = None, sort: str = "added", page: int = 1) -> dict[str, Any]:
+    async def list_collection(
+        query: str | None = None, sort: str = "added", page: int = 1, tag: str | None = None
+    ) -> dict[str, Any]:
         sub = _sub()
         page_no = max(1, min(int(page or 1), 10_000))
+        if tag and _clean(tag, 64):
+            try:
+                got = await service.tagged(
+                    sub, _clean(tag, 64), q=_clean(query, 80), offset=(page_no - 1) * PAGE_SIZE
+                )
+            except CollectionError as exc:
+                return _err(exc)
+            if not got["known"]:
+                names = ", ".join(f"“{t['name']}”" for t in got["tags"]) or "none"
+                return {
+                    "ok": False,
+                    "error": "not_found",
+                    "message": f"No binder tag “{tag}” (yours: {names}).",
+                }
+            pages = max(1, -(-got["total"] // PAGE_SIZE))
+            return {
+                "ok": True,
+                "cards": got["rows"],
+                "count": got["total"],
+                "page": page_no,
+                "total_pages": pages,
+                "has_next": page_no < pages,
+                "tags": got["tags"],
+                **(
+                    {}
+                    if got["complete"]
+                    else {"note": "Your binder is larger than one whole read; counted so far."}
+                ),
+            }
         info = service.binder.info(sub) if sort == "price" else None
         if info is not None and info.get("read_at") is not None:
             got = service.binder.listing(
@@ -3033,15 +3438,105 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                     left -= take
         return out
 
+    async def _tagging(sub: str, tag: Any) -> list[dict[str, Any]]:
+        """Resolve ``tag`` entries ({id | name, tags}) against the binder now: one row per record,
+        with its tags before, after, and the names the member has no tag for yet (made at apply)."""
+        if tag is None:
+            return []
+        if not isinstance(tag, list) or len(tag) > MAX_ITEMS_PER_CALL:
+            raise CollectionError("invalid", f"tag must be a list of up to {MAX_ITEMS_PER_CALL} entries")
+        have = await service.tags(sub)
+        out: list[dict[str, Any]] = []
+        for entry in tag:
+            if not isinstance(entry, dict):
+                raise CollectionError("invalid", "each tag entry is {id | name, tags}")
+            try:
+                names = collection_tags.clean_names(entry.get("tags"))
+            except DeckError as exc:
+                raise CollectionError("invalid", str(exc)) from exc
+            if entry.get("id") is not None and str(entry["id"]).strip():
+                recs = [await service._record(sub, _rid(entry["id"]), _clean(entry.get("name"), 200))]
+            elif entry.get("name"):
+                want = _clean(entry["name"], 200).casefold()
+                found = _Found()
+                found.tried_whole = True
+                await service._records_for(sub, want, found)
+                recs = [r for r in found.records if row_out(r)["name"].casefold() == want]
+                if not recs:
+                    raise CollectionError(
+                        "not_found", f"no card named '{_clean(str(entry['name']), 60)}' in your binder"
+                    )
+            else:
+                raise CollectionError("invalid", "each tag entry needs id or name")
+            by_id = {t["id"]: t for t in have}
+            for rec in recs:
+                r = row_out(rec)
+                before = collection_tags.record_tag_names(rec, by_id)
+                if [n.casefold() for n in before] == [n.casefold() for n in names]:
+                    continue
+                out.append(
+                    {
+                        "id": int(r["id"]),
+                        "name": r["name"],
+                        "printing": f"({r['set'].upper()} {r['collector_number']})" if r.get("set") else None,
+                        "tags": names,
+                        "before": before,
+                        "new": collection_tags.ids_for(names, have)[1],
+                    }
+                )
+        if tag and not out:
+            raise CollectionError("invalid", "those entries already have exactly those binder tags")
+        return out
+
+    async def _apply_tags(
+        sub: str, entries: list[dict[str, Any]], progress: dict[str, Any], result: dict[str, Any]
+    ) -> list[str]:
+        """The tag changes of an approved proposal: a tag that does not exist yet is made first
+        (its color Archidekt's color tag default), then each entry's tags are set. Mismatches in
+        Archidekt's answers are returned, not raised."""
+        from .account_lists import DEFAULT_TAG_COLOR
+
+        wanted = {n.casefold(): n for e in entries for n in e.get("tags") or []}
+        have = await collection_tags.read_tags(service.decks, sub)
+        made: list[str] = []
+        for key, name in wanted.items():
+            if any(t["name"].casefold() == key for t in have):
+                continue
+            await service._run(
+                sub,
+                lambda token, n=name: service.client.create_collection_tag(token, n, DEFAULT_TAG_COLOR),
+                progress=progress,
+            )
+            made.append(name)
+        result["tags_made"] = made
+        wrong: list[str] = []
+        for e in entries:
+            got = await service.update(
+                sub,
+                _rid(e["id"]),
+                {"tags": list(e.get("tags") or [])},
+                name=str(e.get("name") or ""),
+                progress=progress,
+                raise_wrong=False,
+            )
+            result["tagged"].append({"id": e["id"], "name": got["row"]["name"], "tags": got["row"]["tags"]})
+            if got.get("wrong"):
+                wrong.append(
+                    f"{got['row']['name']}: Archidekt's answer does not show the tags that were sent"
+                )
+        return wrong
+
     async def apply_changes(sub: str, changes: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
         """Apply an approved ``collection`` proposal: the stored adds go through service.add (the
         same path as the page), the stored removals by record id. A scan the adds came from is
         removed once every card went in. Called by DeckService under its Archidekt slot."""
         adds = changes.get("add") or []
-        result: dict[str, Any] = {"added": [], "skipped": [], "removed": []}
+        tag_entries = changes.get("tag") or []
+        result: dict[str, Any] = {"added": [], "skipped": [], "removed": [], "tagged": []}
         expected: dict[Any, int | None] = {}  # record id -> copies it should now hold (None: gone)
-        # each record written counts one (CollectionService._run), of every add and removal
-        progress["of_entries"] = len(adds) + len(changes.get("remove") or [])
+        # each record written counts one (CollectionService._run), of every add, removal and tagging
+        progress["of_entries"] = len(adds) + len(changes.get("remove") or []) + len(tag_entries)
+        tag_wrong: list[str] = []
         try:
             if adds:
                 source = str(changes.get("source") or "assistant")
@@ -3069,9 +3564,14 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                     }
                 )
                 expected[_rid(r["id"])] = left
+            if tag_entries:
+                tag_wrong = await _apply_tags(sub, tag_entries, progress, result)
         except CollectionError as exc:
             raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
         result["verified"], result["mismatches"] = await _read_back(sub, expected)
+        if tag_wrong:
+            result["verified"] = False
+            result["mismatches"] = list(result["mismatches"]) + tag_wrong
         return result
 
     async def _read_back(sub: str, expected: dict[Any, int | None]) -> tuple[bool, list[str]]:
@@ -3112,20 +3612,15 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         title="Propose changes to my binder",
         description=(
             "Propose adding cards to, or removing cards from, the user's binder (their Archidekt "
-            "collection). Like a deck edit this is a proposal: show its diff and review_url; it is "
-            "applied by the user "
-            "(Apply on the proposal card or the review page) or by you when assistant_may_apply is "
-            "true, with apply_proposal. add: a list of {name, set_code?, collector_number?, quantity?, "
-            "finish?, condition?, language?} or plain names (a card named without set_code and "
-            "collector_number is added in a printing Archidekt picks, as a nonfoil unless finish says "
-            "otherwise; language: the card's language code, EN default, or ES, FR, DE, IT, PT, JA, KO, "
-            "RU, ZHS, ZHT); text: one "
-            "card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; scan_session: the id or name of a scan "
-            "session, every matched card in it is added and the session is removed once applied; remove: "
-            "a list of {id (from list_collection) | name, quantity?} (no quantity removes every copy). At "
-            "most 100 cards each way per proposal. Once applied, each row of the result's added and "
-            "removed lists has quantity (the copies the record holds now, 0 when it is gone), "
-            "previous_quantity, and added_quantity or removed_quantity (what this proposal changed)."
+            "collection): show its diff and review_url; the user applies it, or you do with apply_proposal "
+            "when assistant_may_apply is true. add: cards or names (without set_code and collector_number "
+            "Archidekt picks the printing); text: one card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; "
+            "scan_session: a scan's matched cards (the scan is removed once applied); remove: {id (from "
+            "list_collection) | name, quantity?} (no quantity: every copy); tag: {id | name, tags} sets "
+            "every binder tag of those rows (new names are made). At most 100 cards each way. Once "
+            "applied, each row has quantity (held now), previous_quantity and added_quantity or "
+            "removed_quantity. clear: true, alone, proposes clearing the whole binder (the user applies "
+            "it on its review page)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=dict(CARD_TOOL_META) if in_chat else None,
@@ -3137,8 +3632,24 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             str | None, Field(description="Or a scan session's id or name to add.")
         ] = None,
         remove: Annotated[list[CollectionRemove | str] | None, Field(description="Cards to remove.")] = None,
+        tag: list[dict[str, Any]] | None = None,
+        clear: bool = False,
     ) -> Any:
         sub = _sub()
+        if clear:
+            if add or text or scan_session or remove or tag:
+                return _result(
+                    {
+                        "ok": False,
+                        "error": "invalid",
+                        "message": "clear goes alone: propose other changes apart",
+                    }
+                )
+            try:
+                return _result({"ok": True, **(await service.decks.propose_action(sub, "clear_collection"))})
+            except DeckError as exc:
+                return _result({"ok": False, "error": exc.kind, "message": str(exc), **exc.extra})
+        tag_in = tag
         items: list[Any] = [card_aliases(dumped(a)) for a in add or []]
         remove = [dumped(r) for r in remove] if remove is not None else None
         source = "assistant"
@@ -3186,6 +3697,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 session_id = sess.get("id")
             adds = normalise_items(items) if items else []
             removals = await _removals(sub, remove)
+            tagging = await _tagging(sub, tag_in)
         except CollectionError as exc:
             return _result(_err(exc))
         warnings += await _finish_warnings(adds, service.scan)
@@ -3233,6 +3745,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 adds,
                 removals,
                 extra={"source": source, "scan_session_id": session_id},
+                tags=tagging,
                 missing=names["missing"],
                 unchecked=names["unchecked"],
             )

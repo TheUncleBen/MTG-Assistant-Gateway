@@ -68,7 +68,7 @@ tests/e2e/run.sh down
 
 The workflow's matrix knows three Authentik versions: `2025.6.4`, which `docs/DEPLOY.md` was written
 against, `2026.2.2`, and `2026.8.3`, the current release. A pull request runs the suite once, against the current
-release, and only when its diff touches the gateway package (the whole `src/mtg_gateway/scan/` subpackage excluded), the stack or Docker
+release, and only when its diff touches the gateway package (the scan subpackage's Python included; only the scan page's scripts and styles under `src/mtg_gateway/scan/static/`, which the suite never loads, are left to the browser tests), the stack or Docker
 files, the suite itself or its dependencies; a manual run (Actions tab, "Run workflow") runs
 `2025.6.4` and `2026.8.3`, or the one chosen, and is how main is re-checked. `authentik_setup.py`
 records what each version produced in `.generated/authentik-evidence.json` (version, applied

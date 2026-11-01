@@ -256,11 +256,13 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
             if c["card"]["oracleCard"]["name"] == "Sol Ring"
         ] == [7]
         # refusals: too many rows, nothing readable
-        many = "\n".join(f"1 Card {i}" for i in range(101))
+        many = "Quantity,Name\n" + "\n".join(f"1,Card {i}" for i in range(5_001))
         r = await import_list(b, {"csrf": csrf, "action": "import", "text": many})
         assert r.headers["location"].startswith("/collection?err=toomany&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
-        assert "Nothing was imported: that is 101 rows; an import adds at most 100 at a time" in shown.text
+        assert (
+            "Nothing was imported: that is 5,001 rows; an import adds at most 5,000 at a time" in shown.text
+        )
         r = await import_list(b, {"csrf": csrf, "action": "import", "text": "   "})
         assert r.headers["location"].startswith("/collection?err=unreadable&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)

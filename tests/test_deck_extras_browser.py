@@ -553,7 +553,7 @@ def test_my_decks_and_packages_mark_package_tiles_and_add_one_to_a_deck(
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        # My Decks lists the decks only (the owner, 2026-10-25): the package waits under Packages
+        # My Decks lists the decks only (Sam, 2026-10-25): the package waits under Packages
         page.goto(f"{server.base}/decks", wait_until="networkidle")
         tile = page.locator("li.deck[data-deck-id='50']")
         page.locator("li.deck[data-deck-id='50'][data-package='1']").wait_for(state="hidden")

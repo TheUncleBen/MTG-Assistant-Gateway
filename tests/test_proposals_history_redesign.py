@@ -240,7 +240,7 @@ def test_proposal_index_and_history_counts(tmp_path: Path) -> None:
     counts = db.history_counts("u", deck_id=None, search="", since=None)
     assert counts["snapshots"] == 15 and counts["restores"] == 1  # p04, an applied restore
     # the search counts as the rows match: a restore by its deck's name or its change summary
-    for q in ("immortal", "sol ring", "card 4", "reap"):
+    for q in ("liesa", "sol ring", "card 4", "reap"):
         rows = db.list_proposals("u", limit=100, kinds=["restore"], states=["applied"], search=q)
         assert db.history_counts("u", search=q)["restores"] == len(rows), q
     assert db.history_counts("u", search="sol ring")["restores"] == 1

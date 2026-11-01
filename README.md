@@ -7,8 +7,9 @@ server for Magic: The Gathering. You run it in Docker, on one machine with
 Compose or on a Swarm, for you and whoever you invite. Each person adds one URL to Claude or ChatGPT and signs
 in with their own account. From there their assistant can look up cards and
 Commander data, test a deck, and edit their own
-[Archidekt](https://archidekt.com) decks. It never changes a deck until that
-person has said yes to the exact change.
+[Archidekt](https://archidekt.com) decks. A deck changes only the way that
+person chose: out of the box, only after they say yes to the exact change; they
+can let their assistant apply small changes, or most changes, without asking.
 
 ## Contents
 

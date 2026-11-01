@@ -184,7 +184,7 @@ async def test_the_add_cards_box_has_two_tabs_and_opens_from_the_old_address(sta
         assert "placeholder='Name, or “name (SET) 123” for one printing'" in box
         assert "Scanning a pile is quicker" in box
         assert (
-            "A collection CSV or a card list, one card per line, up to 100 rows at a time. "
+            "A collection CSV or a card list, one card per line, up to 5,000 rows at a time. "
             "Copies join an entry you already have only when its printing, finish, condition and "
             "language all match." in box
         )

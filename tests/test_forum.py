@@ -28,6 +28,20 @@ async def test_sections_and_a_sections_threads_come_from_the_forums_own_pages(st
     assert [t["title"] for t in found["threads"]] == ["Best mana rocks?"]
 
 
+async def test_a_thread_opens_from_its_number_sent_as_a_number(stack: Stack) -> None:
+    """get_forum's description says thread_id is "a number or a forum link", so an assistant sends
+    700002, not "700002"; the same goes for a deck id anywhere (whole-application audit row 13)."""
+    token = await linked_user(stack)
+    t = structured(await call(stack.h, token, "get_forum", {"thread_id": 700002}))
+    assert t["ok"] is True, t
+    assert t["title"] == "Best mana rocks?"
+    deck = structured(await call(stack.h, token, "get_deck", {"deck_ref": 42}))
+    assert deck["ok"] is True and deck["id"] == "42", deck
+    # only a whole number stands for text: a list or a fraction is still refused by the tool's check
+    bad = structured(await call(stack.h, token, "get_forum", {"thread_id": 700002.5}))
+    assert bad["ok"] is False and bad["error"] == "invalid", bad
+
+
 async def test_a_thread_reads_its_first_post_and_replies(stack: Stack) -> None:
     token = await linked_user(stack)
     t = structured(

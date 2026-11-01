@@ -732,6 +732,13 @@ details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);pa
   border:1px solid var(--border);border-radius:var(--radius-sheet);background:var(--surface);padding:1rem;
   box-shadow:var(--shadow)}
 .toast.error{border-color:var(--red)}
+/* a toast stays above the phone's bottom tab bar (as .ui-bar does), and on a phone it spans the
+   width so its Undo sits where the thumb is (0.7.46 audit QG-09) */
+.has-tabbar .toast{bottom:calc(var(--tab-room,0px) + .75rem)}
+@media (max-width:599.98px){
+  .toast{right:.5rem;left:.5rem;width:auto;max-width:none}
+  .has-tabbar .toast{bottom:calc(var(--tab-room,calc(max(56px,
+  4rem) + env(safe-area-inset-bottom))) + .5rem)} }
 /* a toast's × keeps the top right corner at every width: out of the flow, so a message with
    buttons (Undo, History) wraps under the text instead of pushing the × onto a line of its own
    (0.7.43: it wrapped at 810 px); the toast keeps the corner clear for it, 44 px wide on touch
@@ -1011,6 +1018,14 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
   align-items:baseline}
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
+.home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.home details.connect .addrline code{word-break:break-all;font-size:.9rem}
+/* the keyboard shortcuts box (static/sitesearch.js) */
+.mtgbox dl.keys{display:grid;grid-template-columns:auto 1fr;gap:.4rem 1rem;margin:0}
+.mtgbox dl.keys dt{margin:0}.mtgbox dl.keys dd{margin:0}
+.mtgbox dl.keys kbd{font-family:inherit;font-size:.9rem;padding:.1rem .4rem;
+  border:1px solid var(--border-soft);
+  border-radius:4px;background:var(--surface-2);white-space:nowrap}
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
@@ -2076,6 +2091,11 @@ SEARCH_PANEL_CSS = """
   padding:0 .35rem;border-radius:.7rem;background:var(--orange);color:var(--on-orange);font-size:.8rem;
   font-weight:700}
 .spanel .fbtn .n:empty{display:none}
+/* card search on a Fold or desktop (mockup screen 5): the filter groups fold in place behind the
+   same Filters button, so the first result starts near the top; the last state follows the
+   account (searchpanel.filters_sheet, static/searchpanel.js) */
+.spanel .fbtn.fold{display:inline-flex}
+@media (min-width:600px){ .spanel .sp-filters.folded{display:none} }
 /* the filter groups: whole groups in a fluid row, each at least --gw wide, growing to fill its row */
 .spanel .fgrid{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-start}
 .spanel .fgrid > *{flex:1 1 var(--gw,150px);min-width:0;margin:0}
@@ -2897,6 +2917,11 @@ def render(
         # script that reads them (deferred scripts run in document order; pages add theirs in
         # head_extra)
         + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
+        # static/fetchjson.js: how every page script talks to the gateway, and the one wording
+        # for a signed-out or lost-connection answer; before the scripts that send
+        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
+        # static/draft.js: what is typed into a form marked data-draft is kept and put back
+        + ("<script src='/static/draft.js' defer></script>" if signed_in else "")
         # static/topbar.js: the scroll room above a focused element follows the bar's height
         + "<script src='/static/topbar.js' defer></script>"
         # static/box.js: the box (dialog) every pop-up shares, on every page, before the menus
@@ -2939,7 +2964,6 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
-        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
         + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )

@@ -183,7 +183,7 @@ def test_tab_reaches_the_deck_owner_before_the_deck_buttons(server: Server) -> N
             assert owner_first is not None, order
             edit_at = page.evaluate("() => document.activeElement.innerText")
             assert "Edit deck" not in edit_at or owner_first < len(order) - 1, order
-            # the owner link lies above the deck's buttons, as the order now says
+            # The owner link lies above the deck's buttons, as the order now says
             tops = page.evaluate(
                 "() => [document.querySelector('.banner .owner').getBoundingClientRect().top,"
                 " document.querySelector('.banner .controls').getBoundingClientRect().top]"
