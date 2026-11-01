@@ -371,6 +371,7 @@ ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
 .crumbs li{display:inline-flex;align-items:center;gap:.4rem;min-width:0;max-width:100%}
 .crumbs li + li::before{content:'›';color:var(--text-muted)}
 .crumbs a,.crumbs span{overflow-wrap:anywhere}
+.crumbs a.ui-cap{overflow-wrap:normal;white-space:nowrap;flex:none}
 .crumbs li[aria-current] span{font-weight:700}
 .fv-area{margin:0 0 14px}
 .fv-area > h2{display:flex;align-items:center;gap:.45rem;margin:0 0 8px;font-size:1.05rem;

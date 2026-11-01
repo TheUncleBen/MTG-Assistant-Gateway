@@ -220,7 +220,7 @@
       root.append(introCard(introFirstVisit));
       if (introFirstVisit && window.MtgPrefs && introPref() === undefined) window.MtgPrefs.set(INTRO_KEY, 'seen');
     }
-    const tabs = h('div', { class: 'tabs', role: 'tablist' },
+    const tabs = h('div', { class: 'hubseg tabs', role: 'tablist' },
       tabButton('camera', 'Camera'), tabButton('type', 'Type'), tabButton('list', 'List'), tabButton('sessions', 'Sessions'));
     root.append(tabs);
     root.append(h('div', { id: 'panel' }));

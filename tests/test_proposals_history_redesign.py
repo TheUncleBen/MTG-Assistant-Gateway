@@ -275,7 +275,7 @@ async def test_waiting_dashboard(stack: Stack) -> None:
             in body
         )
         assert "All <span class='n'>60</span>" in body
-        assert "placeholder='Search deck or card'" in body
+        assert "placeholder='Search'" in body
         assert "<option value='admin'>The administrator</option>" in body
         assert (
             "<select name='risk' aria-label='Risk'>" in body

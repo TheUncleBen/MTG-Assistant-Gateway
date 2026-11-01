@@ -703,13 +703,19 @@ class ShortReads:
     gateway sends with a member's session forgets all of that member's copies, before the write
     goes out and again once it has landed (``drop``), and a read that was under way meanwhile
     keeps nothing, so a page never shows what it showed before the member's own change. A write
-    sent with no member known forgets everyone's (``clear``)."""
+    sent with no member known forgets everyone's (``clear``).
+
+    Beside those, the member's last good read under each key is kept for PAGE_DECK_LAST, through
+    their writes (``keep_last``, ``last``): while Archidekt can't be asked, a page shows it dated
+    and read-only instead of the busy page (``get_held``), as the deck page shows a deck."""
 
     MAX_ENTRIES = 2000
 
     def __init__(self, seconds: float):
         self.seconds = seconds
         self._entries: dict[tuple[str, tuple[Any, ...]], tuple[float, Any]] = {}
+        # (member, key) -> (wall time read, the copy): the last good read, kept through writes
+        self._last: dict[tuple[str, tuple[Any, ...]], tuple[float, Any]] = {}
         self._gen: dict[str, int] = {}  # sub -> writes seen; a read started before one keeps nothing
         self._all_gen = 0
 
@@ -737,7 +743,51 @@ class ShortReads:
                 oldest = min(self._entries, key=lambda e: self._entries[e][0])
                 self._entries.pop(oldest, None)
             self._entries[k] = (time.monotonic(), copy.deepcopy(value))
+        self.keep_last(sub, key, value)
         return value
+
+    async def get_held(
+        self, sub: str, key: tuple[Any, ...], fetch: Callable[[], Awaitable[Any]], *, fresh: bool = False
+    ) -> tuple[Any, dict[str, Any] | None]:
+        """``get``, and when the read is refused because Archidekt can't be asked (busy, paused,
+        unreachable) the member's last good read under ``key`` within PAGE_DECK_LAST: ``(value,
+        None)`` for a read, ``(copy, {"held_at": wall time it was read, "refused": the error})``
+        for a held copy, as page_deck_view says it. Any other failure, and a refusal with nothing
+        kept, is raised."""
+        try:
+            return await self.get(sub, key, fetch, fresh=fresh), None
+        except DeckError as exc:
+            if not is_busy(exc):
+                raise
+            held = self.last(sub, key)
+            if held is None:
+                raise
+            return held[1], {"held_at": held[0], "refused": exc}
+
+    def keep_last(self, sub: str, key: tuple[Any, ...], value: Any) -> None:
+        """Keep ``value`` as the member's last good read under ``key`` (``get`` does it itself;
+        a page that reads some other way keeps its own)."""
+        if self.seconds <= 0 or not sub:
+            return
+        k = (sub, key)
+        if k not in self._last and len(self._last) >= self.MAX_ENTRIES:
+            oldest = min(self._last, key=lambda e: self._last[e][0])
+            self._last.pop(oldest, None)
+        self._last[k] = (time.time(), copy.deepcopy(value))
+
+    def last(self, sub: str, key: tuple[Any, ...]) -> tuple[float, Any] | None:
+        """The member's last good read under ``key`` as ``(wall time read, a copy)``, when it is
+        younger than PAGE_DECK_LAST; else None."""
+        held = self._last.get((sub, key))
+        if held is None or time.time() - held[0] > PAGE_DECK_LAST:
+            return None
+        return held[0], copy.deepcopy(held[1])
+
+    def forget(self, sub: str) -> None:
+        """The member's link changed or their data was deleted: their copies and last reads go."""
+        self.drop(sub)
+        for k in [k for k in self._last if k[0] == sub]:
+            del self._last[k]
 
     def drop(self, sub: str) -> None:
         """A write with the member's session: their copies go."""
@@ -3656,7 +3706,7 @@ class DeckService:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
         self.deck_lists.forget(sub)
         self.folder_trees.forget(sub)
-        self.short_reads.drop(sub)
+        self.short_reads.forget(sub)
         self._forget_page_decks()
         for key in [k for k in self._page_last if k[0] == sub]:
             del self._page_last[key]

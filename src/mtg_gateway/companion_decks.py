@@ -186,7 +186,7 @@ def new_deck_box_html(
         )
         + "</select></span></div></div>"
         "<div class='nd-cards'><span class='lbl' id='nd-cards-l'>Cards</span>"
-        f"<div class='segc nd-tabs' role='tablist' aria-labelledby='nd-cards-l'>{tabs}</div>"
+        f"<div class='hubseg segc nd-tabs' role='tablist' aria-labelledby='nd-cards-l'>{tabs}</div>"
         "<div class='nd-src'>"
         "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
         "<input id='file' type='file' accept='.txt,.csv,.json,text/plain,text/csv,application/json' "
@@ -259,7 +259,7 @@ NEW_DECK_CSS = """
 .nd-form .switch{justify-self:start;margin:0}
 .nd-cards{display:grid;gap:.6rem} .nd-cards > .lbl{font-weight:700}
 /* three tabs on one row; at large text they wrap instead of widening the sheet */
-.mtgbox .body .nd-tabs{display:flex;flex-wrap:wrap;width:100%;margin:0}
+.mtgbox .body .nd-tabs{display:flex;width:100%;margin:0}
 .mtgbox .body .nd-tabs [role=tab]{flex:1 1 0;min-width:0;gap:.35rem;display:inline-flex;align-items:center;
   justify-content:center}
 .nd-tabs [role=tab] span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}

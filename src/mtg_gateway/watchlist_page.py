@@ -1118,7 +1118,7 @@ def watchlist_page_html(
         f"<form class='ui-tools w-top' role='search' method='get' action='/watchlist'>{keep}"
         "<label class='search'><span class='sr-only'>Search your watchlist</span>"
         f"{icon('search')}<input type='search' name='q' value='{esc(query.q)}' "
-        "placeholder='Search watched cards'></label>"
+        "placeholder='Search'></label>"
         f"<a class='btn btn-plain' href='{esc(query.href(box='add'))}' {ui.box_open_attr('w-add')}>"
         f"{icon('plus')}Watch a card</a>"
         "<button type='button' class='btn-plain w-select' aria-pressed='false' hidden>"
@@ -1272,6 +1272,8 @@ WATCH_PAGE_CSS = (
 .watch-page .w-t .thumb img{width:100%;height:100%;object-fit:cover}
 .watch-page .w-t .thumb.deckart{height:48px;background:var(--orange-tint);color:var(--orange-text)}
 .watch-page .w-t .title .t a{font-weight:700}
+/* the grid's card name is a 44 px target on a touch screen (audit D07) */
+@media (pointer:coarse){ .watch-page a.wcard{display:inline-flex;align-items:center;min-height:44px} }
 .watch-page .w-t .title .deck{color:var(--text-muted);font-size:.86rem}
 .watch-page .w-t .px{font-variant-numeric:tabular-nums;font-weight:700}
 .watch-page .w-t .px small{display:block;font-weight:400;color:var(--text-muted);font-size:.8rem}

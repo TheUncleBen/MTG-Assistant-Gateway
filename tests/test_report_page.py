@@ -255,3 +255,21 @@ def test_long_lists_show_six_rows_then_show_all_and_categories_open_on_tap() -> 
         {"deck_size": 100, "honesty": {"unrecognized": [{"name": f"C{i}"} for i in range(8)]}}
     )
     assert "ig-more" not in short  # 8 rows or fewer: all shown
+
+
+def test_one_report_page_parses_its_simulation_text_once(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report page used to parse the simulation's text about seven times per view (the
+    header, the tiles, the Markdown copy, the coverage line each parsed it again): once is enough."""
+    sid = server.sign_in_and_link()
+    store_report(server.db, "user-1", "rep_once")
+    rv._PARSED.clear()  # cold, whatever an earlier test parsed
+    calls: list[str] = []
+    real = rv.split_sections
+    monkeypatch.setattr(rv, "split_sections", lambda text: (calls.append(text[:20]), real(text))[1])
+    h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
+    assert h.get("/history/reports/rep_once").status_code == 200
+    assert len(calls) == 1, calls
+    assert h.get("/history/reports/rep_once").status_code == 200
+    assert len(calls) == 1, "a second view of the same report parses nothing again"

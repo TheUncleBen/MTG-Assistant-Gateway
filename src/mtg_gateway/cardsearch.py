@@ -31,7 +31,7 @@ from . import prefs
 from .pages import NO_STORE, _csrf, browser_session, login_redirect_here
 from .scan.service import ScanError
 from .theme import esc as _esc
-from .theme import icon, render, stylesheet_link
+from .theme import icon, in_app, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -583,7 +583,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         )
         body += (
             "<section class='cs-out'>"
-            + (cv.HINT_HTML if state.prices is not None else "")
+            + ((cv.HINT_APP_HTML if in_app() else cv.HINT_HTML) if state.prices is not None else "")
             + f"<div id='cs-status' class='cs-status' role='status'>{status_html}</div>"
             + f"<div id='cs-results' class='cs-results' data-linked='{'1' if linked else ''}'>{results}</div>"
             + more

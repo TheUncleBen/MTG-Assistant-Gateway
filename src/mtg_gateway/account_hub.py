@@ -204,6 +204,9 @@ HUB_CSS = """
   .ylone{max-width:calc(50% - .75rem);margin:0 auto} }
 .ycol{display:flex;flex-direction:column;min-width:0}
 .ygrp{margin:0 0 1.25rem}
+/* a group with no row left (This app in an app without the bridge, or an older one) shows no
+   heading over nothing (audit D16); feedback.js hides the rows an app can't answer */
+.ygrp:not(:has(.yrow:not([hidden]))){display:none}
 .ygrp h2{margin:0 0 .4rem .9rem;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
   color:var(--menu-head)}
 .ygrp .rows{background:var(--surface);border:1px solid var(--border-soft);border-radius:14px;overflow:hidden}

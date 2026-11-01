@@ -190,16 +190,23 @@ def test_the_summary_dates_read_like_the_pages_dates() -> None:
     assert summary.text(s).startswith("Summary for Dec 29, 2025 to Jan 5.\n")
 
 
-async def test_view_choices_and_delete_my_data_put_the_tick_above_the_button(stack: Stack) -> None:
+async def test_view_choices_asks_in_a_box_and_delete_my_data_puts_the_tick_above_the_button(
+    stack: Stack,
+) -> None:
     b = await _browser(stack)
     try:
         page = (await b.http.get("/account/details/choices")).text
+        # Forget my view choices asks in the shared box (Cancel, then the solid Forget), as every
+        # action that can't be undone does; the card's own button only opens it (audit D17)
         choices = page.split("id='choices'", 1)[1].split("</form>", 1)[0]
         assert (
-            "<div class='ui-checks'><label><input type='checkbox' name='confirm' value='yes' required>"
-            "<span>Yes, forget my view choices on every device</span></label></div>"
-            "<div class='ui-actions'><button>Forget my view choices</button></div>" in choices
+            "data-box-open='forget-choices'" in choices
+            and "name='confirm'" not in choices.split("<div class='ui-box", 1)[0]
         )
+        box = page.split("id='forget-choices' role='dialog'", 1)[1].split("</div></div>", 1)[0]
+        assert "<input type='hidden' name='confirm' value='yes'>" in box
+        assert "<button type='button' class='btn-plain' data-cancel>Cancel</button>" in box
+        assert "<button type='submit' class='danger' form='forgetf'>Forget my view choices</button>" in box
         # Delete my data: the list's red row opens the box that holds the tick and the solid red button
         page = (await b.http.get("/account/details")).text
         assert "<a class='yrow ydanger' href='/account/details?delete=1'" in page

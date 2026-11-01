@@ -1916,15 +1916,15 @@ REPORT_PAGE_CSS = (
   border:1px solid var(--border-soft);border-radius:12px;overflow:hidden}
 .rv-page .ig-list{list-style:none;margin:0;padding:0}
 .rv-page .ig.ig-list{margin:.5rem 0 0}
-.rv-page .ig-list li{display:flex;align-items:center;gap:.75rem;min-height:44px;padding:0 16px;
-  border-top:1px solid var(--border-soft)}
+.rv-page .ig-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;min-height:44px;
+  padding:0 16px;border-top:1px solid var(--border-soft)}
 .rv-page .ig-list li:first-child{border-top:0}
-.rv-page .ig-list .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.rv-page .ig-list .nm{flex:1 1 9rem;min-width:0;overflow-wrap:anywhere}
 .rv-page .ig-list .v{color:var(--text-muted);font-size:.9rem;font-variant-numeric:tabular-nums;
   white-space:nowrap}
 .rv-page .ig-list .v b{color:var(--text)}
-.rv-page .ig-list a{display:flex;align-items:center;gap:.75rem;flex:1;align-self:stretch;color:inherit;
-  text-decoration:none}
+.rv-page .ig-list a{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;flex:1;
+  align-self:stretch;min-height:44px;color:inherit;text-decoration:none}
 .rv-page .ig-list a svg{transform:rotate(-90deg);color:var(--text-muted);width:16px;height:16px;flex:none}
 .rv-page .ig-list a:hover .nm{text-decoration:underline}
 .rv-page .ig-list .dot{width:12px;height:12px;border-radius:50%;flex:none}

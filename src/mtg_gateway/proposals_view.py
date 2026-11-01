@@ -698,7 +698,7 @@ def _toolbar(data: dict[str, Any], query: dict[str, Any]) -> str:
     return ui.toolbar(
         "/proposals",
         search_label="Search proposals",
-        placeholder="Search deck or card",
+        placeholder="Search",
         q=query["q"],
         filters=[
             ui.filter_select("deck_id", "Deck", deck_opts, query["deck_id"]),

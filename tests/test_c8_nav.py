@@ -139,7 +139,7 @@ async def test_old_pins_addresses_land_on_wants_and_a_save_comes_back_there(
 
 async def test_the_lists_live_in_binder_with_the_pins_among_them(member: Browser) -> None:
     page = (await member.http.get("/lists/templates")).text
-    tabs = page.split("<nav class='adm-nav lp-tabs' aria-label='Lists'")[1].split("</nav>")[0]
+    tabs = page.split("<nav class='hubseg adm-nav lp-tabs' aria-label='Lists'")[1].split("</nav>")[0]
     assert re.findall(r"<a href='([^']+)'", tabs) == [
         "/lists/templates",
         "/lists/defaults",

@@ -88,8 +88,8 @@ async def test_the_overview_is_six_widgets_then_system_updates_and_activity_by_d
         assert text.index("<h1>Admin: overview</h1>") < text.index(
             "Members, the last 30 days and the system."
         )
-        assert text.index("the system.") < text.index("<nav class='adm-nav'")
-        assert text.index("<nav class='adm-nav'") < text.index("<section class='ui-widgets'")
+        assert text.index("the system.") < text.index("<nav class='hubseg adm-nav'")
+        assert text.index("<nav class='hubseg adm-nav'") < text.index("<section class='ui-widgets'")
         assert _widgets(text) == [
             "Members",
             "Proposals, 30 days",
@@ -334,7 +334,7 @@ async def test_card_models_search_member_filter_and_widgets(gw: Harness) -> None
         assert _widgets(text) == ["Models kept", "Members with models", "Changed in 7 days"]
         assert "<span class='big'>2</span>" in text or "<span class='big'>2<small>" in text
         assert "<span class='big'>2<small>of 4</small></span>" in text
-        assert "<input type='search' name='q'" in text and "placeholder='Search by name'" in text
+        assert "<input type='search' name='q'" in text and "placeholder='Name'" in text
         opts = text.split("<select name='member'", 1)[1].split("</select>", 1)[0]
         assert "<option value='' selected>Every member</option>" in opts
         assert ">bob</option>" in opts and ">a member with no name</option>" in opts
@@ -368,7 +368,7 @@ async def test_settings_opens_with_the_heading_purpose_and_tab_bar_in_the_wide_c
         text = await _get(b, "/admin/settings")
         h1 = text.index("<h1>Admin: settings</h1>")
         purpose = text.index("Settings for the whole gateway. A setting your stack sets is shown greyed out")
-        nav = text.index("<nav class='adm-nav'")
+        nav = text.index("<nav class='hubseg adm-nav'")
         groups = text.index("<nav class='ui-chips set-nav'")
         assert h1 < purpose < nav < groups
         assert "<main class='wrap ui-wide'" in text
@@ -419,8 +419,8 @@ async def test_admin_activity_has_the_page_head_first_and_a_menu_on_every_row(gw
     b = await admin_browser(gw)
     try:
         text = await _get(b, "/admin/activity")
-        assert text.index("<h1>Admin: activity</h1>") < text.index("<nav class='adm-nav'")
-        assert text.index("<nav class='adm-nav'") < text.index("<section class='ui-widgets'")
+        assert text.index("<h1>Admin: activity</h1>") < text.index("<nav class='hubseg adm-nav'")
+        assert text.index("<nav class='hubseg adm-nav'") < text.index("<section class='ui-widgets'")
         assert "<div class='wdg wide-sm'>" in text  # Last 14 days spans the phone row
         assert "<script src='/static/admin.js?v=" in text
         rows = text.split("act-table'", 1)[1]

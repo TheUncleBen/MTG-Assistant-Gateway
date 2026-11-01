@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import modes, tool_labels, ui
 from .pages import _csrf, browser_session
-from .theme import ASSISTANT_PAGES, NAV_LINKS, binder_pages, icon, more_groups, rail_extra, render
+from .theme import ASSISTANT_PAGES, NAV_LINKS, binder_pages, icon, in_app, more_groups, rail_extra, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -47,9 +47,11 @@ GUIDE_CSS = """
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
-.gsearch .gsrow{display:flex;gap:.5rem;align-items:stretch}
-.gsearch .gsrow input[type=search]{flex:1 1 auto;min-width:0;margin:0}
-.gsearch .gsrow .btn{margin:0;flex:none}
+/* the box and its button share a row; at large text the button goes under the box, which
+   keeps the whole row, rather than the box shrinking to a letter (audit D13) */
+.gsearch .gsrow{display:flex;flex-wrap:wrap;gap:.5rem;align-items:stretch}
+.gsearch .gsrow input[type=search]{flex:1 1 12rem;min-width:0;margin:0}
+.gsearch .gsrow .btn{margin:0;flex:0 1 auto}
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
 .gsearch .status:empty{display:none}
 /* the contents page: a card a part, its topics as rows */
@@ -386,6 +388,13 @@ def nav_description(*, html_out: bool = True) -> str:
     return text
 
 
+# the Playtest topic's title on the website and in the app (build(app=True))
+PLAYTEST_TITLES = {
+    False: "Why Playtest opens Archidekt in a new tab",
+    True: "Why Playtest opens Archidekt in your browser",
+}
+
+
 def build(
     *,
     site: str,
@@ -397,7 +406,10 @@ def build(
     backup_folder: str = "MTG Gateway Backups",
     watchlists: bool = False,
     live: LiveSettings | None = None,
+    app: bool = False,
 ) -> Guide:
+    """``app``: the guide as the Android app shows it, in the app's own words (no browser tabs,
+    no adding the site to a home screen, no install-the-app line; audit D15)."""
     if live is not None:  # the approval rows as set now (live settings), over the start-up values
         max_rows = int(live.get("auto_apply_max_rows"))
         big_rows = int(live.get("auto_big_edit_rows"))
@@ -793,12 +805,15 @@ def build(
         "edit. It can also propose a like, follow or comment, but each one waits for your own press on "
         "its review page, whatever your approval mode.</p>"
     )
+    where_playtest = (
+        "in your phone's browser" if app else "in a new tab, or in the phone's browser from the app"
+    )
     how_playtest = (
         "<p><strong>Playtest</strong> in a deck's banner opens the deck in Archidekt's own playtester "
-        "(opening hand, mulligans, turns played by hand) in a new tab, or in the phone's browser from the "
-        "app. A private deck shows there when that browser is signed in to Archidekt, so sign in on "
-        "archidekt.com once in the browser you use. <a href='#exp-playtest'>Why Playtest opens Archidekt "
-        "in a new tab</a> explains.</p>"
+        f"(opening hand, mulligans, turns played by hand) {where_playtest}. "
+        "A private deck shows there when that browser is signed in to Archidekt, so sign in on "
+        f"archidekt.com once in the browser you use. <a href='#exp-playtest'>{PLAYTEST_TITLES[app]}</a> "
+        "explains.</p>"
         "<p><strong>Goldfish</strong>, next to it, plays the deck by hand here on the gateway: seven cards "
         "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
         "starts with its commander in the command zone.</p>"
@@ -822,9 +837,14 @@ def build(
         "<li><strong>Desktop layout</strong>, under Look too and remembered per device, shows the "
         "computer layout on a phone or in the app, like a browser's Desktop site switch; <strong>Fit the "
         "screen</strong> goes back to the adaptive layout.</li>"
-        "<li>No Android phone? Add this site to your home screen from the browser (Chrome and Samsung "
-        "Internet on Android, Safari on iPhone: Share, then Add to Home Screen) and it opens like an app, "
-        "scanning included.</li></ul>"
+        + (
+            ""
+            if app
+            else "<li>No Android phone? Add this site to your home screen from the browser (Chrome and "
+            "Samsung Internet on Android, Safari on iPhone: Share, then Add to Home Screen) and it opens "
+            "like an app, scanning included.</li>"
+        )
+        + "</ul>"
     )
     how_app = (
         "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
@@ -1292,8 +1312,16 @@ def build(
         "exp-privacy": exp_privacy,
         "exp-playtest": exp_playtest,
     }
+    # the app's own words for a topic's title
+    titles = {"exp-playtest": PLAYTEST_TITLES[True]} if app else {}
     parts = [
-        (pid, ic, title, lead, [sec for sec in sections if bodies.get(sec[0])])
+        (
+            pid,
+            ic,
+            title,
+            lead,
+            [(sid, sic, titles.get(sid, label)) for sid, sic, label in sections if bodies.get(sid)],
+        )
         for pid, ic, title, lead, sections in PARTS
     ]
     return Guide(parts, {k: _stackable(v) for k, v in bodies.items() if v})
@@ -1340,7 +1368,7 @@ def search_form_html(q: str = "") -> str:
         f"<form class='gsearch' method='get' action='{PAGE}/search' role='search'>"
         "<label for='guide-q'>Search the guide</label>"
         "<div class='gsrow'>"
-        f"<input id='guide-q' type='search' name='q' value='{_esc(q)}' placeholder='Search the guide' "
+        f"<input id='guide-q' type='search' name='q' value='{_esc(q)}' placeholder='Search' "
         "maxlength='100' autocomplete='off' spellcheck='false' aria-describedby='guide-status' "
         f"data-search='{PAGE}/search.json'>"
         f"<button type='submit' class='btn btn-plain'>{icon('search')} Search</button></div>"
@@ -1519,6 +1547,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             archidekt_backups=bool(state.live.get("archidekt_backups")),
             backup_folder=state.decks.backup_folder,
             watchlists=bool(s.watchlists_enabled),
+            app=in_app(),
         )
 
     def page(request: Request, title: str, body: str, *, current: str = PAGE) -> Response:

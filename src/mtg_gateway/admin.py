@@ -635,7 +635,7 @@ KIND_ICONS = {"tool": "activity", "error": "alert", "api": "link", "admin": "shi
 ADMIN_CSS = """
 /* the admin pages (admin.py): dashboards in the 1200 px width, the tab bar in the same place on
    every tab, the System rows lined up as on Settings */
-.adm .adm-nav{margin:0 0 1rem}
+.adm .adm-nav{margin:0 0 1rem;display:flex;width:100%}
 .adm .notice{margin:0 0 1rem}
 .adm .ui-widgets .wdg .det{overflow-wrap:anywhere;min-width:0}
 /* the number and its unit ("0.7.37 running") may part at 200% text: two flex items, not one word */
@@ -724,8 +724,9 @@ ADMIN_HEAD = f"<style>{ADMIN_CSS}</style><script src='/static/admin.js' defer></
 
 
 def _nav(active: str) -> str:
-    """The admin pages' own tabs (all six pages): even links in full rows, the current one tinted
-    and marked aria-current, not a second orange button (one orange main button per page)."""
+    """The admin pages' own tabs (all six pages): the site's one switch (theme.hub_switch's
+    .hubseg), the current one marked aria-current, not a second orange button (one orange main
+    button per page). Six parts don't fit a phone: the switch scrolls sideways (static/topbar.js)."""
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
     links += (
         ("/admin/metrics", "Metrics"),
@@ -733,7 +734,7 @@ def _nav(active: str) -> str:
         ("/admin/models", "Card models"),
     )
     return (
-        "<nav class='adm-nav' aria-label='Admin'>"
+        "<nav class='hubseg adm-nav' aria-label='Admin'>"
         + "".join(f"<a href='{href}'{CURRENT if href == active else ''}>{label}</a>" for href, label in links)
         + "</nav>"
     )
@@ -1469,7 +1470,7 @@ def _users_body(
     tools = ui.toolbar(
         path,
         search_label="Search members",
-        placeholder="Search name, email or username",
+        placeholder="Search",
         q=q,
         filters=[
             ui.filter_select("app", "App", app_opts, app),
@@ -2021,7 +2022,7 @@ def _models_body(
     tools = ui.toolbar(
         path,
         search_label="Search card models",
-        placeholder="Search by name",
+        placeholder="Name",
         q=q,
         filters=[ui.filter_select("member", "Member", member_opts, member)],
         keep={"changed": changed},

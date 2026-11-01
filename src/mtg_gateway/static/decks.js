@@ -268,6 +268,54 @@
     refresh();
     if (window.MtgSearchPanel) window.MtgSearchPanel.closeSheet();
   });
+
+  // -- My Decks or Packages: the switch at the top works in place ----------------------------------
+  // Its links are whole pages (a reload or a shared link shows the same side); with scripts a
+  // press draws the other side at once, without a page load: the form's show value, the heading,
+  // the filter box's words, the page's orange button and the address follow it (the browser's
+  // Back comes back the same way), and mark() shows the packages or the decks.
+  var seg = $(".hubhead .hubseg");
+  function isPackages(href) { return /[?&]show=packages(?:&|$)/.test(href || ""); }
+  function applyShow(packages, href) {
+    var s = form.querySelector("input[name=show]");
+    if (packages && !s) {
+      s = document.createElement("input");
+      s.type = "hidden";
+      s.name = "show";
+      form.appendChild(s);
+    }
+    if (s) { if (packages) s.value = "packages"; else s.parentNode.removeChild(s); }
+    Array.prototype.forEach.call(seg.querySelectorAll("a"), function (a) {
+      if (isPackages(a.getAttribute("href")) === packages) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+    var word = packages ? "Packages" : "My Decks";
+    var h1 = $(".hubhead h1");
+    if (h1) h1.textContent = word;
+    document.title = document.title.replace(/^(My Decks|Packages)/, word);
+    var newDeck = $(".hubhead .acts a[href='/decks/new']"), newPkg = $(".hubhead .acts a[href='/decks/new-package']");
+    if (newDeck) newDeck.classList.toggle("btn-primary", !packages);
+    if (newPkg) newPkg.classList.toggle("btn-primary", packages);
+    var q = $("#q", form), lab = form.querySelector("label[for=q]"), show = form.querySelector(".sp-show");
+    if (q) q.placeholder = packages ? "Package name" : "Deck name";
+    if (lab) lab.textContent = packages ? "Filter package name" : "Filter deck name";
+    if (show) show.textContent = packages ? "Show packages" : "Show decks";
+    if (href !== null) history.pushState({ show: packages ? "packages" : "" }, "", href);
+    if (pkgs || pkgFailed) mark(); else readPackages();
+  }
+  if (seg) {
+    seg.addEventListener("click", function (ev) {
+      var a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
+      if (!a || !seg.contains(a) || ev.defaultPrevented || ev.button !== 0) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;  // a new tab is the member's
+      ev.preventDefault();
+      if (a.hasAttribute("aria-current")) return;
+      applyShow(isPackages(a.getAttribute("href")), a.getAttribute("href"));
+    });
+    window.addEventListener("popstate", function () {
+      applyShow(isPackages(window.location.search), null);
+    });
+  }
   form.addEventListener("input", function (e) {
     var t = e.target;
     if (t && t.type === "search") soon();

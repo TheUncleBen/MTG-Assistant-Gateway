@@ -32,7 +32,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import account_hub, account_lists, custom_pictures, modes, proposals_view, ui
 from .archidekt import no_retry
 from .archidekt_account import CUSTOM_CARD_FIELDS
-from .busy import busy_response
+from .busy import busy_response, held_html, same_url
 from .companion import DECK_CSP
 from .deckpage import image_url
 from .decks import DeckError, current_client, own_snapshot, reloading
@@ -133,7 +133,7 @@ CUSTOM_FACE_FIELDS = (
     ("Name", "n", "", 200, ""),
     ("Mana cost", "m", "{2}{G}", 200, ""),
     ("Types", "t", "Creature", 200, ""),
-    ("Subtypes", "st", "Human Advisor", 200, ""),
+    ("Subtypes", "st", "Advisor", 200, ""),
     ("Supertypes", "su", "Legendary", 200, ""),
     ("Power", "p", "", 20, ""),
     ("Toughness", "tg", "", 20, ""),
@@ -379,7 +379,7 @@ def tabs_html(current: str, counts: dict[str, int]) -> str:
         out.append(f"<a href='{tab_page_of(t)}'{cur}>{esc(t.label)}{num}</a>")
     missing = any(counts.get(t.kind) is None for t in TABS)
     fill = f" data-counts='{COUNTS_API}'" if missing else ""
-    return f"<nav class='adm-nav lp-tabs' aria-label='Lists'{fill}>{''.join(out)}</nav>"
+    return f"<nav class='hubseg adm-nav lp-tabs' aria-label='Lists'{fill}>{''.join(out)}</nav>"
 
 
 def crumbs_html(tab: Tab) -> str:
@@ -1439,7 +1439,7 @@ def face_fields(face: str, v: dict[str, Any], *, editing: bool, has_picture: boo
     return (
         f"<div class='lp-face' id='cc-face-{p}'{'' if req else ' hidden'}>"
         f"<div class='lp-two'>{fld(name_label, 'n')}{fld('Mana cost', 'm', '{2}{G}')}</div>"
-        f"<div class='lp-three'>{fld(types_label, 't', 'Creature')}{fld('Subtypes', 'st', 'Human Advisor')}"
+        f"<div class='lp-three'>{fld(types_label, 't', 'Creature')}{fld('Subtypes', 'st', 'Advisor')}"
         f"{fld('Supertypes', 'su', 'Legendary')}</div>"
         f"<div class='field'><label for='{p}-x'>Rules text</label><textarea id='{p}-x' name='{p}_x' rows='3' "
         f"maxlength='{account_lists.CUSTOM_TEXT_MAX}'>{esc(text)}</textarea></div>"
@@ -1476,7 +1476,7 @@ def custom_box(csrf: str, st: dict[str, Any]) -> str:
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='action' value='{'edit' if editing else 'create'}'>"
         f"<input type='hidden' name='was_name' value='{esc(v.get('was_name', ''))}'>"
-        "<div class='segc lp-faces' role='tablist' aria-label='Face'>"
+        "<div class='hubseg segc lp-faces' role='tablist' aria-label='Face'>"
         "<button type='button' role='tab' data-face='f' aria-selected='true' id='cc-tab-f' "
         "aria-controls='cc-face-f'>Front</button>"
         "<button type='button' role='tab' data-face='b' aria-selected='false' id='cc-tab-b' "
@@ -1579,16 +1579,9 @@ CSS = """
 .lp .list-head .acts{display:flex;gap:8px;flex-wrap:wrap}
 .lp .list-head .acts .btn{margin:0}
 .lp-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
+/* the site's one switch (.hubseg, as the admin tabs); on a phone it scrolls sideways, the
+   current tab brought into view by topbar.js */
 .lp-tabs{margin:0 0 1rem}
-.lp-tabs a{white-space:normal;text-align:center;line-height:1.15;padding:.2rem .4rem;gap:.35rem}
-/* on a phone the six tabs are one row that scrolls sideways (the admin bar's even rows would
-   leave a hole), the current one brought into view by lists.js */
-@media (max-width:599.98px){
-  .lp-tabs{display:flex;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;
-    scrollbar-width:none;margin-left:-1rem;margin-right:-1rem;padding:0 1rem 2px;scroll-padding:0 1rem}
-  .lp-tabs::-webkit-scrollbar{display:none}
-  .lp-tabs a{flex:0 0 auto;white-space:nowrap;scroll-snap-align:start;padding:0 .75rem}
-}
 .lp-tabs a .n{font-weight:400;color:var(--text-muted);margin-left:.1rem}
 .lp-tabs a[aria-current] .n{color:inherit}
 .lp .ui-table .tr{min-height:52px}
@@ -1822,12 +1815,15 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         search = q if tab.kind == "custom_cards" else ""
         # kept briefly per member; any change they send (a pin, a template, a custom card) forgets
         # it (decks.short_reads). A box that changes a row (``fresh``) shows the list as it is now.
-        got = await decks.short_reads.get(
+        # While Archidekt can't be asked, the member's last read of the tab, dated (``held_at``).
+        got, held_at = await decks.short_reads.get_held(
             sub,
             ("list", tab.kind, page_no, search),
             lambda: account_lists.read(decks, sub, tab.kind, page=page_no, search=search),
             fresh=fresh,
         )
+        if held_at is not None:
+            got = {**got, **held_at}
         if tab.kind == "custom_cards":  # the rows' pictures, served by custom_pictures
             custom_pictures.remember(sub, got["items"])
         return got
@@ -2060,6 +2056,9 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             if wants_json(request):
                 return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
             return problem(request, exc, sub, sid, tab)
+        held = ""
+        if got.get("held_at") is not None:  # the list as last read, dated, with Try again
+            held = held_html(got["refused"], got["held_at"], "this list", same_url(request))
         if wants_json(request) and tab.slug in ("defaults", "custom"):
             # Load more with scripts: the next page's rows, appended in place (static/lists.js)
             if tab.slug == "defaults":
@@ -2085,7 +2084,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if box.get("box") in ("tpl-deck", "cc-add"):  # the deck list, for the box drawn open without scripts
             box["decks"] = await decks_or_none(sub)
         body = page_body(
-            tab, got, _csrf(s, sid) or "", box, search, sub, top_notice(q, sub, _csrf(s, sid) or "")
+            tab, got, _csrf(s, sid) or "", box, search, sub, held + top_notice(q, sub, _csrf(s, sid) or "")
         )
         return respond(body, sub, sid, tab=tab)
 

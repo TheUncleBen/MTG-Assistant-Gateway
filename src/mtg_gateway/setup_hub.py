@@ -686,6 +686,8 @@ MD_LEAD = "These steps connect your AI assistant to this site. You need the acco
 PURPOSE = (
     "Connect Claude, ChatGPT or Codex to this gateway, add the assistant skill, or install the Android app."
 )
+# inside the Android app: no install-the-app line (audit D15)
+PURPOSE_APP = "Connect Claude, ChatGPT or Codex to this gateway, or add the assistant skill."
 PICK = "Which app will you use?"
 
 
@@ -902,8 +904,8 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
         md_shown = f"{e(s.public_url)}/<wbr>install.md" + (f"?for={client}" if client else "")
         intro = (
             f"<div class='card'><p>{e(INTRO, quote=False)}</p>"
-            "<p class='muted small'>Giving an AI agent this page's address and saying \"install this "
-            f"plugin\" is enough: the plain-text version is at <a class='mdaddr' href='{e(md_url)}'>"
+            "<p class='muted small'>Giving an AI agent this page's address and saying “install this "
+            f"plugin” is enough: the plain-text version is at <a class='mdaddr' href='{e(md_url)}'>"
             f"<code>{md_shown}</code></a>.</p></div>"
         )
         nav, drop = _picker(client, e)
@@ -922,7 +924,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
                 + (block_html(_after(ctx), "After connecting", ctx) if client in CLIENTS else "")
             )
         body = (
-            f"<div class='inst'>{ui.page_head('Guided setup', PURPOSE)}"
+            f"<div class='inst'>{ui.page_head('Guided setup', PURPOSE_APP if in_app() else PURPOSE)}"
             f"<div class='cols'><div>{drop}{nav}</div><div>{right}</div></div></div>"
         )
         # Signed in, the page gets the member's navigation (tab bar, rail, account menu).
