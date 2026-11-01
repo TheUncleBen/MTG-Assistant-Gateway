@@ -308,6 +308,9 @@ def test_a_contest_thread_enters_and_withdraws_a_deck(server: Server, width: int
                 "owner": {"id": ark._user_id("alice"), "username": "alice"},
             }
         ]
+        # the apply's write to Archidekt forgets what the gateway kept for the member
+        # (decks.short_reads); set straight in the fake here, so forget it the same way
+        server.app.state.gateway.decks.short_reads.clear()
         page.goto(f"{server.base}/forum/thread/700007", wait_until="networkidle")
         assert "Your entry: Sample Commander Deck" in strip.inner_text()
         assert (
