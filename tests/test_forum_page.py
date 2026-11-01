@@ -630,6 +630,14 @@ async def test_a_busy_read_answers_429_with_retry_after_not_400(
         assert r.status_code == 429, (path, r.status_code)
         assert r.headers["retry-after"] == "7" and r.headers["cache-control"] == "no-store"
         assert "Try again" in r.text, r.text[:400]
+    # a section's Load more (JSON) answers the same way, never 400 (confirmation pass, N4)
+    monkeypatch.setattr(forum, "threads", busy)
+    r = await member.http.get(SECTION, params={"page": "2"}, headers={"Accept": "application/json"})
+    assert r.status_code == 429, (r.status_code, r.text[:300])
+    assert r.headers["retry-after"] == "7" and r.headers["cache-control"] == "no-store"
+    got = r.json()
+    assert got["ok"] is False and got["error"] == "rate_limited" and got["retry_after"] == 7
+    assert "Try again" not in got["message"] and got["message"]
 
     async def down(*_a, **_k):
         raise DeckError("unavailable", "Archidekt could not be reached.")
