@@ -82,7 +82,9 @@ def test_deck_page_notes_after_instant_saves(
         browser, page, errors = _menu_page(p, server, width, height, scheme)
         if big:
             page.add_style_tag(content="html{font-size:200% !important}")
-        cost = page.locator(".banner span", has_text="Est cost:")
+        # the cost's part of the facts: "Est cost: " on a wide screen and "Est " on a phone, then
+        # the value (the redesigned banner, mockup screen 5)
+        cost = page.locator(".banner .row > span", has=page.locator("span.lg", has_text="Est cost:"))
         assert "–" in cost.inner_text() and "$0.00" not in cost.inner_text()
         box = page.locator("#quick")
         # a second copy in a singleton format: saved, and the note says which rule it breaks
