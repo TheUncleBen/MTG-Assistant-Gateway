@@ -594,7 +594,7 @@ adds the cards and checks it the same way. A waiting proposal expires after
 **Days a change waits for approval** on the Settings page (7 by default). The gateway deletes a deck only on its
 owner's own press: on a deletion proposal's review page, or with Delete deck
 on the deck's page. A proposal left in `applying` by a restart
-mid-apply is marked `failed` at startup, with the snapshot and deck ids in
+mid-apply is marked `failed` at startup, with the snapshot and deck IDs in
 its result; one somehow still `applying` six hours after it started is marked
 the same way by the regular clean-up.
 
@@ -900,7 +900,7 @@ Archidekt busy for everyone:
   waiting;
 - at most 120 started per 10 minutes (**Archidekt work per member per 10
   minutes** on the Settings page), refilled evenly. Deck reads, proposals, applies, links and
-  research tools (solo test, precon) given an Archidekt deck id or link all
+  research tools (solo test, precon) given an Archidekt deck ID or link all
   count. Past it the member gets
   `rate_limited` until enough of the allowance has refilled;
 - at most five failed Archidekt link attempts (wrong username or password)

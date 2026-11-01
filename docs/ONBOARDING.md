@@ -178,7 +178,7 @@ so:
      value, no more than 4 copies a row, never a change to which cards are
      the commanders or to the categories of a row in the commander zone, never fewer copies of a card that has a
      row in the commander zone and another row, both in the deck or both in the maybeboard or sideboard, and private
-     copies of a deck) or Full auto (shown as "Apply deck and binder changes without asking": the rest too, except a restore, a
+     copies of a deck) or Full auto (shown as "Apply changes without asking": the rest too, except a restore, a
      commander or companion change, a new deck, an edit of more than 20 rows (by default), making a deck public or unlisted, a category change that touches the commander or which cards count in the deck, and any edit of a description that has formatting,
      such as bold text, links or pictures, which still wait for your press; so
      does a held change, a change waiting for another change first, one
