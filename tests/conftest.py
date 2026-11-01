@@ -582,6 +582,10 @@ if BrowserType is not None and not ONLINE:
         if self.name == "chromium":
             rules = "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"
             kwargs["args"] = [*(kwargs.get("args") or []), "--no-proxy-server", rules]
+            # A machine whose network goes through a proxy anyway (a sandbox's own) resolves names
+            # there, past the rules above: every request not for this machine goes to a proxy
+            # nothing listens on, so it fails here whatever the machine's DNS or proxy does.
+            kwargs.setdefault("proxy", {"server": "http://127.0.0.1:9", "bypass": "localhost,127.0.0.1"})
         return _real_launch(self, **kwargs)
 
     BrowserType.launch = _offline_launch  # type: ignore[method-assign]
