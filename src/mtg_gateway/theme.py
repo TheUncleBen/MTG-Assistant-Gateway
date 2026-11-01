@@ -775,9 +775,12 @@ details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);pa
 .summary .add{color:var(--green-text);border-color:var(--green);background:var(--green-tint)}
 .summary .del{color:var(--red-text);border-color:var(--red);background:var(--red-tint)}
 .summary .chg{color:var(--orange-text);border-color:var(--orange);background:var(--orange-tint)}
+/* the labels share one column as wide as the longest (two words such as COMMANDER BRACKET stay on
+   one line beside the change), at least 6.8rem; each row takes it as a subgrid */
 ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--border);
-  border-radius:var(--radius-panel);overflow:hidden;container-type:inline-size}
-.changes li{display:grid;grid-template-columns:6.8rem minmax(0,1fr) auto;align-items:center;gap:.6rem;
+  border-radius:var(--radius-panel);overflow:hidden;container-type:inline-size;display:grid;
+  grid-template-columns:minmax(6.8rem,max-content) minmax(0,1fr) auto}
+.changes li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;gap:.6rem;
   padding:.5rem .75rem;border-bottom:1px solid var(--border-soft);border-left:5px solid var(--border)}
 .changes li:last-child{border-bottom:0}
 .changes .act{font-size:.78rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;
@@ -802,15 +805,19 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 .changes blockquote.said{margin:0;padding:.4rem .6rem;border-left:3px solid var(--border);
   background:var(--surface);color:var(--text);font-weight:400;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (max-width:420px){
-  .changes li{grid-template-columns:6.8rem minmax(0,1fr);gap:.35rem .6rem}
+  ul.changes{grid-template-columns:minmax(6.8rem,max-content) minmax(0,1fr)}
+  .changes li{gap:.35rem .6rem}
+  /* capitals spaced out make a two-word label (COMMANDER BRACKET) take half a phone's row */
+  .changes .act{text-transform:capitalize;letter-spacing:0}
   .changes .qty{grid-column:2;text-align:left}
   /* an add or remove count (+1, -1) is short: it stays on the card's line, one line a row */
-  .changes li.add,.changes li.del:not(.action){grid-template-columns:6.8rem minmax(0,1fr) auto}
+  .changes li.add,.changes li.del:not(.action){
+    grid-template-columns:minmax(6.8rem,max-content) minmax(0,1fr) auto}
   .changes li.add .qty,.changes li.del:not(.action) .qty{grid-column:auto;text-align:right}
 }
 /* a list too narrow for the label beside the change (a small phone, or large text): the label goes
    above it, and the change has the whole row */
-@container (max-width:20em){
+@container (max-width:22em){
   .changes li,.changes li.add,.changes li.del:not(.action){grid-template-columns:minmax(0,1fr) auto}
   /* capitals spaced out don't fit a word like DESCRIPTION across a 320 px phone at 200% text */
   .changes .act{grid-column:1/-1;justify-self:start;text-transform:capitalize;letter-spacing:0}
