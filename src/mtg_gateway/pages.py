@@ -1883,17 +1883,28 @@ async def details_html(
     ]
     if linked:
         archidekt += [row("profile"), row("email"), row("defaults"), _lists_fold(sub)]
-    n = len(assistants.connected(state.db, sub))
+    apps = assistants.connected(state.db, sub)
+    n = len(apps)
+    default = state.decks.mode_of(sub)
+    # the default for new assistants (each one can have its own, on the Assistants page), named as
+    # its own page names it, and saying which assistant does not follow it (independent review 2, M4)
+    own = [a for a in apps if a.mode is not None and a.mode != default]
+    differs = (
+        ""
+        if not own
+        else f" · {own[0].name} has its own"
+        if len(own) == 1
+        else f" · {len(own)} assistants have their own"
+    )
     assistant = [
         _yrow(
             "Assistants", "shield", href=assistants.PAGE, value=f"{n} connected" if n else "None connected"
         ),
-        # the default for new assistants (each one can have its own, on the Assistants page)
         _yrow(
-            "Approval mode",
+            "Default for new assistants",
             "shield",
             href=assistants.DEFAULT_PAGE,
-            value=modes.MODE_LABELS.get(state.decks.mode_of(sub), ""),
+            value=modes.MODE_LABELS.get(default, "") + differs,
         ),
     ]
     if state.summaries is not None:
