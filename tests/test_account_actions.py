@@ -968,7 +968,19 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
     ("propose_profile_change", {"field": "collection_public", "on": True}),
     ("propose_contest_entry", {"deck_id": "42", "contest": "881", "summary": "Sea monsters"}),
     ("propose_contest_entry", {"deck_id": "42", "contest": "880", "entry_action": "withdraw"}),
+    ("propose_collection_changes", {"clear": True}),
 ]
+
+
+def _other(args: dict) -> str:
+    return "clear" if args.get("clear") else "folder"
+
+
+def _binder_ready(ark: FakeArchidekt) -> None:
+    """One entry in alice's binder, so clearing it is a change."""
+    ark.next_coll_id += 1
+    row = ark._collection_row(ark.next_coll_id, ark.printing(9003), {"quantity": 1})
+    ark.collections.setdefault("alice", {})[row["id"]] = row
 
 
 def _contest_ready(ark: FakeArchidekt) -> None:
@@ -992,7 +1004,7 @@ def _help_ready(ark: FakeArchidekt, deck_id: int = 42) -> None:
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
     ids=[
-        f"{t}:{a.get('action', a.get('report_kind', a.get('field', a.get('entry_action', 'folder'))))}"
+        f"{t}:{a.get('action', a.get('report_kind', a.get('field', a.get('entry_action', _other(a)))))}"
         for t, a in ALL_ACCOUNT_ACTIONS
     ],
 )
@@ -1014,6 +1026,7 @@ async def test_only_the_review_page_marker_applies_an_account_action(
         ark.editors[42] = [_amy_row()]
     _help_ready(ark)
     _contest_ready(ark)
+    _binder_ready(ark)
     await _set_mode(h, "auto")
     p = structured(await account_call(h, token, tool, args))
     assert p["ok"] and p["kind"] == "action", p
@@ -1047,6 +1060,7 @@ async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> Non
     ark.editors[42] = [_amy_row()]
     _help_ready(ark)
     _contest_ready(ark)
+    _binder_ready(ark)
     seen = set()
     for tool, args in ALL_ACCOUNT_ACTIONS:
         if tool == "propose_collaborator" and args["action"] == "add":
