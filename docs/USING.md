@@ -406,9 +406,10 @@ settings change, restore or binder change is first saved as a
 **proposal**: the exact list of what would change. Apply it on the card
 in the chat or on the review page (deleting a deck, and any edit of a
 description or comment that has formatting: on the review page only), or
-pick an approval mode on your Account page (Manual, shown as "Ask me every
+pick an approval mode for each assistant under Account › Account details › **Assistants** (Manual, shown as "Ask me every
 time"; Semi-auto, shown as "Apply low-risk changes without asking", for small deck or binder edits and copies of a deck; Full auto, shown as "Apply changes without asking") and the
 assistant applies what that mode allows, with a snapshot first for a change to one of your decks. Adding, removing or swapping a deck's commander always waits for your press.
+Claude on the web, desktop and phone counts as one assistant, and so does ChatGPT; an app that runs on your own computer, such as Claude Code, is its own. Each one starts with your **Default for new assistants** until you change it; letting one apply changes without asking asks you to confirm first, and disconnecting it forgets its mode. When an assistant connects for the first time, Home says so once, with a button to its page.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**, or check several, on any decks, and press

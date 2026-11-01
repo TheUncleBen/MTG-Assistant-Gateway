@@ -657,7 +657,8 @@ def build(
         "failed or expired shows <strong>Held</strong>, and so does one that would replace a change "
         "already applied. The check never changes a deck, a snapshot or your undo "
         "history.</p>"
-        "<p>On your Account page you can pick an approval mode: Manual, shown as "
+        "<p>On your Account page (Account details › Assistants) you can pick an approval mode for "
+        "each assistant: Manual, shown as "
         f"<strong>{_esc(modes.MODE_LABELS['manual'])}</strong> (every change asks you), Semi-auto, shown "
         f"as <strong>{_esc(modes.MODE_LABELS['semi'])}</strong> (the assistant applies low-risk changes "
         "itself, such as a small edit or a private copy of a deck, and asks about the rest) or Full auto, "
@@ -994,7 +995,8 @@ def build(
         (
             "Account",
             "<code>/account</code>",
-            "link or unlink Archidekt, approval mode, Connected apps, theme, sign out (two buttons), "
+            "link or unlink Archidekt, your assistants and their approval modes, theme, sign out (two "
+            "buttons), "
             "Delete my data",
         ),
         (
@@ -1020,9 +1022,11 @@ def build(
         "comment that has formatting: on its review page only)</td>"
     )
     ref_approval = (
-        "<p>Your approval mode on <a href='/account/details'>Account details</a> says how much your "
-        "assistant may change on Archidekt without asking you first. It is your own setting and applies to "
-        "nobody else; the gateway may cap the choices.</p>"
+        "<p>The approval mode on <a href='/account/assistants'>Assistants</a> says how much each "
+        "assistant may change on Archidekt without asking you first. Claude on the web, desktop and phone "
+        "is one assistant, ChatGPT another, and an app on your own computer, such as Claude Code, its own; "
+        "each starts with your <strong>Default for new assistants</strong> until you give it its own. It "
+        "is your own setting and applies to nobody else; the gateway may cap the choices.</p>"
         "<div class='tbl'><table><thead><tr><th>Mode</th><th>Low-risk proposal</th><th>High-risk proposal"
         "</th><th>Account action or deck deletion</th></tr></thead><tbody>"
         f"<tr><td><strong>Manual</strong> (default): {_esc(modes.MODE_LABELS['manual'])}</td>"

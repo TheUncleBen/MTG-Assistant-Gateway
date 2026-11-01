@@ -688,6 +688,21 @@ connected, and it can only be set there, in their browser session (never
 over MCP or the API, so a tricked assistant cannot loosen it). Every change
 of mode is in the audit log as `approval_mode_set`.
 
+**One mode for each assistant.** Under Account › Account details ›
+**Assistants**, each connected assistant has its own mode. The member's own
+choice there, **Default for new assistants**, is the mode every assistant
+starts with and follows until the member gives it one of its own. Assistants
+are told apart by where they send the member back after sign-in, never by the
+name they give themselves: every app on claude.ai's hosts is one assistant,
+"Claude" (the web, desktop and phone apps, and Claude connecting again), every
+one on chatgpt.com's is "ChatGPT", and any other app, and one on localhost
+such as Claude Code, is its own. A proposal follows the mode of the assistant
+that made it (only that app may apply it). Loosening an assistant's mode asks
+the member to confirm in a box that names it; tightening takes effect at
+once, for its waiting changes too; disconnecting it forgets its mode. The two
+settings below cap every assistant alike. A change of an assistant's mode is
+in the audit log as `assistant_mode_set`.
+
 | Mode | What the assistant may apply with `apply_proposal` |
 |---|---|
 | `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
@@ -732,7 +747,7 @@ snapshot.
 Two settings are the operator's, on the Settings page:
 
 - **Approval mode for new members** (default `manual`) is the mode of a
-  member who has not chosen one. Leave it `manual` on a shared gateway.
+  member who has not chosen a default, and so of their assistants that follow it. Leave it `manual` on a shared gateway.
 - **Highest approval mode allowed** (default `auto`, no cap) is the highest
   mode members may choose; a stored choice above it is read as the cap, and the
   Account page shows the capped choices disabled.
