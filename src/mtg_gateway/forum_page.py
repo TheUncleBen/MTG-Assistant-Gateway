@@ -30,7 +30,7 @@ from . import actions, deck_extras, forum, ui
 from .busy import busy_body, busy_headers, busy_json_response, busy_plan, same_url
 from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
-from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect
+from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect_here
 from .theme import esc, icon
 
 PAGE = "/forum"
@@ -450,10 +450,12 @@ def toolbar_html() -> str:
     return f"<div class='rt' role='toolbar' aria-label='Text style'>{buttons}</div>"
 
 
-def reply_form_html(csrf: str, me_name: str) -> str:
+def reply_form_html(csrf: str, me_name: str, thread_id: str = "") -> str:
     public = REPLY_PUBLIC.format(name=me_name) if me_name else REPLY_PUBLIC_UNNAMED
+    # the reply typed is kept and put back (static/draft.js), per thread
     return (
-        f"<form class='newcomment' data-forum='1' data-me-name='{esc(me_name)}'>"
+        f"<form class='newcomment' data-forum='1' data-me-name='{esc(me_name)}' "
+        f"data-draft='reply:{esc(thread_id)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<label for='ctext'>Your reply</label>"
         + toolbar_html()
@@ -697,7 +699,7 @@ def thread_html(
     }
     data = _json_for_html(pre)  # every < escaped: no reply can open a tag inside the block
     if can_write:
-        form = reply_form_html(csrf, me_name)
+        form = reply_form_html(csrf, me_name, str(tid))
     elif closed:
         form = ""
     elif not linked:
@@ -811,16 +813,26 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             resp = respond(body, sub, sid, status=plan.status)
             resp.headers.update(busy_headers(plan))
             return resp
+        words = str(exc)
         if exc.kind == "not_found":
             status = 404
-        body = ui.page_head(TITLE, SUB) + ui.notice(str(exc), "error", role="alert") + open_form_html()
+            # Archidekt's generic "could not find that deck" is about a thread here (QG-19)
+            words = "That thread could not be found. It may have been deleted on Archidekt."
+        elif exc.kind == "invalid" and words.startswith("thread_id must be"):
+            words = OPEN_BAD  # the open form's own words, not the tool's field name
+        body = (
+            ui.page_head(TITLE, SUB)
+            + ui.notice(words, "error", role="alert")
+            + f"<p><a class='btn btn-primary' href='{PAGE}'>{icon('back')} Back to the forum</a></p>"
+            + open_form_html()
+        )
         return respond(body, sub, sid, status=status)
 
     @server.custom_route(PAGE, methods=["GET"], include_in_schema=False)
     async def forum_home(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         try:
             # kept briefly per member, forgotten by any write they send (decks.short_reads)
             got = await decks.short_reads.get(sub, ("forum",), lambda: forum.sections(decks, sub))
@@ -835,7 +847,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The little form: a thread's link or number goes to its page."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         raw = (request.query_params.get("thread") or "").strip()[:200]
         try:
             tid = forum._thread_id(raw)
@@ -851,7 +863,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = str(request.path_params["thread_id"])[:200]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         # the old addresses of the thread's boxes (/forum/thread/<n>/enter and so on): the thread
         # page with that box drawn open, so the strip's buttons work without scripts
         head, _slash, tail = raw.rpartition("/")
@@ -934,7 +946,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = str(request.path_params["thread_id"])[:200]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         try:
             tid = forum._thread_id(raw)
         except DeckError as exc:
@@ -1036,7 +1048,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         section = str(request.path_params["section"])[:100]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(section_href(group, section))
+            return login_redirect_here(request, section_href(group, section))
         q = request.query_params
         order = q.get("order") if q.get("order") in forum.ORDERS else "recent"
         search = (q.get("q") or "").strip()[:100]

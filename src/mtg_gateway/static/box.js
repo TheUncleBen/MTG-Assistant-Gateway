@@ -10,7 +10,7 @@
    Two ways to a box:
    - MtgBox.open({title, body, actions, wide, label, returnFocus, onClose}) builds one from nodes
      (the menus' boxes: Rename, Move, Delete, Export…). Returns the box: {panel, body, acts,
-     close(), lock(on), note(text, error), busy(on), setTitle(t), setBody(node), setActions(nodes),
+     close(), lock(on), note(text, error, actions), busy(on), setTitle(t), setBody(node), setActions(nodes),
      focusFirst()}. MtgBox.button(text, cls, onClick, {icon, cancel}) makes its buttons;
      MtgBox.confirm({title, text, ok, danger, onOk}) is the short "are you sure" box.
    - A box the page already holds (ui.box in ui.py: a hidden .ui-box with the dialog's markup)
@@ -158,9 +158,11 @@
     b.locked = false;
     b.close = function () { closeBox(true); };
     b.lock = function (on) { b.locked = !!on; panel.setAttribute("data-locked", on ? "true" : "false"); };
-    b.note = function (text, error) {
+    // actions: buttons that can help (Sign in when signed out, static/fetchjson.js), after the text
+    b.note = function (text, error, actions) {
       note.hidden = !text;
       note.textContent = text || "";
+      (actions || []).forEach(function (a) { a.className = "btn small"; note.appendChild(document.createTextNode(" ")); note.appendChild(a); });
       note.className = "notice boxnote" + (error ? " error" : " ok");
     };
     b.busy = function (on) {

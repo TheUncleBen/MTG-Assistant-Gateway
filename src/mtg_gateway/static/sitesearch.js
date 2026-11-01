@@ -35,4 +35,47 @@
   input.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && isOpen() && !input.value) { e.preventDefault(); close(true); }
   });
+
+  // -- desktop shortcuts (QOL-18, 0.7.46 audit QG-15): / or Ctrl+K (Cmd+K) focuses the search,
+  // ? lists the shortcuts; none fires while typing or while a box or menu is open
+  function typing(t) {
+    if (!t || !t.tagName) return false;
+    var tag = t.tagName.toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+  }
+  function layerOpen() {
+    return !!document.querySelector(".mtgbox[role=dialog]:not([hidden]), .ctxmenu[role=menu], dialog[open]");
+  }
+  function focusSearch() {
+    if (form.offsetParent !== null) { input.focus(); input.select(); return; }
+    open();
+  }
+  function shortcuts() {
+    var Box = window.MtgBox;
+    if (!Box) return;
+    var rows = [
+      ["/", "Search cards and decks (Ctrl+K too)"],
+      ["Esc", "Close the open menu or box"],
+      ["Enter", "Open the highlighted suggestion, or the card you typed"],
+      ["Shift+F10", "Open a card's menu on a deck page (the Menu key too)"],
+      ["Ctrl+Z, Ctrl+Shift+Z", "Undo and redo a deck change on a deck page"],
+      ["?", "This list"]
+    ];
+    var dl = document.createElement("dl");
+    dl.className = "keys";
+    rows.forEach(function (r) {
+      var dt = document.createElement("dt"), kbd = document.createElement("kbd"), dd = document.createElement("dd");
+      kbd.textContent = r[0]; dt.appendChild(kbd); dd.textContent = r[1];
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+    Box.open({ title: "Keyboard shortcuts", body: dl, actions: [Box.button("Close", "btn", null, { cancel: true })], returnFocus: document.activeElement });
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.defaultPrevented || e.altKey || typing(e.target) || layerOpen()) return;
+    var k = e.key;
+    if ((k === "k" || k === "K") && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); focusSearch(); return; }
+    if (e.ctrlKey || e.metaKey) return;
+    if (k === "/") { e.preventDefault(); focusSearch(); return; }
+    if (k === "?") { e.preventDefault(); shortcuts(); }
+  });
 })();

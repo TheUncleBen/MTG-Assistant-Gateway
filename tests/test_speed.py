@@ -253,11 +253,16 @@ async def test_collection_first_page_is_cached_until_a_write(stack: Stack) -> No
         )
         assert r.status_code == 303, r.text
         after_write = _collection_reads(stack)
+        # the Binder opens on the sort it was left on (the Set release pick above is remembered on
+        # the account), and a sort other than Added reads the whole-count page beside its own:
+        # both dropped by the write, so two reads, and nothing more until the next write
         r = await b.http.get("/collection", headers=NAV)
         assert "Sol Ring" in r.text and "id='col-count' aria-live='polite'>1 entry<" in r.text
-        assert _collection_reads(stack) == after_write + 1  # dropped by the write, read once more
+        assert "<option value='edition' selected>" in r.text
+        assert _collection_reads(stack) == after_write + 2
         assert (await b.http.get("/collection", headers=NAV)).status_code == 200
-        assert _collection_reads(stack) == after_write + 1
+        assert (await b.http.get("/collection?sort=added", headers=NAV)).status_code == 200
+        assert _collection_reads(stack) == after_write + 2
     finally:
         await b.aclose()
 
