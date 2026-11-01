@@ -30,7 +30,7 @@ from . import actions, deck_extras, forum, ui
 from .busy import busy_body, busy_headers, busy_json_response, busy_plan, same_url
 from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
-from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect
+from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect_here
 from .theme import esc, icon
 
 PAGE = "/forum"
@@ -820,7 +820,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def forum_home(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         try:
             # kept briefly per member, forgotten by any write they send (decks.short_reads)
             got = await decks.short_reads.get(sub, ("forum",), lambda: forum.sections(decks, sub))
@@ -835,7 +835,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The little form: a thread's link or number goes to its page."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         raw = (request.query_params.get("thread") or "").strip()[:200]
         try:
             tid = forum._thread_id(raw)
@@ -851,7 +851,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = str(request.path_params["thread_id"])[:200]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         # the old addresses of the thread's boxes (/forum/thread/<n>/enter and so on): the thread
         # page with that box drawn open, so the strip's buttons work without scripts
         head, _slash, tail = raw.rpartition("/")
@@ -934,7 +934,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         raw = str(request.path_params["thread_id"])[:200]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(PAGE)
+            return login_redirect_here(request, PAGE)
         try:
             tid = forum._thread_id(raw)
         except DeckError as exc:
@@ -1036,7 +1036,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         section = str(request.path_params["section"])[:100]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(section_href(group, section))
+            return login_redirect_here(request, section_href(group, section))
         q = request.query_params
         order = q.get("order") if q.get("order") in forum.ORDERS else "recent"
         search = (q.get("q") or "").strip()[:100]

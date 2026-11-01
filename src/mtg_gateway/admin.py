@@ -32,7 +32,7 @@ from .pages import (
     browser_session,
     csrf_form_ok,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .theme import display_name, icon, plural, render
@@ -141,7 +141,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 return JSONResponse(
                     {"ok": False, "error": "unauthenticated", "login": "/login?next=/admin"}, 401
                 )
-            return login_redirect(request.url.path)
+            return login_redirect_here(request)
         if not is_admin(state, sub):
             return not_found(api)
         if write and api:

@@ -29,7 +29,7 @@ from .archidekt import FORMAT_NAMES, Deck, DeckCard, format_label
 from .busy import busy_response
 from .deckpage import deck_title, folder_options_html
 from .decks import DeckError, current_client, split_label
-from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect, read_limited
+from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect_here, read_limited
 from .theme import esc, icon
 
 EXTRA_BOXES = (
@@ -1053,7 +1053,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def member(request: Request, deck_id: str) -> tuple[str, str | None, dict[str, str]] | Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}")
+            return login_redirect_here(request, f"/decks/{deck_id}")
         data = await form(request, limit=64_000)
         if not check_csrf(sid, data):
             return expired(request, sub, sid)
@@ -1069,7 +1069,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 deck_id = request.path_params["deck_id"]
                 sub, sid = browser_session(state, request)
                 if not sub:
-                    return login_redirect(f"/decks/{deck_id}/{name}")
+                    return login_redirect_here(request, f"/decks/{deck_id}/{name}")
                 values: dict[str, str] = {}
                 templates = None
                 color_tags = None
@@ -1118,7 +1118,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"/decks/{deck_id}/report-to-archidekt")
+            return login_redirect_here(request, f"/decks/{deck_id}/report-to-archidekt")
         card = (request.query_params.get("card") or "")[:200]
         return await h.deck_page_response(
             request, sub, sid, deck_id, box="reportcard" if card else "report", box_values={"card": card}

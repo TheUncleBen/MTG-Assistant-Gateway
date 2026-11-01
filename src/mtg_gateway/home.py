@@ -25,7 +25,7 @@ from .companion import DECK_CSP
 from .companion_decks import NEW_DECK_CSS, NEW_DECK_SCRIPTS, new_deck_box_html
 from .deckpage import covers_for, deck_list_held_html, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError, is_busy
-from .pages import _csrf, browser_session, login_redirect
+from .pages import _csrf, browser_session, login_redirect_here
 from .theme import SPINNER, icon, render
 from .watchlist_page import due_line
 
@@ -318,7 +318,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
     async def index(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if sub is None:
-            return login_redirect("/")
+            return login_redirect_here(request, "/")
         # Try again on the notice that the deck list couldn't be read: read it again
         if request.query_params.get("reread"):
             if prefs.from_this_site(request):  # a link on another site only shows the page

@@ -40,7 +40,7 @@ from .pages import (
     _csrf,
     browser_session,
     limited_form,
-    login_redirect,
+    login_redirect_here,
     read_limited,
 )
 from .theme import esc, icon
@@ -1808,7 +1808,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The old My lists address: Binder › Lists now."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect(HUB)
+            return login_redirect_here(request, HUB)
         return RedirectResponse(HUB, status_code=302)
 
     @server.custom_route(HUB, methods=["GET"], include_in_schema=False)
@@ -1820,7 +1820,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
 
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(HUB)
+            return login_redirect_here(request, HUB)
         if reloading(("lists-hub", sub)):  # a reload or the app's pull: the counts are read again
             account_lists.read_counts_again(sub)
         prices_svc = getattr(state, "prices", None)
@@ -1896,7 +1896,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def tab_page(request: Request, tab: Tab) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"{PAGE}/{tab.slug}")
+            return login_redirect_here(request, f"{PAGE}/{tab.slug}")
         q = request.query_params
         search, page_no = q_of(q), page_of(q)
         # an address that opens a box (edit, new, delete...) reads the list as it is now
@@ -2252,7 +2252,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return RedirectResponse(f"{PAGE}/templates", status_code=302)
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"{PAGE}/{tab.slug}")
+            return login_redirect_here(request, f"{PAGE}/{tab.slug}")
         raw = await read_limited(request, 64_000)
         fields = parse_qs((raw or b"").decode("utf-8", "replace"), keep_blank_values=True)
         data = {k: v[0] for k, v in fields.items()}
@@ -2325,7 +2325,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         tab = BY_SLUG["custom"]
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(f"{PAGE}/custom")
+            return login_redirect_here(request, f"{PAGE}/custom")
         posted = await limited_form(request, PICTURE_BODY_LIMIT, max_files=1, max_fields=20)
         if posted is TOO_BIG:
             exc = DeckError(

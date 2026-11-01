@@ -49,7 +49,7 @@ from .pages import (
     _csrf,
     _lists_before,
     browser_session,
-    login_redirect,
+    login_redirect_here,
 )
 from .report_view import (
     REPORT_CSS,
@@ -110,7 +110,7 @@ def add_history_routes(
         Proposals are on the Proposals page."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         query = read_query(request.query_params)
         if query["open"].startswith("r-"):  # a test's one home is its report page (owner decision C7)
             box = "?box=delete" if request.query_params.get("box") == "delete" else ""
@@ -387,7 +387,7 @@ def add_history_routes(
     async def restore(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         data = await form(request)
         if not check_csrf(sid, data):
             return page(
@@ -427,7 +427,7 @@ def add_history_routes(
         details = "/history" + query_string({"open": f"s-{snap_id}"})
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(details)
+            return login_redirect_here(request, details)
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
@@ -477,7 +477,7 @@ def add_history_routes(
         the report's page. The member's own only (any of theirs, whichever app ran it)."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
@@ -494,7 +494,7 @@ def add_history_routes(
         or it holds the record of a backup copy the gateway may still delete (Database.snapshot_held)."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
@@ -570,7 +570,7 @@ def add_history_routes(
         the validation verdict and the deck statistics; the service's raw text folded away."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         rid = request.path_params["rid"]
         r = _report_or_404(sub, rid)
         if r is None:
@@ -749,7 +749,7 @@ def add_history_routes(
         sub, sid = browser_session(state, request)
         rid = request.path_params["rid"]
         if not sub:
-            return login_redirect(f"/history/reports/{rid}")
+            return login_redirect_here(request, f"/history/reports/{rid}")
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
@@ -795,7 +795,7 @@ def add_history_routes(
         sub, sid = browser_session(state, request)
         rid = request.path_params["rid"]
         if not sub:
-            return login_redirect(f"/history/reports/{rid}/head-to-head")
+            return login_redirect_here(request, f"/history/reports/{rid}/head-to-head")
         pair = reports.pair_of(sub, rid)
         sides = [_report_or_404(sub, x) for x in pair] if pair else []
         if not pair or any(x is None for x in sides):
@@ -823,7 +823,7 @@ def add_history_routes(
         page. ``job`` takes the stored-callback and returns the run."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(back[0])
+            return login_redirect_here(request, back[0])
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
@@ -955,7 +955,7 @@ def add_history_routes(
         ``?remove=`` a card's confirm open, ``?models=`` the notice after a Remove."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(card_models_view.PAGE)
+            return login_redirect_here(request, card_models_view.PAGE)
         if not reports.models.available:
             return Response(status_code=404)
         qp = request.query_params
@@ -988,7 +988,7 @@ def add_history_routes(
         the page the box was opened from (one of the member's own pages) with the notice."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect(card_models_view.PAGE)
+            return login_redirect_here(request, card_models_view.PAGE)
         if not reports.models.available:
             return Response(status_code=404)
         data = await form(request)
@@ -1021,7 +1021,7 @@ def add_history_routes(
         sub, sid = browser_session(state, request)
         rid = request.path_params["rid"]
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         # nothing to remove while kept models are switched off (card_models.SWITCHED_ON)
         if not reports.models.available:
             return Response(status_code=404)
@@ -1051,7 +1051,7 @@ def add_history_routes(
         sub, sid = browser_session(state, request)
         rid = request.path_params["rid"]
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         data = await form(request)
         if not check_csrf(sid, data):
             return page(
@@ -1094,7 +1094,7 @@ def add_history_routes(
     async def report_export_md(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         r = _report_or_404(sub, request.path_params["rid"])
         if r is None:
             return _not_found(sub, _sid)
@@ -1106,7 +1106,7 @@ def add_history_routes(
         """The report as one HTML file: inline styles and SVG, no scripts, nothing fetched."""
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         r = _report_or_404(sub, request.path_params["rid"])
         if r is None:
             return _not_found(sub, _sid)
@@ -1124,7 +1124,7 @@ def add_history_routes(
     async def activity(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/activity")
+            return login_redirect_here(request, "/activity")
         body = activity_view.member_body(state, sub, request.query_params)
         return page(
             "My activity",

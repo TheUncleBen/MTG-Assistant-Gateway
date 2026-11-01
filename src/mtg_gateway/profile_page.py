@@ -34,7 +34,7 @@ from .pages import (
     apply_own_press,
     browser_session,
     limited_form,
-    login_redirect,
+    login_redirect_here,
     read_limited,
     section_href,
 )
@@ -716,7 +716,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def profile_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/account")
+            return login_redirect_here(request, "/account")
         raw = await read_limited(request, 16_384)
         fields = parse_qs((raw or b"").decode("utf-8", "replace"), keep_blank_values=True)
         data = {k: v[0] for k, v in fields.items()}
@@ -782,7 +782,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sends it (profile.set_avatar). The page's own route: never an assistant."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/account")
+            return login_redirect_here(request, "/account")
         posted = await limited_form(request, PICTURE_BODY_LIMIT, max_files=1, max_fields=10)
         too_big = posted is TOO_BIG
         data: dict[str, str] = {}
@@ -839,7 +839,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The list: as a box on the page with scripts (JSON), as a small page without them."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/notifications")
+            return login_redirect_here(request, "/notifications")
         is_linked = linked(sub)
         got: dict[str, Any] = {"notifications": [], "unseen": 0}
         error = ""

@@ -54,7 +54,7 @@ from .pages import (
     browser_session,
     csrf_form_ok,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     press_stamp,
     read_limited,
 )
@@ -2437,7 +2437,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def collection_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         qp = request.query_params
         lq = listing_query(qp)
         view, remember = prefs.view_choice(state.db, sub, request, "collection", ("grid", "list"), "grid")
@@ -2685,7 +2685,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         """The page's own forms (no script needed): add by name, one more, one fewer, remove."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         data = await form(request)
         back = _safe_next(data.get("next") or "/collection")
         if not back.startswith("/collection"):
@@ -2789,7 +2789,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def export_csv(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         try:
             text = await service.export_csv(sub)
         except CollectionError as exc:
