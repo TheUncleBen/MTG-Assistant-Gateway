@@ -472,7 +472,10 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
                 description="The watchlist list (group) to put the card in; made when new. Empty: no list."
             ),
         ] = None,
-        clear_alerts: Annotated[bool, Field(description="Also turn off alerts not named.")] = False,
+        clear_alerts: Annotated[
+            bool,
+            Field(description="Turn off alerts not named; a new watch gets none."),
+        ] = False,
     ) -> dict[str, object]:
         sub = _sub()
         try:

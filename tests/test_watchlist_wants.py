@@ -459,6 +459,30 @@ async def test_the_assistant_watches_into_a_list_with_a_drop_alert(stack: Stack,
     assert "alert_drop" in schema and "list_name" in schema
 
 
+async def test_clear_alerts_on_a_new_watch_means_no_alerts(stack: Stack, monkeypatch) -> None:
+    """Confirmation pass, N2: ``watch_card(clear_alerts=true)`` naming no alert turned every
+    alert off on a card already watched but was ignored on a new watch, which still got the
+    member's default 10% alert. The same call now means the same thing both times: no alerts."""
+    Clock(monkeypatch)
+    h = stack.h
+    await _browser(stack, link=True)
+    token = await mcp_token(h)
+    fresh = structured(await call(h, token, "watch_card", {"name": "Sol Ring", "clear_alerts": True}))
+    assert fresh["ok"] and fresh["watch"]["created"] is True, fresh
+    assert fresh["watch"]["alerts"] == {}, fresh["watch"]
+    # the default still applies to a new watch that does not ask for none
+    other = structured(await call(h, token, "watch_card", {"name": "Sol Talisman"}))
+    assert other["watch"]["alerts"] == {"drop": 10.0}, other["watch"]
+    # and clear_alerts with one alert named keeps that one alone, new or not
+    one = structured(
+        await call(h, token, "watch_card", {"name": "Sol Talisman", "alert_below": 2, "clear_alerts": True})
+    )
+    assert one["watch"]["created"] is False and one["watch"]["alerts"] == {"below": 2.0}, one["watch"]
+    tools = (await h.mcp(token, "tools/list")).json()["result"]["tools"]
+    field = next(t for t in tools if t["name"] == "watch_card")["inputSchema"]["properties"]["clear_alerts"]
+    assert field["description"] == "Turn off alerts not named; a new watch gets none."
+
+
 async def test_a_call_on_a_watched_card_that_names_no_alert_keeps_its_alerts(
     stack: Stack, monkeypatch
 ) -> None:
