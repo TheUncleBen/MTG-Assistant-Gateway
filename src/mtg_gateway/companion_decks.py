@@ -950,7 +950,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             deck_css=True,
             # social.js: the banner's like, bookmark and follow and the comments; export.js: the
             # Export box's Copy buttons
-            extra_scripts=("social.js", "deckstats.js", "printpick.js", "export.js", "deckextras.js"),
+            # undo-box.js: a category delete's Undo in its toast (deck.js) asks in the shared box
+            extra_scripts=(
+                "social.js",
+                "deckstats.js",
+                "printpick.js",
+                "export.js",
+                "deckextras.js",
+                "undo-box.js",
+            ),
             extra_css=deck_extras.CSS,
         )
         return prefs.remember_view(state.db, sub, resp, "deck", view, secure=secure) if remember else resp

@@ -699,7 +699,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
             stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"add_tags": ["gwtest"]}}
         )
     )
-    assert new["ok"] is False and "no deck tag called 'gwtest'" in new["message"], new
+    assert new["ok"] is False and "no deck tag called “gwtest”" in new["message"], new
     assert ark.tag_creates == 0
     # the next change names the cover it replaces and the tag it takes off
     other = ark.decks[42]["cards"][1]
@@ -716,7 +716,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
             stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"remove_tags": ["nope"]}}
         )
     )
-    assert off["ok"] is False and "no tag 'nope'" in off["message"]
+    assert off["ok"] is False and "no tag “nope”" in off["message"]
     bad = structured(
         await call(
             stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"folder": "Nowhere"}}
