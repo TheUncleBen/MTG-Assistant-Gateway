@@ -218,6 +218,47 @@ def result_words(r: dict[str, Any]) -> list[str]:
     return out
 
 
+def _binder_copy_event(x: dict[str, Any], csrf_input: str) -> dict[str, Any]:
+    """The copy of the Binder kept before it was cleared (collection_bulk.clear): Restore to my
+    binder (a background job on the Binder page that adds every entry back) and its CSV. Not a
+    deck: no Test, no deck restore."""
+    sid = _esc(x["snapshot_id"])
+    count = x.get("card_count")
+    line = f"{count:,} cards" if isinstance(count, int) else "Your whole binder"
+    line += " as your binder stood just before it was cleared"
+    restore_form = (
+        "<form method='post' action='/collection/restore' class='hy-restore'>"
+        + csrf_input
+        + f"<input type='hidden' name='snapshot_id' value='{sid}'>"
+        + "<button type='submit' class='btn-plain' data-busy-label='Starting…'>Restore to my binder</button>"
+        "</form>"
+    )
+    csv_link = ui.button_link("Download CSV", f"/collection/snapshots/{sid}.csv", icon_name="download")
+    words = (
+        "<p>Restore to my binder adds every card in this copy back to your Archidekt binder, with its "
+        "finish, condition, language, tags and price paid. It runs on the Binder page, where you can "
+        "follow it. Cards already in your binder are added to, not replaced. The CSV is the same "
+        "list, ready for Archidekt’s own import.</p>"
+    )
+    review = f"/proposals/{x['proposal_id']}" if x.get("proposal_id") else None
+    link = "<p>" + ui.cap_link("The clear it was kept before", review) + "</p>" if review else ""
+    return {
+        "key": f"s-{x['snapshot_id']}",
+        "ts": int(x.get("taken_at") or 0),
+        "kind": "snapshot",
+        "deck_id": BINDER_ID,
+        "deck_name": x.get("deck_name") or "Your binder",
+        "line": _esc(line),
+        "review": review,
+        "backup": None,
+        "app": None,
+        "who": False,
+        "action": restore_form,
+        "details": link + words,
+        "panel_actions": [restore_form, csv_link],
+    }
+
+
 def build_events(
     restores: list[dict[str, Any]],
     snapshots: list[dict[str, Any]],
@@ -256,6 +297,9 @@ def build_events(
             }
         )
     for x in snapshots:
+        if str(x.get("deck_id") or "") == BINDER_ID:
+            events.append(_binder_copy_event(x, csrf_input))
+            continue
         # deck_gone / backup_gone: what the member's Archidekt deck list says (decks.mark_gone)
         bits: list[str] = []
         count = x.get("card_count")
@@ -440,7 +484,10 @@ COLS = ("minmax(0,1fr) auto",) * 3
 
 
 def deck_href(deck_id: Any) -> str:
-    """Where an entry's deck name leads: the deck, or My lists for a change to the member's lists."""
+    """Where an entry's deck name leads: the deck, My lists for a change to the member's lists, the
+    Binder for a change to it (a clear, a copy kept before one)."""
+    if str(deck_id) == BINDER_ID:
+        return "/collection"
     return "/lists" if str(deck_id) == LISTS_ID else f"/decks/{_esc(str(deck_id))}"
 
 
@@ -590,7 +637,7 @@ def details_panel(
         + ui.meta(
             [
                 (
-                    "Lists" if str(e["deck_id"]) == LISTS_ID else "Deck",
+                    {LISTS_ID: "Lists", BINDER_ID: "Binder"}.get(str(e["deck_id"]), "Deck"),
                     f"<a href='{deck_href(e['deck_id'])}'>{_esc(e['deck_name'])}</a>",
                 )
                 if e.get("deck_id")
@@ -615,6 +662,7 @@ def details_panel(
 COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
 COLLECTION_LABEL = "Your binder"
 LISTS_ID = "lists"  # account_lists.LISTS_TARGET: changes to the member's lists file under it
+BINDER_ID = "collection"  # collection_bulk.TARGET: a clear and the copy kept before it
 LISTS_LABEL = "Your Archidekt lists"
 
 

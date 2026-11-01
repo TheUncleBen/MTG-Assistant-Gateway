@@ -178,7 +178,12 @@
     var tags = [];
     try { tags = JSON.parse(item.getAttribute("data-tags") || "[]"); } catch (err) { tags = []; }
     var tagbox = $(".tags", detailsBox), line = $(".tagline", detailsBox);
-    if (tagbox && line) {
+    var ticks = $$("input[data-tag]", detailsBox);
+    if (ticks.length) {
+      /* the member's binder tags as boxes: tick the row's own */
+      var low = tags.map(function (t) { return String(t).toLowerCase(); });
+      ticks.forEach(function (c) { c.checked = low.indexOf(c.getAttribute("data-tag").toLowerCase()) !== -1; });
+    } else if (tagbox && line) {
       line.textContent = "";
       tags.forEach(function (t) { var s = document.createElement("span"); s.className = "pill"; s.textContent = t; line.appendChild(s); });
       tagbox.hidden = tags.length === 0;
@@ -194,6 +199,7 @@
     item.setAttribute("data-cond", row.condition || "");
     item.setAttribute("data-lang", row.lang || "EN");
     item.setAttribute("data-paid", row.purchase_price == null ? "" : row.purchase_price);
+    if (row.tags) item.setAttribute("data-tags", JSON.stringify(row.tags));
     item.setAttribute("data-finish", row.finish === "foil" ? "Foil" : row.finish === "etched" ? "Etched" : "");
     var fin = FIN[row.finish] || "Normal", cond = row.condition || "", lang = row.lang || "EN";
     row.lang_name = LANG[lang] || lang;
@@ -246,6 +252,8 @@
         language: form.elements.language.value,
         purchase_price: form.elements.purchase_price.value
       };
+      var ticks = $$("input[data-tag]", form);
+      if (ticks.length) body.tags = ticks.filter(function (c) { return c.checked; }).map(function (c) { return c.getAttribute("data-tag"); });
       var name = nameOf(item);
       var btns = $$("button", detailsBox);
       btns.forEach(function (b) { b.disabled = true; });
@@ -319,6 +327,7 @@
     var params = new URLSearchParams(new FormData(listform));
     params.delete("offset");
     if (!params.get("q")) params.delete("q");
+    if (!params.get("tag")) params.delete("tag");
     /* the defaults stay out of the address, as the page's own links leave them */
     if (params.get("sort") !== "edition") { params.delete("sort"); params.delete("dir"); }
     else if (params.get("dir") === "desc") params.delete("dir");
@@ -377,6 +386,8 @@
     if (sortc) sortc.addEventListener("change", function () { var p = sortc.value.split(":"); go(p[0], p[1]); });
     if (sortf) sortf.addEventListener("change", function () { go(sortf.value, dirIn ? dirIn.value : "desc"); });
     $$("input[name=view]", listform).forEach(function (r) { r.addEventListener("change", submit); });
+    var tagf = $("#col-tag", listform);
+    if (tagf) tagf.addEventListener("change", submit);
   }
 
   /* -- an import in the background: its strip follows it, and the page shows the result -------- */
