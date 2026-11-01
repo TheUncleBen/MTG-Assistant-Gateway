@@ -129,9 +129,24 @@
     wrap.appendChild(signInLink());
     return wrap;
   }
+  // One press at a time (0.7.46 audit QG-13): the button is busy and disabled until ``work``
+  // (a promise, or a function returning one) settles; a press while busy does nothing. Returns
+  // the promise, or null when the button was already busy.
+  function press(button, work) {
+    if (!button) return typeof work === "function" ? work() : work;
+    if (button.getAttribute("aria-busy") === "true") return null;
+    button.setAttribute("aria-busy", "true");
+    var wasDisabled = button.disabled;
+    button.disabled = true;
+    var done = function () { button.removeAttribute("aria-busy"); button.disabled = wasDisabled; };
+    var p;
+    try { p = typeof work === "function" ? work() : work; } catch (e) { done(); throw e; }
+    return Promise.resolve(p).then(function (v) { done(); return v; }, function (e) { done(); throw e; });
+  }
   window.MtgFetch = {
     json: json, answer: answer, problem: problem, signedOut: signedOut, signInLink: signInLink, signInHref: signInHref,
     isSignedOut: isSignedOut, signedOutError: signedOutError, noConnectionError: noConnectionError,
-    NO_CONNECTION: NO_CONNECTION, SIGNED_OUT: SIGNED_OUT, UNREADABLE: UNREADABLE
+    NO_CONNECTION: NO_CONNECTION, SIGNED_OUT: SIGNED_OUT, UNREADABLE: UNREADABLE,
+    press: press
   };
 })();

@@ -310,7 +310,7 @@ async def test_apply_checked_opens_the_confirm_as_a_box_for_the_lists_script(sta
             "data-dwell='800' data-settle='300'>"
         ) in box
         assert "form='apply-f' data-guard aria-disabled='true'>" in box
-        assert "class='muted small guard-hint'>Apply unlocks a moment after this box opens" in box
+        assert "class='muted small guard-hint'>On a phone, tap once to unlock, then tap Apply." in box
         assert "name='shown' value='" in box and f"name='v_{a}' value='1'" in box
         assert f"name='picks' value='{a}'" in box and "name='back' value='/decks/42'" in box
         assert "name='action' value='apply' form='apply-f'" in box and ">Apply</button>" in box

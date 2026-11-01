@@ -837,6 +837,20 @@ details.raw{margin:.5rem 0 0}
   background:var(--orange-tint)}
 .apply h2{margin:0 0 .4rem;font-size:1.25rem;font-weight:900} .apply p{margin:0 0 .25rem}
 .apply .choice{margin-top:.9rem}
+/* on a phone Apply and Reject are a bar at the foot of the screen, above the tab bar, so they are
+   on the first screen whatever the proposal's length (0.7.46 audit QG-13); the page's last lines
+   can still scroll above it */
+@media (max-width:599.98px){
+  .apply form.guarded .choice{position:fixed;left:.5rem;right:.5rem;z-index:20;
+    bottom:calc(var(--tab-room,calc(max(56px,4rem) + env(safe-area-inset-bottom))) + .5rem);
+    margin:0;padding:.6rem .5rem;background:var(--surface);
+    border:1px solid var(--card-border);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
+  body:not(.has-tabbar) .apply form.guarded .choice{bottom:calc(.5rem + env(safe-area-inset-bottom))}
+  .apply form.guarded .choice .btn-plain{display:none}  /* Not now: the tab bar and Back lead out */
+  /* the page's last lines scroll above the bar */
+  main.wrap:has(.apply form.guarded){padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
+  .has-tabbar main.wrap:has(.apply form.guarded){
+    padding-bottom:calc(5.5rem + 9rem + env(safe-area-inset-bottom))} }
 /* Locked (until the click guard unlocks them), Apply and Reject keep labels that read: outlined in
    their colour, not faded. */
 .apply form.guarded button[data-guard]:disabled{opacity:1;background:transparent;

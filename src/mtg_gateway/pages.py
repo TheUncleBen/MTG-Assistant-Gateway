@@ -3505,13 +3505,12 @@ def _proposal_body(
             apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-primary")
         else:
             where = "your binder" if p.get("kind") == "collection" else "your deck"
+            # one line and a way to the longer story (0.7.46 audit QG-23): the Guide tells how
+            # the apply checks the deck, keeps a snapshot and reads the result back
             ask = (
                 "<div class='apply'><h3 class='ui-section'>Apply to Archidekt?</h3>"
-                f"<p>Applying writes these changes to {where} on Archidekt. "
-                "The gateway applies the changes, then reads the result back from "
-                "Archidekt. For a change to one of your decks, it first checks that the deck still matches "
-                "this proposal and keeps a snapshot of it from just before the edit. Nothing happens until "
-                "you tap Apply.</p>"
+                f"<p>Apply writes these changes to {where} on Archidekt, with a snapshot kept first so "
+                "Undo can put it back. <a href='/guide#how-approve'>How it works</a></p>"
             )
             apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-primary")
         if p.get("try_again"):  # Archidekt didn't answer the last apply; nothing changed
@@ -3860,10 +3859,7 @@ def _confirm_body(
 
 
 APPLY_BOX_NOTE = "A snapshot is kept first, so Undo can put the cards back."
-APPLY_BOX_GUARD_HINT = (
-    "Apply unlocks a moment after this box opens, once you move the pointer, touch the screen or press "
-    "a key here. On a phone, tap once to unlock, then tap Apply."
-)
+APPLY_BOX_GUARD_HINT = "On a phone, tap once to unlock, then tap Apply."
 
 
 def _apply_box_html(
