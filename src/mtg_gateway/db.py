@@ -1275,15 +1275,52 @@ class Database:
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
+        if threading.current_thread() is not threading.main_thread():
+            self._begin_off_loop()  # holds self._lock on return, the transaction begun
+        else:
+            self._lock.acquire()
             try:
-                yield self._conn
-            except Exception:
-                self._conn.execute("ROLLBACK")
+                self._conn.execute("BEGIN IMMEDIATE")
+            except BaseException:
+                self._lock.release()
                 raise
-            else:
-                self._conn.execute("COMMIT")
+        try:
+            yield self._conn
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+        finally:
+            self._lock.release()
+
+    def _begin_off_loop(self) -> None:
+        """BEGIN IMMEDIATE for a worker thread (a job run with asyncio.to_thread), returning with
+        self._lock held. While another connection holds the write lock, the thread waits for it
+        on a connection of its own with self._lock released (wait_write_free), so the event loop's
+        reads and writes on the shared connection are never held up behind that wait. It waits
+        BUSY_TIMEOUT_MS in all, as a write on the loop does, then fails the same way."""
+        deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+        while True:
+            self._lock.acquire()
+            try:
+                if self._conn.in_transaction:  # nested: let SQLite refuse it as it always has
+                    self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute("PRAGMA busy_timeout=0")
+                try:
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    return  # self._lock stays held for the transaction
+                except sqlite3.OperationalError as exc:
+                    left = deadline - time.monotonic()
+                    if "locked" not in str(exc) or left <= 0:
+                        raise
+                finally:
+                    self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            except BaseException:
+                self._lock.release()
+                raise
+            self._lock.release()
+            self.wait_write_free(left)
 
     def write_free(self) -> bool:
         """Whether a write could start now without waiting: nothing in this process is using the

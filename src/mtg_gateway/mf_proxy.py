@@ -22,7 +22,7 @@ from mcp import Client
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
-from . import deck_stats
+from . import dbwait, deck_stats
 from .decklist import front_faces
 from .decks import DeckError
 from .report_view import found_not_verified
@@ -712,6 +712,19 @@ class MysticForgeProxy:
         return name in ALLOWED_TOOLS or name in OWNED_ELSEWHERE
 
     async def call(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        *,
+        owner: str | None = None,
+        internal: bool = False,
+    ) -> types.CallToolResult:
+        try:
+            return await self._call_now(name, arguments, owner=owner, internal=internal)
+        finally:
+            await dbwait.settle()  # a background job's database work waits off the loop
+
+    async def _call_now(
         self,
         name: str,
         arguments: dict[str, Any] | None,
