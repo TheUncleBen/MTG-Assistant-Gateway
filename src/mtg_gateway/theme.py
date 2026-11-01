@@ -72,6 +72,12 @@ _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 # pages then use the phone layout at every width and drop the website footer.
 _app: ContextVar[bool] = ContextVar("mtg_app", default=False)
 APP_UA_MARK = "MTGAssistant/"
+
+# A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Card models, Forum)
+# as links and drops More ▾ once the bar is this wide (0.7.46 redesign, screen 1; a container
+# query in the bar's own em, so a narrower window or 200% text brings More ▾ back, with every page
+# still in it). None: More ▾ at every width, as before. Open for Ben.
+TOPBAR_FULL_FROM: str | None = "70em"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
 _app_version: ContextVar[str] = ContextVar("mtg_app_version", default="")
@@ -909,6 +915,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .topbar nav.site .navmore > summary.on{color:var(--orange)}
 .topbar nav.site .navmore > summary span{font-size:.8em}
 .topbar nav.site .navmore .menu{left:0;right:auto;min-width:14rem}
+/* the rail's pages as links of their own, from TOPBAR_FULL_FROM (the query below) */
+.topbar nav.site a.xtra{display:none}
 /* the count of proposals waiting (Assistant), in the bell's orange */
 .nb{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:9px;padding:0 5px;
   background:var(--orange);color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:1;
@@ -1090,7 +1098,7 @@ _MOBILE_RULES = """
   body{b} .topbar .wrap{padding:0 1rem;gap:.5rem;padding-left:max(1rem,env(safe-area-inset-left));
     padding-right:max(1rem,env(safe-area-inset-right))}
   body{b} .topbar .searchbtn{display:inline-flex}
-  body{b} .tabbar > a.railonly{display:none}
+  body{b} .tabbar > .railonly{display:none}
   body{b}.has-tabbar main.wrap{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
   body{b}.has-tabbar footer{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
   body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);position:fixed;
@@ -1120,12 +1128,13 @@ _MOBILE_RULES = """
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
-# under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
-# the account menu and loses its text links and its bell. The rail lists the tab bar's pages, then
-# Alerts (the bell) and More, whose sheet opens beside the rail at its foot; its 64 px tabs give
-# up a little height (down to 52 px) when the screen is too short for all of them, and on a
-# shorter one still it scrolls. The body is padded by the rail's width so
-# every page re-centres in the remaining space.
+# under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand, the
+# search box and the account menu and loses its text links and its bell. The rail lists the tab
+# bar's four places, a thin line, More's pages (rail_extra) and Alerts (the bell) at its foot;
+# the phone's More is hidden, since nothing is left for it. Nine tabs fit a 700 px tall open Fold
+# at their 64 px; the tabs give up a little height (down to 52 px) when the screen is shorter
+# than all of them, and on a shorter one still the rail scrolls. The body is padded by the rail's
+# width so every page re-centres in the remaining space.
 _RAIL_RULES = """
   body{b} .topbar nav.site{display:none}
   body{b} .topbar a.bell{display:none}
@@ -1142,28 +1151,18 @@ _RAIL_RULES = """
     text-decoration:none;
     font-weight:700;font-size:var(--tab-label);-webkit-tap-highlight-color:transparent}
   body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
-  body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    padding:0 2px}
+  body{b} .tabbar > a > .lbl{max-width:100%;max-height:2.2em;overflow:hidden;text-overflow:ellipsis;
+    white-space:normal;line-height:1.1;text-align:center;padding:0 2px}  /* "Card models" takes two lines */
   body{b} .tabbar > a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
     margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
   body{b} .tabbar > a:hover::before,
   body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
   body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
-  body{b} .tabbar details.more{display:block}
-  body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:.3rem;height:64px;min-height:52px;color:var(--toolbar-text);font-weight:700;
-    font-size:var(--tab-label);-webkit-tap-highlight-color:transparent}
-  body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
-  body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
-    height:32px;margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
-  body{b} .tabbar details.more summary:hover::before,
-  body{b} .tabbar details.more[open] summary::before{background:rgba(127,127,127,.18)}
-  body{b} .tabbar details.more summary.on{color:var(--toolbar-active)}
-  body{b} .tabbar details.more summary.on::before{background:rgba(255,111,0,.22)}
-  /* More opens beside the rail, at its foot */
-  body{b} .tabbar details.more .menu.sheet{left:calc(80px + env(safe-area-inset-left) + 8px);transform:none;
-    top:auto;bottom:calc(.5rem + env(safe-area-inset-bottom));width:18rem}
+  body{b} .tabbar details.more{display:none}
+  /* the thin line between the four places and the rest; Alerts at the foot */
+  body{b} .tabbar > .rail-sep{display:block;height:1px;flex:none;margin:.4rem 20px;background:var(--border)}
+  body{b} .tabbar > a.foot{margin-top:auto}
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 CSS = CSS.replace(
@@ -1197,6 +1196,15 @@ _NAV_ROW_RULES = (
     "body:not(.app) .topbar .right{margin-left:auto;padding-left:0;min-height:50px;align-self:flex-end}"
 )
 CSS = CSS.replace("__NAVROW__", _NAV_ROW_RULES)
+# A computer's bar wide enough for every page (TOPBAR_FULL_FROM, screen 1 of the 0.7.46 redesign):
+# the rail's pages as links and no More ▾. The query is in the bar's own em, so 200% text or a
+# narrower window folds them back into More ▾.
+if TOPBAR_FULL_FROM:
+    CSS += (
+        f"@media (width >= 600px){{ @container topbar (width >= {TOPBAR_FULL_FROM}){{"
+        " body:not(.app) .topbar nav.site a.xtra{display:inline-flex}"
+        " body:not(.app) .topbar nav.site .navmore{display:none} } }\n"
+    )
 
 # Card size S / M / L (0.7.29): M is exactly the size each
 # page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
@@ -2433,7 +2441,7 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 
 # The site navigation (Ben, 2026-10-25): four places and More, the same on every screen. The top bar
 # on a computer, the bottom tab bar on a phone and the rail (an unfolded Fold, a tablet, the app from
-# 600 px) list these; the rail adds Forum and Alerts (the bell) before More. Assistant is the
+# 600 px) list these; the rail adds More's pages and Alerts (the bell) instead of More. Assistant is the
 # assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
 # the count of proposals waiting for the member. Binder is the member's cards, behind one switch too
 # (BINDER_PAGES): Cards (the Archidekt collection), Wants (the cards pinned on Archidekt) and
@@ -2465,16 +2473,25 @@ NAV_PLACE = {
 # The pages that light the picture (the Account place): the Account pages and the Archidekt lists
 # that live under Account (category templates, default categories, color tags, custom cards)
 ACCOUNT_PAGES = ("/account", "/account/details", "/lists")
-# The rail's extra places between the four and More (the phone bar keeps the bell in the top bar
-# and Forum under More): (href, label, icon, class)
-RAIL_EXTRA = (("/forum", "Forum", "comment", "railonly"),)
-# More, in groups. Account, Guide and Admin live on the Account page your picture opens; the
-# Archidekt lists live under Account; Watchlist lives in Binder.
+# More, in groups: the phone's sheet. Account, Guide and Admin live on the Account page your
+# picture opens; the Archidekt lists live under Account; Watchlist lives in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
     ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),
     ("Community", [("/forum", "Forum", "comment")]),
 ]
+# The rail without More (0.7.46 redesign, screen 1): an open Fold's rail has room for every page,
+# so More only hid them. The rail is the four places, a thin line, then More's pages in order of
+# use (Search stays in the top bar's box), and Alerts (the bell) at the foot, where the eye looks
+# for its badge. The mockup's rail also listed Watchlist and My lists, which 0.7.46 had already
+# given homes (Binder's switch and the Account page): the rail follows the code. Forum was on the
+# rail but not in the mockup: it closes the second group, as Community closes More. The phone
+# keeps its tab bar and More sheet. Each choice still open for Ben is one constant here.
+RAIL_PAGES = ("/scan", "/precons", "/history/models", "/forum")
+RAIL_ALERTS_AT_FOOT = True  # No: Alerts sits inside the second group, under Forum
+RAIL_GROUP_LINE = True  # the thin line between the four places and the rest
+# A computer's top bar lists the rail's pages too, and drops More ▾, once the bar is wide enough:
+# TOPBAR_FULL_FROM, beside the stylesheet above.
 
 
 def binder_pages() -> list[tuple[str, str, str]]:
@@ -2487,6 +2504,14 @@ def more_groups() -> list[tuple[str, list[tuple[str, str, str]]]]:
     (card_models.SWITCHED_ON)."""
     off = set() if card_models.SWITCHED_ON else {"/history/models"}
     return [(head, [x for x in links if x[0] not in off]) for head, links in MORE_GROUPS]
+
+
+def rail_extra() -> list[tuple[str, str, str]]:
+    """The rail's second group, and the computer's extra links: More's pages (as more_groups lists
+    them now, so a page switched off leaves both) in RAIL_PAGES order. Search is not among them:
+    the top bar's box is its place on the rail and on a computer."""
+    links = {href: (href, label, ic) for _g, group in more_groups() for href, label, ic in group}
+    return [links[href] for href in RAIL_PAGES if href in links]
 
 
 def hub_switch(label: str, items: list[tuple[str, str, str]], current: str, *, badge: int = 0) -> str:
@@ -2636,9 +2661,17 @@ def render(
             # The member's own picture (their provider's, else their initials: /account/avatar).
             "<img class='av' src='/account/avatar' alt='' width='28' height='28'></a>"
         )
+        # The rail's pages as links of their own (xtra: shown once the bar is TOPBAR_FULL_FROM wide,
+        # where More ▾ goes; the stylesheet decides, so a narrower window keeps More ▾)
+        extra_links = (
+            "".join(a(href, label).replace("<a ", "<a class='xtra' ", 1) for href, label, _ic in rail_extra())
+            if TOPBAR_FULL_FROM
+            else ""
+        )
         nav = (
             "<nav class='site' aria-label='Site'>"
             + "".join(a(href, label) for href, label, _ic in NAV_LINKS)
+            + extra_links
             + "<details class='dd navmore'><summary"
             + (" class='on'" if more_open else "")
             + ">More<span aria-hidden='true'>▾</span></summary>"
@@ -2685,17 +2718,19 @@ def render(
                 tab(href, label, ic, extra=badge(waiting, "waiting") if href == "/proposals" else "")
                 for href, label, ic in NAV_LINKS
             )
-            # Forum, then the bell, as rail places (railonly: the phone bar keeps the bell in the
-            # top bar and Forum under More)
-            + "".join(tab(href, label, ic, cls) for href, label, ic, cls in RAIL_EXTRA)
+            # The rail's second group after a thin line, then Alerts at the foot (railonly: the
+            # phone bar keeps the bell in the top bar and these pages in its More sheet)
+            + ("<span class='rail-sep railonly' aria-hidden='true'></span>" if RAIL_GROUP_LINE else "")
+            + "".join(tab(href, label, ic, "railonly") for href, label, ic in rail_extra())
             + tab(
                 "/notifications",
                 "Alerts",
                 "bell",
-                "railonly bell",
+                "railonly bell" + (" foot" if RAIL_ALERTS_AT_FOOT else ""),
                 "<span class='n' hidden aria-hidden='true'></span>",
                 " data-bell data-bell-label='Alerts'",
             )
+            # More: the phone's sheet (the rail lists its pages, so the rail hides it)
             + "<details class='dd more'><summary"
             + (" class='on'" if more_open else "")
             + f" aria-label='More sections'>{icon('more')}<span class='lbl'>More</span></summary>"

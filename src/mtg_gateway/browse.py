@@ -809,7 +809,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 head + precon_panel_html({}, pq, view=view, count="Decks") + problem(exc),
                 sub=sub,
                 sid=sid,
-                current="/search",
+                current="/precons",
                 body_class="precons",
             )
         groups = precon_groups(listing, pq)
@@ -820,7 +820,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             head + precon_panel_html(listing, pq, view=view, count=count) + body,
             sub=sub,
             sid=sid,
-            current="/search",
+            current="/precons",
             body_class="precons",
             scripts=("precons.js",),
         )

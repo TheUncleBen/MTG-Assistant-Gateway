@@ -9,6 +9,8 @@ from contextlib import contextmanager
 
 import pytest
 
+from mtg_gateway import theme as site_theme
+
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_suggest_browser import server as _server
@@ -156,8 +158,9 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         page.set_viewport_size({"width": 599, "height": 700})
         page.wait_for_timeout(50)
         phone = page.evaluate(GEOMETRY)
+    full = 4 + len(site_theme.rail_extra())  # a bar wide enough lists the rail's pages instead of More ▾
     for width, g in seen.items():
-        assert g["links"] == 5, (width, g)
+        assert g["links"] == (full if width >= 1000 else 5), (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
         assert g["last"] + 8 <= g["avatar"], (width, g)  # the last link ends before the account button
     assert phone["links"] == 0, phone  # the phone layout: links move to the tab bar
@@ -188,8 +191,9 @@ HOME_PLACE = """() => {
 )
 def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     """Home sits left of Decks in the top bar and the phone tab bar and above Decks in the rail,
-    never under More. Navigation round 2: the phone bar and the rail carry the four places (the
-    rail adds Alerts) and end with More, which holds Find and Your cards."""
+    never under More. Navigation round 2: the phone bar carries the four places and ends with
+    More, which holds Find, Your cards and Community; the rail (0.7.46 redesign, screen 1) carries
+    the four places, More's pages and Alerts, with no More."""
     width, height, touch, app = {
         "desktop": (1280, 800, False, False),
         "phone": (390, 844, True, False),
@@ -211,19 +215,28 @@ def test_home_is_never_under_more(chromium, server: Server, where: str) -> None:
     assert got["home"] and got["decks"], got
     assert not got["homeInMore"], got
     assert got["doc"] == got["win"], got  # no sideways scroll
-    if where.startswith("fold"):  # the rail: Home above Decks, the places, Alerts, then More
+    if where.startswith("fold"):  # the rail: Home above Decks, the places, More's pages, Alerts
         assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
         assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
-        # Forum sits on the rail before Alerts (decision C8)
-        assert got["tabs"] == ["/", "/decks", "/collection", "/proposals", "/forum", "/notifications"], got
-        assert got["moreShown"], got
+        # More's pages sit on the rail in order of use, Forum last of them, then Alerts (0.7.46)
+        assert got["tabs"] == [
+            "/",
+            "/decks",
+            "/collection",
+            "/proposals",
+            "/scan",
+            "/precons",
+            "/history/models",
+            "/forum",
+            "/notifications",
+        ], got
+        assert not got["moreShown"], got  # nothing is left for More
         assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
     else:  # a row: Home left of Decks
         assert got["home"]["x"] < got["decks"]["x"], got
         assert abs(got["home"]["y"] - got["decks"]["y"]) < 1, got
     if where.startswith("phone"):  # the bar: the four places and More
         assert got["tabs"] == ["/", "/decks", "/collection", "/proposals"], got
-    if where != "desktop":
         # Watchlist is in Binder and My lists under Account; Forum is in More's Community group (C8)
         more = ["/search", "/precons", "/scan", "/history/models", "/forum"]
         assert got["moreShown"] and got["moreItems"] == more, got
@@ -362,8 +375,12 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                         if g["links"] and g["contrast"] < 4.5:
                             problems.append(f"contrast {where}")
                         # a mouse from 600 px shows the four places and More ▾ (navigation
-                        # round 2); at the normal size on one row in the 50 px bar, as before
-                        want = 5
+                        # round 2), or, where the bar is wide enough for them, the rail's pages
+                        # instead of More ▾ (0.7.46 redesign, screen 1: from 1000 px at the
+                        # normal size, never at 200% text); at the normal size on one row in
+                        # the 50 px bar, as before
+                        full = 4 + len(site_theme.rail_extra())
+                        want = full if zoom == "none" and width >= 1000 else 5
                         if not touch and width >= 600 and g["links"] != want:
                             problems.append(f"links {where}")
                         if (

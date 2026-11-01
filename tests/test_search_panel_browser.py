@@ -403,8 +403,8 @@ def test_the_navigation_rail_reaches_1279_px_on_a_touch_screen(
         if expect == "phone":
             assert got["tabbar"] and got["more"] and not got["rail"], got
         elif expect == "rail":
-            # the rail ends with More (navigation round 2: Find and Your cards), as the phone bar
-            assert got["rail"] and got["more"] and got["links"] == 0 and got["search"], got
+            # the rail lists More's pages itself (0.7.46 redesign, screen 1), so it has no More
+            assert got["rail"] and not got["more"] and got["links"] == 0 and got["search"], got
         else:
             assert not got["tabbar"] and got["links"] > 0, got
             assert got["search"] == (width >= 900), got
