@@ -214,8 +214,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "test A/B: both decks played game for game under the same seeds, with per-metric deltas, "
             "confidence intervals and significance (decks of different sizes play their own games: unpaired "
             "true). Every tested comparison is stored as a report (report_id; an unpaired one as one per "
-            "deck, report_ids). Where the gateway runs Forge, simulate=true also starts both decks at one Forge "
-            "table (forge; forge=false leaves it out, forge=true starts it alone). Changes nothing on "
+            "deck, report_ids). Where the gateway runs Forge, simulate=true also starts both decks at one "
+            "Forge table (forge; forge=false leaves it out, forge=true starts it alone). Changes nothing on "
             "Archidekt. Its A/B is the like-for-like comparison of two decks; run_deck_report's Forge seats "
             "a deck against precons of its own bracket, and its compare_with does that for two."
         ),
