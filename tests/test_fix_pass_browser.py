@@ -564,8 +564,12 @@ def test_the_brand_is_whole_at_1280_px_with_every_link(server: Server, path: str
         page.goto(f"{server.base}{path}", wait_until="networkidle")
         got = page.evaluate(BRAND)
         assert got["text"] == "MTG Assistant Gateway" and not got["cut"], got
-        # the four places, none dropped (navigation round 2: the rest under More)
-        assert got["links"] == 4, got
+        # the four places and the rail's pages, none dropped: a computer's bar this wide shows
+        # them all as links and no More (theme.TOPBAR_FULL_FROM, redesign screen 1)
+        from mtg_gateway import theme
+
+        assert got["links"] == len(theme.NAV_LINKS) + len(theme.rail_extra()) == 8, got
+        assert not page.locator(".topbar nav.site .navmore").is_visible()
         assert errors == [], errors
         browser.close()
 
