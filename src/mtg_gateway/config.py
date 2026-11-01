@@ -279,7 +279,6 @@ class Settings:
     browser_session_max_age: int = 30 * 24 * 3600
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
-    reauth_interval: int = 7 * 24 * 3600
     membership_check_ttl: int = 5
     oidc_previous_issuers: list[str] = field(default_factory=list)
     auth_code_ttl: int = 300
@@ -463,7 +462,6 @@ def load_settings() -> Settings:
         archidekt_backups=_bool_env("MTG_ARCHIDEKT_BACKUPS", True),
         access_token_ttl=_int_env("MTG_ACCESS_TOKEN_TTL", 3600, lo=60, hi=86400),
         refresh_token_ttl=_int_env("MTG_REFRESH_TOKEN_TTL", 30 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
-        reauth_interval=_int_env("MTG_REAUTH_INTERVAL", 7 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
         membership_check_ttl=_int_env("MTG_MEMBERSHIP_CHECK_TTL", 5, lo=0, hi=60),
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,

@@ -210,6 +210,9 @@ reach past the stack, so if your old version is older than the one named, also:
 - **0.7.45 or older:** if your variables set `MTG_BROWSER_SESSION_TTL=7200` (the older example
   files did), remove the line or set `604800`. It is now how long a sign-in lasts unused, so
   `7200` keeps sign-ins to 2 hours unused.
+- **0.7.46 or older:** delete the `MTG_REAUTH_INTERVAL` line from your variables; it does nothing
+  now. Assistants connect again when the Settings page's **Assistant refresh** time (30 days by
+  default) has passed since they signed in, not after a week. To keep a week, set that row to 7 days.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.
