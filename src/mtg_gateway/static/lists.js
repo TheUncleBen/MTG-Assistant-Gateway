@@ -428,8 +428,10 @@
     var status = $("[data-filter-count]");
     if (status) status.textContent = q ? n + " shown." : "";
   }
+  // the tables that are on the page whole (or a Load more away) narrow as you type: Default
+  // categories, and the templates, tags and pins too (0.7.46 audit QG-25)
   var searchIn = $(".lp .ui-tools input[type=search]");
-  if (searchIn && tab === "defaults") {
+  if (searchIn && tab !== "custom") {
     searchIn.addEventListener("input", function () { filterRows(searchIn.value); });
     if (searchIn.value) filterRows(searchIn.value);
   }

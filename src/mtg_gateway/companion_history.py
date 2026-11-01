@@ -271,7 +271,7 @@ def add_history_routes(
         list_html = (
             ui.assistant_head(
                 "/history",
-                "History" if not deck_id else "Deck history",
+                "Assistant: History" if not deck_id else "Deck history",
                 PAGE_SUB_TEXT,
             )
             + back
@@ -308,7 +308,7 @@ def add_history_routes(
         panel = details_panel(opened, query, extra_html=extra, extra_actions=acts) if opened else ""
         body = ui.split(list_html, panel)
         return page(
-            "History" if not deck_id else "Deck history",
+            "Assistant: History" if not deck_id else "Deck history",
             body,
             sub=sub,
             sid=sid,

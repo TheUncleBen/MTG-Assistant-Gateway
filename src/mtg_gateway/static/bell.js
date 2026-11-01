@@ -100,7 +100,7 @@
         setCount(0);
         keep(0);
       }
-      var note = el("p", "muted small bell-foot", "The count clears when you open this list. This gateway keeps its newest alerts here; Archidekt’s stay for as long as Archidekt keeps them. Choose which of the gateway’s alerts you get under Account › Account details › Notifications, and Archidekt’s under Email and alerts on Archidekt.");
+      var note = el("p", "muted small bell-foot", "The count clears when you open this list. This gateway keeps its newest alerts here; Archidekt’s stay for as long as Archidekt keeps them. Choose which of the gateway’s alerts you get under Account › Account details › Push notifications, and Archidekt’s under Email and alerts on Archidekt.");
       wrap.appendChild(note);
       box.setBody(wrap);
       box.focusFirst();

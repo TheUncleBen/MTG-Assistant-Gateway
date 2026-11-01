@@ -131,6 +131,15 @@ RECOUNT_DELAY = 1.0  # seconds: changes close together (an apply all, a sweep) a
 # which the bell reads from Archidekt already; a test message is for the phone alone.
 KEPT_ALERTS = 50
 BELL_EVENTS = ("prices", "reports", "summary")
+# the Alerts page's Type filter (0.7.46 audit QG-25): value, words
+ALERT_TYPES = (
+    ("", "Every type"),
+    ("waiting", "Waiting for you"),
+    ("prices", "Price alerts"),
+    ("reports", "Deck reports"),
+    ("summary", "Summaries"),
+    ("archidekt", "From Archidekt"),
+)
 WAITING_TEXT = "Open it to look at the changes, then apply or reject them."
 
 

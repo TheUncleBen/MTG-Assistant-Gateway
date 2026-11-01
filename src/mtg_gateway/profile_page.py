@@ -638,6 +638,56 @@ def _row_html(cls: str, mark: str, text: str, sub_text: str, href: str) -> str:
     return f"<li><div class='{cls}'>{inner}</div></li>"
 
 
+def _has_words(q: str, *parts: Any) -> bool:
+    return not q or any(q in str(p or "").casefold() for p in parts)
+
+
+def alerts_page_parts(
+    mine: list[dict[str, Any]],
+    waiting: dict[str, tuple[str, int, str]],
+    got: dict[str, Any],
+    *,
+    linked: bool,
+    error: str = "",
+    kind: str = "",
+    q: str = "",
+) -> str:
+    """The Alerts page's list, narrowed by the Type filter (``kind``, an ALERT_TYPES value) and
+    the search box (``q``, in a title or its line), 0.7.46 audit QG-25. Everything when both are
+    empty; a type alone keeps its own heading."""
+    q = q.casefold().strip()
+    if kind == "waiting":
+        mine = []
+    elif kind in ("prices", "reports", "summary"):
+        mine = [a for a in mine if a["event"] == kind]
+        waiting = {}
+    if q:
+        mine = [a for a in mine if _has_words(q, a["title"], a["message"])]
+        waiting = {k: v for k, v in waiting.items() if _has_words(q, v[0], "waiting for you")}
+        rows = [n for n in (got.get("notifications") or []) if _has_words(q, n.get("text"))]
+        got = {**got, "notifications": rows}
+    ours = kind != "archidekt"
+    theirs = kind in ("", "archidekt")
+    if q and ours and theirs and not mine and not waiting and not got.get("notifications"):
+        return "<p class='muted'>No alerts match.</p>"
+    out = ""
+    if ours:
+        if q and not mine and not waiting:
+            rows_html = "<p class='muted'>No alerts match.</p>"
+        else:
+            rows_html = gateway_rows_html(mine, waiting)
+        out += "<h3 class='bell-part'>From this gateway</h3>" + rows_html
+    if theirs:
+        if error:
+            ark = ui.notice(error, "error", role="alert")
+        elif q and not got.get("notifications"):
+            ark = "<p class='muted'>No alerts match.</p>"
+        else:
+            ark = notifications_html(got, linked=linked)
+        out += "<h3 class='bell-part'>From Archidekt</h3>" + ark
+    return out
+
+
 def gateway_rows_html(alerts: list[dict[str, Any]], waiting: dict[str, tuple[str, int, str]]) -> str:
     """The gateway's own part of the bell (0.7.46 audit QG-16): what waits for the member's
     press now (read live, one row per deck, the words of the phone's message), then the kept
@@ -713,7 +763,7 @@ def notifications_html(
 BELL_NOTE = (
     "The count clears when you open this list. This gateway keeps its newest alerts here; Archidekt's "
     "stay for as long as Archidekt keeps them. Choose which of the gateway's alerts you get under Account "
-    "› Account details › Notifications, and Archidekt's under Email and alerts on Archidekt."
+    "› Account details › Push notifications, and Archidekt's under Email and alerts on Archidekt."
 )
 
 
@@ -924,27 +974,31 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 waiting = await asyncio.to_thread(decks.waiting_by_deck, sub)
             except Exception:  # noqa: BLE001 - the bell never fails for its waiting rows
                 waiting = {}
-            if error:
-                ark = ui.notice(error, "error", role="alert")
-            else:
-                ark = notifications_html(got, linked=is_linked)
-            body = (
-                "<h3 class='bell-part'>From this gateway</h3>"
-                + gateway_rows_html(mine, waiting)
-                + "<h3 class='bell-part'>From Archidekt</h3>"
-                + ark
-            )
-        if wants_json(request):
+            body = alerts_page_parts(mine, waiting, got, linked=is_linked, error=error)
+        if wants_json(request):  # the bell's box: never narrowed
             return JSONResponse(
                 {"ok": not error, "unseen": unseen, "html": body, "message": error},
                 headers={"Cache-Control": "no-store"},
             )
+        # the page: a Type filter and a search box (0.7.46 audit QG-25), applied as a GET
+        qp = request.query_params
+        kind = qp.get("type") if qp.get("type") in {v for v, _ in notify.ALERT_TYPES} else ""
+        q = (qp.get("q") or "").strip()[:100]
+        if not cross_site and (kind or q):
+            body = alerts_page_parts(mine, waiting, got, linked=is_linked, error=error, kind=kind, q=q)
+        tools = ui.toolbar(
+            "/notifications",
+            search_label="Search alerts",
+            placeholder="Search alerts",
+            q=q,
+            filters=[ui.filter_select("type", "Type", notify.ALERT_TYPES, kind)],
+        )
         badge = f" <span class='bell-badge'>{unseen} new</span>" if unseen else ""
         return page(
             "Alerts",
             f"<div class='bell-page'><div class='ui-head'><h1>Alerts{badge}</h1></div>"
             "<p class='ui-sub'>Alerts from this gateway and from Archidekt.</p>"
-            f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
+            f"{tools}<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
             f"<div class='ui-actions'><a class='btn btn-plain' href='{section_href('email')}'>"
             f"{icon('settings')} Settings</a>"
             "</div></div></div>",

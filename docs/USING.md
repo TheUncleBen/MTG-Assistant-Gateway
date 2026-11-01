@@ -283,6 +283,12 @@ Press **Save changes** and they go to Archidekt (a snapshot is taken
 first, so History can undo); only a large removal or a change to the
 commander zone asks you to confirm.
 
+On **My Decks**, **Select** ticks every deck on screen (each of your own
+decks has a tick box of its own); the bar that appears then offers **Move to
+folder…** and **Visibility…** for the ticked decks, each deck written to
+Archidekt on its own, at most 50 a press, and the message says how many went.
+Deleting stays each deck's own box, with its name typed.
+
 ## Finding cards and decks
 
 The **search box at the top of every page** finds both. Type part of a
@@ -357,7 +363,20 @@ condition and count.
   release or by price, and page through it. Plus and minus change the count; the cross
   removes a card; the dots open the card's details: finish, condition,
   language and the price you paid, saved to Archidekt on **Save** (its tags
-  are shown as Archidekt holds them).
+  are shown as Archidekt holds them). The sort you pick is remembered on your
+  account. Minus on a last copy and **Remove from binder** take the card out at
+  once, and the message offers **Undo**, which puts it back with its printing,
+  the price you paid and its binder tags.
+- **Select** ticks every card on screen (each card has a tick box of its
+  own). The bar that appears sets the condition, finish or binder tags of the
+  ticked cards, or removes them, each card written to Archidekt on its own, at
+  most 200 a press; the message says how many went, and a removal offers
+  **Undo** for a while.
+- Binder › **Lists**: each table (category templates, default categories,
+  color tags, binder tags, pinned cards, custom cards) has a search box that
+  narrows its rows as you type. A change you make there (a template, tag,
+  default category or custom card created, saved or deleted, a pin's copies)
+  offers **Undo** on its message for a while.
 - **Add cards** asks the name, copies, finish, condition and language. The
   copies join an entry you already have only when its printing, finish,
   condition and language all match; anything else becomes a new entry, and
@@ -431,7 +450,11 @@ Claude on the web, desktop and phone counts as one assistant, and so does ChatGP
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**, or check several, on any decks, and press
-  **Apply checked** or **Reject checked** to do them together.
+  **Apply checked** or **Reject checked** to do them together. On a phone the
+  review page's Apply and Reject stay at the foot of the screen, with one line
+  saying what Apply does. A press is taken once: the button shows it is busy
+  until the answer comes. The pages of the Assistant tab are titled
+  **Assistant: Proposals**, **Assistant: History** and **Assistant: Reports**.
 - Before an edit is applied, the gateway checks the change still fits the
   deck as it is now, saves a **snapshot** and, with backups on (the operator's
   setting), puts a backup copy of the deck in your backup folder on
@@ -503,7 +526,10 @@ and Watchlist) keeps the price of cards and decks you choose, once a day:
   table under **Price history table**.
 - **Price alert**: a move of more than a percentage from one day to the
   next, or a price it rises above or falls below. Price alerts reach you through
-  push notifications (below).
+  the bell at the top and push notifications (below).
+- **Stop watching**, from a row's menu or from the bar after ticking several
+  cards, goes at once; the message offers **Undo** for a while, which brings
+  the cards back with their alerts, their list and their price history.
 
 Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
 are checked once a day; the operator sets how many cards and decks you may
@@ -538,6 +564,13 @@ words; pressing it opens the deck, forum thread or profile here, or the
 Alerts list for news and contests. Several at once come as one message.
 Alerts that were already there when you turned this on, and ones you have
 read in the gateway's Alerts, are not sent.
+
+The **bell** at the top, and the **Alerts** page it opens, carry the
+gateway's own alerts beside Archidekt's, with or without push notifications:
+a price alert that fired, a deck report that finished, your summary, and what
+waits for your press right now. The kinds you untick under Push notifications stay
+out of it, the gateway keeps its newest 50, and the count clears once you
+open the list. The Alerts page has a search box and a **Type** filter.
 
 The summary is part of the **Push notifications** card, so it is there only when
 the gateway has a notification server set up (without one, the card only
@@ -599,6 +632,15 @@ The **Account** page shows who you are signed in as and your Archidekt
 link. Unlinking removes the stored Archidekt session at once. **Sign out on
 all my devices** ends every browser and Android app session; connected
 assistants keep working until you disconnect them under **Assistants**.
+Under Account details › Choices, **Forget my view choices** clears the views,
+sorts and other choices the gateway remembered for you. A link opened while
+you are signed out comes back to the same address after you sign in, and what
+you typed in the New deck box, Import a list or a comment is kept through a
+reload and a sign-in. A change that could not be sent says why in one line:
+"You're signed out, so nothing was changed." with a Sign in button, or "No
+connection; nothing was changed." On a computer, **/** or **Ctrl+K** moves to
+the search box and **?** lists the keyboard shortcuts; none fires while you
+type in a field.
 Only
 you can see your decks, proposals, snapshots, scans and collection; another
 member cannot reach them, and neither can their assistant. Nothing is
