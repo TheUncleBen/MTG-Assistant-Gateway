@@ -1327,8 +1327,10 @@ main.wrap.ui-wide{max-width:1200px}
    Alone, it sits in the middle; beside a page's buttons it starts the row. Full width on a phone. */
 /* its parts never shrink under their words: when they are wider than the screen (large text on a
    Fold's inner screen beside the rail), the switch scrolls sideways inside, never the page */
+/* position:relative: a part's count words for screen readers (.sr-only, absolutely placed) stay
+   inside the switch's scroller; placed against the page, they widened it on a phone at 200% text */
 .hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%;
-  overflow-x:auto;scrollbar-width:none}
+  overflow-x:auto;scrollbar-width:none;position:relative}
 .hubseg::-webkit-scrollbar{display:none}
 /* more parts that way (static/topbar.js): the edge fades out */
 .hubseg.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
