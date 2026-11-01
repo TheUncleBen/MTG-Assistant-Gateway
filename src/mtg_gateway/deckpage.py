@@ -3955,7 +3955,7 @@ html.cardview-open{overflow:hidden}
 .pie .slegend{flex-direction:column;gap:0}
 .pie .slegend .muted{font-size:.8rem}
 .rowbtn{min-height:24px;padding:0 .25rem;margin:0 0 0 -.25rem;border:0;background:none;color:var(--text);
-  font:inherit;text-align:left;overflow-wrap:break-word;justify-content:flex-start;gap:.4rem;max-width:100%}
+  font:inherit;text-align:left;overflow-wrap:anywhere;justify-content:flex-start;gap:.4rem;max-width:100%}
 .ccard .cname .rowbtn{font-weight:700}
 [data-focus].on{outline:2px solid var(--focus);outline-offset:1px}
 .ooi{display:flex;gap:.4rem;align-items:baseline;margin:.75rem 0 0;font-size:.93rem}
@@ -3975,6 +3975,10 @@ table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
 table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:break-word}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
+/* the type and rarity tables sit in the stats panel's side without a scroller: a row's name wraps
+   anywhere rather than widening the page (a 320 px phone at 200% text leaves "Enchantment" no
+   room), while the odds table's scroller keeps its words whole */
+.stats .side table.qty td{overflow-wrap:anywhere}
 .legality ul{margin:.25rem 0 0;padding-left:1.2rem} .legality .ok{color:var(--green-text);font-weight:700}
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
