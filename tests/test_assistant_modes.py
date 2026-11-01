@@ -231,6 +231,36 @@ async def test_the_assistants_page_as_the_mockup_shows_it(stack: Stack) -> None:
     assert html.escape(modes.AUTO_WARNING) not in one
 
 
+async def test_account_details_names_the_default_and_says_which_assistant_differs(stack: Stack) -> None:
+    """Independent review 2, M4: Account details said "Approval mode · Ask me every time" while
+    Claude applied low-risk changes by itself. The row is the default for new assistants, so it is
+    called that (the name its own page has), and it says when an assistant has a mode of its own."""
+    import re
+
+    h = stack.h
+    await linked_member(stack)
+    await connect(h, CLAUDE_CB, "Claude")
+    await connect(h, GPT_CB, "ChatGPT")
+    b = await browser(h)
+
+    def mode_row(page: str) -> str:
+        m = re.search(r"<a class='yrow[^']*' href='/account/assistants/default'>(.*?)</a>", page, re.S)
+        assert m, page
+        return re.sub(r"<[^>]+>", " ", m.group(1))
+
+    row = mode_row((await b.http.get("/account/details")).text)
+    assert "Default for new assistants" in row and MANUAL in row and "own" not in row, row
+    assert "Approval mode" not in row
+    assert (await set_app_mode(b, "claude", "semi")).status_code == 303
+    row = mode_row((await b.http.get("/account/details")).text)
+    assert "Default for new assistants" in row and MANUAL in row
+    assert "Claude has its own" in row, row
+    assert (await set_app_mode(b, "chatgpt", "semi")).status_code == 303
+    row = mode_row((await b.http.get("/account/details")).text)
+    await b.aclose()
+    assert "2 assistants have their own" in row, row
+
+
 async def test_loosening_asks_first_and_names_the_app(stack: Stack) -> None:
     h = stack.h
     await linked_member(stack)
