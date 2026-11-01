@@ -45,10 +45,10 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         assert r.status_code == 200
         page = r.text
         # the head: the purpose line, Export CSV plain, + Add cards the one orange button (opens the box)
-        # Binder's switch (Cards | Wants | Watchlist, decision C8) names the page; the h1 is for
-        # screen readers
+        # Binder's switch (Cards | Lists | Watchlist, decision C8 and mockup screen 8) names the
+        # page and counts the cards; the h1 is for screen readers
         assert "<h1 class='sr-only'>Binder: Cards</h1>" in page
-        assert "<a href='/collection' aria-current=page>Cards</a>" in page
+        assert "<a href='/collection' aria-current=page>Cards<span class='cn'>3</span>" in page
         assert (
             "<p class='ui-sub'>The cards you own, kept in your Archidekt account "
             "(your Archidekt collection).</p>"

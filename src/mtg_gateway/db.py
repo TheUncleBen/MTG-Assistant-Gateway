@@ -908,6 +908,27 @@ def _step_19(conn: sqlite3.Connection) -> None:
     _add_column(conn, "proposals", "deck_after_json", "TEXT")
 
 
+def _step_20(conn: sqlite3.Connection) -> None:
+    """0.7.46, the Watchlist as a want list (prices.py): the member's watchlist lists (groups of
+    watched cards, ``watch_lists``, a list can be empty), and on each watched card the list it is
+    in (``list_name``, '' for none), the price it had when it was added (``added_price`` in
+    ``added_currency``, the reference for the "drop below" and "rise above" alerts) and those two
+    alerts as percentages of it (``alert_drop_pct``, ``alert_rise_pct``)."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS watch_lists (
+            sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, name)
+        )"""
+    )
+    _add_column(conn, "watch_cards", "list_name", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "watch_cards", "added_price", "REAL")
+    _add_column(conn, "watch_cards", "added_currency", "TEXT")
+    _add_column(conn, "watch_cards", "alert_drop_pct", "REAL")
+    _add_column(conn, "watch_cards", "alert_rise_pct", "REAL")
+
+
 # A closed proposal's risk reason, as judged when it closed (settle_risks), kept in its stored
 # result beside the stored tier; get_proposal shows it as risk_reason, never as a result field.
 RISK_REASON_KEY = "_risk_reason"
@@ -933,6 +954,7 @@ MIGRATIONS = [
     _step_17,
     _step_18,
     _step_19,
+    _step_20,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -992,6 +1014,7 @@ MEMBER_TABLES = (
     ("idp_grants", "sub"),
     ("metrics", "sub"),
     ("watch_cards", "sub"),
+    ("watch_lists", "sub"),
     ("watch_decks", "sub"),
     ("deck_values", "sub"),
     ("binder_records", "sub"),  # their Binder as last read, for its value

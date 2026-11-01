@@ -595,15 +595,18 @@ async def test_the_watch_form_remembers_finish_and_alert_and_menus_use_them(
         page = (await b.http.get("/watchlist")).text
         form = page[page.index("id='w-add'") :]
         form = form[: form.index("</form>")]
-        assert "name='alert_pct'" in form and "value='15'" in form and "checked" in form
-        # the card viewer's or a menu's Watch (no alert of its own) gets the remembered alert
+        # the box remembers the finish (the alert comes from the member's defaults, so no field)
+        assert "<option value='nonfoil' selected>" in form and "checked" in form
+        assert "name='alert_pct'" not in form
+        # the card viewer's or a menu's Watch (no alert of its own) gets the remembered alert and
+        # the member's default (drop 10% below the price when added)
         r = await b.http.post(
             "/watchlist/api/watch",
             content=json.dumps({"name": "Aesi, Tyrant of Gyre Strait"}),
             headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["watch"]["alerts"] == {"pct": 15}
+        assert r.json()["watch"]["alerts"] == {"pct": 15, "drop": 10}
     finally:
         await b.aclose()
 

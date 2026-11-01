@@ -17,8 +17,9 @@
   }
   showTab();
   if (curTab && window.ResizeObserver) new ResizeObserver(showTab).observe(curTab);
-  // the other tabs' counts, read after the page has drawn (lists_page.COUNTS_API)
-  var tabBar = document.querySelector(".lp-tabs[data-counts]");
+  // the other tabs' counts, read after the page has drawn (lists_page.COUNTS_API); the hub's rows
+  // (Binder › Lists, .lp-hubrows) ask the same way
+  var tabBar = document.querySelector(".lp-tabs[data-counts], .lp-hubrows[data-counts]");
   if (tabBar && window.fetch) {
     fetch(tabBar.getAttribute("data-counts"), { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -27,6 +28,9 @@
         Array.prototype.forEach.call(tabBar.querySelectorAll("a[href]"), function (a) {
           var n = d.counts[a.getAttribute("href").split("/").pop()];
           if (typeof n !== "number" || a.querySelector(".n")) return;
+          // the hub's rows (Binder › Lists) carry a value cell; the tab bar a small count
+          var val = a.querySelector(".val");
+          if (val) { if (!val.textContent) val.textContent = n.toLocaleString("en"); return; }
           var span = document.createElement("span");
           span.className = "n";
           span.textContent = n.toLocaleString("en");
