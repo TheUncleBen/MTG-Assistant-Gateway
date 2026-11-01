@@ -99,7 +99,8 @@ def test_account_rows_keep_label_and_value_apart_at_200_percent(chromium, server
         page.evaluate(ZOOMS[zoom])
         page.wait_for_timeout(30)
         rows = page.evaluate(ROWS)
-        assert [r["label"] for r in rows] == ["Theme", "Layout"]
+        # Lists (its value: Binder) joined the rows with a value when the lists moved to Binder
+        assert [r["label"] for r in rows] == ["Lists", "Theme", "Layout"]
         assert all(not r["overlap"] and r["fits"] and r["inside"] for r in rows), rows
         assert page.evaluate(SCROLLS) == 0
 
@@ -409,6 +410,10 @@ def test_the_remember_tick_box_is_a_44_px_target_across_its_label(chromium, serv
     sid = _link(server)
     with _page(chromium, server, sid, width, touch=width < 1024) as page:
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        # the add form is in the Watch a card box since the want-list redesign: open it as a member does
+        page.locator("[data-box-open='w-add']").first.click()
+        page.locator(".w-addrow label.check").wait_for(state="visible")
+        page.wait_for_function("() => document.getAnimations().every(a => a.playState !== 'running')")
         got = page.evaluate(TICK)
         assert got["height"] >= 44 and got["width"] >= 200 and got["holds"], got
         box = page.locator(".w-addrow label.check input")

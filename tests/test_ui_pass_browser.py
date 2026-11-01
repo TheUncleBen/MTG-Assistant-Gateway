@@ -77,12 +77,18 @@ def test_watchlist_inputs_are_styled_like_every_other_input(server: Server) -> N
         ctx = _context(browser, server, sid, 344, touch=True)
         page = ctx.new_page()
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        # the add form is in the Watch a card box since the want-list redesign: open it as a member does
+        page.locator("[data-box-open='w-add']").first.click()
+        page.locator("#w-name").wait_for(state="visible")
+        page.wait_for_function("() => document.getAnimations().every(a => a.playState !== 'running')")
         # every box and select; a tick box (Add's "Use this finish and alert next time") is not a box
         heights = page.evaluate(
             "() => [...document.querySelectorAll("
             "'.watch-page input:not([type=hidden]):not([type=checkbox]),"
             " .watch-page select:not([aria-hidden=true]),"
-            " .watch-page .msel-btn')].filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
+            " .watch-page .msel-btn, #w-add input:not([type=hidden]):not([type=checkbox]),"
+            " #w-add select:not([aria-hidden=true]), #w-add .msel-btn')]"
+            ".filter(e => e.getClientRects().length && !e.closest('[hidden]'))"
             ".map(e => [e.id || e.className, Math.round(e.getBoundingClientRect().height),"
             " getComputedStyle(e).borderRadius])"
         )
