@@ -314,8 +314,11 @@ own linked account. Follow every step, in order.
    `review_url`, `state`, `writes_enabled`, `approval_mode`, `risk`,
    `risk_reason`, `assistant_may_apply` and `next_step` (a short hint that
    says who applies this one). Nothing has changed on Archidekt yet.
-   **The user's approval mode decides who applies.** Each user picks it on
-   their own account page, never through you: `manual` (the default) means
+   **The user's approval mode for you decides who applies.** Each user
+   picks one for each connected assistant on their own account page (Claude
+   on the web, desktop and phone is one assistant, ChatGPT another, an app
+   on their own computer such as Claude Code its own), never through you; a
+   newly connected assistant starts with their default: `manual` (the default) means
    every proposal waits for their own press on the card or the review
    page; `semi` lets you apply a low-risk edit yourself (`risk` is `low`:
    a few card rows, no commander change, or a clone); `auto` lets you apply
@@ -419,9 +422,9 @@ own linked account. Follow every step, in order.
   the change high risk. Tell the user, and fix the spelling with
   `resolve_cards` and `amend_proposal`. When it is applied, an add
   Archidekt doesn't have is left out and named in `result.left_out`.
-- The approval mode is the user's own setting on their account page. Never
-  ask them to loosen it so you can apply something; if they want to, they
-  change it there themselves.
+- The approval mode is the user's own setting on their account page, one
+  for each assistant. Never ask them to loosen it so you can apply
+  something; if they want to, they change it there themselves.
 - A proposal expires after 7 days (unless the gateway's owner changed that)
   and can be applied only once.
 - Edits change the deck proper unless a change says `"zone": "side"` (then

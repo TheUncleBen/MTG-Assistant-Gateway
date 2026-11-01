@@ -281,8 +281,10 @@ For the exact devices and plans tested, see
 - **Deck changes** need the person's own yes, unless they chose otherwise.
   The code enforces it: changes are proposals until applied with the review
   page's Apply button or the in-chat card's Apply button. Each person has
-  an **approval mode** (`src/mtg_gateway/modes.py`), set only on their own
-  Account page in the browser, never over MCP or the API: `manual` (the
+  an **approval mode** (`src/mtg_gateway/modes.py`) for each connected
+  assistant, with a default for new ones (`src/mtg_gateway/assistants.py`:
+  Claude by claude.ai, ChatGPT by chatgpt.com, any other or localhost app its
+  own), set only on their own Account page in the browser, never over MCP or the API: `manual` (the
   default: ask every time), `semi` (the assistant may apply a low-risk edit
   itself: at most **Rows a small edit may have** (a Settings page row, 5 by default) review rows of card adds,
   removes, quantity, category, finish, printing, color tag or custom mana
