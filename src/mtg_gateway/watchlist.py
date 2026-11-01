@@ -421,11 +421,9 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         description=(
             "Add a card to the member's watchlist (or change its alerts when it is already there). By name "
             "alone it follows the printing Scryfall gives for that name; set_code and collector_number "
-            "follow one printing; finish is nonfoil, foil or etched. Optional alerts: alert_pct (a move of "
-            "more than this percent from one day to the next), alert_above and alert_below (a price "
-            "crossed, in dollars, or euros when the card has no dollar price), alert_drop (a drop of this "
-            "many percent below the price when added). A new watch that names no alert gets the member's "
-            "defaults. list_name puts the card in one of the member's watchlist lists. The gateway checks "
+            "follow one printing. Optional alerts: alert_pct, alert_above and alert_below (a price "
+            "crossed, in dollars, or euros when the card has no dollar price) and alert_drop. A new watch "
+            "that names no alert gets the member's defaults; list_name groups it. The gateway checks "
             "prices once a day; alerts reach the member through their push notifications. Changes only the "
             "member's gateway data, never Archidekt. Returns today's price when Scryfall answered, with "
             "printing_now, the printing that price is for."
@@ -451,7 +449,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         ] = None,
         alert_drop: Annotated[
             float | None,
-            Field(description="Alert when the price drops this many percent below the price when added."),
+            Field(description="Alert on a drop of this % below the price when added."),
         ] = None,
         list_name: Annotated[
             str | None,
