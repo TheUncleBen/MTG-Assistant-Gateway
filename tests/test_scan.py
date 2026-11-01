@@ -1011,6 +1011,46 @@ async def test_truncated_title_check_sees_all_completions(stack: Stack) -> None:
 
 
 # -- printings -------------------------------------------------------------------
+async def test_printings_by_name_while_scryfall_says_wait_is_try_again_not_no_card(stack: Stack) -> None:
+    """A Scryfall 429 left the name unread, so card_printings must not answer "no card found"
+    (whole-application audit, row 4): it says to try again, with retry_in in seconds. And when
+    Scryfall is down, the words are plain: no exception name, no HTTP code."""
+
+    def limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "12"}, json={"object": "error"})
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route", request=request)
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"object": "error"})
+
+    service = stack.h.app.state.gateway.scan
+    token = await mcp_token(stack.h)
+    for handler in (limited, down, failing):
+        service.scryfall = ScryfallClient(
+            "https://scryfall.test",
+            min_interval=0.0,
+            http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://scryfall.test"),
+        )
+        result = await call(stack.h, token, "card_printings", {"name": "Sol Ring"})
+        out = result["structuredContent"]
+        assert out["ok"] is False and out["error"] != "not_found", out
+        assert "no card found" not in out["message"], out
+        assert result["isError"] is True and out["retryable"] is True, out
+        for raw in ("ConnectError", "503", "429", "unreachable:"):
+            assert raw not in out["message"], out
+        if handler is limited:
+            assert out["error"] == "rate_limited" and out["retry_in"] == 12, out
+            assert "Try again in about 12 s" in out["message"], out
+        else:
+            assert out["error"] == "unavailable" and "Try again in a few minutes" in out["message"], out
+        # resolve_cards says the same plain words when Scryfall is down
+        if handler is down:
+            resolved = await call(stack.h, token, "resolve_cards", {"cards": [{"name": "Sol Ring"}]})
+            assert "ConnectError" not in json.dumps(resolved), resolved
+
+
 async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
     """The assistant's copy of a card's printings: the sets and the newest printings, newest first,
     with finishes but no pictures (those are the printings card's, through its signed link)."""

@@ -1723,7 +1723,7 @@ DELETED_LIST = (
 )
 
 # Account details (mockup screen 7, 0.7.46): the same grouped list as the Account page, each row
-# opening the form it replaces. The two choices Ben has not answered yet, each one constant:
+# opening the form it replaces. The two choices the owner has not answered yet, each one constant:
 DETAILS = "/account/details"
 # each row opens its own small page (False: the row folds its form open on the list itself)
 DETAIL_PAGES = True
@@ -1977,7 +1977,7 @@ async def details_html(
             chev=False,
         )
     )
-    # Two columns on a wide screen, even (Ben: balanced columns; review 2, L10): Archidekt over
+    # Two columns on a wide screen, even (the owner: balanced columns; review 2, L10): Archidekt over
     # Your data, Assistant over This gateway (the mockup's Archidekt over This gateway stood 9
     # rows against 6); one under the other on a phone in the mockup's order, Your data (the
     # actions that ask first) last.
@@ -2298,10 +2298,10 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
     """The member's default approval mode (modes.py), on Assistants › Default for new assistants:
     every assistant starts with it and follows it until given its own (assistants.py). Three radio
     choices, the current one checked,
-    choices above the gateway's cap shown disabled. A tight list (Ben, 2026-10-22): each choice
+    choices above the gateway's cap shown disabled. A tight list (the owner, 2026-10-22): each choice
     is one row, its name, with what it means in a fold opened by the chevron at the row's end.
     The whole warning (AUTO_WARNING) is in the two auto modes' details, and nowhere else on the
-    page: no line about it under the list (Ben, 2026-10-23, "line hide").
+    page: no line about it under the list (the owner, 2026-10-23, "line hide").
     ``primary`` makes Save the page's orange button (not while Link account is)."""
     live = state.decks.live  # the admin's Settings page values, read now
     current = state.decks.mode_of(sub)
@@ -2354,7 +2354,7 @@ def _forget_choices_card(csrf_in: str) -> str:
 
 
 def _signout_box(csrf_in: str, *, open: bool = False) -> str:
-    """Sign out on all my devices asks first (Ben, 2026-10-28: every action that can't be undone
+    """Sign out on all my devices asks first (the owner, 2026-10-28: every action that can't be undone
     asks in a box): the same /logout form the card's button posted, inside the box."""
     return ui.box(
         "signout",
@@ -2540,15 +2540,17 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     "add",
                     "Clone",
                     html.escape(str(r.get("name", ""))),
-                    html.escape(f"copy of {r.get('source', '')}, {r.get('cards', 0)} cards, private"),
+                    html.escape(
+                        f"copy of {r.get('source', '')}, {plural(int(r.get('cards') or 0), 'card')}, private"
+                    ),
                 )
             )
         elif kind == "new_deck":
             visibility = "private" if r.get("private") else "PUBLIC"
             what = (
-                f"{r.get('cards', 0)} cards, {visibility}; {r['package']}"
+                f"{plural(int(r.get('cards') or 0), 'card')}, {visibility}; {r['package']}"
                 if r.get("package")
-                else f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"
+                else f"{r.get('format', '')}, {plural(int(r.get('cards') or 0), 'card')}, {visibility}"
             )
             if r.get("folder"):
                 what += f"; in folder “{r['folder']}”"

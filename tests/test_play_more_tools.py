@@ -214,3 +214,36 @@ async def test_a_read_only_app_is_refused_on_both_paths_and_starts_nothing(stack
     )
     assert api_again.status_code == 400 and api_again.json()["reason"] == "forge_running"
     assert len(fake.started) == started + 1
+
+
+async def test_more_games_on_a_report_whose_forge_was_down_says_so(stack: Stack) -> None:
+    """Forge couldn't be reached, so the report's Forge part failed before a game. Play more games
+    names that (reason notrun: its Forge section says why), not "it has no Forge games, or it was made
+    before this gateway kept what more games need" (whole-application audit, BACKEND play_more_games)."""
+    h = stack.h
+    fake = FakeForge(brackets=BRACKETED)
+    _forge(stack, fake)
+    fake.up = False
+    real = fake.handler
+
+    def down(request: Any) -> Any:  # every Forge call fails, not only the health probe
+        import httpx
+
+        if not fake.up:
+            raise httpx.ConnectError("down", request=request)
+        return real(request)
+
+    fake.handler = down  # type: ignore[method-assign]
+    stack.h.app.state.gateway.reports.forge = fake.client()
+    token = await mcp_token(h)
+    out = structured(
+        await call(h, token, "run_deck_report", {"deck_ref": "42", "forge": True, "simulate": False})
+    )
+    rid = out["report_id"]
+    await _until(lambda: _section(stack, rid).get("state") in ("failed", "skipped"))
+    section = _section(stack, rid)
+    assert "ConnectError" not in json.dumps(section), section
+    more = structured(await call(h, token, "play_more_games", {"report_id": rid}))
+    assert more["ok"] is False and more["reason"] == "notrun", more
+    assert more["message"] == reports_module.MORE_NOT_RUN
+    assert "Forge" in section["error"], section

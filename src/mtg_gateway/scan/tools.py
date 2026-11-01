@@ -12,7 +12,7 @@ from pydantic import Field
 
 from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, ask_choices, tool_meta, with_card
 from ..schemas import change_for_assistant
-from .service import ScanError, ScanService, parse_cards, parse_text
+from .service import SUGGESTED_WAIT_SECONDS, ScanError, ScanService, parse_cards, parse_text
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -42,6 +42,24 @@ def _sub() -> str:
     if token is None or not token.subject:
         raise RuntimeError("no authenticated user on this request")
     return token.subject
+
+
+def not_looked_up(name: str, retry_in: int) -> ScanError:
+    """The refusal for a name the resolver handed back unread: Scryfall asked the gateway to wait
+    (retry_in seconds), or this call's lookup time ran out. Never "no card found": the name was
+    never looked up (whole-application audit, row 4)."""
+    if retry_in > 0:
+        return ScanError(
+            "rate_limited",
+            f"Scryfall asked the gateway to wait, so '{name}' was not looked up yet. Try again in about "
+            f"{retry_in} s.",
+            extra={"retry_in": retry_in},
+        )
+    return ScanError(
+        "busy",
+        f"The card lookups took too long, so '{name}' was not looked up yet. Try again in a moment.",
+        extra={"retry_in": SUGGESTED_WAIT_SECONDS},
+    )
 
 
 def _err(exc: ScanError) -> dict[str, Any]:
@@ -127,19 +145,15 @@ def add_scan_tools(
         name="resolve_cards",
         title="Resolve card names to exact cards",
         description=(
-            "Turn card names read from photos, a typed list or a decklist into exact Magic cards via "
-            "Scryfall. Give either `cards` (list of {name, set?, collector_number?, quantity?}) or `text` "
-            "(one card per line, e.g. '2 Sol Ring (CMR) 472'). Each result has a status: exact, printing "
-            "(matched by set and number), fuzzy (name corrected; confirm with the user), ambiguous or "
-            "not_found (with suggestions), or conflict (the set and number are a different card, shown in "
-            "`requested`; ask which is meant). Without a set, a card keeps Scryfall's default printing when "
-            "that one is out on paper (in foil when foil is asked for), else the newest printing that is "
-            "out on paper; the newer ones passed over are listed in `newer_printings`. "
-            "Returns a decklist and `changes` ready for propose_deck_changes, without conflicts. "
-            "In an app that shows cards, the user sees the recognized cards with pictures, can drop some, "
-            "pick among suggestions and confirm; wait for that before proposing. One lookup per account "
-            "runs at a time: another waits its turn briefly (waited_seconds), else is refused busy with "
-            "suggested_wait (seconds). Does not touch Archidekt."
+            "Turn card names from photos, a typed list or a decklist into exact Magic cards via Scryfall: "
+            "cards ({name, set?, collector_number?, quantity?}) or text (one card per line, e.g. '2 Sol Ring "
+            "(CMR) 472'). Each result's status: exact, printing (by set and number), fuzzy (name corrected: "
+            "confirm with the user), ambiguous or not_found (with suggestions), or conflict (the set and "
+            "number are another card, in requested: ask). Without a set a card gets Scryfall's default "
+            "printing when it is on paper, else the newest paper one (newer_printings: those passed over). "
+            "Returns a decklist and changes for propose_deck_changes. In an app that shows cards the user "
+            "confirms the cards first: wait for that. One lookup per account at a time (else busy, with "
+            "suggested_wait). Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PICKER_CARD_URI) if links is not None else None,
@@ -210,18 +224,13 @@ def add_scan_tools(
         name="card_printings",
         title="List the printings of a card",
         description=(
-            "The printings of one Magic card (set, set name, collector number, release date, rarity, "
-            "finishes) from Scryfall: released paper printings first, newest first (the first is the "
-            "default when no set is named), then previews not out yet (`unreleased: true`) and printings "
-            "not sold on paper (`paper: false`). Give `oracle_id` from a resolve_cards result, or `name`. "
-            "Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that come in it). "
-            "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
-            "rows (default 25) and `truncated` means that cap cut the list; `has_more` means more printings "
-            "exist than `cards` holds. `sets` lists the sets the card "
-            "was printed in, newest first, not narrowed by set_code or finish; `limit` caps it too, "
-            "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that "
-            "shows cards, the user sees every printing's picture and taps the one they mean; wait for "
-            "that pick. Does not touch Archidekt."
+            "A Magic card's printings from Scryfall (set, set name, collector number, release date, rarity, "
+            "finishes): released paper printings newest first (the first is the default when no set is "
+            "named), then previews (unreleased) and non-paper printings (paper false). Give oracle_id (from "
+            "resolve_cards) or name; narrow with set_code and finish. matching_total match; returned_count "
+            "are in cards (truncated: limit cut it); sets lists every set it was printed in (sets_total, "
+            "sets_truncated). In an app that shows cards the user taps the printing they mean: wait for that "
+            "pick. Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,
@@ -240,6 +249,8 @@ def add_scan_tools(
                 if not name:
                     raise ScanError("invalid", "give oracle_id or name")
                 results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
+                if results and results[0].status == "deferred":
+                    raise not_looked_up(name, service.scryfall.retry_in())
                 card = results[0].card if results else None
                 if not card or not card.get("oracle_id"):
                     raise ScanError("not_found", f"no card found for '{name}'")
@@ -338,10 +349,9 @@ def add_scan_tools(
         name="get_scan_session",
         title="Get a scan session",
         description=(
-            "Fetch one of the signed-in user's scan sessions by id (scan_…) or by name. Returns the "
-            "resolved cards, a decklist text and `changes` (add actions) that can be passed to "
-            "propose_deck_changes for a deck the user owns. Items without a `card` were not resolved; "
-            "ask the user about them."
+            "One of the user's scan sessions, by id (scan_…) or name: the resolved cards, a decklist text "
+            "and changes (adds) for propose_deck_changes. Items without a card were not resolved: ask the "
+            "user about them."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
@@ -355,10 +365,9 @@ def add_scan_tools(
         name="propose_delete_scan_session",
         title="Ask to delete a scan session",
         description=(
-            "Ask the user to delete one of their scan sessions, by id (scan_…) or by name. It never "
-            "deletes anything itself: it checks the scan is the user's and returns delete_url, the "
-            "Scan page's Sessions tab with the Delete question open for that scan, where only the "
-            "user's own press deletes it. Use it only when the user asked for the scan to go."
+            "Ask the user to delete one of their scan sessions (id or name), only when they asked. It "
+            "deletes nothing itself: delete_url opens the Scan page with the Delete question open, where "
+            "only the user's press deletes it."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )

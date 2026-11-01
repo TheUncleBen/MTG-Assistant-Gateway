@@ -1,0 +1,3325 @@
+{
+ "image_tag": "1.3.2-mag7",
+ "tools": [
+  {
+   "description": "Fetch a public Archidekt deck by ID or URL.\n\nReturns the deck's cards organized by category, with commander info,\nformat, and deck statistics.\n",
+   "inputSchema": {
+    "$defs": {
+     "ArchidektDeckInput": {
+      "additionalProperties": false,
+      "properties": {
+       "deck": {
+        "description": "Archidekt deck ID or full URL (e.g., '365563' or 'https://archidekt.com/decks/365563').",
+        "minLength": 1,
+        "title": "Deck",
+        "type": "string"
+       },
+       "include_text": {
+        "default": false,
+        "description": "Include mana cost, type line, and full oracle text for every card. Set true whenever you will discuss what cards do — never rely on memory for card text.",
+        "title": "Include Text",
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "deck"
+      ],
+      "title": "ArchidektDeckInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/ArchidektDeckInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "archidekt_deckArguments",
+    "type": "object"
+   },
+   "name": "archidekt_deck",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "archidekt_deckOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Export an Archidekt deck in Archidekt-compatible import format.\n\nUses the full Archidekt import syntax with set codes, finishes, categories,\nand labels:\n  1x Card Name (set) 123 *F* [Category{flags}] ^Label,#hex^\n\nFoil and etched cards keep their finish (*F* / *E*), so the exported list\nre-imports as the same cards and prices correctly via scryfall_price_list.\n\nCategory flags: {top} for commander, {noDeck}{noPrice} for maybeboard.\nOutput can be pasted directly into Archidekt's import dialog.\n",
+   "inputSchema": {
+    "$defs": {
+     "ArchidektDeckInput": {
+      "additionalProperties": false,
+      "properties": {
+       "deck": {
+        "description": "Archidekt deck ID or full URL (e.g., '365563' or 'https://archidekt.com/decks/365563').",
+        "minLength": 1,
+        "title": "Deck",
+        "type": "string"
+       },
+       "include_text": {
+        "default": false,
+        "description": "Include mana cost, type line, and full oracle text for every card. Set true whenever you will discuss what cards do — never rely on memory for card text.",
+        "title": "Include Text",
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "deck"
+      ],
+      "title": "ArchidektDeckInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/ArchidektDeckInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "archidekt_exportArguments",
+    "type": "object"
+   },
+   "name": "archidekt_export",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "archidekt_exportOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "List a user's public decks on Archidekt.",
+   "inputSchema": {
+    "$defs": {
+     "ArchidektUserInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 20,
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "username": {
+        "description": "Archidekt username.",
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "Username",
+        "type": "string"
+       }
+      },
+      "required": [
+       "username"
+      ],
+      "title": "ArchidektUserInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/ArchidektUserInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "archidekt_user_decksArguments",
+    "type": "object"
+   },
+   "name": "archidekt_user_decks",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "archidekt_user_decksOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get the average decklist for a commander from EDHRec.",
+   "inputSchema": {
+    "$defs": {
+     "CommanderInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 15,
+        "description": "Max cards per category.",
+        "maximum": 50,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "name": {
+        "description": "Commander name (e.g., 'Kraum, Ludevic\\'s Opus').",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "CommanderInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/CommanderInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_average_deckArguments",
+    "type": "object"
+   },
+   "name": "edhrec_average_deck",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_average_deckOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get popular combo lines for a commander from EDHRec.",
+   "inputSchema": {
+    "$defs": {
+     "CommanderInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 15,
+        "description": "Max cards per category.",
+        "maximum": 50,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "name": {
+        "description": "Commander name (e.g., 'Kraum, Ludevic\\'s Opus').",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "CommanderInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/CommanderInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_combosArguments",
+    "type": "object"
+   },
+   "name": "edhrec_combos",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_combosOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get EDHRec's top card recommendations for a commander.\n\nReturns high synergy cards, top cards, game changers, and cards by type\nwith inclusion rates and synergy scores.\n",
+   "inputSchema": {
+    "$defs": {
+     "CommanderInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 15,
+        "description": "Max cards per category.",
+        "maximum": 50,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "name": {
+        "description": "Commander name (e.g., 'Kraum, Ludevic\\'s Opus').",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "CommanderInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/CommanderInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_commanderArguments",
+    "type": "object"
+   },
+   "name": "edhrec_commander",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_commanderOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get how a preconstructed deck is commonly upgraded, from EDHRec's Precon\nUpgrade Guide. Use this INSTEAD of web search or memory for \"what cards are\ncut/added\" questions.\n\nReturns the most-added cards/lands with real inclusion percentages, and the\nmost-cut cards/lands as a ranked list (EDHRec's unpopularity score, not a\npercentage). Precons that build as multiple commanders are handled explicitly;\npass `commander` to switch faces. For an exact cut percentage against a\nspecific deck, use precon_diff.\n",
+   "inputSchema": {
+    "$defs": {
+     "PreconUpgradeInput": {
+      "additionalProperties": false,
+      "properties": {
+       "commander": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Face commander to view when the precon builds as several (e.g. 'Hearthhull, the Worldseed').",
+        "title": "Commander"
+       },
+       "limit": {
+        "default": 20,
+        "description": "Max cards per section.",
+        "maximum": 50,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "precon": {
+        "description": "Precon name or slug (e.g. 'World Shaper' or 'world-shaper').",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Precon",
+        "type": "string"
+       }
+      },
+      "required": [
+       "precon"
+      ],
+      "title": "PreconUpgradeInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PreconUpgradeInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_precon_upgradeArguments",
+    "type": "object"
+   },
+   "name": "edhrec_precon_upgrade",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_precon_upgradeOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get card recommendations based on your commander(s) and current cards.\n\nUses EDHRec's engine to suggest cards that complement what you have.\n",
+   "inputSchema": {
+    "$defs": {
+     "RecsInput": {
+      "additionalProperties": false,
+      "properties": {
+       "cards": {
+        "description": "Cards already in the deck.",
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 100,
+        "title": "Cards",
+        "type": "array"
+       },
+       "commanders": {
+        "description": "Commander name(s) for partner pairs.",
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 3,
+        "minItems": 1,
+        "title": "Commanders",
+        "type": "array"
+       },
+       "limit": {
+        "default": 20,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "commanders"
+      ],
+      "title": "RecsInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/RecsInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_recommendationsArguments",
+    "type": "object"
+   },
+   "name": "edhrec_recommendations",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_recommendationsOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get the saltiest (most hated) cards in Commander according to EDHRec.",
+   "inputSchema": {
+    "$defs": {
+     "SaltInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 20,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       }
+      },
+      "title": "SaltInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/SaltInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_saltArguments",
+    "type": "object"
+   },
+   "name": "edhrec_salt",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_saltOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get the most popular EDH cards by time period, optionally filtered by color.",
+   "inputSchema": {
+    "$defs": {
+     "TopCardsInput": {
+      "additionalProperties": false,
+      "properties": {
+       "color": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/TopColor"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional color filter."
+       },
+       "limit": {
+        "default": 20,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "period": {
+        "$ref": "#/$defs/TopPeriod",
+        "default": "week"
+       }
+      },
+      "title": "TopCardsInput",
+      "type": "object"
+     },
+     "TopColor": {
+      "enum": [
+       "white",
+       "blue",
+       "black",
+       "red",
+       "green",
+       "colorless",
+       "lands"
+      ],
+      "title": "TopColor",
+      "type": "string"
+     },
+     "TopPeriod": {
+      "enum": [
+       "week",
+       "month",
+       "year"
+      ],
+      "title": "TopPeriod",
+      "type": "string"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/TopCardsInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "edhrec_top_cardsArguments",
+    "type": "object"
+   },
+   "name": "edhrec_top_cards",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "edhrec_top_cardsOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "REQUIRED when outputting any decklist for Archidekt import. Do NOT manually\nformat decklists — always call this tool instead.\n\nTakes card names with categories, commander/maybeboard flags, and labels,\nvalidates all names against Scryfall, and outputs text that pastes directly\ninto Archidekt's import dialog.\n\nOutput format (Archidekt native):\n  1x Card Name [Category]\n  1x Commander Name [Commander{top}]\n  1x Maybe Card [Maybeboard{noDeck}{noPrice}]\n  1x Labeled Card [Draw] ^To Buy,#2ccce4^\n  1x Foil Card (dmr) 281 *F* [Ramp]\n\nSet finish='foil' or finish='etched' on a card to mark it as such (*F* / *E*).\nPair it with include_set_codes so the marked line names a printing.\n\nCategory examples: Ramp, Draw, Removal, Counters, Evasion, Finisher,\nSacrifice, Recursion, Lands, Protection, Combo, Tokens, Tribal, etc.\nAssign categories based on each card's role in the deck.\n",
+   "inputSchema": {
+    "$defs": {
+     "CardFinish": {
+      "enum": [
+       "nonfoil",
+       "foil",
+       "etched"
+      ],
+      "title": "CardFinish",
+      "type": "string"
+     },
+     "DeckCardEntry": {
+      "additionalProperties": false,
+      "description": "A single card entry for deck formatting.",
+      "properties": {
+       "category": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Category name (e.g., 'Ramp', 'Draw', 'Removal', 'Lands').",
+        "title": "Category"
+       },
+       "commander": {
+        "default": false,
+        "description": "True if this is the commander (or partner).",
+        "title": "Commander",
+        "type": "boolean"
+       },
+       "finish": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/CardFinish"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Card finish. 'foil' emits *F* and 'etched' emits *E* on the line, which Archidekt imports as that finish. Omit for a normal card. With include_set_codes the printing named comes in this finish; a card with no printing in it gets no marker and a warning."
+       },
+       "label": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label text (e.g., 'To Buy').",
+        "title": "Label"
+       },
+       "label_color": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional label hex color (e.g., '#2ccce4').",
+        "title": "Label Color"
+       },
+       "maybeboard": {
+        "default": false,
+        "description": "True if this should go in the maybeboard.",
+        "title": "Maybeboard",
+        "type": "boolean"
+       },
+       "name": {
+        "description": "Card name.",
+        "title": "Name",
+        "type": "string"
+       },
+       "quantity": {
+        "default": 1,
+        "maximum": 99,
+        "minimum": 1,
+        "title": "Quantity",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "DeckCardEntry",
+      "type": "object"
+     },
+     "FormatDeckInput": {
+      "additionalProperties": false,
+      "description": "Input for format_archidekt.",
+      "properties": {
+       "cards": {
+        "description": "List of cards with optional category, commander/maybeboard flags, and labels.",
+        "items": {
+         "$ref": "#/$defs/DeckCardEntry"
+        },
+        "minItems": 1,
+        "title": "Cards",
+        "type": "array"
+       },
+       "include_set_codes": {
+        "default": false,
+        "description": "If true, look up and include set codes from Scryfall: the newest printing already out on paper (not a preview), in the card's finish when one is given. Slower but useful for specific printings.",
+        "title": "Include Set Codes",
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "cards"
+      ],
+      "title": "FormatDeckInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/FormatDeckInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "format_archidektArguments",
+    "type": "object"
+   },
+   "name": "format_archidekt",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "format_archidektOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Paired A/B goldfish comparison: both decks run game-for-game under\nidentical seeds with position-stable deck alignment; reports per-metric\npaired deltas ± CI with significance flags (exact McNemar for binary\nmetrics), the achieved pairing correlation, and both honesty reports.\n\nRefuses decks with different commanders unless\nallow_different_commanders=true.\n",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishAbInput": {
+      "additionalProperties": false,
+      "properties": {
+       "allow_different_commanders": {
+        "default": false,
+        "description": "Compare decks with different commanders anyway (cross-commander deltas confound every metric).",
+        "title": "Allow Different Commanders",
+        "type": "boolean"
+       },
+       "annotations": {
+        "description": "Shared annotations applied to both decks.",
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "title": "Annotations",
+        "type": "array"
+       },
+       "annotations_a": {
+        "description": "Deck-A-only annotations (override shared ones by name).",
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "title": "Annotations A",
+        "type": "array"
+       },
+       "annotations_b": {
+        "description": "Deck-B-only annotations (override shared ones by name).",
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "title": "Annotations B",
+        "type": "array"
+       },
+       "combos": {
+        "description": "Declared combos, applied to both decks.",
+        "items": {},
+        "title": "Combos",
+        "type": "array"
+       },
+       "constructed": {
+        "default": false,
+        "description": "A 60-card deck (Standard, Modern, Pioneer, ...) with no commander: every listed card is in the library, opponents start at 20 life, the first mulligan is not free (unless mulligan.free_first says so) and the game is on the play (no draw on turn 1).",
+        "title": "Constructed",
+        "type": "boolean"
+       },
+       "deck_a": {
+        "description": "Deck A: Archidekt ID/URL or decklist text.",
+        "minLength": 1,
+        "title": "Deck A",
+        "type": "string"
+       },
+       "deck_b": {
+        "description": "Deck B: Archidekt ID/URL or decklist text.",
+        "minLength": 1,
+        "title": "Deck B",
+        "type": "string"
+       },
+       "n": {
+        "default": 1000,
+        "description": "Number of paired games per arm.",
+        "maximum": 20000,
+        "minimum": 1,
+        "title": "N",
+        "type": "integer"
+       },
+       "seed": {
+        "default": 42,
+        "description": "Master RNG seed (shared).",
+        "title": "Seed",
+        "type": "integer"
+       },
+       "until_turn": {
+        "default": 10,
+        "description": "Simulate through this turn.",
+        "maximum": 30,
+        "minimum": 1,
+        "title": "Until Turn",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "deck_a",
+       "deck_b"
+      ],
+      "title": "GoldfishAbInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishAbInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_abArguments",
+    "type": "object"
+   },
+   "name": "goldfish_ab",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_abOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Pre-flight a deck for goldfish simulation: auto-derive what the engine\nmodels on its own, classify out-of-scope cards, and show oracle text ONLY\nfor the plausibly simulable gaps — cutting a full-deck annotation pass to\nthe handful of cards that need one.\n\nDeck input is an Archidekt deck ID/URL or decklist text. For decklist\ntext, list your commander first; a line ending in ' *CMDR*' overrides.\n",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishAnnotateInput": {
+      "additionalProperties": false,
+      "properties": {
+       "constructed": {
+        "default": false,
+        "description": "A 60-card deck (Standard, Modern, Pioneer, ...) with no commander: every listed card is in the library.",
+        "title": "Constructed",
+        "type": "boolean"
+       },
+       "deck": {
+        "description": "Archidekt deck ID/URL, or decklist text ('1 Card Name' per line). For decklist text, list your commander first (or mark its line with a trailing ' *CMDR*').",
+        "minLength": 1,
+        "title": "Deck",
+        "type": "string"
+       }
+      },
+      "required": [
+       "deck"
+      ],
+      "title": "GoldfishAnnotateInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishAnnotateInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_annotateArguments",
+    "type": "object"
+   },
+   "name": "goldfish_annotate",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_annotateOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Exact hypergeometric draw odds — no simulation, closed form.\n\nFlat mode (`copies`, optional `min_successes`): P(at least min_successes\nof the copies appear in the top `draws` of a `deck_size`-card deck).\nJoint mode (`groups`): P(EVERY group meets its minimum simultaneously) by\nexact multivariate enumeration — answers \"≥1 piece A AND ≥1 piece B in\nthe top m\". Provide exactly one of `copies` or `groups`.\n",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishOddsGroup": {
+      "additionalProperties": false,
+      "properties": {
+       "copies": {
+        "description": "Copies of this group's cards in the deck.",
+        "minimum": 0,
+        "title": "Copies",
+        "type": "integer"
+       },
+       "min_successes": {
+        "default": 1,
+        "description": "Minimum copies that must appear in the sample.",
+        "minimum": 0,
+        "title": "Min Successes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "copies"
+      ],
+      "title": "GoldfishOddsGroup",
+      "type": "object"
+     },
+     "GoldfishOddsInput": {
+      "additionalProperties": false,
+      "properties": {
+       "copies": {
+        "anyOf": [
+         {
+          "minimum": 0,
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Flat mode: copies of the card of interest in the deck.",
+        "title": "Copies"
+       },
+       "deck_size": {
+        "description": "Cards in the deck (library) being drawn from.",
+        "maximum": 500,
+        "minimum": 2,
+        "title": "Deck Size",
+        "type": "integer"
+       },
+       "draws": {
+        "description": "Cards seen (e.g. 7 for an opening hand).",
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Draws",
+        "type": "integer"
+       },
+       "groups": {
+        "anyOf": [
+         {
+          "items": {
+           "$ref": "#/$defs/GoldfishOddsGroup"
+          },
+          "maxItems": 8,
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Joint mode: up to 8 groups of {copies, min_successes}; returns P(every group meets its minimum simultaneously), e.g. '>=1 piece A AND >=1 piece B in the top 12'.",
+        "title": "Groups"
+       },
+       "min_successes": {
+        "default": 1,
+        "description": "Flat mode: minimum copies that must appear among the draws.",
+        "minimum": 0,
+        "title": "Min Successes",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "deck_size",
+       "draws"
+      ],
+      "title": "GoldfishOddsInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishOddsInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_oddsArguments",
+    "type": "object"
+   },
+   "name": "goldfish_odds",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_oddsOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Self-contained HTML report for a completed goldfish_run/goldfish_ab\n(spec §Run reports, D11): fingerprint header, stat tiles with CIs,\ninline-SVG charts, trigger table, honesty report — no JavaScript, no\nexternal requests. Publish it VERBATIM as an artifact or file; never\nhand-author the numbers.",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishReportInput": {
+      "properties": {
+       "run_id": {
+        "description": "run_id from goldfish_run/goldfish_ab (the 13-char content-addressed run code).",
+        "title": "Run Id",
+        "type": "string"
+       }
+      },
+      "required": [
+       "run_id"
+      ],
+      "title": "GoldfishReportInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishReportInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_reportArguments",
+    "type": "object"
+   },
+   "name": "goldfish_report",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_reportOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Batch goldfish simulation: n policy-driven games of the deck, with\nper-proportion 95% CIs, an honesty report of what was and wasn't\nsimulated, and a run_id content-addressing the inputs.\n\nRun goldfish_annotate first — pass its requested annotations here as\n`annotations`. Declared `combos` are tracked (assembled / castable by\nturn); every piece must be a deck card or the commander.\n",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishMulliganInput": {
+      "additionalProperties": false,
+      "description": "MulliganRules overrides; unset (None) fields keep the engine\ndefaults. Field names mirror goldfish.engine.MulliganRules exactly — a\ntest pins the correspondence — and pydantic types/bounds reject bad\nvalues here instead of letting them escape mid-sim as TypeErrors.",
+      "properties": {
+       "free_first": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "EDH free first mulligan (default true).",
+        "title": "Free First"
+       },
+       "lands_only": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Count only true lands as sources, not mana rocks.",
+        "title": "Lands Only"
+       },
+       "max_sources": {
+        "anyOf": [
+         {
+          "maximum": 7,
+          "minimum": 0,
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "...and at most this many (default 5).",
+        "title": "Max Sources"
+       },
+       "min_real_lands": {
+        "anyOf": [
+         {
+          "maximum": 7,
+          "minimum": 0,
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Minimum actual lands in a kept 7-card hand (default 2).",
+        "title": "Min Real Lands"
+       },
+       "min_sources": {
+        "anyOf": [
+         {
+          "maximum": 7,
+          "minimum": 0,
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Keep a 7-card hand only with at least this many mana sources (default 3).",
+        "title": "Min Sources"
+       }
+      },
+      "title": "GoldfishMulliganInput",
+      "type": "object"
+     },
+     "GoldfishRunInput": {
+      "additionalProperties": false,
+      "properties": {
+       "annotations": {
+        "description": "Card annotations (goldfish_annotate's DSL) for cards the engine can't auto-derive.",
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "title": "Annotations",
+        "type": "array"
+       },
+       "combos": {
+        "description": "Declared combos: each a list of card names or {\"cards\": [...], \"wins\": bool}.",
+        "items": {},
+        "title": "Combos",
+        "type": "array"
+       },
+       "constructed": {
+        "default": false,
+        "description": "A 60-card deck (Standard, Modern, Pioneer, ...) with no commander: every listed card is in the library, opponents start at 20 life, the first mulligan is not free (unless mulligan.free_first says so) and the game is on the play (no draw on turn 1).",
+        "title": "Constructed",
+        "type": "boolean"
+       },
+       "deck": {
+        "description": "Archidekt deck ID/URL, or decklist text ('1 Card Name' per line, commander first or marked ' *CMDR*').",
+        "minLength": 1,
+        "title": "Deck",
+        "type": "string"
+       },
+       "mulligan": {
+        "$ref": "#/$defs/GoldfishMulliganInput",
+        "description": "MulliganRules overrides: min_sources, max_sources, lands_only, free_first, min_real_lands."
+       },
+       "n": {
+        "default": 1000,
+        "description": "Number of games to simulate.",
+        "maximum": 20000,
+        "minimum": 1,
+        "title": "N",
+        "type": "integer"
+       },
+       "opponents": {
+        "default": 1,
+        "description": "Goldfish opponents (life totals).",
+        "maximum": 5,
+        "minimum": 1,
+        "title": "Opponents",
+        "type": "integer"
+       },
+       "seed": {
+        "default": 42,
+        "description": "Master RNG seed.",
+        "title": "Seed",
+        "type": "integer"
+       },
+       "until_turn": {
+        "default": 10,
+        "description": "Simulate through this turn.",
+        "maximum": 30,
+        "minimum": 1,
+        "title": "Until Turn",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "deck"
+      ],
+      "title": "GoldfishRunInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishRunInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_runArguments",
+    "type": "object"
+   },
+   "name": "goldfish_run",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_runOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Start (or resume) an interactive goldfish game. Returns JSON\n{\"game_id\", \"state\", \"legal_actions\"} (interactive tools return JSON,\nD4); \"warnings\" appears when annotations matched no deck card or names\nwere not recognized by Scryfall.\n\nOne step = one atomic action (D10): drive the game with goldfish_step,\ninspect it with goldfish_state. Every response echoes the full\nresumable state — pass it back as resume_state to restore an evicted\ngame, or to rewind to any earlier point with identical future draws\n(D3): counterfactuals hold the deck order constant.\n\nMulligans use the DEFAULT MulliganRules (pinned v1 — no interactive\noverride): keep 7 with 3-5 mana sources (rocks count) and at least 2\nreal lands, EDH free first mulligan. interactive_mulligan=true starts\nin the mulligan phase instead, with mulligan/keep as the legal actions\n(the same rules fix each keep's required bottom count).\n",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishStartInput": {
+      "additionalProperties": false,
+      "properties": {
+       "annotations": {
+        "description": "Card annotations (goldfish_annotate's DSL) for cards the engine can't auto-derive.",
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "title": "Annotations",
+        "type": "array"
+       },
+       "combos": {
+        "description": "Declared combos: each a list of card names or {\"cards\": [...], \"wins\": bool}.",
+        "items": {},
+        "title": "Combos",
+        "type": "array"
+       },
+       "deck": {
+        "anyOf": [
+         {
+          "minLength": 1,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Archidekt deck ID/URL, or decklist text ('1 Card Name' per line, commander first or marked ' *CMDR*'). Exactly one of deck/resume_state.",
+        "title": "Deck"
+       },
+       "interactive_mulligan": {
+        "default": false,
+        "description": "Start in the mulligan phase (legal actions: mulligan / keep) instead of resolving mulligans automatically.",
+        "title": "Interactive Mulligan",
+        "type": "boolean"
+       },
+       "opponents": {
+        "default": 1,
+        "description": "Goldfish opponents (life totals).",
+        "maximum": 5,
+        "minimum": 1,
+        "title": "Opponents",
+        "type": "integer"
+       },
+       "resume_state": {
+        "anyOf": [
+         {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "A previously echoed \"state\" blob: restores an evicted game, or rewinds to any earlier point with identical future draws. Exactly one of deck/resume_state.",
+        "title": "Resume State"
+       },
+       "seed": {
+        "default": 42,
+        "description": "RNG seed for the shuffle.",
+        "title": "Seed",
+        "type": "integer"
+       }
+      },
+      "title": "GoldfishStartInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishStartInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_startArguments",
+    "type": "object"
+   },
+   "name": "goldfish_start",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_startOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Current full state and legal actions of an interactive goldfish game\nas JSON {\"game_id\", \"state\", \"legal_actions\"}. The echoed state is the\ncomplete resume blob (D3) — keep the latest one to survive eviction.",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishStateInput": {
+      "additionalProperties": false,
+      "properties": {
+       "game_id": {
+        "description": "Game id from goldfish_start.",
+        "minLength": 1,
+        "title": "Game Id",
+        "type": "string"
+       }
+      },
+      "required": [
+       "game_id"
+      ],
+      "title": "GoldfishStateInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishStateInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_stateArguments",
+    "type": "object"
+   },
+   "name": "goldfish_state",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_stateOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Advance an interactive goldfish game by atomic actions (D10): yours\n(`action`, engine shape), or the policy's (no arguments = one step;\n`until` = fast-forward to \"turn:N\" / \"phase:X\" / \"end\").\n\nReturns JSON {\"applied\", \"state\", \"legal_actions\", \"log_delta\"} —\napplied is one {\"action\", \"reason\"} (reason null for user actions, the\nfired policy rule otherwise); log_delta is only the log lines this call\nadded. Under until, applied/log_delta echo just the LAST 50 entries /\n200 lines, with \"applied_total\"/\"log_delta_total\" carrying the full\ncounts (the state's own log is always complete). An illegal action\nreturns {\"error\", \"state\", \"legal_actions\"} and the game is guaranteed\nunmutated; a fast-forward that exhausts its step budget without\nreaching the boundary returns an error too, with the advanced state\npreserved. An unknown game_id names the recovery:\ngoldfish_start(resume_state=...).\n",
+   "inputSchema": {
+    "$defs": {
+     "GoldfishStepInput": {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "anyOf": [
+         {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "One engine-shape action to apply, e.g. {\"type\": \"cast\", \"card\": \"...\"} or {\"type\": \"attach\", \"card\": \"b1\", \"target\": \"b3\"}. Omit both action and until to let the policy choose one step.",
+        "title": "Action"
+       },
+       "game_id": {
+        "description": "Game id from goldfish_start.",
+        "minLength": 1,
+        "title": "Game Id",
+        "type": "string"
+       },
+       "until": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Fast-forward the policy to a boundary: \"turn:N\" (stop at the start of turn N), \"phase:main1|combat|main2\", or \"end\" (win or past turn 30). Already at the boundary → applied is empty. Mutually exclusive with action.",
+        "title": "Until"
+       }
+      },
+      "required": [
+       "game_id"
+      ],
+      "title": "GoldfishStepInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/GoldfishStepInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "goldfish_stepArguments",
+    "type": "object"
+   },
+   "name": "goldfish_step",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "goldfish_stepOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get the full official decklist for a preconstructed deck. Use this INSTEAD\nof web search when a user asks about a precon's contents.\n\nReturns commander, main deck, and sideboard. Use precon_search first to find\nthe fileName.\n",
+   "inputSchema": {
+    "$defs": {
+     "PreconDeckInput": {
+      "additionalProperties": false,
+      "properties": {
+       "file_name": {
+        "description": "Deck fileName from precon_search results (e.g., 'ForcesOfTheImperium_40K').",
+        "minLength": 1,
+        "title": "File Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "file_name"
+      ],
+      "title": "PreconDeckInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PreconDeckInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "precon_decklistArguments",
+    "type": "object"
+   },
+   "name": "precon_decklist",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "precon_decklistOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Compute the exact cards cut and added between a preconstructed deck and a\nspecific upgraded deck. Use this INSTEAD of estimating from memory when a user\nwants a real cut/added percentage for one deck.\n\nThe precon baseline comes from MTGJSON (use precon_search for the fileName).\nProvide the upgraded deck as either an Archidekt deck (`deck`) or a pasted\n`decklist`. Basic lands are reported separately so routine mana-base churn\ndoesn't distort the numbers.\n",
+   "inputSchema": {
+    "$defs": {
+     "PreconDiffInput": {
+      "additionalProperties": false,
+      "properties": {
+       "canonicalize": {
+        "default": true,
+        "description": "Normalize display names via Scryfall and flag unrecognized cards. Matching is always case-insensitive.",
+        "title": "Canonicalize",
+        "type": "boolean"
+       },
+       "deck": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Upgraded deck as an Archidekt deck ID or URL.",
+        "title": "Deck"
+       },
+       "decklist": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "OR the upgraded deck as a pasted list ('1 Card Name' per line).",
+        "title": "Decklist"
+       },
+       "file_name": {
+        "description": "MTGJSON precon fileName from precon_search (e.g. 'WorldShaper_TDC').",
+        "minLength": 1,
+        "title": "File Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "file_name"
+      ],
+      "title": "PreconDiffInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PreconDiffInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "precon_diffArguments",
+    "type": "object"
+   },
+   "name": "precon_diff",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "precon_diffOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Export a preconstructed deck in Archidekt import format.\n\nReturns the deck in Archidekt-compatible syntax with [Commander{top}]\nannotations. Paste directly into Archidekt's import dialog.\n",
+   "inputSchema": {
+    "$defs": {
+     "PreconDeckInput": {
+      "additionalProperties": false,
+      "properties": {
+       "file_name": {
+        "description": "Deck fileName from precon_search results (e.g., 'ForcesOfTheImperium_40K').",
+        "minLength": 1,
+        "title": "File Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "file_name"
+      ],
+      "title": "PreconDeckInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PreconDeckInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "precon_exportArguments",
+    "type": "object"
+   },
+   "name": "precon_export",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "precon_exportOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Search for preconstructed decks by name, set name or set code. Use this INSTEAD of\nweb search when looking up precon decklists — it has the complete database.\n\nSearches MTGJSON's database of 2700+ official precon decks. Returns deck names,\nset codes, and fileNames needed to fetch full decklists with precon_decklist.\n",
+   "inputSchema": {
+    "$defs": {
+     "PreconSearchInput": {
+      "additionalProperties": false,
+      "properties": {
+       "commander_only": {
+        "default": true,
+        "description": "If true, only show Commander precons.",
+        "title": "Commander Only",
+        "type": "boolean"
+       },
+       "limit": {
+        "default": 15,
+        "maximum": 50,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "query": {
+        "description": "Search term for the deck's name, its set's name or set code (e.g., 'Forces of the Imperium', 'Warhammer 40,000' or 'MKC').",
+        "minLength": 1,
+        "title": "Query",
+        "type": "string"
+       }
+      },
+      "required": [
+       "query"
+      ],
+      "title": "PreconSearchInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PreconSearchInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "precon_searchArguments",
+    "type": "object"
+   },
+   "name": "precon_search",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "precon_searchOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Daily price series for a card from the local price DB — cheapest\nprinting by default, or a specific one via set_code+collector_number.\nData exists for cards someone watches; global, needs no passphrase.",
+   "inputSchema": {
+    "$defs": {
+     "PriceHistoryInput": {
+      "additionalProperties": false,
+      "properties": {
+       "collector_number": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Pin a specific printing: collector number",
+        "title": "Collector Number"
+       },
+       "days": {
+        "default": 90,
+        "description": "Days of history",
+        "title": "Days",
+        "type": "integer"
+       },
+       "name": {
+        "description": "Card name",
+        "title": "Name",
+        "type": "string"
+       },
+       "provider": {
+        "default": "all",
+        "description": "all (cheapest across the USD shops) | tcgplayer | cardkingdom | cardmarket | manapool",
+        "title": "Provider",
+        "type": "string"
+       },
+       "set_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Pin a specific printing: set code",
+        "title": "Set Code"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "PriceHistoryInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PriceHistoryInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "price_historyArguments",
+    "type": "object"
+   },
+   "name": "price_history",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "price_historyOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Look up Magic's Comprehensive Rules by rule number or keyword.\n\nUse this INSTEAD of memory or web search for what the rulebook says.\nA rule number ('702.2b', '601.2') returns exact rule text — '702.2'\nincludes its subrules, '702' lists that subsection's rules. A keyword\nor glossary term ('deathtouch') returns the glossary entry plus the\nrules it cites. Cite rule numbers in answers.\n",
+   "inputSchema": {
+    "$defs": {
+     "RulesGetInput": {
+      "additionalProperties": false,
+      "properties": {
+       "ref": {
+        "description": "A Comprehensive Rules number at any depth ('7', '702', '702.2', '702.2b'; a trailing period is fine) or a keyword/glossary term ('deathtouch', 'exploit').",
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "Ref",
+        "type": "string"
+       }
+      },
+      "required": [
+       "ref"
+      ],
+      "title": "RulesGetInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/RulesGetInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "rules_getArguments",
+    "type": "object"
+   },
+   "name": "rules_get",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "rules_getOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Full-text search of Magic's Comprehensive Rules and glossary.\n\nUse this INSTEAD of memory or web search when a rules-interaction\nquestion (stack, layers, replacement effects, state-based actions)\ndoesn't start from a known rule number; then cite the rule numbers\nit returns, or drill in with rules_get.\n",
+   "inputSchema": {
+    "$defs": {
+     "RulesSearchInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 10,
+        "description": "Max hits to return.",
+        "maximum": 25,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "query": {
+        "description": "Words or a phrase to find in Comprehensive Rules and glossary text. Prefer the CR's own wording — singular forms and rules vocabulary ('replacement effect order', not 'ordering of replacement effects').",
+        "maxLength": 300,
+        "minLength": 1,
+        "title": "Query",
+        "type": "string"
+       }
+      },
+      "required": [
+       "query"
+      ],
+      "title": "RulesSearchInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/RulesSearchInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "rules_searchArguments",
+    "type": "object"
+   },
+   "name": "rules_search",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "rules_searchOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Exact oracle text for a whole list of cards in one call.\n\nUse this BEFORE discussing what specific cards do — never state rules\ntext from memory: distinct cards share similar names, and text gets\nerrata'd. Returns name, mana cost, type line, full rules text, and P/T\nfor every card. Cards Scryfall cannot match are listed explicitly under\n'Not found', never silently dropped.\n",
+   "inputSchema": {
+    "$defs": {
+     "CardTextInput": {
+      "additionalProperties": false,
+      "properties": {
+       "cards": {
+        "description": "Cards to fetch exact oracle text for, one per line. Plain names work ('Sol Ring'), and so do full Archidekt/Moxfield lines ('1x Sol Ring (ltc) 284 *F* [Ramp]') — quantities, finishes, and categories are ignored. Max 500 lines.",
+        "maxLength": 50000,
+        "minLength": 1,
+        "title": "Cards",
+        "type": "string"
+       }
+      },
+      "required": [
+       "cards"
+      ],
+      "title": "CardTextInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/CardTextInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_card_textArguments",
+    "type": "object"
+   },
+   "name": "scryfall_card_text",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_card_textOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Look up a single card by name. Tries exact match first, then fuzzy.\nWith no set_code, shows the newest printing already out on paper.",
+   "inputSchema": {
+    "$defs": {
+     "NamedInput": {
+      "additionalProperties": false,
+      "properties": {
+       "name": {
+        "description": "Card name to look up.",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+       },
+       "set_code": {
+        "anyOf": [
+         {
+          "maxLength": 6,
+          "minLength": 2,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional set code (e.g. 'bbd', 'eld'). Without one, the newest printing already out on paper is shown, not a preview.",
+        "title": "Set Code"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "NamedInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/NamedInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_namedArguments",
+    "type": "object"
+   },
+   "name": "scryfall_named",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_namedOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get current market prices for a card, optionally for one specific printing.\n\nWith no filters, lists printings cheapest first (printings with no price\nsort last, not first). Pass set_code to restrict to one set, set_code plus\ncollector_number to price exactly one printing, or finish to restrict to\nprintings that come in foil or etched.\n\nDigital-only (Arena/MTGO) printings are excluded by default because they\nnever carry paper prices. Prices are updated daily by Scryfall.\n",
+   "inputSchema": {
+    "$defs": {
+     "CardFinish": {
+      "enum": [
+       "nonfoil",
+       "foil",
+       "etched"
+      ],
+      "title": "CardFinish",
+      "type": "string"
+     },
+     "PriceInput": {
+      "additionalProperties": false,
+      "properties": {
+       "collector_number": {
+        "anyOf": [
+         {
+          "maxLength": 20,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Collector number within the set, e.g. '281' or 'IFIYW-10'. Requires set_code. With both set, prices exactly one printing.",
+        "title": "Collector Number"
+       },
+       "finish": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/CardFinish"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Restrict to printings available in this finish, and lead with its price."
+       },
+       "include_digital": {
+        "default": false,
+        "description": "Include Arena/MTGO-only printings. They never have paper prices, so off by default.",
+        "title": "Include Digital",
+        "type": "boolean"
+       },
+       "limit": {
+        "default": 10,
+        "description": "Max printings to show.",
+        "maximum": 50,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "name": {
+        "description": "Card name to look up prices for.",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+       },
+       "set_code": {
+        "anyOf": [
+         {
+          "maxLength": 6,
+          "minLength": 2,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Restrict to one set, e.g. 'dmr'. Use with collector_number to pin one printing.",
+        "title": "Set Code"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "PriceInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PriceInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_priceArguments",
+    "type": "object"
+   },
+   "name": "scryfall_price",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_priceOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Price a decklist and total it, honoring the printing on each line.\n\n'1x Sol Ring (ltc) 284 *F*' is priced as that exact printing in that exact\nfinish. Lines naming no set use the newest printing already out on paper\n(in the line's finish when one has it), never a preview, and are listed\nseparately so the total is honest about what it guessed.\n\nNever substitutes a different finish: if the requested finish has no price,\nthe line is reported on its own with the finishes that printing does have,\nrather than being quietly totalled at another finish's price.\n",
+   "inputSchema": {
+    "$defs": {
+     "PriceListInput": {
+      "additionalProperties": false,
+      "properties": {
+       "decklist": {
+        "description": "Decklist text, one card per line. Plain names work ('1 Sol Ring'), and so do full Archidekt/Moxfield lines naming a printing and finish ('1x Sol Ring (ltc) 284 *F* [Ramp]'). Lines with a set code are priced at that exact printing; lines without one use the newest printing that is already out on paper (in the finish asked for), not a preview, and are flagged separately in the output. Max 500 lines.",
+        "maxLength": 50000,
+        "minLength": 1,
+        "title": "Decklist",
+        "type": "string"
+       }
+      },
+      "required": [
+       "decklist"
+      ],
+      "title": "PriceListInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/PriceListInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_price_listArguments",
+    "type": "object"
+   },
+   "name": "scryfall_price_list",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_price_listOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get a random Magic card, optionally filtered by a Scryfall query.",
+   "inputSchema": {
+    "$defs": {
+     "RandomInput": {
+      "additionalProperties": false,
+      "properties": {
+       "query": {
+        "anyOf": [
+         {
+          "maxLength": 500,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional Scryfall query filter.",
+        "title": "Query"
+       }
+      },
+      "title": "RandomInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/RandomInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_randomArguments",
+    "type": "object"
+   },
+   "name": "scryfall_random",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_randomOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Get official Wizards of the Coast rulings for a card.\n\nReturns dated rulings that clarify how a card works, including\ninteractions, edge cases, and errata.\n",
+   "inputSchema": {
+    "$defs": {
+     "RulingsInput": {
+      "additionalProperties": false,
+      "properties": {
+       "name": {
+        "description": "Card name to get rulings for.",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "RulingsInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/RulingsInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_rulingsArguments",
+    "type": "object"
+   },
+   "name": "scryfall_rulings",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_rulingsOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Search for Magic: The Gathering cards using Scryfall's full query syntax.\n\nSupports color identity (id<=), oracle text (o:), type (t:), set (set:),\nkeywords (kw:), mana cost, and boolean operators. Shows `limit` cards a page\n(default 20); page takes the next. Each card is shown in its newest printing\nout on paper (as scryfall_named), unless `printing` asks for another.\n",
+   "inputSchema": {
+    "$defs": {
+     "ScryfallSearchOrder": {
+      "enum": [
+       "name",
+       "set",
+       "released",
+       "rarity",
+       "color",
+       "usd",
+       "eur",
+       "cmc",
+       "power",
+       "toughness",
+       "edhrec",
+       "artist",
+       "review"
+      ],
+      "title": "ScryfallSearchOrder",
+      "type": "string"
+     },
+     "SearchInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 20,
+        "description": "Cards per page (default 20, at most 175).",
+        "maximum": 175,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       },
+       "order": {
+        "$ref": "#/$defs/ScryfallSearchOrder",
+        "default": "name"
+       },
+       "page": {
+        "default": 1,
+        "description": "Page of `limit` cards (1 is the first).",
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Page",
+        "type": "integer"
+       },
+       "printing": {
+        "$ref": "#/$defs/SearchPrinting",
+        "default": "newest_paper",
+        "description": "Which printing of each card is shown: 'newest_paper' (default: the newest printing out on paper, as scryfall_named shows), 'scryfall' (Scryfall's own choice), 'cheapest' (lowest USD price) or 'oldest'. A prefer: term in the query wins."
+       },
+       "query": {
+        "description": "Scryfall search query using full syntax. Examples: 'o:\"partner with\" id<=rw', 't:cat id<=rw', '!\"Blind Obedience\"', 'set:bbd t:creature'. Full syntax: https://scryfall.com/docs/syntax",
+        "maxLength": 500,
+        "minLength": 1,
+        "title": "Query",
+        "type": "string"
+       },
+       "verbose": {
+        "default": false,
+        "description": "Include set, price, legality, keywords, and Scryfall link.",
+        "title": "Verbose",
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "query"
+      ],
+      "title": "SearchInput",
+      "type": "object"
+     },
+     "SearchPrinting": {
+      "enum": [
+       "newest_paper",
+       "scryfall",
+       "cheapest",
+       "oldest"
+      ],
+      "title": "SearchPrinting",
+      "type": "string"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/SearchInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "scryfall_searchArguments",
+    "type": "object"
+   },
+   "name": "scryfall_search",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "scryfall_searchOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Find all combos that use a specific card. Use this INSTEAD of web search\nwhen asked about combos or synergies for a card.\n\nUseful for discovering what combo potential a card has.\n",
+   "inputSchema": {
+    "$defs": {
+     "SpellbookCardInput": {
+      "additionalProperties": false,
+      "properties": {
+       "card": {
+        "description": "Card name to find combos for.",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Card",
+        "type": "string"
+       },
+       "color_identity": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional color identity filter.",
+        "title": "Color Identity"
+       },
+       "limit": {
+        "default": 10,
+        "maximum": 25,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "card"
+      ],
+      "title": "SpellbookCardInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/SpellbookCardInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "spellbook_card_combosArguments",
+    "type": "object"
+   },
+   "name": "spellbook_card_combos",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "spellbook_card_combosOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Search for combos involving specific cards together. Use this INSTEAD of\nweb search when looking up MTG combos or infinite combos.\n\nFinds combos that use ALL the specified cards. Returns step-by-step\ninstructions, prerequisites, and what the combo produces.\n",
+   "inputSchema": {
+    "$defs": {
+     "SpellbookCombosInput": {
+      "additionalProperties": false,
+      "properties": {
+       "cards": {
+        "description": "Card names to find combos for (e.g., ['Dualcaster Mage', 'Twinflame']).",
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 10,
+        "minItems": 1,
+        "title": "Cards",
+        "type": "array"
+       },
+       "color_identity": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional color identity filter (e.g., 'wubrg', 'bg', 'r').",
+        "title": "Color Identity"
+       },
+       "limit": {
+        "default": 10,
+        "maximum": 25,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "cards"
+      ],
+      "title": "SpellbookCombosInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/SpellbookCombosInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "spellbook_combosArguments",
+    "type": "object"
+   },
+   "name": "spellbook_combos",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "spellbook_combosOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Validate an Archidekt deck for card accuracy, deck size, color identity, and category structure.\n\nFetches the deck, verifies all cards on Scryfall, checks Commander format\nrules, and validates Archidekt-specific category structure (commander zone,\nmaybeboard, card counts).\n",
+   "inputSchema": {
+    "$defs": {
+     "ValidateArchidektInput": {
+      "additionalProperties": false,
+      "properties": {
+       "deck": {
+        "description": "Archidekt deck ID or URL.",
+        "minLength": 1,
+        "title": "Deck",
+        "type": "string"
+       }
+      },
+      "required": [
+       "deck"
+      ],
+      "title": "ValidateArchidektInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/ValidateArchidektInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "validate_archidekt_deckArguments",
+    "type": "object"
+   },
+   "name": "validate_archidekt_deck",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "validate_archidekt_deckOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Validate a Commander decklist for card name accuracy, deck size, and color identity.\n\nChecks all card names against Scryfall, verifies deck size is 100\n(including commander), and optionally checks color identity.\nReturns a structured pass/fail report.\n",
+   "inputSchema": {
+    "$defs": {
+     "ValidateDecklistInput": {
+      "additionalProperties": false,
+      "properties": {
+       "commander": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Commander name for color identity validation. If omitted, validation skips color checks.",
+        "title": "Commander"
+       },
+       "decklist": {
+        "description": "Decklist in '1 Card Name' format (one per line). Lines starting with // are treated as category headers.",
+        "minLength": 1,
+        "title": "Decklist",
+        "type": "string"
+       }
+      },
+      "required": [
+       "decklist"
+      ],
+      "title": "ValidateDecklistInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/ValidateDecklistInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "validate_decklistArguments",
+    "type": "object"
+   },
+   "name": "validate_decklist",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "validate_decklistOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Add a card to a watchlist (or update its target/note if already\nwatched). Tracks the cheapest printing unless set_code+collector_number\npin one.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistAddInput": {
+      "additionalProperties": false,
+      "properties": {
+       "collector_number": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Pin a specific printing: collector number",
+        "title": "Collector Number"
+       },
+       "name": {
+        "description": "Card name (fuzzy-matched via Scryfall)",
+        "title": "Name",
+        "type": "string"
+       },
+       "note": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Free-form note, e.g. deck/batch",
+        "title": "Note"
+       },
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "List passphrase (omit when using a personal connector URL)",
+        "title": "Passphrase"
+       },
+       "set_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Pin a specific printing: set code",
+        "title": "Set Code"
+       },
+       "shop": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Pin this card's price basis to one market: tcgplayer | cardkingdom | cardmarket | manapool. Default (omit) is the cheapest across the USD markets.",
+        "title": "Shop"
+       },
+       "target_price": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Fixed alert threshold (USD unless the card is pinned to Cardmarket)",
+        "title": "Target Price"
+       },
+       "target_rule": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Moving target instead of a fixed price: 'low' alerts at the historic low, 'low-10%' ten percent under it, '-20%' twenty percent under today's price (fixed at add time). Overrides target_price.",
+        "title": "Target Rule"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "WatchlistAddInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistAddInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_addArguments",
+    "type": "object"
+   },
+   "name": "watchlist_add",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_addOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Add many cards to a watchlist at once — USE THIS instead of calling\nwatchlist_add repeatedly. Paste a decklist, a shopping list, or any list\nof card names (one per line); optional per-line target after ' @ '.\nValidates every name against Scryfall in batches and backfills all their\nprice history in a single pass.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistBulkAddInput": {
+      "additionalProperties": false,
+      "properties": {
+       "decklist": {
+        "description": "Cards to add, one per line. Accepts plain names, decklist quantities ('1 Sol Ring', '1x Sol Ring'), and Archidekt/Moxfield printings ('1 Sol Ring (CMM) 464' pins that printing; [Category] and ^label^ suffixes are stripped). Quantities are ignored — a watchlist tracks cards, not copies. An optional target may follow the name after ' @ ': a price ('Rhystic Study @ 60'), 'low' (alert at the historic low), 'low-10%' (10% under the historic low), or '-20%' (20% under today's price, fixed at add time).",
+        "title": "Decklist",
+        "type": "string"
+       },
+       "note": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Note applied to every card added, e.g. the deck name",
+        "title": "Note"
+       },
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "List passphrase (omit when using a personal connector URL)",
+        "title": "Passphrase"
+       },
+       "pin_printings": {
+        "default": false,
+        "description": "Pin each card to the printing its line names ('(CMM) 464'). Off by default because deck exports name the printing the owner has, while a watchlist usually wants the cheapest one.",
+        "title": "Pin Printings",
+        "type": "boolean"
+       },
+       "target_price": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Default fixed target for cards without a per-line ' @ ' target",
+        "title": "Target Price"
+       },
+       "target_rule": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Default target rule ('low', 'low-10%', '-20%') for cards without a per-line ' @ ' target; overrides target_price",
+        "title": "Target Rule"
+       }
+      },
+      "required": [
+       "decklist"
+      ],
+      "title": "WatchlistBulkAddInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistBulkAddInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_bulk_addArguments",
+    "type": "object"
+   },
+   "name": "watchlist_bulk_add",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_bulk_addOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Clone a list at a revision into a NEW list with a new passphrase.\nCloning your own list (passphrase) is recovery and supersedes it; cloning\na share code is a fork of a friend's list.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistCloneInput": {
+      "additionalProperties": false,
+      "properties": {
+       "at_seq": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Revision to clone at (from watchlist_history); default latest",
+        "title": "At Seq"
+       },
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Clone your own list (recovery: marks it superseded)",
+        "title": "Passphrase"
+       },
+       "share_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Clone someone's shared list (fork)",
+        "title": "Share Code"
+       }
+      },
+      "title": "WatchlistCloneInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistCloneInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_cloneArguments",
+    "type": "object"
+   },
+   "name": "watchlist_clone",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_cloneOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Create a new price watchlist. Returns its passphrase (SHOWN ONLY ONCE —\noffer to remember it for the user), personal connector URL, and read-only\nshare code.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistCreateInput": {
+      "additionalProperties": false,
+      "properties": {
+       "label": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Optional list label, e.g. 'Cloud deck upgrades'",
+        "title": "Label"
+       }
+      },
+      "title": "WatchlistCreateInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistCreateInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_createArguments",
+    "type": "object"
+   },
+   "name": "watchlist_create",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_createOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Show a list's append-only event chain (what changed, when). Accepts a\npassphrase (own list) or share code (read-only).",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistHistoryInput": {
+      "additionalProperties": false,
+      "properties": {
+       "limit": {
+        "default": 50,
+        "description": "Most recent events to show",
+        "title": "Limit",
+        "type": "integer"
+       },
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "List passphrase",
+        "title": "Passphrase"
+       },
+       "share_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Read-only share code",
+        "title": "Share Code"
+       }
+      },
+      "title": "WatchlistHistoryInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistHistoryInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_historyArguments",
+    "type": "object"
+   },
+   "name": "watchlist_history",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_historyOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Show a watchlist: current price (cheapest normal-finish price across\nTCGplayer, Card Kingdom and Mana Pool, or the card's pinned shop),\n7/30-day movement, targets, notes. Sorted by 30-day movement.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistListInput": {
+      "additionalProperties": false,
+      "properties": {
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "List passphrase (omit when using a personal connector URL)",
+        "title": "Passphrase"
+       }
+      },
+      "title": "WatchlistListInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistListInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_listArguments",
+    "type": "object"
+   },
+   "name": "watchlist_list",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_listOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Remove a card from a watchlist by name or entry id.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistRemoveInput": {
+      "additionalProperties": false,
+      "properties": {
+       "collector_number": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Disambiguate a specific pinned printing",
+        "title": "Collector Number"
+       },
+       "entry_id": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Entry id (from watchlist_list/history)",
+        "title": "Entry Id"
+       },
+       "name": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Card name to remove",
+        "title": "Name"
+       },
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "List passphrase (omit when using a personal connector URL)",
+        "title": "Passphrase"
+       },
+       "set_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "Disambiguate a specific pinned printing",
+        "title": "Set Code"
+       }
+      },
+      "title": "WatchlistRemoveInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistRemoveInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_removeArguments",
+    "type": "object"
+   },
+   "name": "watchlist_remove",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_removeOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "Movers report: biggest 7-day drops/rises and anything at/below target.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistListInput": {
+      "additionalProperties": false,
+      "properties": {
+       "passphrase": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "description": "List passphrase (omit when using a personal connector URL)",
+        "title": "Passphrase"
+       }
+      },
+      "title": "WatchlistListInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistListInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_reportArguments",
+    "type": "object"
+   },
+   "name": "watchlist_report",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_reportOutput",
+    "type": "object"
+   }
+  },
+  {
+   "description": "View a friend's watchlist read-only via its share code.",
+   "inputSchema": {
+    "$defs": {
+     "WatchlistViewInput": {
+      "additionalProperties": false,
+      "properties": {
+       "share_code": {
+        "description": "Read-only share code, e.g. SC-ABC123",
+        "title": "Share Code",
+        "type": "string"
+       }
+      },
+      "required": [
+       "share_code"
+      ],
+      "title": "WatchlistViewInput",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "params": {
+      "$ref": "#/$defs/WatchlistViewInput"
+     }
+    },
+    "required": [
+     "params"
+    ],
+    "title": "watchlist_viewArguments",
+    "type": "object"
+   },
+   "name": "watchlist_view",
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "watchlist_viewOutput",
+    "type": "object"
+   }
+  }
+ ]
+}

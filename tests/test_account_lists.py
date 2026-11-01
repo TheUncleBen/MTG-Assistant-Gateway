@@ -380,3 +380,13 @@ async def test_a_premier_template_and_defaults_naming_one_wait_for_the_members_p
         h, token, "default_categories", [{"op": "set", "card": "Sol Ring", "categories": ["Ramp"]}]
     )
     assert p["risk"] == "low", p
+
+
+async def test_a_change_named_by_action_reads_as_its_op(stack: Stack) -> None:
+    """Every other propose tool names a change's kind "action" (whole-application audit): the
+    lists take it for "op", so the natural call is not refused."""
+    h = stack.h
+    token = await linked_user(stack)
+    p = await _propose(h, token, "color_tags", [{"action": "create", "name": "Proxy", "color": "#123456"}])
+    assert p["ok"] and p["kind"] == "lists", p
+    assert "Proxy" in p["rows"][0]["text"], p

@@ -957,16 +957,11 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         name="search_decks",
         title="Search public Archidekt decks",
         description=(
-            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: "
-            "`name` (part of the deck name), `commander` (a commander's card name; a partial name is "
-            "looked up and, if several commanders match, returned as commander_suggestions), "
-            "`owner` (Archidekt username), `format` (" + ", ".join(sorted(FORMAT_IDS)) + "), "
-            "`colors` (letters from WUBRG: color identity within those colors), "
-            "`order_by` (-viewCount, -updatedAt, -createdAt, -size, edhBracket), `page` (60 decks a "
-            "page) and `limit` (how many of the page to return, default 20). For one user's decks "
-            "(their profile), give `owner` with order_by -updatedAt. Each result has an id and url; "
-            "read one with get_deck. This is the one tool for public deck lists; list_my_decks lists "
-            "the signed-in member's own decks, private ones included. Read-only."
+            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: name, "
+            "commander (a partial name is looked up; several matching commanders come back as "
+            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their profile's "
+            "decks), format, colors, order_by, page and limit. Each result has an id and url; read one with "
+            "get_deck. list_my_decks lists the member's own decks, private ones included. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )

@@ -108,6 +108,7 @@ from .schemas import (
     changes_for_assistant,
     compact_schema,
     inline_refs,
+    without_field_descriptions,
     without_item_descriptions,
 )
 from .setup_hub import add_setup_routes
@@ -312,6 +313,31 @@ def scope_guard_middleware():
     return _mw
 
 
+def numbers_as_text_middleware(tool_schema: Callable[[str], dict[str, Any] | None]):
+    """MCP middleware letting a whole number stand for a text parameter (a deck id, a thread id,
+    a deck reference): assistants send ``42`` as often as ``"42"``, and the descriptions call these
+    numbers. Only a parameter the tool lists as text (``tool_schema`` gives the gateway tool's input
+    schema) and only a whole number; anything else reaches the tool's own check as it came."""
+
+    async def _mw(ctx: Any, call_next: Any) -> Any:
+        if ctx.method == "tools/call" and isinstance(ctx.params, dict):
+            args = ctx.params.get("arguments")
+            schema = tool_schema(str(ctx.params.get("name")))
+            props = schema.get("properties") if isinstance(schema, dict) else None
+            if isinstance(args, dict) and isinstance(props, dict):
+                fixed = {
+                    k: str(v)
+                    if type(v) is int and isinstance(props.get(k), dict) and props[k].get("type") == "string"
+                    else v
+                    for k, v in args.items()
+                }
+                if fixed != args:
+                    ctx.params["arguments"] = fixed
+        return await call_next(ctx)
+
+    return _mw
+
+
 _VALIDATION_HEAD = re.compile(r"^Error executing tool (\w+): \d+ validation errors? for \w+\n")
 
 
@@ -331,7 +357,9 @@ def _schema_problems(text: str) -> str | None:
             problems.append(f"{field}: {reason}" if field else reason)
             field = None
         elif not line.startswith(" "):
-            field = line.strip()
+            # a research tool's arguments arrive wrapped in one "params" object (mf_proxy): the
+            # member's field is the one inside it
+            field = re.sub(r"^params\.", "", line.strip())
     return "; ".join(problems)[:1500] or None
 
 
@@ -1203,8 +1231,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # and without the generated titles and null branches, which only cost tokens.
     for tool in server._tool_manager.list_tools():
         tool.parameters = compact_schema(inline_refs(tool.parameters))
+        if tool.fn_metadata.output_schema is not None:  # "an object": its generated title says no more
+            tool.fn_metadata.output_schema = compact_schema(tool.fn_metadata.output_schema)
         if tool.name in SAME_CHANGES_AS_PROPOSE:  # the fields are explained on propose_deck_changes
             tool.parameters = without_item_descriptions(tool.parameters, "changes")
+        if tool.name in SAME_FIELDS_AS_NEW_DECK:  # and a new deck's on propose_new_deck
+            tool.parameters = without_field_descriptions(tool.parameters, SAME_FIELDS_AS_NEW_DECK[tool.name])
         if tool.name in PROPOSAL_TOOLS:
             tool.annotations = _proposal_hints(tool.annotations)
 
@@ -1220,6 +1252,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
 # Tools that take propose_deck_changes' list of changes and say so in the parameter's description:
 # the list's fields are explained there once, not in every tool (review F15).
 SAME_CHANGES_AS_PROPOSE = frozenset({"check_deck_changes", "amend_proposal"})
+# The same for propose_new_deck's fields: the parameter they sit under (None: every parameter).
+SAME_FIELDS_AS_NEW_DECK: dict[str, str | None] = {"check_new_deck": None, "amend_proposal": "new_deck"}
 
 PROPOSAL_TOOLS: frozenset[str] = frozenset(
     {
@@ -1362,6 +1396,14 @@ def create_app(
     state.mcp_reads = mcp_reads
     server.middleware.append(state.metrics.mcp_middleware())  # before the proxy, so its calls count too
     server.middleware.append(scope_guard_middleware())
+
+    def gateway_schema(name: str) -> dict[str, Any] | None:
+        if mf_proxy is not None and mf_proxy.is_proxied(name):
+            return None  # the research service checks its own arguments
+        tool = server._tool_manager.get_tool(name)
+        return tool.parameters if tool is not None else None
+
+    server.middleware.append(numbers_as_text_middleware(gateway_schema))
     server.middleware.append(schema_error_middleware())
     if mf_proxy is not None:
         # proxied archidekt_* research calls draw on the member's Archidekt budget too

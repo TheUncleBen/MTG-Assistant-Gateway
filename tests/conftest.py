@@ -24,6 +24,7 @@ import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
 from mcp import Client
+from mcp.server.lowlevel import Server
 from mcp.server.mcpserver import MCPServer
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -702,7 +703,7 @@ class StackOptions:
         default_factory=lambda: {"writes_enabled": True, "approval_mode_default": "auto"}
     )
     archidekt: Callable[[], FakeArchidekt] | None = FakeArchidekt
-    mystic_forge: Callable[[], MCPServer] | None = None
+    mystic_forge: Callable[[], MCPServer | Server[Any]] | None = None
     scryfall: bool = False
     started: Callable[[Stack], None] | None = None
 

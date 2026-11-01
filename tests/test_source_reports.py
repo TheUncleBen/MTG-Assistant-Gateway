@@ -236,3 +236,66 @@ async def test_reports_of_lists_and_proposals_go_before_a_decks_own_reports(
     ]
     kept = {r["report_id"] for r in reports.list("alice", None)}
     assert kept == {second, *more}, kept
+
+
+async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack: Stack) -> None:
+    """Every kind of run uses Forge where the gateway has it (owner feedback F1; whole-application
+    audit row 10): compare_decks with simulate keeps the A/B as a report and, for two Commander
+    decks, starts both decks' Forge games against the same precons, as the website's Compare page
+    does (two Head to head reports, within the member's Forge queue). Where it can't, it says why."""
+    from mtg_gateway.tools_reports import FORGE_NEEDS_DECKS, FORGE_READ_ONLY
+
+    from .test_forge import BRACKETED
+    from .test_round4_data import _app_token
+
+    h = stack.h
+    reports = h.app.state.gateway.reports
+    fake = FakeForge(brackets=BRACKETED)
+    reports.forge, reports.forge_interval = fake.client(), 0.05
+    stack.ark.private.discard(43)  # Amy's deck, public for this test
+    token = await linked_user(stack)
+    try:
+        out = structured(
+            await call(h, token, "compare_decks", {"a": "42", "b": "43", "simulate": True, "games": 20})
+        )
+        assert out["stored"] is True and out["report_id"], out
+        forge = out["forge"]
+        assert forge["started"] is True, forge
+        ids = forge["report_ids"]
+        assert forge["head_to_head_url"].endswith(f"/history/reports/{ids['b']}/head-to-head"), forge
+        first = structured(await call(h, token, "get_deck_report", {"report_id": ids["a"], "view": "forge"}))
+        second = structured(await call(h, token, "get_deck_report", {"report_id": ids["b"], "view": "forge"}))
+        assert first["ok"] and second["ok"], (first, second)
+        for _ in range(200):  # the first deck's games start; the second's wait for or seat its table
+            if fake.started:
+                break
+            await asyncio.sleep(0.02)
+        assert fake.started, "no Forge games were started"
+        assert reports.pair_of(h.app.state.gateway.db._one("SELECT sub FROM users", ())["sub"], ids["b"]) == (
+            ids["a"],
+            ids["b"],
+        )
+        # a pasted list can't sit at a Forge table: the comparison is kept and the reason given
+        listed = structured(
+            await call(h, token, "compare_decks", {"a": "42", "b_list": LIST, "simulate": True, "games": 20})
+        )
+        assert listed["stored"] is True and listed["forge"] == {"started": False, "note": FORGE_NEEDS_DECKS}
+        # forge false: no Forge games, as run_deck_report's forge false
+        off = structured(
+            await call(
+                h,
+                token,
+                "compare_decks",
+                {"a": "42", "b": "43", "simulate": True, "games": 20, "forge": False},
+            )
+        )
+        assert off["stored"] is True and "forge" not in off, off
+        # a read-only app's comparison is kept, but it starts no Forge games
+        reader, _cid = await _app_token(h, "reader", scope="mtg.read")
+        ro = structured(
+            await call(h, reader, "compare_decks", {"a": "42", "b": "43", "simulate": True, "games": 20})
+        )
+        assert ro["stored"] is True and ro["forge"] == {"started": False, "note": FORGE_READ_ONLY}, ro
+    finally:
+        if reports._forge_task is not None:
+            reports._forge_task.cancel()
