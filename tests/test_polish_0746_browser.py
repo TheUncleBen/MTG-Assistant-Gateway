@@ -75,13 +75,17 @@ SCROLLS = "() => document.documentElement.scrollWidth - document.documentElement
 
 # Each row's label and value (Theme: System, Layout: Fit the screen) as laid out: each one's
 # words fit its own box (a box squeezed to nothing lets its words run over the other's), the two
-# boxes do not overlap, and both sit inside their row.
+# boxes do not overlap, and both sit inside their row. Overlap is measured on both axes: on a
+# narrow phone at 200% the value sits on the line under its label (account_hub.HUB_CSS), the
+# two boxes then sharing their left edge but not a line.
 ROWS = """
 () => [...document.querySelectorAll('.ygrp .yrow')].filter((r) => r.querySelector('.val')).map((r) => {
   const box = (r.querySelector('summary') || r).getBoundingClientRect();
   const lbl = r.querySelector('.lbl'), val = r.querySelector('.val');
   const l = lbl.getBoundingClientRect(), v = val.getBoundingClientRect();
-  return { label: lbl.textContent, overlap: l.right > v.left + 0.5 && v.right > l.left + 0.5,
+  return { label: lbl.textContent,
+    overlap: l.right > v.left + 0.5 && v.right > l.left + 0.5
+      && l.bottom > v.top + 0.5 && v.bottom > l.top + 0.5,
     fits: l.width + 0.5 >= lbl.scrollWidth && v.width + 0.5 >= val.scrollWidth,
     inside: l.left >= box.left - 0.5 && v.right <= box.right + 0.5 && l.right <= box.right + 0.5 };
 })
