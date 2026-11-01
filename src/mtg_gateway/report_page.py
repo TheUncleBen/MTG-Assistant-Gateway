@@ -450,7 +450,7 @@ def again_html(r: dict[str, Any], csrf: str) -> str:
     if not again:
         return "<div id='forge-more'></div>"
     return (
-        f"<div id='forge-more' class='rv-more'>{again}<p class='ui-hint'>Runs the full test of the deck "
+        f"<div id='forge-more' class='rv-more'>{again}<p class='ui-hint'>Tests the deck again "
         "as it is now, with new Forge games.</p></div>"
     )
 
