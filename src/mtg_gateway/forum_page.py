@@ -27,7 +27,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_extras, forum, ui
-from .busy import busy_body, busy_headers, busy_plan, same_url
+from .busy import busy_body, busy_headers, busy_json_response, busy_plan, same_url
 from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect
@@ -1052,6 +1052,10 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             )
         except DeckError as exc:
             if wants_json(request):
+                # Load more: busy or unreachable is 429 or 503 with Retry-After, as the page is
+                busy = busy_json_response(exc)
+                if busy is not None:
+                    return busy
                 return JSONResponse(
                     {"ok": False, "message": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"}
                 )
