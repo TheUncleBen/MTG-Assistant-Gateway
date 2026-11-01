@@ -51,6 +51,7 @@ from .pages import (
     browser_session,
     login_redirect,
 )
+from .running_view import deck_notice_html
 from .theme import (
     SPINNER,
     hub_switch,
@@ -861,17 +862,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # a test of this deck still going (the member pressed Run test, or an assistant ran one):
         # the spinner and how far it is, with the way to its report, until every part is done
         running = state.reports.running(sub, deck.id) if state.reports is not None else []
-        if running:
-            one = running[0]
-            words = (
-                f"Test running: {one['progress']}."
-                if len(running) == 1
-                else f"{len(running)} tests running: {one['progress']}."
-            )
-            open_report = ui.cap_link("Open the report", f"/history/reports/{one['report_id']}")
-            notice = (
-                f"<p class='notice testing' role='status'>{SPINNER} {_esc(words)} {open_report}</p>" + notice
-            )
+        if running:  # running-live.js keeps it current (running_view)
+            notice = deck_notice_html(running, str(deck.id)) + notice
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
@@ -960,6 +952,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 "export.js",
                 "deckextras.js",
                 "undo-box.js",
+                # a test still going: its mark kept current (running_view)
+                *(("running-live.js",) if running else ()),
             ),
             extra_css=deck_extras.CSS,
         )

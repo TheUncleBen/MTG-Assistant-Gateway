@@ -121,17 +121,24 @@ def need_row(ic: str, text: str, detail: str, button: str, *, accent: bool = Fal
 
 
 def running_row(running: list[dict[str, Any]]) -> str:
-    """The tests still going (reports.running): one test names its deck and how far it is, with
-    the spinner, and opens that report; several open the Reports list."""
+    """The tests still going (reports.running): one test names its step, its deck and the time so
+    far, with the spinner, and opens that report; several open the Reports list. running-live.js
+    asks for it again every few seconds (running_view)."""
     if not running:
         return ""
+    from .running_view import _live_attrs, step_words
+
+    attrs = _live_attrs("home", running)
     if len(running) == 1:
         one = running[0]
+        text, so_far = step_words(one)
+        name = one["deck_name"] or "Unnamed deck"
         return need_row(
             "spinner",
-            f"<b>1 test running</b>: {_esc(one['progress'])}.",
-            _esc(one["deck_name"] or "Unnamed deck"),
+            f"<b>1 test running</b>: {_esc(text)}.",
+            f"{name} · {so_far}" if so_far else name,
             ui.button_link("Open the report", f"/history/reports/{one['report_id']}"),
+            attrs=attrs,
         )
     return need_row(
         "spinner",
@@ -140,7 +147,25 @@ def running_row(running: list[dict[str, Any]]) -> str:
         + ".",
         "",
         ui.button_link("Open reports", "/reports"),
+        attrs=attrs,
     )
+
+
+def ended_row(ended: list[dict[str, Any]]) -> str:
+    """Home's row once the tests it showed have ended: that they did, and the way to the report."""
+    if not ended:
+        return ""
+    from .running_view import ended_words
+
+    words = ended_words(ended)
+    head, _, rest = words.partition(".")
+    if len(ended) == 1:
+        go = ui.button_link("Open the report", f"/history/reports/{ended[0]['report_id']}")
+        detail = ended[0].get("deck_name") or "Unnamed deck"
+    else:
+        go, detail = ui.button_link("Open reports", "/reports"), ""
+    text = f"<b>{_esc(head)}</b>." + (f" {_esc(rest.strip())}" if rest.strip() else "")
+    return need_row("check", text, str(detail), go)
 
 
 def needs_you_html(
@@ -418,6 +443,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             head_extra=f"<style>{HOME_CSS}{assistants.HOME_CSS if joined else ''}"
             f"{NEW_DECK_CSS if newdeck else ''}</style>"
             "<script src='/static/decks.js' defer></script>"
+            + ("<script src='/static/running-live.js' defer></script>" if running else "")
             + "".join(
                 f"<script src='/static/{n}' defer></script>" for n in (NEW_DECK_SCRIPTS if newdeck else ())
             ),

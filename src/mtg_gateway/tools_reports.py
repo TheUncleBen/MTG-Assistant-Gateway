@@ -472,6 +472,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     same_opponents_as=same_opponents_as,
                     pair_with=pair,
                 )
+            if report.get("report_id"):
+                # the page that shows where the test stands while it plays (the step, the games
+                # played, the time so far) and the whole report once it is done
+                report = {**report, "report_url": _report_url(report["report_id"])}
             failed = _simulation_failure(report.get("goldfish")) if simulate else None
             if failed:
                 # the simulation was asked for and did not run: the result says so at the top
@@ -486,6 +490,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             return {"ok": True, **run_answer(report)}
         except DeckError as exc:
             return _tool_error(exc)
+
+    def _report_url(report_id: str) -> str:
+        return f"{state.settings.public_url}/history/reports/{report_id}"
 
     @server.tool(
         name="list_deck_reports",
@@ -566,7 +573,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> dict[str, object]:
         try:
             if view == "forge":
-                return {"ok": True, **state.reports.forge_only(_sub(), report_id)}
+                status = state.reports.forge_only(_sub(), report_id)
+                return {"ok": True, **status, "report_url": _report_url(str(status["report_id"]))}
             return {"ok": True, **state.reports.get(_sub(), report_id)}
         except DeckError as exc:
             return _tool_error(exc)
@@ -634,8 +642,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "same number, so the two stay even. Never contacts Archidekt. Returns started, the "
             "report's forge_status (poll get_deck_report with view 'forge' until it ends) and, when "
             "the games did not start, message; a refusal gives error, message and reason (queue, "
-            "full, ended, none, noforge, pairwait, paircant, pairqueue, setup, or notfound for a report "
-            "that is not the member's)."
+            "full, forge_running, none, notrun, noforge, pairwait, paircant, pairqueue, setup, or notfound: "
+            "not the member's)."
         ),
         annotations={
             "readOnlyHint": False,
@@ -653,6 +661,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             return _tool_error(exc)
         note = (full.get("forge") or {}).get("more_note")
         out: dict[str, object] = {"ok": True, "started": not note, **status}
+        out["report_url"] = _report_url(str(status["report_id"]))
         if note:
             out["message"] = MORE_DID_NOT_START + str(note)
         return out
