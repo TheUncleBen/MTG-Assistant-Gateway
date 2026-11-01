@@ -25,11 +25,14 @@ def _card(
     games: tuple[str, ...] = ("paper",),
     digital: bool = False,
     lang: str = "en",
+    art: str | None = None,
 ) -> dict[str, Any]:
     cid = f"00000000-0000-4000-9000-{n:012d}"
     return {
         "object": "card",
         "id": cid,
+        # which picture it carries (the picker's Different art chip): its own unless told
+        "illustration_id": art or f"art-{n:03d}",
         "oracle_id": SOL_RING_ORACLE,
         "name": "Sol Ring",
         "lang": lang,

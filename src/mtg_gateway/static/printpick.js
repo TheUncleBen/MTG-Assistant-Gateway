@@ -295,6 +295,7 @@
     st = {
       opts: opts, oid: null, list: [], page: 0, hasMore: false, total: 0, complete: false, loading: false,
       params: { finish: "", frame: "", border: "", order: "newest" }, q: "", all: false, pinned: null, seq: 0,
+      scope: "all", binder: null, binderAsked: false,
       mine: Object.create(null), mineAsked: false, watched: Object.create(null),
       finish: scryFinish(opts.finish)
     };
@@ -355,6 +356,21 @@
     });
     if (window.MtgPrefs) searchRow.appendChild(sizes);
     tools.appendChild(searchRow);
+    // the chips (mockup screen 3): All, Different art (one printing of each picture other
+    // than the card's own) and In my binder (the printings of this card the member keeps)
+    var scope = el("div", "ppscope ui-chips");
+    scope.setAttribute("role", "group");
+    scope.setAttribute("aria-label", "Which printings");
+    [["all", "All"], ["art", "Different art"], ["mine", "In my binder"]].forEach(function (pair) {
+      var c = el("button", "ui-chip", pair[1]);
+      c.type = "button";
+      c.setAttribute("data-scope", pair[0]);
+      c.setAttribute("aria-pressed", pair[0] === "all" ? "true" : "false");
+      c.addEventListener("click", function () { setScope(pair[0]); });
+      scope.appendChild(c);
+    });
+    tools.appendChild(scope);
+    st.scope_el = scope;
     var filters = el("div", "ppfilters");
     filters.id = "pp-filters";
     filters.setAttribute("role", "group");
@@ -548,6 +564,8 @@
   function wanted(p) {
     if (!english(p)) return false;
     if (!st.all && (preview(p) || digital(p))) return false;
+    if (st.scope === "mine" && !(st.binder && st.binder[printKey(p)])) return false;
+    if (st.scope === "art" && (!p.illustration_id || p.illustration_id === ownArt())) return false;
     if (st.complete) {
       if (st.params.finish && (p.finishes || []).indexOf(st.params.finish) < 0) return false;
       if (st.params.frame && String(p.frame || "") !== st.params.frame) return false;
@@ -592,9 +610,11 @@
     // search or filters leave out here, or one not in the pages read (asked for by itself, or
     // left out of Scryfall's filtered list), which "Showing n of m" doesn't count either. Those
     // come after the matches, each group in the chosen order.
-    var filtered = st.q || st.params.finish || st.params.frame || st.params.border;
+    var filtered = st.q || st.params.finish || st.params.frame || st.params.border || st.scope !== "all";
     var ownOnly = sorted(listed.filter(function (p) { return !wanted(p); }).concat(extra));
-    var shown = sorted(listed.filter(wanted)).concat(ownOnly);
+    var shown = sorted(listed.filter(wanted));
+    if (st.scope === "art") shown = onePerArt(shown);
+    shown = shown.concat(ownOnly);
     var hits = shown.length - ownOnly.length;
     var hidden = st.all ? 0 : st.list.filter(function (p) {
       return english(p) && (preview(p) || digital(p)) && !samePrint(p, st.opts.current) && !samePrint(p, st.opts.pending);
@@ -629,7 +649,7 @@
     if (hidden) words += (words ? " " : "") + plural(hidden, "digital-only or preview printing") + " hidden.";
     // with no tile at all, the count line says what the box says, for screen readers only
     var readOnly = !words && !shown.length;
-    if (readOnly) words = "No printing matches these filters.";
+    if (readOnly) words = st.scope === "mine" && st.binder ? "None of this card's printings is in your binder." : "No printing matches these filters.";
     st.status.className = readOnly ? "ppstatus sr-only" : "ppstatus";
     st.status.textContent = words;
     // nothing to show: say why, with a way back
@@ -637,7 +657,10 @@
     st.empty.textContent = "";
     st.empty.hidden = !stuck;
     if (stuck) {
-      st.empty.appendChild(el("p", "", "No printing matches these filters."));
+      var noneWhy = "No printing matches these filters.";
+      if (st.scope === "mine" && st.binder && !hits) noneWhy = "None of this card's printings is in your binder.";
+      else if (st.scope === "art" && !hits) noneWhy = "No printing has a different picture.";
+      st.empty.appendChild(el("p", "", noneWhy));
       var clear = el("button", "btn", "Clear filters");
       clear.type = "button";
       clear.addEventListener("click", clearFilters);
@@ -675,12 +698,67 @@
     st.q = ""; st.search.value = "";
     st.params = { finish: "", frame: "", border: "", order: "newest" };
     st.all = false; st.switchIn.checked = false;
+    setScope("all", true);
     Array.prototype.forEach.call(st.selects, function (s, i) {
       s.value = i === 3 ? "newest" : "";
       if (window.MtgSelect) window.MtgSelect.refresh(s);
     });
     refilter();
     st.search.focus();
+  }
+
+  // -- the chips: All, Different art, In my binder ------------------------------------------
+  function printKey(p) { return String(p.set || "").toLowerCase() + "#" + String(p.collector_number || ""); }
+  // the picture on the card's own printing (its current one, else the pick waiting)
+  function ownArt() {
+    var own = st.list.concat(extraMine()).filter(isMine)[0];
+    return own && own.illustration_id ? own.illustration_id : null;
+  }
+  // one printing of each picture, the first in the chosen order
+  function onePerArt(list) {
+    var seen = Object.create(null);
+    return list.filter(function (p) {
+      if (seen[p.illustration_id]) return false;
+      seen[p.illustration_id] = true;
+      return true;
+    });
+  }
+  function setScope(which, quiet) {
+    if (!st) return;
+    st.scope = which;
+    Array.prototype.forEach.call(st.scope_el.querySelectorAll(".ui-chip"), function (c) {
+      c.setAttribute("aria-pressed", c.getAttribute("data-scope") === which ? "true" : "false");
+    });
+    if (which === "mine" && !st.binderAsked) { askBinder(); return; }
+    if (!quiet) draw();
+  }
+  // the binder's entries for this card, once: the binder's own list, filtered by the card's
+  // name (its rows carry the set and number), so the sheet needs no second endpoint
+  function askBinder() {
+    var mine = st;
+    st.binderAsked = true;
+    looking();
+    st.grid.textContent = "";
+    getJSON("/collection/api/rows?view=list&q=" + encodeURIComponent(st.opts.name)).then(function (d) {
+      if (st !== mine) return;
+      var have = Object.create(null), want = String(st.opts.name).toLowerCase();
+      var doc = new DOMParser().parseFromString("<ul>" + (d.html || "") + "</ul>", "text/html");
+      Array.prototype.forEach.call(doc.querySelectorAll("[data-name][data-set]"), function (r) {
+        if (r.getAttribute("data-name") !== want) return;
+        var parts = String(r.getAttribute("data-set") || "").trim().split(/\s+/);
+        if (parts.length >= 2) have[parts[0].toLowerCase() + "#" + parts.slice(1).join(" ")] = true;
+      });
+      st.binder = have;
+      draw();
+    }).catch(function (err) {
+      if (st !== mine) return;
+      st.binderAsked = false;
+      st.binder = null;
+      setScope("all", true);
+      draw();
+      st.status.className = "ppstatus notice error";
+      st.status.textContent = "Your binder could not be read. " + why(err);
+    });
   }
 
   // the preview: the whole card large, its facts, and the pick

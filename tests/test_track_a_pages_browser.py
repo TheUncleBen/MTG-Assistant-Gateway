@@ -572,8 +572,13 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
                                 # Sort by two a row on a phone (never three), and each deck check's
                                 # value beside its label
                                 if text == "100%":
-                                    cols = page.evaluate(VIEWS_COLUMNS)
-                                    assert vw > 600 or cols == 2, (where, cols)
+                                    # 0.7.46 (mockup screen 5): on a phone the View button holds
+                                    # View as, Group by and Sort by in a sheet
+                                    if vw < 600 and "nojs" not in where:
+                                        assert page.locator(".toolbar.compact .viewbtn").is_visible(), where
+                                        assert page.locator("form.views").is_hidden(), where
+                                    elif vw < 600:  # without scripts: two a row, as before
+                                        assert page.evaluate(VIEWS_COLUMNS) == 2, where
                                     assert set(page.evaluate(CHECK_VALUES)) == {"beside"}, where
                                 ctx.close()
             finally:

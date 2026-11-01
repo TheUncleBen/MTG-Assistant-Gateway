@@ -46,7 +46,7 @@ def test_the_deck_menu_offers_no_edits_while_the_deck_is_made(server: Server, wi
         page.locator(".banner button.deckmenu").click()
         items = _items(page)
         assert "Deck stats" in items and "Share…" in items and "Export…" in items
-        for edit in ("Rename…", "Move to folder…", "Add a package…", "Deck settings", "Delete deck…"):
+        for edit in ("Rename…", "Move to folder…", "Deck settings", "Delete deck…"):
             assert edit not in items, items
         page.keyboard.press("Escape")
         # once the deck is done the page reloads by itself, and the menu has them back

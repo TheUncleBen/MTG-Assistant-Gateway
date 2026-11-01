@@ -37,6 +37,12 @@ PNG = base64.b64decode(
 EDIT_URL = re.compile(r"/api/v1/decks/42/edit$")
 
 
+def _edit_post(r) -> bool:
+    """A save sent to the edit endpoint: not the re-read the page asks for after a slow answer
+    ({"refresh": true}, static/deck.js), which carries no changes."""
+    return bool(EDIT_URL.search(r.url)) and '"changes"' in (r.post_data or "")
+
+
 class Server:
     """The gateway with writes on, over a real port, with alice's Commander deck 42 (a Sol Ring on
     its maybeboard too, so a side row is on the page)."""
@@ -283,7 +289,7 @@ def test_undo_of_a_remove_puts_back_printing_finish_tag_and_mana_value(server: S
         sent: list[list[dict]] = []
         page.on(
             "request",
-            lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+            lambda r: sent.append(json.loads(r.post_data)["changes"]) if _edit_post(r) else None,
         )
         page.locator(".deck-toast button", has_text="Undo").click()
         page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
@@ -346,7 +352,7 @@ def test_undo_of_a_maybeboard_remove_puts_back_its_printing(server: Server) -> N
         sent: list[list[dict]] = []
         page.on(
             "request",
-            lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+            lambda r: sent.append(json.loads(r.post_data)["changes"]) if _edit_post(r) else None,
         )
         page.locator(".deck-toast button", has_text="Undo").click()
         page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
@@ -718,7 +724,7 @@ def _edits(page) -> list[list[dict]]:
     sent: list[list[dict]] = []
     page.on(
         "request",
-        lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+        lambda r: sent.append(json.loads(r.post_data)["changes"]) if _edit_post(r) else None,
     )
     return sent
 
@@ -1014,7 +1020,7 @@ def test_the_card_menu_switches_companion_and_back_face(server: Server) -> None:
 
 MENU_ROWS = """() => [...document.querySelectorAll(
     '.ctxmenu[role=menu] [role=menuitem], .ctxmenu[role=menu] [role=menuitemcheckbox], ' +
-    '.ctxmenu[role=menu] .qtyrow')]
+    '.ctxmenu[role=menu] .qtyrow, .ctxmenu[role=menu] .qtyrow .step')]
   .filter(e => e.getClientRects().length)
   .map(e => { const r = e.getBoundingClientRect(); return { text: e.textContent.trim().slice(0, 24),
     cls: e.className, h: r.height, w: r.width, x: r.left }; })"""

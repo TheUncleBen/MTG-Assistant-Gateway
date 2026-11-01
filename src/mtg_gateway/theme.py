@@ -879,7 +879,8 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   .guide .anchor{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
     margin-top:-.6rem;margin-bottom:-.6rem}
   footer.site .links a{display:inline-flex;align-items:center;min-height:44px;padding:0 .5rem}
-  .brand{min-height:44px;--brand-line:max(44px,1.35em)}
+  /* the mark alone (the app's bar hides the word) is a finger-sized link too */
+  .topbar .brand{min-height:44px;min-width:44px;--brand-line:max(44px,1.35em)}
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
     padding:.6rem 0;min-height:44px;box-sizing:border-box}
   .banner .social a.soc,.banner .social button.soc{height:44px;min-height:44px;border-radius:22px}
@@ -1214,7 +1215,9 @@ CSS += """
 .sizeseg button + button{border-left:1px solid var(--control-border)}
 .sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
 .sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px} }
+@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px}
+  /* the Grid / List switch: its own rule takes 2 px off --ctl for the border; a finger gets 44 */
+  .spanel .segc label{min-height:44px;min-width:44px} }
 .field.cardsize .sizeseg{display:flex;width:max-content}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){

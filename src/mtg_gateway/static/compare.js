@@ -36,13 +36,7 @@
     var node = e.target.closest ? e.target.closest(".cardlink[data-card]") : null;
     if (!node) return;
     e.preventDefault();
-    var name = node.getAttribute("data-card") || "";
-    var scry = document.createElement("a");
-    scry.className = "btn";
-    scry.textContent = "Open on Scryfall";
-    scry.href = "https://scryfall.com/search?q=" + encodeURIComponent("!\"" + name + "\"");
-    scry.target = "_blank";
-    scry.rel = "noopener noreferrer";
-    CardView.open(CardView.fromElement(node), [scry]);
+    // Scryfall is the viewer's own pill, with EDHREC and TCGplayer
+    CardView.open(CardView.fromElement(node), []);
   });
 })();
