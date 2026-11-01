@@ -279,7 +279,7 @@ def test_propose_new_deck_from_the_csv_export_is_review_only(clients):
             assert p["ok"] and p["kind"] == "create_deck" and p["state"] == "pending", p
             assert (
                 p["diff"].splitlines()[0]
-                == "New commander deck 'E2E copy of Sample Commander Deck' (100 cards, private)"
+                == "New commander deck “E2E copy of Sample Commander Deck” (100 cards, private)"
             ), p["diff"]
             refused = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
             assert refused["ok"] is False and refused["error"] == "writes_disabled", refused
