@@ -66,6 +66,7 @@ SIGNIN_EVENTS = (
     "tokens_revoked",
     "refresh_rejected",
     "refresh_reuse_detected",
+    "refresh_retry_answered",
     "code_reuse_detected",
     "signed_out_everywhere",
 )
