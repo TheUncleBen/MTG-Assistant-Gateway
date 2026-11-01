@@ -62,7 +62,7 @@ async def test_theme_and_layout_answer_a_script_without_a_redirect(member: Brows
 
 def test_more_lists_my_card_models_while_they_are_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     groups = dict(theme.more_groups())
-    assert ("/history/models", "Card models", "box") in groups["Your cards"]
+    assert ("/history/models", "Card models", "layers") in groups["Your cards"]
     monkeypatch.setattr(card_models, "SWITCHED_ON", False)
     assert "/history/models" not in [h for _g, links in theme.more_groups() for h, _l, _i in links]
 
@@ -97,3 +97,10 @@ def test_the_forum_and_folder_crumbs_are_capsules() -> None:
     level.crumbs = [(None, "Decks"), (5, "Precons")]
     out = folderview.breadcrumb_html(level, order="-updatedAt")
     assert "<a class='ui-cap' href=" in out and "<span>Precons</span>" in out, out
+
+
+def test_every_more_menu_link_has_its_own_icon() -> None:
+    """Card models and Precons shared the box icon (review 2, L7): each More link's icon is its
+    own, so the icon says which link it is."""
+    icons = [i for _g, links in theme.more_groups() for _h, _l, i in links]
+    assert len(icons) == len(set(icons)), icons

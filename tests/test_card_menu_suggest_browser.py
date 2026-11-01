@@ -106,7 +106,10 @@ def test_the_editor_add_box_has_watch_buttons_and_the_card_menu(tmp_path: Path, 
             btn.click()
             toast = page.locator(".toast.cards-toast")
             toast.wait_for(timeout=5000)
-            assert toast.locator(".msg").inner_text() == "Sol Talisman added to your watchlist."
+            assert (
+                toast.locator(".msg").inner_text()
+                == "Sol Talisman added to your watchlist, with a price alert at a 10% drop."
+            )
             assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Talisman"
             label = talisman.locator(".wbtn").get_attribute("aria-label")
             assert label == "Sol Talisman is on your watchlist"
@@ -202,7 +205,10 @@ def test_the_top_bar_suggestions_get_the_card_menu_only(tmp_path: Path, width: i
             page.locator(".ctxmenu.cs-menu button", has_text="Watch this card").click()
             toast = page.locator(".toast.cards-toast")
             toast.wait_for(timeout=5000)
-            assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+            assert (
+                toast.locator(".msg").inner_text()
+                == "Sol Ring added to your watchlist, with a price alert at a 10% drop."
+            )
             watched = server.app.state.gateway.prices.watched_cards("user-1")
             assert [w["name"] for w in watched] == ["Sol Ring"]
             assert page.evaluate("document.documentElement.scrollWidth") <= width

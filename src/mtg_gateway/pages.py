@@ -916,7 +916,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             current_client.set(BROWSER_CLIENT_ID)
             for pid in picks:
                 try:
-                    state.decks.reject(sub, pid, via="browser")
+                    state.decks.reject(sub, pid, via="browser", reason=str(data.get("reason") or ""))
                 except DeckError:
                     continue  # already closed: nothing to do for it
             return RedirectResponse(_with_query(back, "ok=rejected_some"), status_code=303)
@@ -1912,7 +1912,7 @@ async def details_html(
     ]
     data = [
         _yrow(
-            "Sign out on all my devices",
+            "Sign out on all my devices…",
             "x",
             href=f"{DETAILS}?signout=1",
             attrs=ui.box_open_attr("signout"),
@@ -1939,11 +1939,13 @@ async def details_html(
             chev=False,
         )
     )
-    # The mockup's two columns on a wide screen: Archidekt over This gateway, Assistant over Your
-    # data; one under the other on a phone, Your data (the actions that ask first) last.
+    # Two columns on a wide screen, even (Ben: balanced columns; review 2, L10): Archidekt over
+    # Your data, Assistant over This gateway (the mockup's Archidekt over This gateway stood 9
+    # rows against 6); one under the other on a phone in the mockup's order, Your data (the
+    # actions that ask first) last.
     cols = [
-        [(0, GROUP_NAMES[0], archidekt, ""), (2, GROUP_NAMES[2], gateway, "")],
-        [(1, GROUP_NAMES[1], assistant, "apps"), (3, GROUP_NAMES[3], data, "")],
+        [(0, GROUP_NAMES[0], archidekt, ""), (3, GROUP_NAMES[3], data, "")],
+        [(1, GROUP_NAMES[1], assistant, "apps"), (2, GROUP_NAMES[2], gateway, "")],
     ]
     s = state.settings
     boxes = _signout_box(csrf_in, open=open_box == "signout") + _delete_box(
@@ -2019,10 +2021,24 @@ def _notifications_value(state: Any, sub: str) -> str:
 
 
 def _alert_defaults_value(state: Any, sub: str) -> str:
-    """The Price alert defaults row's value: the alert in its short form (watchlist_page)."""
-    from . import prefs, watchlist_page
+    """The Price alert defaults row's value, short enough for one line beside its label ("10%
+    drop"; the row's own page says it in full)."""
+    from . import prefs
+    from .watchlist_page import money
 
-    return watchlist_page.alert_text(prefs.alert_defaults(state.db, sub), "usd") or "None"
+    a = prefs.alert_defaults(state.db, sub)
+    parts = []
+    if a.get("drop") is not None:
+        parts.append(f"{a['drop']:g}% drop")
+    if a.get("rise") is not None:
+        parts.append(f"{a['rise']:g}% rise")
+    if a.get("pct") is not None:
+        parts.append(f"{a['pct']:g}% move")
+    if a.get("above") is not None:
+        parts.append(f"above {money(a['above'], 'usd')}")
+    if a.get("below") is not None:
+        parts.append(f"below {money(a['below'], 'usd')}")
+    return " · ".join(parts) or "None"
 
 
 def _writes_fold(on: bool) -> str:
@@ -3587,10 +3603,12 @@ def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf:
         f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
         f"<input type='hidden' name='back' value='{html.escape(back)}'>"
         "<input type='hidden' name='sure' value='1'>"
-        f"{hidden}<p class='actions'>"
+        f"{hidden}<label for='reject-reason'>Reason (optional)"
+        "<textarea id='reject-reason' name='reason' rows='2' maxlength='500' "
+        "placeholder='Your assistant sees this'></textarea></label><p class='actions'>"
+        f"<a class='btn btn-plain' href='{html.escape(back)}'>Keep it</a> "
         f"<button type='submit' name='action' value='reject' class='danger'>"
-        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button> "
-        f"<a class='btn btn-plain' href='{html.escape(back)}'>Cancel</a></p></form>"
+        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button></p></form>"
     )
 
 

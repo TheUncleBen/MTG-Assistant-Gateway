@@ -572,3 +572,30 @@ async def test_a_new_category_from_a_template_takes_its_switches(stack: Stack) -
         out = structured(await call(stack.h, token, "propose_deck_categories", propose(bad)))
         assert out["ok"] is False and says in out["message"], out
     assert stack.ark.category_creates == []
+
+
+async def test_delete_with_no_category_clears_the_cards_then_deletes(stack: Stack) -> None:
+    """The deck page's "No category" choice (review 2, M6): the cards stay in the deck with no
+    category (each row written with its other categories, if any) and only then is the empty
+    category deleted, as Archidekt allows; the line says so."""
+    await _ready(stack)
+    ark, svc = stack.ark, _svc(stack)
+    for row in ark.decks[42]["cards"]:
+        if row["card"]["oracleCard"]["name"] == "Cultivate":
+            row["categories"] = ["Ramp", "Lands"]
+    p = await svc.propose_categories(
+        SUB, "42", [{"action": "delete", "category": "Ramp", "no_category": True}]
+    )
+    assert p["diff"].startswith("Delete category “Ramp”: its 2 cards stay in the deck with no category")
+    out = await svc.apply(SUB, p["proposal_id"], via="browser")
+    assert out["state"] == "applied" and out["result"]["verified"] is True, out
+    assert "Ramp" not in _cats(ark) and _filed(ark, "Ramp") == []
+    rows = {r["card"]["oracleCard"]["name"]: r.get("categories") or [] for r in ark.decks[42]["cards"]}
+    assert rows["Cultivate"] == ["Lands"] and rows["Coiling Oracle"] == []
+    assert len(ark.patches) == 2 and len(ark.category_deletes) == 1 and ark.category_deletes_with_cards == []
+    with pytest.raises(DeckError, match="no_category and move_cards_to together"):
+        await svc.propose_categories(
+            SUB,
+            "42",
+            [{"action": "delete", "category": "Maybeboard", "no_category": True, "move_cards_to": "Lands"}],
+        )

@@ -151,7 +151,10 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         btn.click()
         toast = page.locator(".toast.cards-toast")
         toast.wait_for(timeout=5000)
-        assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+        assert (
+            toast.locator(".msg").inner_text()
+            == "Sol Ring added to your watchlist, with a price alert at a 10% drop."
+        )
         assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Ring"
         page.wait_for_function(
             "() => document.querySelector(\".wbtn[data-watch='Sol Ring']\").classList.contains('on')"
@@ -261,7 +264,10 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
             menu.locator("button", has_text="Watch this card").click()
             toast = page.locator(".deck-toast", has_text="watchlist")
             toast.wait_for(timeout=5000)
-            assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+            assert (
+                toast.locator(".msg").inner_text()
+                == "Sol Ring added to your watchlist, with a price alert at a 10% drop."
+            )
             assert [w["name"] for w in s.app.state.gateway.prices.watched_cards("user-1")] == ["Sol Ring"]
             toast.locator("button", has_text="Undo").click()
             page.locator(".deck-toast", has_text="no longer").wait_for(timeout=5000)

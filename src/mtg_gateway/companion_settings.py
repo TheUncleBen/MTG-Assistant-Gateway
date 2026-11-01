@@ -1328,10 +1328,20 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 if cat is None:
                     raise stale_categories_error()
                 move = " ".join((data.get("move_to") or data.get("move_cards_to") or "").split())
-                changes = [{"action": "delete", "id": int(key), **({"move_cards_to": move} if move else {})}]
+                # the deck page's box offers "No category": the cards stay in the deck with none
+                # (the deck page lists such cards by type), as Archidekt allows
+                none = not move and data.get("no_category") == "1"
+                changes = [
+                    {
+                        "action": "delete",
+                        "id": int(key),
+                        **({"move_cards_to": move} if move else {}),
+                        **({"no_category": True} if none else {}),
+                    }
+                ]
                 ok, yes = "category_deleted", f"Delete “{cat['name']}”"
                 title_name, move_n = cat["name"], int(cat["cards"])
-                if cat["cards"] and not move:
+                if cat["cards"] and not move and not none:
                     # Archidekt only deletes an empty category: the member picks where its cards go
                     # (nothing picked to start with, as the first category is often Commander; a
                     # submit without a pick is refused here, said on the page)

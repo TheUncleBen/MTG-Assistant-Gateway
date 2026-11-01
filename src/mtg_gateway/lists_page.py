@@ -386,6 +386,9 @@ HUB_CSS = """
   border-radius:var(--radius);color:var(--text)}
 .lp-hub .yrow.wlrow .lp-dd > summary.kebab:hover{background:var(--surface-2)}
 .lp-hub .yrow.wlrow .lp-dd .menu{min-width:12rem}
+/* large text on a narrow phone (account_hub.HUB_CSS's grid rows): the list's link, which holds
+   its own icon, spans the icon and label columns */
+@container (max-width:20em){ .lp-hub .yrow.wlrow a.lbl{grid-column:1 / span 2;grid-row:1} }
 .lp-hub .ui-hint{margin:.5rem 0 0}
 .lp-hub + .ui-box form label{display:flex;flex-direction:column;gap:.25rem;font-weight:700}
 """

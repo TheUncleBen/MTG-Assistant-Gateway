@@ -109,6 +109,7 @@
     // form says box=1); anything but a box answer falls back to the confirm page.
     var apply = bar.querySelector("button[name=action][value=apply]");
     if (apply && window.MtgBox && window.fetch && window.FormData) {
+      apply.setAttribute("data-asks", "1");  // the rows' menus press it to ask the same way
       apply.addEventListener("click", function (e) {
         if (e.defaultPrevented || apply.disabled) return;
         e.preventDefault();
@@ -153,18 +154,39 @@
     var reject = bar.querySelector("button[name=action][value=reject]");
     var asking = null;
     if (reject && window.MtgBox) {
+      reject.setAttribute("data-asks", "1");  // the rows' menus press it to ask the same way
       reject.addEventListener("click", function (e) {
         if (e.defaultPrevented || reject.disabled || form.querySelector("input[name=sure]")) return;
         e.preventDefault();
         var n = 0, all = picks();
         for (var i = 0; i < all.length; i++) if (all[i].checked) n++;
         if (!n) return;
+        // the box's body: the note, then a reason the member may give (kept with the rejection
+        // and shown to the assistant, as the chat card's "why")
+        var body = document.createElement("div");
+        var note = document.createElement("p");
+        note.textContent = "Nothing is sent to Archidekt. A rejected change can't be brought back: your assistant would have to propose it again.";
+        body.appendChild(note);
+        var lab = document.createElement("label");
+        lab.className = "reason";
+        lab.setAttribute("for", "reject-reason");
+        lab.textContent = "Reason (optional)";
+        var why = document.createElement("textarea");
+        why.id = "reject-reason";
+        why.name = "reason";
+        why.rows = 2;
+        why.maxLength = 500;
+        why.placeholder = "Your assistant sees this";
+        lab.appendChild(why);
+        body.appendChild(lab);
         asking = window.MtgBox.confirm({
           title: n === 1 ? "Reject this change?" : "Reject " + n + " changes?",
-          text: "Nothing is sent to Archidekt. A rejected change can't be brought back: your assistant would have to propose it again.",
+          body: body,
           ok: n === 1 ? "Reject" : "Reject " + n,
+          cancel: "Keep it",
           danger: true,
           returnFocus: reject,
+          focus: "cancel",  // "Keep it" takes the focus, not the reason (a phone would open its keyboard)
           onClose: function () { asking = null; },
           onOk: function (box) {
             var sure = document.createElement("input");
@@ -172,6 +194,11 @@
             sure.name = "sure";
             sure.value = "1";
             form.appendChild(sure);
+            var reason = document.createElement("input");
+            reason.type = "hidden";
+            reason.name = "reason";
+            reason.value = why.value.trim();
+            form.appendChild(reason);
             var act = document.createElement("input");
             act.type = "hidden";
             act.name = "action";
@@ -186,7 +213,7 @@
     }
     // back from the next page (the browser's page cache): ask again next time
     window.addEventListener("pageshow", function () {
-      var left = form.querySelectorAll("input[name=sure], input[type=hidden][name=action]");
+      var left = form.querySelectorAll("input[name=sure], input[name=reason], input[type=hidden][name=action]");
       for (var i = 0; i < left.length; i++) left[i].remove();
       if (asking) asking.close();
     });

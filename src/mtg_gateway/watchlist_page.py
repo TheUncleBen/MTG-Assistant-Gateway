@@ -1261,6 +1261,21 @@ WATCH_PAGE_CSS = (
   .watch-page .w-t .act .more{white-space:nowrap}
   .watch-page .w-t .sub .dl{white-space:normal}
 }
+/* Large text on a narrow phone (independent review 2, M5): the table and the tools row are
+   containers, and under about 20 em of their own text (200% text at 375 px) their rows change
+   shape rather than squeeze the name to one letter per line: no thumbnail, the name wraps between
+   its words over the whole width, the row's end (Details, ⋮) takes a line of its own under the
+   name, a list head's count and value go under the list's name, and each picker takes a whole
+   line instead of showing "So…". */
+.watch-page .w-t,.watch-page .ui-tools.w-top{container-type:inline-size}
+@container (max-width:20em){
+  .watch-page .w-top .f{flex:1 1 100%}
+  .watch-page .w-t .tr{grid-template-columns:32px minmax(0,1fr)}
+  .watch-page .w-t .tr > .thumb{display:none}
+  .watch-page .w-t .tr > .act{grid-column:2;justify-self:end;margin-top:.25rem}
+  .watch-page .w-t .tr.wgrp{grid-template-columns:32px minmax(0,1fr)}
+  .watch-page .w-t .wgrp .meta{grid-column:2;width:100%;justify-content:space-between}
+}
 .watch-page .w-dd > summary.kebab{display:inline-grid;place-items:center;width:44px;height:44px;
   margin:-.45rem -.4rem -.45rem 0;border-radius:var(--radius);color:var(--text)}
 .watch-page .w-dd > summary.kebab:hover{background:var(--surface-3)}
