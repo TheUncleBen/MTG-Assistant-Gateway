@@ -356,8 +356,8 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
 
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 1rem}
 main.wrap{flex:1;padding:1rem 1rem 3rem}
-h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
+h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:break-word}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:break-word}
 h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}

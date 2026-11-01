@@ -4083,7 +4083,13 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .editor .edithead .kicker{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;
   color:var(--text-muted)}
 .editor .edithead h1.deckname{margin:0;font-size:24px}
+/* the name's box gives up its least width, so an unbroken name wraps inside the row instead of
+   running the page wide (638 px at 360) */
+.editor .edithead .info{min-width:0}
 .editor .edithead .btn{margin:0}
+/* a phone's heading is the deck page's size (19px), so at 200% text a ten-letter word in the
+   name ("Commander", "categories") still fits the head's row whole */
+@media (max-width:599.98px){ .editor .edithead h1.deckname{font-size:19px;line-height:1.25} }
 /* the save bar sticks just under the site's top bar (theme.py: sticky, 50px tall, plus the safe
    area in the app), never over it */
 .editbar{position:sticky;top:50px;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;

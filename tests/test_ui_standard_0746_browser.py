@@ -345,8 +345,14 @@ def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> Non
                         problems.append(f"{path}: the first ⋮ opened no menu")
                     # else the row's ⋮ is its link to the row's own page (admin's card models)
             problems += [f"{path}: {f}" for f in page.evaluate(MENU_ITEMS)]
-            page.keyboard.press("Escape")  # a phone's sheet closes through the history it pushed
-            page.wait_for_function("() => !document.querySelector('.ctxmenu')")
+            # a phone's sheet and a drop-down close through the history entry each pushed: the
+            # next page waits for that back() to land, or the browser drops its navigation
+            page.keyboard.press("Escape")
+            page.wait_for_function(
+                "() => !document.querySelector('.ctxmenu, details.dd[open]')"
+                " && !(window.MtgDropdowns && window.MtgDropdowns.backPending())"
+                " && !(window.MtgMenu && window.MtgMenu.backPending && window.MtgMenu.backPending())"
+            )
             page.wait_for_load_state("networkidle")
         browser.close()
     assert errors == []
