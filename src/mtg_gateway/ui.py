@@ -269,9 +269,12 @@ def app_logo(brand: str | None) -> str:
     if brand == "claude":
         return f"<img class='logo' src='{CLAUDE_LOGO}' alt='' width='16' height='16'>"
     if brand == "openai":
+        # both in one 16 px slot, which their larger pictures overhang (theme.py, .logo-box)
         return (
+            "<span class='logo-box'>"
             f"<img class='logo on-light' src='{OPENAI_LOGO_LIGHT}' alt='' width='16' height='16'>"
             f"<img class='logo on-dark' src='{OPENAI_LOGO_DARK}' alt='' width='16' height='16'>"
+            "</span>"
         )
     return icon("app")
 

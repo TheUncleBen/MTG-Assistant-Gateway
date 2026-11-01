@@ -51,6 +51,31 @@ class BrowserSignInTest {
         assertEquals("https://g/login?next=%2F&app_challenge=$c", BrowserSignIn.startUrl("https://g", "/", c, fresh = false))
     }
 
+    @Test fun aCustomTabSaysSoInTheStartUrl() {
+        val c = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        assertEquals(
+            "https://g/login?next=%2F&app_challenge=$c&fresh=1&app_return=intent",
+            BrowserSignIn.startUrl("https://g", "/", c, fresh = true, customTab = true),
+        )
+        assertEquals(
+            "https://g/login?next=%2F&app_challenge=$c&app_return=intent",
+            BrowserSignIn.startUrl("https://g", "/", c, fresh = false, customTab = true),
+        )
+    }
+
+    @Test fun theThisAppLineSaysWhetherSignInComesBackByItself() {
+        val has = setOf("com.android.chrome")
+        val status = { default: String?, installed: List<String>, system: Boolean ->
+            BrowserSignIn.returnStatus(BrowserSignIn.pickAuthTabBrowser(default, installed, { system }) { it in has })
+        }
+        // Samsung Internet as the default, with the phone's own Chrome: the Auth Tab in Chrome
+        assertEquals("auto", status("com.sec.android.app.sbrowser", listOf("com.android.chrome"), true))
+        // Chrome missing, or not the phone's own: a Custom Tab, which may wait for a tap
+        assertEquals("tap", status("com.sec.android.app.sbrowser", listOf("com.sec.android.app.sbrowser"), true))
+        assertEquals("tap", status("org.firefox", listOf("com.android.chrome"), false))
+        assertEquals("tap", status(null, emptyList(), true))
+    }
+
     @Test fun theDefaultBrowserFirstThenAChromeThatCameWithThePhoneAndNothingElse() {
         val has = setOf("com.android.chrome", "org.other.browser", "evil")
         val system = setOf("com.android.chrome", "com.sec.android.app.sbrowser")

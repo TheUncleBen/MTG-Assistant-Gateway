@@ -87,7 +87,9 @@ async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -
         r = await b.http.get("/admin/activity", headers=NAVIGATE)
         assert r.status_code == 200
         total = gw.db._conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE client_id IS NOT '__admin__'"
+            # the one-time upgrade entry is listed only when asked for by name (activity_view.QUIET_EVENTS)
+            "SELECT COUNT(*) FROM audit_log WHERE client_id IS NOT '__admin__' "
+            "AND event != 'archidekt_sessions_sealed'"
         ).fetchone()[0]
         assert total > 230
         assert f"25 of {total:,}</p>" in r.text and _table(r.text).count("<div class='tr ev") == 25
@@ -102,8 +104,8 @@ async def test_admin_activity_pages_through_every_row_with_no_cap(gw: Harness) -
 
 async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None:
     """Plain names with the Activity labels (the code only in the tooltip and the
-    details), admin actions with the shield and no label, the member by username (a link that
-    filters), an app only when a client id is recorded, the detail as words."""
+    details), admin actions with the shield and no label, the member by username (plain text; the
+    row's "Show NAME only" filters), an app only when a client id is recorded, the detail as words."""
     b = await admin_browser(gw)
     _members(gw)
     _rows(
@@ -129,7 +131,8 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         )
         assert "A reused assistant token was refused" in reuse
         assert "<span class='k'>family</span> f-3" in reuse
-        assert "<a href='/admin/activity?sub=user-2'>bram</a>" in reuse
+        assert "<span class='c-who'>bram</span>" in reuse
+        assert "<a class='btn btn-plain' href='/admin/activity?sub=user-2'>Show bram only</a>" in reuse
         assert "<span class='nm'>Claude</span></span>" in reuse
         failed = _row(page, "proposal_failed")
         assert (

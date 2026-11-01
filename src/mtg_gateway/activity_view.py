@@ -55,6 +55,7 @@ FAILED_EVENTS = (
 )
 SIGNIN_EVENTS = (
     "browser_login",
+    "app_signin_tap_page",
     "login_ok",
     "login_denied",
     "login_rejected_group",
@@ -72,6 +73,8 @@ REPORT_EVENTS = ("report_created", "report_more_games", "report_deleted", "snaps
 ADMIN_ACTIONS = ("admin_disable", "admin_enable", "admin_revoke", "admin_unlink", "admin_delete_data")
 # admin actions written once (no member copy): the admin page's "Admin actions" counts them too
 ADMIN_ONCE = ("setting_changed", "card_model_removed")
+# one-time upgrade entries with nothing for anyone to do: listed only when asked for by name
+QUIET_EVENTS = ("archidekt_sessions_sealed",)
 
 # The admin's own row of an action on a member's account, as the admin page names it.
 ADMIN_PAGE_NAMES = {
@@ -103,6 +106,7 @@ ADMIN_ACTION_WORDS = {
 
 ICONS = {
     "browser_login": "login",
+    "app_signin_tap_page": "login",
     "login_ok": "login",
     "login_denied": "login",
     "issuer_repinned": "login",
@@ -455,6 +459,9 @@ class Log:
         if query.event:
             where.append("event = ?")
             args.append(query.event)
+        else:
+            where.append(f"event NOT IN ({_marks(QUIET_EVENTS)})")
+            args += list(QUIET_EVENTS)
         if query.time:
             where.append("at >= ?")
             args.append(int((time.time() if now is None else now) - TIME_SECONDS[query.time]))
@@ -761,6 +768,9 @@ def admin_detail_html(row: Mapping[str, Any], names: Names) -> str:
         return f"<span class='said'>{esc(said)}</span>"
     if event == "card_model_removed" and (said := card_model_line(d, names.member(d.get("added_by")))):
         return f"<span class='said'>{esc(said)}</span>"
+    if event == "client_registered" and isinstance(hosts := d.get("redirect_hosts"), list) and hosts:
+        # where the app's sign-ins go back to, as its registration lists them (at most three hosts)
+        return f"<span class='said'>Signs you back in at {esc(', '.join(str(h) for h in hosts))}</span>"
     pairs: list[str] = []
     items = list(d.items())
     if "deck_id" not in d and (deck_id := _deck_of(row, d, names)) not in (None, ""):
@@ -1236,7 +1246,8 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     sub = r.get("sub")
     who_name = names.member(sub) if sub else None
     if sub and who_name:
-        who = f"<a href='{esc(query.href(path, sub=sub))}'>{esc(who_name)}</a>"
+        # plain text, not a bare link: the row's menu and details have "Show NAME only"
+        who = esc(who_name)
     else:
         who = f"<span class='none'>{NO_MEMBER}</span>"
     cid = r.get("client_id")

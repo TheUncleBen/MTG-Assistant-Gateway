@@ -598,7 +598,7 @@ def notifications_html(got: dict[str, Any], *, linked: bool = True) -> str:
 
 BELL_NOTE = (
     "The count clears when you open this list. The items stay here for as long as Archidekt keeps them. "
-    "Turn them off under Account › Email and alerts."
+    "Turn them off under Account › Account details › Email and alerts on Archidekt."
 )
 
 
