@@ -53,7 +53,7 @@ OUTLINE = [
     rv.MODEL_HEADING,
     "Validation",
     "Deck statistics",
-    "Raw output",
+    rv.RAW_HEADING,
 ]
 
 
@@ -72,9 +72,9 @@ def test_markdown_follows_the_outline() -> None:
     # validation keeps its own headings; the names stay under their line
     val = md.split("## Validation", 1)[1].split("\n## ", 1)[0]
     assert "\n### Gateway checks\n" in val
-    assert "- 2 card(s) not found on Scryfall:\n  - Enduring Angel\n  - Elbrus, the Binding Blade" in val
-    # the raw output is a link, not 15 KB of JSON
-    raw = md.split("## Raw output", 1)[1]
+    assert "- 2 cards not found on Scryfall:\n  - Enduring Angel\n  - Elbrus, the Binding Blade" in val
+    # the research service's output is a link, not 15 KB of JSON
+    raw = md.split(f"## {rv.RAW_HEADING}", 1)[1]
     assert URL in raw and "```" not in raw and '{"n": 300' not in md
     # no empty heading, no unknown price
     for i, ln in enumerate(md.splitlines()[:-2]):
@@ -86,7 +86,7 @@ def test_markdown_follows_the_outline() -> None:
 def test_html_follows_the_outline_and_prints() -> None:
     doc = _html(_report())
     heads = [re.sub(r"<[^>]+>", "", h).strip() for h in re.findall(r"<h2[^>]*>(.*?)</h2>", doc)]
-    heads += ["Raw output"] if "<summary class='fold-btn'>Raw output" in doc else []
+    heads += [rv.RAW_HEADING] if f"<summary class='fold-btn'>{rv.RAW_HEADING}" in doc else []
     assert _in_order(heads) == OUTLINE, heads
     assert "href='https://archidekt.com/decks/42'" in doc and f"href='{URL}'" in doc
     assert "<h3>Gateway checks</h3>" in doc

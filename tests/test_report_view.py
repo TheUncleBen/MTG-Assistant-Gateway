@@ -84,7 +84,8 @@ def test_validation_verdicts() -> None:
     v = rv.parse_validation({"ok": True, "text": VALIDATION_ISSUES})
     assert v["verdict"] == "issues" and v["headline"] == "Validation: ISSUES FOUND"
     # a line that is just a double-faced name shows its front face; the raw text keeps it whole
-    assert v["lines"] == ["2 card(s) not found on Scryfall:", "Enduring Angel", "Elbrus, the Binding Blade"]
+    # the service's "card(s)" becomes a real plural
+    assert v["lines"] == ["2 cards not found on Scryfall:", "Enduring Angel", "Elbrus, the Binding Blade"]
     assert "Enduring Angel // Angelic Enforcer" in v["raw"]
     ok = rv.parse_validation({"ok": True, "text": VALIDATION_PASSED})
     # the research service's "verified" reads "found", the gateway's word for it (stored reports too)
@@ -228,7 +229,7 @@ def test_markdown_and_html_exports() -> None:
         and "## Validation: issues found" in md
     )
     # the research service's raw output stays on the report's page (test_report_export_outline)
-    assert "## Raw output" in md and "## Metrics" not in md and "goldfish_" not in md
+    assert f"## {rv.RAW_HEADING}" in md and "## Metrics" not in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
     assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme: light" in doc
@@ -467,7 +468,8 @@ def test_the_export_draws_labels_with_icons_like_the_live_report() -> None:
     assert "<span class='ui-lbl green'>" in doc and ">Complete</span>" in doc  # the status
     assert ".ui-lbl{display:inline-flex" in doc and ".ui-lbl svg.i{" in doc
     assert "<h3>Cards Forge left out <small>1</small></h3>" in doc and "Not counted above." in doc
-    assert "Cards Forge could not play" not in doc and ">Opt</p>" in doc  # the front face
+    # the front face, as a capsule of its own (one card per capsule, never a comma-joined line)
+    assert "Cards Forge could not play" not in doc and "<ul class='names'><li>Opt</li></ul>" in doc
     running = rv.report_export_html(report(forge={**forge, "state": "running"}, status="running"))
     assert "<span class='ui-lbl orange'>" in running and ">Running</span>" in running
     failed = rv.report_export_html(report(forge={"state": "failed", "error": "x"}, status="partial"))

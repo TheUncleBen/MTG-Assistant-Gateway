@@ -115,14 +115,16 @@ button.danger:disabled{color:var(--red)}
       var li = el("li"); li.id = "row-" + x.proposal_id;
       var what = el("span", "what");
       what.appendChild(el("span", "name", label(x)));
-      var sub = [statusWord(x), "by " + creator(x.created_by), ago(x.created_at)];
-      if (riskWord(x)) sub.splice(1, 0, riskWord(x));
+      // a row decided here (Applied, Failed, Rejected) reads its outcome, not the wait it began with
+      var d = decided[x.proposal_id];
+      var sub = [d ? d.word || d.text : statusWord(x), "by " + creator(x.created_by), ago(x.created_at)];
+      if (!d && riskWord(x)) sub.splice(1, 0, riskWord(x));
       if (Number(x.version) > 1 && !x.changed_by) sub.push("Version " + Number(x.version));
       if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
       what.appendChild(el("span", "sub", sub.join(" · ")));
       // the why: status_text on a page's line, status_reason on the board's (show_waiting_changes)
-      var why = x.status_text || x.status_reason;
-      if ((x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
+      var why = d ? d.why : x.status_text || x.status_reason;
+      if ((d || x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
       if (changeNote(x)) what.appendChild(el("span", "why", changeNote(x)));
       if (x.link_note) what.appendChild(el("span", "why", String(x.link_note)));
       // which row Apply all leaves out
@@ -130,8 +132,7 @@ button.danger:disabled{color:var(--red)}
       if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Apply it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
-      if (decided[x.proposal_id]) {
-        var d = decided[x.proposal_id];
+      if (d) {
         btns.appendChild(el("span", "done " + (d.kind || ""), d.text));
       } else if (codes[x.proposal_id] && data.writes_enabled) {
         var ok = el("button", "primary small", "Apply"); ok.type = "button";
@@ -261,7 +262,7 @@ button.danger:disabled{color:var(--red)}
     var rl = $("res-list"); rl.replaceChildren();
     (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
     (sc.not_sent || []).forEach(function (c) { if (decided[c.proposal_id]) return; rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + whyAfter(c.why) : ""))); });
-    (sc.failed || []).forEach(function (c) { decided[c.proposal_id] = { text: "Failed", kind: "err" }; rl.appendChild(el("li", "", "Failed: " + label(c) + (c.why ? ". " + c.why : ""))); });
+    (sc.failed || []).forEach(function (c) { decided[c.proposal_id] = { text: "Failed", kind: "err", why: c.why ? String(c.why) : "" }; rl.appendChild(el("li", "", "Failed: " + label(c) + (c.why ? ". " + c.why : ""))); });
     $("result").className = rl.children.length ? "" : "hidden";
     var running = sc.state === "applying";
     B.setStatus(running ? "Still applying. " + String(sc.summary || "") : String(sc.summary || "Done."), running ? "" : (sc.failed && sc.failed.length ? "err" : "ok"));
@@ -333,7 +334,7 @@ button.danger:disabled{color:var(--red)}
         var st = String(sc.state || "");
         decided[x.proposal_id] = st === "applied" ? { text: "Applied", kind: "ok" }
           : st === "rejected" ? { text: "Rejected", kind: "" }
-          : st === "applying" ? { text: "Applying… the review page shows how it goes", kind: "" }
+          : st === "applying" ? { text: "Applying… the review page shows how it goes", word: "Applying", kind: "" }
           : { text: "Now " + st, kind: "err" };
         B.setStatus(st === "applied" ? "Applied. " + String(sc.applied_text || "The deck on Archidekt matches this change.") : st === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || ""), st === "applied" ? "ok" : "");
         draw();

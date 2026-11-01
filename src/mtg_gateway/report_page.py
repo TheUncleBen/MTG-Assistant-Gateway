@@ -1977,7 +1977,10 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-cards .kebab{margin:0}
 .rv-page .cardlink{background:none;border:0;padding:0;margin:0;color:inherit;cursor:pointer;font:inherit;
   text-align:left;min-height:0}
-.rv-page .cardlink:hover{text-decoration:underline;color:var(--orange-text)}
+/* every name opens the viewer and reads the same: the orange underline is for a pointer that can
+   hover (a touch screen keeps the last tapped name "hovered", so one name stood out as a link) */
+@media (hover:hover){.rv-page .cardlink:hover{text-decoration:underline;color:var(--orange-text)}}
+.rv-page .cardlink:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:3px}
 /* owner decision C7: has the deck changed since, since the last test, the tested list, paired tests */
 .rv-page .rv-changed{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:0 0 1rem;
   padding:.6rem .9rem;border-left:4px solid var(--orange);background:var(--orange-tint);border-radius:6px}

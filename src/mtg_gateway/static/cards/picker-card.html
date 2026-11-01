@@ -10,10 +10,20 @@
 /* A picker row is four things across: the tick, the picture, the name and the count. */
 .row{grid-template-columns:auto auto minmax(0,1fr) auto}
 .row .sugg{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;grid-column:1 / -1}
-.row .sugg button{flex:0 0 auto;width:84px;padding:3px;min-height:0}
-.row .sugg img{aspect-ratio:5/7}
-.row .sugg .cap{font-size:10px}
+.row .sugg button{flex:0 0 auto;width:124px;padding:3px;min-height:0}
+.row .sugg .cap{font-size:.75rem}
 .row.ask{grid-template-rows:auto auto}
+/* the thumbnail is a button that opens the big picture in the card's flow */
+button.picbtn{min-height:0;padding:0;border:0;background:none;border-radius:3px;flex:none;cursor:zoom-in}
+button.picbtn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+/* the big picture of one row takes the list's place */
+.card.viewing .scroll,.card.viewing #note,.card.viewing #actions{display:none}
+.detail.flow{position:static;padding:0;overflow:visible;z-index:auto}
+.detail.flow img.big{max-width:340px}
+#detail .cap{font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere}
+#detail .cap b{color:var(--text);font-weight:600;font-size:.9375rem}
+/* the pictures could not load: the rows keep their names, set and number, without empty boxes */
+.card.nopics .pic,.card.nopics .picbtn,.card.nopics .sugg img{display:none}
 </style>
 </head>
 <body>
@@ -21,6 +31,10 @@
   <div class="head"><h1 id="title">Recognized cards</h1><span class="badge" id="count"></span></div>
   <p class="sum" id="summary">Loading…</p>
   <div class="scroll"><div id="rows" role="list"></div></div>
+  <div class="detail flow hidden" id="detail" role="region" aria-label="One card">
+    <div class="top"><span class="cap" id="dcap"></span><button type="button" class="small" id="back">Back to the list</button></div>
+    <div class="body"><div id="dpic"></div></div>
+  </div>
   <p class="note hidden" id="note"></p>
   <div class="actions" id="actions"></div>
   <div class="status hidden" id="status" role="status" aria-live="polite"></div>
@@ -32,6 +46,10 @@
   var B = Bridge, el = B.el, $ = B.$;
   var MAX_IMAGES = 60, MAX_SUGGESTIONS = 6;
   var rows = [], picks = {}, keep = {}, done = false;
+  // pictures that could not be drawn against those that could: past half, the card says so and
+  // keeps to names, set and number (a picture host blocked by the chat, or down)
+  var failed = 0, loaded = 0, noPics = false;
+  var NO_PICTURES = "Pictures could not load; the set and number are listed.";
 
   var STATUS = {
     exact: ["ok", "exact"], printing: ["ok", "printing"], fuzzy: ["warn", "corrected"],
@@ -43,15 +61,53 @@
     var s = (c.set || "").toUpperCase(); if (c.collector_number) s += " #" + c.collector_number;
     return s;
   }
+  var picOpts = {
+    onError: function () { failed++; if (!noPics && failed >= 2 && failed > loaded) { noPics = true; draw(); } },
+    onLoad: function () { loaded++; }
+  };
+  // a card's small and normal-size pictures: the data's own links when it carries them, else the
+  // Scryfall lookup at each size
+  function pics(c) {
+    return [c.image_small || B.scryfallImage(c.scryfall_id, c.name),
+      c.image_normal || B.scryfallImage(c.scryfall_id, c.name, "normal")];
+  }
+  // a row's picture is a button that shows the card big (view), in the list's place
+  function thumb(c) {
+    var btn = el("button", "picbtn"); btn.type = "button";
+    btn.setAttribute("aria-label", "See " + (c.name || "the card") + " bigger");
+    var p = pics(c);
+    btn.appendChild(B.picture(p[0], null, p[1], { sizes: "48px", onError: picOpts.onError, onLoad: picOpts.onLoad }));
+    btn.onclick = function () { view(c); };
+    return btn;
+  }
+  function view(c) {
+    $("dcap").replaceChildren();
+    $("dcap").appendChild(el("b", "", c.name || ""));
+    if (label(c)) { $("dcap").appendChild(document.createElement("br")); $("dcap").appendChild(document.createTextNode(label(c))); }
+    var pic = $("dpic"); pic.replaceChildren();
+    var p = pics(c), img = B.picture(p[0], "big", p[1], { sizes: "340px" });
+    img.loading = "eager";
+    pic.appendChild(img);
+    $("detail").className = "detail flow";
+    $("card").className = "card viewing" + (noPics ? " nopics" : "");
+    $("back").focus();
+    B.reportSize();
+  }
+  function closeView() {
+    $("detail").className = "detail flow hidden";
+    $("card").className = "card" + (noPics ? " nopics" : "");
+    B.reportSize();
+  }
   function draw() {
     var list = $("rows"); list.replaceChildren();
+    $("card").className = "card" + (noPics ? " nopics" : "");
     var images = 0, unresolved = 0;
     rows.forEach(function (r, i) {
       var c = r.card, st = STATUS[r.status] || ["", r.status || ""];
       var li = el("div", "row" + (keep[i] === false ? " dim" : "")); li.setAttribute("role", "listitem");
       var cb = el("input", "check"); cb.type = "checkbox"; cb.checked = keep[i] !== false; cb.disabled = done || (!c && !picks[i]);
       cb.setAttribute("aria-label", "Keep " + ((c && c.name) || r.input_name || ""));
-      cb.onchange = function () { keep[i] = cb.checked; li.className = "row" + (cb.checked ? "" : " dim"); };
+      cb.onchange = function () { keep[i] = cb.checked; li.classList.toggle("dim", !cb.checked); };
       li.appendChild(cb);
       var n = el("span");
       var name = el("span", "name", (picks[i] || (c && c.name) || r.input_name || "?"));
@@ -65,7 +121,7 @@
       n.appendChild(el("span", "sub", sub.join(" · ")));
       li.appendChild(n);
       li.appendChild(el("span", "qty", "×" + (r.quantity || 1)));
-      if (c && images < MAX_IMAGES) { li.insertBefore(B.picture(c.image_small || B.scryfallImage(c.scryfall_id, c.name)), n); images++; }
+      if (c && images < MAX_IMAGES && !noPics) { li.insertBefore(thumb(c), n); images++; }
       else li.insertBefore(el("span", "pic none"), n);
       var sugg = Array.isArray(r.suggestions) ? r.suggestions.slice(0, MAX_SUGGESTIONS) : [];
       if (!c) unresolved++;
@@ -75,7 +131,11 @@
         sugg.forEach(function (sname) {
           var t = el("button", "tile" + (picks[i] === sname ? " picked" : "")); t.type = "button";
           t.setAttribute("aria-label", "Use " + sname);
-          if (images < MAX_IMAGES) { t.appendChild(B.picture(B.scryfallImage("", sname), "")); images++; }
+          if (images < MAX_IMAGES && !noPics) {
+            t.appendChild(B.picture(B.scryfallImage("", sname), "", B.scryfallImage("", sname, "normal"),
+              { sizes: "118px", onError: picOpts.onError, onLoad: picOpts.onLoad }));
+            images++;
+          }
           t.appendChild(el("span", "cap", sname)); t.appendChild(el("span", "tick", "✓"));
           t.onclick = function () { picks[i] = sname; keep[i] = true; draw(); };
           strip.appendChild(t);
@@ -85,9 +145,10 @@
       list.appendChild(li);
     });
     $("count").textContent = rows.length + " row" + (rows.length === 1 ? "" : "s");
-    var note = $("note");
-    if (unresolved && !done) { note.textContent = unresolved + " name" + (unresolved === 1 ? " was" : "s were") + " not recognized: pick one of the suggestions, or leave it out."; note.className = "note"; }
-    else note.className = "note hidden";
+    var note = $("note"), text = "";
+    if (unresolved && !done) text = unresolved + " name" + (unresolved === 1 ? " was" : "s were") + " not recognized: pick one of the suggestions, or leave it out.";
+    if (noPics) text = NO_PICTURES + (text ? " " + text : "");
+    note.textContent = text; note.className = text ? "note" : "note hidden";
     renderActions();
   }
   function renderActions() {
@@ -117,8 +178,12 @@
       (chosen.length ? "\nThe user picked: " + chosen.join("; ") + "." : "") +
       (dropped.length ? "\nLeft out: " + dropped.map(B.quote).join(", ") + "." : "") +
       "\nUse exactly this list (resolve any picked name again if you need its printing).";
-    B.setStatus(kept.length ? kept.length + " card" + (kept.length === 1 ? "" : "s") + " confirmed; your assistant will use them." : "No cards kept.", "ok");
-    B.tellModel(text);
+    var said = kept.length ? kept.length + " card" + (kept.length === 1 ? "" : "s") + " confirmed; your assistant will use them." : "No cards kept.";
+    B.setStatus(said, "ok");
+    B.tellModel(text).then(function (heard) {
+      // a chat that cannot carry the list: the person tells the assistant in their next message
+      if (!heard) B.setStatus(said + " Your chat could not pass this on, so tell your assistant which cards you kept.", "ok");
+    });
   }
   function load(result) {
     var sc = result.structuredContent || {}, meta = (result._meta || {})["mtg/card"] || {};
@@ -137,9 +202,10 @@
     });
     // a conflict (set and number name a different card) starts unticked: the user decides
     rows.forEach(function (r, i) { keep[i] = !!r.card && r.status !== "conflict"; });
-    $("summary").textContent = rows.length ? "Untick what you don't want, pick among the suggestions, then press Use these cards." : "Nothing was recognized.";
+    $("summary").textContent = rows.length ? "Untick what you don't want, pick among the suggestions, then press Use these cards. Tap a picture to see it bigger." : "Nothing was recognized.";
     draw();
   }
+  $("back").onclick = closeView;
   B.start("MTG Assistant Gateway picker card", load, {});
 })();
 </script>

@@ -2679,8 +2679,10 @@ def goldfish_page_html(
     solo = "" if forge_solo is _NO_SOLO_LINE else forge_solo_line(deck, forge_solo, csrf=csrf)
     return (
         "<section class='panel gf-head'>"
-        f"<a class='gf-back' href='/decks/{did}'>← {name}</a>"
-        "<h1>Goldfish</h1>"
+        # the way back is the report and review pages' grey capsule (ui.cap_link), never blue text
+        "<nav class='crumbs gf-crumbs' aria-label='Back'>"
+        f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
+        f"<h1>Goldfish <span class='gf-deck'>{name}</span></h1>"
         f"<p class='muted small gf-intro'>{esc(goldfish_intro(size, commander=commander))}</p>"
         + solo
         + extra_head
@@ -2717,7 +2719,9 @@ def goldfish_page_html(
 
 GOLDFISH_CSS = """
 .gf-head h1{margin:.1rem 0 .3rem;font-size:1.6rem}
-.gf-back{display:inline-flex;align-items:center;min-height:44px}
+.gf-crumbs{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .25rem}
+.gf-head h1 .gf-deck{font-size:1rem;font-weight:400;color:var(--text-muted);margin-left:.4rem;
+  overflow-wrap:anywhere}
 .gf-intro{margin:0}
 .gf-solo{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:.6rem 0 0}
 .gf-solo form.inline{display:contents} .gf-solo button{margin:0}
