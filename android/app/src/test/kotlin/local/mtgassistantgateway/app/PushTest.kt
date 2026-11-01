@@ -63,6 +63,17 @@ class PushTest {
         assertEquals(300L, Push.backoffSeconds(30, 1.0))
     }
 
+    @Test fun theNextTryAndTheQuietConnectionCheckAreAlarms() {
+        // waiting: the alarm is the next try itself, so deep sleep can't hold it back
+        assertEquals(1_000_000L, Push.nextAlarm(connected = false, retryAt = 1_000_000L, lastLineAt = 0L))
+        // connected: a little after the moment the connection would count as dead
+        val at = Push.nextAlarm(connected = true, retryAt = 0L, lastLineAt = 500_000L)
+        assertEquals(500_000L + Push.READ_TIMEOUT_MS + Push.ALARM_SLACK_MS, at)
+        assertTrue(Push.stale(500_000L, at))
+        assertFalse(Push.stale(500_000L, 500_000L + Push.READ_TIMEOUT_MS))
+        assertTrue(Push.TRY_HOLD_MS > 20_000L) // the wake lock outlasts the connect timeout
+    }
+
     @Test fun onlyTheGatewaysOwnRefusalsStopThePhone() {
         assertEquals(Push.Refusal.NONE, Push.refusal(200, null))
         assertEquals(Push.Refusal.STOP, Push.refusal(401, """{"ok":false,"error":"unknown_key"}"""))

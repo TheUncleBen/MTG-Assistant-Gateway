@@ -453,6 +453,21 @@ async def test_a_group_replaces_its_message_and_withdraw_removes_it(stack: Stack
 # -- the Account card in the app ------------------------------------------------------------------
 
 
+async def test_the_card_in_the_app_names_samsungs_never_sleeping_apps(stack: Stack) -> None:
+    """Samsung's own battery saving can stop the app's connection whatever Android allows, so the
+    card names the list that keeps it awake (0.7.46 review)."""
+    b, _key = await _member(stack, app=True)
+    try:
+        await _post(b, {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1"})
+        page = (await b.http.get("/account/details")).text
+        assert (
+            "<p class='ui-hint' data-native-show='connected off' hidden>On a Samsung phone, also add the app "
+            "to Never sleeping apps (Settings, Battery, Background usage limits)."
+        ) in page
+    finally:
+        await b.aclose()
+
+
 async def test_the_card_in_the_app_connects_this_phone(stack: Stack) -> None:
     b, key = await _member(stack, app=True)
     try:
