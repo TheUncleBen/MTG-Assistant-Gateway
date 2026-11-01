@@ -93,18 +93,19 @@
     if (b.back && b.back.isConnected && b.back.focus) b.back.focus({ preventScroll: true });
   }
   // a box that must stay (a delete job running inside it) refuses Esc and the scrim; the box's
-  // own code closes it with force once the outcome is shown
-  function closeBox(force, fromHistory) {
+  // own code closes it with force once the outcome is shown. ``handOn``: the next box takes over
+  // this one's history entry (see mount), so no going back here.
+  function closeBox(force, fromHistory, handOn) {
     if (!box || (box.locked && !force)) return;
     var b = box;
     box = null;
-    if (pushed && !fromHistory) {
+    if (pushed && !fromHistory && !handOn) {
       // going back over the box's entry fires popstate later; that one is ours, not a Back press
       pushed = false;
       ignorePop = true;
       try { history.back(); } catch (e) { ignorePop = false; }
     }
-    pushed = false;
+    if (!handOn) pushed = false;
     b.scrim.classList.remove("in");
     b.scrim.classList.add("out");
     if (reduced() || !b.scrim.isConnected) { finish(b); return; }
@@ -115,7 +116,11 @@
 
   // -- opening: the scrim, the keys, focus --------------------------------------------------------
   function mount(b, o) {
-    closeBox(true);
+    // A box over an open box (a confirm over a delete box): the open one's history entry passes
+    // to the new one. Going back over it and pushing again in the same breath would leave the
+    // browser one entry behind, and the new box's close would then leave the page.
+    var handOn = !!(box && pushed);
+    closeBox(true, false, handOn);
     if (leaving) finish(leaving);
     if (window.MtgMenu && window.MtgMenu.close) window.MtgMenu.close(false);
     var sc = b.scrim, panel = b.panel;
@@ -139,7 +144,8 @@
     if (reduced()) sc.classList.add("in");
     else requestAnimationFrame(function () { sc.classList.add("in"); });
     b.focusFirst();
-    if (!o.fromAddress && backCloses()) {
+    if (handOn) pushed = true;
+    else if (!o.fromAddress && backCloses()) {
       // the menu's own Back still settling: the box's entry goes on once it has landed
       if (menuBackPending()) b.wantsPush = true; else push();
     }

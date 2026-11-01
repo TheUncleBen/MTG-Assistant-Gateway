@@ -29,13 +29,14 @@ from .archidekt import (
 )
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
-from .deckpage import card_image, deck_title, delete_box_html
+from .deckpage import SORTS, VIEWS, card_image, cards_html, deck_title, delete_box_html
 from .decks import (
     CATEGORY_FLAGS,
     CATEGORY_HAS_CARDS,
     MAX_CATEGORY_CHANGES,
     DeckError,
     category_change_rows,
+    category_keys,
     category_line,
     current_client,
     deck_categories,
@@ -259,20 +260,6 @@ def posted_main_values(data: dict[str, str]) -> dict[str, str]:
         "theorycrafted": "1" if data.get("theorycrafted") else "",
         "game": data.get("game") or "any",
     }
-
-
-def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:
-    """Each category of the panel with the key its fields carry: its record id, or ``d1``, ``d2``...
-    in the panel's order for one Archidekt sent without a record (its default Sideboard or
-    Maybeboard until someone creates one; the change gives it its record)."""
-    out, n = [], 0
-    for c in deck_categories(deck):
-        if c["record"]:
-            out.append((str(int(c["id"])), c))
-        else:
-            n += 1
-            out.append((f"d{n}", c))
-    return out
 
 
 def category_baseline_fields(c: dict[str, Any], key: str | None = None) -> str:
@@ -1379,6 +1366,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 return JSONResponse(
                     {"ok": False, "needs_confirm": True, "title": title, "text": why}, headers=NO_STORE
                 )
+            if move_field and wants_json(data):
+                # the deck page's own delete always names where the cards go (its box picks one);
+                # a delete without that pick is refused in the box's words, nothing sent
+                raise DeckError("invalid", modes.CATEGORY_WORDS["pick_target"])
             if why and not said_yes:
                 drop = ("csrf", "confirmed", "move_ok") + (("move_to", "move_cards_to") if move_field else ())
                 fields = {k: v for k, v in data.items() if k not in drop}
@@ -1407,6 +1398,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     elif not move_field:
                         notes.append(" ".join(category_line(r) for r in rows))
                     note = notes
+                if wants_json(data):
+                    # the deck page's own create, delete or template add (deck.js): the same
+                    # question in its box, then the same post with confirmed=1
+                    text = note if isinstance(note, str) else " ".join(n for n in note if n)
+                    return JSONResponse(
+                        {"ok": False, "needs_confirm": True, "title": title, "text": text}, headers=NO_STORE
+                    )
                 body = confirm_form(
                     f"/decks/{deck.id}/categories#categories",
                     _csrf(s, sid),
@@ -1442,6 +1440,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 result = await decks.apply(sub, p["proposal_id"], via="browser")
                 if result.get("state") != "applied":
                     raise DeckError("applying", STILL_SAVING, review_url=f"/proposals/{p['proposal_id']}")
+                if data.get("page") == "deck":
+                    return await deck_page_answer(
+                        sub, sid, data, p["proposal_id"] if action == "delete" else ""
+                    )
                 return ok
             done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
             if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":
@@ -1451,6 +1453,35 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     f"/decks/{deck.id}/settings?ok={ok}{undo}#categories", status_code=303
                 )
             return done  # Archidekt refused or writes are off: the review page says why
+
+        async def deck_page_answer(
+            sub: str, sid: str | None, data: dict[str, str], undo_pid: str
+        ) -> Response:
+            """The deck page's own category change (deck.js, mockup screen 4): the answer carries the
+            stacks drawn again from the read back (deckpage.cards_html, for the page's view, sort and
+            filter, grouped by category as the menus are), and after a delete the Undo form of its own
+            snapshot (undo_form), which the page's toast offers."""
+            kept = one_click.get() or {}
+            deck = kept.get("verified") or await decks.get_own_deck(sub, deck_id)
+            view = data.get("view") if data.get("view") in VIEWS else "text"
+            sort = data.get("sort") if data.get("sort") in SORTS else "name"
+            # Archidekt marks each card with the copies the member owns (deck page: the green dot)
+            owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} or None
+            out: dict[str, Any] = {
+                "ok": True,
+                "cards_html": cards_html(
+                    deck,
+                    view=view,
+                    group="category",
+                    sort=sort,
+                    q=(data.get("q") or "").strip()[:80],
+                    own=True,
+                    owned=owned,
+                ),
+            }
+            if undo_pid:
+                out["undo_html"] = undo_form(sub, sid, deck, undo_pid)
+            return JSONResponse(out, headers=NO_STORE)
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")
 
