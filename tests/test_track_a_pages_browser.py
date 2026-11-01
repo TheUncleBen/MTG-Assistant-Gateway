@@ -173,9 +173,11 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
             page.locator(f"input[name=pick][value='{ids[0]}']").check()
             page.locator(f"input[name=pick][value='{ids[1]}']").check()
             page.locator("button[name=action][value=apply]").first.click()
-            page.wait_for_selector("text=Apply 2 changes")
-            button = page.locator("form.guarded button[value=apply]")
-            # locked until the page was seen (click guard), but still in the Tab order, so a fast
+            # the confirm asks in a box over the list (static/proposals.js), not on a page
+            page.wait_for_selector("#apply-box[role=dialog] >> text=Apply 2 changes?")
+            assert page.url == f"{server.base}/proposals"
+            button = page.locator("#apply-box button[value=apply]")
+            # locked until the box was seen (click guard), but still in the Tab order, so a fast
             # keyboard user does not skip past it
             assert button.get_attribute("aria-disabled") == "true" and not button.evaluate("e => e.disabled")
             locked = button.evaluate(CONTRAST)
@@ -193,7 +195,7 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
                 page.wait_for_timeout(300)
                 assert "/proposals/applied/" not in page.url and server.ark.patches == []
             page.wait_for_function(
-                "() => !document.querySelector('form.guarded button[value=apply]')"
+                "() => !document.querySelector('#apply-box button[value=apply]')"
                 ".hasAttribute('aria-disabled')",
                 timeout=10000,
             )

@@ -816,7 +816,8 @@
         // "Keep it" (the box gone, nothing sent) puts the picks back as they were
         var restore = function () {
           var watch = new MutationObserver(function () {
-            if (document.querySelector(".mtgbox-scrim")) return;
+            // Apply's box comes from the server: still asking (data-busy) is not "Keep it"
+            if (document.querySelector(".mtgbox-scrim") || (btn && btn.hasAttribute("data-busy"))) return;
             watch.disconnect();
             if ($("input[name=action]", form)) return;  // sent: the page is leaving
             picks.forEach(function (p) { p.checked = was.indexOf(p) !== -1; });
