@@ -1637,7 +1637,8 @@ def add_box_html(
     )
     import_form = (
         f"<form method='post' action='/collection' id='col-importform' class='importform' role='tabpanel' "
-        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'}>"
+        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'} "
+        "data-draft='binder-import'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<input type='hidden' name='action' value='import'>"
         "<p class='muted small'>A collection CSV or a card list, one card per line, "

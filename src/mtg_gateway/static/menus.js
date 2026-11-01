@@ -67,7 +67,8 @@
   }
   function failed(box, d) {
     box.busy(false);
-    box.note((d && d.message) || NO_NET, true);
+    var pr = window.MtgFetch.problem(d, null);
+    box.note(d && (d.signedOut || d.noConnection) ? pr.text : ((d && d.message) || NO_NET), true, pr.actions);
   }
   // where My decks goes after a box: the open folder, and the notice the gateway named
   function currentFolder() {

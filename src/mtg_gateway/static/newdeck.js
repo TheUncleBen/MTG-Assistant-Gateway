@@ -39,7 +39,9 @@
       show(n.getAttribute("data-src"));
     });
   });
-  show(form.getAttribute("data-src") || "empty");
+  // a draft put back by static/draft.js with a list in it opens on the Paste tab
+  var kept = form.__draft && form.__draft.restored;
+  show(kept && area && area.value && form.getAttribute("data-src") === "empty" ? "paste" : (form.getAttribute("data-src") || "empty"));
 
   // the preview tile: name, format and Private as typed, and how many cards the list names
   function cards() {

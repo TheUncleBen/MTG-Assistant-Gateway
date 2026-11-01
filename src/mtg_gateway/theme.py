@@ -2897,6 +2897,11 @@ def render(
         # script that reads them (deferred scripts run in document order; pages add theirs in
         # head_extra)
         + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
+        # static/fetchjson.js: how every page script talks to the gateway, and the one wording
+        # for a signed-out or lost-connection answer; before the scripts that send
+        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
+        # static/draft.js: what is typed into a form marked data-draft is kept and put back
+        + ("<script src='/static/draft.js' defer></script>" if signed_in else "")
         # static/topbar.js: the scroll room above a focused element follows the bar's height
         + "<script src='/static/topbar.js' defer></script>"
         # static/box.js: the box (dialog) every pop-up shares, on every page, before the menus
@@ -2939,7 +2944,6 @@ def render(
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
         + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
-        + ("<script src='/static/fetchjson.js' defer></script>" if signed_in else "")
         + ("<script src='/static/bell.js' defer></script>" if signed_in else "")
         + "</body></html>"
     )

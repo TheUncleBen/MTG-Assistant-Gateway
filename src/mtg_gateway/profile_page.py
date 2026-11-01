@@ -466,7 +466,7 @@ def cards(
             "Upload a picture…", section_href("profile", "picture=1"), "picture", icon_name="image"
         )
         + "</div></div></div></div>"
-        f"<form method='post' action='/account/profile' id='pr-f'>{csrf_in}"
+        f"<form method='post' action='/account/profile' id='pr-f' data-draft='profile'>{csrf_in}"
         "<input type='hidden' name='action' value='profile'>"
         + _row(
             "<label for='pr-un'>Username</label>",

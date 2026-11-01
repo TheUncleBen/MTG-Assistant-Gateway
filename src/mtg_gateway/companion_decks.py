@@ -153,7 +153,10 @@ def new_deck_box_html(
             if scan_name
             else ""
         )
-        + f"<form id='ndf' method='post' action='/decks/new' class='nd-form' data-src='{src}' novalidate>"
+        # what is typed is kept and put back (static/draft.js), unless a scan filled the form
+        + f"<form id='ndf' method='post' action='/decks/new' class='nd-form' data-src='{src}' novalidate"
+        + ("" if scan_name else " data-draft='newdeck'")
+        + ">"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<div class='nd-grid'><div class='nd-fields'>"
         "<div class='nd-top'><div class='field nd-name'><label for='name'>Deck name</label>"

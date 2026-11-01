@@ -59,15 +59,8 @@
   }
   function postForm(form) {
     var body = new URLSearchParams(new FormData(form));
-    return fetch(form.getAttribute("action"), {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: body.toString()
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () {
-        return { ok: false, status: r.status, message: "The gateway sent an answer this page could not read. Reload the page to see whether the change was made." };
-      });
-    });
+    // never rejects: signed out and no connection come back as {ok: false} in the site's words
+    return window.MtgFetch.answer(form.getAttribute("action"), { method: "POST", body: body.toString(), form: true });
   }
 
   // -- the Add a package box: the packages list with its chips and filters ---------------------------

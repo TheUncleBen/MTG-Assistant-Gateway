@@ -513,16 +513,17 @@
         w.type = "button";
         w.addEventListener("click", function () {
           w.disabled = true;
-          fetch("/watchlist/api/watch", { method: "POST", credentials: "same-origin",
-            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.value, Accept: "application/json" },
-            body: JSON.stringify({ name: name, finish: fin }) })
-            .then(function (r) { return r.json(); })
+          // never rejects: signed out and no connection come back in the site's words, with Sign in
+          window.MtgFetch.answer("/watchlist/api/watch", { body: JSON.stringify({ name: name, finish: fin }), csrf: csrf.value, what: "the card was not watched" })
             .then(function (d) {
               if (d && d.ok) { show([d.watch], owned); return; }
               w.disabled = false;
-              box.appendChild(el("p", "notice error", (d && d.message) || "The card could not be watched."));
-            })
-            .catch(function () { w.disabled = false; box.appendChild(el("p", "notice error", "No connection.")); });
+              var pr = window.MtgFetch.problem(d, "the card was not watched");
+              var p = el("p", "notice error", pr.text);
+              p.setAttribute("role", "alert");
+              pr.actions.forEach(function (a) { a.className = "btn small"; p.appendChild(document.createTextNode(" ")); p.appendChild(a); });
+              box.appendChild(p);
+            });
         });
         box.appendChild(w);
         return;
