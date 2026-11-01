@@ -985,7 +985,9 @@ def toolbar_html(
     add = (
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
-        "<input id='quick' type='text' name='add' placeholder='Quick add (name)' data-suggest='cards' "
+        # the placeholder is short enough to read whole in the phone toolbar's field (the full
+        # name of the control is its label, "Add to the deck", and the + beside it says Add)
+        "<input id='quick' type='text' name='add' placeholder='Add a card' data-suggest='cards' "
         "data-suggest-submit "
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same. The
@@ -3405,13 +3407,20 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 @media (max-width:599.98px){
   .toolbar.compact{padding:.5rem .75rem}
   .toolbar.compact .controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+  /* the row's spare width goes to the text field (its placeholder reads whole), not to View,
+     which keeps its own width; under 360 px the field has the first row to itself and View fills
+     the next one beside ⋮ */
   .toolbar.compact form.quick{flex:1 1 11rem;min-width:0;margin:0}
   .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0)}
   .toolbar.compact .quickrow{flex-wrap:nowrap}
   .toolbar.compact .quickrow .addpkg,.toolbar.compact form.views{display:none}
-  .toolbar.compact .viewbtn{display:inline-flex;flex:1 0 auto;margin:0;min-height:var(--ctl);gap:.35rem;
+  .toolbar.compact .viewbtn{display:inline-flex;flex:0 0 auto;margin:0;min-height:var(--ctl);gap:.35rem;
     justify-content:center;max-width:100%}
+  @media (max-width:359.98px){
+    .toolbar.compact form.quick{flex-basis:100%}
+    .toolbar.compact .viewbtn{flex:1 0 auto}
+  }
   .toolbar.compact .controls > .viewbtn:first-child{flex:1 1 auto;justify-content:center}
   .toolbar.compact .toolmore{display:inline-flex;flex:0 0 auto;margin:0;width:var(--ctl);min-width:var(--ctl);
     min-height:var(--ctl);padding:0;justify-content:center}
