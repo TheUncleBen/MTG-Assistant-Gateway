@@ -1777,7 +1777,7 @@
           toast((w.name || name) + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
-      toast((w.name || name) + " added to your watchlist.", { actions: [open, undo] });
+      toast(d.message || (w.name || name) + " added to your watchlist.", { actions: [open, undo] });
       return w;
     }, function (err) { toast("No connection; the card was not watched.", { error: true }); throw err; });
   }

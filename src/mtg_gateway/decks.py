@@ -3195,7 +3195,7 @@ def custom_card_rows(
                 raise DeckError(
                     "not_found",
                     f"Custom card {cid} is not one of your custom cards, so it can't be added. Only "
-                    "your own custom cards (My lists) go in a deck.",
+                    "your own custom cards (Binder › Lists › Custom cards) go in a deck.",
                 )
             if cur is not None:
                 raise DeckError(

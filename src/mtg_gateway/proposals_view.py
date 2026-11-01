@@ -66,6 +66,8 @@ WHENS = (("", "Any time"), ("today", "Today"), ("7d", "Last 7 days"), ("30d", "L
 YOU, ADMIN = "you", "admin"
 FROM_YOU, FROM_ADMIN = "You", "The administrator"
 NO_APP_NAME = "An assistant"  # an app with no registered name: never its client id
+# the stand-in names as they read inside a sentence ("10 from an unnamed assistant, 5 from you")
+_MID = {NO_APP_NAME: "an unnamed assistant", FROM_YOU: "you", FROM_ADMIN: "the administrator"}
 # A failed apply's stored error when Archidekt answered and said no (ArchidektError kinds, and the
 # gateway's own refusals of what it was about to send); anything else (the gateway restarted, a
 # network error or a timeout, the backup copy) is "could not be applied", not a refusal.
@@ -355,7 +357,8 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
                 by_app[name] = by_app.get(name, 0) + 1
             if len(by_app) > 1:  # which apps they came from, when it is more than one
                 order = sorted(by_app.items(), key=lambda kv: (-kv[1], kv[0]))
-                det += " · " + ", ".join(f"{n} from {name}" for name, n in order)
+                # mid-sentence, the stand-in names lose their capital (independent review 2, L6)
+                det += " · " + ", ".join(f"{n} from {_MID.get(name, name)}" for name, n in order)
         det += f" · oldest {_span(now - min(it['created_at'] for it in waiting))}"
         soon = [it["expires_at"] for it in waiting if it["expires_at"] > now]
         if soon:

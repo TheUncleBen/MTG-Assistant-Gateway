@@ -75,7 +75,7 @@ async def test_proposals_has_four_widgets_with_the_apps_folded_into_waiting(stac
         assert "Waiting by app" not in widgets and "Connected apps" not in widgets
         assert "bar-split" not in widgets and "wide-sm" not in widgets
         first = widgets.split("<div class='wdg")[1]
-        assert "15 on 1 deck · 10 from An assistant, 5 from You · oldest " in first
+        assert "15 on 1 deck · 10 from an unnamed assistant, 5 from you · oldest " in first
         # the third tile keeps the approved words and says what it counts (C-FINDINGS F13)
         third = widgets.split("<div class='wdg")[3]
         assert "Only you can apply" in third and "in every approval mode" not in third

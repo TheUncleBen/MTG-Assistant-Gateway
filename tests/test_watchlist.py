@@ -247,6 +247,10 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
         try:
             r = await _watch(b, name="No Such Card Anywhere")
             assert r.status_code == 404 and "Scryfall knows no card named" in r.text
+            # the name in curly quotes, as every name the pages show (independent review 2, L5)
+            assert "named “No Such Card Anywhere”." in r.text
+            r = await _watch(b, name="Urza's Nothing", set_code="frc", collector_number="999")
+            assert "named “Urza&#x27;s Nothing” in FRC 999." in r.text, r.text
             # one printing: its own finishes; by name alone (0.7.46) any printing's
             r = await _watch(b, name="Sol Ring", set_code="frc", finish="foil")
             assert r.status_code == 400 and "not printed in foil" in r.text

@@ -323,7 +323,7 @@ doesn't land in your account.
 1. On `https://mtg.example.com/account`, under **Delete my data**, tick the
    box and press **Delete my data**. That deletes everything the gateway
    keeps for you from its database: proposals, snapshots, test reports, scan
-   sessions, deck covers, the stored Archidekt session, connected apps,
+   sessions, deck covers, the stored Archidekt session, connected assistants,
    the copy of your profile picture and your sign-in. Your decks on Archidekt (and the backup copies in your
    Archidekt account) stay yours. The owner's nightly database backups, if
    they keep them, still hold a copy (without your Archidekt session) until they age out (14 days by default). The owner's security log keeps a record that your

@@ -27,7 +27,7 @@ from . import prefs, prices
 from .decks import DeckError
 from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
 from .theme import render
-from .watchlist_page import WATCH_PAGE_CSS, Query, watchlist_fragment_html, watchlist_page_html
+from .watchlist_page import WATCH_PAGE_CSS, Query, alert_text, watchlist_fragment_html, watchlist_page_html
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -358,7 +358,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
             return JSONResponse(
                 {"ok": False, "error": exc.kind, "message": str(exc)}, status, headers=NO_STORE
             )
-        return JSONResponse({"ok": True, "watch": out}, headers=NO_STORE)
+        return JSONResponse({"ok": True, "watch": out, "message": watched_text(out)}, headers=NO_STORE)
 
     @server.custom_route("/watchlist/api/unwatch", methods=["POST"], include_in_schema=False)
     async def unwatch_api(request: Request) -> Response:
@@ -397,6 +397,20 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
 
 
 # -- assistant tools -----------------------------------------------------------------------------
+
+
+def watched_text(w: dict[str, Any]) -> str:
+    """The toast for a Watch press (the card menus, the card viewer): a new watch says the price
+    alert it came with, the member's defaults (independent review 2, L5), so the push that may
+    follow is no surprise."""
+    name = str(w.get("name") or "The card")
+    if not w.get("created"):
+        return f"{name} is on your watchlist."
+    alerts = w.get("alerts") or {}
+    if not alerts:
+        return f"{name} added to your watchlist."
+    said = alert_text(alerts, w.get("currency") or "usd", w.get("added_price"))
+    return f"{name} added to your watchlist, with a price alert: {said[:1].lower()}{said[1:]}."
 
 
 def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
@@ -458,9 +472,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
                 description="The watchlist list (group) to put the card in; made when new. Empty: no list."
             ),
         ] = None,
-        clear_alerts: Annotated[
-            bool, Field(description="Also turn off alerts not named.")
-        ] = False,
+        clear_alerts: Annotated[bool, Field(description="Also turn off alerts not named.")] = False,
     ) -> dict[str, object]:
         sub = _sub()
         try:

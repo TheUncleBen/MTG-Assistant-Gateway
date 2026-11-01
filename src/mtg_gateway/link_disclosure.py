@@ -130,7 +130,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "email, username, user ID and groups at the sign-in service, profile picture (if "
             "sent), sign-in and last-seen times, approval mode, Archidekt username and user "
             "number, proposed and applied deck and binder changes, deck snapshots, reports and "
-            "covers, scans, connected apps, usage counts and the activity log. The sign-in "
+            "covers, scans, connected assistants, usage counts and the activity log. The sign-in "
             "service's tokens the gateway keeps to check your groups use the same key, so they can "
             "open those too.",
             "They control the code this server runs. This gateway's code never keeps your "
@@ -142,7 +142,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "On the admin pages they see your name, email, username, groups and user ID at the "
             "sign-in service, your Archidekt username, first sign-in and last seen, connected "
-            "apps, how many app tokens and browser sessions you have open, whether and when you "
+            "assistants, how many app tokens and browser sessions you have open, whether and when you "
             "were disabled, and the activity log: what you did, when and with which app (links, "
             "unlinks, proposals, deck and binder changes, scans, likes, bookmarks, follows and "
             "comments, with deck, proposal and comment numbers).",

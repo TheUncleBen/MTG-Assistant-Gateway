@@ -854,7 +854,7 @@ def build(
         "proposals.</li>"
         "<li><strong>Unlink Archidekt</strong> removes the stored Archidekt session at once.</li>"
         "<li><strong>Delete my data</strong> removes everything this gateway keeps for your account "
-        "(proposals, snapshots, reports, scan sessions, your Archidekt link, connected apps and your "
+        "(proposals, snapshots, reports, scan sessions, your Archidekt link, connected assistants and your "
         "sign-in); your decks on Archidekt are not touched.</li>"
         "<li>When the gateway signs you out by itself, the page you land on says why: the device wasn't "
         "used for a while, the sign-in reached the longest time one lasts, the sign-in service asked "
@@ -986,7 +986,7 @@ def build(
             "snapshots (Restore), restores and reports, newest first, with filters; a report at "
             "<code>/history/reports/&lt;id&gt;</code> with its Markdown and HTML exports",
         ),
-        ("My activity", "<code>/activity</code>", "what your account and its connected apps did"),
+        ("My activity", "<code>/activity</code>", "what your account and its connected assistants did"),
     ]
     if watchlists:
         page_rows.append(

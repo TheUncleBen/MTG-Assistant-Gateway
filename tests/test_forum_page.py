@@ -608,3 +608,32 @@ async def test_a_trail_is_only_archidekts_own_names_never_a_members_url(stack: S
     assert "href='/forum/Archidekt/General'>General</a>" in crumbs
     await alice.aclose()
     forum._IN_SECTION.clear()
+
+
+async def test_a_busy_read_answers_429_with_retry_after_not_400(
+    stack: Stack, member: Browser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Independent review 2, L15: a member's own quick page reads that hit the gateway's pace
+    came back as a 400 problem page, which the browser and the app take for a bad request. A busy
+    answer is the shared busy panel: 429 with Retry-After (503 when Archidekt can't be reached)."""
+    from mtg_gateway import forum
+    from mtg_gateway.decks import DeckError
+
+    async def busy(*_a, **_k):
+        raise DeckError("rate_limited", "Too many requests just now.", retry_after=7)
+
+    monkeypatch.setattr(forum, "thread", busy)
+    monkeypatch.setattr(forum, "sections", busy)
+    stack.gw.decks.short_reads.drop("user-1")
+    for path in ("/forum/thread/700001", "/forum"):
+        r = await member.http.get(path)
+        assert r.status_code == 429, (path, r.status_code)
+        assert r.headers["retry-after"] == "7" and r.headers["cache-control"] == "no-store"
+        assert "Try again" in r.text, r.text[:400]
+
+    async def down(*_a, **_k):
+        raise DeckError("unavailable", "Archidekt could not be reached.")
+
+    monkeypatch.setattr(forum, "thread", down)
+    r = await member.http.get("/forum/thread/700002")
+    assert r.status_code == 503 and "retry-after" in r.headers

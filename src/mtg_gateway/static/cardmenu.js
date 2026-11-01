@@ -360,7 +360,8 @@
           toast(name + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
-      toast(name + " added to your watchlist.", { ok: true, actions: [listLink(name), undo] });
+      // the server's words say the price alert the new watch came with (the member's defaults)
+      toast(d.message || name + " added to your watchlist.", { ok: true, actions: [listLink(name), undo] });
       return w;
     }, function (err) {
       done();

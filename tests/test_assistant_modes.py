@@ -83,7 +83,11 @@ async def add_one(h: Harness, token: str, name: str = "Sol Ring") -> dict:
         ("o10", [CLAUDE_CB, GPT_CB], "app:o10"),  # two brands: neither
         ("o11", [CLAUDE_CB + "/"], "app:o11"),
         # a metadata document on a brand's host is that brand only by the callbacks it names
-        ("https://anything.claude.ai/u/x.json", ["https://evil.test/cb"], "app:https://anything.claude.ai/u/x.json"),
+        (
+            "https://anything.claude.ai/u/x.json",
+            ["https://evil.test/cb"],
+            "app:https://anything.claude.ai/u/x.json",
+        ),
         ("https://community.openai.com/x.json", [], "app:https://community.openai.com/x.json"),
         ("https://claude.ai/oauth/client.json", [CLAUDE_CB], "claude"),
         ("g1", [GPT_CB], "openai"),

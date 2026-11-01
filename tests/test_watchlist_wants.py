@@ -498,9 +498,43 @@ async def test_a_call_on_a_watched_card_that_names_no_alert_keeps_its_alerts(
         assert row["alert_pct"] == 5 and row["list_name"] == ""
         # the card viewer's Watch on a watched card (keep_alerts) changes nothing either
         csrf = await b.csrf("/watchlist")
-        r = await b.http.post("/watchlist/api/watch", json={"name": "Sol Ring"}, headers={"X-CSRF-Token": csrf})
+        r = await b.http.post(
+            "/watchlist/api/watch", json={"name": "Sol Ring"}, headers={"X-CSRF-Token": csrf}
+        )
         assert r.status_code == 200 and r.json()["watch"]["created"] is False, r.text
         row = next(w for w in svc.watched_cards(SUB) if w["name"] == "Sol Ring")
         assert row["alert_pct"] == 5
+    finally:
+        await b.aclose()
+
+
+async def test_an_empty_list_says_it_is_empty_and_counts_its_own_cards(stack: Stack, monkeypatch) -> None:
+    """Independent review 2, L4: a new list read "Cards 2 · Together $2.50 today", the chip "All 2"
+    and "No cards match. Clear the search or the filters", although nothing was searched. A list
+    counts and sums its own cards, and an empty one says so and how to fill it."""
+    import re
+
+    Clock(monkeypatch)
+    svc = stack.gw.prices
+    b = await _browser(stack, link=True)
+    try:
+        await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")
+        await _watch(b, name="Sol Talisman", finish="foil")
+        svc.create_list(SUB, "Trades")
+        page = (await b.http.get("/watchlist", params={"list": "Trades"})).text
+        head = page.split("<div id='w-cards' class='w-sec'>", 1)[1].split("</div>", 1)[0]
+        assert "Together" not in head and re.search(r"Cards\D*0\b", re.sub(r"<[^>]+>", " ", head)), head
+        assert "No cards match" not in page
+        assert "No cards in “Trades” yet." in page
+        chips = page.split("<nav class='ui-chips'", 1)[1].split("</nav>", 1)[0]
+        assert re.search(r">All <span class='n'>0</span>", chips), chips
+        # a list with a card: its own count and price, not every card's
+        svc.move_to_list(SUB, [_ids(stack)["Sol Ring"]], "Trades")
+        page = (await b.http.get("/watchlist", params={"list": "Trades"})).text
+        head = page.split("<div id='w-cards' class='w-sec'>", 1)[1].split("</div>", 1)[0]
+        assert "Together $1.28 today" in head, head
+        # a search that finds nothing in a list that has cards still says to clear it
+        page = (await b.http.get("/watchlist", params={"list": "Trades", "q": "zzz"})).text
+        assert "No cards match" in page
     finally:
         await b.aclose()

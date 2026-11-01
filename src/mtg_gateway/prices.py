@@ -634,11 +634,11 @@ class PriceService:
         On a card already watched, only the alerts the call names change and the others are kept
         (a call naming none, such as a move to a list, keeps them all); ``clear_alerts`` turns
         off the ones it does not name. ``keep_alerts``: a card already watched keeps its alerts
-        whatever is named (the Watch buttons). A new watch that names no alert of its own gets the member's defaults
-        (``defaults``, as prefs.alert_defaults gives them; ``default_pct`` alone is the remembered
-        one-day move) and remembers the price it was added at, the reference for the "drop below"
-        and "rise above" alerts. ``list_name``: the watchlist list to put it in (None: leave a
-        watched card where it is; '' takes it out of its list)."""
+        whatever is named (the Watch buttons). A new watch that names no alert of its own gets the
+        member's defaults (``defaults``, as prefs.alert_defaults gives them; ``default_pct`` alone
+        is the remembered one-day move) and remembers the price it was added at, the reference
+        for the "drop below" and "rise above" alerts. ``list_name``: the watchlist list to put it
+        in (None: leave a watched card where it is; '' takes it out of its list)."""
         name = clean_text(name or "").strip()[:MAX_NAME]
         set_code = (set_code or "").strip().lower()
         number = (collector_number or "").strip()
@@ -740,7 +740,9 @@ class PriceService:
                             "FROM watch_cards WHERE id = ?",
                             (wid,),
                         ).fetchone()
-                        alerts = tuple(a if a is not None else w for a, w in zip(alerts, tuple(was), strict=True))
+                        alerts = tuple(
+                            a if a is not None else w for a, w in zip(alerts, tuple(was), strict=True)
+                        )
                     c.execute(_SET_ALERTS + " WHERE id = ?", (*alerts, wid))
                 if list_name is not None:
                     self._ensure_list(c, sub, list_name, t)
@@ -817,7 +819,7 @@ class PriceService:
     @staticmethod
     def _label(name: str, set_code: str, number: str) -> str:
         where = " ".join(p for p in (set_code.upper(), number) if p)
-        return f"named {name!r}" + (f" in {where}" if where else "") if name else f"numbered {where}"
+        return f"named “{name}”" + (f" in {where}" if where else "") if name else f"numbered {where}"
 
     def set_alerts(
         self,

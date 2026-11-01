@@ -151,7 +151,11 @@ def test_watch_toast_undo_and_the_card_menu(server: Server, width: int) -> None:
         btn.click()
         toast = page.locator(".toast.cards-toast")
         toast.wait_for(timeout=5000)
-        assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+        # with the price alert it came with, the member's default (independent review 2, L5)
+        assert re.fullmatch(
+            r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+            toast.locator(".msg").inner_text(),
+        ), toast.locator(".msg").inner_text()
         assert toast.locator("a").get_attribute("href") == "/watchlist?q=Sol%20Ring"
         page.wait_for_function(
             "() => document.querySelector(\".wbtn[data-watch='Sol Ring']\").classList.contains('on')"
@@ -261,7 +265,10 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
             menu.locator("button", has_text="Watch this card").click()
             toast = page.locator(".deck-toast", has_text="watchlist")
             toast.wait_for(timeout=5000)
-            assert toast.locator(".msg").inner_text() == "Sol Ring added to your watchlist."
+            assert re.fullmatch(
+                r"Sol Ring added to your watchlist, with a price alert: drops 10% below \$\d+\.\d\d\.",
+                toast.locator(".msg").inner_text(),
+            ), toast.locator(".msg").inner_text()
             assert [w["name"] for w in s.app.state.gateway.prices.watched_cards("user-1")] == ["Sol Ring"]
             toast.locator("button", has_text="Undo").click()
             page.locator(".deck-toast", has_text="no longer").wait_for(timeout=5000)
@@ -290,3 +297,33 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
             browser.close()
     finally:
         s.stop()
+
+
+async def test_a_new_watch_says_the_price_alert_it_came_with(stack: Stack, monkeypatch) -> None:
+    """Independent review 2, L5: the Watch toast said only "added to your watchlist", though the
+    new watch came with the member's default price alert (a 10% drop), and so with a push later.
+    The answer carries the toast's words, and the card menus show them."""
+    from pathlib import Path
+
+    Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        csrf = await b.csrf("/watchlist")
+        hdr = {"Content-Type": "application/json", "X-CSRF-Token": csrf}
+        r = await b.http.post("/watchlist/api/watch", content=json.dumps({"name": "Sol Ring"}), headers=hdr)
+        d = r.json()
+        assert r.status_code == 200 and d["watch"]["created"] is True
+        assert d["watch"]["alerts"] == {"drop": 10.0}
+        assert d["message"].startswith(
+            "Sol Ring added to your watchlist, with a price alert: drops 10% below $"
+        )
+        again = await b.http.post(
+            "/watchlist/api/watch", content=json.dumps({"name": "Sol Ring"}), headers=hdr
+        )
+        assert again.json()["message"] == "Sol Ring is on your watchlist."
+    finally:
+        await b.aclose()
+    static = Path(__file__).resolve().parent.parent / "src" / "mtg_gateway" / "static"
+    for script in ("cardmenu.js", "deck.js"):
+        text = (static / script).read_text(encoding="utf-8")
+        assert re.search(r"toast\(d\.message \|\| [^;]*added to your watchlist\.\"", text), script

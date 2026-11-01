@@ -263,7 +263,11 @@ async def test_waiting_dashboard(stack: Stack) -> None:
             assert re.search(rf"<span class='lab'>(<svg.*?</svg>)?{lab}</span>", body)
         # the apps the waiting ones came from are a line of the Waiting widget (the fifth widget,
         # Waiting by app, went in the 0.7.46 redesign)
-        assert "Waiting by app" not in body and "10 from An assistant, 5 from You" in body
+        assert (
+            "Waiting by app" not in body
+            and "10 from an unnamed assistant, 5 from you" in body
+            and "from An assistant" not in body
+        )
         assert "Undo last apply" not in body or "action='/proposals/undo'" in body
         # chips with counts; the filters, "The administrator" among From
         assert (

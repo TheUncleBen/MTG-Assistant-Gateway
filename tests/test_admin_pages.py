@@ -131,7 +131,7 @@ async def test_users_list_reads_in_words_with_widgets_chips_and_filters(gw: Harn
             "Active in 7 days",
             "Disabled",
             "Linked to Archidekt",
-            "Connected apps",
+            "Assistants",  # independent review 2, L2: the name it has everywhere else
         ]
         assert "<span class='big'>4<small>signed in</small></span>" in text
         assert "<div class='wdg alert'>" in text  # one account is disabled

@@ -1701,7 +1701,7 @@ def _ok(msg: str) -> str:
 # was deleted" page (db.py MEMBER_TABLES is the code's list; tests keep the two in step).
 DELETED_LIST = (
     "proposals, snapshots, test reports, scan sessions, deck covers, your watchlist, your card "
-    "models, your push notification and view choices, your Archidekt link, connected apps and your "
+    "models, your push notification and view choices, your Archidekt link, connected assistants and your "
     "sign-in"
 )
 
@@ -1933,7 +1933,7 @@ async def details_html(
     ]
     data = [
         _yrow(
-            "Sign out on all my devices",
+            "Sign out on all my devices…",  # it asks first in a box, as its neighbours (L10)
             "x",
             href=f"{DETAILS}?signout=1",
             attrs=ui.box_open_attr("signout"),
@@ -2040,10 +2040,22 @@ def _notifications_value(state: Any, sub: str) -> str:
 
 
 def _alert_defaults_value(state: Any, sub: str) -> str:
-    """The Price alert defaults row's value: the alert in its short form (watchlist_page)."""
+    """The Price alert defaults row's value, short enough for one line beside its label
+    (independent review 2, L10): "10% drop", "5% move · Below $2.00"; the box says it in full."""
     from . import prefs, watchlist_page
 
-    return watchlist_page.alert_text(prefs.alert_defaults(state.db, sub), "usd") or "None"
+    alerts = prefs.alert_defaults(state.db, sub)
+    parts = [
+        f"{alerts[k]:g}% {word}"
+        for k, word in (("drop", "drop"), ("rise", "rise"), ("pct", "move"))
+        if alerts.get(k) is not None
+    ]
+    parts += [
+        f"{word} {watchlist_page.money(alerts[k], 'usd')}"
+        for k, word in (("above", "Above"), ("below", "Below"))
+        if alerts.get(k) is not None
+    ]
+    return " · ".join(parts) or "None"
 
 
 def _writes_fold(on: bool) -> str:
@@ -2775,7 +2787,7 @@ def _page_step(p: dict[str, Any]) -> str:
         n = int(result["done"])
         return (
             f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
-            "Check My lists; the entries as they were just before are under Before, below."
+            "Check Binder › Lists; the entries as they were just before are under Before, below."
         )
     if state == "failed" and p.get("rest_offered"):
         return (
@@ -3073,7 +3085,7 @@ def _custom_cards_box(p: dict[str, Any]) -> str:
     body = (
         f"<p>{what} The gateway checks the deck again first and reads it back after. "
         "<strong>Restoring a snapshot doesn't put custom cards back.</strong> To have one again, add it "
-        "from My lists › Custom cards.</p>"
+        "from Binder › Lists › Custom cards.</p>"
         "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
         "you press Take them out.</p>"
     )
@@ -3343,7 +3355,7 @@ def _proposal_body(
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Take custom cards out of the deck?</h3>"
                 "<p class='notice warn'><strong>Restoring a snapshot doesn't put custom cards back.</strong> "
-                "To have one again, add it from My lists › Custom cards.</p>"
+                "To have one again, add it from Binder › Lists › Custom cards.</p>"
                 "<p class='small'>The gateway checks the deck again first and reads it back after. Only "
                 "you can approve this, in every approval mode. Nothing happens until you tap "
                 "Take them out on Archidekt.</p>"
@@ -3882,6 +3894,59 @@ def undo_back(raw: str | None, deck_id: str | None = None) -> str:
     return m.group(0)
 
 
+def undo_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """What an Undo puts back, one line per card in words (independent review 2, L14): a card that
+    leaves one category for another is "Cultivate: Removal → Ramp", not a -1 and a +1 in tool
+    notation; an add or a removal says so with its copies; a count "Sol Ring: 1 → 2 copies".
+    The deck's own rows (its categories, details) keep their sentences (decks.row_line)."""
+
+    def who(r: dict[str, Any]) -> tuple[str, str, str]:
+        return (str(r.get("name", "")), str(r.get("printing") or ""), str(r.get("zone") or ""))
+
+    def where(r: dict[str, Any]) -> str:
+        return str(r.get("category") or "no category")
+
+    plain = [r for r in rows if r.get("kind") in ("add", "remove") and not r.get("companion_card")]
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for r in plain:
+        groups.setdefault(who(r), []).append(r)
+    out: list[str] = []
+    said: set[tuple[str, str, str]] = set()
+    for r in rows:
+        kind = r.get("kind")
+        if r in plain:
+            key = who(r)
+            if key in said:
+                continue
+            said.add(key)
+            gone = [x for x in groups[key] if x["kind"] == "remove"]
+            back = [x for x in groups[key] if x["kind"] == "add"]
+            name = key[0]
+            if (
+                gone
+                and back
+                and sum(int(x.get("qty") or 0) for x in gone) == sum(int(x.get("qty") or 0) for x in back)
+            ):
+                was = " and ".join(dict.fromkeys(where(x) for x in gone))
+                now = " and ".join(dict.fromkeys(where(x) for x in back))
+                out.append(f"{name}: {was} → {now}")
+                continue
+            for x in gone:
+                out.append(
+                    f"Take out {plural(int(x.get('qty') or 0), 'copy', 'copies')} of {name} from {where(x)}"
+                )
+            for x in back:
+                out.append(
+                    f"Put back {plural(int(x.get('qty') or 0), 'copy', 'copies')} of {name} in {where(x)}"
+                )
+        elif kind == "change" and not r.get("fold") and not r.get("companion_card"):
+            now = plural(int(r.get("after") or 0), "copy", "copies")
+            out.append(f"{r.get('name', '')}: {r.get('before')} → {now}")
+        else:
+            out.append(row_line(r))
+    return out
+
+
 def undone_url(back: str) -> str:
     return back + "?ok=undone" + ("#categories" if back.endswith("/settings") else "")
 
@@ -3898,10 +3963,11 @@ def _undo_body(
     if look["warning"]:
         out.append(f"<p class='notice warn'>{html.escape(look['warning'])}</p>")
     out.append("<p>Undo puts the deck back as it was before that change:</p><ul class='results'>")
-    for r in look["rows"][:UNDO_ROWS_SHOWN]:
-        out.append(f"<li>{html.escape(row_line(r))}</li>")
+    lines = undo_lines(look["rows"])
+    for line in lines[:UNDO_ROWS_SHOWN]:
+        out.append(f"<li>{html.escape(line)}</li>")
     out.append("</ul>")
-    left = len(look["rows"]) - UNDO_ROWS_SHOWN
+    left = len(lines) - UNDO_ROWS_SHOWN
     if left > 0:
         out.append(f"<p class='muted'>{undo_rows_left(left)}</p>")
     out.append(

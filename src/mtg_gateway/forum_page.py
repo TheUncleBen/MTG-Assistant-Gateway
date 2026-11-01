@@ -27,6 +27,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_extras, forum, ui
+from .busy import busy_body, busy_headers, busy_plan, same_url
 from .companion import DECK_CSP, _json_for_html
 from .decks import DeckError, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, login_redirect
@@ -785,7 +786,9 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     def wants_json(request: Request) -> bool:
         return "application/json" in (request.headers.get("accept") or "")
 
-    def problem(exc: DeckError, sub: str, sid: str | None, *, status: int = 400) -> Response:
+    def problem(
+        exc: DeckError, sub: str, sid: str | None, *, status: int = 400, request: Request | None = None
+    ) -> Response:
         if exc.kind == "unavailable" and str(exc) == forum.FORUM_CHANGED:
             body = ui.page_head(TITLE, SUB) + changed_html(str(exc))
             return respond(body, sub, sid)
@@ -800,6 +803,14 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 f"rel='noreferrer noopener'>{icon('external')}Archidekt's forum</a></p>" + open_form_html()
             )
             return respond(body, sub, sid)
+        plan = busy_plan(exc)
+        if plan is not None:
+            # Archidekt (or the member's own pace) is busy: the shared busy panel with 429 or 503
+            # and Retry-After, never a 400 "bad request" (independent review 2, L15)
+            body = ui.page_head(TITLE, SUB) + busy_body(plan, same_url(request) if request else PAGE)
+            resp = respond(body, sub, sid, status=plan.status)
+            resp.headers.update(busy_headers(plan))
+            return resp
         if exc.kind == "not_found":
             status = 404
         body = ui.page_head(TITLE, SUB) + ui.notice(str(exc), "error", role="alert") + open_form_html()
@@ -814,7 +825,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             # kept briefly per member, forgotten by any write they send (decks.short_reads)
             got = await decks.short_reads.get(sub, ("forum",), lambda: forum.sections(decks, sub))
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         strip = "" if forum.linked(decks, sub) else link_strip_html()
         body = ui.page_head(TITLE, SUB) + strip + new_thread_html() + sections_html(got)
         return respond(body, sub, sid)
@@ -852,7 +863,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             tid = forum._thread_id(raw)
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         if raw != str(tid):  # a link pasted into the address: its own page
             return RedirectResponse(thread_href(tid), status_code=303)
         if open_box:
@@ -885,7 +896,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             # the trail as the section listings read so far name it (not as when the thread was kept)
             t["in"] = forum.in_section(int(t["id"]))
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         link = state.db.get_link(sub) or {}
         linked = bool(link)
         raw_me = str(link.get("archidekt_user_id") or "")
@@ -927,7 +938,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             tid = forum._thread_id(raw)
         except DeckError as exc:
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         data = await h.form(request, limit=64_000)
         if not h.check_csrf(sid, data):
             if wants_json(request):
@@ -1044,7 +1055,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 return JSONResponse(
                     {"ok": False, "message": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"}
                 )
-            return problem(exc, sub, sid)
+            return problem(exc, sub, sid, request=request)
         if wants_json(request):
             # Load more with scripts: the next page's rows, appended in place (static/forum.js)
             has_more = got["page"] < got["pages"]
