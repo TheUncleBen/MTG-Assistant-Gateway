@@ -128,6 +128,8 @@ class MainActivity : ComponentActivity() {
     @Volatile private var pageGen = 0
     @Volatile private var gatewayPage = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    /** The open file picker is for an input that takes several files. */
+    private var fileMultiple = false
     private var pendingCameraPermission: PermissionRequest? = null
     private var pendingCamera = false // open the camera as soon as the /scan page is ready
     private var pendingAuto = false // ...with Auto on (the page's Auto switch asked for it)
@@ -794,7 +796,21 @@ class MainActivity : ComponentActivity() {
             REQ_FILE -> {
                 val cb = fileCallback ?: return
                 fileCallback = null
-                cb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+                val clip = data?.clipData
+                val uris = if (resultCode != android.app.Activity.RESULT_OK || data == null) emptyList() else FilePick.picked(
+                    data.data,
+                    if (clip == null) emptyList() else (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri },
+                    fileMultiple,
+                )
+                if (uris.isEmpty()) {
+                    cb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+                    return
+                }
+                // A HEIC photo becomes a JPEG the page can read; off the main thread, it can take a moment.
+                Thread({
+                    val out = FilePick.forPage(applicationContext, uris)
+                    runOnUiThread { cb.onReceiveValue(out) }
+                }, "file-pick").start()
             }
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
@@ -1283,7 +1299,9 @@ class MainActivity : ComponentActivity() {
             if (!GatewayUrl.isGateway(origin, web.url)) return false
             fileCallback?.onReceiveValue(null)
             fileCallback = filePathCallback
+            fileMultiple = fileChooserParams.mode == FileChooserParams.MODE_OPEN_MULTIPLE
             val intent = fileChooserParams.createIntent()
+            if (fileMultiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
             try {
                 startActivityForResult(intent, REQ_FILE)
             } catch (e: ActivityNotFoundException) {
