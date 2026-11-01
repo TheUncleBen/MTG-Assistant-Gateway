@@ -623,6 +623,7 @@ EVENT_LABELS = {
     "deck_cover_changed": "Deck cover changed",
     "deck_deleted": "Deck deleted",
     "deck_moved": "Deck moved to another folder",
+    "removed_card_deleted": "A removed card's row deleted for good on Archidekt",
     "deck_tag_added": "Tag added to a deck",
     "deck_tag_removed": "Tag removed from a deck",
     "folder_delete_stopped": "Folder delete stopped before anything was deleted",

@@ -61,6 +61,9 @@ DELETE_ALONE = "Not sent: deleting a deck is approved only on its own review pag
 CLEAR_ALONE = (
     "Not sent: clearing your whole binder is approved only on its own review page. It is still waiting."
 )
+PURGE_ALONE = (
+    "Not sent: removing a removed card for good is approved only on its own review page. It is still waiting."
+)
 FORMATTING_ALONE = (
     "Not sent: it keeps the formatting already there, such as bold text, links or pictures, so it is "
     "approved on its own review page, which shows how it will look. It is still waiting."
@@ -159,6 +162,8 @@ def plan(
                 skipped.append(_line(svc, sub, row, DELETE_ALONE))
             elif row.get("kind") == "action" and changes.get("action") == "clear_collection":
                 skipped.append(_line(svc, sub, row, CLEAR_ALONE))
+            elif row.get("kind") == "action" and changes.get("action") == "purge_removed":
+                skipped.append(_line(svc, sub, row, PURGE_ALONE))
             elif formatting.keeps_formatting(row):  # approved where its formatting shows
                 lost = formatting.loses_formatting(row)
                 skipped.append(_line(svc, sub, row, FORMATTING_LOST_ALONE if lost else FORMATTING_ALONE))

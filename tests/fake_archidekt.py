@@ -161,6 +161,11 @@ class FakeArchidekt:
         self.next_rel_id = 2000
         self.next_deck_id = 100
         self.private = {43}  # deck ids that need the owner's session
+        # Archidekt's own change log per deck (GET /decks/{id}/logs/), as a test sets it, or a whole
+        # answer to give as it is; and the removed card rows deleted for good (DELETE relations)
+        self.deck_logs: dict[int, list[dict[str, Any]]] = {}
+        self.deck_logs_answer: Any = None
+        self.relation_deletes: list[int] = []
         self.next_folder_id = 500
         self.folders: dict[str, list[dict[str, Any]]] = {}  # username -> folders under their root
         self.deck_folder: dict[int, int] = {}  # deck id -> folder id (decks not listed sit in root)
@@ -356,6 +361,35 @@ class FakeArchidekt:
             deck["categories"] = [c for c in deck["categories"] if c.get("id") != cid]
             deck["updatedAt"] = "2026-10-06T00:00:00Z"
         return httpx.Response(204)
+
+    def add_removed_row(
+        self, deck_id: int, name: str, quantity: int = 1, removed_at: str = "2026-10-20T09:30:00Z"
+    ) -> int:
+        """Give a deck a row of a card taken out of it, as Archidekt keeps one: in the deck JSON's
+        cards with ``deletedAt`` set (the gateway's reading of the payload, archidekt.parse_deck).
+        ``name`` is a card already in one of the fake's decks. Returns the row's id."""
+        card = next(
+            (
+                json.loads(json.dumps(c["card"]))
+                for d in self.decks.values()
+                for c in d["cards"]
+                if c["card"]["oracleCard"]["name"] == name
+            ),
+            None,
+        )
+        assert card is not None, name
+        self.next_rel_id += 1
+        self.decks[deck_id]["cards"].append(
+            {
+                "id": self.next_rel_id,
+                "quantity": quantity,
+                "modifier": "Normal",
+                "categories": ["Ramp"],
+                "card": card,
+                "deletedAt": removed_at,
+            }
+        )
+        return self.next_rel_id
 
     def add_side_row(self, deck_id: int, name: str, quantity: int = 1, category: str = "Maybeboard") -> None:
         """Give a deck a maybeboard / sideboard row (a category not counted in the deck) holding
@@ -582,7 +616,26 @@ class FakeArchidekt:
         """archidekt.com's own forum pages: HTML carrying their data as Next.js does."""
         self.site_pages.append((path, params))
         parts = [unquote(p) for p in path.strip("/").split("/")]
-        if parts == ["forum"]:
+        if len(parts) == 2 and parts[0] == "u":
+            # A user's profile page. Its data's layout on archidekt.com is NOT recorded: this is the
+            # fake's own guess (the user object one level down, beside other people's names), and
+            # the gateway looks for the user wherever the object sits (archidekt.find_user).
+            name = next((n for n in self.users if n.casefold() == parts[1].casefold()), None)
+            if name is None:
+                return httpx.Response(404, text="<html>Not found</html>")
+            uid = self._user_id(name)
+            others = [{"id": self._user_id(n), "username": n} for n in sorted(self.users) if n != name]
+            props = {
+                "profile": {
+                    "id": uid,
+                    "username": name,
+                    "profile": {"bio": "", "avatar": None},
+                    "deckCount": len([d for d in self.users[name].get("decks", []) if d not in self.private]),
+                    "followerCount": sum(1 for f in self.follows.values() if uid in f),
+                },
+                "followers": others[:3],
+            }
+        elif parts == ["forum"]:
             props: dict[str, Any] = {"forums": {"results": self.forum_sections}}
         elif len(parts) == 3:
             rows = [
@@ -626,7 +679,7 @@ class FakeArchidekt:
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
-        if path.startswith("/forum") and request.method == "GET":
+        if (path.startswith("/forum") or path.startswith("/u/")) and request.method == "GET":
             return self._site_page(path, dict(request.url.params))
         if request.method != "GET":
             self._deck_printings()  # remember every printing before a write may take it out
@@ -1300,6 +1353,19 @@ class FakeArchidekt:
                     rows.remove(row)
                     return httpx.Response(204)
             return httpx.Response(404, json={"detail": "Not found."})
+        if len(parts) == 4 and parts[1:3] == ["decks", "relations"] and request.method == "DELETE":
+            # removes one card row of a deck for good (the site's _app script; not checked live)
+            rid = int(parts[3]) if parts[3].isdigit() else -1
+            for d in self.decks.values():
+                row = next((c for c in d["cards"] if c.get("id") == rid), None)
+                if row is None:
+                    continue
+                if d["owner"]["username"] != who:
+                    return httpx.Response(403, json={"detail": "You do not have permission."})
+                d["cards"].remove(row)
+                self.relation_deletes.append(rid)
+                return httpx.Response(204)
+            return httpx.Response(404, json={"detail": "Not found."})
         if len(parts) >= 3 and parts[1] == "decks" and parts[2].isdigit():
             deck = self.decks.get(int(parts[2]))
             mine = deck is not None and deck["owner"]["username"] == who
@@ -1330,6 +1396,24 @@ class FakeArchidekt:
             if not mine:
                 return httpx.Response(
                     403, json={"detail": "You do not have permission to perform this action."}
+                )
+            if parts[3:] == ["logs"] and request.method == "GET":
+                # Archidekt's change log of a deck. The layout of its answer is NOT recorded: this
+                # page shape and the entries' fields (deck_logs, set by a test) are the fake's guess.
+                if self.deck_logs_answer is not None:
+                    return httpx.Response(200, json=self.deck_logs_answer)
+                entries = self.deck_logs.get(deck["id"], [])
+                page = int(dict(request.url.params).get("page", "1"))
+                size = 25
+                chunk = entries[(page - 1) * size : page * size]
+                more = page * size < len(entries)
+                return httpx.Response(
+                    200,
+                    json={
+                        "count": len(entries),
+                        "next": f"page={page + 1}" if more else None,
+                        "results": chunk,
+                    },
                 )
             if parts[3:] == ["editors"] and request.method == "GET":
                 rows = self.editors.get(deck["id"], [])

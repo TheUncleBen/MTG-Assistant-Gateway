@@ -26,6 +26,7 @@ from . import (
     account_hub,
     app_signin,
     assistants,
+    backup_place,
     link_disclosure,
     masked,
     modes,
@@ -650,6 +651,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             except DeckError as exc:
                 return await again(str(exc), read=True)
             return RedirectResponse("/account/details?ok=linked", status_code=303)
+        if action in backup_place.ACTIONS:
+            try:
+                code = await backup_place.post(state.decks, sub, action, data)
+            except DeckError as exc:
+                body = await section_html(state, sub, _csrf(s, sid), "backups", profile_error=str(exc))
+                return account_response(
+                    page, f"<div class='acc'>{body}</div>", sub, sid, status=400, section="backups"
+                )
+            return RedirectResponse(section_href("backups", f"ok={code}"), status_code=303)
         done = await notify.account_action(state, sub, action or "", data)
         if done is not None:
             anchor = "summary" if action in ("summary_save", "summary_send") else "notifications"
@@ -1736,6 +1746,7 @@ SECTIONS: dict[str, tuple[str, str]] = {
     "profile": ("Archidekt profile", "account"),
     "email": ("Email and alerts on Archidekt", "bell"),
     "defaults": ("New device defaults", "settings"),
+    "backups": ("Backup folder", "folder"),
     "notifications": ("Push notifications", "bell"),
     "choices": ("Your view choices", "grid"),
 }
@@ -1846,6 +1857,8 @@ async def section_html(
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
     if section == "archidekt":
         return _archidekt_card(state, sub, csrf_in, open_box=open_box, disclosure_read=disclosure_read)
+    if section == "backups":
+        return await backup_place.card_html(state.decks, sub, csrf_in, ok=ok, error=profile_error)
     if section in PROFILE_SECTIONS:
         cards = await profile_cards(
             state,
@@ -1938,6 +1951,8 @@ async def details_html(
             value="On" if info["writes_enabled"] else "Off",
             rid="writes",
         ),
+        # where the gateway keeps its backup copies on Archidekt: moved or renamed there
+        *([row("backups", state.decks.backup_folder)] if linked else []),
         # the price alert every card the member watches gets (mockup screen 8): its box on the
         # watchlist, one press from here
         _yrow(
@@ -3105,6 +3120,22 @@ def _clear_binder_box(p: dict[str, Any]) -> str:
     return _confirm_box("Clear your whole binder?", body, "Keep it", "Clear my binder")
 
 
+def _purge_box(p: dict[str, Any]) -> str:
+    """Removing a removed card's row for good (actions.py ``purge_removed``): the card, the deck,
+    and that neither Archidekt nor a snapshot can bring the row back."""
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    card = str(changes.get("name") or "this card")
+    deck = str(p.get("deck_name") or "this deck")
+    body = (
+        f"<p>This deletes the row Archidekt keeps for <strong>“{html.escape(card)}”</strong>, taken out of "
+        f"“{html.escape(deck)}”. The gateway reads the deck again first. The gateway's snapshots don't "
+        "hold these rows. <strong>Archidekt itself has no undo.</strong></p>"
+        "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
+        "you press Remove for good.</p>"
+    )
+    return _confirm_box(f"Remove “{card}” for good?", body, "Keep it", "Remove for good")
+
+
 def _custom_cards_box(p: dict[str, Any]) -> str:
     """Taking custom cards out of a deck (modes.custom_cards_risk): each card that ends with
     fewer copies, by name; a snapshot restore does not put them back."""
@@ -3425,6 +3456,17 @@ def _proposal_body(
             )
             apply_button = ("apply", "Clear my binder on Archidekt", "btn-outline-danger")
             box = _clear_binder_box(p)
+        elif destroy and (p.get("changes") or {}).get("action") == "purge_removed":
+            ask = (
+                "<div class='apply destroy'><h3 class='ui-section'>Remove this card's row for good?</h3>"
+                "<p class='notice error'><strong>This deletes the row Archidekt keeps for a card taken out "
+                "of the deck. Archidekt itself has no undo.</strong></p>"
+                "<p class='small'>The gateway reads the deck again first and stops if the card is back in "
+                "the deck. Only you can approve this, in every approval mode. Nothing happens until you "
+                "tap Remove for good.</p>"
+            )
+            apply_button = ("apply", "Remove for good on Archidekt", "btn-outline-danger")
+            box = _purge_box(p)
         elif destroy:
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Delete this deck on Archidekt?</h3>"
