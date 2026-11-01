@@ -633,7 +633,8 @@ class PriceService:
         printing's); when Scryfall is busy the watch is kept and priced by the next daily check.
         On a card already watched, only the alerts the call names change and the others are kept
         (a call naming none, such as a move to a list, keeps them all); ``clear_alerts`` turns
-        off the ones it does not name. ``keep_alerts``: a card already watched keeps its alerts
+        off the ones it does not name, and on a new watch means no alerts instead of the
+        member's defaults. ``keep_alerts``: a card already watched keeps its alerts
         whatever is named (the Watch buttons). A new watch that names no alert of its own gets the
         member's defaults (``defaults``, as prefs.alert_defaults gives them; ``default_pct`` alone
         is the remembered one-day move) and remembers the price it was added at, the reference
@@ -657,7 +658,7 @@ class PriceService:
             list_name = clean_list_name(list_name)
         alerts = _alerts(alert_pct, alert_above, alert_below, alert_drop, alert_rise)
         fresh_alerts = alerts
-        if all(a is None for a in alerts):
+        if all(a is None for a in alerts) and not clear_alerts:
             kept = dict(defaults or {})
             if default_pct is not None:
                 kept.setdefault("pct", default_pct)
