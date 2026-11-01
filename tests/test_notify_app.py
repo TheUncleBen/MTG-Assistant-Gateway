@@ -460,10 +460,9 @@ async def test_the_card_in_the_app_names_samsungs_never_sleeping_apps(stack: Sta
     try:
         await _post(b, {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1"})
         page = (await b.http.get("/account/details")).text
-        assert (
-            "<p class='ui-hint' data-native-show='connected off' hidden>On a Samsung phone, also add the app "
-            "to Never sleeping apps (Settings, Battery, Background usage limits)."
-        ) in page
+        step = "On a Samsung phone, also add the app to Never sleeping apps (Settings, Battery, Background"
+        assert page.count(step) == 2  # connected, and not yet connected
+        assert f"Always connected. {step}" in page
     finally:
         await b.aclose()
 
