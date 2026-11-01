@@ -51,13 +51,13 @@ def not_looked_up(name: str, retry_in: int) -> ScanError:
     if retry_in > 0:
         return ScanError(
             "rate_limited",
-            f"Scryfall asked the gateway to wait, so '{name}' was not looked up yet. Try again in about "
-            f"{retry_in} s.",
+            f"Scryfall asked the gateway to wait, so '{name}' was not looked up yet. Try again after "
+            "the wait in retry_in (seconds).",
             extra={"retry_in": retry_in},
         )
     return ScanError(
         "busy",
-        f"The card lookups took too long, so '{name}' was not looked up yet. Try again in a moment.",
+        f"The card lookups took too long, so '{name}' was not looked up yet. Try again.",
         extra={"retry_in": SUGGESTED_WAIT_SECONDS},
     )
 

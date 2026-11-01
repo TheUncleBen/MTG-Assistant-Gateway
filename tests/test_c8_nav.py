@@ -145,6 +145,7 @@ async def test_the_lists_live_in_binder_with_the_pins_among_them(member: Browser
         "/lists/tags",
         "/collection/wants",
         "/lists/custom",
+        "/lists/btags",
     ]
     assert "Pinned cards" in tabs
     # the way back: the Lists crumb to the hub, not Account

@@ -69,7 +69,7 @@ async def test_new_deck_name_with_newlines_stays_one_row(stack: Stack) -> None:
     )
     assert p["ok"], p
     assert p["diff"].splitlines() == [
-        "New commander deck “Gifts' (2 cards, private) +1 Island” (1 cards, public)",
+        "New commander deck “Gifts' (2 cards, private) +1 Island” (1 card, public)",
         "+1 Sol Ring",
     ]
     b = Browser(h)
@@ -79,7 +79,7 @@ async def test_new_deck_name_with_newlines_stays_one_row(stack: Stack) -> None:
     await b.aclose()
     # the deck name is one field of the New deck row; the visibility comes from its own field
     assert len(rows) == 2 and rows[0] == "Gifts&#x27; (2 cards, private) +1 Island"
-    assert "commander, 1 cards, PUBLIC" in page
+    assert "commander, 1 card, PUBLIC" in page
 
 
 async def test_csv_cells_with_newlines_stay_one_row(stack: Stack) -> None:

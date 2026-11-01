@@ -204,12 +204,12 @@ async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None
     assert tabs.count("<span class='n'>") == 1 and "data-counts='/lists/api/counts'" in tabs, tabs
     links = re.findall(r"<a href='/(?:lists|collection)/([a-z]+)'", tabs)
     got = (await member.http.get("/lists/api/counts")).json()
-    assert links == ["templates", "defaults", "tags", "wants", "custom"], links
+    assert links == ["templates", "defaults", "tags", "wants", "custom", "btags"], links
     assert set(links) <= set(got["counts"]), (links, got)
     assert all(isinstance(got["counts"][k], int) for k in links), got
     again = (await member.http.get("/lists/templates")).text
     tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", again).group(0)
-    assert tabs.count("<span class='n'>") == 5, tabs
+    assert tabs.count("<span class='n'>") == 6, tabs
 
 
 async def test_the_scripts_carry_the_icons_their_buttons_ask_for(member: Browser) -> None:
