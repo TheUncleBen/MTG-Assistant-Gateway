@@ -394,10 +394,10 @@ async def test_a_template_is_added_to_a_deck_from_my_lists(stack: Stack) -> None
             "/lists/templates",
             data={"csrf": csrf, "action": "add_to_deck", "was_name": "Draw", "deck": "42"},
         )
-        pid = _pid(r)
-        assert not [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
-        done = await _browser_apply(stack.h, pid)
-        assert done["state"] == "applied", done
+        # the member's own press adds it at once (as Deck settings › Add template), back on the
+        # list with a notice and Undo; a Premier or Not in deck template opens its review first
+        assert r.status_code == 303, r.text
+        assert r.headers["location"].startswith("/lists/templates?ok=template_added&n=Draw&p="), r.headers
         assert [c for c in ark.decks[42]["categories"] if c["name"] == "Draw"]
         again = await b.http.post(
             "/lists/templates",
