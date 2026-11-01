@@ -33,6 +33,7 @@ import asyncio
 import contextlib
 import html
 import logging
+import re
 import time
 from collections.abc import Iterator
 from contextvars import ContextVar
@@ -151,6 +152,24 @@ _CSP = (
     "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 _FORM_TYPE = "application/x-www-form-urlencoded"
+# A posted field whose name says it holds a secret is never written back into a page. The forms'
+# own names: archidekt_password (the Archidekt link form, pages.py); token (an undo form's
+# one-time token, collection.py, lists_page.py, watchlist_page.py); the OAuth fields code,
+# code_verifier, client_secret, refresh_token reach /token, a machine path, but are listed in
+# case a form ever carries one. Kept as plain names: csrf (the page's own form token, which the
+# posted form needs again), set_code, card_key, pin_id, keywords, archidekt_login.
+SECRET_WORDS = frozenset(
+    {"password", "passwd", "pwd", "pass", "secret", "token", "verifier", "otp", "credential", "auth"}
+)
+SECRET_NAMES = frozenset({"code", "key", "pin"})
+
+
+def looks_secret(name: str) -> bool:
+    """Whether a posted field's name says it holds a secret (see SECRET_WORDS)."""
+    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower().replace("-", "_")
+    if snake in SECRET_NAMES or "api_key" in snake or "apikey" in snake:
+        return True
+    return any(w in SECRET_WORDS for w in re.split(r"[^a-z0-9]+", snake) if w)
 
 
 async def _busy(scope: Scope, receive: Receive) -> Response:
@@ -170,6 +189,8 @@ async def _busy(scope: Scope, receive: Receive) -> Response:
     fields: list[tuple[str, str]] | None = None
     if method == "POST":
         fields = await _posted_fields(receive, request_headers)
+        if fields is not None and any(looks_secret(name) for name, _ in fields):
+            fields = None  # a password or a token goes into no page: Go back to the form instead
     page = busy_page(same_url, method, fields, theme=_theme_cookie(request_headers.get("cookie", "")))
     return HTMLResponse(page, 503, headers={**headers, "Content-Security-Policy": _CSP})
 
