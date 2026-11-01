@@ -172,3 +172,44 @@ async def test_a_copy_of_a_deck_without_a_link_is_refused(stack: Stack) -> None:
     assert out["ok"] is False and out["error"] == "not_linked", out
     assert "/account" in out["message"], out
     assert await _pending(h) == 0
+
+
+async def test_a_new_deck_is_made_without_the_card_archidekt_does_not_have(stack: Stack) -> None:
+    """As an assistant's deck edit does (_left_out): the member approves the new deck, it is made
+    with the cards Archidekt has, and the result names the card left out, instead of the whole
+    deck failing on one card after the member approved it."""
+    from .track_a_helpers import review_page_apply
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    p = structured(
+        await call(
+            h, token, "propose_new_deck", {"name": "Brew", "cards": _cards("Notacard Xyzzyplex", "Opt")}
+        )
+    )
+    assert p["ok"] and p["missing_on_archidekt"] == ["Notacard Xyzzyplex"], p
+    got = await review_page_apply(h, token, p["proposal_id"])
+    assert got["state"] == "applied", got
+    assert got["result"]["left_out"] == [
+        {"name": "Notacard Xyzzyplex", "why": "Archidekt doesn't have this card"}
+    ]
+    assert "“Notacard Xyzzyplex” was left out: Archidekt doesn't have it." in got["applied_text"], got
+    made = stack.ark.decks[int(got["result"]["deck_id"])]
+    assert [c["card"]["oracleCard"]["name"] for c in made["cards"]] == ["Opt"]
+
+
+async def test_a_new_deck_of_only_cards_archidekt_does_not_have_is_not_made(stack: Stack) -> None:
+    from .track_a_helpers import review_page_apply
+
+    h = stack.h
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    decks_before = set(stack.ark.decks)
+    p = structured(
+        await call(h, token, "propose_new_deck", {"name": "Brew", "cards": _cards("Notacard Xyzzyplex")})
+    )
+    got = await review_page_apply(h, token, p["proposal_id"])
+    assert got["state"] == "failed", got
+    assert "Archidekt doesn't have “Notacard Xyzzyplex”, so nothing was sent." in got["result"]["detail"], got
+    assert set(stack.ark.decks) == decks_before

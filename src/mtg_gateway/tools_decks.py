@@ -640,7 +640,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                         "error": "missing_on_archidekt",
                         "message": "Archidekt doesn't have "
                         + ", ".join(f"“{n}”" for n in names["missing"])
-                        + ", so the deck couldn't be made with "
+                        + ", so the deck would be made without "
                         + ("it." if len(names["missing"]) == 1 else "them."),
                         "missing_on_archidekt": names["missing"],
                     }
