@@ -769,9 +769,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         family revoked, when the user is gone, when the required group is no longer among the
         groups recorded at their last sign-in (so a changed MTG_REQUIRED_GROUP bites within an
         access-token lifetime), or when this app's own sign-in (``auth_time``, not the person's
-        latest sign-in anywhere) is older than MTG_REAUTH_INTERVAL. The
-        client then re-runs the authorization flow, where Authentik's current group membership
-        decides; a removed member is cut off by then at the latest."""
+        latest sign-in anywhere) is older than the Assistant refresh time (the Settings page's row,
+        or MTG_REFRESH_TOKEN_TTL when the stack locks it), as it is now. The client then re-runs the
+        authorization flow, where Authentik's current group membership decides; a removed
+        member is cut off by then at the latest."""
         user = self.db.get_user(sub)
         reason = None
         if user is None:
@@ -780,7 +781,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             reason = "disabled"
         elif not self.settings.grants_access(user["groups"]):
             reason = "group"
-        elif auth_time + self.settings.reauth_interval < int(time.time()):
+        elif auth_time + self._ttl("refresh_token_ttl") < int(time.time()):
             reason = "reauth_due"
         if reason is None:
             self.db.touch_user(sub)

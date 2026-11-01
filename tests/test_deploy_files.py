@@ -245,7 +245,7 @@ def test_no_removed_variable_is_left_in_the_deploy_files(name: str):
         "MTG_CHATGPT_NAME", "MTG_LOG_LEVEL", "MTG_APPROVAL_MODE", "MTG_FORGE_GAMES",
         "MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG_AUTHENTIK_API_URL", "MTG_ALLOWED_HOSTS", "MTG_IMAGE",
         "MF_NODE", "MF_TAG", "FORGE_TAG", "FORGE_XMX", "FORGE_MAX_PARALLEL", "COMPOSE_PROFILES",
-        "MTG_PLUGIN_DIR", "MTG_APP_DIR", "MTG_SCAN_GLARE",
+        "MTG_PLUGIN_DIR", "MTG_APP_DIR", "MTG_SCAN_GLARE", "MTG_REAUTH_INTERVAL",
     ):  # fmt: skip
         assert gone not in text, gone
 

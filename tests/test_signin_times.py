@@ -191,3 +191,80 @@ def test_the_stack_ranges_stay_as_they_were(tmp_path: Path, monkeypatch: pytest.
     s = load_settings()
     assert s.access_token_ttl == 60 and s.refresh_token_ttl == 3600
     assert s.env_set >= {"access_token_ttl", "refresh_token_ttl"}
+
+
+def _age_sign_ins(gw: Harness, seconds: int) -> None:
+    """Moves every assistant token's sign-in (auth_time) this far into the past."""
+    with gw.db.tx() as c:
+        c.execute("UPDATE tokens SET auth_time = auth_time - ?", (seconds,))
+
+
+async def _refresh(gw: Harness, client: dict, tokens: dict):
+    return await gw.token(client, grant_type="refresh_token", refresh_token=tokens["refresh_token"])
+
+
+def _rejections(gw: Harness) -> list[str]:
+    import json
+
+    with gw.db.tx() as c:
+        rows = c.execute("SELECT detail_json FROM audit_log WHERE event = 'refresh_rejected' ORDER BY id")
+        return [json.loads(r[0])["reason"] for r in rows.fetchall()]
+
+
+async def test_the_assistant_refresh_row_is_when_the_member_connects_again(gw: Harness) -> None:
+    """The owner, 2026-11-01 ("Every 30 days, as the row says"): the forced reconnect follows the
+    Assistant refresh row, 30 days by default, not a separate week."""
+    client = await gw.register()
+    tokens = await gw.tokens_for(client)
+    _age_sign_ins(gw, 8 * DAY)  # day 8: still refreshes by itself
+    r = await _refresh(gw, client, tokens)
+    assert r.status_code == 200, r.text
+    _age_sign_ins(gw, 22 * DAY - 120)  # day 30, two minutes short: still fine
+    r = await _refresh(gw, client, r.json())
+    assert r.status_code == 200, r.text
+    _age_sign_ins(gw, 180)  # a minute past day 30: the member connects it again
+    r = await _refresh(gw, client, r.json())
+    assert r.status_code == 400 and r.json()["error"] == "invalid_grant"
+    assert _rejections(gw) == ["reauth_due"]
+
+
+async def test_a_saved_assistant_refresh_time_moves_the_reconnect_at_once(gw: Harness) -> None:
+    _live(gw).set("refresh_token_ttl", 5, by="admin-1")
+    client = await gw.register()
+    tokens = await gw.tokens_for(client)
+    _age_sign_ins(gw, 4 * DAY)
+    r = await _refresh(gw, client, tokens)
+    assert r.status_code == 200, r.text
+    _age_sign_ins(gw, DAY + 60)  # past 5 days
+    r = await _refresh(gw, client, r.json())
+    assert r.status_code == 400 and r.json()["error"] == "invalid_grant"
+    # a longer time saved later applies to a sign-in already made
+    _live(gw).set("refresh_token_ttl", 60, by="admin-1")
+    tokens = await gw.tokens_for(client)
+    _age_sign_ins(gw, 40 * DAY)
+    assert (await _refresh(gw, client, tokens)).status_code == 200
+    assert _rejections(gw) == ["reauth_due"]
+
+
+async def test_the_stack_value_of_assistant_refresh_locks_the_reconnect_too(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    """R-208: MTG_REFRESH_TOKEN_TTL locks the row, and with it the forced reconnect."""
+    settings = make_settings(tmp_path, refresh_token_ttl=2 * DAY)
+    async with running(Harness(settings, idp)) as h:
+        client = await h.register()
+        tokens = await h.tokens_for(client)
+        _age_sign_ins(h, DAY)
+        r = await _refresh(h, client, tokens)
+        assert r.status_code == 200, r.text
+        _age_sign_ins(h, DAY + 60)
+        r = await _refresh(h, client, r.json())
+        assert r.status_code == 400 and r.json()["error"] == "invalid_grant"
+        assert _rejections(h) == ["reauth_due"]
+
+
+def test_mtg_reauth_interval_is_gone() -> None:
+    """The forced reconnect has no stack variable of its own any more (0.7.47)."""
+    from mtg_gateway.config import Settings
+
+    assert "reauth_interval" not in Settings.__dataclass_fields__
