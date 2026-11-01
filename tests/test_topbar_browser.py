@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from mtg_gateway import theme
+from mtg_gateway import theme as site_theme
 
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
@@ -158,7 +158,7 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         page.set_viewport_size({"width": 599, "height": 700})
         page.wait_for_timeout(50)
         phone = page.evaluate(GEOMETRY)
-    full = 4 + len(theme.rail_extra())  # a bar wide enough lists the rail's pages instead of More ▾
+    full = 4 + len(site_theme.rail_extra())  # a bar wide enough lists the rail's pages instead of More ▾
     for width, g in seen.items():
         assert g["links"] == (full if width >= 1000 else 5), (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
@@ -379,7 +379,7 @@ def test_the_top_bar_links_fit_at_every_width_and_text_size(chromium, server: Se
                         # instead of More ▾ (0.7.46 redesign, screen 1: from 1000 px at the
                         # normal size, never at 200% text); at the normal size on one row in
                         # the 50 px bar, as before
-                        full = 4 + len(theme.rail_extra())
+                        full = 4 + len(site_theme.rail_extra())
                         want = full if zoom == "none" and width >= 1000 else 5
                         if not touch and width >= 600 and g["links"] != want:
                             problems.append(f"links {where}")
