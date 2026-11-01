@@ -275,7 +275,14 @@ def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(se
                 page.evaluate(ROOT_200)
                 page.wait_for_timeout(100)
             # the main deck's Sol Ring, from the stack under Commander: the Maybeboard copy sits
-            # below every stack that counts now (0.7.46 audit D-14), a drag of thousands of pixels
+            # below every stack that counts now (0.7.46 audit D-14), a drag of thousands of pixels.
+            # The page is scrolled so the Commander stack's head sits clear of the sticky top bar
+            # with the card in view under it: the drag's own scroll centres the card, which at
+            # 200% text can leave the head under the bar, where the drop never lands
+            page.evaluate(
+                "() => { document.querySelector(\".stack[data-group='Commander'] .stackhead\")"
+                ".scrollIntoView({block: 'start'}); window.scrollBy(0, -120); }"
+            )
             page.drag_and_drop(
                 ".deckview .row[data-card='Sol Ring'][data-zone='main']",
                 ".stack[data-group='Commander'] .stackhead",
