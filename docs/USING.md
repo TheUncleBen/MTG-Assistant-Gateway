@@ -115,11 +115,11 @@ One deck:
   Ctrl+Y (Cmd on a Mac), except while you type in a field. A card's notes
   cannot come back: Archidekt gives the gateway no way to write them, so
   removing a card that has a note asks first.
-- Drag a stack's handle to put the stacks in your own order. That order is
-  kept with your account, so every device shows it (Archidekt has no stack order);
-  **Reset stack order** puts the deck's own order back.
-- **Quick add** types a card name and takes you to the editor with it
-  filled in.
+- Stacks follow the deck's category order on Archidekt, with Maybeboard and
+  Sideboard last.
+- On your own deck, **Quick add** adds one copy of the card you type straight
+  to the deck, with **Undo** on the message; a name Archidekt doesn't know is
+  refused in red and nothing changes.
 - **Playtest** opens the deck in Archidekt's own playtester (draw an
   opening hand, mulligan, play turns by hand) in a new tab, or in your
   phone's browser from the app. A private deck shows there only when that
@@ -222,10 +222,13 @@ One deck:
   snapshots are listed under the box to pick from. **Solo test both (A/B)**
   plays the two decks game for game and keeps the result as a report. Your
   assistant makes the same comparison when you ask it to compare two decks.
-- The **More** menu in the banner holds **Solo test only** (when the gateway
-  runs Forge: the same run without the Forge games), Deck settings, Export
-  deck, History and snapshots, **Delete deck**, Compare with another deck,
-  Deck stats and Open on Archidekt. Deleting asks you to type the deck's name; a snapshot is
+- The **More** menu in the banner is grouped: **This deck** (Rename…, Move to
+  folder…, Deck settings; on your own decks), **Share** (Share…, Export…, Open
+  on Archidekt), **Look into it** (Deck stats, Deck reports, History,
+  Compare with…, Watch deck price) and **Community** (Deck help…, Contests…,
+  Report deck…), then **Delete deck…**. **Test** in the banner holds
+  **Goldfish**, Run test and **Solo test only** (when the gateway runs Forge: the
+  same run without the Forge games). Deleting asks you to type the deck's name; a snapshot is
   kept under History, but no copy is made on Archidekt, and a snapshot can't be
   restored onto a deleted deck; History's **Make a new deck from this** proposes
   a new deck from it, with its name, format, cards and categories, which you
@@ -235,9 +238,11 @@ One deck:
   automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
   **folder** it sits in. Each saves to Archidekt at once; cover and tag
   changes take a snapshot first. **Categories** renames the deck's categories
-  and turns Premier, Not in deck and Not in price on or off; Save categories
-  keeps a snapshot first, asks once more when the change touches Premier or the
-  commander, and refuses (sending nothing) if the deck changed since you
+  and turns Premier, Not in deck and Not in price on or off. Each change saves
+  as you make it (a new name when you press Enter or leave the box), with a
+  message and **Undo**; a snapshot is kept first. A change that touches
+  Premier or the commander asks first in a box (press **Save categories** there),
+  and a change is refused (sending nothing) if the deck changed since you
   opened the page; the panel then shows the deck as it is now, to make the
   change again.
 - Below the cards: statistics (mana curve, colours, types, rarities,
