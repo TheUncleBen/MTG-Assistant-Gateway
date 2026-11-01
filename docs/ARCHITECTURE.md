@@ -206,12 +206,19 @@ For the exact devices and plans tested, see
   groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. The provider's
   tokens are kept per sign-in (`idp_grants.holder`: each browser session,
   and the member's AI apps), so a session is checked with its own and a
-  bearer token with any of the member's. A page being read (GET outside
-  `/admin`) is answered at once and the provider asked in the background
-  whenever the provider let that sign-in in before; writes, admin pages and
-  assistant requests wait for the answer. Removing someone from
-  `MTG_REQUIRED_GROUP` takes effect on their next write, admin page or
-  assistant request, and after one page read: every
+  bearer token with any of the member's. A request that only reads is
+  answered at once and the provider asked in the background whenever the
+  provider let that sign-in in before: a page being read (GET outside
+  `/admin` and `/api/v1/admin`), and an assistant's call of tools that only
+  read or propose. Which tools those are comes from each tool's own
+  `readOnlyHint` (`app.tool_only_reads`), so a tool that doesn't say it is
+  read only waits. Every change waits for the answer (any non-GET website
+  request, deck-page saves included; `apply_proposal` and every other tool
+  that isn't read only), as do the admin pages and admin API and any other
+  assistant request (`tools/list`, a batch with a writing call in it, a body
+  that can't be read). Removing someone from `MTG_REQUIRED_GROUP` takes
+  effect on their next change, apply or admin page, and after one read
+  (a page, or an assistant's read or proposal): every
   gateway token, browser session and stored provider token is revoked, and
   their Archidekt link too. A sign-in whose provider tokens are refused (a
   deactivated or deleted account looks the same as a refresh token that ran

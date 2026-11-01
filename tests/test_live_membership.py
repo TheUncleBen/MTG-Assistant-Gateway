@@ -188,7 +188,9 @@ async def test_checks_are_cached_for_the_configured_seconds(tmp_path: Path, idp:
         assert idp.userinfo_calls == calls  # the sign-in just checked
         h.app.state.gateway.membership.forget(SUB)
         idp.set_groups(SUB, [])
-        assert (await whoami(h, token)).status_code == 401
+        # forgotten: the next call that waits asks the provider again (a read would ask it in the
+        # background, on the yes on file)
+        assert (await _call(h, token, "apply_proposal", {"proposal_id": "nope"})).status_code == 401
 
 
 async def test_stored_provider_tokens_are_encrypted(tmp_path: Path, idp: FakeIdP) -> None:
@@ -603,9 +605,9 @@ async def test_a_removal_ends_page_reads_after_one_page_and_refuses_the_first_wr
 async def test_an_assistant_of_a_removed_member_is_refused_on_its_next_request(
     tmp_path: Path, idp: FakeIdP
 ) -> None:
-    """An AI app's request past the cache waits for the provider, however recently it let the
-    member in, so a member taken out of the group is cut off on the next tool call (the e2e test
-    of the same, against a real Authentik)."""
+    """An AI app's request past the cache that is not a read tool's call waits for the provider,
+    however recently it let the member in, so a member taken out of the group is cut off on it:
+    tools/list here, as in the e2e test of the same against a real Authentik."""
     async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
         b = Browser(h)
         await b.login()
@@ -614,7 +616,7 @@ async def test_an_assistant_of_a_removed_member_is_refused_on_its_next_request(
         assert (await whoami(h, tokens["access_token"])).status_code == 200
         _age_last_check(h, 6)  # just past the 5 s cache, as the e2e test waits
         idp.set_groups(SUB, ["someone-else"])
-        assert (await whoami(h, tokens["access_token"])).status_code == 401
+        assert (await h.mcp(tokens["access_token"], "tools/list", {}, rid=3)).status_code == 401
         assert live_tokens(h) == 0
         await b.aclose()
 
@@ -694,4 +696,177 @@ async def test_the_admin_api_waits_for_the_provider_like_the_admin_pages(
         r = await b.http.get("/api/v1/admin/users")
         assert r.status_code in (401, 403, 404), (r.status_code, r.text[:300])
         assert "alice" not in r.text.lower()
+        await b.aclose()
+
+
+# -- an assistant's reads off the critical path too (owner decision 11-01) ---------------------------
+# "Only changes and admin wait": an assistant's call that only reads or proposes is answered at once
+# past the cache and the provider asked in the background, as for a page being read; an apply, any
+# other tool that is not read only, a website write and the admin pages and API still wait.
+async def _assistant(h: Harness) -> tuple[Browser, str]:
+    b = Browser(h)
+    await b.login()
+    client = await h.register()
+    tokens = await h.tokens_for(client)
+    assert (await whoami(h, tokens["access_token"])).status_code == 200
+    return b, tokens["access_token"]
+
+
+async def _call(h: Harness, token: str, name: str, arguments: dict | None = None):
+    return await h.mcp(token, "tools/call", {"name": name, "arguments": arguments or {}}, rid=7)
+
+
+async def _raw_mcp(h: Harness, token: str, body: bytes):
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Host": "mtg.test",
+        "Authorization": f"Bearer {token}",
+    }
+    return await h.http.post("/mcp", headers=headers, content=body)
+
+
+async def test_an_assistant_reading_past_the_cache_is_not_kept_waiting(tmp_path: Path, idp: FakeIdP) -> None:
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b, token = await _assistant(h)
+        _age_last_check(h, 10)
+        idp.userinfo_delay = 1.0
+        calls = idp.userinfo_calls
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        r = await whoami(h, token)
+        assert r.status_code == 200 and "Alice" in r.text  # the body reached the tool intact
+        assert loop.time() - t0 < 0.5  # not the provider's second
+        await _background_checks(h)
+        assert idp.userinfo_calls == calls + 1  # asked once, in the background
+        # a proposal is a read here too (owner decision 10-28: propose_* are read only)
+        _age_last_check(h, 10)
+        t0 = loop.time()
+        await _call(h, token, "withdraw_proposal", {"proposal_id": "nope"})
+        assert loop.time() - t0 < 0.5
+        await _background_checks(h)
+        # ... and an apply just past the cache waits for the provider's answer.
+        _age_last_check(h, 10)
+        t0 = loop.time()
+        await _call(h, token, "apply_proposal", {"proposal_id": "nope"})
+        assert loop.time() - t0 >= 1.0
+        await b.aclose()
+
+
+async def test_an_assistant_of_a_removed_member_reads_once_and_is_refused_next(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b, token = await _assistant(h)
+        _age_last_check(h, 6)
+        idp.set_groups(SUB, ["someone-else"])
+        # The read that starts the background check is still answered ...
+        assert (await whoami(h, token)).status_code == 200
+        await _background_checks(h)
+        # ... and the check's answer applies to the next request.
+        assert (await whoami(h, token)).status_code == 401
+        assert live_tokens(h) == 0
+        await b.aclose()
+
+
+async def test_a_removed_members_apply_and_website_write_are_refused_at_once(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b, token = await _assistant(h)
+        _age_last_check(h, 6)
+        idp.set_groups(SUB, ["someone-else"])
+        r = await _call(h, token, "apply_proposal", {"proposal_id": "nope"})
+        assert r.status_code == 401
+        assert not h.app.state.gateway.membership._background  # it waited, nothing runs after
+        assert live_tokens(h) == 0
+        await b.aclose()
+
+        b = Browser(h)
+        idp.set_groups(SUB, ["mtg-users"])
+        await b.login()
+        csrf = await b.csrf("/logout")
+        _age_last_check(h, 10)
+        idp.set_groups(SUB, ["someone-else"])
+        await b.http.post("/theme", data={"csrf": csrf, "theme": "dark"})
+        assert not h.app.state.gateway.membership._background
+        assert "mtg_theme" not in b.http.cookies  # refused
+        await b.aclose()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b"{not json", id="unparseable"),
+        pytest.param(b"", id="empty"),
+        pytest.param(b'"whoami"', id="not-an-object"),
+        pytest.param(b'{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}', id="tools-list"),
+        pytest.param(b'{"jsonrpc": "2.0", "method": "notifications/initialized"}', id="notification"),
+        pytest.param(b'{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}}', id="no-name"),
+        pytest.param(
+            b'{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": ["whoami"]}}',
+            id="name-not-a-string",
+        ),
+        pytest.param(
+            b'{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "no_such_tool"}}',
+            id="unknown-tool",
+        ),
+        pytest.param(
+            b'[{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "whoami"}},'
+            b' {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "apply_proposal",'
+            b' "arguments": {"proposal_id": "x"}}}]',
+            id="batch-with-a-write",
+        ),
+        pytest.param(b"[]", id="empty-batch"),
+        pytest.param(
+            b'{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "whoami", "pad": "'
+            + b"x" * (70 * 1024)
+            + b'"}}',
+            id="too-big-to-read",
+        ),
+    ],
+)
+async def test_an_assistant_request_that_is_not_plainly_a_read_waits(
+    tmp_path: Path, idp: FakeIdP, body: bytes
+) -> None:
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b, token = await _assistant(h)
+        _age_last_check(h, 6)
+        idp.set_groups(SUB, ["someone-else"])
+        r = await _raw_mcp(h, token, body)
+        assert r.status_code == 401, r.text  # it waited for the provider, which said no
+        assert live_tokens(h) == 0
+        await b.aclose()
+
+
+async def test_a_batch_of_reads_only_does_not_wait(tmp_path: Path, idp: FakeIdP) -> None:
+    async with running(Harness(make_settings(tmp_path, required_group="mtg-users"), idp)) as h:
+        b, token = await _assistant(h)
+        _age_last_check(h, 6)
+        idp.set_groups(SUB, ["someone-else"])
+        body = (
+            b'[{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "whoami"}},'
+            b' {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_my_proposals"}}]'
+        )
+        r = await _raw_mcp(h, token, body)
+        assert r.status_code != 401  # served (the SDK answers a batch as it does)
+        await _background_checks(h)
+        assert live_tokens(h) == 0
+        await b.aclose()
+
+
+async def test_the_admin_api_waits_for_the_provider(tmp_path: Path, idp: FakeIdP) -> None:
+    """GET /api/v1/admin/* with a session waits like the admin pages do."""
+    settings = make_settings(tmp_path, required_group="mtg-users", admin_group="mtg-admins")
+    async with running(Harness(settings, idp)) as h:
+        idp.user = {**idp.user, "groups": ["mtg-users", "mtg-admins"]}
+        b = Browser(h)
+        await b.login("/admin")
+        assert (await b.http.get("/api/v1/admin/overview")).status_code == 200
+        _age_last_check(h, 10)
+        idp.userinfo_delay = 1.0
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        await b.http.get("/api/v1/admin/overview")
+        assert loop.time() - t0 >= 1.0
         await b.aclose()
