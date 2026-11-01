@@ -1,7 +1,8 @@
 "use strict";
-// Report page: while a Forge run is queued or running (the Forge section, or the solo test played by
-// Forge, carries data-forge-live and the report's id), ask the JSON status route (/api/v1/reports/<id>/forge)
-// every 5 seconds and swap in the new section(s) and status, until every run has ended; then the page is
+// Report page: while a Forge run is queued or running (the progress panel, the Forge section, or the solo
+// test played by Forge, carries data-forge-live and the report's id), ask the JSON status route
+// (/api/v1/reports/<id>/forge) every 5 seconds and swap in the new section(s) and status, until every run
+// has ended; then the page is
 // fetched once more so the Markdown copy matches. While the quick solo test still runs on the research
 // service (its section carries data-research; the report is stored before it is done), the page asks
 // every 2 seconds and is read again whole once that section is no longer live: the test fills most of
@@ -15,6 +16,7 @@
   var timer = null;
   // the live sections and the JSON field each is redrawn from
   var PARTS = [
+    { sel: "#rv-progress", field: "progress_html" },
     { sel: ".forge", field: "forge_html" },
     { sel: "#rv-solo-forge", field: "forge_solo_html" }
   ];
@@ -28,6 +30,18 @@
   // Only what changed is replaced: an unchanged poll leaves every node as it is, and a changed one
   // swaps just the parts that differ, so the aria-live section announces only the news (a finished
   // game), never the whole section every 5 seconds.
+  // An element whose tag and attributes are unchanged is kept and patched inside, so a live region
+  // in it (the progress panel's step) stays in place and announces its new words, and the time so far
+  // beside it changes quietly.
+  function sameShell(a, b) {
+    if (a.nodeType !== 1 || b.nodeType !== 1 || a.tagName !== b.tagName) return false;
+    if (a.attributes.length !== b.attributes.length) return false;
+    for (var i = 0; i < b.attributes.length; i++) {
+      if (a.getAttribute(b.attributes[i].name) !== b.attributes[i].value) return false;
+    }
+    return true;
+  }
+
   function patch(target, nodes) {
     var old = target.childNodes;
     if (old.length !== nodes.length) {
@@ -35,7 +49,9 @@
       return;
     }
     for (var i = 0; i < nodes.length; i++) {
-      if (!old[i].isEqualNode(nodes[i])) target.replaceChild(document.importNode(nodes[i], true), old[i]);
+      if (old[i].isEqualNode(nodes[i])) continue;
+      if (sameShell(old[i], nodes[i])) patch(old[i], Array.prototype.slice.call(nodes[i].childNodes));
+      else target.replaceChild(document.importNode(nodes[i], true), old[i]);
     }
   }
 
@@ -49,6 +65,7 @@
     // The section itself stays (it is the aria-live region); the live mark goes once the run has ended.
     patch(card, Array.prototype.slice.call(fresh.childNodes));
     if (!fresh.hasAttribute("data-forge-live")) card.removeAttribute("data-forge-live");
+    card.hidden = fresh.hidden;  // the progress panel goes once the test has ended
     return fresh.hasAttribute("data-forge-live");
   }
 

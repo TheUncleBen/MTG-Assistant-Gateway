@@ -164,6 +164,8 @@ API_ROUTES: dict[str, str] = {
     "GET /reports/{rid}": "Read a test report (API)",
     "GET /reports/{rid}/forge": "Read a report's Forge games (API)",
     "POST /reports/{rid}/forge/more": "Play more games (API)",
+    "POST /reports/{rid}/forge/stop": "Stop a test (API)",
+    "GET /reports/running": "Tests still going (API)",
     "DELETE /reports/{rid}": "Delete a test report (API)",
     "GET /activity": "My activity (API)",
     # the admin pages' own JSON (admin.py; not counted as API calls today)
