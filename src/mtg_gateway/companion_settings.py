@@ -69,6 +69,7 @@ OK_SECTIONS = {
     "categories": "categories",
     "category_created": "categories",
     "category_deleted": "categories",
+    "undone": "categories",
     "package_differs": "package",
     "categories_unused": "categories",
     "cover": "cover",
@@ -1074,7 +1075,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         ok = request.query_params.get("ok") or ""
         undo = ""
         if ok == "category_deleted":
-            undo = undo_form(sub, sid, deck, request.query_params.get("undo") or "")
+            undo = undo_form(
+                sub, sid, deck, request.query_params.get("undo") or "", back=f"/decks/{deck.id}/settings"
+            )
         templates = None
         if request.query_params.get("templates"):
             try:
@@ -1098,7 +1101,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             sid,
         )
 
-    def undo_form(sub: str, sid: str | None, deck: Deck, pid: str) -> str:
+    def undo_form(sub: str, sid: str | None, deck: Deck, pid: str, *, back: str) -> str:
         """Undo of the member's category delete (review F10), drawn with its notice: the review
         page's Undo (POST /proposals/undo, in its box when scripts run), a restore of the snapshot
         the delete took just before it (decks.deletes_categories), which re-creates the category
@@ -1114,7 +1117,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             or not row.get("snapshot_id")
         ):
             return ""
-        return proposals_view.undo_box_form(_csrf(s, sid), row)
+        return proposals_view.undo_box_form(_csrf(s, sid), row, back=back)
 
     def settings_response(body: str, sub: str, sid: str | None, status: int = 200) -> Response:
         return page(
@@ -1500,7 +1503,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 ),
             }
             if undo_pid:
-                out["undo_html"] = undo_form(sub, sid, deck, undo_pid)
+                out["undo_html"] = undo_form(sub, sid, deck, undo_pid, back=f"/decks/{deck.id}")
             return JSONResponse(out, headers=NO_STORE)
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")

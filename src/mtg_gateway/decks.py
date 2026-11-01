@@ -6480,18 +6480,37 @@ class DeckService:
             "fingerprint": undo_seen(deck),
         }
 
-    async def undo(self, sub: str, snapshot_id: str, *, seen: str | None = None) -> dict[str, Any]:
+    async def undo(
+        self, sub: str, snapshot_id: str, *, seen: str | None = None, applied: list[str] | None = None
+    ) -> dict[str, Any]:
         """The member's "Undo": a restore of the snapshot, applied at once by their own press (the
         restore is an ordinary proposal, so it can itself be undone). ``seen`` is the deck's
         fingerprint when the preview was shown: a deck changed since is refused before anything
-        is made, as the preview's list and warning no longer hold."""
+        is made, as the preview's list and warning no longer hold. ``applied``: the changes the
+        Undo is of; when each is the member's own one-click save that made no backup copy on
+        Archidekt (keep_no_backup) and took this snapshot, the Undo makes none either (owner
+        decision 11-01; independent review 2, L12): the gateway keeps its snapshot as always."""
         if seen is not None:
             snap = self.snapshot(sub, str(snapshot_id))
             deck = await self.get_own_deck(sub, snap["deck_id"])
             if undo_seen(deck) != seen:
                 raise DeckError("changed", UNDO_CHANGED)
+        rows = [self.db.get_proposal(pid, sub) for pid in applied or []]
+        one_click = bool(rows) and all(
+            r is not None
+            and r.get("state") == "applied"
+            and r.get("created_by_client") == BROWSER_CLIENT
+            and str(r.get("snapshot_id") or "") == str(snapshot_id)
+            and (
+                (r.get("result") or {}).get(NO_BACKUP_KEY)
+                or (r.get("result") or {}).get("archidekt_backup") == "skipped"
+            )
+            for r in rows
+        )
         made = await self.propose_restore(sub, snapshot_id)
-        return await self.apply(sub, made["proposal_id"], via="browser")
+        return await self.apply(
+            sub, made["proposal_id"], via="browser", archidekt_backup=False if one_click else None
+        )
 
     async def aclose(self, grace: float = SHUTDOWN_GRACE_SECONDS) -> None:
         """At shutdown: give running applies ``grace`` seconds to finish, then cancel the rest,

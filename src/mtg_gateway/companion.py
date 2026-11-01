@@ -183,6 +183,7 @@ DECK_OK_MESSAGES = {
     "saved": "Saved to Archidekt. A snapshot from just before is under History if you want to undo.",
     "created": "Created on Archidekt.",
     "moved": "Deck moved to that folder on Archidekt.",
+    "undone": "Undone. The deck is back as it was before that change.",
 }
 # The deck pages' problem page (deck, Goldfish, Compare, Export): one full sentence per case as the
 # title, and one orange Back to my decks. Any other refusal shows its own words.
@@ -206,6 +207,7 @@ def deck_problem_title(exc: DeckError) -> str:
 INDENT = "\u2003"  # an em space per folder level in folder pickers
 # Notices the settings page shows after one of its hand actions (?ok=).
 SETTINGS_OK_MESSAGES = {
+    "undone": "Undone. The deck is back as it was before that change.",
     "saved": "Saved to Archidekt. A snapshot from just before is under History.",
     "categories": CATEGORIES_SAVED,
     "category_created": "Category created on Archidekt. A snapshot from just before is under History.",

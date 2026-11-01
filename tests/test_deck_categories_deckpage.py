@@ -14,7 +14,7 @@ import re
 from mtg_gateway import modes
 from mtg_gateway.decks import OPEN_TABS_NOTE
 
-from .conftest import Stack
+from .conftest import Stack, aged_stamp
 from .test_companion import NAV, linked_browser
 from .test_deck_categories import RAMP, _give_categories
 
@@ -296,5 +296,77 @@ async def test_add_from_template_on_the_deck_page(stack: Stack) -> None:
         assert r.status_code == 200 and r.json()["ok"] is True, r.text
         assert [c["name"] for c in stack.ark.category_creates] == ["Wincons"]
         assert _info(r.json()["cards_html"], "Wincons")["cards"] == 0
+    finally:
+        await b.aclose()
+
+
+async def test_undo_of_a_deck_page_delete_comes_back_to_the_deck_and_makes_no_backup_copy(
+    stack: Stack,
+) -> None:
+    """Independent review 2, M2 and L12: Undo of the member's own one-click delete on the deck page
+    lands back on the deck page with its "Undone." notice (not on a proposal page with "Back to
+    Proposals"), and, as the save it undoes, makes no backup copy on Archidekt (owner decision
+    11-01: one-click saves keep the gateway's snapshot only)."""
+    _give_categories(stack.ark)
+    stack.ark.decks[42]["categories"].append(
+        {"name": "Removal", "isPremier": False, "includedInDeck": True, "includedInPrice": True}
+    )
+    b = await linked_browser(stack)
+    try:
+        page, csrf = await _page(b)
+        ramp = _info(page, "Ramp")
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(ramp["id"]),
+                "move_cards_to": "Removal",
+                "move_ok": "1",
+                "json": "1",
+                "page": "deck",
+            },
+            headers=JSON,
+        )
+        assert r.status_code == 200 and r.json()["ok"] is True, r.text
+        fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.json()["undo_html"]))
+        assert fields["back"] == DECK, fields
+        r = await b.http.post("/proposals/undo", data=fields)  # the box's preview
+        assert r.status_code == 200 and "name='action' value='undo'" in r.text, r.text
+        confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.text))
+        assert confirm["back"] == DECK  # carried into the box's own form
+        confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
+        decks_before = set(stack.ark.decks)
+        r = await b.http.post("/proposals/undo", data=confirm)
+        assert r.status_code == 303 and r.headers["location"] == DECK + "?ok=undone", r.headers
+        assert "Ramp" in [c["name"] for c in stack.ark.decks[42]["categories"]]
+        assert set(stack.ark.decks) == decks_before, "Undo made a backup copy on Archidekt"
+        page, _csrf = await _page(b, r.headers["location"])
+        assert "Undone. The deck is back as it was before that change." in page
+        assert "Ramp" in _stacks(page)
+        # a crafted return address is never followed: the restore's own page as before
+        page, csrf = await _page(b)
+        removal = _info(page, "Removal")
+        r = await b.http.post(
+            POST,
+            data={
+                "csrf": csrf,
+                "action": "delete",
+                "delete": str(removal["id"]),
+                "move_cards_to": "Ramp",
+                "move_ok": "1",
+                "json": "1",
+                "page": "deck",
+            },
+            headers=JSON,
+        )
+        fields = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", r.json()["undo_html"]))
+        for bad in ("//evil.test/x", "https://evil.test/", "/decks/43", "/decks/42/../../x", "/\\evil.test"):
+            look = await b.http.post("/proposals/undo", data={**fields, "back": bad})
+            assert look.status_code == 200 and "evil" not in look.text and "/decks/43" not in look.text
+        confirm = dict(re.findall(r"name='([a-z_]+)' value='([^']*)'", look.text))
+        confirm["shown"] = aged_stamp(stack.h.settings, f"undo:user-1:{fields['snapshot']}")
+        r = await b.http.post("/proposals/undo", data={**confirm, "back": "//evil.test/x"})
+        assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.headers
     finally:
         await b.aclose()
