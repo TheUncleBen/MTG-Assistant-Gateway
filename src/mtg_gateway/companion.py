@@ -575,6 +575,7 @@ EVENT_LABELS = {
     "user_followed": "Followed a user",
     "report_created": "Deck test run",
     "report_more_games": "Asked for more Forge games for a report",
+    "report_stopped": "Stopped a deck test",
     "report_deleted": "Report deleted",
     "snapshot_deleted": "Snapshot deleted",
     "scan_session_saved": "Scan saved",

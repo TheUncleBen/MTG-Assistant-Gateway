@@ -87,6 +87,7 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
     more = structured(await call(h, token, "play_more_games", {"report_id": rid}))
     assert more["ok"] and more["started"] is True and "message" not in more
     assert more["report_id"] == rid and more["forge_status"]["state"] in ("queued", "running")
+    await reports.starts_settled()  # handed to Forge in the background, after the answer
     assert len(fake.started) == 2 and fake.started[1]["games"] == 4
     assert fake.started[1]["decks"] == fake.started[0]["decks"]
     audit = h.db._conn.execute(
@@ -99,6 +100,7 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
     api = await h.http.post(f"/api/v1/reports/{rid}/forge/more", headers=auth)
     assert api.status_code == 202, api.text
     assert api.json()["ok"] and api.json()["forge"]["games_requested"] == 12
+    await reports.starts_settled()
     assert len(fake.started) == 3
     fake.finish(_section(stack, rid)["job_id"], [1, 1, 1, 1])
     await _until(lambda: _section(stack, rid).get("state") == "done")
@@ -107,6 +109,7 @@ async def test_the_tool_and_the_api_add_games_with_the_buttons_rules(stack: Stac
         view = structured(await call(h, token, "get_deck_report", {"report_id": rid}))
         assert view["forge"]["more_games"] == games
         step = structured(await call(h, token, "play_more_games", {"report_id": rid}))
+        await reports.starts_settled()
         assert step["ok"] and fake.started[-1]["games"] == games
         fake.finish(_section(stack, rid)["job_id"], [1] * games)
         await _until(lambda: _section(stack, rid).get("state") == "done")
