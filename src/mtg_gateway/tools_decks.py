@@ -633,14 +633,35 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             problems.append({"error": exc.kind, "message": str(exc)})
         out: dict[str, Any] = {"ok": True, "name": name, "deck_format": deck_format, "problems": problems}
         if plan is not None:
-            unknown = await state.decks.unknown_new_deck_cards(plan["changes"]["cards"])
-            if unknown:
+            # the checks propose_new_deck makes (as check_deck_changes makes a deck edit's)
+            names = await state.decks.check_new_names(
+                sub, [str(c.get("name") or "") for c in plan["changes"]["cards"]]
+            )
+            if names["unknown"]:
                 problems.append(
                     {
                         "error": "unknown_cards",
-                        "message": no_card_called(unknown),
-                        "unknown_cards": unknown,
+                        "message": no_card_called(names["unknown"], meant=names["meant"]),
+                        "unknown_cards": names["unknown"],
+                        **({"did_you_mean": names["meant"]} if names["meant"] else {}),
                     }
+                )
+            if names["missing"]:
+                problems.append(
+                    {
+                        "error": "missing_on_archidekt",
+                        "message": "Archidekt doesn't have "
+                        + ", ".join(f"“{n}”" for n in names["missing"])
+                        + ", so the deck couldn't be made with "
+                        + ("it." if len(names["missing"]) == 1 else "them."),
+                        "missing_on_archidekt": names["missing"],
+                    }
+                )
+            if names["unchecked"]:
+                warnings.append(
+                    "Couldn't check that "
+                    + ", ".join(f"“{n}”" for n in names["unchecked"])
+                    + (" is a card." if len(names["unchecked"]) == 1 else " are cards.")
                 )
             problem = _size_warning(deck_format, plan["rows"])
             if problem:
@@ -804,7 +825,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         ] = None,
         oldest_first: Annotated[bool, Field(description="Oldest first instead of newest first.")] = False,
         limit: Annotated[
-            int, Field(description=f"How many to return, 1 to {MAX_PROPOSALS_PAGE} (not with pending_only).")
+            int,
+            Field(description=f"How many, 1 to {MAX_PROPOSALS_PAGE}, clamped (not with pending_only)."),
         ] = 20,
         offset: Annotated[int, Field(description="How many to skip, from next_offset.")] = 0,
     ) -> dict[str, object]:

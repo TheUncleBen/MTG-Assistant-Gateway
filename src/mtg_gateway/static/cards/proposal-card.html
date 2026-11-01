@@ -502,6 +502,7 @@ button.danger:disabled{color:var(--red)}
     }
     if (p.state === "expired") return "This proposal expired" + when(p.closed_at || p.expires_at) + " without a decision." + again;
     if (p.state === "failed" && p.rest_offered) return "Part of this change reached Archidekt before it stopped" + at + ". Propose the rest makes a new proposal of what is still missing.";
+    if (p.state === "failed" && p.may_have_changed) return "This change may have reached Archidekt before it stopped" + at + ". Check the deck before asking for it again.";
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
     if (p.state === "applied") return "Already applied" + at + ". " + (p.applied_text || "The deck on Archidekt matches this proposal.");
     if (p.state === "replaced" && p.replace_note) return p.replace_note + " Nothing was sent to Archidekt from this one.";
@@ -511,11 +512,11 @@ button.danger:disabled{color:var(--red)}
 
   // This press's apply failed (the gateway's answer says the proposal is failed now):
   // its reason once, then where to see what happened, and to ask again unless the reason says so.
-  function failedText(msg) {
+  function failedText(msg, maybe) {
     var text = msg.trim();
     if (text && !/[.!?]$/.test(text)) text += ".";
     text += (text ? " " : "") + "The review page shows what happened.";
-    if (!/new proposal/i.test(msg)) text += " Ask the assistant for a new proposal if you still want this change.";
+    if (!maybe && !/new proposal/i.test(msg)) text += " Ask the assistant for a new proposal if you still want this change.";
     return text;
   }
 
@@ -677,7 +678,7 @@ button.danger:disabled{color:var(--red)}
           } else if (sc.state !== "applying") {
             // failed: the same text as an Approve that failed at once, from the
             // reason the proposal stored, never the assistant's next_step
-            setStatus(sc.state === "failed" ? failedText(String(r.detail || ""))
+            setStatus(sc.state === "failed" ? failedText(String(r.detail || ""), !!sc.may_have_changed)
               : String(sc.next_step || ("Now " + sc.state)), "err");
             tellModel("Proposal " + pid + " stopped applying: it is now " + sc.state + ".");
           }
@@ -1059,14 +1060,15 @@ button.danger:disabled{color:var(--red)}
           // No longer pending (rejected or applied elsewhere, expired): show that and drop the buttons.
           var closed = sc.state && sc.state !== "pending" ? Object.assign({}, proposal, {
             state: sc.state, result: sc.result || proposal.result,
-            closed_at: sc.closed_at, closed_by: sc.closed_by, closed_by_app: sc.closed_by_app
+            closed_at: sc.closed_at, closed_by: sc.closed_by, closed_by_app: sc.closed_by_app,
+            rest_offered: !!sc.rest_offered, may_have_changed: !!sc.may_have_changed
           }) : null;
           if (closed) { approval = null; render({ structuredContent: closed, _meta: {} }); }
           else if (sc.try_again) { proposal.try_again = true; renderActions(); }
           else { if (ok) ok.disabled = false; if (no) no.disabled = false; }
           if (!closed) setStatus(String(msg), "err");
-          else if (closed.state === "failed" && !sc.rest_offered) setStatus(failedText(String(msg)), "err");
-          else if (closed.state === "failed") setStatus(closedText(Object.assign(closed, { rest_offered: true })), "err");
+          else if (closed.state === "failed" && !sc.rest_offered) setStatus(failedText(String(msg), !!sc.may_have_changed), "err");
+          else if (closed.state === "failed") setStatus(closedText(closed), "err");
           else if (closed.state !== "applying") setStatus(closedText(closed) || String(msg), "");
           tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
           return;
