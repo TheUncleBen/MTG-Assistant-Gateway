@@ -751,3 +751,47 @@ def test_category_boxes_and_the_companion_switch_respond_at_once(server: Server)
     print("0.7.42 controls (ms at 4x):", slow)
     over = [s for s in slow if s[2] > s[3]]
     assert not over, f"over budget at 4x: {over}; all: {slow}"
+
+
+RELAYOUT_MS = 25  # a change inside one row of the text view: its stack alone, not every column
+
+
+def test_a_change_in_one_deck_row_relays_out_its_stack_alone(server: Server) -> None:
+    """The text view's stacks flow down columns; a change inside one row (the Companion word, a
+    count) relaid out every row of every column, 45-145 ms at 4x, the whole of the Companion
+    switch's cost (review 2, L13). Each stack is now one piece for the column layout, so the
+    change costs a few ms: measured as a forced layout right after a mark is added to a row."""
+    from playwright.sync_api import sync_playwright
+
+    sid, _pending = _seed(server)
+    exe = _exe()
+    slow: list[tuple] = []
+    with sync_playwright() as p:
+        for d in _drivers(p, server, sid, exe):
+            d.goto("/decks/42?view=text")
+            assert d.page.locator(".deckview.text li.row").count() > 30
+            ms = d.page.evaluate(
+                """() => {
+                  const rows = [...document.querySelectorAll('.deckview.text li.row')];
+                  let best = Infinity;
+                  for (let i = 0; i < 5; i++) {
+                    const row = rows[(i * 7) % rows.length];
+                    const mark = document.createElement('span');
+                    mark.className = 'mc';
+                    mark.textContent = 'Companion';
+                    document.body.offsetHeight;  // a clean layout first
+                    const t0 = performance.now();
+                    row.appendChild(mark);
+                    document.body.offsetHeight;  // the relayout the change forces
+                    best = Math.min(best, performance.now() - t0);
+                    mark.remove();
+                    document.body.offsetHeight;
+                  }
+                  return best;
+                }"""
+            )
+            slow.append(("row relayout", d.width, round(ms), RELAYOUT_MS))
+            assert d.errors == [], d.errors
+    print("row relayout (ms at 4x):", slow)
+    over = [s for s in slow if s[2] > s[3]]
+    assert not over, f"over budget at 4x: {over}; all: {slow}"

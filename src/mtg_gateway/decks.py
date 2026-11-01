@@ -10984,7 +10984,7 @@ def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
     allowed = {
         "change": {"action", "category", "id", "rename_to", *flag_keys},
         "create": {"action", "category", *flag_keys},
-        "delete": {"action", "category", "id", "move_cards_to"},
+        "delete": {"action", "category", "id", "move_cards_to", "no_category"},
     }
     for i, item in enumerate(raw, 1):
         if not isinstance(item, dict):
@@ -11008,6 +11008,13 @@ def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
             entry["rename_to"] = _category_name(i, item["rename_to"])
         if action == "delete" and item.get("move_cards_to") is not None:
             entry["move_cards_to"] = _category_name(i, item["move_cards_to"])
+        if action == "delete" and item.get("no_category"):
+            # its cards keep no category (the deck page lists them by type) instead of moving
+            if not isinstance(item["no_category"], bool):
+                raise DeckError("invalid", f"change {i}: no_category must be true or false")
+            if entry.get("move_cards_to"):
+                raise DeckError("invalid", f"change {i}: no_category and move_cards_to together")
+            entry["no_category"] = True
         for key in flag_keys if action != "delete" else ():
             if key in item and item[key] is not None:
                 if not isinstance(item[key], bool):
@@ -11198,6 +11205,7 @@ def category_change_rows(
         move_to: str | None = None
         moves: list[dict[str, Any]] = []
         target_state: dict[str, Any] | None = None
+        no_category = bool(w.get("no_category"))  # its cards keep none (listed by type)
         if w.get("move_cards_to"):
             want = w["move_cards_to"]
             target_state = by_name.get(want.casefold()) or created.get(want.casefold())
@@ -11217,7 +11225,7 @@ def category_change_rows(
             move_to = final_names.get(tid if tid is not None else "name:" + target_state["name"]) or (
                 final_names.get("new:" + target_state["name"].casefold()) or target_state["name"]
             )
-        if filed and move_to is None:
+        if filed and move_to is None and not no_category:
             n = copies
             raise DeckError(
                 "invalid",
@@ -11260,6 +11268,7 @@ def category_change_rows(
                 delete=True,
                 cards=copies,
                 move_to=move_to,
+                no_category=(no_category and bool(filed)) or None,
                 # cards moved into Commander or a Premier category become commanders (S-01)
                 commander=_touches_commander(deck, s)
                 or bool(
@@ -11289,6 +11298,8 @@ def category_line(r: dict[str, Any]) -> str:
         n = int(r.get("cards") or 0)
         if n and r.get("move_to"):
             move = f": its {n} card{'s move' if n != 1 else ' moves'} to “{r['move_to']}” first"
+        elif n and r.get("no_category"):
+            move = f": its {n} card{'s stay' if n != 1 else ' stays'} in the deck with no category"
         else:
             move = ""
         why = " (added since the snapshot)" if r.get("since") else ""

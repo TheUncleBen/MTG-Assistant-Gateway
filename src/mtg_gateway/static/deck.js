@@ -166,6 +166,27 @@
   var grouping = cards.getAttribute("data-grouping");
   var byCategory = grouping === "category";
   var touch = window.matchMedia("(hover: none)").matches;
+  // A list row's hover picture (ul.rows .hover) is fixed to the screen and placed by its row as
+  // the pointer arrives: each stack clips its overflow (deckpage.py, so a change to one row never
+  // relays out the whole column view), which would clip the picture inside the stack.
+  // The picture stays on screen (clamped to the viewport) and follows its row on scroll.
+  var hoverRow = null;
+  var placeHover = function () {
+    var pic = hoverRow ? hoverRow.querySelector(".hover") : null;
+    if (!pic) return;
+    var r = hoverRow.getBoundingClientRect();
+    var h = pic.offsetHeight || 312;
+    pic.style.position = "fixed";
+    pic.style.left = (r.left + 28) + "px";
+    pic.style.top = Math.max(8, Math.min(r.top + 30, window.innerHeight - h - 8)) + "px";
+  };
+  cards.addEventListener("mouseover", function (e) {
+    var row = e.target && e.target.closest ? e.target.closest("li.row") : null;
+    hoverRow = row && cards.contains(row) ? row : null;
+    placeHover();
+  });
+  cards.addEventListener("mouseleave", function () { hoverRow = null; });
+  window.addEventListener("scroll", placeHover, { passive: true });
   // a phone, a touch screen in the rail range (to 1279.98 px, as theme.py draws the rail) or the app
   var phone = function () {
     return window.matchMedia("(max-width: 599.98px)").matches ||
@@ -1777,9 +1798,19 @@
           toast((w.name || name) + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
-      toast((w.name || name) + " added to your watchlist.", { actions: [open, undo] });
+      toast((w.name || name) + " added to your watchlist" + alertWords(w.alerts) + ".", { actions: [open, undo] });
       return w;
     }, function (err) { toast("No connection; the card was not watched.", { error: true }); throw err; });
+  }
+  // the price alert a new watch came with (the member's Price alert defaults), for the toast:
+  // ", with a price alert at a 10% drop" (review 2, L5)
+  function alertWords(alerts) {
+    var a = alerts || {};
+    if (a.drop != null) return ", with a price alert at a " + a.drop + "% drop";
+    if (a.rise != null) return ", with a price alert at a " + a.rise + "% rise";
+    if (a.pct != null) return ", with a price alert at a move of more than " + a.pct + "%";
+    if (a.above != null || a.below != null) return ", with a price alert";
+    return "";
   }
   function artVariants(card) {
     var Pick = window.MtgPrintPick;
@@ -2196,7 +2227,8 @@
           // watched already (any printing): the item opens its watchlist entry
           elsewhere.push(menuLink("On your watchlist", "check", "/watchlist?q=" + enc(name)));
         } else {
-          elsewhere.push(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null); }));
+          // a refusal is said in its toast; the rejection it leaves is taken here (review 2, L5)
+          elsewhere.push(menuItem("Watch this card", "bookmark", function () { closeMenu(); watchCard(card, null).catch(function () { /* said */ }); }));
         }
       }
       // one copy into the binder, as the viewer's Add to binder (the shared layer's call)
@@ -3296,23 +3328,43 @@
       others.sort(function (a, b) { return b.cards - a.cards || a.name.localeCompare(b.name); });
       return others;
     }
+    // Each choice for the cards is named for what it does (review 2, M6): a plain category keeps
+    // them in the deck; Maybeboard or Sideboard (not in the deck) takes them out of it; Commander
+    // or a Premier category makes them commanders; "No category" leaves them in the deck with
+    // none, listed by type, as Archidekt allows. t: a category of targetsFor, or null for none.
+    function targetWords(t, n) {
+      var cards = n === 1 ? "card" : "cards", stay = n === 1 ? "stays" : "stay", move = n === 1 ? "moves" : "move";
+      if (!t) return { label: "No category", sentence: "Its " + n + " " + cards + " " + stay + " in the deck with no category, listed by type." };
+      if (t.premier || t.commander) return { label: t.name + " (makes " + (n === 1 ? "it a commander" : "them commanders") + ")", sentence: "Its " + n + " " + cards + " " + move + " to " + q(t.name) + " and become " + (n === 1 ? "a commander" : "commanders") + "." };
+      if (t.not_in_deck) return { label: t.name + " (leaves the deck)", sentence: "Its " + n + " " + cards + " " + move + " to " + q(t.name) + ", out of the deck." };
+      return { label: t.name, sentence: "Its " + n + " " + cards + " " + stay + " in the deck, in " + q(t.name) + "." };
+    }
     function deleteBox(c, back) {
       var body = el("div");
-      var n = c.cards, select = null;
+      var n = c.cards, select = null, sentence = null;
       if (n) {
-        body.appendChild(el("p", null, "Its " + (n === 1 ? "1 card stays" : n + " cards stay") + " in the deck."));
+        sentence = el("p", null, "");
+        body.appendChild(sentence);
         select = el("select");
-        select.required = true;
         var targets = targetsFor(c);
-        // the biggest category the cards can go into without a second question comes picked;
-        // a Premier one or one not in the deck is offered, and asks, as it does on Deck settings
-        var pick = PRESELECT_BIGGEST ? (targets.filter(function (t) { return !t.premier && !t.commander && !t.not_in_deck; })[0] || targets[0]) : null;
+        // the biggest plain category (in the deck, not Premier) comes picked, as its cards then
+        // stay in the deck as they are; with no plain category "No category" comes picked, never
+        // Commander or a board out of the deck (review 2, M6); a Premier pick asks once more
+        var plain = targets.filter(function (t) { return !t.premier && !t.commander && !t.not_in_deck; })[0] || null;
+        var pick = PRESELECT_BIGGEST ? plain : null;
+        var none = el("option", null, targetWords(null, n).label);
+        none.value = "";
+        none.selected = !pick;
+        select.appendChild(none);
         targets.forEach(function (t) {
-          var o = el("option", null, t.name);
+          var o = el("option", null, targetWords(t, n).label);
           o.value = t.name;
           if (pick && t.name === pick.name) o.selected = true;
           select.appendChild(o);
         });
+        var say = function () { sentence.textContent = targetWords(catNamed(select.value), n).sentence; };
+        select.addEventListener("change", say);
+        say();
         body.appendChild(field("Move " + (n === 1 ? "it" : "them") + " to", select, "catmove"));
       }
       body.appendChild(el("p", "muted small", "Saved to Archidekt at once; a snapshot from just before is kept under History."));
@@ -3321,15 +3373,15 @@
       ok.addEventListener("click", function () {
         var fields = { action: "delete", delete: String(c.id), move_ok: "1" };
         var to = select ? select.value : "";
-        if (select && !to) { box.note("Pick the category its cards move to.", true); return; }
-        if (to) fields.move_cards_to = to;
+        if (to) fields.move_cards_to = to; else if (select) fields.no_category = "1";
         box.busy(true);
         send(fields, { ok: "Delete category", danger: true }).then(function (d) {
           if (d.cancelled) { box.close(); return; }
           if (!d.ok) { failed(d, box); return; }
           box.close();
           swap(d.cards_html);
-          var words = "Deleted " + q(c.name) + "." + (to ? " Its " + (n === 1 ? "card is" : n + " cards are") + " in " + q(to) + "." : "") + HISTORY;
+          var where = !n ? "" : to ? " Its " + (n === 1 ? "card is" : n + " cards are") + " in " + q(to) + "." : " Its " + (n === 1 ? "card has" : n + " cards have") + " no category now.";
+          var words = "Deleted " + q(c.name) + "." + where + HISTORY;
           // the Undo is the restore of the delete's own snapshot (undo-box.js asks first)
           var undo = null;
           if (d.undo_html) {

@@ -3365,6 +3365,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   /* an owner's name can be one long word (Archidekt allows 64 letters): it breaks inside the
      line rather than widen the page */
   .banner .rows .owner-sm{text-decoration:none;max-width:100%;overflow-wrap:anywhere}
+  /* a 44 px tap target on the facts line without a taller line: the padding makes the box, the
+     negative margins keep the line box as it is (review 2, L8) */
+  .banner .rows .owner-sm{padding:10px 0;margin-top:-10px;margin-bottom:-10px}
   .banner .rows .owner-sm:hover,.banner .rows .owner-sm:focus-visible{color:var(--orange);
     text-decoration:underline}
   .banner .lg{display:none} .banner .sm{display:inline}
@@ -3501,6 +3504,15 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
    columns like a newspaper, so a short category leaves no hole under it */
 .deckview.text{columns:300px;column-gap:2rem}
 .deckview.text .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:.75rem}
+/* each stack clips its own overflow, which makes it one unbreakable piece for the column layout
+   (it never split across columns anyway: break-inside): a change to one row (the Companion word,
+   a count) then relays out that stack alone, not every row of every column, 10-20x less work
+   (measured: 45-145 ms down to 4-8 ms at 4x CPU; review 2, L13). The row's hover picture
+   escapes the clip as a fixed box, placed by deck.js. */
+.deckview.text .stack,.deckview.brewer .stack{overflow:hidden;padding:0 12px;margin-left:-12px;
+  margin-right:-12px}  /* room for the stackhead's ⋮ (it overhangs 6px on touch) and the focus rings */
+/* a row's focus ring draws inside the row, so the clip never cuts it at the stack's bottom edge */
+.deckview.text li.row:focus-visible,.deckview.brewer li.row:focus-visible{outline-offset:-2px}
 ul.rows{list-style:none;margin:0;padding:0}
 /* --rowh: the row's one line (44 px on touch, theme.py); a row with a second line (the Companion
    word) keeps that first line and grows under it */

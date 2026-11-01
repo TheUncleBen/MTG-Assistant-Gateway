@@ -360,7 +360,12 @@
           toast(name + " is no longer on your watchlist.");
         }).catch(function () { toast("No connection; the card is still watched.", { error: true }); });
       });
-      toast(name + " added to your watchlist.", { ok: true, actions: [listLink(name), undo] });
+      // the alert the watch came with (the member's Price alert defaults) is said (review 2, L5)
+      var a = w.alerts || {}, alert = a.drop != null ? ", with a price alert at a " + a.drop + "% drop"
+        : a.rise != null ? ", with a price alert at a " + a.rise + "% rise"
+        : a.pct != null ? ", with a price alert at a move of more than " + a.pct + "%"
+        : (a.above != null || a.below != null) ? ", with a price alert" : "";
+      toast(name + " added to your watchlist" + alert + ".", { ok: true, actions: [listLink(name), undo] });
       return w;
     }, function (err) {
       done();
