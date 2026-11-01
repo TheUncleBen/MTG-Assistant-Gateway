@@ -756,7 +756,7 @@ def test_the_category_words_fill_in_names_and_counts() -> None:
     assert modes.category_names_line(["A"]) == "Deletes “A”."
     assert modes.category_words("move_commander", n=1) == (
         "Cards in a Premier category are the deck's commanders. Moving this card there makes it a "
-        "commander, which can change the deck's legality and its colours."
+        "commander, which can change the deck's legality and its colors."
     )
     assert modes.category_words("move_counts", n=1).startswith(
         "Moving this card there changes whether it counts"

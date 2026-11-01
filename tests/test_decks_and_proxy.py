@@ -610,7 +610,7 @@ async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) 
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck 'No deck' (1 cards, 1 more in the maybeboard or sideboard, private)"
+        "New custom deck “No deck” (1 cards, 1 more in the maybeboard or sideboard, private)"
     )
     assert "+1 Arcane Signet [Maybeboard] (maybeboard/sideboard)" in p["diff"]
     signet = next(c for c in p["changes"]["cards"] if c["name"] == "Arcane Signet")
@@ -639,7 +639,7 @@ async def test_a_new_deck_keeps_a_custom_categorys_switches(stack: Stack) -> Non
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck 'Flags' (1 cards, 2 more in the maybeboard or sideboard, private)"
+        "New custom deck “Flags” (1 cards, 2 more in the maybeboard or sideboard, private)"
     )
     assert "New category “Considering”: Not in deck on, Not in price on." in p["diff"]
     assert not p.get("warnings"), p
@@ -761,7 +761,7 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
     assert p["ok"] and p["kind"] == "create_deck" and p["deck_id"] == "new" and p["state"] == "pending"
     # the SB: row is created too, but is not a deck card
     assert p["diff"].splitlines()[0] == (
-        "New commander deck 'Test import' (4 cards, 1 more in the maybeboard or sideboard, private)"
+        "New commander deck “Test import” (4 cards, 1 more in the maybeboard or sideboard, private)"
     )
     assert "+1 Sol Ring [Ramp]" in p["diff"] and "+1 Island [Sideboard]" in p["diff"]
     assert len(ark.decks) == 2  # nothing created yet
@@ -837,7 +837,7 @@ async def test_propose_new_deck_from_csv_and_cards(stack: Stack) -> None:
             },
         )
     )
-    assert p2["ok"] and p2["diff"].startswith("New modern deck 'From cards' (4 cards")
+    assert p2["ok"] and p2["diff"].startswith("New modern deck “From cards” (4 cards")
     bad = structured(
         await call(
             h,
@@ -1223,7 +1223,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"] and r["state"] == "pending" and r["deck_id"] == "42" and r["kind"] == "restore", r
     lines = r["diff"].splitlines()
-    assert lines[0].startswith(f"Restore to snapshot {a['snapshot_id']} taken ")
+    assert lines[0].startswith("Put the deck back as it stood on ") and a["snapshot_id"] not in lines[0]
     assert set(lines[1:]) == {
         "+1 Acidic Slime (cmr 421)",
         "+1 Aesi, Tyrant of Gyre Strait (cmr 365, Foil) [Commander]",

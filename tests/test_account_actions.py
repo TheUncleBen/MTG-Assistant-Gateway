@@ -341,7 +341,7 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     p = structured(
         await account_call(h, token, "propose_create_folder", {"name": "Inner", "inside": "Brews"})
     )
-    assert "in 'Brews'" in p["rows"][0]["text"]
+    assert "in “Brews”" in p["rows"][0]["text"]
     p = structured(await account_call(h, token, "propose_create_folder", {"name": "X", "inside": "Nope"}))
     assert p["ok"] is False and "Brews" in p["message"]
     p = structured(await account_call(h, token, "propose_create_folder", {"name": "Brews"}))

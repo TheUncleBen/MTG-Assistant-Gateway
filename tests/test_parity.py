@@ -777,7 +777,7 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
     assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
     p = await propose({"deck_format": "modern"})
     assert p["ok"], p
-    assert "bracket: 3 -> none" in p["diff"], p["diff"]
+    assert "Commander bracket: 3 → none" in p["diff"], p["diff"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
     assert ark.decks[42]["deckFormat"] == 2 and ark.decks[42]["edhBracket"] is None
@@ -826,8 +826,8 @@ async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack:
     assert a["ok"] and a["snapshot_id"], a
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
-    assert 'name: "New" -> "Sample Commander Deck"' in r["diff"], r["diff"]
-    assert "bracket: 2 -> none" in r["diff"], r["diff"]
+    assert "Deck name: “New” → “Sample Commander Deck”" in r["diff"], r["diff"]
+    assert "Commander bracket: 2 → none" in r["diff"], r["diff"]
     done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["result"]["verified"] is True, done
     assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["deckFormat"] == 2
