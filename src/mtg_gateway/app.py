@@ -863,11 +863,12 @@ class SessionRenewalMiddleware:
 
 class ReloadMiddleware:
     """A page the member reloaded (the browser's Reload; the Android app's pull to refresh, which
-    is the WebView's reload) reads Archidekt again instead of serving the copies the gateway keeps
-    for a while: My decks' list and folders, Binder's first page, Alerts, the forum, profiles,
-    Pinned cards and the lists (independent review 2, M1). It sets decks.reload_read for the
-    request; each kept read then reads once more, through the pacer like every read. The deck page
-    keeps its own rule for a reload (stale while it is read again, companion_decks)."""
+    says so with decks.PULL_HEADER) reads Archidekt again instead of serving the copies the gateway
+    keeps for a while: My decks' list and folders, Binder's first page, Alerts, the forum,
+    profiles, Pinned cards, Binder › Lists and each list (independent review 2, M1). It sets
+    decks.reload_read for the request; each kept read then reads once more, through the pacer and
+    the member's Archidekt slot like every read. The deck page keeps its own rules (a Reload: stale
+    while it is read again; a pull: read now, companion_decks)."""
 
     SKIP = re.compile(r"^/(?:decks/\d{1,12}/?$|static/|mcp|late/|oauth|\.well-known/)")
 

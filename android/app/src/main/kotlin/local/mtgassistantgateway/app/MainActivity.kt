@@ -343,8 +343,8 @@ class MainActivity : ComponentActivity() {
     /**
      * A pull from the top of a list page ([PullRefresh.offered], set per page in
      * [Client.onPageStarted]) shows the orange disc under the page's own top bar and, let go past
-     * the threshold, reloads the page the way the browser's Reload does; the disc goes when the new
-     * page has drawn or the load failed ([Client]). The layer only pulls when the page is at its top
+     * the threshold, loads the page again with the pull's header ([pull]); the disc goes when the
+     * new page has drawn or the load failed ([Client]). The layer only pulls when the page is at its top
      * and the page's own word on the touch ([pagePull]) allows it.
      */
     private fun setUpPullRefresh() {
@@ -354,8 +354,23 @@ class MainActivity : ComponentActivity() {
         val dp = resources.displayMetrics.density
         refresh.setProgressViewOffset(false, (8 * dp).toInt(), (72 * dp).toInt())
         refresh.setOnChildScrollUpCallback { _, _ -> !pagePull || web.canScrollVertically(-1) }
-        refresh.setOnRefreshListener { web.reload() }
+        refresh.setOnRefreshListener { pull() }
         refresh.isEnabled = false // per page, from onPageStarted
+    }
+
+    /**
+     * A pull: the page's own address loaded again with [PullRefresh.HEADERS]
+     * (WebView.loadUrl(String, Map), Android API level 8), so the gateway reads Archidekt now rather
+     * than show what it keeps ([PullRefresh]). A GET: a page drawn from a form's POST is never
+     * posted again. The page is at its top when a pull starts, so there is no scroll to keep.
+     */
+    private fun pull() {
+        val url = web.url
+        if (url == null || !PullRefresh.offered(origin, url)) {
+            pullDone()
+            return
+        }
+        web.loadUrl(PullRefresh.target(url), PullRefresh.HEADERS)
     }
 
     /** The disc goes: the page has drawn, or its load failed and the error box says so. */

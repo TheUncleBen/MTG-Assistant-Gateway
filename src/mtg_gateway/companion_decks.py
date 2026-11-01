@@ -43,7 +43,7 @@ from .deckpage import (
     folder_options_html,
     reread_href,
 )
-from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, is_reload, owns_deck
+from .decks import MAX_PENDING_PROPOSALS, DeckError, current_client, is_pull, is_reload, owns_deck
 from .folderview import FOLDER_CSS, arrange, filter_params, level_html, read_filters, resolve_folder
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -805,10 +805,12 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         addresses render the page this way, and a refused clone or delete comes back with
         ``box_error`` in its box. ``templates``: the member's template names, read for the Lock box
         drawn open from its address."""
-        # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
+        # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again
+        # unless the copy on show is under PAGE_DECK_RELOAD old. The app's pull to refresh says so
+        # in its own header (decks.is_pull): read the deck now (PAGE_DECK_PULL_FLOOR aside).
         reload = is_reload(request.headers)
         try:
-            deck, how = await decks.page_deck_view(sub, deck_id, fresh=reload)
+            deck, how = await decks.page_deck_view(sub, deck_id, fresh=reload, pull=is_pull(request.headers))
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         link = state.db.get_link(sub)
