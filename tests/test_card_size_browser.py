@@ -91,27 +91,46 @@ def test_the_switch_applies_at_once_and_follows_the_account(server: Server, widt
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme)
         page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        phone = width < 600  # a phone's toolbar is one row; the switch is in its View sheet
         sw = page.locator(".toolbar .sizeseg")
-        assert sw.is_visible()
+        assert sw.is_visible() is not phone
         assert page.get_attribute("html", "data-card-size") == "m"
         assert page.get_attribute(".toolbar [data-card-size-set=m]", "aria-pressed") == "true"
         url = page.url
         before = page.evaluate(COLS, ".deckview.stacks")
+        if phone:
+            page.locator(".toolbar .viewbtn").click()
+            sheet = page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet")
+            sheet.wait_for(timeout=3000)
+            mirror = sheet.locator(".sizeseg button")
+            assert mirror.all_inner_texts() == ["S", "M", "L"], mirror.all_inner_texts()
+            assert mirror.nth(1).get_attribute("aria-pressed") == "true"
+            for i in range(3):  # a touch target each
+                box = mirror.nth(i).bounding_box()
+                assert box["height"] >= 44 and box["width"] >= 44, box
+            pick = mirror.nth(0)
+        else:
+            pick = page.locator(".toolbar [data-card-size-set=s]")
         with page.expect_response(SAVED) as saved:
-            page.locator(".toolbar [data-card-size-set=s]").click()
+            pick.click()
         assert saved.value.ok  # the account has it once the save answers: no fixed wait
         assert page.get_attribute("html", "data-card-size") == "s" and page.url == url  # no reload
         assert page.get_attribute(".toolbar [data-card-size-set=s]", "aria-pressed") == "true"
+        if phone:
+            assert pick.get_attribute("aria-pressed") == "true"
+            page.keyboard.press("Escape")
+            page.locator(".mtgbox-scrim").wait_for(state="detached")
         assert page.evaluate(COLS, ".deckview.stacks") > before
         assert server.db.get_pref("user-1", "card.size.deck") == "s"
-        # as tall as the selects beside it (39 px with its border; 46 px on a touch screen)
-        height = page.evaluate(
-            "() => document.querySelector('.toolbar .sizeseg').getBoundingClientRect().height"
-        )
-        select = page.evaluate(
-            "() => document.querySelector('.toolbar .msel-btn').getBoundingClientRect().height"
-        )
-        assert height >= 38.5 and abs(height - select) <= 1 or height >= 44, (height, select)
+        if not phone:
+            # as tall as the selects beside it (39 px with its border; 46 px on a touch screen)
+            height = page.evaluate(
+                "() => document.querySelector('.toolbar .sizeseg').getBoundingClientRect().height"
+            )
+            select = page.evaluate(
+                "() => document.querySelector('.toolbar .msel-btn').getBoundingClientRect().height"
+            )
+            assert height >= 38.5 and abs(height - select) <= 1 or height >= 44, (height, select)
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, ".sizeseg button, .field.cardsize .lbl") == []
         _shot(page, f"deck-stacks-small-{width}-{theme}.png")
