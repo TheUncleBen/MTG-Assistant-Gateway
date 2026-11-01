@@ -179,9 +179,11 @@ def test_filter_controls_keep_their_rows(server: Server, width: int) -> None:
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, width, exe)
         page.goto(f"{server.base}/cards?q=s", wait_until="networkidle")
+        page.locator(".sp-open").click()  # a sheet on a phone, folded in place from 600 px
         if width < 600:
-            page.locator(".sp-open").click()
             page.locator("#sp-filters.open").wait_for(timeout=3000)
+        else:
+            page.locator("#p-t").wait_for(state="visible", timeout=3000)
         got = page.evaluate(FILTERS_JS)
         assert got["sw"] <= got["vw"], got
         pills, mode = got["pills"], got["mode"]

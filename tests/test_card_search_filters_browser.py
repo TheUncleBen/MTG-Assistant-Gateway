@@ -81,9 +81,9 @@ CONTRAST = """
 """
 
 
-def _lands(n: int, base: dict) -> list[dict]:
+def _lands(n: int, base: dict, start: int = 0) -> list[dict]:
     out = []
-    for i in range(n):
+    for i in range(start, start + n):
         c = copy.deepcopy(base)
         c["id"] = f"00000000-0000-4000-8000-{i:012d}"
         c["name"] = f"Test Land {i:02d}"
@@ -108,6 +108,13 @@ def server(tmp_path: Path):
 
 def _query(url: str) -> dict[str, list[str]]:
     return parse_qs(urlparse(url).query)
+
+
+def _more_lands(server: Server) -> None:
+    """Thirty more lands (60 in all): on a desktop the filters wait folded, so the first screen
+    takes more tiles than the fixture's 30 leave for Load more."""
+    tower = next(c for c in server.sf.cards if c["name"] == "Command Tower")
+    server.sf.extra_cards.extend(_lands(30, tower, start=30))
 
 
 def _names(page) -> list[str]:
@@ -164,7 +171,9 @@ def test_a_type_chip_narrows_and_flips_to_not_and_clear_empties_everything(serve
         browser, page, errors = _page(p, server, sid, 1280, "dark", exe)
         page.goto(f"{server.base}/cards?q=mountain", wait_until="networkidle")
         _wait_count(page, "2 cards")
+        page.locator(".sp-open").click()  # the filters wait folded on a desktop
         box = page.locator("#p-t")
+        box.wait_for(state="visible", timeout=3000)
         box.click()
         box.press_sequentially("crea", delay=20)
         opt = page.locator("#o-t li.opt", has_text="Creature").first
@@ -209,26 +218,27 @@ def test_load_more_reads_to_the_end_and_the_list_view_and_sort_stay_in_the_searc
 
     exe = _chromium()
     sid = _link(server)
+    _more_lands(server)
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1280, "light", exe)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
-        _wait_count(page, "30 cards")
+        _wait_count(page, "60 cards")
         page.wait_for_function(MORE_SETTLED, timeout=5000)  # the screen's fill has ended
         page.wait_for_load_state("networkidle")
         first = page.locator("#cardgrid .cc").count()
-        assert 0 < first < 30
+        assert 0 < first < 60
         page.mouse.wheel(0, 8000)
         page.wait_for_timeout(700)
         assert page.locator("#cardgrid .cc").count() == first  # scrolling loads nothing
         for _ in range(12):
             n = page.locator("#cardgrid .cc").count()
-            if n >= 30:
+            if n >= 60:
                 break
             page.wait_for_function(MORE_READY, timeout=5000)
             page.locator("#cs-more [data-more]").click()
             page.wait_for_function(f"() => document.querySelectorAll('#cardgrid .cc').length > {n}")
         names = _names(page)
-        assert names == [f"Test Land {i:02d}" for i in range(30)], names
+        assert names == [f"Test Land {i:02d}" for i in range(60)], names
         assert page.locator("#cs-more [data-more]").is_hidden()
         # the list view: rows, chosen in the results head, kept in a cookie for the next visit
         page.locator(".segc label[title=List]").click()
@@ -282,7 +292,10 @@ def test_the_filters_fit_every_width_and_the_phone_panel_opens_and_closes(
             page.keyboard.press("Escape")
             page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
         else:
-            assert page.locator("#p-t").is_visible()
+            # on a Fold or desktop the groups wait folded behind the same button, and unfold in place
+            assert not page.locator("#p-t").is_visible()
+            page.locator(".sp-open").click()
+            page.locator("#p-t").wait_for(state="visible", timeout=3000)
             assert page.evaluate(CONTROLS, "#cs-form") == []
         # the open More filters fits as well
         if width < 600:
@@ -393,6 +406,7 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler
 
     exe = _chromium()
     sid = _link(server)
+    _more_lands(server)
     held: list = []
 
     def hold(route) -> None:
@@ -433,7 +447,7 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler
         # "Load more" within the typing pause asks for the next page of the tiles on screen
         page.unroute("**/cards/api/search?*page=2*")
         page.goto(f"{server.base}/cards?q=test+land", wait_until="networkidle")
-        _wait_count(page, "30 cards")
+        _wait_count(page, "60 cards")
         asked: list[str] = []
         page.on("request", lambda r: asked.append(r.url) if "page=" in r.url else None)
         page.locator("#c-q").press_sequentially("x", delay=10)  # the search waits 400 ms
@@ -522,4 +536,80 @@ def test_one_escape_closes_the_dropdown_sheet_and_not_the_filters_panel(server: 
         page.keyboard.press("Escape")
         page.wait_for_function("() => !document.getElementById('sp-filters').classList.contains('open')")
         assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [717, 840, 1280])
+def test_on_a_fold_and_desktop_the_filters_wait_behind_a_filters_button_that_remembers(
+    server: Server, width: int
+) -> None:
+    """Mockup screen 5 (0.7.46, owner 11-01): on a Fold and on desktop the filter groups sit
+    folded behind the same Filters button phones have, so the first result starts near the top;
+    the button counts the filters in use, opens them in place (no full-screen sheet at these
+    widths), works from the keyboard, is 44 px tall, and its last state follows the account."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "dark", exe)
+        page.goto(f"{server.base}/cards?q=sol&r=r&t=artifact", wait_until="networkidle")
+        _wait_count(page, "1 card")
+        btn = page.locator(".sp-open")
+        assert btn.is_visible() and btn.get_attribute("aria-expanded") == "false"
+        assert page.locator(".sp-open .n").inner_text().strip() == "2"
+        assert not page.locator("#p-t").is_visible()  # the type picker waits behind the button
+        assert page.locator(".sp-sheet-head").is_hidden() and page.locator(".sp-sheet-foot").is_hidden()
+        box = btn.bounding_box()
+        assert box and box["height"] >= (44 if width < 900 else 39), box  # 44 px on a touch screen
+        folded_top = page.locator("#cs-results").bounding_box()["y"]
+        assert page.evaluate(MEASURE) == []
+        btn.click()
+        page.locator("#p-t").wait_for(state="visible", timeout=3000)
+        assert btn.get_attribute("aria-expanded") == "true"
+        assert page.locator(".sp-sheet-head").is_hidden()  # in place, not a sheet
+        assert page.evaluate(CONTROLS, "#cs-form") == []
+        assert page.evaluate(MEASURE) == []
+        assert page.locator("#cs-results").bounding_box()["y"] > folded_top + 100
+        # the choice follows the account: the page comes back open, with no flash of a closed panel
+        page.reload(wait_until="networkidle")
+        _wait_count(page, "1 card")
+        assert page.locator("#p-t").is_visible()
+        assert page.locator(".sp-open").get_attribute("aria-expanded") == "true"
+        assert server.db.get_pref("user-1", "cards.filters") == "open"
+        # Escape leaves an in-place panel alone; the keyboard folds it from the button
+        page.keyboard.press("Escape")
+        assert page.locator("#p-t").is_visible()
+        page.locator(".sp-open").focus()
+        page.keyboard.press("Enter")
+        page.locator("#p-t").wait_for(state="hidden", timeout=3000)
+        assert page.locator(".sp-open").get_attribute("aria-expanded") == "false"
+        assert page.evaluate("document.activeElement.classList.contains('sp-open')")
+        page.reload(wait_until="networkidle")
+        _wait_count(page, "1 card")
+        assert not page.locator("#p-t").is_visible()
+        assert server.db.get_pref("user-1", "cards.filters") == "closed"
+        assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [360, 840])
+def test_without_scripts_the_filters_show_at_every_width(server: Server, width: int) -> None:
+    """Without scripts nothing can open the phone sheet or unfold the groups on a Fold, so the
+    filters show as the plain form they are, with no Filters button (before, a phone without
+    scripts had the button and no way to the filters)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 860}, java_script_enabled=False)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
+        assert page.locator("#p-t").is_visible()
+        assert page.locator(".sp-open").is_hidden()
+        assert page.locator(".sp-sheet-head").is_hidden()
+        assert page.evaluate(MEASURE) == []
         browser.close()
