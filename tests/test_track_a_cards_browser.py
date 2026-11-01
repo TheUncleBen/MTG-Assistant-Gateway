@@ -1208,3 +1208,72 @@ def test_apply_all_on_the_waiting_card_posts_nothing_as_the_user_and_a_row_appro
         finally:
             browser.close()
     assert not errors, errors
+
+
+def test_the_waiting_cards_rows_show_their_outcome_after_an_apply() -> None:
+    """After Apply all (or one row's Reject), a row's line reads its outcome (Applied, Failed with
+    the reason, Rejected), not "Waiting · Low" as if nothing had happened; a change note's
+    "1 → 2" arrow is drawn as it is."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    rows = {
+        **WAITING,
+        "waiting": [
+            {
+                **WAITING["waiting"][0],
+                "risk": "low",
+                "version": 2,
+                "changed_by": "app: ChatGPT (c2)",
+                "what_changed": "Opt: 1 → 2",
+            },
+            {**WAITING["waiting"][1], "risk": "high"},
+            _line("p4", 4, "+1 Ponder", risk="low"),
+        ],
+        "count": 3,
+        "own_count": 3,
+        "other_apps": [],
+    }
+    meta = {
+        APPROVALS_META_KEY: {"p1": "code-1", "p2": "code-2", "p4": "code-4"},
+        APPROVAL_SET_META_KEY: {"ids": ["p1", "p2"], "code": "set-code"},
+    }
+    why = "Archidekt refused the change."
+    failed = {"proposal_id": "p2", "board_no": 2, "summary": "-1 Island", "why": why}
+    result = {**DONE, "summary": "Applied 1. 1 failed.", "not_sent": [], "failed": [failed]}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(
+                page,
+                cards_html("waiting-card"),
+                {"structuredContent": rows, "_meta": meta},
+                {"confirm_waiting": result, "confirm_proposal": {"ok": True, "state": "rejected"}},
+            )
+            assert card.locator("#row-p1 .sub").inner_text().startswith("Waiting · Low · by Claude")
+            assert "Last change: Opt: 1 → 2." in card.locator("#row-p1 .why").inner_text()
+            card.locator("#apply-all:not([disabled])").click()
+            card.locator("#go:not([disabled])").click()
+            card.locator("#result:not(.hidden)").wait_for()
+            # the rows say what happened to them, in the words of the result list
+            p1 = card.locator("#row-p1 .sub").inner_text()
+            assert p1.startswith("Applied · by Claude"), p1
+            assert "Waiting" not in p1 and "Low" not in p1
+            p2 = card.locator("#row-p2 .sub").inner_text()
+            assert p2.startswith("Failed · by Claude"), p2
+            assert "High" not in p2
+            assert "Archidekt refused the change." in card.locator("#row-p2").inner_text()
+            assert card.locator("#row-p4 .sub").inner_text().startswith("Waiting · Low")
+            # one row rejected on its own buttons
+            card.locator("#row-p4 button", has_text="Reject").click()
+            card.locator("#row-p4 .done", has_text="Rejected").wait_for()
+            p4 = card.locator("#row-p4 .sub").inner_text()
+            assert p4.startswith("Rejected · by Claude"), p4
+            assert card.locator("#count").inner_text().lower() == "0 waiting"
+            _shot(page, "waiting-card-outcomes-390")
+        finally:
+            browser.close()
+    assert not errors, errors

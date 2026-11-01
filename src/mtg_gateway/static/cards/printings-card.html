@@ -7,6 +7,23 @@
 <title>Printings of a card</title>
 <style>
 /*@BASE@*/
+/* the detail (one printing, big, with Use this printing) is drawn in the card's flow and takes the
+   list's place, so the host's frame follows its height instead of covering a frame sized for the list */
+.card.viewing .toolbar,.card.viewing .scroll,.card.viewing #note,.card.viewing #actions{display:none}
+.detail.flow{position:static;padding:0;overflow:visible;z-index:auto}
+.detail.flow img.big{max-width:340px}
+.detail .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px}
+#detail .cap{font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere}
+#detail .cap b{color:var(--text);font-weight:600;font-size:.9375rem}
+/* the pictures could not load: the same tiles as a plain list of set and number */
+.grid.list{display:block;padding:0}
+.grid.list .tile{flex-direction:row;align-items:center;gap:10px;min-height:44px;padding:6px 10px;border-radius:0;
+  border:0;border-top:1px solid var(--border);background:var(--bg)}
+.grid.list .tile:first-child{border-top:0}
+.grid.list .tile img{display:none}
+.grid.list .tile .cap{font-size:.875rem;flex:1 1 auto}
+.grid.list .tile .tick{position:static;flex:none}
+.grid.list .tile.picked{background:var(--blue-bg)}
 </style>
 </head>
 <body>
@@ -19,6 +36,10 @@
     <button type="button" class="small hidden" id="expand">Expand</button>
   </div>
   <div class="scroll"><div class="grid" id="grid" role="list"></div></div>
+  <div class="detail flow hidden" id="detail" role="region" aria-label="One printing">
+    <div class="top"><span class="cap" id="dcap"></span><button type="button" class="small" id="back">Back to the list</button></div>
+    <div class="body"><div id="dpic"></div><div class="acts" id="dacts"></div></div>
+  </div>
   <p class="note hidden" id="note"></p>
   <div class="actions" id="actions"></div>
   <div class="status hidden" id="status" role="status" aria-live="polite"></div>
@@ -29,7 +50,11 @@
   "use strict";
   var B = Bridge, el = B.el, $ = B.$;
   var MAX_TILES = 400;
-  var all = [], picked = null, cardName = "", oracleId = "", link = "";
+  var all = [], picked = null, viewing = null, cardName = "", oracleId = "", link = "";
+  // pictures that could not be drawn against those that could: past half, the list says so and
+  // shows set and number as a plain list (a picture host blocked by the chat, or down)
+  var failed = 0, loaded = 0, listMode = false;
+  var NO_PICTURES = "Pictures could not load; the set and number are listed.";
 
   function caption(c) {
     var bits = [];
@@ -42,6 +67,12 @@
     return bits.join(" · ");
   }
   function finishesOf(c) { return Array.isArray(c.finishes) ? c.finishes : []; }
+  // a printing's small and normal-size pictures: the data's own links when it carries them, else
+  // the Scryfall lookup at each size
+  function pics(c) {
+    return [c.image_small || B.scryfallImage(c.scryfall_id, c.name),
+      c.image_normal || B.scryfallImage(c.scryfall_id, c.name, "normal")];
+  }
   function matches(c, q, fin) {
     if (fin && finishesOf(c).indexOf(fin) < 0) return false;
     if (!q) return true;
@@ -53,30 +84,77 @@
       (c.released_at ? ", released " + c.released_at : "") + (fin.length ? ", finishes: " + fin.join(", ") : "") +
       (c.scryfall_id ? " (Scryfall id " + c.scryfall_id + ")" : "");
   }
+  function setLabel(c) { return (c.set || "").toUpperCase() + (c.collector_number ? " #" + c.collector_number : ""); }
+  function pictureFailed() {
+    failed++;
+    if (!listMode && failed >= 2 && failed > loaded) { listMode = true; draw(); }
+  }
   function draw() {
     var q = String($("filter").value || "").trim().toLowerCase(), fin = finishWanted();
     var grid = $("grid"); grid.replaceChildren();
+    grid.className = listMode ? "grid list" : "grid";
     var shown = 0;
     all.forEach(function (c) {
       if (!matches(c, q, fin) || shown >= MAX_TILES) return;
       shown++;
       var t = el("button", "tile" + (picked === c ? " picked" : "")); t.type = "button"; t.setAttribute("role", "listitem");
       t.setAttribute("aria-label", describe(c));
-      t.appendChild(B.picture(c.image_small || B.scryfallImage(c.scryfall_id, c.name), ""));
-      var cap = el("span", "cap"); var b = el("b", "", (c.set || "").toUpperCase() + (c.collector_number ? " #" + c.collector_number : ""));
+      if (!listMode) {
+        var p = pics(c);
+        t.appendChild(B.picture(p[0], "", p[1],
+          { sizes: "(max-width: 420px) 45vw, 160px", onError: pictureFailed, onLoad: function () { loaded++; } }));
+      }
+      var cap = el("span", "cap"); var b = el("b", "", setLabel(c));
       cap.appendChild(b); cap.appendChild(el("span", "", " " + caption(c).replace(/^[^·]*·?\s*/, "")));
       t.appendChild(cap); t.appendChild(el("span", "tick", "✓"));
-      t.onclick = function () { pick(c); };
+      t.onclick = function () { view(c); };
       grid.appendChild(t);
     });
-    var note = $("note");
-    if (!shown) { note.textContent = all.length ? "No printing matches that filter." : ""; note.className = "note"; }
-    else if (shown < all.length) { note.textContent = shown + " of " + all.length + " printings shown."; note.className = "note"; }
-    else note.className = "note hidden";
+    var note = $("note"), text = "";
+    if (!shown) text = all.length ? "No printing matches that filter." : "";
+    else if (shown < all.length) text = shown + " of " + all.length + " printings shown.";
+    if (listMode && all.length) text = NO_PICTURES + (text ? " " + text : "");
+    note.textContent = text; note.className = text ? "note" : "note hidden";
+    B.reportSize();
+  }
+  // One printing, big, in the list's place: the person looks before choosing, and the pick is
+  // the Use this printing press, as on the site's own Printings sheet.
+  function view(c) {
+    viewing = c;
+    $("dcap").replaceChildren();
+    $("dcap").appendChild(el("b", "", (c.name || cardName) + " · " + setLabel(c)));
+    $("dcap").appendChild(document.createElement("br"));
+    $("dcap").appendChild(document.createTextNode(
+      [c.set_name || "", c.released_at ? "released " + c.released_at : "", finishesOf(c).length ? finishesOf(c).join(", ") : ""]
+        .filter(Boolean).join(" · ")));
+    var pic = $("dpic"); pic.replaceChildren();
+    var p = pics(c), img = B.picture(p[0], "big", p[1], { sizes: "340px" });
+    img.loading = "eager";
+    pic.appendChild(img);
+    var acts = $("dacts"); acts.replaceChildren();
+    var use = el("button", "primary", picked === c ? "Picked" : "Use this printing"); use.type = "button"; use.id = "use";
+    use.disabled = picked === c;
+    use.onclick = function () { pick(c); };
+    acts.appendChild(use);
+    if (typeof c.scryfall_uri === "string" && c.scryfall_uri.indexOf("https://scryfall.com/") === 0) {
+      var s = el("a", "link", "Open on Scryfall"); s.href = "#";
+      s.onclick = function (e) { e.preventDefault(); B.openLink(c.scryfall_uri, function (t) { B.setStatus(t, ""); }); };
+      acts.appendChild(s);
+    }
+    $("detail").className = "detail flow";
+    $("card").className = "card viewing";
+    $("back").focus();
+    B.reportSize();
+  }
+  function closeView() {
+    viewing = null;
+    $("detail").className = "detail flow hidden";
+    $("card").className = "card";
     B.reportSize();
   }
   function pick(c) {
     picked = c;
+    closeView();
     draw();
     B.setStatus("Picked: " + describe(c), "ok");
     renderActions();
@@ -84,7 +162,12 @@
       ", set " + B.quote(c.set_name || "") + ", set_code " + B.quote(c.set || "") + ", collector_number " +
       B.quote(c.collector_number || "") + (c.released_at ? ", released " + B.quote(c.released_at) : "") +
       (finishesOf(c).length ? ", finishes " + B.quote(finishesOf(c).join(", ")) : "") +
-      (c.scryfall_id ? ", Scryfall id " + B.quote(c.scryfall_id) : "") + ". Use that set_code and collector_number for it.");
+      (c.scryfall_id ? ", Scryfall id " + B.quote(c.scryfall_id) : "") + ". Use that set_code and collector_number for it.")
+      .then(function (heard) {
+        // a chat that cannot carry the pick: the person says it in their next message instead
+        if (!heard) B.setStatus("Picked: " + describe(c) + " Your chat could not pass this on, so tell your assistant: use " +
+          setLabel(c) + ".", "ok");
+      });
   }
   function renderActions() {
     var a = $("actions"); a.replaceChildren();
@@ -109,7 +192,7 @@
     }
     var total = Number(sc.total_cards || meta.total || 0);
     $("count").textContent = total ? total + " printing" + (total === 1 ? "" : "s") : "";
-    $("summary").textContent = "Tap the printing you mean; your assistant will use it.";
+    $("summary").textContent = "Tap a printing to see it bigger, then press Use this printing; your assistant will use it.";
     if (!link) { B.setStatus("The list is in the assistant's message.", ""); return; }
     fetch(link, { credentials: "omit", headers: { Accept: "application/json" } })
       .then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
@@ -117,12 +200,13 @@
         var j = pair[1] || {};
         if (pair[0] !== 200 || j.ok === false) { B.setStatus(String(j.message || "The printings could not be loaded; ask again."), "err"); return; }
         all = Array.isArray(j.cards) ? j.cards : [];
-        if (j.has_more) { $("summary").textContent = "The newest " + all.length + " of " + (j.total_cards || "many") + " printings. Tap the one you mean."; }
+        if (j.has_more) { $("summary").textContent = "The newest " + all.length + " of " + (j.total_cards || "many") + " printings. Tap one to see it bigger, then press Use this printing."; }
         draw();
       })
       .catch(function () { B.setStatus("The printings could not be loaded (no connection to the gateway). The newest sets are in the assistant's message.", "err"); });
   }
   $("filter").addEventListener("input", draw);
+  $("back").onclick = closeView;
   // The finish filter is a row of the card's own chips, not the host browser's list.
   function finishWanted() {
     var on = $("finish").querySelector("button.on");

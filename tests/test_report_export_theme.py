@@ -76,7 +76,7 @@ def test_the_markdown_is_clean() -> None:
     # one title; the research service's own output (# Goldfish run, ## Metrics) is not copied in:
     # the file says where it is kept (test_report_export_outline)
     assert [ln for ln in outside if ln.startswith("# ")] == ["# Deck report: Immortal Reckoning"]
-    assert "## Metrics" not in md and "# Goldfish run" not in md and "## Raw output" in outside
+    assert "## Metrics" not in md and "# Goldfish run" not in md and f"## {rv.RAW_HEADING}" in outside
     # no HTML outside the fences
     assert not [ln for ln in outside if re.search(r"<[a-z/][^>]*>", ln)], outside
     # each group of cards is its own paragraph, its count in bold

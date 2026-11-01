@@ -856,6 +856,20 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 f"<p class='notice making' role='status' data-made-poll='/decks/{_esc(deck.id)}/made'>"
                 f"{SPINNER} {_esc(being_made)} Changes wait until it is done.</p>" + notice
             )
+        # a test of this deck still going (the member pressed Run test, or an assistant ran one):
+        # the spinner and how far it is, with the way to its report, until every part is done
+        running = state.reports.running(sub, deck.id) if state.reports is not None else []
+        if running:
+            one = running[0]
+            words = (
+                f"Test running: {one['progress']}."
+                if len(running) == 1
+                else f"{len(running)} tests running: {one['progress']}."
+            )
+            open_report = ui.cap_link("Open the report", f"/history/reports/{one['report_id']}")
+            notice = (
+                f"<p class='notice testing' role='status'>{SPINNER} {_esc(words)} {open_report}</p>" + notice
+            )
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None

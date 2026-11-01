@@ -52,7 +52,10 @@
 - Spells cast each turn (average, from turn 1): 0.6, 1.9, 3.6, 5.6, 7.8, 10.1, 12.4, 14.6, 16.9, 19.1
 - Damage dealt each turn (average, from turn 1): 0, 0.3, 1.8, 4.6, 8.9, 13.7, 19.8, 26.1, 31.9, 37.4
 - Left out: 4 games that Forge's time limit stopped before turn 10 or a win.
-- Cards Forge could not play: Mirror of the Forebears, Grist, the Hunger Tide // Grist, Pernicious Deed
+- Cards Forge could not play:
+  - Mirror of the Forebears
+  - Grist, the Hunger Tide
+  - Pernicious Deed
 
 ## What the quick solo test leaves out
 
@@ -62,20 +65,90 @@ Played with their effect: 49 of 98 cards (50% of the deck). Known: 66 of 98 card
 
 The solo test found these cards and their exact text, but has no description yet of what they do, so it drew and cast them without their effect. Whatever they would do in a real game is missing from the numbers above. Your assistant may be able to describe some of them from their exact text, in a form the solo test can play. Many cards need things the solo test does not model, such as opponents to interact with.
 
-Aegis of the Gods, Ajani, Caller of the Pride, Cathars' Crusade, Cathedral Sanctifier, Cleric Class, Desecration Demon, Doomsday Excruciator, Ensnaring Bridge, Eternal Thirst, Feign Death, Fetid Imp, Flaming Fist, Gift of Immortality, Goldnight Redeemer, Grim Discovery, Guardian of the Gateless, Holy Day, Indulgent Tormentor, Liesa, Forgotten Archangel, Liliana Vess, Mark of the Vampire, Pacifism, Pestilence Demon, Platinum Angel, Ranger's Hawk, Rite of Consumption, Safe Passage, Shield of the Avatar, Staff of the Sun Magus, Sun Titan, Unhallowed Pact, Vampire Spawn
+- Aegis of the Gods
+- Ajani, Caller of the Pride
+- Cathars' Crusade
+- Cathedral Sanctifier
+- Cleric Class
+- Desecration Demon
+- Doomsday Excruciator
+- Ensnaring Bridge
+- Eternal Thirst
+- Feign Death
+- Fetid Imp
+- Flaming Fist
+- Gift of Immortality
+- Goldnight Redeemer
+- Grim Discovery
+- Guardian of the Gateless
+- Holy Day
+- Indulgent Tormentor
+- Liesa, Forgotten Archangel (commander)
+- Liliana Vess
+- Mark of the Vampire
+- Pacifism
+- Pestilence Demon
+- Platinum Angel
+- Ranger's Hawk
+- Rite of Consumption
+- Safe Passage
+- Shield of the Avatar
+- Staff of the Sun Magus
+- Sun Titan
+- Unhallowed Pact
+- Vampire Spawn
 
 **Needs opponents: 17 of 98 cards (17% of the deck).**
 
 The solo test plays against opponents who do nothing, so removal, board wipes, counterspells and protection have nothing to act on. Spells that only do that stayed in hand. Creatures and other permanents among them were still cast, and played the parts of their text the solo test can read.
 
-- Removal and other interaction: Avatar of Woe, Banishing Light, Dawnbringer Cleric, Divine Verdict, Doom Blade, Grim Bounty, Keening Apparition, Murder, Ob Nixilis Reignited, Portable Hole, Trapped in the Screen
-- Other effects the solo test does not model: Aetherflux Reservoir, Ascend from Avernus, Minimus Containment, Norn's Annex, Shrine of Loyal Legions, Torment of Hailfire
+- Removal and other interaction:
+  - Avatar of Woe
+  - Banishing Light
+  - Dawnbringer Cleric
+  - Divine Verdict
+  - Doom Blade
+  - Grim Bounty
+  - Keening Apparition
+  - Murder
+  - Ob Nixilis Reignited
+  - Portable Hole
+  - Trapped in the Screen
+- Other effects the solo test does not model:
+  - Aetherflux Reservoir
+  - Ascend from Avernus
+  - Minimus Containment
+  - Norn's Annex
+  - Shrine of Loyal Legions
+  - Torment of Hailfire
 
 **Played with their effect but never mattered: 23 of 98 cards (23% of the deck).**
 
 These cards were understood, drawn and played, and nothing they do changed a solo test game. A solo test game has no opponent and no interaction, so this says nothing about how the card does at a real table.
 
-Black Dragon Gate, Charcoal Diamond, Daggerdrome Imp, Dungeon Map, Evolving Wilds, Leather Armor, Leechridden Swamp, Lightning Greaves, Lotus Field, Marble Diamond, Markov Patrician, Mask of Avacyn, Nephalia Academy, Opaline Unicorn, Orzhov Guildgate, Orzhov Keyrune, Plate Armor, Seraph of Dawn, The Soul Stone, Transguild Promenade, Typhoid Rats, Vampire Nighthawk, Vault of the Archangel
+- Black Dragon Gate
+- Charcoal Diamond
+- Daggerdrome Imp
+- Dungeon Map
+- Evolving Wilds
+- Leather Armor
+- Leechridden Swamp
+- Lightning Greaves
+- Lotus Field
+- Marble Diamond
+- Markov Patrician
+- Mask of Avacyn
+- Nephalia Academy
+- Opaline Unicorn
+- Orzhov Guildgate
+- Orzhov Keyrune
+- Plate Armor
+- Seraph of Dawn
+- The Soul Stone
+- Transguild Promenade
+- Typhoid Rats
+- Vampire Nighthawk
+- Vault of the Archangel
 
 **Shortcuts the model takes: 6.**
 
@@ -90,7 +163,7 @@ Simplifications applied to these cards; they play a little better or worse than 
 
 ## Validation: issues found
 
-- 2 card(s) not found on Scryfall:
+- 2 cards not found on Scryfall:
   - Enduring Angel
   - Elbrus, the Binding Blade
 
@@ -106,6 +179,6 @@ Simplifications applied to these cards; they play a little better or worse than 
 - Average mana value: 3.2
 - Mana curve: 1: 9, 2: 17
 
-## Raw output
+## Research service output
 
 The research service's own output is kept with the report: https://mtg.example.org/history/reports/rep_test

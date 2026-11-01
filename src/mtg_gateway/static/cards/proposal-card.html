@@ -119,25 +119,29 @@ button.danger:disabled{color:var(--red)}
   "use strict";
   // "Held: it depends on #3, …", as the Proposals page writes it (batch.held_text)
   function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
-  var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html
+  // the shared host protocol (_bridge.js), inlined by cards.card_html
+  var B = Bridge;
   var APPROVAL_KEY = "mtg/approval";
   var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck
   var MAX_IMAGES = 6;    // Scryfall thumbnails at most: the first rows only, the rest is text
   var COLLAPSE_AT = 6;   // a longer list shows a summary and this many rows until "Show all"
   var ROWS_READ = 8;     // rows a timed read asks for (Show all reads the whole list once)
-  var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
+  // buttons stay disabled this long after the card is drawn
+  var ARM_DELAY_MS = 700;
   // While a waiting proposal's card is on screen it reads the proposal again this often, so it
   // follows an amend, a withdraw or a press elsewhere; at most REFRESH_MAX timed reads each time it
   // comes on screen (Approve reads it once more anyway).
   var REFRESH_EVERY_MS = 30000, REFRESH_MAX = 6;
-  var APPLYING_POLL_MS = 5000; // how often a running apply's progress is read
+  // how often a running apply's progress is read
+  var APPLYING_POLL_MS = 5000;
   // A read that fails is tried again after 2 s, 4 s, 8 s ... (at most a minute apart), up to
   // RETRY_MAX times, so a card never keeps showing buttons it could not check
   var RETRY_FIRST_MS = 2000, RETRY_LAST_MS = 60000, RETRY_MAX = 6;
   // This card's own number among the cards drawn for its proposal in this chat (the result that
   // drew it says so); a read that names a higher one means a newer card is below
   var mySeq = 0, stepped = false;
-  var pressedHere = false; // this card's own Approve or Apply all decided it: it keeps the outcome
+  // this card's own Approve or Apply all decided it: it keeps the outcome
+  var pressedHere = false;
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
   var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel;
@@ -325,7 +329,8 @@ button.danger:disabled{color:var(--red)}
   }
 
   function render(result) {
-    uncheckedOk = false; // a new drawing is checked afresh
+    // a new drawing is checked afresh
+    uncheckedOk = false;
     var sc = result.structuredContent || {};
     if (sc.state && sc.state !== "pending") clearNotSent();
     var meta = result._meta || {};
@@ -422,12 +427,15 @@ button.danger:disabled{color:var(--red)}
     $("rows").replaceChildren(); $("actions").replaceChildren();
     $("also").className = "also hidden"; clearNotSent(); release();
     var st = $("state");
-    B.label(st, newer(sc0, sc) ? "Replaced" : "Shown below", "replaced", "arrows");
+    // "Older card", never "Replaced": a replaced proposal is its own state (one change replaced by
+    // another), and this card's change was only updated or drawn again below
+    B.label(st, newer(sc0, sc) ? "Older card" : "Shown below", "replaced", "arrows");
     $("risk").className = "badge risk hidden"; $("nopress").className = "nopress hidden";
     setStatus(newer(sc0, sc) ? STEPPED_NEWER_TEXT : STEPPED_AGAIN_TEXT, "");
     reportSize();
   }
-  var sc0 = {}; // the proposal as this card was first drawn (for its version)
+  // the proposal as this card was first drawn (for its version)
+  var sc0 = {};
   // The card's own read names the card's number, so an older card is handed no approval code.
   // A card drawn before card numbers names none, and the gateway counts it as 0: older than any
   // card that has a number.
@@ -457,7 +465,7 @@ button.danger:disabled{color:var(--red)}
     if (p.result && p.result.deck_url) keep.result = { deck_url: p.result.deck_url };
     return keep;
   }
-  var STEPPED_NEWER_TEXT = "Replaced by a newer version below. Use the newest card for this change.";
+  var STEPPED_NEWER_TEXT = "This change was updated; the newest card is below. Use that one.";
   var STEPPED_AGAIN_TEXT = "This change is shown again in a newer card below. Use that one.";
   // No more timed reads, retries or on-screen checks: the card has nothing left to follow.
   function stopWatching() {
@@ -554,7 +562,8 @@ button.danger:disabled{color:var(--red)}
           render({ structuredContent: Object.assign({}, p, sc), _meta: codesMeta() });
           return;
         }
-        if (sc.state === p.state) return; // still withdrawn or replaced
+        // still withdrawn or replaced
+        if (sc.state === p.state) return;
         askWhy(false);
         approval = null;
         render({ structuredContent: sc, _meta: {} });
@@ -1024,7 +1033,8 @@ button.danger:disabled{color:var(--red)}
                 var p2 = (r2 && r2.structuredContent) || {};
                 if (proposal !== drawn) return;
                 if (p2.state) render({ structuredContent: p2, _meta: (r2 && r2._meta) || {} });
-                else render({ structuredContent: drawn, _meta: {} }); // unread: the review page
+                // unread: the review page
+                else render({ structuredContent: drawn, _meta: {} });
                 setStatus(p2.state === "pending" ? UPDATED_TEXT : String(msg), "err");
               })
               .catch(function () {
@@ -1085,7 +1095,8 @@ button.danger:disabled{color:var(--red)}
   B.start("Proposal card", function (params) {
     var first = (params && params.structuredContent) || {};
     mySeq = Number(first.card_seq) || 0; sc0 = first;
-    if (stepped) return; // a newer card is below: the host showing this one again changes nothing
+    // a newer card is below: the host showing this one again changes nothing
+    if (stepped) return;
     render(params); refresh();
   }, {
     connectError: "This card could not connect to the chat. Use the review page in your browser."

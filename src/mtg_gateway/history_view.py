@@ -912,6 +912,10 @@ HISTORY_CSS = (
 .hy-table .act .acts form{display:contents}
 .hy-table .act .acts .btn,.hy-table .act .acts button{margin:0}
 .hy-table .title .deck a{font-weight:400}
+/* the deck name is its own way to go (the row opens its details): a 44 px tap target on a phone,
+   padded out and pulled back in so the row keeps its height */
+@media (pointer:coarse),(max-width:599px){.hy-table .title a.t{display:inline-block;padding:13px 0;
+  margin:-13px 0}}
 .hy-table .group.hy-group{grid-template-columns:minmax(0,1fr) auto}
 .hy-table .ui-lbl + .ui-lbl{margin-left:.25rem}
 .hy-table .th .hy-sort{display:inline-flex;align-items:center;gap:.2rem}

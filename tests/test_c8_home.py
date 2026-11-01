@@ -32,14 +32,25 @@ def _client(server: Server) -> httpx.Client:
     return httpx.Client(base_url=server.base, cookies={"mtg_session": server.sign_in()})
 
 
+RUNNING = [
+    {
+        "report_id": "rep_a",
+        "deck_id": "42",
+        "deck_name": "Liesa <b>",
+        "progress": "Forge has played 2 of 5 games",
+    },
+    {"report_id": "rep_b", "deck_id": "7", "deck_name": "Aesi", "progress": "waiting for Forge"},
+]
+
+
 def test_needs_you_shows_only_what_waits() -> None:
-    nothing = home.needs_you_html(pending=0, board=[], forge_running=0, watch_hits=[], linked=False, now=NOW)
+    nothing = home.needs_you_html(pending=0, board=[], running=[], watch_hits=[], linked=False, now=NOW)
     assert nothing == ""
     rows = [{"deck_id": "42", "created_at": NOW - 3600, "expires_at": NOW + 7200, "status": "pending"}]
     out = home.needs_you_html(
         pending=1,
         board=rows,
-        forge_running=2,
+        running=RUNNING,
         watch_hits=["Mana Crypt is below your $150.00"],
         linked=True,
         now=NOW,
@@ -48,11 +59,17 @@ def test_needs_you_shows_only_what_waits() -> None:
     assert "<li class=accent>" in out and "<b>1 proposal</b> waiting for you" in out
     assert "1 on 1 deck · oldest 1 h · next expires in 2 h" in out
     assert "href='/proposals'" in out and ">Review it</a>" in out and out.count("btn-primary") == 1
-    two = home.needs_you_html(pending=2, board=rows, forge_running=0, watch_hits=[], linked=True, now=NOW)
+    two = home.needs_you_html(pending=2, board=rows, running=[], watch_hits=[], linked=True, now=NOW)
     assert "<b>2 proposals</b> waiting for you" in two and ">Review them</a>" in two
-    plain = home.needs_you_html(pending=1, board=rows, forge_running=0, watch_hits=[], linked=False, now=NOW)
+    plain = home.needs_you_html(pending=1, board=rows, running=[], watch_hits=[], linked=False, now=NOW)
     assert ">Review it</a>" in plain and "btn-primary" not in plain  # Link Archidekt keeps the orange
-    assert "<b>2 Forge tests</b> running" in out and ">Open reports</a>" in out
+    # several tests going: each deck and how far it is, the animated spinner, the Reports list
+    assert (
+        "<b>2 tests running</b>: Liesa &lt;b&gt;, Forge has played 2 of 5 games; Aesi, waiting for Forge."
+        in out
+    )
+    assert "<span class='ui-spin' aria-hidden='true'></span>" in out and ">Open reports</a>" in out
+    assert "Forge test" not in out and "lands under Reports" not in out
     # the alerts row waits for the script's count (hidden until it is above zero)
     assert (
         "<li data-bell-row hidden>" in out
@@ -60,8 +77,13 @@ def test_needs_you_shows_only_what_waits() -> None:
     )
     assert "<b>1 watched card</b> past a price alert" in out and "Mana Crypt is below your $150.00" in out
     # not linked: no alerts row (the bell reads Archidekt)
+    one = home.needs_you_html(pending=0, board=[], running=RUNNING[:1], watch_hits=[], linked=False, now=NOW)
+    assert "data-bell-row" not in one
+    # one test: its own words and the way to that report, not the list
+    assert "<b>1 test running</b>: Forge has played 2 of 5 games." in one and "ui-spin" in one
+    assert "href='/history/reports/rep_a'" in one and ">Open the report</a>" in one and "/reports'" not in one
     assert "data-bell-row" not in home.needs_you_html(
-        pending=0, board=[], forge_running=1, watch_hits=[], linked=False, now=NOW
+        pending=0, board=[], running=RUNNING[:1], watch_hits=[], linked=False, now=NOW
     )
     # with something else waiting, the section shows from the start
     assert "<section class='needs' aria-labelledby='needs-h'>" in out
@@ -71,7 +93,7 @@ def test_no_needs_you_heading_when_nothing_waits() -> None:
     """Review F8: a linked member with nothing waiting got a "Needs you" heading over nothing (the
     alerts row is hidden until bell.js counts above zero). With only that row, the whole section
     starts hidden and bell.js shows it with the row."""
-    only_bell = home.needs_you_html(pending=0, board=[], forge_running=0, watch_hits=[], linked=True, now=NOW)
+    only_bell = home.needs_you_html(pending=0, board=[], running=[], watch_hits=[], linked=True, now=NOW)
     assert only_bell.startswith("<section class='needs' aria-labelledby='needs-h' data-bell-section hidden>")
     assert "<li data-bell-row hidden>" in only_bell
     js = (Path(home.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
@@ -93,7 +115,7 @@ def test_the_needs_you_section_follows_the_alert_count_in_a_browser() -> None:
     exe = _chromium_path()
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
-    section = home.needs_you_html(pending=0, board=[], forge_running=0, watch_hits=[], linked=True, now=NOW)
+    section = home.needs_you_html(pending=0, board=[], running=[], watch_hits=[], linked=True, now=NOW)
     bell_js = (Path(home.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
