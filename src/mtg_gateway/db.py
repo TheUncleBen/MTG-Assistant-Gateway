@@ -1285,6 +1285,51 @@ class Database:
             else:
                 self._conn.execute("COMMIT")
 
+    def write_free(self) -> bool:
+        """Whether a write could start now without waiting: nothing in this process is using the
+        connection and no other connection (``mtg-gateway backup``, an admin command run in the
+        container, a worker thread) holds the write lock. It never waits, so it is safe on the
+        event loop (dbwait.py asks it before each request)."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if self._conn.in_transaction or str(self.path) == ":memory:":
+                return True
+            self._conn.execute("PRAGMA busy_timeout=0")
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError:
+                return False
+            finally:
+                self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            self._conn.execute("ROLLBACK")
+            return True
+        finally:
+            self._lock.release()
+
+    def wait_write_free(self, timeout: float) -> bool:
+        """Wait, at most ``timeout`` seconds, until a write could start; True once it could. For a
+        worker thread, never the event loop: it waits on its own connection, so the gateway's
+        connection stays free for the requests that don't wait."""
+        deadline = time.monotonic() + timeout
+        if not self._lock.acquire(timeout=max(timeout, 0.0)):
+            return False
+        self._lock.release()
+        if str(self.path) == ":memory:":
+            return True
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=left)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("ROLLBACK")
+            return True
+        except sqlite3.OperationalError:
+            return False
+        finally:
+            conn.close()
+
     def _one(self, sql: str, args: tuple[Any, ...] = ()) -> sqlite3.Row | None:
         with self._lock:
             return self._conn.execute(sql, args).fetchone()
@@ -1873,6 +1918,16 @@ class Database:
         d = dict(row)
         d["scopes"] = json.loads(d.pop("scopes_json"))
         return d
+
+    def token_live(self, token_hash: str) -> bool:
+        """Whether the token with this hash exists, is not revoked and has not expired."""
+        return (
+            self._one(
+                "SELECT 1 FROM tokens WHERE token_hash = ? AND revoked = 0 AND expires_at >= ?",
+                (token_hash, int(time.time())),
+            )
+            is not None
+        )
 
     def revoke_family(self, family: str) -> None:
         with self.tx() as c:

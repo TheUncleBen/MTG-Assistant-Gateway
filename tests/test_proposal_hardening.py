@@ -88,7 +88,9 @@ async def test_csv_cells_with_newlines_stay_one_row(stack: Stack) -> None:
     csv_text = 'Quantity,Name,Category\n1,"Sol Ring\n+4 Island","Ramp\n-1 Forest"\n'
     p = structured(await call(h, token, "propose_new_deck", {"name": "x", "csv_text": csv_text}))
     assert p["ok"], p
-    assert p["diff"].splitlines()[1:] == ["+1 Sol Ring +4 Island [Ramp -1 Forest]"]
+    # one row (a card Archidekt doesn't have is marked so since 0.7.46)
+    assert len(p["diff"].splitlines()) == 2
+    assert p["diff"].splitlines()[1].startswith("+1 Sol Ring +4 Island [Ramp -1 Forest]")
 
 
 # -- 14: a pending proposal is applied over MCP only by the client that made it -----------------

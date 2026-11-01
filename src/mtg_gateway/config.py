@@ -87,12 +87,35 @@ def _ntfy_url_env(name: str) -> str | None:
     return raw
 
 
+# The spellings an on/off variable may have (any case). Anything else stops start-up: a typo such
+# as MTG_WRITES_ENABLED=ture used to start the gateway with that feature off (0.7.46 audit PA-16).
+BOOL_TRUE = ("1", "true", "yes", "on")
+BOOL_FALSE = ("0", "false", "no", "off")
+# the on/off variables a stack may set (each read with _bool_env)
+BOOL_ENV = (
+    "MTG_ALLOW_ANY_IDP_USER",
+    "MTG_APPLY_IN_CHAT",
+    "MTG_ARCHIDEKT_BACKUPS",
+    "MTG_CIMD_ENABLED",
+    "MTG_SCAN_ART_ENABLED",
+    "MTG_UPDATE_CHECK",
+    "MTG_WATCHLISTS_ENABLED",
+    "MTG_WRITES_ENABLED",
+)
+
+
 def _bool_env(name: str, default: bool) -> bool:
-    """1/true/yes (any case) is True, anything else False; unset or empty is ``default``."""
+    """true/false, 1/0, yes/no or on/off (any case); unset or empty is ``default``. Anything else
+    stops start-up with the variable's name."""
     raw = _env(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
-    return raw.strip().lower() in ("1", "true", "yes")
+    value = raw.strip().lower()
+    if value in BOOL_TRUE:
+        return True
+    if value in BOOL_FALSE:
+        return False
+    raise ConfigError(f"{name} must be true or false (or 1/0, yes/no, on/off), not {raw.strip()!r}")
 
 
 def _groups_claim_env(name: str, default: str) -> str:
@@ -408,7 +431,7 @@ def load_settings() -> Settings:
     # application binding missed in Authentik opens the gateway to every IdP user). An empty
     # group must be an explicit choice.
     required_group = (_env("MTG_REQUIRED_GROUP", "") or "").strip() or None
-    allow_any = (_env("MTG_ALLOW_ANY_IDP_USER", "false") or "false").strip().lower() in ("1", "true", "yes")
+    allow_any = _bool_env("MTG_ALLOW_ANY_IDP_USER", False)
     if required_group is None and not allow_any:
         raise ConfigError(
             "MTG_REQUIRED_GROUP is empty: set it to the identity provider group whose members may "
@@ -484,9 +507,78 @@ def load_settings() -> Settings:
     return settings
 
 
+# Every variable an earlier release read and this one does not (from the releases' code; the
+# update notes in docs/UPGRADING.md and the CHANGELOG say where each went). One left in a stack
+# with a value is warned about at start (0.7.46 audit PA-10): most tuning settings are on the
+# admin Settings page now, and a stack value for one of them does nothing.
+RETIRED_ENV = (
+    "MTG_ALLOWED_HOSTS",
+    "MTG_ANDROID_ASSETLINKS",
+    "MTG_ANDROID_PACKAGE",
+    "MTG_APPLY_MIN_AGE_SECONDS",
+    "MTG_APPLY_VIA_MCP",
+    "MTG_APPROVAL_MODE_DEFAULT",
+    "MTG_APPROVAL_MODE_MAX",
+    "MTG_APP_DIR",
+    "MTG_ARCHIDEKT_BACKOFF_BASE",
+    "MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT",
+    "MTG_ARCHIDEKT_BACKUP_COPIES",
+    "MTG_ARCHIDEKT_BACKUP_FOLDER",
+    "MTG_ARCHIDEKT_CACHE_SECONDS",
+    "MTG_ARCHIDEKT_CALLS_PER_10_MIN",
+    "MTG_ARCHIDEKT_CARD_CACHE_SECONDS",
+    "MTG_ARCHIDEKT_MAX_PER_MINUTE",
+    "MTG_ARCHIDEKT_MIN_INTERVAL",
+    "MTG_ARCHIDEKT_RETRIES",
+    "MTG_AUTHENTIK_API_URL",
+    "MTG_AUTO_APPLY_MAX_ROWS",
+    "MTG_AUTO_BIG_EDIT_ROWS",
+    "MTG_BACKUP_HOUR_UTC",
+    "MTG_BACKUP_KEEP_DAYS",
+    "MTG_CHATGPT_NAME",
+    "MTG_FORGE_GAMES",
+    "MTG_FORGE_PARALLEL_GAMES",
+    "MTG_LISTEN_HOST",
+    "MTG_LISTEN_PORT",
+    "MTG_LOG_LEVEL",
+    "MTG_PLUGIN_DIR",
+    "MTG_PRICE_HISTORY_DAYS",
+    "MTG_PRICE_HOUR_UTC",
+    "MTG_PROPOSAL_EXPIRY_DAYS",
+    "MTG_SCAN_AMBIGUITY_MARGIN",
+    "MTG_SCAN_ART_GALLERY_IDLE_DAYS",
+    "MTG_SCAN_ART_IMAGES_PER_HOUR",
+    "MTG_SCAN_ART_IMAGE_INTERVAL",
+    "MTG_SCAN_ART_MAX_DISTANCE",
+    "MTG_SCAN_ART_MAX_GALLERIES",
+    "MTG_SCAN_ART_MAX_PRINTINGS",
+    "MTG_SCAN_ART_MIN_MARGIN",
+    "MTG_SCAN_AUTO_ADD_CONFIDENCE",
+    "MTG_SCAN_FOIL_STAR_INK_RATIO",
+    "MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY",
+    "MTG_SCAN_FUZZY_MIN_SIMILARITY",
+    "MTG_SCAN_GLARE_RATIO",
+    "MTG_SCAN_MIN_OCR_CONFIDENCE",
+    "MTG_SCRYFALL_LOOKUP_INTERVAL",
+    "MTG_SNAPSHOTS_PER_DECK",
+    "MTG_WATCH_MAX_CARDS",
+    "MTG_WATCH_MAX_DECKS",
+)
+
+
 def _warn_retired(settings: Settings) -> None:
-    """A WARNING at start for a removed variable that still has a value: the deployment looks as
+    """A WARNING at start for each removed variable that still has a value: the deployment looks as
     it did, but the setting no longer does anything (security review 3, R3-01)."""
+    log = logging.getLogger(__name__)
+    for name in RETIRED_ENV:
+        if (os.environ.get(name) or "").strip():
+            log.warning(
+                "%s is set but no longer used: the gateway ignores it. Most settings like it are on "
+                "the admin Settings page now; set it there if you need it, then delete %s from your "
+                "variables (docs/UPGRADING.md lists where each one went).",
+                name,
+                name,
+            )
     if (os.environ.get("MTG_REAUTH_INTERVAL") or "").strip():
         days = settings.refresh_token_ttl / 86400
         logging.getLogger(__name__).warning(

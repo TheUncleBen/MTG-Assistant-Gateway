@@ -267,7 +267,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             result = await state.decks.apply(sub, pid, via="browser")
         except DeckError as exc:
-            code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
+            code = _err_code(exc, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
         if result.get("state") == "applying":  # a large one carries on; its page shows the progress
             return RedirectResponse(f"/proposals/{pid}?ok=applying", status_code=303)
@@ -561,6 +561,7 @@ EVENT_LABELS = {
     "tokens_revoked": "An assistant's access was revoked",
     "refresh_rejected": "An assistant's expired access was refused",
     "refresh_reuse_detected": "A reused assistant token was refused",
+    "refresh_retry_answered": "An assistant's repeated sign-in renewal was answered",
     "code_reuse_detected": "A reused sign-in code was refused",
     "proposal_created": "Proposal created",
     "proposal_applied": "Proposal applied",

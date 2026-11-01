@@ -132,10 +132,43 @@ async def test_save_changes_stays_on_deck_settings_with_a_saved_note(stack: Stac
         await b.aclose()
 
 
-async def test_a_write_archidekt_never_answered_draws_what_the_deck_shows_now(stack: Stack) -> None:
+async def test_a_write_archidekt_took_but_never_answered_is_saved(stack: Stack) -> None:
+    """0.7.46 audit PA-3: Archidekt took the write but never answered. The deck read after it shows
+    the change, so the save is saved, as on every other way a change is applied."""
+    stack.ark.timeout_card_writes = True
+    b = await linked(stack)
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 2}]},
+        )
+        d = r.json()
+        assert r.status_code == 201 and d["ok"] and d["applied"], r.text
+        assert d["result"]["result"]["answer_lost"] is True
+        assert [(x["name"], x["qty"]) for x in d["rows"]] == [("Cultivate", 2)]
+        assert len(stack.ark.patches) == 1  # sent once
+    finally:
+        await b.aclose()
+
+
+async def test_a_write_archidekt_never_answered_draws_what_the_deck_shows_now(
+    stack: Stack, monkeypatch
+) -> None:
     """0.7.46 audit D-04: a write that timed out was reported as not saved and rolled back on the
-    page, though it may have landed. The answer says the write may have changed the deck and
-    carries the rows as Archidekt has them, in plain words (no exception names)."""
+    page, though it may have landed. When the apply could not read the deck after it, the answer
+    says the write may have changed the deck and carries the rows as Archidekt has them (read
+    again for the page), in plain words (no exception names)."""
+    import mtg_gateway.decks as decks_mod
+
+    async def unreadable(read, unanswered):  # the apply's own read after the write fails
+        if unanswered is None:
+            return await read
+        read.close()
+        raise unanswered
+
+    monkeypatch.setattr(decks_mod, "_read_after", unreadable)
     stack.ark.timeout_card_writes = True
     b = await linked(stack)
     try:
@@ -157,9 +190,10 @@ async def test_a_write_archidekt_never_answered_draws_what_the_deck_shows_now(st
 
 
 async def test_a_write_archidekt_refused_shows_the_rows_as_they_are(stack: Stack) -> None:
-    """Archidekt answered the sent write with a refusal: the gateway treats a sent write as one
-    that may have landed, so the answer carries the rows too, which show the count unchanged (the
-    page then says the change was not saved, with Try again). The words name no status code."""
+    """Archidekt answered the sent write with a 5xx, so it might have landed: the apply reads the
+    deck again, which shows the count unchanged, so the answer is the plain "not saved" (the page
+    says so, with Try again) and the stored result says nothing changed. The words name no status
+    code."""
     stack.ark.fail_card_writes = True
     b = await linked(stack)
     try:
@@ -171,8 +205,17 @@ async def test_a_write_archidekt_refused_shows_the_rows_as_they_are(stack: Stack
         )
         d = r.json()
         assert r.status_code != 201 and d["ok"] is False, r.text
-        assert d["may_have_changed"] is True
-        assert [(x["name"], x["qty"]) for x in d["rows"]] == [("Cultivate", 1)]
+        assert "may_have_changed" not in d, d
+        assert (
+            stack.ark.decks[42]
+            and sum(
+                c["quantity"]
+                for c in stack.ark.decks[42]["cards"]
+                if c["card"]["oracleCard"]["name"] == "Cultivate"
+            )
+            == 1
+        )
+        assert d["message"] == "Archidekt had a problem answering.", d["message"]
         assert "503" not in d["message"] and "HTTP" not in d["message"], d["message"]
     finally:
         await b.aclose()
