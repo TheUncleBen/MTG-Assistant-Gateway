@@ -110,9 +110,10 @@ name per thing.
   $1.50.”).
 - Pull to refresh in the Android app, on a deck page and on Home, My decks, Binder, Pinned cards,
   the Watchlist, Proposals, History, Reports, Alerts, Precons, the search pages, Activity and the
-  forum. The browser's Reload reads Archidekt again on My decks, Binder, Pinned cards, the lists,
-  Alerts, the forum and profiles instead of the copy kept from the last minute or two, and so does
-  a pull on those of them that offer it (Binder › Lists, each list and profiles have no pull).
+  forum, Binder › Lists, each of your Archidekt lists and member profiles. The browser's Reload
+  reads Archidekt again on My decks, Binder, Pinned cards, the lists, Alerts, the forum and profiles
+  instead of the copy kept from the last minute or two, and so does a pull. A pull on a deck page
+  always loads the deck fresh from Archidekt; a second pull within a few seconds reuses that read.
 - History can make a new deck from a deleted deck's snapshot, for you to review and apply.
 - History lists the changes to your Archidekt lists, with the list as it was just before.
 - `check_new_deck`: an assistant checks a new deck before proposing it, with no card in the chat.
@@ -286,8 +287,9 @@ name per thing.
   strip, and + and − add to what Archidekt holds.
 - The Binder's name box searches the whole Binder as you type, and the Binder reads your
   cards and your profile together, so the page comes sooner.
-- The Watchlist stays fast with large lists, with Load more; members may watch up to 5,000 cards
-  and 100 decks. Add takes up to 9,999 copies, and a price alert opens its row.
+- The Watchlist stays fast with large lists, with Load more, and opening it from the Binder or
+  after an assistant's request doesn't work the whole list out again; members may watch up to
+  5,000 cards and 100 decks. Add takes up to 9,999 copies, and a price alert opens its row.
 - A card watched by name alone follows its cheapest printing and says which printing its price is
   for, on the page and in `list_watchlist`.
 - Home greets you by name, and its search suggests your own decks first.
@@ -430,6 +432,10 @@ name per thing.
   mark more reliably. A stray letter read from the title bar's edge no longer breaks the name.
 - A failed scan says whether the card's edges or its name were the problem; a HEIC photo says the
   browser can't open it and suggests JPEG or the camera.
+- In the Android app, a photo from the camera reaches the scan page whichever way the phone's
+  WebView sends it, and the app hands it over directly if that still fails. If it never arrives,
+  the camera panel says “The app couldn’t hand the photo to the page. Tap Shoot to try again.”
+  instead of “Scan failed: photo not loaded”.
 - A browser window of middle width with a mouse has search again; the top bar's search box fills
   its space, and its suggestions on a phone are as wide as the box.
 - The bell says “You're signed out” with a Sign in button when you signed out in another tab.
