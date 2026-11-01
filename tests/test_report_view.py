@@ -235,6 +235,42 @@ def test_markdown_and_html_exports() -> None:
     assert "<title>Deck report: Immortal Reckoning</title>" in doc
 
 
+AESI = "Aesi, Tyrant of Gyre Strait"
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        f"Commander: {AESI} | 5 games",  # the research service's own shape (fixtures)
+        f"Commander: 1 {AESI} (cmr) 365 *F* [Commander] | 5 games",  # the fake's: the deck's first line
+        f"Commander: 1x {AESI} (CMR) 365 [Commander{{top}}] | 5 games",
+        f"Commander: 1 {AESI} | 5 games",
+        f"Commander: {AESI} // Back Face | 5 games",
+    ],
+)
+def test_the_commander_is_a_card_name_whatever_line_the_research_service_echoes(header: str) -> None:
+    """Full review F9: after the solo test, the report's header read "Commander 1 Aesi, Tyrant of
+    Gyre Strait (cmr) 365 *F* [Commander]", the deck line the research service echoed back."""
+    g = rv.parse_goldfish({"tool": "goldfish_run", "ok": True, "text": f"# Goldfish run\n{header}"})
+    assert rv.front_face(g["commander"]) == AESI, g["commander"]
+    page = rv.report_body_html(report(goldfish=f"# Goldfish run\n{header}", stats={"card_count": 100}))
+    assert f"<span class='k'>Commander</span> {AESI}</span>" in page
+
+
+def test_the_report_header_names_the_gateways_own_commander_first() -> None:
+    """The deck's commander as the gateway read it wins over the research service's header."""
+    s = rv.report_sections(
+        report(
+            goldfish="# Goldfish run\nCommander: 1 Aesi (cmr) 365 | 5 games",
+            stats={"card_count": 100, "commanders": [AESI]},
+        )
+    )
+    assert s["commander"] == AESI
+    # without the gateway's own, the header's name is used, cleaned
+    s = rv.report_sections(report(goldfish=f"# Goldfish run\nCommander: 1 {AESI} (cmr) 365 | 5 games"))
+    assert s["commander"] == AESI
+
+
 @pytest.mark.parametrize(
     "junk",
     [

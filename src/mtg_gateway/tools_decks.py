@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context
-from mcp_types import CallToolResult
+from mcp_types import CallToolResult, TextContent
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import deck_stats, modes
@@ -21,6 +21,7 @@ from .approve import (
     CONFIRM_TOOL_META,
     apply_on_review_page,
     bounded,
+    waiting_text,
     with_words_note,
 )
 from .archidekt import parse_deck
@@ -742,15 +743,16 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "In an app that shows cards, every propose, amend and combine call puts a card in the "
             "chat, a refused one too. Plan the whole edit first, then check it here: no card, nothing "
-            "saved, and Archidekt is not asked (a card name may be looked up on Scryfall). Same "
-            "deck_id and changes as propose_deck_changes. Returns problems it can find without the "
-            "deck (the change list, card names that are no Magic card, no Archidekt link, too many "
-            "waiting), the deck's waiting proposals with the cards each shares with this plan, and "
-            "suggest: fix, already_waiting (duplicate_of), amend (amend: the proposal_id, version and "
-            "whole changes list of your own waiting one; amend it with that list and this plan "
-            "merged, one change per card) or propose. Anything that needs the deck itself (a card "
-            "not in it, a deck that is not the user's or does not exist, a deck changed since you "
-            "read it) is found only when you propose."
+            "saved. Same deck_id and changes as propose_deck_changes. Returns problems it can find "
+            "without the deck (the change list, card names that are no Magic card, an added card "
+            "Archidekt doesn't have (missing_on_archidekt) or that couldn't be checked "
+            "(unchecked_names), no Archidekt link, too many waiting), the deck's waiting proposals with "
+            "the cards each shares with this plan, and suggest: fix (next_step says how), "
+            "already_waiting (duplicate_of) or propose (adds_to names your waiting change it joins). A "
+            "card name is looked up on Scryfall, and on Archidekt only when that can't tell, as the "
+            "proposal would. Anything that needs the deck itself (a card not in it, a deck that is not "
+            "the user's or does not exist, a deck changed since you read it) is found only when you "
+            "propose."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
     )
@@ -761,7 +763,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         changes: Annotated[
             list[DeckChange],
             Field(
-                description=f"The planned changes, all of them: at most {MAX_CHANGES}.",
+                description=f"The planned changes, all of them, as for propose_deck_changes: at most "
+                f"{MAX_CHANGES}.",
                 max_length=MAX_CHANGES,
             ),
         ],
@@ -956,6 +959,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return _card_result(_tool_error(exc), None)
         res = _card_result(data, None)
+        # the model reads it as text, like a proposal; the card reads the structured content
+        res.content = [TextContent(type="text", text=waiting_text(data))]
         if meta:
             res.meta = meta
         return res
@@ -1335,7 +1340,8 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 # the reason the member typed on the card, kept with the rejection
                 why = str(reason)[:REJECT_REASON_MAX] if isinstance(reason, str) else None
                 return _card_result(
-                    {"ok": True, **state.decks.reject(sub, proposal_id, via="app", reason=why)}, None
+                    _closed_at({"ok": True, **state.decks.reject(sub, proposal_id, via="app", reason=why)}),
+                    None,
                 )
             shown = None if shown_status is None else str(shown_status)[:20]
             applied = await state.decks.apply(

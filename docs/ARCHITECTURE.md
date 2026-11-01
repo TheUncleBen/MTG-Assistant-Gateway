@@ -303,7 +303,7 @@ For the exact devices and plans tested, see
   still snapshots the deck first.
   The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
   `static/cards/proposal-card.html`): every `propose_*` tool (and
-  `amend_proposal`, `combine_proposals`, `apply_proposal`) names it in
+  `amend_proposal` and `combine_proposals`; `apply_proposal` draws none) names it in
   `_meta.ui.resourceUri`, a host that renders MCP Apps shows it with the
   result, and each card is numbered among its proposal's cards in that app's
   chat (`card_seqs`, schema 16): a card that reads a higher number steps aside

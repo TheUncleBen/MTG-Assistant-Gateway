@@ -5228,6 +5228,29 @@ class DeckService:
             )
         return mark_name_checks(rows, missing, unchecked), note
 
+    async def _look_up_unjudged(self, sub: str, adds: list[Change]) -> tuple[list[str], list[str]]:
+        """check_deck_changes' names the catalog can't judge, looked up on Archidekt as
+        _check_names does (the same limits, the answers remembered for the proposal): the names
+        Archidekt doesn't have, and the names nothing could check."""
+        missing: list[str] = []
+        unchecked: list[str] = []
+        asked, stop = 0, False
+        deadline = time.monotonic() + CHECK_SECONDS
+        for ch in adds:
+            found = self._printing_cached(ch)
+            if found is None and not stop and asked < CHECK_LOOKUPS:
+                asked += 1
+                try:
+                    async with asyncio.timeout(max(0.1, deadline - time.monotonic())):
+                        found = await self._lookup_printing(sub, ch)
+                except (DeckError, TimeoutError):
+                    stop = True  # Archidekt is slow or failing: the rest stay unchecked
+            if found == NOT_ON_ARCHIDEKT:
+                missing.append(ch.card_name)
+            elif found is None:
+                unchecked.append(ch.card_name)
+        return missing, unchecked
+
     def keep_no_backup(self, sub: str, proposal_id: str) -> None:
         """Record on a member's own save (the deck page, Card search, the deck editor with its
         backup box unticked) that it makes no backup copy on Archidekt, so an apply later (writes
@@ -5424,7 +5447,7 @@ class DeckService:
                 {
                     "changed_by": self._creator_label(row["amended_by_client"]),
                     "changed_by_apps": self.changed_by_apps(sub, row),
-                    "what_changed": str(row.get("version_note") or ""),
+                    "what_changed": board.member_arrows(row.get("version_note")),
                 }
                 if int(row.get("version") or 1) > 1 and row.get("amended_by_client")
                 else {}
@@ -7985,7 +8008,9 @@ class DeckService:
         for line in lines_:
             row = self.db.get_proposal(line["id"], sub) or {}
             lines = str(line.get("diff_text") or "").splitlines()
-            summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+            summary = board.member_arrows("; ".join(lines[:3])) + (
+                f" (+{len(lines) - 3} more)" if len(lines) > 3 else ""
+            )
             amender = line.get("amended_by_client")
             out.append(
                 {
@@ -8007,7 +8032,7 @@ class DeckService:
                             "changed_by": self._creator_label(amender),
                             "changed_by_apps": self.changed_by_apps(sub, row or line),
                             "changed_at": line.get("amended_at"),
-                            "what_changed": line.get("version_note"),
+                            "what_changed": board.member_arrows(line.get("version_note")) or None,
                         }
                         if amender
                         else {}
@@ -8559,12 +8584,23 @@ class DeckService:
                         problems.append({"error": one.kind, "message": message})
         unknown: list[str] = []
         adds = list(dict.fromkeys(c.card_name for c in names_of if c.action == "add"))
+        found: dict[str, bool | None] = {}
         if adds and self.known_cards is not None:
             try:
                 found = await self.known_cards(adds)
                 unknown = [n for n in adds if found.get(n) is False]
             except Exception:
                 logger.exception("card-name check failed")
+        # A name the catalog can't judge is asked of Archidekt, as the proposal would (F5)
+        # (not when the plan is refused already, or there is no link to ask with)
+        unjudged: dict[str, Change] = {}
+        for c in names_of:
+            if c.action == "add" and found.get(c.card_name) is None:
+                unjudged.setdefault(c.card_name, c)
+        missing: list[str] = []
+        unchecked: list[str] = []
+        if unjudged and not problems:
+            missing, unchecked = await self._look_up_unjudged(sub, list(unjudged.values()))
         if unknown:
             meant: dict[str, str] = {}
             if self.suggest_cards is not None:
@@ -8578,6 +8614,27 @@ class DeckService:
                     "message": no_card_called(unknown, in_deck=True, meant=meant),
                     "unknown_cards": unknown,
                     **({"did_you_mean": meant} if meant else {}),
+                }
+            )
+        if missing:
+            problems.append(
+                {
+                    "error": "missing_on_archidekt",
+                    "message": "Archidekt doesn't have "
+                    + ", ".join(f"“{n}”" for n in missing)
+                    + ", so a proposal would leave "
+                    + ("it out." if len(missing) == 1 else "them out."),
+                    "missing_on_archidekt": missing,
+                }
+            )
+        if unchecked:
+            problems.append(
+                {
+                    "error": "unchecked_names",
+                    "message": "Couldn't check that "
+                    + ", ".join(f"“{n}”" for n in unchecked)
+                    + (" is a card." if len(unchecked) == 1 else " are cards."),
+                    "unchecked_names": unchecked,
                 }
             )
         client = current_client.get()
@@ -8626,11 +8683,18 @@ class DeckService:
             "waiting_on_deck": waiting,
             **({"overlaps": overlaps} if overlaps else {}),
         }
-        if problems:
+        if problems and all(p["error"] == "unchecked_names" for p in problems):
             out["suggest"] = "fix"
             out["next_step"] = (
-                "Fix each problem first; a proposal with them would be refused (a name in "
-                "unknown_cards passes only if the deck already has it)."
+                "Check the spelling of each name in unchecked_names with scryfall_named. If it is "
+                "right, you may propose it, but the proposal is high risk and waits for the user's "
+                "own press (unless the deck already has the card)."
+            )
+        elif problems:
+            out["suggest"] = "fix"
+            out["next_step"] = (
+                "Fix each problem first; a proposal with them would be refused or high risk (a name "
+                "in unknown_cards passes only if the deck already has it)."
             )
         elif dup:
             no = (self.db.get_proposal(dup, sub) or {}).get("board_no")

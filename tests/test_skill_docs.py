@@ -190,3 +190,41 @@ def test_chatgpt_block_uses_the_glossary_and_names_the_newer_answers() -> None:
     assert "plan_first" in block
     assert "propose_account_action" in block and "propose_delete_deck" in block
     assert len(block) <= 4000
+
+
+async def test_no_guide_describes_the_cards_as_they_were_before_0_7_46(tmp_path: Path, idp: FakeIdP) -> None:
+    """Approved decision C3 (0.7.46 review): no card posts a message in the user's name, a pick
+    reaches the assistant with the user's next message, and since one waiting change per deck per
+    app check_deck_changes suggests no amend: a plan joins the app's waiting change (adds_to). After
+    an amend, the newest card shows the new version and older ones shrink to a line; apply_proposal
+    draws no card."""
+    from mtg_gateway.guide import add_guide_routes
+
+    def flat(p: Path) -> str:
+        return " ".join(p.read_text(encoding="utf-8").split())
+
+    skill = flat(SKILL_DIR / "SKILL.md")
+    connect, arch = flat(ROOT / "docs" / "CONNECT.md"), flat(ROOT / "docs" / "ARCHITECTURE.md")
+    guide = " ".join(Path(add_guide_routes.__code__.co_filename).read_text(encoding="utf-8").split())
+    caps = flat(ROOT / "docs" / "CAPABILITIES.md")
+    # a pick is read with the next message, not posted as one
+    for name, text in (("SKILL.md", skill), ("CONNECT.md", connect), ("guide.py", guide)):
+        assert "plain text message" not in text and "as text and it carries on" not in text, name
+    assert "reaches you as plain text naming the pick, with the user's next message" in skill
+    assert "reads with your next message" in connect and "which it reads with your next" in guide
+    # the check suggests fix, already_waiting or propose (adds_to), never amend
+    assert "when it suggests `amend`" not in skill and "`amend.changes`" not in skill
+    assert "`adds_to` names it: one propose call adds your plan to it" in skill
+    rows = CATALOGUE.read_text(encoding="utf-8").splitlines()
+    row = next(line for line in rows if line.startswith("| `check_deck_changes`"))
+    assert "`amend` (" not in row and "`adds_to`" in row and "no Archidekt call" not in row
+    assert "whether to amend one of its own instead" not in caps and "Archidekt not asked" not in caps
+    # the card after an amend
+    assert "after an amend, the new card shows the new version and the older cards for it shrink" in skill
+    assert "`apply_proposal`) names it" not in arch and "`apply_proposal` draws none" in arch
+    # the tool's own description says the same
+    async with running(Harness(make_settings(tmp_path), idp)) as h:
+        token = (await h.tokens_for(await h.register()))["access_token"]
+        tools = {t["name"]: t for t in sse_json(await h.mcp(token, "tools/list"))["result"]["tools"]}
+    check = tools["check_deck_changes"]["description"]
+    assert "amend (amend:" not in check and "adds_to" in check and "Archidekt is not asked" not in check
