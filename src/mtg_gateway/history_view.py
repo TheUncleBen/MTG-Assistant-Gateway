@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
-from .decks import actor_label
+from .decks import actor_label, without_tabs_note
 from .reports_page import source_label_html
 from .theme import esc as _esc
 from .theme import icon, time_html
@@ -147,12 +147,17 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
     """A change applied to a deck (not a restore): what it did, from its own summary. A sitting
     on the deck page (``session``: its edits, oldest first, sharing one snapshot) is one entry
     listing every edit."""
-    summary = str(p.get("summary") or "").strip()
+    summary = without_tabs_note(str(p.get("summary") or "")).strip()
     lead = CHANGE_WORDS.get(str(p.get("kind") or ""), "Applied a change")
     session = p.get("session") or []
-    diff = str(p.get("diff_text") or "")
+    diff = without_tabs_note(str(p.get("diff_text") or ""))
     if len(session) > 1:
-        lines = [ln for e in session for ln in str(e.get("diff_text") or "").splitlines() if ln.strip()]
+        lines = [
+            ln
+            for e in session
+            for ln in without_tabs_note(str(e.get("diff_text") or "")).splitlines()
+            if ln.strip()
+        ]
         summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
         lead = f"{len(session)} edits on the deck page"
         diff = "\n".join(lines)

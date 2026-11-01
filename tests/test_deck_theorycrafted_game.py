@@ -43,7 +43,7 @@ async def test_propose_apply_read_back_and_restore(stack: Stack) -> None:
         )
     )
     assert p["ok"] and p["kind"] == "details", p
-    assert set(p["diff"].splitlines()) == {"theorycrafted: no -> yes", "game: Any -> Arena"}, p["diff"]
+    assert set(p["diff"].splitlines()) == {"Theorycrafted: no → yes", "Game type: Any → Arena"}, p["diff"]
     a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied" and a["result"]["verified"] is True, a
     assert [u for u in ark.updates if u["deck_id"] == 42] == [
@@ -53,7 +53,7 @@ async def test_propose_apply_read_back_and_restore(stack: Stack) -> None:
     # Restore under History puts both back
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
-    assert {"theorycrafted: yes -> no", "game: Arena -> Any"} <= set(r["diff"].splitlines()), r["diff"]
+    assert {"Theorycrafted: yes → no", "Game type: Arena → Any"} <= set(r["diff"].splitlines()), r["diff"]
     a2 = await apply_any(h, token, r["proposal_id"])
     assert a2["ok"] and a2["result"]["verified"] is True, a2
     assert ark.decks[42]["theorycrafted"] is False and ark.decks[42].get("game") is None
@@ -122,7 +122,7 @@ async def test_a_new_deck_takes_both(stack: Stack) -> None:
     )
     assert p["ok"], p
     assert (
-        p["diff"].splitlines()[0] == "New standard deck 'Arena brew' (4 cards, private, theorycrafted, Arena)"
+        p["diff"].splitlines()[0] == "New standard deck “Arena brew” (4 cards, private, theorycrafted, Arena)"
     )
     a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"] is True, a

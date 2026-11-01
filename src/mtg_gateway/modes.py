@@ -331,7 +331,7 @@ CATEGORY_REASON = "changes the deck's categories"
 # The deck settings page's confirm box for a commander category change (NEW-WORDING.md)
 CATEGORY_COMMANDER_CONFIRM = (
     "Cards in a Premier category are the deck's commanders. Changing it can change which cards "
-    "Archidekt treats as the commander, the deck's legality and its colours."
+    "Archidekt treats as the commander, the deck's legality and its colors."
 )
 # ... and for a change to which cards count in the deck (Not in deck, or a rename to or from
 # Sideboard or Maybeboard): an assistant's version of either waits, so the member's own asks too
@@ -363,7 +363,7 @@ CATEGORY_WORDS = {
     "create_commander_title": "Create “{name}” as a Premier category?",
     "create_commander": (
         "Cards in a Premier category are the deck's commanders. Cards you put in it later count as "
-        "commanders, which can change the deck's legality and its colours."
+        "commanders, which can change the deck's legality and its colors."
     ),
     "create_counts_title": "Create “{name}” as a category that doesn't count?",
     "create_counts": (
@@ -372,11 +372,11 @@ CATEGORY_WORDS = {
     # after the member picks where a deleted category's cards go
     "move_commander": (
         "Cards in a Premier category are the deck's commanders. Moving these {n} cards there makes "
-        "them commanders, which can change the deck's legality and its colours."
+        "them commanders, which can change the deck's legality and its colors."
     ),
     "move_commander_one": (
         "Cards in a Premier category are the deck's commanders. Moving this card there makes it a "
-        "commander, which can change the deck's legality and its colours."
+        "commander, which can change the deck's legality and its colors."
     ),
     "move_counts": (
         "Moving these {n} cards there changes whether they count in the deck, so its card count and "

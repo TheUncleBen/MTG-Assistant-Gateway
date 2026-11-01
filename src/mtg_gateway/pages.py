@@ -46,6 +46,7 @@ from .decks import (
     commander_stays_text,
     current_client,
     custom_card_line,
+    detail_word,
     diff_of,
     row_label,
     row_line,
@@ -2115,8 +2116,8 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                 _li(
                     "chg",
                     "Restore",
-                    html.escape(f"snapshot {r.get('snapshot_id', '')}"),
-                    html.escape(f"taken {r.get('taken', '')}, {_restore_count(r)}"),
+                    html.escape(f"as the deck stood on {r.get('taken', '')}"),
+                    html.escape(_restore_count(r)),
                 )
             )
         else:
@@ -2164,7 +2165,7 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
             items.append(
                 _li(
                     "chg",
-                    str(r.get("field", "")).replace("_", " "),
+                    detail_word(r.get("field")),
                     _was_now(r.get("before", ""), r.get("after", ""))
                     + (
                         f"<br><span class='small'>{html.escape(said[0].upper() + said[1:])}</span>"

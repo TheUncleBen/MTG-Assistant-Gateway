@@ -57,7 +57,7 @@ async def test_a_new_package_is_made_with_the_new_package_request(stack: Stack) 
     token = await linked_user(stack)
     p = await _new_package(stack, token)
     assert p["diff"].startswith(
-        "New card package 'Fetches' (0 cards, private; keywords “fetchlands”, budget $$$"
+        "New card package “Fetches” (0 cards, private; keywords “fetchlands”, budget $$$"
     )
     assert not [d for d in stack.ark.decks.values() if d.get("cardPackage")]  # nothing made yet
     out = await _browser_apply(stack.h, p["proposal_id"])
@@ -215,7 +215,7 @@ async def test_package_settings_change_by_the_blocks_own_id(stack: Stack) -> Non
     )
     assert p["ok"] is True, p
     assert (
-        "package: keywords “fetchlands”, budget $$$, for Commander -> keywords “fetches”, budget any"
+        "Package: keywords “fetchlands”, budget $$$, for Commander → keywords “fetches”, budget any"
         in p["diff"]
     )
     done = await _browser_apply(stack.h, p["proposal_id"])

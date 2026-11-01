@@ -808,6 +808,36 @@ def diff_of(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+# A deck details row's field as Deck settings names it (review F14)
+DETAIL_WORDS = {
+    "name": "Deck name",
+    "format": "Format",
+    "bracket": "Commander bracket",
+    "description": "Description",
+    "private": "Private",
+    "unlisted": "Unlisted",
+    "theorycrafted": "Theorycrafted",
+    "game": "Game type",
+    "cover": "Cover image",
+    "tags": "Deck tags",
+    "folder": "Folder",
+    "package": "Package",
+}
+
+
+def detail_word(field: Any) -> str:
+    """A details row's field in words: "Game type" for ``game``."""
+    key = str(field or "")
+    return DETAIL_WORDS.get(key) or key.replace("_", " ").capitalize()
+
+
+def without_tabs_note(text: str) -> str:
+    """A change's text without the note about open Archidekt tabs: a list of changes (History,
+    Proposals, Activity) shows each change's line, and the note belongs on the change's own page
+    (review F14: it was on every entry)."""
+    return text.replace(f" {OPEN_TABS_NOTE}", "").replace(OPEN_TABS_NOTE, "")
+
+
 def row_line(r: dict[str, Any]) -> str:
     """The plain-text diff line for one review row."""
     kind = r.get("kind")
@@ -863,29 +893,29 @@ def row_line(r: dict[str, Any]) -> str:
         where = f" in folder “{r['folder']}”" if r.get("folder") else ""
         if r.get("package"):
             what = f"{r['cards']} cards{side}, {visibility}; {r['package']}"
-            return f"New card package '{r['name']}'{where} ({what})"
-        return f"New {r['format']} deck '{r['name']}'{where} ({r['cards']} cards{side}, {visibility}{more})"
+            return f"New card package “{r['name']}”{where} ({what})"
+        return f"New {r['format']} deck “{r['name']}”{where} ({r['cards']} cards{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
             n = int(r["changes"])
             count = f"{n} change{'' if n == 1 else 's'}"
-            return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({count})"
-        return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({r['rows']} rows)"
+            return f"Put the deck back as it stood on {r['taken']} ({count})"
+        return f"Put the deck back as it stood on {r['taken']} ({r['rows']} rows)"
     if kind == "description":
         after_len = int(r.get("after_len") or 0)
         if not after_len:
-            return "description: (cleared)"
+            return "Description: cleared"
         # The new text on the one diff line, so the user approves words they can read (in full on
         # the review page). clean_text keeps it to one line: it can never pose as another row.
         text = clean_text(r.get("after_text") or "")
         shown = text if len(text) <= DESCRIPTION_EXCERPT else text[: DESCRIPTION_EXCERPT - 1] + "…"
         return (
-            f'description: (changed, {after_len} chars) "{shown}"'
+            f"Description: changed, {after_len} chars: “{shown}”"
             if shown
-            else (f"description: (changed, {after_len} chars)")
+            else (f"Description: changed, {after_len} chars")
         )
     if kind == "detail":
-        line = f"{r['field']}: {r['before']} -> {r['after']}"
+        line = f"{detail_word(r.get('field'))}: {r['before']} → {r['after']}"
         said = tag_change_text(r)
         return f"{line} ({said})" if said else line
     return str(r.get("text", ""))
@@ -5662,7 +5692,7 @@ class DeckService:
     def _proposal_listed(self, sub: str, r: dict[str, Any], now: int, full: bool) -> dict[str, Any]:
         """One row of list_proposals."""
         state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
-        diff_text = str(r.pop("diff_text", None) or "")
+        diff_text = without_tabs_note(str(r.pop("diff_text", None) or ""))
         lines = diff_text.splitlines()
         summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
         if full:
@@ -10448,7 +10478,7 @@ def _current_detail(deck: Deck, key: str) -> Any:
 
 def _detail_label(key: str, value: Any) -> str:
     if key == "name":
-        return json.dumps(value, ensure_ascii=False)
+        return f"“{value}”"
     if key in ("private", "unlisted", "theorycrafted"):
         return "yes" if value else "no"
     if key == "game":
