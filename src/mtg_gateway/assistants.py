@@ -249,18 +249,6 @@ def _group(title: str, rows: list[str], foot: str = "", *, gid: str = "") -> str
     return f"<section class='ygrp'{i}>{t}<div class='rows'>{''.join(rows)}</div>{f}</section>"
 
 
-def details_row(db: Any, sub: str) -> str:
-    """Account details' one "Assistants" row (it was the Approval mode and Connected apps cards):
-    the count of connected assistants, one press from the Assistants page."""
-    n = len(connected(db, sub))
-    value = f"{n} connected" if n else "None connected"
-    return (
-        "<div class='yhub ydetails'>"
-        + _group("Assistant", [_row("Assistants", "shield", value, PAGE)], gid="apps")
-        + "</div>"
-    )
-
-
 def _app_row(a: Assistant, default: str) -> str:
     new = " <span class='ui-lbl orange'>New</span>" if a.new else ""
     mode = mode_label(a.mode) if a.mode else mode_label(default)
@@ -551,7 +539,6 @@ CSS = (
 /* a short page: one column, as wide as a phone screen at most */
 .yhub.ylone{max-width:40rem;margin:0}
 .yhub.ylone .ycols{grid-template-columns:minmax(0,1fr)}
-.yhub.ydetails{max-width:none;margin:0 0 1rem}
 .mtgbox .body form.inbox p{margin:0 0 .6rem;line-height:1.45}
 """
 )

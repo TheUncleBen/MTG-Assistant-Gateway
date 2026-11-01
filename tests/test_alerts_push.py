@@ -18,6 +18,7 @@ from .test_notify_app import OPTIONS
 
 stack_options = stack_with(OPTIONS)
 SUB = "user-1"
+N = "/account/details/notifications"
 WHO = "alice"
 
 
@@ -39,7 +40,7 @@ async def _set_up(stack: Stack, *, phone: bool = True) -> tuple[Browser, AlertWa
     await linked_user(stack)
     b = Browser(stack.h)
     await b.login("/account")
-    page = (await b.http.get("/account/details")).text
+    page = (await b.http.get(N)).text
     assert "name='on_alerts' value='1' aria-describedby='n-alerts' checked" in page  # on by default
     data = {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1", "on_reports": "1", "on_alerts": "1"}
     assert (await _post(b, data)).status_code == 303
@@ -192,7 +193,7 @@ async def test_no_phone_connected_or_switched_off_asks_archidekt_nothing(stack: 
         data = {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1"}  # alerts unticked
         await _post(b, data)
         assert notify.prefs(stack.h.db, SUB)["on_alerts"] is False
-        page = (await b.http.get("/account/details")).text
+        page = (await b.http.get(N)).text
         assert "name='on_alerts' value='1' aria-describedby='n-alerts'>" in page  # shown unticked
         await _round(watch)
         assert _calls(stack, "notificationCount") == 1
@@ -260,7 +261,7 @@ async def test_the_card_offers_the_choice_with_a_plain_hint(stack: Stack) -> Non
     b = Browser(stack.h)
     await b.login("/account")
     try:
-        card = (await b.http.get("/account/details")).text.split("id='notifications'", 1)[1]
+        card = (await b.http.get(N)).text.split("id='notifications'", 1)[1]
         card = card.split("</section>", 1)[0]
         assert "A new alert on Archidekt (a comment, a reply, a new follower)" in card
         # not linked yet: the box is there, with what it needs
