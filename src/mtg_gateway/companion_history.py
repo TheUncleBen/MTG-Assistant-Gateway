@@ -72,9 +72,6 @@ if TYPE_CHECKING:
     from .reports import ReportService
 
 
-# How long a report page waits for its deck's read before it draws the "changed since" line as a
-# placeholder that report.js fills (the page never waits on a slow Archidekt).
-CHANGES_WAIT = 0.6
 RESTORE_NO_LIST = (
     "This report was made before reports kept the list they played, or it is not of one of your decks, "
     "so there is no list to put back."
@@ -652,7 +649,8 @@ def add_history_routes(
         who = asked_by(r, state.db.client_names({client}) if client else {})
         by_html = ui.app_chip(who, client_id=str(client)) if who else ""
         tested = reports.tested(sub, rid)
-        changes = await _changes_html(sub, r, tested, wait=CHANGES_WAIT, csrf=_csrf(s, sid) or "")
+        # never waits on Archidekt: the deck as its page just read it, else the placeholder report.js fills
+        changes = await _changes_html(sub, r, tested, wait=0.0, csrf=_csrf(s, sid) or "")
         prev = reports.previous(sub, rid)
         pair = reports.pair_of(sub, rid)
         body = report_page_html(
@@ -689,26 +687,31 @@ def add_history_routes(
         sub: str, r: dict[str, Any], tested: list[dict[str, Any]] | None, *, wait: float, csrf: str
     ) -> str:
         """Whether the deck changed since report r was made, for a report of an Archidekt deck: the
-        deck as Archidekt has it now (the read cache first), waited for ``wait`` seconds at most so
-        the page never waits on a slow Archidekt; then a placeholder that report.js fills from
-        /changes. '' for a report of no deck, or when the deck can't be read."""
+        deck as a page of it read it within the last PAGE_DECK_SECONDS (decks.kept_page_deck, so
+        never from before a change the gateway sent), else read now (and kept for the deck's
+        pages), waited for ``wait`` seconds at most; past that, a placeholder that report.js fills
+        from /changes. '' for a report of no deck, or when the deck can't be read."""
         from .report_page import changes_placeholder_html, deck_changes_html
         from .reports import list_diff, tested_rows
 
         deck_id = str(r.get("deck_id") or "")
         if not deck_id.isdigit():
             return ""
-        task = _deck_reads.get((sub, deck_id))
-        if task is None or (task.done() and (task.cancelled() or task.exception() is not None)):
-            task = asyncio.ensure_future(decks.get_any_deck(sub, deck_id))
-            _deck_reads[(sub, deck_id)] = task
-            task.add_done_callback(lambda _t, key=(sub, deck_id): _deck_reads.pop(key, None))
-        try:
-            deck = await asyncio.wait_for(asyncio.shield(task), wait)
-        except TimeoutError:
-            return changes_placeholder_html(r.get("report_id"))
-        except DeckError:
-            return ""
+        deck = decks.kept_page_deck(sub, deck_id)
+        if deck is None:
+            task = _deck_reads.get((sub, deck_id))
+            if task is None or (task.done() and (task.cancelled() or task.exception() is not None)):
+                task = asyncio.ensure_future(decks.read_page_deck(sub, deck_id))
+                _deck_reads[(sub, deck_id)] = task
+                task.add_done_callback(lambda _t, key=(sub, deck_id): _deck_reads.pop(key, None))
+            if not task.done() and wait <= 0:
+                return changes_placeholder_html(r.get("report_id"))
+            try:
+                deck = await asyncio.wait_for(asyncio.shield(task), wait)
+            except TimeoutError:
+                return changes_placeholder_html(r.get("report_id"))
+            except DeckError:
+                return ""
         diff = list_diff(tested, tested_rows(deck)) if tested is not None else None
         # the list can be put back only onto one of the member's own decks
         link = state.db.get_link(sub)

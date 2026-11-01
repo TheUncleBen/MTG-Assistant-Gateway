@@ -41,8 +41,9 @@ def test_the_summary_keeps_a_day_and_finds_the_slow_pages() -> None:
 def test_the_card_says_why_each_slow_page_was_slow() -> None:
     now = time.time()
     card = _speed_card(_log(now).summary(now))
-    assert "<h2 id='speed-h'>Speed, last 24 h</h2>" in card
-    assert "22, 2 slower than 3 s" in card
+    # a unit never breaks away from its number at large text
+    assert "<h2 id='speed-h'>Speed, last 24\u00a0h</h2>" in card
+    assert "22, 2 slower than 3\u00a0s" in card
     assert "/users/{username}" in card and "waiting for a turn with Archidekt" in card
     assert "/decks/{deck_id}" in card and "mostly Archidekt answering slowly" in card
     assert "Archidekt failed or asked to slow down 2 times" in card
@@ -61,7 +62,7 @@ async def test_the_overview_shows_it_with_page_patterns_only(gw: Harness, monkey
     try:
         log.add(PageTime(time.time(), "/users/{username}", 5.0, 4.9, 4.0, 0, 200))
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert r.status_code == 200 and "Speed, last 24 h" in r.text
+        assert r.status_code == 200 and "Speed, last 24\u00a0h" in r.text
         assert "/users/{username}" in r.text
         assert "shared with the same read under way" in r.text
     finally:
@@ -79,3 +80,42 @@ async def test_every_page_view_is_counted_by_its_pattern(gw: Harness, monkeypatc
         assert "/admin/users" in routes and not any(r.startswith("/static") for r in routes)
     finally:
         await b.aclose()
+
+
+def test_the_card_shows_the_identity_providers_share() -> None:
+    """0.7.46 review: the log line had idp= but the card did not, so the cost of the membership
+    check on every write and assistant call could not be seen."""
+    now = time.time()
+    log = SpeedLog()
+    log.add(PageTime(now - 5, "/decks/{deck_id}/settings", 2.0, 0.1, 0.0, 0, 200, 1.6))
+    log.add(PageTime(now - 4, "/decks/{deck_id}/settings", 0.2, 0.1, 0.0, 0, 200, 0.0))
+    d = log.summary(now)
+    assert abs(d["idp"] - 1.6) < 1e-9
+    assert abs(d["routes"][0]["idp"] - 0.8) < 1e-9
+    card = _speed_card(d)
+    assert "Identity provider" in card and "1.6\u00a0s asking whether members may still come in" in card
+    assert "0.8\u00a0s identity provider on average" in card
+    assert "mostly asking the identity provider" in card
+
+
+async def test_a_page_views_identity_provider_time_is_logged(monkeypatch) -> None:
+    from starlette.responses import PlainTextResponse
+
+    log = SpeedLog()
+    monkeypatch.setattr(timing, "speed_log", log)
+
+    async def page(scope, receive, send) -> None:  # noqa: ANN001
+        timing.add_time(timing.idp_time, 0.25)  # what membership.py adds while it asks
+        await PlainTextResponse("ok")(scope, receive, send)
+
+    app = timing.TimingMiddleware(page)
+    sent: list = []
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    await app({"type": "http", "method": "GET", "path": "/decks", "headers": []}, receive, send)
+    assert [round(r.idp, 2) for r in log.rows()] == [0.25]

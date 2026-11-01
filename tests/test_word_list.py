@@ -109,6 +109,7 @@ ALLOWED: list[tuple[str, str, str]] = [
     ("companion_tools.py", r"^Goldfish: \{\}$", GOLDFISH_PAGE),
     ("deck.js", r"^Goldfish$", GOLDFISH_PAGE),
     ("menus.js", r"^Goldfish$", GOLDFISH_PAGE),
+    ("latepage.py", r"^Goldfish$", GOLDFISH_PAGE),
     ("guide.py", r"^Goldfish$|Playtest, Goldfish, Play on EDHPlay|<strong>Goldfish</strong>", GOLDFISH_PAGE),
     (
         "SKILL.md",

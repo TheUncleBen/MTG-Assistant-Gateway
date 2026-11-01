@@ -31,11 +31,12 @@ from .deckpage import (
     GOLDFISH_GUIDE_PREF,
     card_image,
     compare_page_html,
+    deck_check_html,
     deck_title,
     goldfish_page_html,
     precon_by_label,
 )
-from .decks import DeckError, current_client, is_outside_category, split_label
+from .decks import DeckError, current_client, is_busy, is_outside_category, split_label
 from .history_view import DELETED_NOTICES
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -75,6 +76,12 @@ COMPARE_NO_COMMANDER = (
 )
 
 
+def _checking(deck: Deck, how: dict[str, Any]) -> str:
+    """The deck page's strip for a deck shown as last read while it is read again
+    (decks.page_deck_live's ``checking``): static/feedback.js says when that read found a change."""
+    return deck_check_html(deck.id, how.get("read_at"), reload=False) if how.get("checking") else ""
+
+
 def add_deck_tool_routes(
     server: MCPServer, state: AppState, reports: ReportService, h: SimpleNamespace
 ) -> None:
@@ -100,7 +107,9 @@ def add_deck_tool_routes(
         if not sub:
             return login_redirect(f"/decks/{deck_id}/edit")
         try:
-            deck = await decks.get_own_deck(sub, deck_id)
+            # the deck as its page last read it (decks.page_deck_live): a change the gateway sent
+            # to it forgets that read, and the save checks the deck on Archidekt itself
+            deck, how = await decks.page_own_deck(sub, deck_id)
         except DeckError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy
@@ -207,7 +216,8 @@ def add_deck_tool_routes(
             watched = watched_name_list(watched_names(state.prices.watched_cards(sub)))[:200]
             watch_attr = f" data-suggest-watch='{_esc(json.dumps(watched))}'"
         body = (
-            f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
+            _checking(deck, how)
+            + f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
             "<div id='editor' class='editor'>"
             "<section class='panel edithead'><div class='row'><div class='info'>"
             f"<div class='kicker'>Editing</div><h1 class='deckname'>{_esc(deck.name)}</h1></div>"
@@ -608,7 +618,7 @@ def add_deck_tool_routes(
         if not sub:
             return login_redirect(f"/decks/{deck_id}/goldfish")
         try:
-            deck = await decks.get_any_deck(sub, deck_id)
+            deck, how = await decks.page_deck_live(sub, deck_id)
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         # The deck's newest Forge solo test, for the line under the intro (the Goldfish thread's
@@ -642,7 +652,7 @@ def add_deck_tool_routes(
                 guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden",
                 forge_solo=forge_solo if isinstance(forge_solo, dict) else None,
                 csrf=_csrf(s, sid),
-                extra_head=extra,
+                extra_head=_checking(deck, how) + extra,
             )
             + models_html,
             sub=sub,
@@ -787,7 +797,7 @@ def add_deck_tool_routes(
         if not sub:
             return login_redirect(f"/decks/{deck_id}/compare")
         try:
-            deck = await decks.get_any_deck(sub, deck_id)
+            deck, how = await decks.page_deck_live(sub, deck_id)
         except DeckError as exc:
             return h.deck_problem(request, exc, sub=sub, sid=sid)
         qp = request.query_params
@@ -823,6 +833,8 @@ def add_deck_tool_routes(
                 other = await decks.get_any_deck(sub, str(precon_id) if precon_id else other_ref)
                 other_name = other.name or f"deck {other.id}"
             except DeckError as exc:
+                if is_busy(exc):  # Archidekt can't be asked now: the shared busy page, as for this deck
+                    return h.deck_problem(request, exc, sub=sub, sid=sid)
                 error, status = (
                     f"That deck could not be read: {_esc(exc)}",
                     400 if exc.kind != "not_found" else 404,
@@ -837,7 +849,7 @@ def add_deck_tool_routes(
                 mine = decks.last_deck_list(sub)
             except DeckError:
                 mine = None
-        body = compare_page_html(
+        body = _checking(deck, how) + compare_page_html(
             deck,
             other=other,
             other_name=other_name,

@@ -678,8 +678,8 @@ class MembershipMiddleware:
             await self.app(scope, receive, send)
             return
         # A page being read never waits for the provider when it let this sign-in in before
-        # (membership.py); a write, an admin page and an assistant's request do.
-        reading = scope.get("method") in ("GET", "HEAD") and not path.startswith("/admin")
+        # (membership.py); a write, an admin page (or the admin API) and an assistant's request do.
+        reading = scope.get("method") in ("GET", "HEAD") and not path.startswith(("/admin", "/api/v1/admin"))
         outcomes: list[Membership] = []
         for sub, holder in self._subjects(scope):
             outcome = await checker.check(sub, holder, page=reading and holder is not None)

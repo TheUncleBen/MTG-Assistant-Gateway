@@ -3,6 +3,7 @@ form behind My decks' folder boxes without scripts (POST /folders)."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -29,7 +30,7 @@ from .archidekt import (
 )
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
-from .deckpage import card_image, deck_title, delete_box_html
+from .deckpage import card_image, deck_check_html, deck_title, delete_box_html
 from .decks import (
     CATEGORY_FLAGS,
     CATEGORY_HAS_CARDS,
@@ -992,7 +993,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         if social is None:
             return None
         try:
-            return await social.collaborators(sub, deck_id, owned=True)  # the page just read it as own
+            # the page read it as own (owned=True); kept briefly, and forgotten by any write the
+            # member sends (a collaborator added or removed is one)
+            return await decks.short_reads.get(
+                sub, ("editors", str(deck_id)), lambda: social.collaborators(sub, deck_id, owned=True)
+            )
         except (DeckError, ArchidektError):
             return None
 
@@ -1038,7 +1043,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
 
     async def folders_or_none(sub: str) -> dict[str, Any] | None:
         try:
-            return await decks.folders(sub)
+            # the folder tree My decks keeps (dropped by every write the member sends); the folder
+            # write itself checks the tree on Archidekt
+            return await decks.folder_view(sub)
         except DeckError:
             return None
 
@@ -1062,10 +1069,21 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}/settings")
-        try:
-            deck = await decks.get_own_deck(sub, deck_id)
-        except DeckError as exc:
-            return settings_problem(request, deck_id, exc, sub, sid)
+        # The deck (as its page last read it), the folder tree, the collaborators and the people
+        # followed are independent reads: asked at once, not one after another.
+        got = await asyncio.gather(
+            decks.page_own_deck(sub, deck_id),
+            folders_or_none(sub),
+            collaborators_or_none(sub, deck_id) if deck_id.isdigit() else asyncio.sleep(0, None),
+            following_or_none(sub),
+            return_exceptions=True,
+        )
+        if isinstance(got[0], DeckError):
+            return settings_problem(request, deck_id, got[0], sub, sid)
+        for result in got:
+            if isinstance(result, BaseException):
+                raise result
+        (deck, how), folders, collaborators, following = got
         ok = request.query_params.get("ok") or ""
         undo = ""
         if ok == "category_deleted":
@@ -1076,13 +1094,15 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 templates = (await account_lists.read(decks, sub, "templates"))["items"]
             except DeckError as exc:
                 return settings_problem(request, deck_id, exc, sub, sid)
+        checking = deck_check_html(deck.id, how.get("read_at"), reload=False) if how.get("checking") else ""
         return settings_response(
-            settings_form(
+            checking
+            + settings_form(
                 deck,
                 _csrf(s, sid),
-                folders=await folders_or_none(sub),
-                collaborators=await collaborators_or_none(sub, deck.id),
-                following=await following_or_none(sub),
+                folders=folders,
+                collaborators=collaborators,
+                following=following,
                 ok=ok,
                 templates=templates,
                 undo=undo,

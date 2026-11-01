@@ -124,9 +124,26 @@ object Push {
         fun stored(): String = ids.joinToString(",")
     }
 
+    /**
+     * When the phone's alarm must next wake the app ([NotifyService]), in elapsedRealtime
+     * milliseconds. A phone in deep sleep doesn't run the app's own timers (a thread's wait, a
+     * socket's read timeout), so both the next try and the check on a quiet connection are alarms:
+     * while [connected], the moment the connection would count as dead ([READ_TIMEOUT_MS] after the
+     * last line, at [lastLineAt]); else the next try, [retryAt].
+     */
+    fun nextAlarm(connected: Boolean, retryAt: Long, lastLineAt: Long): Long =
+        if (connected) lastLineAt + READ_TIMEOUT_MS + ALARM_SLACK_MS else retryAt
+
+    /** True when a connection that last sent a line at [lastLineAt] is dead at [now] (both elapsedRealtime). */
+    fun stale(lastLineAt: Long, now: Long): Boolean = now - lastLineAt > READ_TIMEOUT_MS
+
     const val MAX_BACKOFF_S = 300L
     /** A connection that ends sooner than this counts as a failure (backoff), not as having worked. */
     const val WORKED_MS = 30_000L
     /** No line for this long (the gateway sends one every 25 s) means the connection is dead. */
     const val READ_TIMEOUT_MS = 90_000
+    /** A little after the read timeout, so a live connection's own timeout usually comes first. */
+    const val ALARM_SLACK_MS = 5_000L
+    /** How long the app keeps the phone awake for one try: the connect (20 s at most) and its answer. */
+    const val TRY_HOLD_MS = 30_000L
 }

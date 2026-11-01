@@ -54,6 +54,17 @@ def _csrf(text: str) -> str:
     return m.group(1)
 
 
+async def _report_page(b: object, rid: str) -> str:
+    """A report page as the member sees it: its "changed since" line drawn at once, or (the deck's
+    read still under way, 0.7.46 review) a placeholder report.js fills from /changes."""
+    page = (await b.http.get(f"/history/reports/{rid}", headers=NAV)).text  # type: ignore[attr-defined]
+    hole = re.search(r"<div class='rv-changed wait' data-changes-url='([^']+)'.*?</div>", page, re.S)
+    if hole is None:
+        return page
+    filled = (await b.http.get(hole.group(1))).text  # type: ignore[attr-defined]
+    return page.replace(hole.group(0), filled)
+
+
 # -- (a) the tested list, "the deck has changed", put it back; (b) since your last test ------------
 async def test_a_report_keeps_its_list_says_the_deck_changed_and_puts_it_back_through_a_proposal(
     stack: Stack,
@@ -73,7 +84,7 @@ async def test_a_report_keeps_its_list_says_the_deck_changed_and_puts_it_back_th
     assert second["ok"] and second["report_id"] != first["report_id"], second
     b = await linked_browser(stack)
     try:
-        page = (await b.http.get(f"/history/reports/{first['report_id']}", headers=NAV)).text
+        page = await _report_page(b, first["report_id"])
         main = page.split("<main", 1)[1]
         # the list it played, folded, with Copy
         assert "id='rv-tested'" in main and "Acidic Slime" in main.split("id='rv-tested'")[1]
@@ -93,7 +104,7 @@ async def test_a_report_keeps_its_list_says_the_deck_changed_and_puts_it_back_th
         assert [c["card_name"] for c in restore["changes"] if c["action"] == "add"] == ["Acidic Slime"]
         assert stack.ark.patches == patches  # nothing written: the member confirms it on its page
         # (b) the second test compares itself with the one before, with the cards that moved
-        newer = (await b.http.get(f"/history/reports/{second['report_id']}", headers=NAV)).text
+        newer = await _report_page(b, second["report_id"])
         since = newer.split("<section class='rv-since'", 1)[1].split("</section>", 1)[0]
         assert "Since your last test" in since and f"href='/history/reports/{first['report_id']}'" in since
         assert "−1 Acidic Slime" in since

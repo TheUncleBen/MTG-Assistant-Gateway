@@ -965,6 +965,13 @@ def strong_topic(db: Database, sub: str, topic: str | None) -> bool:
     return _marked(_topic_key(db), sub, topic)
 
 
+# Samsung's own battery saving can stop the app's connection whatever Android allows (0.7.46 review).
+SAMSUNG_STEP = (
+    "On a Samsung phone, also add the app to Never sleeping apps (Settings, Battery, Background usage "
+    "limits), or the phone can put it to sleep and stop your push notifications."
+)
+
+
 def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
     """The card's part about this phone, inside the Android app: whether it is connected, and the
         button that connects it (which asks Android for the notification permission and for the
@@ -980,14 +987,14 @@ def _phone_html(state: AppState, sub: str, p: dict[str, Any]) -> str:
         "<h3>This phone</h3>"
         "<p data-native-show='connected' hidden><span class='badge ok'>Connected</span> This phone gets your "
         "push notifications, also while the app is closed. While it is connected, Android shows a quiet "
-        "notification called Always connected.</p>"
+        f"notification called Always connected. {SAMSUNG_STEP}</p>"
         "<p data-native-show='blocked' hidden>Android has push notifications turned off for this app. "
         "Turn them on in Android's settings for the app, then press Get push notifications on this "
         "phone.</p>"
         "<p data-native-show='off' hidden>This phone doesn't get your push notifications yet. Press Get "
         "push notifications on this phone. Android may ask you to allow push notifications and to let "
         "the app run in the background. Allow both so push notifications arrive while the app is "
-        "closed.</p>"
+        f"closed. {SAMSUNG_STEP}</p>"
         "<div class='form-actions' data-native-show='off blocked' hidden>"
         f"<button type='button' class='btn-plain' data-native='startNotifications' data-native-arg='{key}' "
         f"data-native-auto>{icon('bell')}Get push notifications on this phone</button></div>"

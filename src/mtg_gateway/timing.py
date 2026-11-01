@@ -102,6 +102,7 @@ class PageTime:
     pacer: float  # of it, waiting for a turn in the shared pacer
     failures: int  # Archidekt calls that failed
     status: int
+    idp: float = 0.0  # asking the identity provider whether the member is still allowed in
 
 
 class SpeedLog:
@@ -140,6 +141,7 @@ class SpeedLog:
                     "pacer": sum(r.pacer for r in rs) / len(rs),
                     "archidekt": sum(max(0.0, r.archidekt - r.pacer) for r in rs) / len(rs),
                     "failures": sum(r.failures for r in rs),
+                    "idp": sum(r.idp for r in rs) / len(rs),
                 }
             )
         routes.sort(key=lambda r: (r["slow"], r["max"]), reverse=True)  # the most slow views first
@@ -149,6 +151,7 @@ class SpeedLog:
             "pacer": sum(r.pacer for r in rows),
             "archidekt": sum(max(0.0, r.archidekt - r.pacer) for r in rows),
             "failures": sum(r.failures for r in rows),
+            "idp": sum(r.idp for r in rows),
             "routes": routes,
             "since": max(self.started, (time.time() if now is None else now) - SPEED_WINDOW),
         }
@@ -206,6 +209,7 @@ class TimingMiddleware:
                         pacer_time.get(),
                         int(archidekt_failures.get()),
                         status["code"],
+                        idp_time.get(),
                     )
                 )
             if not raw.startswith(_QUIET_PREFIXES):

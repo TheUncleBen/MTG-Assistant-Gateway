@@ -1657,9 +1657,17 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return ""
         return proposals_view.undo_box_form(csrf, row) if row.get("snapshot_id") else ""
 
-    async def read_tab(sub: str, tab: Tab, *, page_no: int = 1, q: str = "") -> dict[str, Any]:
-        got = await account_lists.read(
-            decks, sub, tab.kind, page=page_no, search=q if tab.kind == "custom_cards" else ""
+    async def read_tab(
+        sub: str, tab: Tab, *, page_no: int = 1, q: str = "", fresh: bool = False
+    ) -> dict[str, Any]:
+        search = q if tab.kind == "custom_cards" else ""
+        # kept briefly per member; any change they send (a pin, a template, a custom card) forgets
+        # it (decks.short_reads). A box that changes a row (``fresh``) shows the list as it is now.
+        got = await decks.short_reads.get(
+            sub,
+            ("list", tab.kind, page_no, search),
+            lambda: account_lists.read(decks, sub, tab.kind, page=page_no, search=search),
+            fresh=fresh,
         )
         if tab.kind == "custom_cards":  # the rows' pictures, served by custom_pictures
             custom_pictures.remember(sub, got["items"])
@@ -1883,8 +1891,10 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             return login_redirect(f"{PAGE}/{tab.slug}")
         q = request.query_params
         search, page_no = q_of(q), page_of(q)
+        # an address that opens a box (edit, new, delete...) reads the list as it is now
+        opens_box = any(k not in ("page", "q", "ok", "n", "p") for k in q.keys())
         try:
-            got = await read_tab(sub, tab, page_no=page_no, q=search)
+            got = await read_tab(sub, tab, page_no=page_no, q=search, fresh=opens_box)
         except DeckError as exc:
             if wants_json(request):
                 return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)

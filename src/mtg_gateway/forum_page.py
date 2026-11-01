@@ -811,7 +811,8 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if not sub:
             return login_redirect(PAGE)
         try:
-            got = await forum.sections(decks, sub)
+            # kept briefly per member, forgotten by any write they send (decks.short_reads)
+            got = await decks.short_reads.get(sub, ("forum",), lambda: forum.sections(decks, sub))
         except DeckError as exc:
             return problem(exc, sub, sid)
         strip = "" if forum.linked(decks, sub) else link_strip_html()
@@ -877,7 +878,12 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         """The thread page; ``open_box`` names one of its boxes (CONTEST_BOXES) drawn open, as
         the old addresses draw it and as a refused press comes back with its words."""
         try:
-            t = await forum.thread(decks, sub, tid, page=page_no)
+            # kept briefly per member; their reply, vote or report forgets it (decks.short_reads)
+            t = await decks.short_reads.get(
+                sub, ("forum-thread", str(tid), page_no), lambda: forum.thread(decks, sub, tid, page=page_no)
+            )
+            # the trail as the section listings read so far name it (not as when the thread was kept)
+            t["in"] = forum.in_section(int(t["id"]))
         except DeckError as exc:
             return problem(exc, sub, sid)
         link = state.db.get_link(sub) or {}
@@ -889,8 +895,12 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if t.get("type") == "contest" and link:
             # the contest's entries, as the contest page reads them (one read, on contest threads only)
             try:
-                entries = await decks._call_unslotted(
-                    sub, lambda token, *_: decks.client.contest_entries(token, tid)
+                entries = await decks.short_reads.get(
+                    sub,
+                    ("forum-contest", str(tid)),
+                    lambda: decks._call_unslotted(
+                        sub, lambda token, *_: decks.client.contest_entries(token, tid)
+                    ),
                 )
             except DeckError:
                 entries = None
@@ -1024,7 +1034,11 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         except ValueError:
             page_no = 1
         try:
-            got = await forum.threads(decks, sub, group, section, page=page_no, order=order, search=search)
+            got = await decks.short_reads.get(
+                sub,
+                ("forum-section", group, section, page_no, order, search),
+                lambda: forum.threads(decks, sub, group, section, page=page_no, order=order, search=search),
+            )
         except DeckError as exc:
             if wants_json(request):
                 return JSONResponse(

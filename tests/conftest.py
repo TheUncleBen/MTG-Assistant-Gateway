@@ -471,6 +471,16 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _empty_speed_log() -> None:
+    """Admin's Speed card reads one module-level log (timing.speed_log) that every test server in
+    the same worker adds to: each test starts with it empty, so what /admin shows never depends on
+    which tests ran before (a loaded run left slow rows behind for the text-zoom test)."""
+    from mtg_gateway import timing
+
+    timing.speed_log._rows.clear()
+
+
+@pytest.fixture(autouse=True)
 def _forget_package_lists() -> None:
     """packages.listing keeps a member's own package list for a minute; tests share member ids,
     so each test starts with that memory empty."""
@@ -572,6 +582,10 @@ if BrowserType is not None and not ONLINE:
         if self.name == "chromium":
             rules = "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"
             kwargs["args"] = [*(kwargs.get("args") or []), "--no-proxy-server", rules]
+            # A machine whose network goes through a proxy anyway (a sandbox's own) resolves names
+            # there, past the rules above: every request not for this machine goes to a proxy
+            # nothing listens on, so it fails here whatever the machine's DNS or proxy does.
+            kwargs.setdefault("proxy", {"server": "http://127.0.0.1:9", "bypass": "localhost,127.0.0.1"})
         return _real_launch(self, **kwargs)
 
     BrowserType.launch = _offline_launch  # type: ignore[method-assign]

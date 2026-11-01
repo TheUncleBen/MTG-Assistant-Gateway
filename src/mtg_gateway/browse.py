@@ -16,6 +16,7 @@ names in its ``featured`` URL; no Archidekt image is loaded.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -863,8 +864,14 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             else "-updatedAt"
         )
         view, remember = view_of(request, sub)
+        asked = archidekt_query(query)
         try:
-            found = await decks.search_decks(sub, **archidekt_query(query))
+            # kept briefly per member, forgotten by any write they send (a follow is one)
+            found = await decks.short_reads.get(
+                sub,
+                ("profile", json.dumps(asked, sort_keys=True, default=str)),
+                lambda: decks.search_decks(sub, **asked),
+            )
         except DeckError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy

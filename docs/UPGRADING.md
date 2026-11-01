@@ -25,7 +25,10 @@ unchanged, and the example variables file, into which you copy your own values.
    Copy into it every value your old file sets: the lines marked `REQUIRED`, and any optional
    line you changed. To list the lines your old file sets, run
    `grep -v -e '^#' -e '=$' -e '^$' mtg.env.old`, or read through it. A variable the new file
-   doesn't list any more has no effect: leave it out. The comments in the new file explain every
+   doesn't list any more has no effect: leave it out. From 0.7.45 or older, that list also shows
+   three sign-in lines the older example files set for you: `MTG_ACCESS_TOKEN_TTL=3600`,
+   `MTG_REFRESH_TOKEN_TTL=2592000` and `MTG_BROWSER_SESSION_TTL=7200`. Leave them out unless you
+   changed them on purpose (see [Coming from an older version](#coming-from-an-older-version)). The comments in the new file explain every
    line, so this is also the moment to see what is new.
 2. **Secrets.** Do [DEPLOY.md step 4](DEPLOY.md#4-docker-secrets-once) again. It only adds a
    secret that is missing, and the commands there skip any secret you already have (in
@@ -207,9 +210,12 @@ reach past the stack, so if your old version is older than the one named, also:
   `MTG_WATCHLISTS_ENABLED=false`. Forge follows `FORGE_REPLICAS` alone (`0` = off), with Compose
   too: if you had turned Forge off with `COMPOSE_PROFILES`, set `FORGE_REPLICAS=0`, or it comes
   back on.
-- **0.7.45 or older:** if your variables set `MTG_BROWSER_SESSION_TTL=7200` (the older example
-  files did), remove the line or set `604800`. It is now how long a sign-in lasts unused, so
-  `7200` keeps sign-ins to 2 hours unused.
+- **0.7.45 or older:** the older example files set `MTG_ACCESS_TOKEN_TTL=3600`,
+  `MTG_REFRESH_TOKEN_TTL=2592000` and `MTG_BROWSER_SESSION_TTL=7200`, so your old variables
+  probably have them although you never changed them. Leave all three out of your new file
+  unless you set them on purpose. `MTG_BROWSER_SESSION_TTL` is now how long a sign-in lasts
+  unused, so `7200` keeps sign-ins to 2 hours unused (`604800` is a week). A value in either of
+  the other two locks its row on the Settings page.
 
 Every version's full notes are in the [CHANGELOG](../CHANGELOG.md), and the older update steps
 are kept below for reference.

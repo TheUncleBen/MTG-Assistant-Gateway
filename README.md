@@ -385,7 +385,7 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   change anything.
 - **Limits.** Sign-in attempts are limited per network, metadata-document
   fetches per site, and Archidekt actions per member
-  (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), so neither a flood nor a looping
+  (the Settings page's **Archidekt work per member per 10 minutes**), so neither a flood nor a looping
   assistant can wear the gateway or Archidekt down. Archidekt requests from
   everyone together are spaced out and capped per minute, repeat reads are
   briefly cached, and "slow down" answers are honoured.
