@@ -17,15 +17,23 @@ the AI apps' gateway tokens are the member's, not one device's. A session from b
 no grant of its own and is checked like a bearer token until it ends.
 
 The answer is cached for MTG_MEMBERSHIP_CHECK_TTL seconds (5 by default, 0 = every request) to
-spare the identity provider from page bursts. Past that, a page being read (GET or HEAD outside
-/admin, with a session cookie) is answered at once and the provider asked in the background when
-it let that sign-in in before: the first page after a while away never waits for the provider.
-After a restart that "before" is the yes on file, honoured while it is younger than
-STORED_YES_MAX_AGE (a day). Everything else waits for the answer: a write, an admin page, an
-assistant's request, and every request once the provider could not be reached (until it answers
-again). So a member removed at the provider is refused on their next write, admin page or
-assistant request, and can read their own pages only for the moment the background check takes.
-With MTG_MEMBERSHIP_CHECK_TTL=0 every request waits for the provider's answer. Outcomes:
+spare the identity provider from page bursts. Past that, a request that only reads is answered at
+once and the provider asked in the background when it let that sign-in in before: a page being
+read (GET or HEAD outside /admin and /api/v1/admin, with a session cookie), and an assistant's
+call (POST /mcp with a bearer token) of tools that only read or propose (owner decision 11-01,
+"Only changes and admin wait"). Which tools those are comes from each tool's own readOnlyHint
+(app.tool_only_reads): one that does not say true waits, so a new tool waits until it says it
+only reads. The first page or read after a while away never waits for the provider. After a
+restart that "before" is the yes on file, honoured while it is younger than STORED_YES_MAX_AGE (a
+day). Everything else waits for the answer: every change (any non-GET website request, deck-page
+saves among them; apply_proposal and every other tool that is not read only), the admin pages and
+admin API, any other request with a bearer token (tools/list, a notification, a batch with one
+writing call in it, a body that can't be read, the JSON API), a request when no background check
+can start, and every request once the provider could not be reached (until it answers again). So
+a member removed at the provider is refused on their next change, apply or admin page, and can
+read (their own pages, or through an assistant) only for the moment the background check takes;
+its answer applies to the next request. With MTG_MEMBERSHIP_CHECK_TTL=0 every request waits for
+the provider's answer. Outcomes:
 
 - still allowed: the groups are recorded, so the admin check sees a removal at once too;
 - no longer in the required group (or the provider names someone else): every token, browser
@@ -199,8 +207,9 @@ class MembershipChecker:
         """Is ``sub`` still allowed in, according to the identity provider right now? ``holder``
         names the sign-in making the request (a browser session's, session_holder); without one,
         any of the member's sign-ins the provider still honours answers (a bearer token, a phone's
-        notification key). ``page``: the request only reads a member page, so with an earlier
-        answer on file it never waits for the provider (the module's docstring)."""
+        notification key). ``page``: the request only reads (a member page, or an assistant's call
+        of read-only tools), so with an earlier answer on file it never waits for the provider
+        (the module's docstring)."""
         started = time.perf_counter()
         try:
             return await self._check(sub, holder, page)

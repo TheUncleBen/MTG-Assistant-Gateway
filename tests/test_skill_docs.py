@@ -171,10 +171,16 @@ def test_removal_from_the_group_is_told_without_a_time_promise() -> None:
         text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
         assert "loses access within a minute" not in text and "within a minute it revokes" not in text, name
         assert "asked again in the background" in text, name
-    # a page being read never waits for the provider; writes, admin pages and assistant requests do,
-    # so a removed member is refused on the next one (tests/e2e/test_08_live_membership.py)
+    # a page being read and an assistant's read or proposal never wait for the provider; changes,
+    # applies and admin pages do, so a removed member is refused on the next one (owner decision
+    # 11-01, "Only changes and admin wait"; tests/test_live_membership.py)
     text = " ".join((ROOT / "docs/IDP-AUTHENTIK.md").read_text(encoding="utf-8").split())
-    assert "(writes, admin pages and assistant requests wait for the answer)" in text
+    assert "(changes, applies and admin pages wait for the answer)" in text
+    assert "assistant requests wait for the answer" not in text
+    for name in ("docs/ARCHITECTURE.md", "docs/DEPLOY.md", "docs/OPERATIONS.md"):
+        other = " ".join((ROOT / name).read_text(encoding="utf-8").split())
+        assert "assistant requests wait for the answer" not in other, name
+        assert "read only" in other and "apply_proposal" in other, name
     assert "60 seconds" not in text
 
 
