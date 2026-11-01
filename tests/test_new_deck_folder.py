@@ -101,8 +101,9 @@ async def test_the_new_deck_and_new_package_boxes_take_a_folder(stack: Stack) ->
         page = (await b.http.get("/decks")).text
         assert "<select id='nd-folder' name='folder_id'>" in page
         assert "<select id='np-folder' name='folder_id'>" in page
-        assert page.count("<option value='' selected>Top level (no folder)</option>") == 2
-        assert page.count(f"<option value='{fid}'>Brews</option>") == 2
+        # the two boxes, and Select's Move to folder box (0.7.46 audit QG-17)
+        assert page.count("<option value='' selected>Top level (no folder)</option>") == 3
+        assert page.count(f"<option value='{fid}'>Brews</option>") == 3
         # opened from inside a folder, the box starts on that folder
         page = (await b.http.get(f"/decks?folder={fid}")).text
         assert page.count(f"<option value='{fid}' selected>Brews</option>") == 2

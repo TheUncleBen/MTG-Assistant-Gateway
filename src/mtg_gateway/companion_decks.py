@@ -12,7 +12,7 @@ from urllib.parse import quote, urlencode
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import actions, deck_extras, deck_stats, prefs, ui
+from . import actions, deck_bulk, deck_extras, deck_stats, prefs, ui
 from .archidekt import format_label
 from .busy import busy_plan, busy_response, same_url
 from .companion import (
@@ -406,6 +406,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             notice = "<p class='notice error'>That is not an Archidekt deck link or id.</p>"
         if qp.get("ok") in LIST_OK_MESSAGES:
             notice = f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[qp['ok']])}</p>"
+        if "bulk" in (qp.get("ok"), qp.get("err")):  # Select's bar (deck_bulk.py)
+            notice += state.deck_bulk_notice(sub, qp.get("t"))
         nd = new_deck or {}
         # the boxes' Folder field: the member's tree as My decks has it (the top level alone while
         # it is still being read), starting on the open folder
@@ -453,7 +455,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
             listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + unread_html
             if not (unreadable and not total):  # nothing read: the notice instead of "No decks yet"
-                listing += level_html(level, covers=covers, q=q, view=view, order=order)
+                listing += level_html(level, covers=covers, q=q, view=view, order=order, tick=True)
             listing = f"<div id='decks-list'>{listing}</div>"
         body = (
             head
@@ -471,8 +473,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 colour_mode=filters["colour_mode"],
                 fmt=filters["fmt"],
                 show=filters["show"],
+                count_extra=deck_bulk.select_button_html(),
             )
             + listing
+            + deck_bulk.bulk_html(_csrf(s, sid) or "", tree, same_url(request))
             + (
                 f"<p class='muted small backups-note'>{hidden} backup "
                 f"{'copy' if hidden == 1 else 'copies'} made before changes "
@@ -499,8 +503,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             scripts=True,
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
-            extra_scripts=("searchpanel.js", "decks.js") + NEW_DECK_SCRIPTS,
-            extra_css=FOLDER_CSS + NEW_DECK_CSS + NEW_PACKAGE_CSS,
+            extra_scripts=("searchpanel.js", "decks.js", "deckselect.js") + NEW_DECK_SCRIPTS,
+            extra_css=FOLDER_CSS + NEW_DECK_CSS + NEW_PACKAGE_CSS + deck_bulk.BULK_CSS,
         )
         return prefs.remember_view(state.db, sub, resp, "decks", view, secure=secure) if remember else resp
 
@@ -609,7 +613,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 + held_html
             )
             if not (unreadable and not total):
-                out["html"] += level_html(level, covers=covers, q=q, view=view, order=order)
+                out["html"] += level_html(level, covers=covers, q=q, view=view, order=order, tick=True)
             out["count"] = len(shown)
             out["total"] = None if unreadable and not total else total  # no count it doesn't know
             out["count_text"] = deck_count_text(out["total"])

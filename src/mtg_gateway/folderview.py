@@ -309,8 +309,10 @@ def level_html(
     q: str,
     view: str,
     order: str,
+    tick: bool = False,
 ) -> str:
-    """The breadcrumb, the Folders area (when there are folders to show) and the Decks area."""
+    """The breadcrumb, the Folders area (when there are folders to show) and the Decks area.
+    ``tick``: Select's tick boxes on the deck tiles (deck_bulk.py)."""
     out = breadcrumb_html(level, order=order)
     if not level.tree:
         out += f"<p class='notice'>{esc(FOLDERS_UNREADABLE)}</p>"
@@ -322,7 +324,7 @@ def level_html(
             f"<ul class='plain folderlist {esc(view)}'>{tiles}</ul></section>"
         )
     if level.decks:
-        listing = deck_list_html(level.decks, covers=covers, q=q, view=view, own=True)
+        listing = deck_list_html(level.decks, covers=covers, q=q, view=view, own=True, tick=tick)
     elif level.searching and q:
         listing = f"<p class='empty'>No decks matching “{esc(q)}” in any folder.</p>"
     elif level.searching:

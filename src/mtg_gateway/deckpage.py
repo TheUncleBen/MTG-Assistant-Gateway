@@ -2891,13 +2891,18 @@ def deck_card_html(
     show_owner: bool = False,
     own: bool = False,
     plain: bool = False,
+    tick: bool = False,
 ) -> str:
     """One deck tile: a link to the deck, and after it the tile's ⋮ (static/menus.js opens the
     deck's menu from it, a right-click, a press and hold or Shift+F10). ``own``: the member's own
     deck, whose menu has Edit deck, Rename, Move to folder, Delete deck and the rest. ``plain``:
-    a precon tile, without the owner's picture and the deck tags (as deck search's tiles)."""
+    a precon tile, without the owner's picture and the deck tags (as deck search's tiles).
+    ``tick``: My decks' Select tick box before the link (deck_bulk.py)."""
     did = esc(d["id"])
     name = d.get("name") or "Unnamed deck"
+    check = ""
+    if tick and own:
+        check = ui.check_cell("deck_id", str(d["id"]), f"Select {name}", form="decks-bulk")
     folder_id = d.get("folder_id")
     data = f" data-deck-id='{did}' data-deck-name='{esc(name)}' data-own='{1 if own else 0}'" + (
         f" data-folder='{esc(str(folder_id))}'" if folder_id is not None else ""
@@ -2930,7 +2935,7 @@ def deck_card_html(
     when = ui.when(iso_ts(d.get("updated_at") or ""))  # the one list date (feedback.js keeps it current)
     sub_html = esc(sub_text) + (f"{' · ' if sub_text else ''}{when}" if when else "")
     return (
-        f"<li class='deck{' selected' if selected else ''}'{data}><a href='/decks/{did}'>"
+        f"<li class='deck{' selected' if selected else ''}'{data}>{check}<a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
         + (f"<span class='views'>{plural(size, 'card')}</span>" if size else "")
         + colour_bar_html(d.get("colors"))
@@ -2969,10 +2974,11 @@ def deck_list_html(
     folder: str = "",
     own: bool = False,
     plain: bool = False,
+    tick: bool = False,
 ) -> str:
     """The deck tiles. ``own``: the member's own decks (My decks, Home), whose tiles' menus carry
     the owner's actions; a listing of other members' decks leaves it off. ``plain``: precon tiles
-    (no owner picture, no tags)."""
+    (no owner picture, no tags). ``tick``: My decks' Select tick boxes."""
     if not decks:
         if folder:
             return (
@@ -2993,6 +2999,7 @@ def deck_list_html(
             show_owner=show_owner,
             own=own,
             plain=plain,
+            tick=tick,
         )
         for d in decks
     )
@@ -3123,6 +3130,7 @@ def deck_list_controls_html(
     colour_mode: str = "incl",
     fmt: str = "",
     show: str = "",
+    count_extra: str = "",
 ) -> str:
     """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
     the name box, Colors and Format
@@ -3134,7 +3142,8 @@ def deck_list_controls_html(
     packages apart after the list is drawn, from the Packages page's own listing, so the deck
     list's cold load stays one Archidekt listing); it rides in the form so a filter keeps it.
     ``pending``: the list is still being read (no count yet; decks.js fills it). ``total`` None:
-    the list couldn't be read, so no count."""
+    the list couldn't be read, so no count. ``count_extra``: markup after the count (My decks'
+    Select button)."""
     keep = [("folder", folder)] if folder else []
     if show == "packages":
         keep.append(("show", show))
@@ -3161,7 +3170,8 @@ def deck_list_controls_html(
         ]
     )
     bar = sp.results_bar(
-        count_html=sp.count_html(deck_count_text(total, pending=pending), count_id="decks-total"),
+        count_html=sp.count_html(deck_count_text(total, pending=pending), count_id="decks-total")
+        + count_extra,
         sort_html=sp.sort_group(
             order_name="order",
             orders=LIST_ORDERS.items(),
