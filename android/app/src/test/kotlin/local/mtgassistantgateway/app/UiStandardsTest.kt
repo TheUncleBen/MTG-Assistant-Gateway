@@ -45,7 +45,7 @@ class UiStandardsTest {
     }
 
     @Test fun cameraButtonsAreStyledLikeThePages() {
-        val plain = listOf("@+id/undo", "@+id/done")
+        val plain = listOf("@+id/undo", "@+id/done", "@+id/save_photo")
         val toggles = listOf("@+id/torch_toggle", "@+id/auto_toggle")
         val byId = (elements("layout/camera_panel.xml", "Button") + elements("layout/camera_panel.xml", "ToggleButton"))
             .associateBy { it.getAttribute("android:id") }

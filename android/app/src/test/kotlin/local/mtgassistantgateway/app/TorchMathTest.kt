@@ -72,6 +72,20 @@ class TorchMathTest {
         assertNull(TorchMath.guideFractions(1000, 1000, 1000, 1000, 2000f, 0f, 10f, 10f))
     }
 
+    /** A card filling the box fills CARD_SHARE of the photo's width, whatever the screen's shape. */
+    @Test fun theGuideFillsTheSameShareOfThePhotoOnEveryScreen() {
+        assertEquals(0.4f, TorchMath.CARD_SHARE, 0f) // the website's GUIDE_WIDTH too (tests/test_android_shell_rules.py)
+        for ((vw, vh) in listOf(1080 to 2190, 1080 to 2400, 1812 to 2176, 2176 to 1812, 720 to 1280)) {
+            val share = TorchMath.guideWidthShare(vw, vh, 1440, 1920)!!
+            val g = TorchMath.guideFractions(vw, vh, 1440, 1920, (vw - vw * share) / 2f, 0f, vw * share, 10f)!!
+            assertEquals("$vw x $vh", TorchMath.CARD_SHARE, g[2], 1e-3f)
+        }
+        // a tall phone shows about 66 % of the photo's width, so the box is about 60 % of the view
+        assertEquals(CardGuideView.DEFAULT_WIDTH, TorchMath.guideWidthShare(1080, 2190, 1440, 1920)!!, 0.01f)
+        assertNull(TorchMath.guideWidthShare(0, 2190, 1440, 1920))
+        assertEquals(0.9f, TorchMath.guideWidthShare(1000, 1000, 1000, 100)!!, 0f) // never wider than 90 %
+    }
+
     @Test fun uprightSizeSwapsOnQuarterTurns() {
         assertArrayEquals(intArrayOf(4000, 3000), TorchMath.uprightSize(4000, 3000, 0))
         assertArrayEquals(intArrayOf(3000, 4000), TorchMath.uprightSize(4000, 3000, 90))
