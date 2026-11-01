@@ -53,7 +53,7 @@ WRITING
    Comments, likes, follows, folders, collaborators, help posts, reports, contests: propose_account_action; deck delete: propose_delete_deck. Only the user applies these.
    Create: check_new_deck, then propose_new_deck once (name, deck_format, cards|decklist_text|csv_text|scan_session); change it: amend_proposal new_deck.
 2. Show the diff, review_url and say "Nothing has been changed on Archidekt yet." Say deck_after (legal?, price change, unpriced_added). plan_first: finish the plan, propose once.
-3. assistant_may_apply (user's approval mode) decides: false: user applies on card or review page; stop. After a card press, use the outcome given; proposal_status only if unclear. true: state the change briefly, call apply_proposal once. browser_required: give review_url; stop.
+3. assistant_may_apply (your approval mode) decides: false: user applies on card or review page; stop. After a card press, use the outcome given; proposal_status only if unclear. true: state the change briefly, call apply_proposal once. browser_required: give review_url; stop.
 4. "applying": still writing; proposal_status later; don't re-apply. Report whether the check matched, snapshot_id, result.deck_url, undo (list_snapshots, propose_restore_snapshot).
 
 ERRORS (ok:false, error)

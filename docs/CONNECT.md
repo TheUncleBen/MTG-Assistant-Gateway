@@ -257,8 +257,11 @@ come as the assistant's own words. A chat with many cards grew slow in
 ChatGPT when it was tried with this gateway, so only the cards you act on
 stay.
 
-**Your approval mode.** On the gateway's Account page you choose how much
-your assistant may do without asking: *Manual*, shown as "Ask me every
+**Your approval mode.** On the gateway's Account page (Account details ›
+Assistants) you choose, for each connected assistant, how much it may do
+without asking. Claude on the web, desktop and phone is one assistant,
+ChatGPT another, and Claude Code its own; a new one starts with your
+**Default for new assistants**. The modes are *Manual*, shown as "Ask me every
 time" (every change waits for your press; the starting mode by default), *Semi-auto*, shown
 as "Apply low-risk changes without asking" (it applies a small deck or binder edit itself: up to the row limit, 5 card rows by default,
 each a card added or removed, or a new quantity, category, finish,
