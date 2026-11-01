@@ -79,6 +79,7 @@ from .companion import add_companion_routes
 from .compress import PageGzip
 from .config import LiveSettings, Settings, with_stored
 from .db import SESSION_END_NOTICE, Database
+from .dbwait import DatabaseWaitMiddleware
 from .decks import (
     FULL_SCOPE,
     DeckError,
@@ -1403,6 +1404,9 @@ def create_app(
     app.add_middleware(SessionRenewalMiddleware, state=state)  # inside the membership check
     app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
+    # Outside everything that reads or writes the database: a request waits off the loop while
+    # another connection holds the write lock (dbwait.py).
+    app.add_middleware(DatabaseWaitMiddleware, db=db)
     app.add_middleware(PageGzip)
     # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
     # nosniff and HSTS too.

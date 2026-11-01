@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextvars
+import dataclasses
 import hashlib
 import hmac
 import ipaddress
@@ -146,6 +147,28 @@ MAX_STATE_LEN = 512
 # then looks the same, and a limit would let anyone lock everyone out. The per-browser and
 # per-client caps on pending logins still apply to them.
 LOGIN_STARTS_PER_MINUTE = 30
+# A refresh whose answer was lost on the way to the app (a phone's network blip) is sent again with
+# the refresh token that refresh had just rotated out. Within this many seconds of that rotation,
+# by the same app, and only while the pair the rotation issued has never been used (so the app
+# never got it), the retry is answered instead of being taken for a stolen token (0.7.46 audit
+# PA-2): see GatewayAuthProvider._retry_grace.
+RETRY_GRACE_SECONDS = 30
+
+
+@dataclasses.dataclass
+class _Rotation:
+    """A refresh token just rotated out, kept in memory for RETRY_GRACE_SECONDS: when, by which
+    app, in which sign-in (family), and the pair that rotation issued (by hash)."""
+
+    at: float
+    client_id: str
+    family: str
+    refresh_hash: str
+    access_hash: str
+    created_at: int
+    used: bool = False
+
+
 # This many different browsers starting sign-ins from one address logs a warning (once per
 # address) that the address may be an untrusted proxy.
 SHARED_SOURCE_WARN_BROWSERS = 50
@@ -214,6 +237,13 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self.login_limiter = LoginStartLimiter()
         # the token times in seconds as the Settings page has them now (create_app: LiveSettings.seconds)
         self.ttl_source: Callable[[str], int] | None = None
+        # refresh tokens rotated out in the last RETRY_GRACE_SECONDS, by hash (_retry_grace), the
+        # access token each rotation issued -> the rotated-out token's hash (marked used on use),
+        # and the retries load_refresh_token let through for exchange_refresh_token to answer.
+        # In memory: one gateway process, and a restart only means a lost answer signs out again.
+        self._rotations: dict[str, _Rotation] = {}
+        self._rotated_access: dict[str, str] = {}
+        self._retries: set[str] = set()
         self._source_browsers: dict[str, set[str]] = {}  # source -> browser keys seen (bounded)
         self._warned_sources: set[str] = set()
         self._trusted_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
@@ -844,7 +874,12 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         row = self.db.get_token(refresh_token, "refresh", include_revoked=True)
         if row is None or row["client_id"] != client.client_id:
             return None
-        if row["revoked"]:
+        if row["revoked"] and self._retry_grace(hash_token(refresh_token), client.client_id) is not None:
+            # the app sending again a refresh whose answer it never got: answered by
+            # exchange_refresh_token (only a retry that comes after the rotation, never one sent
+            # at the same moment, which keeps its plain invalid_grant)
+            self._retries.add(hash_token(refresh_token))
+        elif row["revoked"]:
             # OAuth 2.1 reuse detection: a rotated-out refresh token presented again means
             # it leaked (or the client is broken). Kill the whole lineage, successors included.
             self.db.revoke_family(row["family"])
@@ -866,13 +901,27 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             # Ask the identity provider first: a removed member's whole family is revoked here,
             # and when the provider can't be reached this refresh token stays usable for a retry.
             await self._require_member(refresh_token.subject)
+        old_hash = hash_token(refresh_token.token)
         row = self.db.get_token(refresh_token.token, "refresh")
-        if row is None:
+        retry = None
+        if row is None and old_hash in self._retries:
+            self._retries.discard(old_hash)
+            # checked again: the identity provider was asked meanwhile
+            retry = self._retry_grace(old_hash, client.client_id)
+            if retry is not None:
+                row = self.db.get_token(refresh_token.token, "refresh", include_revoked=True)
+        if row is None or (retry is None and row["revoked"]):
             raise TokenError("invalid_grant", "refresh token is not valid")
-        # Rotate: retire the current generation (this refresh token and the access token
-        # issued with it) and issue the next one in the same family, so a replay of any
-        # retired token can still be traced to, and revoke, its successors.
-        self.db.revoke_generation(row["family"], row["created_at"])
+        if retry is not None:
+            # The pair the lost answer carried is retired unused (the app never had it), and a
+            # new one is issued in the same sign-in, so its lineage still traces any replay.
+            self.db.revoke_generation(row["family"], retry.created_at)
+            self.db.audit("refresh_retry_answered", sub=row["sub"], client_id=client.client_id)
+        else:
+            # Rotate: retire the current generation (this refresh token and the access token
+            # issued with it) and issue the next one in the same family, so a replay of any
+            # retired token can still be traced to, and revoke, its successors.
+            self.db.revoke_generation(row["family"], row["created_at"])
         if not refresh_token.subject:
             raise TokenError("invalid_grant", "refresh token has no subject")
         user = self.db.get_user(refresh_token.subject or "")
@@ -882,7 +931,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         if is_cimd_client_id(client.client_id):
             # Still in use by a member: keep it known (and kept) past the 180-day purge window.
             self.db.mark_cimd_client_signed_in(client.client_id)
-        return self._issue(
+        issued = self._issue(
             client.client_id,
             refresh_token.subject,
             scopes,
@@ -890,6 +939,63 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             row["family"],
             auth_time=auth_time,
         )
+        # the window runs from the first rotation: a retry never extends it
+        self._note_rotation(old_hash, client.client_id, row["family"], issued, at=retry.at if retry else None)
+        return issued
+
+    def _note_rotation(
+        self, old_hash: str, client_id: str, family: str, issued: OAuthToken, *, at: float | None
+    ) -> None:
+        """Remember a rotation for RETRY_GRACE_SECONDS (_retry_grace), forgetting older ones."""
+        now = time.time()
+        for key in [k for k, r in self._rotations.items() if now - r.at > RETRY_GRACE_SECONDS]:
+            gone = self._rotations.pop(key)
+            self._rotated_access.pop(gone.access_hash, None)
+        was = self._rotations.get(old_hash)
+        if was is not None:
+            self._rotated_access.pop(was.access_hash, None)
+        rotation = _Rotation(
+            at=now if at is None else at,
+            client_id=client_id,
+            family=family,
+            refresh_hash=hash_token(issued.refresh_token or ""),
+            access_hash=hash_token(issued.access_token),
+            created_at=int(now),
+        )
+        self._rotations[old_hash] = rotation
+        self._rotated_access[rotation.access_hash] = old_hash
+
+    def _retry_grace(self, old_hash: str, client_id: str) -> _Rotation | None:
+        """The rotation a rotated-out refresh token presented again may be answered for (0.7.46
+        audit PA-2): one this process made under RETRY_GRACE_SECONDS ago, for the same app, whose
+        new pair was never used (its access token never presented, its refresh token still live),
+        so the app never got that answer. Anything else is reuse, and revokes the sign-in.
+
+        Why: rotation with reuse detection (OAuth 2.1; RFC 9700, the OAuth security best current
+        practice) revokes a sign-in when an old refresh token comes back, as that is how a stolen
+        token shows. A lost answer looks the same, and signing a member out for a network blip is
+        the wrong trade when the retry can be told apart: the pair that answer carried was never
+        used. The window is short and the retry retires that unused pair, so if it was in fact
+        someone else, the app's own next request fails, its refresh with the retired token is then
+        reuse, and the whole sign-in is revoked, the thief's pair with it."""
+        rotation = self._rotations.get(old_hash)
+        if rotation is None or rotation.used or rotation.client_id != client_id:
+            return None
+        if time.time() - rotation.at > RETRY_GRACE_SECONDS:
+            return None
+        if not self.db.token_live(rotation.refresh_hash):
+            return None  # used to refresh, signed out or revoked since
+        return rotation
+
+    def access_used(self, token: str) -> None:
+        """An access token was presented: when a rotation in the retry window issued it, the app
+        has that answer, so a retry of the rotated-out token is reuse from then on."""
+        if not self._rotated_access:
+            return
+        old = self._rotated_access.pop(hash_token(token), None)
+        rotation = self._rotations.get(old) if old else None
+        if rotation is not None:
+            rotation.used = True
 
     def _issue(
         self,
@@ -944,6 +1050,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         row = self.db.get_token(token, "access")
         if row is None or row["expires_at"] < int(time.time()):
             return None
+        self.access_used(token)
         user = self.db.get_user(row["sub"])
         if user is None:
             # Every token is issued to a signed-in person; one whose user row is gone is refused,
