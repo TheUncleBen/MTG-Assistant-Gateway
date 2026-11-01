@@ -309,7 +309,9 @@ async def test_review_page_does_not_show_the_assistant_instructions(stack: Stack
 
 # -- 21: review rows come from structured data and cannot be forged -----------------------------
 def _acts(page: str) -> list[str]:
-    return re.findall(r"<span class='act'>(.*?)</span>", page)
+    """The review rows' action words (pages.py: one <li> per row). The Proposals list drawn beside
+    the review (ui.split) carries its rows' buttons in a span of the same class."""
+    return re.findall(r"<li class='[^']*'><span class='act'>(.*?)</span>", page)
 
 
 async def test_category_text_cannot_forge_review_rows(stack: Stack) -> None:
