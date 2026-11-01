@@ -1,7 +1,8 @@
 """Pages that read Archidekt draw at once (Standard 1 of the 0.7.46 audit: "cache first, never
 blank").
 
-A page such as a deck, Notifications, the forum, a profile, My lists or the Binder is drawn from
+A page such as a deck (and its settings, Goldfish, Compare, editor and export), a report,
+Notifications, the forum, a profile, My lists or the Binder is drawn from
 what Archidekt answers. When that answer is slow (the shared pacer is busy, or Archidekt itself
 is slow), the browser used to show nothing but a thin bar until it came. :class:`LatePageMiddleware`
 lets such a page run as usual; if it has not answered within LATE_AFTER, the member gets the
@@ -48,6 +49,12 @@ LATE_MAX = 300  # pages running or kept at most (the oldest kept ones go first)
 # The pages that read Archidekt before they draw: (address, title, the nav place to mark).
 _PAGES = (
     (re.compile(r"^/decks/\d{1,12}$"), "Deck", "/decks"),
+    (re.compile(r"^/decks/\d{1,12}/settings$"), "Deck settings", "/decks"),
+    (re.compile(r"^/decks/\d{1,12}/goldfish$"), "Goldfish", "/decks"),
+    (re.compile(r"^/decks/\d{1,12}/compare$"), "Compare", "/decks"),
+    (re.compile(r"^/decks/\d{1,12}/edit$"), "Edit deck", "/decks"),
+    (re.compile(r"^/decks/\d{1,12}/(export|delete)$"), "Deck", "/decks"),
+    (re.compile(r"^/history/reports/[A-Za-z0-9_-]{1,80}$"), "Report", "/reports"),
     (re.compile(r"^/notifications$"), "Alerts", ""),
     (re.compile(r"^/forum(/[^/]+){0,3}$"), "Forum", ""),
     (re.compile(r"^/users/[^/]{1,80}$"), "Profile", ""),
