@@ -1249,15 +1249,35 @@ def backup_writes() -> Iterator[None]:
         _backup_write.reset(token)
 
 
+def answer_lost(exc: Any) -> bool:
+    """Whether a failed write (an ArchidektError, or a DeckError made from one) may have been taken
+    by Archidekt although the gateway never heard so: it went out and got no answer (a timeout or
+    a network error), a 5xx, or a 2xx whose body could not be read. A request that never left, and
+    an answer that refused it (a 4xx, a 429), changed nothing. ``verify_mismatch`` is the gateway's
+    own read after a write, not the write's answer."""
+    if not getattr(exc, "sent", True) or exc.kind in NOT_ACTED_ON:
+        return False
+    if exc.kind == "contract":
+        status = getattr(exc, "status", None)
+        if status is None:
+            status = getattr(exc, "http_status", None)
+        return status is None or not 400 <= int(status) < 500
+    return exc.kind in ("unavailable", "unreachable", "temporarily_unavailable", "upstream")
+
+
 def _note_write(exc: ArchidektError | None) -> None:
     """A write inside an apply succeeded (``exc`` None) or failed with ``exc``: mark the apply's
-    progress as written unless the request never left the gateway or Archidekt did not act on it."""
+    progress as written unless the request never left the gateway or Archidekt did not act on it.
+    A failed write Archidekt may have taken unanswered is also marked ``answer_lost``: the apply
+    then never says nothing was changed (0.7.46 audit PA-3)."""
     progress = apply_writes.get()
     if progress is None or _backup_write.get():
         return
     if exc is not None and (not exc.sent or exc.kind in NOT_ACTED_ON):
         return
     progress["deck_written"] = True
+    if exc is not None and answer_lost(exc):
+        progress["answer_lost"] = True
 
 
 NO_SIGN_IN_TEXT = "Archidekt asked for a sign-in, and this request was made without one"

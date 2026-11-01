@@ -64,6 +64,7 @@ from .archidekt import (
     Patience,
     QuillDoc,
     _owned_by,
+    answer_lost,
     apply_writes,
     art_url,
     backup_name,
@@ -353,7 +354,8 @@ DECK_LIST_PARTIAL = 60.0
 DECK_LIST_COLD_WAIT = 1.5
 # A deck page shows the deck as read for its last view for this long (DeckService.page_deck):
 # long enough for a run of view switches and a Back, short enough that a change made on
-# archidekt.com shows on the next view soon after. archidekt_cache_seconds 0 turns it off.
+# archidekt.com shows on the next view soon after. Never longer than archidekt_cache_seconds (the
+# Settings page allows 60 to 900; a Settings built with 0, as some tests use, turns it off).
 PAGE_DECK_SECONDS = 20.0
 # After that, and up to this long after the read, a view shows the deck as last read at once and
 # reads it again in the background, so a page change never waits for Archidekt for a deck the
@@ -380,7 +382,8 @@ PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 # A page's own Archidekt reads that no deck cache holds (the forum, profiles, My lists and Wants,
 # a deck's collaborators) are kept this long per member (ShortReads): a member going back to a page
 # within it is not held up by the pacer every member shares. Any write the gateway sends with the
-# member's session forgets them at once. archidekt_cache_seconds 0 turns it off.
+# member's session forgets them at once. Off only for a Settings built with archidekt_cache_seconds
+# 0, as some tests use (the Settings page allows 60 to 900).
 SHORT_READ_SECONDS = 120.0
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
@@ -1010,10 +1013,11 @@ def row_line(r: dict[str, Any]) -> str:
             f", {r['game']}" if r.get("game") else ""
         )
         where = f" in folder “{r['folder']}”" if r.get("folder") else ""
+        count = f"{r['cards']} {'card' if int(r.get('cards') or 0) == 1 else 'cards'}"
         if r.get("package"):
-            what = f"{r['cards']} cards{side}, {visibility}; {r['package']}"
+            what = f"{count}{side}, {visibility}; {r['package']}"
             return f"New card package “{r['name']}”{where} ({what})"
-        return f"New {r['format']} deck “{r['name']}”{where} ({r['cards']} cards{side}, {visibility}{more})"
+        return f"New {r['format']} deck “{r['name']}”{where} ({count}{side}, {visibility}{more})"
     if kind == "restore":
         if "changes" in r:  # the review lines under it (a restore saved before counted write entries)
             n = int(r["changes"])
@@ -2095,6 +2099,15 @@ def _printing_key(ch: Change) -> tuple[str, str, str, bool]:
         (ch.collector_number or "").casefold(),
         True,
     )
+
+
+# Names a new deck's name-check note lists at most (the rows carry every one).
+NAMES_LISTED = 8
+
+
+def _some_names(names: list[str]) -> str:
+    shown = ", ".join(f"“{n}”" for n in names[:NAMES_LISTED])
+    return shown + (f" and {len(names) - NAMES_LISTED} more" if len(names) > NAMES_LISTED else "")
 
 
 def _with_warnings(note: dict[str, Any], more: dict[str, Any]) -> dict[str, Any]:
@@ -5305,14 +5318,15 @@ class DeckService:
             package=package,
             folder_id=folder_id,
         )
+        plan, names_note = await self._new_deck_names(sub, plan)
         if target is None:
             target = self.waiting_new_deck_named(
                 sub, plan["name"], package=bool(plan["changes"].get("package"))
             )
         if target is None:
-            return await self._save_new_deck(sub, plan)
+            return _with_warnings(await self._save_new_deck(sub, plan), names_note)
         before = int(target.get("version") or 1)
-        out = await self._update_new_deck(sub, target, plan)
+        out = _with_warnings(await self._update_new_deck(sub, target, plan), names_note)
         if out.get("duplicate_of") or out.get("proposal_id") != target["id"]:
             return out
         no = out.get("board_no")
@@ -5329,18 +5343,77 @@ class DeckService:
             ),
         }
 
-    async def unknown_new_deck_cards(self, entries: list[dict[str, Any]]) -> list[str]:
-        """The names in a new deck's list that are no Magic card at all (check_new_deck), as
-        check_plan looks them up: a name that can't be judged passes."""
-        names = list(dict.fromkeys(str(c.get("name") or "") for c in entries if c.get("name")))
-        if not names or self.known_cards is None:
-            return []
-        try:
-            found = await self.known_cards(names)
-        except Exception:
-            logger.exception("card-name check failed")
-            return []
-        return [n for n in names if found.get(n) is False]
+    async def check_new_names(self, sub: str, names: list[str], *, look_up: bool = True) -> dict[str, Any]:
+        """The checks a deck edit's added cards get (``_check_names``), for the cards of a new deck
+        or a binder change (0.7.46 audit): ``unknown`` (the card-name catalog says no Magic card
+        has the name), with ``meant`` (the card a misspelling probably means), then, when none is
+        unknown, each name the catalog can't judge looked up on Archidekt within the same limits:
+        ``missing`` (Archidekt doesn't have it) and ``unchecked`` (nothing could tell). The answers
+        are remembered for the apply."""
+        names = list(dict.fromkeys(n for n in names if n and n != "?"))
+        found: dict[str, bool | None] = {}
+        if names and self.known_cards is not None:
+            try:
+                found = await self.known_cards(names)
+            except Exception:
+                logger.exception("card-name check failed")
+        unknown = [n for n in names if found.get(n) is False]
+        meant: dict[str, str] = {}
+        if unknown and self.suggest_cards is not None:
+            try:
+                meant = await self.suggest_cards(unknown)
+            except Exception:
+                logger.warning("card-name suggestions failed", exc_info=True)
+        missing: list[str] = []
+        unchecked: list[str] = []
+        unjudged = [Change(action="add", card_name=n) for n in names if found.get(n) is None]
+        if unjudged and not unknown and look_up:
+            missing, unchecked = await self._look_up_unjudged(sub, unjudged)
+        return {"unknown": unknown, "meant": meant, "missing": missing, "unchecked": unchecked}
+
+    async def _new_deck_names(self, sub: str, plan: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        """A new deck's (or package's) cards checked before it waits, as a deck edit's added cards
+        are (``_check_names``): a name that is no Magic card refuses it; for an assistant's proposal
+        each name the catalog can't judge is looked up on Archidekt, and one Archidekt doesn't have
+        (``missing``) or nothing could check (``unchecked``) is marked on its rows and named in
+        the result's warnings. A new deck always waits for the member. Returns the plan and the
+        note for the result."""
+        cards = plan["changes"].get("cards") or []
+        client = current_client.get()
+        got = await self.check_new_names(
+            sub,
+            [str(c.get("name") or "") for c in cards],
+            look_up=client not in (None, BROWSER_CLIENT, ADMIN_CLIENT),
+        )
+        if got["unknown"]:
+            raise DeckError(
+                "unknown_cards",
+                no_card_called(got["unknown"], meant=got["meant"]) + " Nothing was proposed.",
+                unknown_cards=got["unknown"],
+                **({"did_you_mean": got["meant"]} if got["meant"] else {}),
+            )
+        missing, unchecked = got["missing"], got["unchecked"]
+        if not (missing or unchecked):
+            return plan, {}
+        note: dict[str, Any] = {"warnings": []}
+        if missing:
+            one = len(missing) == 1
+            note["missing_on_archidekt"] = missing[:NAMES_LISTED]
+            note["warnings"].append(
+                f"Archidekt doesn't have {_some_names(missing)}, so the deck can't be made with "
+                f"{'it' if one else 'them'}: fix the {'name' if one else 'names'} with amend_proposal, or "
+                f"leave {'it' if one else 'them'} out."
+            )
+        if unchecked:
+            note["unchecked_names"] = unchecked[:NAMES_LISTED]
+            note["warnings"].append(
+                f"Couldn't check that {_some_names(unchecked)} "
+                + ("is a card on Archidekt." if len(unchecked) == 1 else "are cards on Archidekt.")
+            )
+        for key, names in (("missing_on_archidekt", missing), ("unchecked_names", unchecked)):
+            if len(names) > NAMES_LISTED:
+                note[f"{key}_total"] = len(names)
+        return {**plan, "rows": mark_name_checks(plan["rows"], missing, unchecked)}, note
 
     async def _refuse_unknown_cards(self, deck: Deck, changes: list[Change]) -> dict[str, bool | None]:
         """Refuse names that are no Magic card; the checks of every new card's name otherwise."""
@@ -5579,6 +5652,12 @@ class DeckService:
             **({"deck_after": row["deck_after"]} if state == "pending" and row.get("deck_after") else {}),
             # a deck edit that stopped partway: "Propose the rest" (propose_rest)
             **({"rest_offered": True} if self.rest_offered(row) else {}),
+            # an apply that stopped after it may have changed Archidekt: never "make it again"
+            **(
+                {"may_have_changed": True}
+                if state == "failed" and isinstance(row["result"], dict) and may_have_changed(row["result"])
+                else {}
+            ),
             **(
                 {"rest_proposal_id": row["result"]["rest_proposal_id"]}
                 if isinstance(row["result"], dict) and row["result"].get("rest_proposal_id")
@@ -5684,7 +5763,12 @@ class DeckService:
             + (
                 # an apply that stopped at the backup (possibly after its caller had its answer)
                 "The last attempt to apply this stopped before anything changed: the backup copy "
-                "could not be made on Archidekt. "
+                "could not be made on Archidekt"
+                + (
+                    ", as Archidekt no longer accepts the stored session. Relink, then apply it again. "
+                    if (row["result"] or {}).get("relink")
+                    else ". "
+                )
                 if state == "pending" and (row["result"] or {}).get("error") == "backup_failed"
                 else ""
             )
@@ -5698,7 +5782,9 @@ class DeckService:
                 risk_reason=why,
                 in_chat=self.settings.apply_in_chat,
                 partial=bool(
-                    (row["result"] or {}).get("sent_entries") or (row["result"] or {}).get("categories_saved")
+                    (row["result"] or {}).get("sent_entries")
+                    or (row["result"] or {}).get("categories_saved")
+                    or (row["result"] or {}).get("answer_lost")
                 ),
                 kind=kind,
                 card_may_approve=self.card_may_approve(row),
@@ -5767,11 +5853,18 @@ class DeckService:
         """The refusal for an apply or reject of a proposal that is no longer pending, carrying its
         state now (and when and by whom it was closed), so a card can show it and drop its buttons."""
         p = self.describe(sub, proposal_id)
-        extra = {k: p[k] for k in ("state", "closed_at", "closed_by", "closed_by_app") if p.get(k)}
+        keys = ("state", "closed_at", "closed_by", "closed_by_app", "may_have_changed", "rest_offered")
+        extra = {k: p[k] for k in keys if p.get(k)}
+        after = (
+            # its own apply may have changed Archidekt: asking for it again would make it twice
+            "check the deck before asking for this change again."
+            if p.get("may_have_changed")
+            else "ask for a new proposal if the change is still wanted."
+        )
         return DeckError(
             "not_pending",
             f"This proposal is already {p['state']}, so it cannot be {doing}. Nothing was sent to "
-            "Archidekt; ask for a new proposal if the change is still wanted.",
+            f"Archidekt now; {after}",
             review_url=p["review_url"],
             **extra,
         )
@@ -6418,13 +6511,14 @@ class DeckService:
         return self.batches.start(self, sub, the_plan, via=via)
 
     def rest_offered(self, row: dict[str, Any]) -> bool:
-        """Whether a failed deck edit offers "Propose the rest": part of it reached Archidekt
-        (some entries were sent) and its snapshot of the deck before it is kept."""
+        """Whether a failed deck edit offers "Propose the rest": part of it reached Archidekt, or
+        may have (some entries were sent, or a write went out unanswered), and its snapshot of the
+        deck before it is kept."""
         result = row.get("result") if isinstance(row.get("result"), dict) else {}
         return bool(
             row.get("state") == "failed"
             and (row.get("kind") or "edit") == "edit"
-            and result.get("sent_entries")
+            and (result.get("sent_entries") or result.get("answer_lost"))
             and result.get("snapshot_id")
             and not result.get("rest_proposal_id")
         )
@@ -6603,6 +6697,8 @@ class DeckService:
         progress: dict[str, Any] = {}
         coll = row.get("kind") == "collection"  # the messages say "your collection", not "the deck"
         clone = row.get("kind") == "clone"  # a copy holds the cards: never "no cards were added"
+        new = row.get("kind") == "create_deck"
+        account = row.get("kind") in ("lists", "action")  # not one deck: the member's account
         self._progress[proposal_id] = progress
         # This task's own context: a rate limit is waited out instead of failing the apply halfway,
         # within one allowance for the whole apply
@@ -6634,6 +6730,7 @@ class DeckService:
                 ):
                     # the write that failed may have landed; the deck read again shows it did not
                     progress["deck_written"] = False
+                    progress.pop("answer_lost", None)
                     progress["read_back_unchanged"] = True
                 await self._drop_unused_backup(sub, proposal_id, progress, source_deck_id=row["deck_id"])
                 if waits_again and not _changed_anything(progress):
@@ -6703,14 +6800,21 @@ class DeckService:
                 # A failure after part of the change landed says how much (_partial_note); the
                 # stored detail is the same message the caller gets, so the chat card after a slow
                 # Approve and the review page say it too.
+                # A write that went out unanswered counts: the deck may have changed (0.7.46 audit
+                # PA-3), so the message never says nothing was changed
                 partial = (
-                    bool(progress.get("sent_entries") or progress.get("deck_id"))
+                    bool(
+                        progress.get("sent_entries") or progress.get("deck_id") or progress.get("answer_lost")
+                    )
                     and exc.kind != "verify_mismatch"
                 )
                 detail = (
                     f"{_sentence(exc)} {_rate_limited_note(progress, collection=coll, clone=clone)}"
                     if exc.kind == "rate_limited"
-                    else f"{_sentence(exc)} {_partial_note(progress, collection=coll, clone=clone)}"
+                    else (
+                        f"{_sentence(exc)} "
+                        + _partial_note(progress, collection=coll, clone=clone, new_deck=new, account=account)
+                    )
                     if partial
                     else str(exc)
                 )
@@ -6723,15 +6827,18 @@ class DeckService:
                     sub=sub,
                     detail={"proposal_id": proposal_id, "error": exc.kind, **_sent(progress)},
                 )
-                if exc.kind == "rate_limited":
-                    raise DeckError(exc.kind, detail, **{**exc.extra, **_sent(progress)}) from exc
-                if partial:
-                    raise DeckError(exc.kind, detail, **{**exc.extra, **_sent(progress)}) from exc
+                if exc.kind == "rate_limited" or partial:
+                    raise DeckError(
+                        exc.kind,
+                        detail,
+                        **{**exc.extra, **_sent(progress), **self._stopped_extras(sub, proposal_id)},
+                    ) from exc
                 raise
             except BaseException as exc:  # cancelled or unexpected: never leave a proposal in applying
                 kind = "internal" if isinstance(exc, Exception) else "interrupted"
                 unexpected = (
-                    f"Applying failed unexpectedly. {_partial_note(progress, collection=coll, clone=clone)}"
+                    f"Applying failed unexpectedly. "
+                    f"{_partial_note(progress, collection=coll, clone=clone, new_deck=new, account=account)}"
                 )
                 stored = {**progress, "error": kind, **({"detail": unexpected} if kind == "internal" else {})}
                 self.db.finish_proposal(proposal_id, state="failed", result=stored)
@@ -6755,6 +6862,22 @@ class DeckService:
             # the result was described before the audit row above existed
             result["applied_via"] = self._applied_via(sub, proposal_id)
         return result
+
+    def _stopped_extras(self, sub: str, proposal_id: str) -> dict[str, Any]:
+        """What the answer to an apply that stopped after it may have changed Archidekt carries, as
+        get_proposal says it: the proposal failed, the deck may have changed (so a card never asks
+        for the same change again), whether Propose the rest is offered, and that pressing again
+        is no use."""
+        row = self.db.get_proposal(proposal_id, sub) or {}
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        if not may_have_changed(result):
+            return {"state": "failed"}
+        return {
+            "state": "failed",
+            "may_have_changed": True,
+            "retryable": False,
+            **({"rest_offered": True} if self.rest_offered(row) else {}),
+        }
 
     async def _apply_claimed(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
         if row.get("kind") == "create_deck":
@@ -6831,13 +6954,26 @@ class DeckService:
                 await self._call(
                     sub, lambda token, *_, i=str(r["package_id"]): self.client.package_cards(token, i)
                 )
-        await self._send(sub, deck.id, payload, progress)
-        verified = await self.get_deck(sub, deck.id)
+        # A write Archidekt may have taken without answering does not end the apply here: the
+        # read below says what the deck has now (0.7.46 audit PA-3)
+        unanswered = await _unless_unanswered(self._send(sub, deck.id, payload, progress))
+        verified = await _read_after(self.get_deck(sub, deck.id), unanswered)
         if (kept := one_click.get()) is not None:
             kept["verified"] = pickle.loads(pickle.dumps(verified))  # the page draws from it (D-01)
         self.recheck_waiting(sub, verified)  # the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
         mismatches += label_mismatches(changes, deck, verified)
+        if unanswered is not None and mismatches:
+            if not progress.get("sent_entries") and verified.rows_fingerprint() == progress["read_rows"]:
+                # the deck read again is as it was: the write did not land (the rule
+                # _deck_as_before applies), so the stop says nothing was changed
+                progress["deck_written"] = False
+                progress.pop("answer_lost", None)
+                progress["read_back_unchanged"] = True
+            else:
+                # part of it may be on the deck: the apply stops as partly made (_apply_slotted)
+                progress["not_on_deck"] = mismatches
+            raise unanswered
         result = {
             "snapshot_id": snapshot_id,
             **backup,
@@ -6846,6 +6982,7 @@ class DeckService:
             "mismatched_cards": mismatches,
             "after_fingerprint": verified.fingerprint(),  # Undo: did the deck change since?
             **({"left_out": left_out} if left_out else {}),
+            **({"answer_lost": True} if unanswered is not None else {}),
         }
         if mismatches:
             progress.update(result)  # apply() records it with the error
@@ -7668,19 +7805,28 @@ class DeckService:
         except DeckError as exc:
             # Kept on the proposal so get_proposal and the review page say why it is pending again,
             # also when the apply was answered "applying" before the backup failed.
+            # A session Archidekt refused is fixed only by relinking (0.7.46 audit PA-4)
+            relink = exc.kind == "not_linked"
             self.db.finish_proposal(
-                row["id"], state="pending", result={"error": "backup_failed", "detail": str(exc)}
+                row["id"],
+                state="pending",
+                result={"error": "backup_failed", "detail": str(exc), **({"relink": True} if relink else {})},
             )
             self._audit(
                 "backup_failed",
                 sub=sub,
                 detail={"proposal_id": row["id"], "deck_id": deck.id, "error": exc.kind},
             )
+            then = (
+                "Relink your Archidekt account, then apply it again."
+                if relink
+                else "It can be applied again once Archidekt answers."
+            )
             raise DeckError(
                 "backup_failed",
                 f"The backup copy of “{deck.name}” could not be made on Archidekt ({exc}). Nothing was "
-                "changed; the proposal is still pending, so it can be applied again once Archidekt "
-                "answers.",
+                f"changed; the proposal is still pending. {then}",
+                **({"relink": True} if relink else {}),
             ) from exc
         self._trim_backups(sub, deck.id)
         return made
@@ -7853,12 +7999,17 @@ class DeckService:
         removes: list[dict[str, Any]],
         *,
         extra: dict[str, Any] | None = None,
+        missing: list[str] | None = None,
+        unchecked: list[str] | None = None,
     ) -> dict[str, Any]:
         """A proposal (kind ``collection``) that adds cards to, or removes cards from, the member's
         Archidekt Collection. Like every write the assistant can start it waits for the member's
         approval (or their approval mode); the review rows are ``add`` and ``remove`` rows, so the
         same tiers apply as to a deck edit. ``adds`` are the items collection.add accepts (already
-        validated), ``removes`` are ``{"id", "name", "quantity"}`` records resolved by the caller."""
+        validated), ``removes`` are ``{"id", "name", "quantity"}`` records resolved by the caller.
+        ``missing`` and ``unchecked``: added names Archidekt doesn't have, or nothing could check
+        (``check_new_names``), marked on their rows, which makes the change high risk."""
+        self._token(sub)  # applied to the linked account: none, and it never could be
         self._room_for_proposal(sub)
         if not adds and not removes:
             raise DeckError("invalid", "nothing to change: give cards to add or remove")
@@ -7874,6 +8025,8 @@ class DeckService:
             _row("remove", name=str(r["name"]), qty=int(r["quantity"]), printing=r.get("printing"))
             for r in removes
         ]
+        if missing or unchecked:
+            rows = mark_name_checks(rows, missing or [], unchecked or [])
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
             {
@@ -7935,6 +8088,7 @@ class DeckService:
         is the same request and has not been exercised live); the copy keeps every card,
         quantity, category and finish."""
         deck_id = _clean_deck_id(deck_id)
+        self._token(sub)  # the copy is made in the linked account: none, and it never could be
         self._room_for_proposal(sub)
         deck = await self.get_any_deck(sub, deck_id)
         new_name = clean_text(name or "") or f"Copy of - {deck.name}"
@@ -8532,7 +8686,10 @@ class DeckService:
             entries=None if new_list else list(had.get("cards") or []),
             parsed_package=None if "package" in given else had.get("package"),
         )
-        return await self._update_new_deck(sub, row, plan, version=version)
+        names_note: dict[str, Any] = {}
+        if new_list:  # the list it keeps was checked when it was proposed
+            plan, names_note = await self._new_deck_names(sub, plan)
+        return _with_warnings(await self._update_new_deck(sub, row, plan, version=version), names_note)
 
     def withdraw(self, sub: str, proposal_id: str, reason: str) -> dict[str, Any]:
         """Close one of the calling app's own waiting notes because the user's newer request
@@ -9364,15 +9521,27 @@ class DeckService:
             from . import recheck
 
             raise needs_look_error(recheck.REASON_DURING_APPLY)
+        unanswered = None
         if changes:
-            await _writing(
-                progress, self._call(sub, self.client.update_deck, deck.id, details_payload(changes))
+            unanswered = await _unless_unanswered(
+                _writing(
+                    progress, self._call(sub, self.client.update_deck, deck.id, details_payload(changes))
+                )
             )
-        verified = await self.get_deck(sub, deck.id)
+        verified = await _read_after(self.get_deck(sub, deck.id), unanswered)
         if not organise:  # the organise steps change the deck again after this read
             self.recheck_waiting(sub, verified)
         still, _lines = details_diff(verified, wanted)
         mismatches = sorted(still)
+        if unanswered is not None and mismatches:
+            if all(_current_detail(verified, key) == _current_detail(deck, key) for key in DETAIL_FIELDS):
+                # read again, the details are as they were: the write did not land
+                progress["deck_written"] = False
+                progress.pop("answer_lost", None)
+                progress["read_back_unchanged"] = True
+            else:
+                progress["not_on_deck"] = mismatches
+            raise unanswered
         organised: list[str] = []
         if organise and not mismatches:
             try:
@@ -9536,9 +9705,17 @@ class DeckService:
                 await _writing(progress, self._call(sub, fn, *args))
             except DeckError as exc:
                 done = ", ".join(f"“{n}”" for n in saved)
+                # a write Archidekt may have taken unanswered is never "not changed" (the apply's
+                # own note says the deck may have changed)
+                landed = may_have_landed(exc)
                 note = (
-                    f" Saved before it stopped: {done}; the other categories were not changed."
+                    f" Saved before it stopped: {done}; “{body['name']}” may have been saved too, and the "
+                    "other categories were not changed."
+                    if saved and landed
+                    else f" Saved before it stopped: {done}; the other categories were not changed."
                     if saved
+                    else ""
+                    if landed
                     else " No category was changed."
                 )
                 raise DeckError(exc.kind, _sentence(exc) + note, **exc.extra) from exc
@@ -9895,16 +10072,24 @@ class DeckService:
         if progress is not None:
             progress["snapshot_id"] = snapshot_id
         await self._call(sub, self.client.delete_deck, deck.id)
-        gone = False
+        gone, unread = False, None
         try:
             await self.get_deck(sub, deck.id)
         except DeckError as exc:
+            # only "not there" shows it gone; a busy or silent Archidekt shows nothing (PA-11)
             gone = exc.kind in ("not_found", "forbidden")
+            unread = None if gone else exc
         self._audit(
             "deck_deleted",
             sub=sub,
             detail={"deck_id": deck.id, "snapshot_id": snapshot_id, "verified": gone},
         )
+        if unread is not None:
+            raise DeckError(
+                "verify_mismatch",
+                f"Archidekt accepted the delete, but “{deck.name}” couldn't be read back to check it is "
+                f"gone ({unread}). Check it on Archidekt.",
+            )
         if not gone:
             raise DeckError(
                 "verify_mismatch",
@@ -11827,9 +12012,43 @@ async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any
     except DeckError as exc:
         if exc.kind not in NOTHING_WRITTEN and exc.sent:
             progress["deck_written"] = True
+            if answer_lost(exc):
+                progress["answer_lost"] = True
         raise
     progress["deck_written"] = True
     return out
+
+
+def may_have_landed(exc: DeckError) -> bool:
+    """Whether a failed write may still have changed Archidekt: it went out, and the answer (none:
+    a timeout; a 5xx; an answer that could not be read) does not say it was refused
+    (archidekt.answer_lost)."""
+    return exc.kind not in NOTHING_WRITTEN and answer_lost(exc)
+
+
+async def _unless_unanswered(work: Awaitable[Any]) -> DeckError | None:
+    """Await an apply's writes. A write Archidekt may have taken without answering is returned
+    instead of raised, so the apply reads the deck to see what it has (0.7.46 audit PA-3: a
+    timeout after the write landed was reported as nothing changed, inviting the change twice).
+    Any other failure is raised as it is."""
+    try:
+        await work
+    except DeckError as exc:
+        if not may_have_landed(exc):
+            raise
+        return exc
+    return None
+
+
+async def _read_after(read: Awaitable[Deck], unanswered: DeckError | None) -> Deck:
+    """The read after an apply's writes. When a write went unanswered and this read fails too, the
+    write's own failure is the one raised (the apply then says the deck may have changed)."""
+    if unanswered is None:
+        return await read
+    try:
+        return await read
+    except DeckError:
+        raise unanswered from None
 
 
 def _link_identity(link: dict[str, Any]) -> tuple[Any, ...]:
@@ -11939,6 +12158,20 @@ def changed_anything(progress: dict[str, Any]) -> bool:
     return _changed_anything(progress)
 
 
+def may_have_changed(result: dict[str, Any]) -> bool:
+    """Whether a failed apply's stored result says Archidekt was, or may have been, changed: what
+    the member is told (never "nothing was changed" or "make it again" then). Unlike
+    ``_changed_anything`` it leaves out a write Archidekt answered with a refusal."""
+    return bool(
+        result.get("sent_entries")
+        or result.get("deck_id")
+        or result.get("answer_lost")
+        or result.get("categories_saved")
+        or result.get("done")
+        or result.get("error") == "verify_mismatch"
+    )
+
+
 def _changed_anything(progress: dict[str, Any]) -> bool:
     """Whether an apply may have changed anything on Archidekt, by its progress or by the
     proposal's stored result (which holds it): deck rows (or collection records) sent, a deck
@@ -12035,13 +12268,24 @@ def _progress_view(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in keys if k in progress}
 
 
-def _partial_note(progress: dict[str, Any], *, collection: bool = False, clone: bool = False) -> str:
+def _partial_note(
+    progress: dict[str, Any],
+    *,
+    collection: bool = False,
+    clone: bool = False,
+    new_deck: bool = False,
+    account: bool = False,
+) -> str:
     """What a failed apply had already changed on Archidekt, for the message the user sees.
     ``collection``: a collection proposal's apply, which counts collection records. ``clone``: a
     copy of a deck, made whole by one request, so once it exists it holds the cards."""
     if clone and progress.get("deck_id"):
         return COPY_MADE.format(deck_id=progress["deck_id"])
     sent = int(progress.get("sent_entries") or 0)
+    if not sent and not progress.get("deck_id") and progress.get("answer_lost"):
+        return _unanswered_note(
+            progress, collection=collection, clone=clone, new_deck=new_deck, account=account
+        )
     if not sent and progress.get("deck_id"):
         return f"The new deck {progress['deck_id']} was created on Archidekt, but no cards were added."
     if collection:
@@ -12065,6 +12309,43 @@ def _partial_note(progress: dict[str, Any], *, collection: bool = False, clone: 
     elif progress.get("deck_id"):
         note += f" The new deck is {progress['deck_id']} on Archidekt."
     return note
+
+
+def _unanswered_note(
+    progress: dict[str, Any],
+    *,
+    collection: bool = False,
+    clone: bool = False,
+    new_deck: bool = False,
+    account: bool = False,
+) -> str:
+    """What an apply whose write went out unanswered (no rows known to be sent, no deck known to be
+    made) may have changed (0.7.46 audit PA-3): never "nothing was changed", as the write may have
+    landed. ``not_on_deck``: what the deck read again after it still lacks (deck edits)."""
+    if clone or new_deck:
+        return (
+            "Archidekt may have made the new deck before it stopped answering, so check your decks on "
+            "Archidekt before trying again."
+        )
+    if collection or account:
+        where = "your binder" if collection else "your Archidekt account"
+        return (
+            f"Archidekt may have taken this change before it stopped answering, so check {where} "
+            "before trying it again."
+        )
+    missing = [str(m) for m in progress.get("not_on_deck") or []]
+    if missing:
+        named = ", ".join(f"“{m}”" for m in missing[:5]) + (
+            f" and {len(missing) - 5} more" if len(missing) > 5 else ""
+        )
+        return (
+            "Part of this change may have reached Archidekt before it stopped answering; the deck read "
+            f"again doesn't show it for {named}."
+        )
+    return (
+        "This change may have reached Archidekt before it stopped answering, so check the deck "
+        "before trying it again."
+    )
 
 
 def edit_mismatches(
@@ -12475,8 +12756,10 @@ def _next_step(
         )
     if state == "failed" and partial:
         return (
-            "Part of this change reached Archidekt before it failed (see result.sent_entries). Check "
-            "the deck; result.snapshot_id can be restored with propose_restore_snapshot."
+            "Part or all of this change may have reached Archidekt before it stopped. Read the deck "
+            "(or binder) as it is now before proposing anything for it again, so nothing is made "
+            "twice; result.snapshot_id, when there is one, can be restored with propose_restore_snapshot. "
+            "Don't retry it yourself."
         )
     if state == "failed":
         return "Nothing further was changed. Create a new proposal if you still want these edits."

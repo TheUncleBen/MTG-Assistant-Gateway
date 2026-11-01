@@ -135,9 +135,9 @@ from mtg_gateway import decks as decks_mod  # noqa: E402
 from .test_deck_views_browser import _error, _held, _menu_page, _open_menu  # noqa: E402
 
 
-def test_a_timed_out_save_shows_what_the_deck_has_now(server: Server) -> None:
-    """D-04: Archidekt took the write but never answered. The page never says "not saved" and
-    never puts the old count back: it draws the count Archidekt has, and says so."""
+def test_a_save_archidekt_took_unanswered_is_saved(server: Server) -> None:
+    """PA-3: Archidekt took the write but never answered. The deck read after it shows the change,
+    so the page says it is saved, as for any save, and never "not saved"."""
     from playwright.sync_api import sync_playwright
 
     server.ark.timeout_card_writes = True
@@ -148,13 +148,37 @@ def test_a_timed_out_save_shows_what_the_deck_has_now(server: Server) -> None:
         n = server.quantity("Cultivate")
         menu = _open_menu(page, row)
         menu.locator(".qtyrow .step").nth(1).click()
-        note = page.locator(".deck-toast.warn .msg")
+        note = page.locator(".deck-toast .msg", has_text="Saved.")
         note.wait_for(timeout=15_000)
-        assert note.inner_text() == "Archidekt didn't answer; this is what the deck shows now."
+        assert note.inner_text().startswith("Saved."), note.inner_text()
         assert page.locator(".deck-toast.error").count() == 0
         assert row.get_attribute("data-qty") == str(n + 1)
-        assert menu.locator(".qtyrow .n").inner_text() == str(n + 1)
         assert server.quantity("Cultivate") == n + 1
+        assert errors == []
+        browser.close()
+
+
+def test_a_timed_out_save_the_deck_does_not_show_is_not_saved(server: Server) -> None:
+    """Archidekt never answered the write, and the deck read after it shows the count as it was:
+    the page says it was not saved, with Try again, and the row keeps the count Archidekt has."""
+    from playwright.sync_api import sync_playwright
+
+    server.ark.timeout_card_writes = True
+    server.ark.fail_patch_silently = True  # not on the deck when it is read again
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, 390, 844, "dark")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        n = server.quantity("Cultivate")
+        menu = _open_menu(page, row)
+        menu.locator(".qtyrow .step").nth(1).click()
+        note = page.locator(".deck-toast.error .msg")
+        note.wait_for(timeout=15_000)
+        assert "not saved: Archidekt didn't answer in time." in note.inner_text(), note.inner_text()
+        assert page.locator(".deck-toast.error button", has_text="Try again").count() == 1
+        assert row.get_attribute("data-qty") == str(n)
+        assert menu.locator(".qtyrow .n").inner_text() == str(n)
+        assert server.quantity("Cultivate") == n
         assert errors == []
         browser.close()
 

@@ -616,7 +616,7 @@ async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) 
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck “No deck” (1 cards, 1 more in the maybeboard or sideboard, private)"
+        "New custom deck “No deck” (1 card, 1 more in the maybeboard or sideboard, private)"
     )
     assert "+1 Arcane Signet [Maybeboard] (maybeboard/sideboard)" in p["diff"]
     signet = next(c for c in p["changes"]["cards"] if c["name"] == "Arcane Signet")
@@ -645,7 +645,7 @@ async def test_a_new_deck_keeps_a_custom_categorys_switches(stack: Stack) -> Non
     )
     assert p["ok"], p
     assert p["diff"].splitlines()[0] == (
-        "New custom deck “Flags” (1 cards, 2 more in the maybeboard or sideboard, private)"
+        "New custom deck “Flags” (1 card, 2 more in the maybeboard or sideboard, private)"
     )
     assert "New category “Considering”: Not in deck on, Not in price on." in p["diff"]
     assert not p.get("warnings"), p
