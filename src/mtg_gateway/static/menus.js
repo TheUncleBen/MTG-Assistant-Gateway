@@ -945,7 +945,9 @@
   }
   Menu.bind(document, {
     itemOf: itemOf,
-    skip: "button, input, select, textarea, summary, form.qty, form.rm, .wbtn",
+    // a hold on a Binder tile's picture (button.thumbbtn, most of the tile) opens the row's
+    // menu, as a hold on a deck tile's link does (0.7.46 audit D08); other buttons act on a tap
+    skip: "button:not(.thumbbtn), input, select, textarea, summary, form.qty, form.rm, .wbtn",
     button: ".kebab",
     open: function (node, x, y) { node.__mtgKind.open(node, x, y); }
   });

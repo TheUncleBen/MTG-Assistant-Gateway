@@ -394,3 +394,72 @@ def test_no_word_breaks_in_two_at_200_percent_text(server: Server, walk) -> None
             assert errors == []
         browser.close()
     assert problems == [], "\n".join(problems)
+
+
+# the filter rows (Proposals' four selects, My activity's three, Admin activity's four)
+FILTER_ROWS = """
+() => [...document.querySelectorAll('.ui-tools')].map(t => {
+  const fs = [...t.querySelectorAll('.f')].filter(f => f.getBoundingClientRect().width > 0);
+  const w = t.getBoundingClientRect().width;
+  return {n: fs.length, rows: new Set(fs.map(f => Math.round(f.getBoundingClientRect().top))).size,
+          wide: fs.every(f => f.getBoundingClientRect().width >= w * .9)};
+})
+"""
+
+
+def test_filter_rows_stack_to_one_column_at_large_text(server: Server, walk) -> None:  # noqa: F811
+    """A page's filter selects sit two a row on a phone; with 200% text each takes a row of its
+    own, so no choice is cut to "All…" (0.7.46 audit D31)."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = walk
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(**WEB_360)
+        page, errors = _open(server, ctx, sid)
+        for path in ("/proposals", "/activity", "/admin/activity"):
+            _goto(server, page, path)
+            normal = [t for t in page.evaluate(FILTER_ROWS) if t["n"] >= 2]
+            assert normal and all(t["rows"] < t["n"] for t in normal), (path, normal)
+            page.evaluate(TEXT_200)
+            page.wait_for_timeout(40)
+            large = [t for t in page.evaluate(FILTER_ROWS) if t["n"] >= 2]
+            assert all(t["rows"] == t["n"] and t["wide"] for t in large), (path, large)
+        browser.close()
+    assert errors == []
+
+
+def test_a_hold_on_a_binder_tiles_picture_opens_its_menu(server: Server, walk) -> None:  # noqa: F811
+    """On a touch screen a press and hold on a Binder tile's picture (most of the tile) opens the
+    row's menu, as a hold on a deck tile does, and does not open the card view on the lift
+    (0.7.46 audit D08). A short tap still opens the card view."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _ = walk
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(**APP_412)
+        page, errors = _open(server, ctx, sid)
+        _goto(server, page, "/collection?view=grid")
+        pic = page.locator("ul.collgrid li.c button.thumbbtn").first
+        pic.scroll_into_view_if_needed()
+        box = pic.bounding_box()
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        page.wait_for_timeout(600)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        page.wait_for_timeout(300)
+        assert page.locator(".cardview.open").count() == 0, "the lift opened the card view too"
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(600)
+        assert page.locator(".ctxmenu").count() == 0
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        page.wait_for_timeout(80)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        assert page.locator(".ctxmenu").count() == 0
+        browser.close()
+    assert errors == []

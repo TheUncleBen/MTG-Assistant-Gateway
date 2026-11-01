@@ -1491,7 +1491,8 @@ main.wrap.ui-wide{max-width:1200px}
 
 /* toolbar: one search box, then the filters; every piece grows, so each row is filled edge to edge
    and a filter that wraps never sits alone beside empty space */
-.ui-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0 0 .75rem}
+.ui-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0 0 .75rem;
+  container-type:inline-size}
 .ui-tools > *{min-width:0}
 .ui-tools .search{flex:2 1 20rem;position:relative;min-width:0;align-self:stretch;display:flex;
   align-items:center}
@@ -1505,6 +1506,9 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-tools .f > :not(.msel-native){width:100%}  /* the hidden native select keeps its own size */
 .ui-tools select{margin:0}
 @media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)} }
+/* large text on a phone (the row under 20 em of its own text): one filter a row, so no choice is
+   cut to "All…" (0.7.46 audit D31) */
+@container (max-width:20em){ .ui-tools .f,.ui-tools .search{flex-basis:100%;grid-column:1 / -1} }
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
 
 /* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
