@@ -187,6 +187,14 @@ def counts(sub: str) -> dict[str, int]:
     return dict(_COUNTS.get(sub) or {})
 
 
+def read_counts_again(sub: str) -> None:
+    """A reload of Binder › Lists (the browser's Reload, the app's pull): the totals are read
+    again by the page's own ask for them (lists_page.COUNTS_API). A list resting after a failed
+    read (COUNT_RETRY_AFTER) stays resting, so a run of pulls never adds up on a struggling
+    Archidekt."""
+    _COUNTS.pop(sub, None)
+
+
 def forget_counts(sub: str) -> None:
     _COUNTS.pop(sub, None)
     _COUNT_FAILED.pop(sub, None)

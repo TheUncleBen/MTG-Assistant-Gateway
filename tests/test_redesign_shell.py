@@ -432,9 +432,13 @@ def test_the_app_offers_pull_to_refresh_on_list_pages_only() -> None:
         '"/precons"',
         '"/cards"',
         '"/search"',
+        '"/collection/lists"',
     ):
         assert path in rule, path
     assert 'Regex("^/decks/\\\\d+$")' in rule  # the deck page, never its editor or settings
+    # Binder › Lists' own pages and profiles, never the box addresses under them
+    assert 'Regex("^/lists/(templates|defaults|tags|custom)$")' in rule
+    assert 'Regex("^/users/[^/]+$")' in rule
     assert (
         "/scan" not in rule.split("object PullRefresh")[1]
         and "/edit" not in rule.split("object PullRefresh")[1]
@@ -443,12 +447,20 @@ def test_the_app_offers_pull_to_refresh_on_list_pages_only() -> None:
         encoding="utf-8"
     )
     assert '"/decks/12345/edit"' in test and '"/scan"' in test and '"/decks/new"' in test
+    assert '"/lists/templates/new"' in test and '"/users/alice"' in test
 
 
 def test_the_app_wires_the_pull_layer_to_the_page_and_the_bridge() -> None:
     main = (ANDROID / "MainActivity.kt").read_text(encoding="utf-8")
+    rule = (ANDROID / "PullRefresh.kt").read_text(encoding="utf-8")
     assert "refresh.setOnChildScrollUpCallback { _, _ -> !pagePull || web.canScrollVertically(-1) }" in main
-    assert "refresh.setOnRefreshListener { web.reload() }" in main
+    # a pull loads the page with its own header (decks.PULL_HEADER), a GET of the page's address
+    assert "refresh.setOnRefreshListener { pull() }" in main
+    assert "web.loadUrl(PullRefresh.target(url), PullRefresh.HEADERS)" in main
+    assert 'const val HEADER = "X-MTG-Pull"' in rule and 'mapOf(HEADER to "1")' in rule
+    from mtg_gateway.decks import PULL_HEADER
+
+    assert PULL_HEADER == "X-MTG-Pull".lower()
     assert "refresh.isEnabled = allowed && PullRefresh.offered(origin, url)" in main
     assert "fun pullAllowed(allowed: Boolean)" in main and main.count("pullDone()") >= 4
     assert "refresh.setProgressBackgroundColorSchemeResource(R.color.accent)" in main  # the orange disc
