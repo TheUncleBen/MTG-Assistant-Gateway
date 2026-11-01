@@ -46,7 +46,7 @@ from .binder_prices import BINDER_PAGE_SIZE, BINDER_READ_PAGES, BinderStore
 from .busy import busy_body, busy_headers, busy_plan, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
-from .decks import DeckError, _writing, archidekt_wait, current_client, reloading
+from .decks import DeckError, _writing, archidekt_wait, current_client, no_card_called, reloading
 from .pages import (
     BROWSER_CLIENT_ID,
     NO_STORE,
@@ -3927,6 +3927,11 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         session_id = None
         warnings: list[str] = []
         try:
+            # applied to the linked Archidekt account: without one it never could be (0.7.46 audit)
+            service.decks._token(sub)
+        except DeckError as exc:
+            return _result({"ok": False, "error": exc.kind, "message": str(exc)})
+        try:
             if text:
                 from .scan.service import parse_text
 
@@ -3967,12 +3972,55 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         except CollectionError as exc:
             return _result(_err(exc))
         warnings += await _finish_warnings(adds, service.scan)
+        # the names checked as a deck edit's adds are (0.7.46 audit): no card at all refuses the
+        # change; one Archidekt doesn't have, or nothing could check, makes it high risk, so no
+        # assistant applies it unasked. A scanned card (scryfall_id) is a card already.
+        names = await service.decks.check_new_names(
+            sub, [str(a.get("name") or "") for a in adds if not a.get("scryfall_id")]
+        )
+        if names["unknown"]:
+            return _result(
+                {
+                    "ok": False,
+                    "error": "unknown_cards",
+                    "message": no_card_called(names["unknown"], meant=names["meant"])
+                    + " Nothing was proposed.",
+                    "unknown_cards": names["unknown"],
+                    **({"did_you_mean": names["meant"]} if names["meant"] else {}),
+                }
+            )
+        note: dict[str, Any] = {}
+        if names["missing"]:
+            note["missing_on_archidekt"] = names["missing"]
+            warnings.append(
+                "Archidekt doesn't have "
+                + ", ".join(f"“{n}”" for n in names["missing"])
+                + (
+                    ", so applying leaves it out."
+                    if len(names["missing"]) == 1
+                    else ", so applying leaves them out."
+                )
+            )
+        if names["unchecked"]:
+            note["unchecked_names"] = names["unchecked"]
+            warnings.append(
+                "Couldn't check that "
+                + ", ".join(f"“{n}”" for n in names["unchecked"])
+                + (" is a card" if len(names["unchecked"]) == 1 else " are cards")
+                + ", so this change waits for the user."
+            )
         try:
             # the source and scan id travel with the proposal so the apply can drop the scan
             p = await service.decks.propose_collection(
-                sub, adds, removals, extra={"source": source, "scan_session_id": session_id}, tags=tagging
+                sub,
+                adds,
+                removals,
+                extra={"source": source, "scan_session_id": session_id},
+                tags=tagging,
+                missing=names["missing"],
+                unchecked=names["unchecked"],
             )
         except DeckError as exc:
             return _result({"ok": False, "error": exc.kind, "message": str(exc), **exc.extra})
-        made = {"ok": True, **p, **({"warnings": warnings} if warnings else {})}
+        made = {"ok": True, **p, **note, **({"warnings": warnings} if warnings else {})}
         return _result(made)

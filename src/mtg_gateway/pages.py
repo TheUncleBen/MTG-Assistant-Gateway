@@ -1026,9 +1026,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if exc.kind == "pick_one":
                 return _pick_one_page(exc, back, sub, sid)
             code = (
-                "writes_disabled_some"
-                if exc.kind == "writes_disabled" and len(picks) > 1
-                else _err_code(exc.kind)
+                "writes_disabled_some" if exc.kind == "writes_disabled" and len(picks) > 1 else _err_code(exc)
             )
             return RedirectResponse(_with_query(back, f"err={code}"), status_code=303)
         await state.decks.batches.wait(run["batch_id"], BATCH_WAIT_SECONDS)
@@ -1307,7 +1305,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
             # put words of its choosing in the page's error box. Failure details are in the result.
-            code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
+            code = _err_code(exc, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
         if action == "reject":
             ok = "rejected"
@@ -1666,6 +1664,9 @@ ERR_MESSAGES = {
     "none_selected": "Check at least one waiting change first. Nothing was done.",
     "backup_failed": "The backup copy of the deck could not be made on Archidekt, so nothing was "
     "changed. The proposal is still pending; try again once Archidekt answers.",
+    "backup_relink": "The backup copy of the deck could not be made on Archidekt, as Archidekt no "
+    "longer accepts the stored session, so nothing was changed. The proposal is still pending: relink "
+    "under Account details, then apply it again.",
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it under Account details.",
     "forbidden": "Archidekt did not allow this change, so nothing more was changed. The reason is in "
@@ -1708,9 +1709,12 @@ async def limited_form(request: Request, limit: int, **kw: Any) -> Any:
         return None
 
 
-def _err_code(kind: str, *, proposal_exists: bool = False) -> str:
+def _err_code(exc: DeckError, *, proposal_exists: bool = False) -> str:
     """The notice code for a failed apply. ``not_found`` from an apply of a proposal that does exist
     means a card, printing, deck or snapshot was missing on Archidekt, not the proposal itself."""
+    kind = exc.kind
+    if kind == "backup_failed" and exc.extra.get("relink"):
+        return "backup_relink"
     if kind == "not_found" and proposal_exists:
         return "missing"
     return kind if kind in ERR_MESSAGES else "failed"
@@ -2804,7 +2808,13 @@ def _page_step(p: dict[str, Any]) -> str:
         )
     if state == "pending":
         retry = (
-            "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
+            "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made"
+            + (
+                ": Archidekt no longer accepts the stored session. Relink under Account details, "
+                "then apply it again. "
+                if result.get("relink")
+                else ". "
+            )
             if result.get("error") == "backup_failed"
             else ""
         )
@@ -2838,13 +2848,28 @@ def _page_step(p: dict[str, Any]) -> str:
             "Part of this change reached Archidekt before it stopped. Propose the rest makes a new "
             "proposal of what is still missing, for you to review."
         )
-    if state == "failed" and result.get("sent_entries"):
-        where = "your binder" if p.get("kind") == "collection" else "the deck"
+    if state == "failed" and (result.get("sent_entries") or result.get("answer_lost")):
+        kind = p.get("kind")
+        where = (
+            "your binder"
+            if kind == "collection"
+            else "your decks on Archidekt"
+            if kind in ("create_deck", "clone")
+            else "your Archidekt account"
+            if kind in ("lists", "action")
+            else "the deck"
+        )
         undo = (
             "; the snapshot taken just before it can be restored from History."
             if result.get("snapshot_id")
             else "."
         )
+        if not result.get("sent_entries"):
+            # a write went out and Archidekt never answered it (0.7.46 audit PA-3): it may have landed
+            return (
+                "Archidekt stopped answering, so this change may have reached it, in part or in full. "
+                f"Check {where} before making it again{undo}"
+            )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
         # the reason, in the gateway's words (DeckError messages: no codes), then what is left
