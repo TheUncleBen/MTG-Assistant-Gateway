@@ -151,3 +151,48 @@ async def test_machine_paths_get_json_even_when_a_browser_asks(path: str) -> Non
     async with _client(_LockedDb()) as http:
         r = await http.get(path, headers=HTML)
         assert r.status_code == 503 and r.json()["error"] == "busy"
+
+
+async def test_a_posted_secret_is_never_written_back_into_the_page() -> None:
+    """The Archidekt link form posts a password (pages.py). A field that looks secret is never
+    kept on the busy page as a hidden input: the member goes back to the form instead (the page
+    is HTML on the way to the screen, cached nowhere, but a password belongs in no page)."""
+    async with _client(_LockedDb()) as http:
+        data = {"csrf": "tok", "action": "link", "archidekt_login": "alice", "archidekt_password": "hunter2"}
+        r = await http.post("/account", data=data, headers=HTML)
+        assert r.status_code == 503
+        assert "hunter2" not in r.text and "archidekt_password" not in r.text and "<form" not in r.text
+        assert "data-busy-back>Go back</button>" in r.text
+        # the words that make a field secret, and the forms' plain names that must stay keepable
+        for name in (
+            "archidekt_password",
+            "passwd",
+            "pwd",
+            "secret",
+            "token",
+            "api_key",
+            "apiKey",
+            "code",
+            "code_verifier",
+            "client_secret",
+            "otp",
+            "key",
+            "pin",
+            "refresh_token",
+            "x-password",
+        ):
+            assert dbwait.looks_secret(name), name
+        for name in (
+            "csrf",
+            "set_code",
+            "card_key",
+            "pin_id",
+            "keywords",
+            "archidekt_login",
+            "name",
+            "note",
+            "deck_id",
+            "action",
+            "accept_risk",
+        ):
+            assert not dbwait.looks_secret(name), name

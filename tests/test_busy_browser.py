@@ -65,6 +65,12 @@ def _page_html() -> str:
         "<div class='field'><label for='cap'>Caption</label><input id='cap' name='caption'></div>"
         "<input type='file' name='picture'>"
         "<button id='upload' class='btn btn-primary'>Upload</button></form>"
+        "<form id='f4' class='panel' data-draft='busy-kit-4' method='post' action='/busy-kit/sent' "
+        "autocomplete='off'>"
+        "<div class='field'><label for='lg'>Login</label><input id='lg' name='login'></div>"
+        "<div class='field'><label for='pw'>Password</label>"
+        "<input id='pw' type='password' name='password'></div>"
+        "<button id='link' class='btn btn-primary'>Link</button></form>"
     )
 
 
@@ -97,7 +103,7 @@ class BusyServer(Server):
 
         async def sent(request: Request):
             form = await request.form()
-            name = str(form.get("name") or form.get("caption") or "")
+            name = str(form.get("name") or form.get("caption") or form.get("login") or "")
             body = f"<p id='sent'>Saved {name}</p>"
             return theme.render("Sent", body, site="MTG Gateway", signed_in=True, csrf="x")
 
@@ -300,5 +306,29 @@ def test_the_busy_page_is_also_the_answer_in_the_android_app(kit: BusyServer) ->
         kit.busy = False
         page.locator("form[method=post] button", has_text="Try again").click()
         page.locator("#sent", has_text="Saved From the app").wait_for(timeout=5000)
+        assert errors == []
+        browser.close()
+
+
+def test_a_form_with_a_password_goes_back_and_the_password_is_nowhere(kit: BusyServer) -> None:
+    """A secret posted while the gateway is busy is written into no page and kept in no draft."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    sid = kit.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _ctx(p, kit, sid, 412, theme_name="dark", exe=exe)
+        page.goto(f"{kit.base}/busy-kit", wait_until="networkidle")
+        page.fill("#lg", "alice")
+        page.fill("#pw", "hunter2")
+        kit.busy = True
+        page.click("#link")
+        page.locator("h1", has_text="The gateway is busy").wait_for(timeout=5000)
+        assert "hunter2" not in page.content() and page.locator("form").count() == 0
+        page.locator("button[data-busy-back]", has_text="Go back").click()
+        page.wait_for_url(f"{kit.base}/busy-kit", timeout=5000)
+        page.wait_for_function("() => document.getElementById('lg').value === 'alice'", timeout=5000)
+        stored = page.evaluate("() => Object.keys(localStorage).map(k => localStorage.getItem(k)).join(' ')")
+        assert "hunter2" not in stored  # draft.js never keeps a password
         assert errors == []
         browser.close()
