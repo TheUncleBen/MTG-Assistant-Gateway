@@ -520,7 +520,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         size = f"{entries:,} {'entry' if entries == 1 else 'entries'}" + (
             f", {copies:,} {'card' if copies == 1 else 'cards'}" if copies is not None else ""
         )
-        row["text"] = f"Clear your whole binder: remove all {size} from your Archidekt collection"
+        row["text"] = f"Clear your whole binder: remove all {size} from your binder on Archidekt"
         row["note"] = (
             "Archidekt itself has no undo. The gateway keeps a copy of your whole binder under History "
             "first (download it as a CSV, or put it back with Restore to my binder) and checks that your "

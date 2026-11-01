@@ -3096,7 +3096,7 @@ def _clear_binder_box(p: dict[str, Any]) -> str:
     if isinstance(changes.get("cards"), int):
         size += f" ({plural(int(changes['cards']), 'card')})"
     body = (
-        f"<p>This removes <strong>{html.escape(size)}</strong> from your Archidekt collection. The "
+        f"<p>This removes <strong>{html.escape(size)}</strong> from your binder on Archidekt. The "
         "gateway keeps a copy of your whole binder under History first: download it as a CSV, or put it "
         "back with “Restore to my binder”. <strong>Archidekt itself has no undo.</strong></p>"
         "<p class='small muted'>Only you can approve this, in every approval mode. Nothing is sent until "
@@ -3416,8 +3416,8 @@ def _proposal_body(
         elif destroy and (p.get("changes") or {}).get("action") == "clear_collection":
             ask = (
                 "<div class='apply destroy'><h3 class='ui-section'>Clear your whole binder on Archidekt?"
-                "</h3><p class='notice error'><strong>This removes every entry from your Archidekt "
-                "collection. Archidekt itself has no undo.</strong></p>"
+                "</h3><p class='notice error'><strong>This removes every entry from your binder on "
+                "Archidekt. Archidekt itself has no undo.</strong></p>"
                 "<p class='small'>The gateway first keeps a copy of your whole binder under History, where "
                 "you can download it as a CSV or put it back with Restore to my binder, and checks that "
                 "your binder still has the entries reviewed here. Only you can approve this, in every "

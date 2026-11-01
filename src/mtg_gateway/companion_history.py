@@ -1123,7 +1123,7 @@ def add_history_routes(
         sub, sid = browser_session(state, request)
         rid = request.path_params["rid"]
         if not sub:
-            return login_redirect("/history")
+            return login_redirect_here(request, "/history")
         data = await form(request)
         if not check_csrf(sid, data):
             return _expired(sub, sid)
