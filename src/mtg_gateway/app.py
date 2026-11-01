@@ -11,7 +11,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -150,6 +150,9 @@ class AppState:
     alerts: AlertWatch | None = None  # Archidekt alerts pushed to members' phones (alerts_push.py)
     folder_jobs: Any = None  # folder deletes from My decks (companion_folders.py)
     late_pages: LateStore = field(default_factory=LateStore)  # pages drawn before Archidekt answered
+    # Whether an assistant's tool only reads (or proposes), by name: its call need not wait for
+    # the identity provider's membership answer (tool_only_reads). None: every call waits.
+    mcp_reads: Callable[[str], bool] | None = None
 
     @property
     def live(self) -> LiveSettings:
@@ -618,6 +621,81 @@ def server_instructions(public_url: str) -> str:
     )
 
 
+# The most of an assistant's request body read to tell whether it only reads (mcp_only_reads); a
+# longer one waits for the provider's answer. A tool call's arguments are rarely more than a few KB.
+MCP_READ_AHEAD = 64 * 1024
+# Paths that wait for the provider's answer even for a GET: the admin pages and the admin API.
+ADMIN_PREFIXES = ("/admin", "/api/v1/admin")
+
+
+def tool_only_reads(name: str, tool: Any, proxied: bool) -> bool:
+    """Whether a call of the tool ``name`` only reads or proposes, so it may be answered before the
+    identity provider's membership answer (membership.py). ``tool`` is the gateway's own tool of
+    that name (None when there is none), ``proxied`` whether the research service answers the
+    call instead. Read from the tool's own readOnlyHint: a tool that does not say true waits, so a
+    new writing tool never goes ahead by default. A tool the scope guard counts as a write
+    (WRITE_TOOLS) waits even when marked read only, unless it is a proposal (owner decision 10-28:
+    propose, amend, withdraw and combine are read only; apply_proposal is the write)."""
+    if proxied:
+        # the research service's own tools, every one advertised read only (mf_proxy.tools); a
+        # hidden duplicate is answered with a refusal, but waits anyway
+        return name in ALLOWED_TOOLS
+    hints = getattr(tool, "annotations", None)
+    if tool is None or hints is None or getattr(hints, "read_only_hint", None) is not True:
+        return False
+    return name not in WRITE_TOOLS or name in PROPOSAL_TOOLS
+
+
+def mcp_only_reads(body: bytes, reads: Callable[[str], bool]) -> bool:
+    """Whether an assistant's JSON-RPC request body is only calls of tools that read (``reads``):
+    one tools/call, or a batch of nothing else. Anything else, or anything that can't be read,
+    waits for the provider: another method, a notification or response, an unknown tool, a body
+    that is not JSON."""
+    try:
+        message = json.loads(body)
+    except (ValueError, RecursionError):  # UnicodeDecodeError too; nesting too deep to read
+        return False
+    calls = message if isinstance(message, list) else [message]
+    if not calls:
+        return False
+    for call in calls:
+        if not isinstance(call, dict) or call.get("method") != "tools/call":
+            return False
+        params = call.get("params")
+        name = params.get("name") if isinstance(params, dict) else None
+        if not isinstance(name, str) or not reads(name):
+            return False
+    return True
+
+
+async def _read_ahead(receive: Receive, limit: int) -> tuple[bytes | None, Receive]:
+    """Read a request's body before the app does, up to ``limit`` bytes. Returns the body (None
+    when it is longer, or the client left first) and a ``receive`` that hands the app every
+    message read here, unchanged and in its pieces, then carries on with the real one."""
+    held: list[Message] = []
+    size = 0
+    complete = False
+    while True:
+        message = await receive()
+        held.append(message)
+        if message["type"] != "http.request":
+            break  # the client left
+        size += len(message.get("body", b""))
+        if size > limit:
+            break
+        if not message.get("more_body", False):
+            complete = True
+            break
+    body = b"".join(m.get("body", b"") for m in held) if complete else None
+
+    async def replay() -> Message:
+        if held:
+            return held.pop(0)
+        return await receive()
+
+    return body, replay
+
+
 class MembershipMiddleware:
     """Before any request that carries a browser session or a bearer token is served, ask the
     identity provider whether that person is still allowed in (membership.py). A removed member's
@@ -677,12 +755,22 @@ class MembershipMiddleware:
         if checker is None or scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
             await self.app(scope, receive, send)
             return
-        # A page being read never waits for the provider when it let this sign-in in before
-        # (membership.py); a write, an admin page (or the admin API) and an assistant's request do.
-        reading = scope.get("method") in ("GET", "HEAD") and not path.startswith(("/admin", "/api/v1/admin"))
+        # A page being read, and an assistant's call that only reads or proposes, never waits for
+        # the provider when it let that sign-in in before (membership.py); a write, an apply or any
+        # other tool that is not read only, and the admin pages and API do.
+        method = scope.get("method")
+        reading = method in ("GET", "HEAD") and not path.startswith(ADMIN_PREFIXES)
+        subjects = self._subjects(scope)
+        assistant_reads = False
+        reads = self.state.mcp_reads
+        if path == "/mcp" and method == "POST" and reads is not None and any(h is None for _, h in subjects):
+            body, receive = await _read_ahead(receive, MCP_READ_AHEAD)
+            assistant_reads = body is not None and mcp_only_reads(body, reads)
         outcomes: list[Membership] = []
-        for sub, holder in self._subjects(scope):
-            outcome = await checker.check(sub, holder, page=reading and holder is not None)
+        for sub, holder in subjects:
+            # the bearer token's person on an assistant's read; a session's on a page being read
+            unhurried = assistant_reads if holder is None else reading
+            outcome = await checker.check(sub, holder, page=unhurried)
             outcomes.append(outcome)
             if outcome is Membership.SIGN_IN and holder is None:
                 # A bearer token while none of the member's sign-ins is honoured: refused, and
@@ -1233,6 +1321,13 @@ def create_app(
         db, known_tool=lambda name: server._tool_manager.get_tool(name) is not None or name in ALLOWED_TOOLS
     )
     server = build_mcp_server(state)
+
+    def mcp_reads(name: str) -> bool:
+        # the proxy's middleware answers its tools before the gateway's own of the same name
+        proxied = mf_proxy is not None and mf_proxy.is_proxied(name)
+        return tool_only_reads(name, None if proxied else server._tool_manager.get_tool(name), proxied)
+
+    state.mcp_reads = mcp_reads
     server.middleware.append(state.metrics.mcp_middleware())  # before the proxy, so its calls count too
     server.middleware.append(scope_guard_middleware())
     server.middleware.append(schema_error_middleware())
