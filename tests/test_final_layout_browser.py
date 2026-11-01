@@ -21,6 +21,7 @@ import pytest
 
 from .test_deck_categories import _give_categories
 from .test_deck_menu_browser import _EXE, PNG, Server, _chromium
+from .test_overflow_sweep_browser import MEASURE
 from .test_social_browser import Server as ReportsServer
 from .test_text_zoom_browser import TEXT_200
 
@@ -181,5 +182,30 @@ def test_the_delete_box_wraps_a_long_unbroken_category_name(
         assert fit["past"] == [], fit
         assert fit["sideways"] == 0 and fit["docScroll"] <= 0, fit
         assert fit["boxRight"] <= fit["window"], fit
+        assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "theme", "touch"), SURFACES)
+def test_the_quick_add_field_shows_its_whole_placeholder(
+    server: Server, width: int, theme: str, touch: bool
+) -> None:
+    """The Quick add field's placeholder fits inside the field on every surface, the toolbar's
+    row with it, and nothing scrolls sideways."""
+    from playwright.sync_api import sync_playwright
+
+    sid = server.sign_in_and_link()
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _context(p, server.base, sid, width, theme, touch)
+        _deck_page(page, server)
+        fit = page.evaluate(QUICK_FIT)
+        _shot(page, f"quick-add-{width}-{theme}")
+        assert fit["need"] <= fit["room"], fit
+        assert page.evaluate(MEASURE) == []
+        # the field is a finger-sized target on touch screens, and the + beside it too
+        if touch:
+            for sel in ("#quick", ".toolbar .quickrow button:not(.addpkg)"):
+                assert page.locator(sel).first.bounding_box()["height"] >= 44, sel
         assert errors == [], errors
         browser.close()

@@ -97,7 +97,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         # the deck page: text, stacks and grid views; grouping and sorting; the local filter
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "class='banner'" in deck.text and "Quick add" in deck.text and "Clone deck" in deck.text
+        assert "class='banner'" in deck.text and "id='quick'" in deck.text and "Clone deck" in deck.text
         # Archidekt's own playtester in its own tab; the simulation (the same run as
         # run_deck_report) is one click; the compare view is under More
         assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in deck.text
