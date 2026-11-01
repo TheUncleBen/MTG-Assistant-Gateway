@@ -2377,6 +2377,7 @@
   // Undo when every step can be put back. The assistant never reaches this path.
   var picking = false;
   var togglePick = function () {};
+  var endPick = null;  // ends Select cards (the stacks are drawn again after a category change)
   var setPickMode = function () {};  // the View sheet's Select cards switch (a phone)
   if (own && deckId) (function () {
     var bar = el("div", "bulkbar");
@@ -2502,6 +2503,7 @@
     };
     start.addEventListener("click", function () { setMode(true); });
     done.addEventListener("click", function () { setMode(false); });
+    endPick = function () { setMode(false); };
     all.addEventListener("click", function () {
       $$(".c, .row", cards).forEach(function (c) {
         if (c.offsetParent === null || isCustom(c)) return;  // hidden by the filter or a collapsed stack; a custom card changes from its own menu
@@ -2976,6 +2978,413 @@
   }
   cards.addEventListener("touchend", endTouch);
   cards.addEventListener("touchcancel", endTouch);
+
+  // -- categories on the deck page (mockup screen 4, review F8; the owner's T-191 note) ---------------
+  // Each stack's ⋮ (and a right-click, a press and hold or Shift+F10 on its head) opens the
+  // category's menu: Rename…, Add category…, Add from template… | Premier, In deck, In price as
+  // tick rows | Edit cards in editor | Delete…, and "+ Add category" after the last stack opens
+  // the same box as Add category…. Every change goes to Deck settings' own route
+  // (/decks/{id}/categories with json=1&page=deck) with the category's baseline, as the settings
+  // page's form sends it: the same check that the deck is still what the page showed, the same
+  // questions (the commander, which cards count, a delete) in a box with the gateway's words, and
+  // one proposal applied at once with its snapshot. The answer's stacks replace the page's and
+  // the toast offers Undo: the inverse change, or after a delete the restore of its own snapshot
+  // (undo-box.js). Without scripts the ⋮ is the drop-down to the editor and Deck settings, and
+  // "+ Add category" opens Deck settings.
+  // Mockup choices for the owner (each flips here): Undo in the toast, as on Deck settings, rather
+  // than in the toolbar's card history (UNDO_IN_TOAST false would end that history instead);
+  // the delete box preselects the biggest category the cards can go to (PRESELECT_BIGGEST).
+  var UNDO_IN_TOAST = true, PRESELECT_BIGGEST = true;
+  (function () {
+    var Menu = window.MtgMenu, Box = window.MtgBox;
+    if (!own || !deckId || !byCategory || !Menu || !Box || !window.fetch || !window.URLSearchParams) return;
+    if (!cards.hasAttribute("data-catinfo")) return;
+    var catUrl = "/decks/" + enc(deckId) + "/categories";
+    var busy = 0;
+    var HISTORY = " Snapshot kept under History.";
+    var NO_NET = "No connection; nothing was changed.";
+    var NO_RECORD = "This category has no record on Archidekt yet, so there is nothing to delete.";
+    function q(name) { return "“" + name + "”"; }
+    function info() { return readJson("data-catinfo", []); }
+    function catNamed(name) { return info().filter(function (c) { return c.name === name; })[0] || null; }
+    // the same category after the stacks were drawn again: by its record, else by its name
+    function fresh(c, name) {
+      var all = info();
+      return (c.id !== null && c.id !== undefined ? all.filter(function (x) { return x.id === c.id; })[0] : null) ||
+        all.filter(function (x) { return x.name === (name || c.name); })[0] || null;
+    }
+    window.addEventListener("beforeunload", function (ev) { if (busy) { ev.preventDefault(); ev.returnValue = ""; } });
+    function post(fields) {
+      var fd = new URLSearchParams();
+      fd.set("csrf", CSRF); fd.set("json", "1"); fd.set("page", "deck");
+      var vf = $("#viewform");
+      fd.set("view", vf && vf.elements.view ? vf.elements.view.value : (cards.className.replace("deckview", "").trim().split(" ")[0] || "text"));
+      fd.set("sort", vf && vf.elements.sort ? vf.elements.sort.value : "name");
+      Object.keys(fields).forEach(function (k) {
+        if (Array.isArray(fields[k])) fields[k].forEach(function (v) { fd.append(k, v); });
+        else fd.set(k, fields[k]);
+      });
+      busy++;
+      return fetch(catUrl, { method: "POST", credentials: "same-origin", body: fd, headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { busy--; return d || { ok: false }; }, function () { busy--; return { ok: false, message: NO_NET }; });
+    }
+    // What Deck settings' form sends for one category: what it was when the page drew it (the
+    // was_ fields) and what it is to be: its name, and each switch that is on. ``over``: the
+    // change ({name} or one of the switches as true/false).
+    function fieldsFor(c, over) {
+      var k = c.key, out = {};
+      out["was_name_" + k] = c.name;
+      out["name_" + k] = over.name !== undefined ? over.name : c.name;
+      ["premier", "not_in_deck", "not_in_price"].forEach(function (flag) {
+        out["was_" + flag + "_" + k] = c[flag] ? "1" : "0";
+        var on = over[flag] !== undefined ? over[flag] : c[flag];
+        if (on) out[flag + "_" + k] = "1";
+      });
+      return out;
+    }
+    // The answer's stacks take the page's place: the cards' own attributes (the categories the
+    // card menu's Move to lists, the ones not in the deck, the category data) follow, the ⋮
+    // buttons are put back, and a filter typed in the toolbar applies again.
+    function swap(html) {
+      var tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      var next = tpl.content.querySelector("#cards");
+      if (!next) return;
+      closeMenu();
+      if (picking && endPick) endPick();
+      ["data-cats", "data-excluded", "data-side", "data-catinfo", "data-drop", "data-grouping"].forEach(function (a) {
+        if (next.hasAttribute(a)) cards.setAttribute(a, next.getAttribute(a)); else cards.removeAttribute(a);
+      });
+      cards.textContent = "";
+      while (next.firstChild) cards.appendChild(next.firstChild);
+      deckCats = readJson("data-cats", []);
+      excluded = readJson("data-excluded", []);
+      sideCat = cards.getAttribute("data-side") || sideCat;
+      wire();
+      var filter = $("#q");
+      if (filter && filter.value) filter.dispatchEvent(new Event("input"));
+    }
+    function button(text, onClick, cls) {
+      var b = el("button", cls || "btn", text);
+      b.type = "button";
+      b.addEventListener("click", onClick);
+      return b;
+    }
+    function undoButton(fn) { return button("Undo", function () { dismissToast(); fn(); }); }
+    function said(text, undo, opts) {
+      opts = opts || {};
+      var actions = undo ? [undo] : [];
+      toast(text, { actions: actions, ms: opts.ms });
+    }
+    function failed(d, box) {
+      var words = (d && d.message) || "The change could not be saved.";
+      if (box) { box.busy(false); box.note(words, true); return; }
+      toast(words, { error: true });
+    }
+    // A change that the gateway answers with a question (needs_confirm): the same box as Deck
+    // settings, with the gateway's own title and sentence, then the same post with confirmed=1.
+    // ``ok``: the final button's words; ``danger``: a delete's solid red one.
+    function send(fields, o) {
+      o = o || {};
+      return post(fields).then(function (d) {
+        if (d.needs_confirm) {
+          return new Promise(function (resolve) {
+            var yes = false;
+            Box.confirm({
+              title: d.title || "", text: d.text || "", ok: o.ok || "Save", icon: o.danger ? "trash" : "check", danger: !!o.danger,
+              cancel: o.danger ? "Keep it" : "Cancel",
+              onOk: function () { yes = true; fields.confirmed = "1"; resolve(send(fields, o)); },
+              onClose: function () { if (!yes) resolve({ ok: false, cancelled: true }); }
+            });
+          });
+        }
+        return d;
+      });
+    }
+    // -- a rename or a switch: one small change, Undo sends the inverse --------------------------
+    function change(c, over, words, box) {
+      var fields = fieldsFor(c, over);
+      fields.action = "save";
+      return send(fields, { ok: "Save" }).then(function (d) {
+        if (d.cancelled) { if (box) box.close(); return; }
+        if (!d.ok) { failed(d, box); return; }
+        if (box) box.close();
+        swap(d.cards_html);
+        var after = fresh(c, over.name !== undefined ? over.name : c.name);
+        var inverse = {};
+        if (over.name !== undefined) inverse.name = c.name;
+        ["premier", "not_in_deck", "not_in_price"].forEach(function (f) { if (over[f] !== undefined) inverse[f] = c[f]; });
+        said(words.done + HISTORY, UNDO_IN_TOAST && after ? undoButton(function () { change(after, inverse, { done: words.undone, undone: words.done }); }) : null);
+      });
+    }
+    function flip(c, flag) {
+      var to = !c[flag], over = {};
+      over[flag] = to;
+      var words = {
+        premier: [q(c.name) + " is now a Premier category.", q(c.name) + " is no longer a Premier category."],
+        not_in_deck: ["Cards in " + q(c.name) + " no longer count in the deck.", "Cards in " + q(c.name) + " count in the deck again."],
+        not_in_price: [q(c.name) + " no longer counts in the price.", q(c.name) + " counts in the price again."]
+      }[flag];
+      change(c, over, { done: to ? words[0] : words[1], undone: to ? words[1] : words[0] });
+    }
+    function field(labelText, input, id) {
+      var wrap = el("div", "field");
+      var lab = el("label", null, labelText);
+      input.id = id;
+      lab.htmlFor = id;
+      wrap.appendChild(lab);
+      wrap.appendChild(input);
+      return wrap;
+    }
+    function textInput(value) {
+      var i = el("input");
+      i.type = "text";
+      i.value = value || "";
+      i.maxLength = 60;
+      i.autocomplete = "off";
+      i.required = true;
+      return i;
+    }
+    function cancelButton(text) { return Box.button(text || "Cancel", "btn", null, { cancel: true }); }
+    function cleanName(box, input, taken) {
+      var name = input.value.replace(/\s+/g, " ").trim();
+      if (!name) { box.note("Type a name.", true); input.focus(); return null; }
+      if (name.indexOf(",") >= 0) { box.note("A category name can't have a comma.", true); input.focus(); return null; }
+      if (info().some(function (c) { return c.name.toLowerCase() === name.toLowerCase() && c.name !== taken; })) {
+        box.note("The deck already has a category named " + q(name) + ". Pick another name.", true);
+        input.focus();
+        return null;
+      }
+      return name;
+    }
+    function renameBox(c, back) {
+      var form = el("form", "catform");
+      var input = textInput(c.name);
+      form.appendChild(field("Name", input, "catname"));
+      var ok = Box.button("Rename", "primary", null, { icon: "check" });
+      var box = Box.open({ title: "Rename " + q(c.name), body: form, actions: [cancelButton(), ok], returnFocus: back });
+      var go = function (e) {
+        if (e) e.preventDefault();
+        var name = cleanName(box, input, c.name);
+        if (!name) return;
+        if (name === c.name) { box.close(); return; }
+        box.busy(true);
+        change(c, { name: name }, { done: "Renamed " + q(c.name) + " to " + q(name) + ".", undone: "Renamed " + q(name) + " back to " + q(c.name) + "." }, box);
+      };
+      ok.addEventListener("click", go);
+      form.addEventListener("submit", go);
+      input.focus();
+      input.select();
+    }
+    // -- Add category…: a name and the three switches; Undo deletes it again ---------------------
+    function check(labelText, on, name) {
+      var lab = el("label", "sw");
+      var c = el("input");
+      c.type = "checkbox"; c.name = name; c.checked = !!on;
+      lab.appendChild(c);
+      lab.appendChild(document.createTextNode(" " + labelText));
+      return lab;
+    }
+    function addBox(back) {
+      var form = el("form", "catform");
+      var input = textInput("");
+      form.appendChild(field("Name", input, "catname"));
+      var sw = el("div", "ds-sw");
+      sw.setAttribute("role", "group");
+      sw.setAttribute("aria-label", "Switches of the new category");
+      var premier = check("Premier", false, "premier"), inDeck = check("In deck", true, "in_deck"), inPrice = check("In price", true, "in_price");
+      sw.appendChild(premier); sw.appendChild(inDeck); sw.appendChild(inPrice);
+      form.appendChild(sw);
+      var ok = Box.button("Add category", "primary", null, { icon: "plus" });
+      var box = Box.open({ title: "Add a category", body: form, actions: [cancelButton(), ok], returnFocus: back });
+      var go = function (e) {
+        if (e) e.preventDefault();
+        var name = cleanName(box, input);
+        if (!name) return;
+        var fields = { action: "create", category: name };
+        if (premier.firstChild.checked) fields.premier = "1";
+        if (!inDeck.firstChild.checked) fields.not_in_deck = "1";
+        if (!inPrice.firstChild.checked) fields.not_in_price = "1";
+        box.busy(true);
+        send(fields, { ok: "Add category" }).then(function (d) {
+          if (d.cancelled) { box.close(); return; }
+          if (!d.ok) { failed(d, box); return; }
+          box.close();
+          swap(d.cards_html);
+          var made = catNamed(name);
+          // an empty category has no stack of its own until a card is in it: one is drawn now,
+          // so a card can be dragged (or moved from its menu) into it
+          var st = ensureStack(name);
+          if (st) focusNear(st);
+          said("Added " + q(name) + ". Move cards into it from their menu, or drag them." + HISTORY,
+            UNDO_IN_TOAST && made && made.record ? undoButton(function () { removeAgain(made); }) : null);
+        });
+      };
+      ok.addEventListener("click", go);
+      form.addEventListener("submit", go);
+      input.focus();
+    }
+    // the Undo of an add: the empty category is deleted again (the member's own press is the yes)
+    function removeAgain(c) {
+      post({ action: "delete", delete: String(c.id), confirmed: "1" }).then(function (d) {
+        if (!d.ok) { failed(d); return; }
+        swap(d.cards_html);
+        said("Removed " + q(c.name) + " again." + HISTORY);
+      });
+    }
+    // -- Add from template…: the member's templates whose names the deck lacks, ticked ----------
+    function templateBox(back) {
+      var form = el("form", "catform tplform");
+      var tree = el("div", "tree");
+      var wait = el("p", "muted small loading", "Reading your templates from Archidekt…");
+      wait.setAttribute("role", "status");
+      tree.appendChild(wait);
+      form.appendChild(el("p", null, "Each ticked template becomes a category with the template's name and switches; after that the two are not linked."));
+      form.appendChild(tree);
+      var ok = Box.button("Add categories", "primary", null, { icon: "plus" });
+      ok.disabled = true;
+      var box = Box.open({ title: "Add from a template", body: form, actions: [cancelButton(), ok], returnFocus: back });
+      var picked = function () { return $$("input[name=template]:checked", form).map(function (i) { return i.value; }); };
+      var count = function () {
+        var n = picked().length;
+        ok.lastChild.textContent = n === 0 ? " Add categories" : " Add " + n + (n === 1 ? " category" : " categories");
+        ok.disabled = n === 0;
+      };
+      Menu.getJSON("/decks/api/templates").then(function (d) {
+        tree.textContent = "";
+        if (!d || !d.ok) { tree.appendChild(el("p", "muted small", (d && d.message) || "Your templates could not be read.")); return; }
+        var have = info().map(function (c) { return c.name.toLowerCase(); });
+        var free = (d.templates || []).filter(function (t) { return t.name && have.indexOf(t.name.toLowerCase()) < 0; });
+        if (!free.length) { tree.appendChild(el("p", "muted small", "Every template's name is already a category in this deck.")); return; }
+        free.forEach(function (t) {
+          var lab = el("label", "sw");
+          var c = el("input");
+          c.type = "checkbox"; c.name = "template"; c.value = t.name;
+          lab.appendChild(c);
+          lab.appendChild(document.createTextNode(" " + t.name));
+          tree.appendChild(lab);
+        });
+        box.focusFirst();
+      }, function () { tree.textContent = ""; tree.appendChild(el("p", "muted small", "No connection; your templates could not be read.")); });
+      form.addEventListener("change", count);
+      var go = function (e) {
+        if (e) e.preventDefault();
+        var names = picked();
+        if (!names.length) { box.note("Tick at least one template.", true); return; }
+        box.busy(true);
+        send({ action: "template", template: names }, { ok: "Add categories" }).then(function (d) {
+          if (d.cancelled) { box.close(); return; }
+          if (!d.ok) { failed(d, box); return; }
+          box.close();
+          swap(d.cards_html);
+          names.forEach(function (n) { ensureStack(n); });
+          said((names.length === 1 ? "Added " + q(names[0]) + "." : "Added " + names.length + " categories: " + names.join(", ") + ".") + HISTORY);
+        });
+      };
+      ok.addEventListener("click", go);
+      form.addEventListener("submit", go);
+    }
+    // -- Delete…: the red box; a category with cards names where they go first ------------------
+    function targetsFor(c) {
+      var others = info().filter(function (x) { return x.name !== c.name; });
+      others.sort(function (a, b) { return b.cards - a.cards || a.name.localeCompare(b.name); });
+      return others;
+    }
+    function deleteBox(c, back) {
+      var body = el("div");
+      var n = c.cards, select = null;
+      if (n) {
+        body.appendChild(el("p", null, "Its " + (n === 1 ? "1 card stays" : n + " cards stay") + " in the deck."));
+        select = el("select");
+        select.required = true;
+        var targets = targetsFor(c);
+        // the biggest category the cards can go into without a second question comes picked;
+        // a Premier one or one not in the deck is offered, and asks, as it does on Deck settings
+        var pick = PRESELECT_BIGGEST ? (targets.filter(function (t) { return !t.premier && !t.commander && !t.not_in_deck; })[0] || targets[0]) : null;
+        targets.forEach(function (t) {
+          var o = el("option", null, t.name);
+          o.value = t.name;
+          if (pick && t.name === pick.name) o.selected = true;
+          select.appendChild(o);
+        });
+        body.appendChild(field("Move " + (n === 1 ? "it" : "them") + " to", select, "catmove"));
+      }
+      body.appendChild(el("p", "muted small", "Saved to Archidekt at once; a snapshot from just before is kept under History."));
+      var ok = Box.button("Delete category", "danger", null, { icon: "trash" });
+      var box = Box.open({ title: "Delete " + q(c.name) + "?", body: body, actions: [cancelButton("Keep it"), ok], returnFocus: back });
+      ok.addEventListener("click", function () {
+        var fields = { action: "delete", delete: String(c.id), move_ok: "1" };
+        var to = select ? select.value : "";
+        if (select && !to) { box.note("Pick the category its cards move to.", true); return; }
+        if (to) fields.move_cards_to = to;
+        box.busy(true);
+        send(fields, { ok: "Delete category", danger: true }).then(function (d) {
+          if (d.cancelled) { box.close(); return; }
+          if (!d.ok) { failed(d, box); return; }
+          box.close();
+          swap(d.cards_html);
+          var words = "Deleted " + q(c.name) + "." + (to ? " Its " + (n === 1 ? "card is" : n + " cards are") + " in " + q(to) + "." : "") + HISTORY;
+          // the Undo is the restore of the delete's own snapshot (undo-box.js asks first)
+          var undo = null;
+          if (d.undo_html) {
+            var holder = el("span");
+            holder.innerHTML = d.undo_html;
+            undo = holder.firstElementChild;
+          }
+          said(words, undo, { ms: 30000 });
+        });
+      });
+      if (select) select.focus(); else box.focusFirst();
+    }
+    // -- the menu ------------------------------------------------------------------------------
+    function tick(text, on, onClick) {
+      var b = Menu.item(text, on ? "check" : "", onClick, { cls: on ? "on" : "" });
+      if (!on) { var slot = el("span", "ic-slot"); slot.setAttribute("aria-hidden", "true"); b.insertBefore(slot, b.firstChild); }
+      b.setAttribute("role", "menuitemcheckbox");
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      return b;
+    }
+    function openCatMenu(head, x, y) {
+      var stack = head.closest(".stack"), name = stack ? stack.getAttribute("data-group") : "";
+      var c = catNamed(name), back = $(".kebab", head) || head;
+      var items = [];
+      if (c) items.push(Menu.item("Rename…", "edit", function () { renameBox(c, back); }));
+      items.push(Menu.item("Add category…", "plus", function () { addBox(back); }));
+      items.push(Menu.item("Add from template…", "decks", function () { templateBox(back); }));
+      if (c) {
+        items.push(Menu.sep());
+        items.push(tick("Premier", c.premier, function () { flip(c, "premier"); }));
+        items.push(tick("In deck", !c.not_in_deck, function () { flip(c, "not_in_deck"); }));
+        items.push(tick("In price", !c.not_in_price, function () { flip(c, "not_in_price"); }));
+      }
+      items.push(Menu.sep());
+      items.push(Menu.link("Edit cards in editor", "edit", "/decks/" + enc(deckId) + "/edit#cat-" + enc(name)));
+      if (c) items.push(Menu.item("Delete…", "trash", function () { deleteBox(c, back); }, { danger: true, disabled: !c.record, title: NO_RECORD }));
+      Menu.open({ head: name, label: "Category: " + name, items: items, focusBack: back }, x, y);
+    }
+    // the ⋮ in place of the no-script drop-down, and "+ Add category" as the box
+    function wire() {
+      $$(".stackhead details.catdd", cards).forEach(function (dd) {
+        var st = dd.closest(".stack"), name = st ? st.getAttribute("data-group") : "";
+        var k = Menu.kebab("Options for " + name);
+        dd.replaceWith(k);
+      });
+      var add = $(".addcat", cards);
+      if (add) add.addEventListener("click", function (e) {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button) return;
+        e.preventDefault();
+        addBox(add);
+      });
+    }
+    wire();
+    Menu.bind(cards, {
+      itemOf: function (n) { var h = n && n.closest ? n.closest(".stackhead") : null; return h && cards.contains(h) ? h : null; },
+      skip: "a, .kebab",
+      button: ".stackhead .kebab",
+      open: openCatMenu
+    });
+  })();
   } // deck view
 
   // Stacks follow Archidekt's category order, the one order there is (owner decision C4).
@@ -3322,7 +3731,7 @@
     var look = [head("Look into it"), link("Deck stats", "report", "/decks/" + id + "#stats"), link("Deck reports", "stats", "/reports?deck_id=" + id)];
     look.push(link("History", "history", "/history?deck_id=" + id));
     if (d.can) look.push(item("Compare with…", "layers", openBox("compare")));
-    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) look.push(item("Watch price", "eye", function () { window.MtgDeckWatch(d.id); }));
+    if (Menu.enabled && Menu.enabled() && window.MtgDeckWatch) look.push(item("Watch deck price", "eye", function () { window.MtgDeckWatch(d.id); }));
     if (SHARE_SECOND) out = out.concat(shareItems, [sep()], look);
     else out = out.concat(look, [sep()], shareItems);
     var community = [];

@@ -107,16 +107,29 @@
   // person has already opened another menu, the entry is pushed again for that menu (never
   // before it lands, so two entries or two backs can never be in flight), so Back never leaves
   // the page while a menu is open and never goes back twice.
-  var pushed = false, popping = false;
+  var pushed = false, popping = false, wantsEntry = false;
+  // the shared menu (static/cardmenu.js) owns an entry of its own: while its back() is still
+  // landing, a drop-down opened meanwhile takes the entry once it has landed (the popstate,
+  // which the shared menu's own handler has seen first)
+  function sharedBackPending() {
+    var M = window.MtgMenu;
+    return !!(M && M.backPending && M.backPending());
+  }
+  function sharedBackLanding() {
+    var M = window.MtgMenu;
+    return !!(M && M.backLanding && M.backLanding());
+  }
   // a phone, a touch screen in the rail range (to 1279.98 px, as theme.py draws the rail) or the app
   function phoneLike() {
     return window.matchMedia("(max-width: 599.98px)").matches ||
       window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches ||
       document.body.classList.contains("app");
   }
-  function takeEntry() {
+  function takeEntry(landed) {
     // while the page's own back() is still landing, the popstate handler takes the entry instead
     if (pushed || popping || !phoneLike()) return;
+    // the same for the shared menu's, unless that is the back() that just landed
+    if (!landed && sharedBackPending()) { wantsEntry = true; return; }
     history.pushState({ menu: 1 }, "");
     pushed = true;
   }
@@ -136,7 +149,7 @@
     } else {
       var m = d.querySelector(":scope > .menu");
       if (m) { m.style.left = ""; m.style.right = ""; }
-      if (!openMenus().length) giveEntryBack();
+      if (!openMenus().length) { wantsEntry = false; giveEntryBack(); }
     }
   }, true);
   window.addEventListener("popstate", function () {
@@ -144,6 +157,12 @@
       // the page's own back() landed; a menu opened meanwhile needs the entry again
       popping = false;
       if (openMenus().length) takeEntry();
+      return;
+    }
+    if (sharedBackLanding()) {
+      // the shared menu's back() landed (its handler ran first): a drop-down opened meanwhile
+      // takes the entry now
+      if (wantsEntry && openMenus().length) { wantsEntry = false; takeEntry(true); }
       return;
     }
     // the person pressed Back: the entry is gone, close what is open without going back again
@@ -377,6 +396,8 @@
     navStart.timer = setTimeout(navEnd, 20000); // a download or a stopped load: never stuck on
   }
   function navEnd() { document.documentElement.classList.remove("navigating"); }
+  // true while a drop-down's own history.back() has not landed yet (static/cardmenu.js asks)
+  window.MtgDropdowns = { backPending: function () { return popping; } };
   window.MtgNavStart = navStart;  // a menu link that waits for the menu's Back (static/cardmenu.js)
   document.addEventListener("click", function (e) {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

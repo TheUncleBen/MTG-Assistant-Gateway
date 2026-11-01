@@ -289,7 +289,7 @@ async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) ->
     sub = "user-1"  # the signed-in member (conftest)
     with pytest.raises(DeckError) as exc:
         await decks.move_deck(sub, "42", 503)
-    assert str(exc.value) == "No folder is called 'MTG Gateway Backups'. Your folders: Commander"
+    assert str(exc.value) == "No folder is called “MTG Gateway Backups”. Your folders: Commander"
     assert (await decks.move_deck(sub, "46", 503))["changed"] is False
 
 
@@ -317,7 +317,7 @@ async def test_a_folder_cannot_be_named_like_the_backup_folder(stack: Stack) -> 
         ):
             r = await b.http.post("/folders", data={"csrf": csrf, **data})
             assert r.status_code == 400, (data, r.text[:300])
-            words = f"'{data['name']}' is the name of the gateway's backup folder. Pick another name."
+            words = f"“{data['name']}” is the name of the gateway's backup folder. Pick another name."
             assert words in r.text or html.escape(words) in r.text, (data, r.text[:300])
         assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
         # other capitals below the top level are another folder to the gateway, so allowed

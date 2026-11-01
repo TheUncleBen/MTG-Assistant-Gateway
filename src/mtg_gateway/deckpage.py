@@ -50,7 +50,7 @@ from .deck_stats import (
     primary_category,
     primary_type,
 )
-from .decks import DELETE_KEPT_NOTE, mana_value_text, split_label
+from .decks import DELETE_KEPT_NOTE, category_keys, mana_value_text, split_label
 from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
 from .theme import SPINNER, card_size_control, esc, icon, plural
@@ -1410,6 +1410,12 @@ def cards_html(
         return "<section class='panel'><p class='muted'>No cards match the filter.</p></section>"
     did = esc(deck.id)
     excluded = deck.excluded_categories()
+    # the member's own deck grouped by its categories: each stack's ⋮ edits that category on the
+    # page (deck.js: Rename…, Add category…, Add from template…, the Premier / In deck / In price
+    # switches, Edit cards in editor and Delete…; mockup screen 4, review F8), and "+ Add
+    # category" follows the last stack. Without scripts the ⋮ is this drop-down to the editor
+    # and to Deck settings, where the same changes are made with forms.
+    editable = own and group == "category"
     sections = []
     for name, cards in groups:
         own_customs = customs.get(name, [])
@@ -1417,13 +1423,14 @@ def cards_html(
         price = sum((c.price or 0) * c.quantity for c in cards)
         strike = " strike" if name in excluded else ""
         menu = (
-            f"<details class='dd'><summary class='icon-only btn-ghost' aria-label='Options for {esc(name)}' "
-            f"title='Category options'>{icon('more')}</summary><div class='menu'>"
+            f"<details class='dd catdd'><summary class='icon-only btn-ghost' "
+            f"aria-label='Options for {esc(name)}' title='Category options'>{icon('more')}</summary>"
+            "<div class='menu'>"
             f"<a href='/decks/{did}/edit#cat-{quote(name, safe='')}'>{icon('edit')} Edit cards in "
             f"{esc(name)}</a>"
             f"<a href='/decks/{did}/settings#categories'>{icon('settings')} Category options</a>"
             "</div></details>"
-            if own and group == "category"
+            if editable
             else ""
         )
         head = (
@@ -1486,10 +1493,42 @@ def cards_html(
         )
         + "</template>"
     )
+    # What each category is (deck.js draws the ⋮ menu from it and sends the change as Deck
+    # settings' form would, with the same ``was_`` baseline): its form key, record id, name, the
+    # three switches, how many copies it holds, and whether it touches the commander
+    catinfo = (
+        f" data-catinfo='{esc(json.dumps(category_info(deck), separators=(',', ':')))}'" if editable else ""
+    )
+    addcat = (
+        f"<a class='btn addcat' href='/decks/{did}/settings#categories' data-addcat>"
+        f"{icon('plus')} Add category</a>"
+        if editable
+        else ""
+    )
     return (
         f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
-        f"data-grouping='{esc(group)}'{droppable}>{icons}{''.join(sections)}</div>"
+        f"data-grouping='{esc(group)}'{droppable}{catinfo}>{icons}{''.join(sections)}{addcat}</div>"
     )
+
+
+def category_info(deck: Deck) -> list[dict[str, Any]]:
+    """The deck's categories for the deck page's category menus (``data-catinfo``): one entry per
+    category as Deck settings lists them (decks.deck_categories), with ``key``, the form key its
+    fields carry there (decks.category_keys)."""
+    return [
+        {
+            "key": key,
+            "id": c["id"],
+            "name": c["name"],
+            "premier": c["premier"],
+            "not_in_deck": c["not_in_deck"],
+            "not_in_price": c["not_in_price"],
+            "cards": int(c["cards"]),
+            "commander": bool(c["commander"]),
+            "record": bool(c["record"]),
+        }
+        for key, c in category_keys(deck)
+    ]
 
 
 def _bar(parts: dict[str, float], *, label: str) -> str:
@@ -3426,6 +3465,31 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .stackhead .meta{font-size:12px;color:var(--text-muted);display:block}
 .stackhead summary.icon-only{width:28px;height:28px;border:0;background:transparent;color:var(--text-muted)}
 .stackhead summary.icon-only:hover{color:var(--orange)}
+/* the category's ⋮ (deck.js puts it in place of the no-script drop-down): a finger-sized button
+   that sits in the 28 px head (negative margins), the icon muted until hovered or focused */
+.stackhead .kebab{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;
+  height:32px;min-height:0;margin:-2px 0;padding:0;border:0;border-radius:50%;background:transparent;
+  color:var(--text-muted);cursor:pointer}
+.stackhead .kebab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
+.stackhead .kebab:hover,.stackhead .kebab:focus-visible{color:var(--orange-text);background:var(--surface-2)}
+@media (pointer:coarse){ .stackhead .kebab{width:44px;height:44px;margin:-8px -6px -8px 0} }
+/* a press and hold on a category's head opens its menu: no text selection under the finger */
+.deckview[data-catinfo] .stackhead h2{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+/* "+ Add category" after the last stack: a dashed outline, the width of a stack */
+.deckview .addcat{display:flex;align-items:center;justify-content:center;gap:.4rem;width:100%;
+  min-height:var(--ctl);margin:.5rem 0 0;border:2px dashed var(--control-border);background:transparent;
+  color:var(--text);font-weight:700;text-decoration:none;break-inside:avoid;page-break-inside:avoid}
+.deckview .addcat:hover,.deckview .addcat:focus-visible{border-color:var(--orange-text);
+  color:var(--orange-text)}
+.deckview.text .addcat,.deckview.brewer .addcat{display:inline-flex;width:100%}
+/* the category boxes (Rename, Add category, Add from template, Delete; deck.js): the switches
+   in one row, each a finger-sized label; the template list one tick per line */
+.mtgbox .catform .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;margin-top:.5rem}
+.mtgbox .catform label.sw{display:inline-flex;align-items:center;gap:.45rem;min-height:var(--ctl);
+  font-weight:700;cursor:pointer}
+.mtgbox .catform label.sw input{margin:0}
+.mtgbox .tplform .tree{display:flex;flex-direction:column;max-height:40vh;overflow:auto}
+.mtgbox .tplform .tree label.sw{font-weight:400}
 
 .stats .pip,.ccard .pip{width:18px;height:18px}
 

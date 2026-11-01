@@ -81,7 +81,7 @@ async def test_the_assistant_names_the_folder(stack: Stack) -> None:
     bad = structured(
         await call(stack.h, token, "propose_new_deck", {"name": "Z", "cards": [], "folder": "Nope"})
     )
-    assert bad["ok"] is False and "No folder is called 'Nope'" in bad["message"], bad
+    assert bad["ok"] is False and "No folder is called “Nope”" in bad["message"], bad
 
 
 # -- the boxes on My decks: a Folder field ---------------------------------------------------------------
