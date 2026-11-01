@@ -3318,16 +3318,34 @@
       others.sort(function (a, b) { return b.cards - a.cards || a.name.localeCompare(b.name); });
       return others;
     }
-    // Each choice for the cards is named for what it does (review 2, M6): a plain category keeps
-    // them in the deck; Maybeboard or Sideboard (not in the deck) takes them out of it; Commander
-    // or a Premier category makes them commanders; "No category" leaves them in the deck with
-    // none, listed by type, as Archidekt allows. t: a category of targetsFor, or null for none.
-    function targetWords(t, n) {
-      var cards = n === 1 ? "card" : "cards", stay = n === 1 ? "stays" : "stay", move = n === 1 ? "moves" : "move";
-      if (!t) return { label: "No category", sentence: "Its " + n + " " + cards + " " + stay + " in the deck with no category, listed by type." };
-      if (t.premier || t.commander) return { label: t.name + " (makes " + (n === 1 ? "it a commander" : "them commanders") + ")", sentence: "Its " + n + " " + cards + " " + move + " to " + q(t.name) + " and become " + (n === 1 ? "a commander" : "commanders") + "." };
-      if (t.not_in_deck) return { label: t.name + " (leaves the deck)", sentence: "Its " + n + " " + cards + " " + move + " to " + q(t.name) + ", out of the deck." };
-      return { label: t.name, sentence: "Its " + n + " " + cards + " " + stay + " in the deck, in " + q(t.name) + "." };
+    // Each choice for the cards is named for what it does to them (review 2, M6; confirmation
+    // N1), from where they are now (c, the category being deleted): from a plain category they
+    // stay in the deck, go out of it (Maybeboard, Sideboard) or become commanders (Commander, a
+    // Premier category); from a board out of the deck they join it, or move to another board and
+    // stay out; from a Premier category they stop being commanders unless they go to another.
+    // "No category" leaves them where they are with none, listed by type, as Archidekt allows.
+    // t: a category of targetsFor, or null for none.
+    function targetWords(t, n, c) {
+      var one = n === 1, cards = one ? "card" : "cards", stay = one ? "stays" : "stay", move = one ? "moves" : "move", join = one ? "joins" : "join";
+      var out = !!(c && c.not_in_deck), cmdr = !!(c && (c.premier || c.commander)) && !out;
+      var its = "Its " + n + " " + cards + " ", commanders = one ? "a commander" : "commanders", become = one ? "becomes" : "become";
+      var ends = cmdr ? (one ? " and is no longer a commander." : " and are no longer commanders.") : ".";
+      if (!t) {
+        if (out) return { label: "No category (joins the deck)", sentence: its + join + " the deck with no category, listed by type." };
+        return { label: "No category", sentence: its + stay + " in the deck with no category, listed by type" + ends };
+      }
+      if (t.premier || t.commander) {
+        if (cmdr) return { label: t.name + " (" + (one ? "stays a commander" : "stay commanders") + ")", sentence: its + move + " to " + q(t.name) + " and " + stay + " " + commanders + "." };
+        var makes = t.name + " (makes " + (one ? "it a commander" : "them commanders") + ")";
+        if (out) return { label: makes, sentence: its + join + " the deck in " + q(t.name) + " and " + become + " " + commanders + "." };
+        return { label: makes, sentence: its + move + " to " + q(t.name) + " and " + become + " " + commanders + "." };
+      }
+      if (t.not_in_deck) {
+        if (out) return { label: t.name + " (still out of the deck)", sentence: its + move + " to " + q(t.name) + ", still out of the deck." };
+        return { label: t.name + " (leaves the deck)", sentence: its + move + " to " + q(t.name) + ", out of the deck" + ends };
+      }
+      if (out) return { label: t.name + " (joins the deck)", sentence: its + join + " the deck, in " + q(t.name) + "." };
+      return { label: t.name, sentence: its + stay + " in the deck, in " + q(t.name) + ends };
     }
     function deleteBox(c, back) {
       var body = el("div");
@@ -3337,22 +3355,23 @@
         body.appendChild(sentence);
         select = el("select");
         var targets = targetsFor(c);
-        // the biggest plain category (in the deck, not Premier) comes picked, as its cards then
-        // stay in the deck as they are; with no plain category "No category" comes picked, never
-        // Commander or a board out of the deck (review 2, M6); a Premier pick asks once more
-        var plain = targets.filter(function (t) { return !t.premier && !t.commander && !t.not_in_deck; })[0] || null;
+        // the biggest category like this one comes picked, as its cards then stay as they are: a
+        // plain one (in the deck, not Premier) for a plain one, another board out of the deck for
+        // a Maybeboard or Sideboard; with none "No category" comes picked, never Commander or a
+        // board that changes whether they count (review 2, M6; N1); a Premier pick asks once more
+        var plain = targets.filter(function (t) { return !t.premier && !t.commander && !t.not_in_deck === !c.not_in_deck; })[0] || null;
         var pick = PRESELECT_BIGGEST ? plain : null;
-        var none = el("option", null, targetWords(null, n).label);
+        var none = el("option", null, targetWords(null, n, c).label);
         none.value = "";
         none.selected = !pick;
         select.appendChild(none);
         targets.forEach(function (t) {
-          var o = el("option", null, targetWords(t, n).label);
+          var o = el("option", null, targetWords(t, n, c).label);
           o.value = t.name;
           if (pick && t.name === pick.name) o.selected = true;
           select.appendChild(o);
         });
-        var say = function () { sentence.textContent = targetWords(catNamed(select.value), n).sentence; };
+        var say = function () { sentence.textContent = targetWords(catNamed(select.value), n, c).sentence; };
         select.addEventListener("change", say);
         say();
         body.appendChild(field("Move " + (n === 1 ? "it" : "them") + " to", select, "catmove"));

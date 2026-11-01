@@ -11328,6 +11328,14 @@ def category_change_rows(
                 cards=copies,
                 move_to=move_to,
                 no_category=(no_category and bool(filed)) or None,
+                # the cards were out of the deck (a Maybeboard or Sideboard) and join it now
+                joins_deck=(
+                    bool(filed)
+                    and not s["includedInDeck"]
+                    and (target_state or {}).get("includedInDeck", True) is not False
+                    and (no_category or move_to is not None)
+                )
+                or None,
                 # cards moved into Commander or a Premier category become commanders (S-01)
                 commander=_touches_commander(deck, s)
                 or bool(
@@ -11355,10 +11363,14 @@ def category_line(r: dict[str, Any]) -> str:
     ]
     if r.get("delete"):
         n = int(r.get("cards") or 0)
+        joins = r.get("joins_deck")  # from a board out of the deck: the cards join it
         if n and r.get("move_to"):
-            move = f": its {n} card{'s move' if n != 1 else ' moves'} to “{r['move_to']}” first"
+            move = f": its {n} card{'s move' if n != 1 else ' moves'} to “{r['move_to']}” first" + (
+                f" and join{'s' if n == 1 else ''} the deck" if joins else ""
+            )
         elif n and r.get("no_category"):
-            move = f": its {n} card{'s stay' if n != 1 else ' stays'} in the deck with no category"
+            verb = ("joins" if n == 1 else "join") if joins else ("stays in" if n == 1 else "stay in")
+            move = f": its {n} card{'s' if n != 1 else ''} {verb} the deck with no category"
         else:
             move = ""
         why = " (added since the snapshot)" if r.get("since") else ""
