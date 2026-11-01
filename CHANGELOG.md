@@ -80,8 +80,11 @@ name per thing.
   - `show_waiting_changes` answers in plain text, one line per waiting change.
   - New keys: `deck_after`, `plan_first`, `side_by_side`, `unpaired`, `waited_seconds`,
     `suggested_wait`, `left_out` and `cards_unchanged`; `check_deck_changes` names
-    `missing_on_archidekt` and `unchecked_names`; `watch_card` takes `alert_drop` and
-    `list_name`, and `list_watchlist` rows carry `list` and `added_price`.
+    `missing_on_archidekt` and `unchecked_names`; `watch_card` takes `alert_drop`,
+    `list_name` and `clear_alerts`, and `list_watchlist` rows carry `list` and `added_price`.
+  - `watch_card` on a card already watched changes only the price alerts it names and keeps the
+    others (a call that names none, such as a move to a list, keeps them all); `clear_alerts`
+    turns off the ones it doesn't name.
 
 ### Added
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a
@@ -101,8 +104,10 @@ name per thing.
   lists, and says “In binder · you own N” when you have it. Make, rename and delete lists, move
   cards between them and filter by one; Select and its bar set a price alert, move or stop
   watching many cards at once. Each row's ⋮, a right-click or a press and hold offers Details,
-  Move to list… and Stop watching.
-- Pull to refresh in the Android app, on the list pages and the deck page.
+  Move to list… and Stop watching. Watching a card says the price alert it came with.
+- Pull to refresh in the Android app, on the list pages and the deck page. It, and the browser's
+  Reload, read Archidekt again on My decks, Binder, Pinned cards, the lists, Alerts, the forum and
+  profiles instead of the copy kept from the last minute or two.
 - History can make a new deck from a deleted deck's snapshot, for you to review and apply.
 - History lists the changes to your Archidekt lists, with the list as it was just before.
 - `check_new_deck`: an assistant checks a new deck before proposing it, with no card in the chat.
@@ -160,7 +165,9 @@ name per thing.
 ### Changed
 - Edits on the deck page within 10 minutes of each other share one snapshot and are one History
   entry, and never push out the snapshot from before an assistant's change. Deleting a category
-  takes its own snapshot, and its Undo puts the category and its cards back.
+  takes its own snapshot, and its Undo puts the category and its cards back, lists them card by
+  card, brings you back to the page you were on and, like the save it undoes, makes no backup copy
+  on Archidekt.
 - Category changes on Deck settings, like the deck page's quick edits, keep the gateway's snapshot
   and no longer make a backup copy on Archidekt. Quick edits, category saves and custom card
   counts take 3 Archidekt requests instead of 4 to 11.
@@ -243,12 +250,12 @@ name per thing.
 - Back is instant on ordinary pages. Binder › Lists shows at once and fills in its counts after;
   the bell and watched names are asked once a minute. Archidekt problems are described in plain words.
 - **Deck page**: Quick add adds one copy at once, with Undo.
-- **One card menu everywhere on the deck page**: a tap, a right-click or a press and hold gives the
-  same menu (a sheet from the bottom on a phone): the card's count with − and +, Open card,
-  Printings…, Move to, Color tag…, Elsewhere (watch, Add to binder, Pin card, Add to another
-  deck…), More (including the finish, Normal, Foil or Etched, with Undo) and Remove from deck in
-  red. The card viewer's Printing row opens the Printings sheet, whose chips are All, Different
-  art and In my binder.
+- **One card menu everywhere on the deck page**: a right-click or a press and hold gives the same
+  menu (a sheet from the bottom on a phone; a tap opens the card in the viewer): the card's count
+  with − and +, Open card, Printings…, Move to, Color tag…, Elsewhere (watch, Add to binder, Pin
+  card, Add to another deck…), More (including the finish, Normal, Foil or Etched, with Undo) and
+  Remove from deck in red. The card viewer's Printing row opens the Printings sheet, whose chips
+  are All, Different art and In my binder.
 - The deck's More menu is grouped as This deck, Share, Look into it and Community, then Delete
   deck…, with one Contests… item and “Watch deck price”; the Registration PDF is in Export ›
   Files, and Add a package… is a toolbar button.
