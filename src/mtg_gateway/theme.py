@@ -244,8 +244,9 @@ main:focus{outline:none}
 /* (!important: a row's own img rule, such as .erow .thumb's inline-flex, must not show it again) */
 img.img-broken{display:none !important}
 .img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
-  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
+  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
+/* (the page's text colour, not the muted one: muted was 3.6:1 on the gradient's surface-3 end) */
 /* too small for the name (a row's thumbnail): the plain tile a row without a picture shows */
 .img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
@@ -1229,7 +1230,9 @@ CSS += """
 .sizeseg button + button{border-left:1px solid var(--control-border)}
 .sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
 .sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px} }
+@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px}
+  /* the Grid / List switch: its own rule takes 2 px off --ctl for the border; a finger gets 44 */
+  .spanel .segc label{min-height:44px;min-width:44px} }
 .field.cardsize .sizeseg{display:flex;width:max-content}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){
@@ -1333,6 +1336,9 @@ main.wrap.ui-wide{max-width:1200px}
 .hubseg a{white-space:nowrap}
 .hubseg a:hover{background:var(--surface-2)}
 .hubseg a[aria-current=page]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+/* a part's count (Binder: Cards 18, Watchlist 3; mockup screen 8): a quiet grey pill */
+.hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;
+  border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
 @media (pointer:coarse){ .hubseg a{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%}
@@ -1505,6 +1511,52 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table .act .chev{display:inline-grid;place-items:center;width:44px;height:44px;font-size:1.7rem;
     line-height:1;color:var(--text);flex-basis:auto}
   .ui-table .act.ui-cap{padding:0;background:none}
+}
+/* A row list (Proposals, History, Reports; the 0.7.46 redesign, screen 6): one line per entry at
+   every width. A tick box where the list has one, the title with its facts line (.sub) under it,
+   then the row's one main action as a capsule and its ⋮ together at the end, never on a line of
+   their own. The columns a wide table lined up are the facts line here, so there is no header to
+   fold away (the waiting list keeps its check-every row). */
+.ui-table.ui-rows .tr{grid-template-columns:var(--cols);gap:0 .6rem;padding:.5rem .75rem}
+.ui-table.ui-rows .tr.th{grid-template-columns:var(--cols)}
+.ui-table.ui-rows .title .t{font-weight:600}
+.ui-table.ui-rows .title .t a{font-weight:600}
+.ui-table.ui-rows .sub{display:flex;margin-top:.25rem}
+.ui-table.ui-rows .sub .ui-lbl{height:20px;font-size:.76rem}
+.ui-table.ui-rows .flag{margin-top:.2rem}
+.ui-table.ui-rows .tr .act{display:flex;align-items:center;justify-content:flex-end;gap:.15rem;
+  justify-self:end;margin-right:-8px}
+/* the actions sit on the title's line, whatever the lines under it (a History entry has three):
+   their 44 px boxes centre on the first line, at any text size */
+.ui-table.ui-rows .tr:not(.group) .act{align-self:start;margin-top:calc(.675em - 22px)}
+.ui-table.ui-rows .act .ui-cap{margin:0;white-space:nowrap}
+.ui-table.ui-rows .act .kebab{flex:none}
+.ui-table.ui-rows .act .acts[hidden]{display:none}
+/* a deck's group row: the name with its count under it, Open deck at the end */
+.ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
+.ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
+.ui-table.ui-rows .group .m{display:flex;flex-direction:column;min-width:0}
+.ui-table.ui-rows .group .m small{font-weight:400;color:var(--text-muted);font-size:.86rem}
+.ui-table.ui-rows .group .m a{font-weight:700}
+.ui-table.ui-rows .group .meta{white-space:normal}
+/* a capsule on the group row's darker ground stays visible */
+.ui-table.ui-rows .tr.group .ui-cap{background:var(--surface-3) padding-box}
+@media (max-width:599.98px){
+  .ui-table.ui-rows .tr{padding:.5rem .6rem}
+  .ui-table.ui-rows .tr .act{margin-right:-6px}
+  /* the main action is its chevron: the title keeps its line at any text size */
+  .ui-table.ui-rows .act > .ui-cap{padding:0;margin:0;border:0;background:none}
+  .ui-table.ui-rows .act > .ui-cap:hover{background:var(--surface-2)}
+  .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto}
+  .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
+  /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
+     grows above and below the words without moving the lines around it (F14) */
+  .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
+    margin:-13px 0}
+}
+@media (pointer:coarse){
+  .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
+    margin:-13px 0}
 }
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
@@ -1705,6 +1757,15 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .act-table .evt .en svg.i{width:16px;height:16px;margin-top:.1rem;color:var(--text-muted)}
 """
 CSS += UI_CSS
+
+# The Assistant pages' toolbar on the open Fold (600 to 999 px): the search on a line of its own
+# and the filters sharing the next, so no filter is left alone and stretched across a whole line
+# (C-FINDINGS F13). Each of those pages appends it to its own styles.
+BALANCED_TOOLS_CSS = """
+@media (min-width:600px) and (max-width:999.98px){
+  .ui-tools .search{flex-basis:100%}
+}
+"""
 
 
 # The card menu and the Watch button (static/cardmenu.js): Card search's results, the deck page,
@@ -2315,6 +2376,16 @@ def time_html(ts: int | float | None, *, day: bool = True) -> str:
     return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
 
 
+_NUMBERS = re.compile(r"(\d+)")
+
+
+def natural_key(text: str | None) -> tuple[str | int, ...]:
+    """A sort key for names: the numbers in them sort as numbers ("Card 2" before "Card 10"),
+    the rest without regard to case. Every key alternates text and numbers from the first
+    character, so any two compare."""
+    return tuple(int(p) if p.isdigit() else p.casefold() for p in _NUMBERS.split(text or ""))
+
+
 def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
     """'1 card', '2 cards': a real plural instead of 'card(s)'. ``plural_word`` for irregular
     nouns (``plural(2, "copy", "copies")``)."""
@@ -2446,8 +2517,9 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
 # 600 px) list these; the rail adds More's pages and Alerts (the bell) instead of More. Assistant is the
 # assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
 # the count of proposals waiting for the member. Binder is the member's cards, behind one switch too
-# (BINDER_PAGES): Cards (the Archidekt collection), Wants (the cards pinned on Archidekt) and
-# Watchlist (decision C8, 0.7.46).
+# (BINDER_PAGES): Cards (the Archidekt collection), Lists (the Archidekt lists that shape decks, the
+# pinned cards among them, and the watchlist's own lists) and Watchlist, the want list (decision C8
+# and mockup screen 8, 0.7.46).
 NAV_LINKS = [
     ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
@@ -2460,23 +2532,23 @@ ASSISTANT_PAGES = (
     ("/history", "History", "history"),
     ("/reports", "Reports", "report"),
 )
-# Binder's switch (Cards, Wants, Watchlist); Watchlist only while watchlists are on (binder_pages)
+# Binder's switch (Cards, Lists, Watchlist); Watchlist only while watchlists are on (binder_pages)
 BINDER_PAGES = (
     ("/collection", "Cards", "collection"),
-    ("/collection/wants", "Wants", "bookmark"),
+    ("/collection/lists", "Lists", "list"),
     ("/watchlist", "Watchlist", "stats"),
 )
 NAV_PLACE = {
     "/history": "/proposals",
     "/reports": "/proposals",
+    "/collection/lists": "/collection",
     "/collection/wants": "/collection",
     "/watchlist": "/collection",
 }
-# The pages that light the picture (the Account place): the Account pages and the Archidekt lists
-# that live under Account (category templates, default categories, color tags, custom cards)
-ACCOUNT_PAGES = ("/account", "/account/details", "/lists")
+# The pages that light the picture (the Account place)
+ACCOUNT_PAGES = ("/account", "/account/details")
 # More, in groups: the phone's sheet. Account, Guide and Admin live on the Account page your
-# picture opens; the Archidekt lists live under Account; Watchlist lives in Binder.
+# picture opens; the lists and the Watchlist live in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
     ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),

@@ -516,14 +516,7 @@
       });
       acts.push(add);
     }
-    var scry = node.getAttribute("data-scry");
-    if (scry) {
-      var a = el("a", "btn ext");
-      a.href = scry; a.target = "_blank"; a.rel = "noreferrer noopener";
-      a.appendChild(icon("external"));
-      a.appendChild(document.createTextNode(" Scryfall"));
-      acts.push(a);
-    }
+    // Scryfall is the viewer's own pill, with EDHREC and TCGplayer (cardview.js reads data-scry)
     return acts;
   }
   /* The rules text (every face), power and toughness, flavour, price and legality are read when a

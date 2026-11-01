@@ -95,11 +95,11 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     assert "With Forge games <span class='n'>1</span>" in page
     assert _rows(page) == 3 and "All 3 reports shown." in page and "data-load-more" not in page
     # each row: the status label, the win rate with its interval, the lethal turn, who asked
-    assert "class='ui-lbl orange'" in page and ">Partial</span>" in page
-    assert "95% interval" in page and "turn 10" in page
-    # the column header does not assume 40 damage: a constructed deck's report counts 20
-    head = page.split("class='ui-table rp-t'")[1].split("<div class='tr'>")[0]
-    assert ">Lethal by<" in head and "40 damage" not in head
+    assert "class='ui-lbl orange stin'" in page and ">Partial</span>" in page
+    assert "95% interval" in page and "damage <b>T10</b>" in page
+    # no column header assumes 40 damage: each row's facts line carries its own figure
+    table = page.split("class='ui-table rp-t ui-rows'")[1]
+    assert ">Lethal by<" not in table and table.count("damage <b>") == 3
     assert "<span class='nm'>Claude</span>" in page and "<span class='nm'>You</span>" in page
     assert "no solo test" in page and "did not run" in page
     assert "Deck trend and history" not in page
@@ -114,7 +114,7 @@ def test_reports_dashboard_widgets_chips_filters_and_rows(server: Server) -> Non
     assert _rows(h.get("/reports?when=7").text) == 2
     assert _rows(h.get("/reports?when=today").text) <= 1
     oldest = h.get("/reports?order=oldest").text
-    table = oldest[oldest.index("class='ui-table rp-t'") :]
+    table = oldest[oldest.index("class='ui-table rp-t ui-rows'") :]
     assert table.index("r_old") < table.index("r_new") and "Oldest first" in oldest
     none = h.get("/reports?q=nothing+like+this").text
     assert "No reports match. Clear the search or the filters to see them all." in none

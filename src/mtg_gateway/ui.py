@@ -17,9 +17,20 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from .theme import ASSISTANT_PAGES, SPINNER, binder_pages, card_size_control, esc, hub_switch, icon
+from .theme import (
+    ASSISTANT_PAGES,
+    SPINNER,
+    binder_pages,
+    card_size_control,
+    esc,
+    hub_switch,
+    icon,
+    natural_key,
+)
 
-__all__ = ["card_size_control"]  # re-exported: the one card size switch (R-175), theme.card_size_control
+# re-exported: the one card size switch (R-175) and the names' sort key, theme.card_size_control
+# and theme.natural_key
+__all__ = ["card_size_control", "natural_key"]
 
 # --- status labels: a word, a colour and an icon -------------------------------------------------
 
@@ -402,24 +413,51 @@ def assistant_head(current: str, title: str, sub: str = "", *, sub_html: str = "
     return f"<div class='hubbar'><h1 class='sr-only'>{esc(title)}</h1>{switch}</div>{line}"
 
 
-def binder_head(current: str, title: str, sub: str = "", *, actions_html: str = "") -> str:
-    """The head of the Binder place's pages (Cards, Wants, Watchlist; decision C8): their switch,
-    which names the page, so the page's heading is for screen readers only, the page's actions at
-    the row's end (the one orange button among them), then the purpose line. ``current``: the
-    page's path (theme.BINDER_PAGES)."""
+def binder_head(
+    current: str,
+    title: str,
+    sub: str = "",
+    *,
+    actions_html: str = "",
+    badges: Mapping[str, int] | None = None,
+) -> str:
+    """The head of the Binder place's pages (Cards, Lists, Watchlist; decision C8 and mockup
+    screen 8): their switch, which names the page, so the page's heading is for screen readers
+    only, the page's actions at the row's end (the one orange button among them), then the purpose
+    line. ``current``: the page's path (theme.BINDER_PAGES). ``badges``: a count on a switch part
+    (Cards 18, Watchlist 3), by path, when the page knows it cheaply."""
     line = f"<p class='ui-sub'>{esc(sub)}</p>" if sub else ""
     acts = f"<span class='acts'>{actions_html}</span>" if actions_html else ""
-    switch = hub_switch("Binder", [(href, text, href) for href, text, _ic in binder_pages()], current)
+    counts = badges or {}
+    links = "".join(
+        f"<a href='{esc(href)}'{' aria-current=page' if href == current else ''}>{esc(text)}"
+        + (
+            f"<span class='cn'>{counts[href]:,}</span><span class='sr-only'>, {counts[href]:,}</span>"
+            if counts.get(href)
+            else ""
+        )
+        + "</a>"
+        for href, text, _ic in binder_pages()
+    )
+    switch = f"<nav class='hubseg' aria-label='Binder'>{links}</nav>"
     return (
         f"<div class='ui-head phead hubhead'><h1 class='sr-only'>{esc(title)}</h1>{switch}{acts}</div>{line}"
     )
 
 
-def list_head(title: str, total: int | None = None, note: str = "") -> str:
-    """The full list's heading with its total count, and an optional note beside it."""
+def list_head(title: str, total: int | None = None, note: str = "", *, note_html: str = "") -> str:
+    """The full list's heading with its total count, and an optional note beside it (``note`` as
+    text, or ``note_html`` already escaped: the order with its switch, as a capsule)."""
     count = f" <span class='ui-sub'>{total:,}</span>" if total is not None else ""
-    side = f"<span class='ui-sub'>{esc(note)}</span>" if note else ""
+    note_html = note_html or esc(note)
+    side = f"<span class='ui-sub'>{note_html}</span>" if note_html else ""
     return f"<div class='list-head'><h2>{esc(title)}{count}</h2>{side}</div>"
+
+
+def order_note(current: str, other: str, href: str) -> str:
+    """The list's order beside its heading, with the switch to the other order as a capsule:
+    "Newest first · Show oldest first"."""
+    return f"{esc(current)} · " + cap_link(f"Show {other.lower()}", href)
 
 
 BUTTON_KINDS = {
@@ -568,11 +606,48 @@ def check_cell(name: str, value: str, label: str, *, checked: bool = False, form
     )
 
 
-def group_row(title_html: str, meta_html: str = "", *, check_html: str = "") -> str:
-    """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta line."""
+def group_row(title_html: str, meta_html: str = "", *, check_html: str = "", action_html: str = "") -> str:
+    """A group's row in the table (a deck's waiting changes): a tick box cell, the title, a meta
+    line. With ``action_html`` (a row list, ``.ui-rows``): the meta line sits under the title and
+    the action (Open deck, as a capsule) ends the row."""
     chk = check_html or "<span></span>"
+    if action_html:
+        small = f"<small>{meta_html}</small>" if meta_html else ""
+        return (
+            f"<div class='tr group'>{chk}<span class='m'>{title_html}{small}</span>"
+            f"<span class='act'>{action_html}</span></div>"
+        )
     meta = f"<span class='meta'>{meta_html}</span>" if meta_html else ""
     return f"<div class='tr group'>{chk}<span>{title_html}</span>{meta}</div>"
+
+
+def row_menu(href: str, name: str) -> str:
+    """A row's ⋮ (the menu static/menus.js opens; a right-click or a hold on the row opens it
+    too): a 44 px button at the row's end, beside its main action. Without scripts it is a link to
+    ``href``, the row's own page, where the same actions are."""
+    return (
+        f"<a class='kebab' href='{esc(href)}' aria-label='Menu for {esc(name)}' aria-haspopup='menu' "
+        f"title='Menu'>{icon('more')}</a>"
+    )
+
+
+def row_open(href: str, word: str) -> str:
+    """A row list's main action (Review, Details, Open): the word in a capsule from 600 px; on a
+    phone a 44 px chevron, so the title keeps its line at any text size (the word stays for
+    screen readers)."""
+    return (
+        f"<a class='ui-cap' href='{esc(href)}' aria-label='{esc(word)}'>"
+        f"<span class='sm-hide'>{esc(word)}</span>"
+        "<span class='sm-only chev' aria-hidden='true'>›</span></a>"
+    )
+
+
+def row_actions(main_html: str, menu_html: str, *, hidden_html: str = "") -> str:
+    """A row list's action cell: the one main action as a capsule (cap_link), then the ⋮
+    (row_menu). ``hidden_html``: forms the menu submits (a snapshot's Restore) that the row no
+    longer shows; the row's page has them in view."""
+    hid = f"<span class='acts' hidden>{hidden_html}</span>" if hidden_html else ""
+    return f"<span class='act'>{hid}{main_html}{menu_html}</span>"
 
 
 def day_row(text: str) -> str:

@@ -259,14 +259,11 @@ async def test_waiting_dashboard(stack: Stack) -> None:
         seed_history(gw.db, sub, now=int(time.time()))
         r = await b.http.get("/proposals", headers=NAV)
         body = r.text.split("<main")[1]
-        for lab in (
-            "Waiting for you",
-            "Needs a look",
-            "Only you can apply",
-            "Last 7 days",
-            "Waiting by app",
-        ):
+        for lab in ("Waiting for you", "Needs a look", "Only you can apply", "Last 7 days"):
             assert re.search(rf"<span class='lab'>(<svg.*?</svg>)?{lab}</span>", body)
+        # the apps the waiting ones came from are a line of the Waiting widget (the fifth widget,
+        # Waiting by app, went in the 0.7.46 redesign)
+        assert "Waiting by app" not in body and "10 from An assistant, 5 from You" in body
         assert "Undo last apply" not in body or "action='/proposals/undo'" in body
         # chips with counts; the filters, "The administrator" among From
         assert (
@@ -336,8 +333,9 @@ async def test_all_view_pages_newest_first(stack: Stack) -> None:
         waiting = "<a class='ui-cap' href='/proposals'>Waiting</a>"
         assert f"To apply or reject several at once, open {waiting}." in body
         assert "name='pick'" not in body  # no tick boxes on All
-        ids = re.findall(r"href='/proposals/(p\d\d)\?show=all'", body)
-        assert ids[:3] == ["p00", "p01", "p02"] and len(set(ids)) == 25
+        # each row links its proposal from its title, its Review and its ⋮
+        ids = list(dict.fromkeys(re.findall(r"href='/proposals/(p\d\d)\?show=all'", body)))
+        assert ids[:3] == ["p00", "p01", "p02"] and len(ids) == 25
         assert "25 of 60</p>" in body and "offset=25" in body and "Earlier" not in body
         older = (await b.http.get("/proposals?show=all&offset=25", headers=NAV)).text
         assert "50 of 60</p>" in older and "/proposals/p25?show=all" in older

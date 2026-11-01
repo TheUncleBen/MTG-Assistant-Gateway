@@ -256,8 +256,8 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
             menu = page.locator(".ctxmenu[role=menu]")
             menu.wait_for(timeout=3000)
             labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-            # the two new items right under Open card
-            assert labels[:3] == ["Open card", "Watch this card", "Printings…"], labels
+            # Printings… right under Open card; Watch this card in the Elsewhere group (0.7.46)
+            assert labels[:2] == ["Open card", "Printings…"] and "Watch this card" in labels, labels
             menu.locator("button", has_text="Watch this card").click()
             toast = page.locator(".deck-toast", has_text="watchlist")
             toast.wait_for(timeout=5000)
@@ -277,7 +277,7 @@ def test_the_deck_page_card_menu_watches_a_card_and_opens_art_variants(tmp_path:
                 card.click(button="right")
                 menu.wait_for(timeout=3000)
                 labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
-                assert labels[:3] == ["Open card", "On your watchlist", "Printings…"], labels
+                assert labels[:2] == ["Open card", "Printings…"] and "On your watchlist" in labels, labels
                 entry = menu.locator("a[role=menuitem]", has_text="On your watchlist")
                 assert entry.get_attribute("href") == "/watchlist?q=Sol%20Ring"
                 page.keyboard.press("Escape")

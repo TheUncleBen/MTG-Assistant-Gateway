@@ -192,6 +192,11 @@ def browse_row(card: dict[str, Any]) -> dict[str, Any]:
     out["promo"] = bool(card.get("promo"))
     out["digital"] = bool(card.get("digital"))
     out["set_type"] = str(card.get("set_type") or "")
+    # which picture the printing carries (Scryfall's illustration id, on the front face of a
+    # two-faced card): the printing picker's "Different art" chip groups printings by it
+    art = card.get("illustration_id") or front.get("illustration_id")
+    if isinstance(art, str) and art:
+        out["illustration_id"] = art
     rank = card.get("edhrec_rank")
     if isinstance(rank, int) and not isinstance(rank, bool):
         out["edhrec_rank"] = rank

@@ -56,6 +56,7 @@ async def test_a_card_watched_in_one_printing_is_not_watched_again_by_name(stack
         # the names the pages' menus mark
         r = await b.http.get("/watchlist/api/names")
         assert r.status_code == 200 and r.json() == {"ok": True, "names": ["Sol Ring"]}
-        assert "no-store" in r.headers["cache-control"]
+        # private, checked with the gateway each time (an unchanged list is a 304), never stale
+        assert r.headers["cache-control"] == "private, no-cache" and r.headers.get("etag")
     finally:
         await b.aclose()

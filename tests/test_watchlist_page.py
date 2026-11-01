@@ -93,23 +93,32 @@ def test_words_for_changes_alerts_and_days() -> None:
     assert day_text("2025-10-11", TODAY) == "Oct 11, 2025"
 
 
-def test_widgets_and_the_watch_a_card_panel() -> None:
+def test_status_line_list_heads_and_the_watch_a_card_box() -> None:
     page = _page()
-    widgets = page.split("aria-label='At a glance'>")[1].split("</section>")[0]
-    assert "4<small>of 200</small>" in widgets and "Together $180.14 today" in widgets
-    assert "3<small>cards have one</small>" in widgets
-    assert "Mana Crypt is below your $150.00 · checked today at 06:00 UTC" in widgets
-    assert "↑9.3%<small>Smothering Tithe</small>" in widgets and "Down most: Mana Crypt, down 8.5%" in widgets
-    assert "1<small>of 10</small>" in widgets and "Meren Graveyard Value up 4% in 30 days" in widgets
+    # the status line carries what the old widgets said, in one line of text
+    status = page.split("<p class='w-status'>")[1].split("</p>")[0]
+    assert status.startswith("Last check today at 06:00 UTC · ")
     assert (
-        "class='wdg accent'" not in widgets and "class='wdg alert'" not in widgets
-    )  # alerts are information
-    assert "<h2 id='w-add-h'>Watch a card</h2>" in page
+        "Biggest move, 7 days: Smothering Tithe <span class='dl up'><span aria-hidden='true'>↑</span>9.3%"
+        in status
+    )
+    assert "title='Mana Crypt is below your $150.00'" in status and "1 price alert past</a>" in status
+    assert "Prices from Scryfall" in status and "Price alert defaults</a>" in status
+    assert "class='wdg" not in page  # alerts are information, not a coloured widget
+    # chips carry the counts, the list heads the totals
+    assert "With a price alert <span class='n'>3</span>" in page
+    cards = page.split("id='w-cards'")[1].split("<div class='tbl")[0]
+    assert "<h2>Cards <span class='ui-sub'>4</span></h2>" in cards and "Together $180.14 today" in cards
+    decks = page.split("id='w-decks'")[1].split("<div class='tbl")[0]
+    assert "<h2>Decks <span class='ui-sub'>1</span></h2>" in decks and "Together $444.14" in decks
+    assert "Meren Graveyard Value" in page and "up 4%" in page
+    # the "Watch a card" box opens from the toolbar; its primary button is Watch card
+    assert "data-box-open='w-add'" in page and "<h2 id='w-add-title'>Watch a card</h2>" in page
     assert "You can also watch a card from Card search: press and hold it, or right-click it." in page
-    # one orange button: Watch card; Watch deck is plain
-    assert page.count("btn-primary") == 1 and "<button class='btn-primary' type='submit'>Watch card" in page
-    assert "<button class='btn-plain' type='submit'>Watch deck</button>" in page
-    assert "Last check today at 06:00 UTC" in page
+    assert "You may watch up to 200 cards and 10 decks." in page
+    assert "btn-primary" not in page  # no orange button on the page itself
+    assert "<button type='submit' class='primary' form='w-add-f'>Watch card</button>" in page
+    assert "<button type='submit' class='primary' form='w-deck-f'>Watch deck</button>" in page
 
 
 def test_a_watched_deck_with_no_name_is_an_unnamed_deck() -> None:
