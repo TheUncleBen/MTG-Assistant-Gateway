@@ -420,7 +420,7 @@ def load_settings() -> Settings:
     if trusted is not None:
         kwargs["trusted_proxies"] = trusted
 
-    return Settings(
+    settings = Settings(
         public_url=public_url,
         oidc_issuer=oidc_issuer,
         oidc_client_id=_env("MTG_OIDC_CLIENT_ID", required=True) or "",
@@ -480,6 +480,23 @@ def load_settings() -> Settings:
         ),
         **kwargs,
     )
+    _warn_retired(settings)
+    return settings
+
+
+def _warn_retired(settings: Settings) -> None:
+    """A WARNING at start for a removed variable that still has a value: the deployment looks as
+    it did, but the setting no longer does anything (security review 3, R3-01)."""
+    if (os.environ.get("MTG_REAUTH_INTERVAL") or "").strip():
+        days = settings.refresh_token_ttl / 86400
+        logging.getLogger(__name__).warning(
+            "MTG_REAUTH_INTERVAL is set but no longer used (removed in 0.7.46): an assistant now has "
+            "to sign in again after the Assistant refresh time instead, %s days from this stack "
+            "unless the admin Settings page's Assistant refresh row says otherwise. To keep a "
+            "shorter time, set that row or MTG_REFRESH_TOKEN_TTL (seconds), then delete "
+            "MTG_REAUTH_INTERVAL.",
+            f"{days:g}",
+        )
 
 
 # -- settings the server owner manages on the admin Settings page (0.7.29) ------------------
