@@ -569,6 +569,54 @@ def test_ocr_variants_are_bounded_and_plausible() -> None:
     assert len(ocr_variants("llllllllll", 4)) == 4
 
 
+def test_trimmed_starts_drop_only_what_the_title_bar_edge_adds() -> None:
+    """The title bar's left edge reads as a stray letter in front of the name ("fSolRing",
+    "l Sol Ring"). Only a lone first letter, a lower-case first letter, or an I, l or 1 glued to a
+    capital is taken off; a name that starts like a real one is left alone."""
+    from mtg_gateway.scan.service import trimmed_starts
+
+    assert trimmed_starts("fSolRing") == ["SolRing"]
+    assert trimmed_starts("fsolRing ti") == ["solRing ti"]
+    assert trimmed_starts("l Sol Ring") == ["Sol Ring"]
+    assert trimmed_starts("l Sol 1 Ring") == ["Sol 1 Ring"]
+    assert trimmed_starts("ISolRing") == ["SolRing"]
+    kept = ("Sol Ring", "Island", "Invoke the Firemind", "A Little Chat", "I Know All, I See All", "lol", "f")
+    for name in (*kept, "Xqzv Plorth"):
+        assert trimmed_starts(name) == [], name
+
+
+async def test_a_stray_letter_before_the_title_still_finds_the_card(stack: Stack) -> None:
+    """F3: reads with the title bar's edge in front ("fSolRing", "l Sol Ring") resolve to the card
+    they name, with the collector line still deciding the printing. The trimmed name passes the
+    same similarity guard, so it never lands on a longer or a different card."""
+    token = await mcp_token(stack.h)
+    out = (
+        await call(
+            stack.h,
+            token,
+            "resolve_cards",
+            {
+                "cards": [
+                    {"name": "fSolRing"},
+                    {"name": "l Sol Ring"},
+                    {"name": "fsolRing ti"},
+                    {"name": "fSolRing", "set": "frc", "collector_number": "21"},
+                    {"name": "l Mountain"},  # Mountain, never Mountain Goat
+                    {"name": "l Sol Talisman"},  # Sol Talisman, never Sol Ring
+                    {"name": "fXqzv Plorth"},  # garbage stays unresolved
+                ]
+            },
+        )
+    )["structuredContent"]
+    cards = out["cards"]
+    names = [c["card"]["name"] if c["card"] else None for c in cards]
+    assert names == ["Sol Ring", "Sol Ring", "Sol Ring", "Sol Ring", "Mountain", "Sol Talisman", None], cards
+    assert [c["status"] for c in cards[:3]] == ["fuzzy", "fuzzy", "fuzzy"]
+    assert cards[3]["status"] == "printing" and cards[3]["card"]["set"] == "frc", cards[3]
+    assert cards[3]["card"]["collector_number"] == "21"
+    assert cards[6]["status"] == "not_found"
+
+
 @pytest.mark.skipif(not os.environ.get("SCAN_LIVE"), reason="set SCAN_LIVE=1 to query api.scryfall.com")
 async def test_live_scryfall_recovers_known_ocr_misreads() -> None:
     """Inputs the live-checks thread found unresolvable on 2026-10-04. Opt-in: hits Scryfall."""

@@ -17,6 +17,15 @@
     cfg.thresholds || {});
   const G = window.ScanGeometry || null; // card edge detection and flattening (geometry.js)
   const PHOTO_MAX = 2400; // long side of the working copy of an uploaded photo, in pixels
+  // The card guide's width as a share of the viewfinder's (scan.css .guide). Filling it holds a
+  // phone's main camera about 12 cm from the card: the main lens of some phones (Samsung's Ultra
+  // models among them) cannot focus much closer, and a card held closer comes out blurred. The
+  // outline search finds a card smaller or larger than the guide too.
+  const GUIDE_WIDTH = 0.5;
+  // Below this edge steepness (see sharpnessOf) a title strip that read nothing useful is called
+  // blurred, and the status line says how to get a sharp picture instead of "No match".
+  // Drawn cards on the page's tests measure 70 to 115 in focus and 10 to 35 out of focus.
+  const SHARP_MIN = 40;
 
   const ASK_DELETE = new URL(location.href).searchParams.get('delete'); // an assistant's delete link
   const state = {
@@ -382,7 +391,7 @@
     // Under the viewfinder, not over it: at large text sizes it would cover the dashed name box.
     const hint = h('p', { class: 'cam-hint', id: 'cam-hint', text: app
       ? 'Tap the shutter to scan with the phone camera, with its torch and zoom.'
-      : 'Fit the card in the frame, name in the dashed box.' });
+      : 'Hold the phone about 12 cm (5 in) from the card, the card in the frame and its name in the dashed box.' });
     const status = h('p', { class: 'muted', id: 'cam-status', text: '' });
     // No capture attribute: Photo means "choose a picture" everywhere (Chrome on Android would
     // open the camera with one, the app's file chooser never does); the shutter is the camera.
@@ -667,14 +676,14 @@
   }
 
   /* Map the dashed title box (CSS percentages of the guide, which is centred
-     at 78% of the preview width with a 63:88 aspect) back to pixels of the
+     at GUIDE_WIDTH of the preview width with a 63:88 aspect) back to pixels of the
      video frame, which is shown with object-fit: cover. */
   function guideGeometry(video, el) {
     const vw = video.videoWidth, vh = video.videoHeight;
     const ew = el.clientWidth, eh = el.clientHeight;
     const scale = Math.max(ew / vw, eh / vh);
     const offX = (ew - vw * scale) / 2, offY = (eh - vh * scale) / 2;
-    const gw = ew * 0.78, gh = gw * 88 / 63;
+    const gw = ew * GUIDE_WIDTH, gh = gw * 88 / 63;
     return { scale, offX, offY, gw, gh, gx: (ew - gw) / 2, gy: (eh - gh) / 2 };
   }
   /* The dashed name box and the info block inside a card-shaped box (the guide, in pixels of the
@@ -718,6 +727,10 @@
   function cleanOcr(text) {
     let t = (text || '').replace(/[^A-Za-z0-9 ,'\-\/.]/g, ' ').replace(/\s+/g, ' ').trim();
     t = t.replace(/^[^A-Za-z]+/, '').replace(/[\s,\-\/.']+$/, '');
+    // The title bar's left edge reads as a letter in front of the name: a lone lower-case one
+    // ("l Sol Ring") or one glued to the capital the name starts with ("fSolRing"). Printed names
+    // start with a capital, so neither can be part of the name.
+    t = t.replace(/^[a-z]\s+(?=[A-Z0-9])/, '').replace(/^[a-z](?=[A-Z])/, '');
     // Mana symbols that slipped through read as lone digits or single letters at the end.
     t = t.replace(/(\s+[0-9A-Za-z]){1,3}$/, (m) => (/^(\s+[A-Z])+$/.test(m) || /\d/.test(m) ? '' : m));
     return t.trim();
@@ -800,8 +813,10 @@
   }
   /* Title and info crops on a flattened (edge-detected, perspective-corrected) card. With the
      geometry known, the title crop runs wider than the guide's dashed box: long names reach the
-     mana cost, and cleanOcr drops the symbols that slip in. */
-  function flatTitleRegion(w, h) { return { x: w * 0.045, y: h * 0.035, w: w * 0.86, h: h * 0.085 }; }
+     mana cost, and cleanOcr drops the symbols that slip in. It starts 7% in, past the black border
+     and the title bar's own edge (about 4.5% to 7% of the card's width), which text recognition
+     reads as an l or an f in front of the name; the name itself starts near 9.5%. */
+  function flatTitleRegion(w, h) { return { x: w * 0.07, y: h * 0.035, w: w * 0.835, h: h * 0.085 }; }
 
   /* Find the card's edges and flatten it; null when no convincing outline is found, in which
      case the caller reads the guide-box regions of the raw frame as before. With a guide box the
@@ -838,18 +853,29 @@
     await scanRegion(frame, titleRegion(video, cam), infoRegion(video, cam), null);
   }
 
+  /* A photo as a working copy with its long side at most PHOTO_MAX px, which holds every detail
+     the OCR can use. Phone photos run to 200 MP (16,320 x 12,240), about 800 MB decoded whole. An
+     <img> reads only the file's header (and its EXIF orientation) when it loads, and drawing it
+     smaller decodes it straight to a reduced size: in Chromium a 200 MP JPEG drawn this way raised
+     the browser's memory by about 75 MB. createImageBitmap with resize options looks like the tool
+     for this but decodes the whole picture first (over 1 GB more for the same photo, and four
+     times slower), so it is not used. Null when the picture cannot be opened. */
+  async function photoCanvas(file, url) {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; })
+      .catch(() => null);
+    if (!img) return null;
+    const k = Math.min(1, PHOTO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  }
+
   async function scanFile(file) {
     const url = URL.createObjectURL(file);
     try {
-      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; })
-        .catch(() => null);
-      if (!img) { setStatus(unreadablePhoto(file)); return; }
-      // Phone photos run to 50 MP; a working copy with the long side at most PHOTO_MAX px holds
-      // every detail the OCR can use and keeps the tab's memory bounded.
-      const k = Math.min(1, PHOTO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
-      const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const c = await photoCanvas(file, url);
+      if (!c) { setStatus(unreadablePhoto(file)); return; }
       state.lastPicture = { w: c.width, h: c.height };
       // A photo of one card: find its edges anywhere in the picture and flatten it. Failing
       // that, assume the card fills the picture: title in the top band, info line bottom left.
@@ -916,20 +942,55 @@
     const ctx = c.getContext('2d'); ctx.translate(c.width, c.height); ctx.rotate(Math.PI); ctx.drawImage(source, 0, 0);
     return c;
   }
-  /* The title read: once, or for a card that lay sideways (flattened upright one way or the other,
-     see geometry.js) both ways up, keeping the way that reads a name with more confidence. The
-     source returned is the card the right way up, for the info line and the art. */
+  /* The title read. A card that lay sideways (flattened upright one way or the other, see
+     geometry.js) is read both ways up. An upright outline is read once, and only when that reads no
+     name, or a shaky one, upside down too (a card laid down the other way round). Either way the
+     way up that reads a name with more confidence is kept, so a card the right way up that reads
+     cleanly costs one read, as before. When no way up reads a name at all, the strip is read once
+     more without its top and bottom tenth: the title bar's own outline along its edges can make
+     text recognition read nothing in a strip that is otherwise clean. The source returned is the
+     card the right way up, for the info line and the art. */
   async function readTitle(source, region, flat) {
-    const tries = flat && flat.sideways ? [source, turned(source)] : [source];
-    let best = null;
-    for (const src of tries) {
-      const strip = preprocess(src, region);
+    const once = async (src, r) => {
+      const strip = preprocess(src, r || region);
       const ocr = await recognize(strip, 'title');
-      const score = (cleanOcr(ocr.text).length >= 3 ? 1000 : 0) + (ocr.confidence || 0);
-      if (!best || score > best.score) best = { source: src, strip, ocr, score };
-    }
-    return best;
+      const text = cleanOcr(ocr.text);
+      // A run of more than 20 letters is no word of a card name (the longest are about 17, such as
+      // Indestructibility): it is the texture of the art or the text box read as letters.
+      const name = text.length >= 3 && !/[A-Za-z]{21}/.test(text);
+      const weak = !name || (ocr.confidence != null && ocr.confidence < T.min_ocr_confidence);
+      return { source: src, strip, ocr, weak, score: (name ? 1000 : 0) + (ocr.confidence || 0) };
+    };
+    const first = await once(source);
+    if (!flat || !(flat.sideways || first.weak)) return first;
+    const other = await once(turned(source));
+    const best = other.score > first.score ? other : first;
+    if (best.score >= 1000) return best;
+    const inner = await once(best.source, { x: region.x, y: region.y + region.h * 0.1, w: region.w, h: region.h * 0.8 });
+    return inner.score > best.score ? inner : best;
   }
+
+  /* How steep the edges in a title strip are (preprocess's black on white, 0-255): the 99th
+     percentile of the step between neighbouring pixels. Printed letters in focus step from paper to
+     ink within a pixel or two; out of focus the same step is spread over many pixels. */
+  function sharpnessOf(strip) {
+    try {
+      const w = strip.width, h = strip.height;
+      const d = strip.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+      const hist = new Uint32Array(256); let n = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 1; x < w; x++) {
+          const i = (y * w + x) * 4;
+          hist[Math.abs(d[i] - d[i - 4])]++; n++;
+          if (y > 0) { hist[Math.abs(d[i] - d[i - w * 4])]++; n++; }
+        }
+      }
+      let acc = 0;
+      for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.01) return v; }
+      return 0;
+    } catch (e) { return 255; }
+  }
+  const BLUR_HINT = ' The picture is blurred: hold the phone still, a little further from the card, and let it focus before the shot.';
 
   /* source: the flattened card or the raw frame; region/info: title and info crops in its pixels;
      flat: the flattening result (corners, score, sideways) or null when the guide box was used as is.
@@ -945,6 +1006,9 @@
       const read = await readTitle(source, region, flat);
       source = read.source;
       const { strip, ocr } = read;
+      const sharpness = sharpnessOf(strip);
+      // Blur is named only when the read went wrong: a sharp enough read is never held up by it.
+      const blurHint = flat && read.weak && sharpness < SHARP_MIN ? BLUR_HINT : '';
       const glare = glareOf(source, region);
       const glareHint = glare >= T.glare_ratio ? ' Glare on the card: tilt it away from the light.' : '';
       const text = cleanOcr(ocr.text);
@@ -956,7 +1020,7 @@
         // Say which step failed: no card outline at all is a background or framing problem, an
         // outline with no readable name is focus, light or glare.
         setStatus(flat
-          ? 'Found the card but could not read its name.' + (glareHint || ' Hold it steady in good light, a little further away if the picture is blurred.')
+          ? 'Found the card but could not read its name.' + (glareHint || blurHint || ' Hold it steady in good light, a little further away if the picture is blurred.')
           : 'Could not find the card’s edges or read a name.' + (glareHint || ' Lay the card on a plain background that contrasts with its border (a light one for a black-bordered card), name at the top, and keep it inside the frame.'));
         return;
       }
@@ -966,7 +1030,7 @@
           // Too shaky to be worth a lookup: keep the read for later without asking the server.
           state.stats.skipped++;
           keepUnidentified({ status: 'not_found', card: null, suggestions: [],
-            ocr: { text, confidence: ocr.confidence, strip: strip.toDataURL('image/png'), info: null } }, glareHint);
+            ocr: { text, confidence: ocr.confidence, strip: strip.toDataURL('image/png'), info: null } }, glareHint || blurHint);
           return;
         }
       }
@@ -990,10 +1054,11 @@
       }
       res.ocr = { text, confidence: ocr.confidence, strip: strip.toDataURL('image/png'), info: infoRead,
         glare, flattened: !!flat, edges: flat ? flat.score : null, sampled: flat ? flat.sampled : null,
-        picture: state.lastPicture, guide };
+        picture: state.lastPicture, guide, sharpness, blurry: !!flat && !res.card && sharpness < SHARP_MIN };
       if (state.continuous) { await handleContinuous(res, glareHint); return; }
       state.pending = res; showResult(res);
-      setStatus((res.card ? 'Matched. Tap Add, or pick another card.' : 'No match. Pick from the suggestions or type the name.') + glareHint);
+      setStatus((res.card ? 'Matched. Tap Add, or pick another card.' : 'No match. Pick from the suggestions or type the name.')
+        + (glareHint || (res.ocr.blurry ? BLUR_HINT : '')));
       buzz(res.status === 'exact' ? 30 : [20, 40, 20]);
     } catch (err) {
       setStatus('Scan failed: ' + why(err));
@@ -1825,7 +1890,7 @@
     parseInfoLine, cardRequest, infoRegionOf, setSetLock, getSetLock, setFoilDefault, getFoilDefault,
     flattenCard, flatTitleRegion, flatInfoRegion, glareOf, torchSupported, setTorch, getTorch, cameraRanges, setCamera,
     tierOf, handleContinuous, undoLastAdd, startContinuous, stopContinuous, noCardFrame, noOutlineFrame, nameIsComplete, ensureOcr,
-    scanFile, guideTitleRegion, listValue,
+    scanFile, guideTitleRegion, listValue, sharpnessOf, photoCanvas,
     loadPrints, choosePrinting, setFoil, foilChoices, openPicker, closePicker };
 
   loadDraft();

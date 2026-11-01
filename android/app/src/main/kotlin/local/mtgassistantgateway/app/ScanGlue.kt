@@ -17,7 +17,9 @@ package local.mtgassistantgateway.app
  * through the `MtgNative.scanEvent` bridge as small JSON objects, each carrying the [install]
  * nonce and the photo's sequence number so stale or spoofed events are dropped: the page's own
  * `scan:auto-added`, `scan:unsure`, `scan:unidentified` and `scan:undo` events, then `done` when
- * the photo has been fully processed, with the status line the page would have shown, or `no-card`
+ * the photo has been fully processed, with the status line the page would have shown and what the
+ * photo came to (`matched` with the card's `name`, `set` and `number`; else `read`, the name as read,
+ * and `blurry`), or `no-card`
  * in its place when continuous mode found no card outline and read nothing. Without an outline the
  * page's own rule applies (`noOutlineFrame`, pages from 0.7.46): after a few such photos in a row it
  * reads the dashed box, and a card found there only ever waits on the page for a tap (`unsure`,
@@ -145,6 +147,20 @@ object ScanGlue {
         s.infoRegionOf(g.x, g.y, g.w, g.h), null);
     }
   }
+  // What the photo came to, for the panel's line: the card found (name, set, number), or the
+  // name as read when no card matched, and whether the picture was blurred (pages from 0.7.46).
+  function outcome(s, ev) {
+    var p = s.state.pending;
+    var card = p && p.card;
+    ev.pending = !!p;
+    ev.matched = !!card;
+    ev.name = card ? String(card.name || '') : '';
+    ev.set = card ? String(card.set || '').toUpperCase() : '';
+    ev.number = card ? String(card.collector_number || '') : '';
+    ev.read = p && p.ocr ? String(p.ocr.text || '') : '';
+    ev.blurry = !!(p && p.ocr && p.ocr.blurry) || /blurred:/.test(ev.status || '');
+    return ev;
+  }
   window.__mtgNative = {
     ready: function () { return !!hooks(); },
     begin: function () {
@@ -172,11 +188,14 @@ object ScanGlue {
       if (!s) return 'no-scan';
       var n = ++seq;
       var box = statusBox(); box.textContent = '';
+      // A new photo replaces a read still waiting on the page (as the page's own Scan does), so
+      // what the done event reports is this photo's outcome, never an earlier one's.
+      s.state.pending = null;
       process(s, url, n, guide || null).then(function (r) {
         if (r === 'no-card') return;
-        send({ type: 'done', seq: n, status: box.textContent, total: total(s), pending: !!s.state.pending });
+        send(outcome(s, { type: 'done', seq: n, status: box.textContent, total: total(s) }));
       }, function (e) {
-        send({ type: 'done', seq: n, status: '', error: String(e && e.message || e), total: total(s), pending: !!s.state.pending });
+        send(outcome(s, { type: 'done', seq: n, status: '', error: String(e && e.message || e), total: total(s) }));
       });
       return 'ok:' + n;
     },
