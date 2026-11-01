@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import json
 import logging
 import re
 import secrets
@@ -64,6 +65,7 @@ from .theme import (
     VIEW_COOKIE,
     VIEW_KINDS,
     card_size_page,
+    display_name,
     icon,
     in_app,
     layout_from_cookie,
@@ -441,9 +443,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/account/details", methods=["GET"], include_in_schema=False)
     async def account_details(request: Request) -> Response:
+        """The list (details_html). A notice or a box that belongs to one section (the redirects
+        of 0.7.45, the app's older links) opens that section's page with it."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/account/details")
+            return to_login(DETAILS)
         q = request.query_params
         ok, err = q.get("ok"), q.get("err")
         if "disconnect" in q or "disconnect_all" in q:
@@ -451,6 +455,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(
                 assistants.PAGE + ("?disconnect_all=1" if "disconnect_all" in q else ""), status_code=303
             )
+        section = "profile" if "picture" in q else notice_section(ok, err)
+        if section and DETAIL_PAGES:
+            # the section's own page, with the same query (only the codes it knows are shown)
+            carried = ("ok", "err", "saved", "picture", "connect")
+            keep = "&".join(f"{k}={quote(v, safe='')}" for k, v in q.multi_items() if k in carried)
+            return RedirectResponse(section_href(section, keep, section), status_code=303)
         if ok == "disconnected":
             # the app's registered name, looked up by the id the redirect carries (never the URL's
             # words), and only among the member's own apps (any other id reads as an unnamed app)
@@ -462,23 +472,39 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
             inside = notify.CARD_NOTICES | PROFILE_NOTICES | {"unconfirmed"}
             notice = _notice(None if ok in inside else ok, None if err in notify.CARD_NOTICES else err)
-        # The old one-press forms' addresses open the page with the matching box open (no-JS path
-        # of the red-outline buttons): ?unlink=1, ?disconnect=<client id>, ?disconnect_all=1,
-        # ?delete=1, ?picture=1 (the Archidekt profile picture box).
-        open_box = next(
-            (k for k in ("unlink", "disconnect", "disconnect_all", "delete", "picture") if k in q), None
-        )
-        body = await account_html(
-            state,
-            sub,
-            _csrf(s, sid),
-            ok=ok,
-            err=err,
-            open_box=open_box,
-            open_client=q.get("disconnect"),
-            saved=q.get("saved") or "",
+        # The old one-press forms' addresses open the list with the matching box open (no-JS path
+        # of the rows): ?signout=1, ?unlink=1, ?delete=1 (and ?picture=1 the profile page's box).
+        open_box = next((k for k in ("signout", "unlink", "delete", "picture") if k in q), None)
+        body = await details_html(
+            state, sub, _csrf(s, sid), open_box=open_box, ok=ok, err=err, saved=q.get("saved") or ""
         )
         return account_response(page, notice + body, sub, sid)
+
+    @server.custom_route(DETAILS + "/{section}", methods=["GET"], include_in_schema=False)
+    async def account_section(request: Request) -> Response:
+        """One section's page: the form its row on the list replaces (section_html)."""
+        sub, sid = current(request)
+        section = request.path_params["section"]
+        if section not in SECTIONS:
+            return Response(status_code=404)
+        if not sub:
+            return to_login(section_href(section))
+        q = request.query_params
+        if not DETAIL_PAGES:  # the rows fold open on the list: the list, at that row
+            query = "&".join(f"{k}={quote(v, safe='')}" for k, v in q.multi_items())
+            return RedirectResponse(section_href(section, query), status_code=303)
+        if section in PROFILE_SECTIONS and not state.decks.status(sub)["linked"]:
+            return RedirectResponse(section_href("archidekt"), status_code=303)
+        ok, err = q.get("ok"), q.get("err")
+        from .profile_page import CARD_NOTICES as PROFILE_NOTICES
+
+        inside = notify.CARD_NOTICES | PROFILE_NOTICES | {"unconfirmed"}
+        notice = _notice(None if ok in inside else ok, None if err in notify.CARD_NOTICES else err)
+        open_box = next((k for k in ("unlink", "picture") if k in q), None)
+        body = await section_html(
+            state, sub, _csrf(s, sid), section, ok=ok, err=err, open_box=open_box, saved=q.get("saved") or ""
+        )
+        return account_response(page, notice + f"<div class='acc'>{body}</div>", sub, sid, section=section)
 
     @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
     async def account_avatar(request: Request) -> Response:
@@ -508,6 +534,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     # Account details' forms with no action (Link account, Save approval mode, Forget my choices,
     # the Notifications card) post to the page's own address: the same handler as /account.
+    @server.custom_route(DETAILS + "/{section}", methods=["POST"], include_in_schema=False)
     @server.custom_route("/account/details", methods=["POST"], include_in_schema=False)
     @server.custom_route("/account", methods=["POST"], include_in_schema=False)
     async def account_post(request: Request) -> Response:
@@ -583,10 +610,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return RedirectResponse(f"{assistants.DEFAULT_PAGE}?ok=mode_{mode}", status_code=303)
         if action == "forget_choices":
             if data.get("confirm") != "yes":
-                return RedirectResponse("/account/details?err=confirm_forget#choices", status_code=303)
+                return RedirectResponse(section_href("choices", "err=confirm_forget"), status_code=303)
             n = prefs.forget(state.db, sub)
             state.db.audit("view_choices_forgotten", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"n": n})
-            resp = RedirectResponse("/account/details?ok=choices_forgotten#choices", status_code=303)
+            resp = RedirectResponse(section_href("choices", "ok=choices_forgotten"), status_code=303)
             for kind in VIEW_KINDS:  # this browser's pre-0.7.29 view cookies, if any are left
                 resp.delete_cookie(VIEW_COOKIE + kind, path="/", secure=secure, httponly=True, samesite="lax")
             return resp
@@ -606,40 +633,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()
             password = data.get("archidekt_password", "")
+
+            async def again(message: str, *, read: bool) -> Response:
+                # The member ticked the box after opening the detail: keep it open, not folded again.
+                body = await section_html(state, sub, _csrf(s, sid), "archidekt", disclosure_read=read)
+                body = _err(message) + f"<div class='acc'>{body}</div>"
+                return account_response(page, body, sub, sid, status=400, section="archidekt")
+
             if data.get("accept_risk") != "1":
-                return account_response(
-                    page,
-                    _err("Tick the box to confirm you have read what linking Archidekt gives this gateway.")
-                    + _account_body(state, sub, _csrf(s, sid)),
-                    sub,
-                    sid,
-                    status=400,
-                )
+                words = "Tick the box to confirm you have read what linking Archidekt gives this gateway."
+                return await again(words, read=False)
             if not login_name or not password:
-                return account_response(
-                    page,
-                    _err("Enter your Archidekt username or email and password.")
-                    + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
-                    sub,
-                    sid,
-                    status=400,
-                )
+                return await again("Enter your Archidekt username or email and password.", read=True)
             try:
                 await state.decks.link(sub, login_name, password)
             except DeckError as exc:
-                # The member ticked the box after opening the detail: keep it open, not folded again.
-                return account_response(
-                    page,
-                    _err(str(exc)) + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
-                    sub,
-                    sid,
-                    status=400,
-                )
+                return await again(str(exc), read=True)
             return RedirectResponse("/account/details?ok=linked", status_code=303)
         done = await notify.account_action(state, sub, action or "", data)
         if done is not None:
-            anchor = "#summary" if action in ("summary_save", "summary_send") else "#notifications"
-            return RedirectResponse(f"/account/details?{done}{anchor}", status_code=303)
+            anchor = "summary" if action in ("summary_save", "summary_send") else "notifications"
+            return RedirectResponse(section_href("notifications", done, anchor), status_code=303)
         return account_response(page, _err("Unknown action."), sub, sid, status=400)
 
     # -- Account › Assistants: each connected assistant's own approval mode (assistants.py) ------
@@ -1681,85 +1695,372 @@ DELETED_LIST = (
     "sign-in"
 )
 
-# The Account page: connected app rows, the disclosure as a tinted strip, buttons that wrap.
+# Account details (mockup screen 7, 0.7.46): the same grouped list as the Account page, each row
+# opening the form it replaces. The two choices Ben has not answered yet, each one constant:
+DETAILS = "/account/details"
+# each row opens its own small page (False: the row folds its form open on the list itself)
+DETAIL_PAGES = True
+# the four groups' names, in the list's order
+GROUP_NAMES = ("Archidekt", "Assistant", "This gateway", "Your data")
+# The sections with a page of their own (DETAIL_PAGES): the address under /account/details, the
+# page's title, and the row's icon.
+SECTIONS: dict[str, tuple[str, str]] = {
+    "archidekt": ("Archidekt account", "link"),
+    "profile": ("Archidekt profile", "account"),
+    "email": ("Email and alerts on Archidekt", "bell"),
+    "defaults": ("New device defaults", "settings"),
+    "notifications": ("Push notifications", "bell"),
+    "choices": ("Your view choices", "grid"),
+}
+# the sections drawn from the member's Archidekt profile (profile_page): only while linked
+PROFILE_SECTIONS = ("profile", "email", "defaults")
+# Where an old list address's notice belongs (the redirects of 0.7.45 and the app's older links):
+# ``?ok=email`` opens Email and alerts, a push notification's ``?ok=notify_saved`` the
+# Push notifications page.
+NOTICE_SECTIONS = {
+    "profile": "profile",
+    "picture": "profile",
+    "unconfirmed": "profile",
+    "email": "email",
+    "defaults": "defaults",
+    "choices_forgotten": "choices",
+    "confirm_forget": "choices",
+}
+
+
+def section_href(section: str, query: str = "", anchor: str = "") -> str:
+    """The address of one section: its page, or (DETAIL_PAGES off) its fold on the list."""
+    q = f"?{query}" if query else ""
+    if DETAIL_PAGES:
+        return f"{DETAILS}/{section}{q}{f'#{anchor}' if anchor else ''}"
+    return f"{DETAILS}{q}#{anchor or section}"
+
+
+def notice_section(ok: str | None, err: str | None) -> str | None:
+    """The section a notice code belongs to, or None for one the list shows itself."""
+    for code in (ok, err):
+        if code in NOTICE_SECTIONS:
+            return NOTICE_SECTIONS[code]
+        if code in notify.CARD_NOTICES:
+            return "notifications"
+    return None
+
+
+# The Account details pages: the list's folds and red row, a section's cards, the disclosure as
+# a tinted strip, buttons that wrap.
 ACCOUNT_CSS = (
     ".yback{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;margin:0 0 -.25rem;"
     "color:var(--orange-text);font-weight:700;text-decoration:none}"
     ".yback svg.i{width:18px;height:18px;transform:rotate(90deg)}"
-    ".acc .apps{list-style:none;margin:.5rem 0;padding:0}"
-    ".acc .apps li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem 1rem;align-items:center;"
-    "padding:.6rem 0;border-top:1px solid var(--border-soft)}"
-    ".acc .apps li:first-child{border-top:0;padding-top:.2rem}"
-    ".acc .apps .nm .ui-app{font-size:1rem;font-weight:700}"
-    ".acc .apps .sub{color:var(--text-muted);font-size:.9rem}"
-    ".acc .apps .btn-cell{grid-column:2;grid-row:1 / span 2}"
+    ".yhub.ydetails{max-width:62rem;margin:0 auto}"
+    # a row that folds open on the list (Your Archidekt lists, What your sign-in shares): its
+    # words start under the row's label
+    ".ydetails .yfold{padding:0 1rem .9rem calc(1.8rem + 20px);font-size:.95rem;line-height:1.4}"
+    ".ydetails .yfold p{margin:.3rem 0}.ydetails .yfold dl.meta{margin:.2rem 0}"
+    ".ydetails .yfold .ui-caps{margin:.4rem 0}"
+    # a row's value keeps its words on one line while it has under half the row, the label wraps
+    ".ydetails .yrow .lbl{min-width:0;overflow-wrap:anywhere}"
+    ".ydetails .yrow .val{flex:0 0 auto;max-width:45%;min-width:0;overflow-wrap:anywhere}"
+    ".ydetails .yme .sub{overflow-wrap:anywhere}"
+    # the one red row: Delete my data…
+    ".ygrp .yrow.ydanger,.ygrp .yrow.ydanger > svg.i{color:var(--danger-text)}"
+    # one column on a phone: the groups in the mockup's order (Archidekt, Assistant, This gateway,
+    # Your data), not column by column
+    "@media (max-width:699.98px){.ydetails .ycols{display:flex;flex-direction:column;align-items:stretch}"
+    ".ydetails .ycol{display:contents}"
+    ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
+    ".ydetails .ygrp[data-g='3']{order:3}}"
+    # a section's page: one card, as wide as the list's column at most; the list itself as wide
+    # as the Account page (two columns from 700 px)
+    ".acc{max-width:40rem}.acc.acc-list{max-width:62rem}.acc .card{margin-bottom:1rem}"
     ".acc .notice.disclosure{background:var(--blue-tint);border-left-color:var(--blue)}"
     ".acc .ui-actions .btn,.acc .ui-actions button{white-space:normal;max-width:100%;text-align:center}"
     ".acc form.inbox{margin:0}.acc form.inbox p{margin:0 0 .5rem}"
-    "@media (max-width:599.98px){.acc .apps li{grid-template-columns:1fr}.acc .apps .btn-cell{grid-column:1;"
-    "grid-row:auto}.acc .ui-actions .btn,.acc .ui-actions button{flex:1 1 auto}}"
+    "@media (max-width:599.98px){.acc .ui-actions .btn,.acc .ui-actions button{flex:1 1 auto}}"
 )
 ACCOUNT_HEAD = f"<style>{ACCOUNT_CSS}</style><script src='{smallpage.SCRIPT}' defer></script>"
 
 
-async def account_html(
+async def profile_cards(state: Any, sub: str, csrf: str | None, **kw: Any) -> dict[str, str]:
+    """The Archidekt profile sections while Archidekt is linked (profile_page: one read, kept a
+    short while), or none. ``kw`` are profile_page.cards' notices and typed values."""
+    from . import profile_page
+
+    if not state.decks.status(sub)["linked"]:
+        return {}
+    now = await profile_page.profile_or_none(state.decks, sub)
+    return profile_page.cards(now, csrf, stamp=press_stamp(state.settings, sub), **kw)
+
+
+async def section_html(
     state: Any,
     sub: str,
     csrf: str | None,
+    section: str,
     *,
     ok: str | None = None,
     err: str | None = None,
     open_box: str | None = None,
-    open_client: str | None = None,
     saved: str = "",
     profile_error: str = "",
     profile_error_in: str = "",
     profile_values: dict[str, str] | None = None,
+    disclosure_read: bool = False,
 ) -> str:
-    """The Account page's body: the cards, with the Archidekt profile cards read first while
-    Archidekt is linked (profile_page: one read, kept a short while). ``profile_error`` is
-    Archidekt's refusal of a profile press, shown in the card ``profile_error_in``."""
-    from . import profile_page
-
-    html_profile = ""
-    if state.decks.status(sub)["linked"]:
-        now = await profile_page.profile_or_none(state.decks, sub)
-        html_profile = profile_page.account_cards(
-            now,
+    """One section's cards: the form the row replaces. ``open_box`` names the box drawn open
+    (the old one-press addresses: unlink, picture), ``saved`` what a profile save changed,
+    ``profile_error``/``profile_error_in`` Archidekt's refusal and the card it belongs to,
+    ``profile_values`` what was typed, kept in the fields after a refusal."""
+    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+    if section == "archidekt":
+        return _archidekt_card(state, sub, csrf_in, open_box=open_box, disclosure_read=disclosure_read)
+    if section in PROFILE_SECTIONS:
+        cards = await profile_cards(
+            state,
+            sub,
             csrf,
-            stamp=press_stamp(state.settings, sub),
             ok=ok or "",
             saved=saved,
             error=profile_error,
             error_in=profile_error_in,
             values=profile_values,
             open_box=open_box,
+            heading=False,
         )
-    return _account_body(
-        state,
-        sub,
-        csrf,
-        ok=ok,
-        err=err,
-        open_box=open_box,
-        open_client=open_client,
-        profile_html=html_profile,
+        if section == "profile":  # what stays on Archidekt, at the foot of the profile page
+            return cards.get("profile", "") + cards.get("only", "")
+        return cards.get(section, "")
+    if section == "notifications":
+        return notify.account_card_html(state, sub, csrf_in, ok=ok, err=err, heading=False)
+    if section == "choices":
+        return _forget_choices_card(csrf_in)
+    return ""
+
+
+async def details_html(
+    state: Any, sub: str, csrf: str | None, *, open_box: str | None = None, **section_kw: Any
+) -> str:
+    """The list: the member at the top, then the four groups, balanced into two columns on a wide
+    screen as the Account page is. With DETAIL_PAGES off every section folds open under its row
+    (``section_kw`` are the sections' notices)."""
+    info = state.decks.status(sub)
+    user = state.db.get_user(sub) or {}
+    linked = bool(info["linked"])
+    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+    folds: dict[str, str] = {}
+    if not DETAIL_PAGES:
+        for name in SECTIONS:
+            if linked or name not in PROFILE_SECTIONS:
+                folds[name] = await section_html(state, sub, csrf, name, open_box=open_box, **section_kw)
+
+    def row(section: str, value: str = "") -> str:
+        title, ic = SECTIONS[section]
+        if section in folds:
+            return _yfold(title, ic, folds[section], value=value, rid=section)
+        return _yrow(title, ic, href=section_href(section), value=value)
+
+    who = html.escape(user.get("email") or user.get("preferred_username") or sub)
+    writes = "on" if info["writes_enabled"] else "off"
+    me = (
+        "<div class='yme'><img class='av' src='/account/avatar' alt='' width='56' height='56'>"
+        f"<span class='who'><b>{html.escape(display_name(user) or 'You')}</b>"
+        f"<span class='sub'>{who} · Archidekt writes {writes}</span></span></div>"
+    )
+    archidekt = [
+        row("archidekt", f"{info['archidekt_username']} · linked" if linked else "Not linked"),
+    ]
+    if linked:
+        archidekt += [row("profile"), row("email"), row("defaults"), _lists_fold(sub)]
+    n = len(assistants.connected(state.db, sub))
+    assistant = [
+        _yrow(
+            "Assistants", "shield", href=assistants.PAGE, value=f"{n} connected" if n else "None connected"
+        ),
+        # the default for new assistants (each one can have its own, on the Assistants page)
+        _yrow(
+            "Approval mode",
+            "shield",
+            href=assistants.DEFAULT_PAGE,
+            value=modes.MODE_LABELS.get(state.decks.mode_of(sub), ""),
+        ),
+    ]
+    if state.summaries is not None:
+        assistant.append(row("notifications", _notifications_value(state, sub)))
+    gateway = [
+        _yfold("What your sign-in shares", "account", _identity_details(user), rid="identity"),
+        _yfold(
+            "Archidekt writes",
+            "edit",
+            _writes_fold(info["writes_enabled"]),
+            value="On" if info["writes_enabled"] else "Off",
+            rid="writes",
+        ),
+        # the price alert every card the member watches gets (mockup screen 8): its box on the
+        # watchlist, one press from here
+        _yrow(
+            "Price alert defaults",
+            "tag",
+            href="/watchlist?box=defaults",
+            value=_alert_defaults_value(state, sub),
+        ),
+        row("choices"),
+    ]
+    data = [
+        _yrow(
+            "Sign out on all my devices",
+            "x",
+            href=f"{DETAILS}?signout=1",
+            attrs=ui.box_open_attr("signout"),
+            chev=False,
+        )
+    ]
+    if linked:
+        data.append(
+            _yrow(
+                "Unlink Archidekt…",
+                "link",
+                href=f"{DETAILS}?unlink=1",
+                attrs=ui.box_open_attr("unlink"),
+                chev=False,
+            )
+        )
+    data.append(
+        _yrow(
+            "Delete my data…",
+            "trash",
+            href=f"{DETAILS}?delete=1",
+            attrs=f"id='delete-data' {ui.box_open_attr('delete')}",
+            cls="ydanger",
+            chev=False,
+        )
+    )
+    # The mockup's two columns on a wide screen: Archidekt over This gateway, Assistant over Your
+    # data; one under the other on a phone, Your data (the actions that ask first) last.
+    cols = [
+        [(0, GROUP_NAMES[0], archidekt, ""), (2, GROUP_NAMES[2], gateway, "")],
+        [(1, GROUP_NAMES[1], assistant, "apps"), (3, GROUP_NAMES[3], data, "")],
+    ]
+    s = state.settings
+    boxes = _signout_box(csrf_in, open=open_box == "signout") + _delete_box(
+        csrf_in, s.backup_keep_days if s.backup_dir is not None else None, open=open_box == "delete"
+    )
+    if linked:
+        boxes += _unlink_box(csrf_in, open=open_box == "unlink")
+    # an old link to a part of the list (#notifications, #profile, …) opens that section's page
+    # (static/pages.js); the list's own folds (#lists, #identity, #writes, #apps) stay
+    parts = {
+        "notifications": "notifications",
+        "summary": "notifications",
+        "profile": "profile",
+        "picture": "profile",
+        "archidekt-only": "profile",
+        "email": "email",
+        "defaults": "defaults",
+        "archidekt": "archidekt",
+        "archidekt-disclosure": "archidekt",
+        "choices": "choices",
+    }
+    pages = {k: section_href(v) for k, v in parts.items()} if DETAIL_PAGES else {}
+    return (
+        "<div class='acc acc-list'>"
+        f"<div class='yhub ydetails' data-section-pages='{html.escape(json.dumps(pages))}'>"
+        + me
+        + "<div class='ycols'>"
+        + "".join(f"<div class='ycol'>{''.join(_ygroup(g) for g in c)}</div>" for c in cols)
+        + f"</div></div>{boxes}</div>"
     )
 
 
-def account_response(page: Any, body: str, sub: str, sid: str | None, *, status: int = 200) -> Response:
-    """The Account page rendered: its own style and scripts (pages.js, profile.js), and a page
-    policy that lets the chosen picture show before it is sent (a blob: address)."""
+def _yrow(
+    label: str, ic: str, *, href: str, value: str = "", attrs: str = "", cls: str = "", chev: bool = True
+) -> str:
+    """A row that opens a page or a box: the icon, the label, its value at the right, and a
+    chevron where it opens a page."""
+    val = f"<span class='val'>{html.escape(value)}</span>" if value else ""
+    ch = f"<span class='ch'>{icon('chev')}</span>" if chev else ""
+    a = f" {attrs}" if attrs else ""
+    c = f" {cls}" if cls else ""
+    return (
+        f"<a class='yrow{c}' href='{html.escape(href)}'{a}>{icon(ic)}"
+        f"<span class='lbl'>{html.escape(label)}</span>{val}{ch}</a>"
+    )
+
+
+def _yfold(label: str, ic: str, body: str, *, value: str = "", rid: str = "") -> str:
+    """A row that folds open in place (as Theme on the Account page): ``body`` under the row."""
+    val = f"<span class='val'>{html.escape(value)}</span>" if value else ""
+    i = f" id='{rid}'" if rid else ""
+    return (
+        f"<details class='yrow'{i}><summary>{icon(ic)}<span class='lbl'>{html.escape(label)}</span>{val}"
+        f"<span class='ch'>{icon('chev')}</span></summary><div class='yfold'>{body}</div></details>"
+    )
+
+
+def _ygroup(g: tuple[int, str, list[str], str]) -> str:
+    gid = f" id='{g[3]}'" if g[3] else ""
+    return (
+        f"<section class='ygrp' data-g='{g[0]}'{gid}><h2>{html.escape(g[1])}</h2>"
+        f"<div class='rows'>{''.join(g[2])}</div></section>"
+    )
+
+
+def _notifications_value(state: Any, sub: str) -> str:
+    """The Push notifications row's value: On, Off, or Not available without a notification server."""
+    n = state.notifier
+    if n is None or not n.enabled:
+        return "Not available"
+    p = notify.prefs(state.db, sub)
+    return "On" if p["ntfy_on"] and bool(p["ntfy_topic"]) else "Off"
+
+
+def _alert_defaults_value(state: Any, sub: str) -> str:
+    """The Price alert defaults row's value: the alert in its short form (watchlist_page)."""
+    from . import prefs, watchlist_page
+
+    return watchlist_page.alert_text(prefs.alert_defaults(state.db, sub), "usd") or "None"
+
+
+def _writes_fold(on: bool) -> str:
+    """Archidekt writes, folded under its row: the label and the same words as the deck page's
+    writes-off texts, with no variable names."""
+    return (
+        f"<p>{ui.label('On', 'green', 'check') if on else ui.label('Off', 'grey', 'x')}</p>"
+        "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are "
+        "off, changes can be reviewed but not applied.</p>"
+    )
+
+
+def account_response(
+    page: Any,
+    body: str,
+    sub: str,
+    sid: str | None,
+    *,
+    status: int = 200,
+    section: str | None = None,
+) -> Response:
+    """An Account details page rendered: the list, or one section's page (its way back is the
+    list). Its own style and scripts (pages.js, profile.js), and a page policy that lets the
+    chosen picture show before it is sent (a blob: address)."""
     from .profile_page import CSS as PROFILE_CSS
 
+    if section:
+        title = SECTIONS[section][0]
+        # back to the list, as a phone's settings go back a level
+        head = (
+            f"<a class='yback' href='{DETAILS}'>{icon('chev')}Account details</a>"
+            f"<h1>{html.escape(title)}</h1>"
+        )
+    else:
+        title = "Account details"
+        head = f"<a class='yback' href='/account'>{icon('chev')}Account</a><h1>Account details</h1>"
     resp = page(
-        "Account details",
-        # back to the Account page, as a phone's settings go back a level
-        f"<a class='yback' href='/account'>{icon('chev')}Account</a><h1>Account details</h1>{body}",
+        title,
+        head + body,
         sub=sub,
         sid=sid,
         status=status,
-        current="/account/details",
+        current=DETAILS,
         heading=False,
         head_extra=ACCOUNT_HEAD + f"<style>{PROFILE_CSS}{account_hub.HUB_CSS}{assistants.CSS}</style>"
         "<script src='/static/profile.js' defer></script>",
@@ -1811,10 +2112,10 @@ def actor_html(label: str | None) -> str:
     return f"<span class='badge' title='{html.escape(label)}'>{html.escape(label)}</span>"
 
 
-def _lists_card(sub: str) -> str:
-    """Your Archidekt lists: the account-wide lists that shape decks with the counts known so far
-    (each count comes from that tab's last read, account_lists.counts), one press from Binder ›
-    Lists (mockup screen 8); the pinned cards keep their own page there."""
+def _lists_fold(sub: str) -> str:
+    """Your Archidekt lists, folded under its row: the account-wide lists that shape decks with
+    the counts known so far (each count comes from that tab's last read, account_lists.counts),
+    one press from Binder › Lists (mockup screen 8); the pinned cards keep their own page there."""
     from . import account_lists  # (imports archidekt first: not at the top)
     from .lists_page import ACCOUNT_TABS, HUB, PAGE, WANTS
 
@@ -1831,78 +2132,48 @@ def _lists_card(sub: str) -> str:
         one, many = words[t.kind]
         text = many if n is None else f"{n:,} {one if n == 1 else many}"
         parts.append(ui.cap_link(text, f"{PAGE}/{t.slug}"))
-    return (
-        "<div class='card' id='lists'><h2>Your Archidekt lists</h2>"
+    body = (
         "<p>Lists that shape every deck, kept on Archidekt:</p>"
         f"<p class='ui-caps'>{''.join(parts)}</p>"
         f"<p class='muted'>The cards you pin on Archidekt: "
         f"{ui.cap_link('Pinned cards', WANTS, icon_name='bookmark')}</p>"
         f"<div class='ui-actions'><a class='btn' href='{HUB}'>{icon('list')} Open Binder › Lists</a>"
-        "</div></div>"
+        "</div>"
+    )
+    return _yfold("Your Archidekt lists", "list", body, rid="lists")
+
+
+def _unlink_box(csrf_in: str, *, open: bool = False) -> str:
+    """Unlink Archidekt: the box behind the list's row and the Archidekt account page's button."""
+    return ui.box(
+        "unlink",
+        "Unlink Archidekt?",
+        f"<form id='unlinkf' class='inbox' method='post' action='/account'>{csrf_in}"
+        "<input type='hidden' name='action' value='unlink'>"
+        "<p>The gateway deletes its copy of your Archidekt session at once. Whether the session "
+        "also stops working on Archidekt's side is not known. Your decks on Archidekt are not "
+        "touched.</p></form>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
+        ],
+        open=open,
+        close_href=DETAILS,
     )
 
 
-def _account_body(
-    state: Any,
-    sub: str,
-    csrf: str | None,
-    *,
-    disclosure_read: bool = False,
-    ok: str | None = None,
-    err: str | None = None,
-    open_box: str | None = None,
-    open_client: str | None = None,
-    profile_html: str = "",
+def _archidekt_card(
+    state: Any, sub: str, csrf_in: str, *, open_box: str | None = None, disclosure_read: bool = False
 ) -> str:
-    """The Account page's cards in their order. ``open_box`` names the box drawn open (the old
-    one-press forms' addresses: unlink, disconnect, disconnect_all, delete, picture), ``open_client``
-    the app a ?disconnect= address names, ``profile_html`` the Archidekt profile cards
-    (profile_page.account_cards, read before this runs) while Archidekt is linked."""
+    """Archidekt account: while linked, whose account, when, and what linking gives this gateway
+    (folded), with Unlink behind its box; otherwise the Link form under the disclosure.
+    ``disclosure_read`` (the form came back after a failed link the member had already ticked)
+    leaves the disclosure open and unlocked."""
     info = state.decks.status(sub)
-    user = state.db.get_user(sub) or {}
-    who = html.escape(user.get("preferred_username") or user.get("email") or sub)
-    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
-    writes = ui.label("On", "green", "check") if info["writes_enabled"] else ui.label("Off", "grey", "x")
-    linked = bool(info["linked"])
-    out = [
-        "<div class='acc'>"
-        "<div class='card'><dl class='meta'>"
-        f"<dt>Signed in as</dt><dd><strong>{who}</strong></dd>"
-        f"<dt>Archidekt writes</dt><dd>{writes}</dd></dl>"
-        # The same words as the deck page's writes-off texts, and no variable names
-        "<p class='muted small'>Set for the whole gateway by the person who runs it. While they are "
-        "off, changes can be reviewed but not applied.</p>"
-        f"{_identity_details(user)}"
-        # Sign out, the assistant skill and the Android app are on the Account page itself
-        f"<form method='post' action='/logout' class='form-actions'>{csrf_in}"
-        "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
-        f"{icon('x')}<span>Sign out on all my devices</span></button></form></div>"
-    ]
-    # Approval mode and Connected apps are one row, Assistants (each assistant has its own mode,
-    # assistants.py): the count connected, one press from the page that lists them.
-    out.append(assistants.details_row(state.db, sub))
-    if state.summaries is not None:
-        # the Notifications card, and with ntfy on the Summary card after it
-        out.append(notify.account_card_html(state, sub, csrf_in, ok=ok, err=err))
-    if linked:
+    if info["linked"]:
         expires = _when(info.get("link_expires_at"))
-        unlink_box = ui.box(
-            "unlink",
-            "Unlink Archidekt?",
-            f"<form id='unlinkf' class='inbox' method='post' action='/account'>{csrf_in}"
-            "<input type='hidden' name='action' value='unlink'>"
-            "<p>The gateway deletes its copy of your Archidekt session at once. Whether the session "
-            "also stops working on Archidekt's side is not known. Your decks on Archidekt are not "
-            "touched.</p></form>",
-            actions=[
-                ui.box_button("Cancel", cancel=True),
-                ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
-            ],
-            open=open_box == "unlink",
-            close_href="/account/details",
-        )
-        out.append(
-            "<div class='card' id='archidekt'><h2>Archidekt</h2>"
+        return (
+            "<div class='card' id='archidekt'>"
             f"<p>Linked to <strong>{html.escape(info['archidekt_username'] or '')}</strong> "
             f"{ui.label('Active', 'green', 'check')}</p>"
             f"<p class='muted small'>Linked {ui.when(info['linked_at'])}. "
@@ -1911,41 +2182,30 @@ def _account_body(
             + "</p>"
             "<div class='ui-actions'>"
             + ui.box_opener(
-                "Unlink and delete stored session", "/account/details?unlink=1", "unlink", kind="danger"
+                "Unlink and delete stored session", f"{DETAILS}?unlink=1", "unlink", kind="danger"
             )
             + "</div>"
             "<p class='muted small'>Unlinking deletes the gateway's copy of the session at once. "
             "Whether the session also stops working on Archidekt's side is not known.</p>"
-            f"{link_disclosure.linked_html(_sweep_on(state))}{unlink_box}</div>"
+            f"{link_disclosure.linked_html(_sweep_on(state))}"
+            f"{_unlink_box(csrf_in, open=open_box == 'unlink')}</div>"
         )
-        out.append(_lists_card(sub))
-        out.append(profile_html)
-    else:
-        out.append(
-            "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"
-            f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
-            f"<form method='post' autocomplete='off'>{csrf_in}"
-            "<input type='hidden' name='action' value='link'>"
-            "<label for='l'>Archidekt username or email</label>"
-            "<input id='l' type='text' name='archidekt_login' required autocomplete='username'>"
-            "<label for='p'>Archidekt password</label>"
-            "<input id='p' type='password' name='archidekt_password' required "
-            "autocomplete='current-password'>"
-            # the fold above says what opening it does; static/disclosure.js keeps the box locked
-            # until the detail was opened
-            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
-            f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
-            "<button class='primary'>Link account</button></form></div>"
-        )
-    s = state.settings
-    out.append(_forget_choices_card(csrf_in))
-    out.append(
-        _delete_card(
-            csrf_in, s.backup_keep_days if s.backup_dir is not None else None, open=open_box == "delete"
-        )
+    return (
+        "<div class='card' id='archidekt'><h2>Link your Archidekt account</h2>"
+        f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
+        f"<form method='post' autocomplete='off'>{csrf_in}"
+        "<input type='hidden' name='action' value='link'>"
+        "<label for='l'>Archidekt username or email</label>"
+        "<input id='l' type='text' name='archidekt_login' required autocomplete='username'>"
+        "<label for='p'>Archidekt password</label>"
+        "<input id='p' type='password' name='archidekt_password' required "
+        "autocomplete='current-password'>"
+        # the fold above says what opening it does; static/disclosure.js keeps the box locked
+        # until the detail was opened
+        "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
+        f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
+        "<button class='primary'>Link account</button></form></div>"
     )
-    out.append("</div>")
-    return "".join(out)
 
 
 def _identity_details(user: dict[str, Any]) -> str:
@@ -1960,10 +2220,9 @@ def _identity_details(user: dict[str, Any]) -> str:
     ]
     facts = "".join(f"<dt>{k}</dt><dd>{html.escape(str(v))}</dd>" for k, v in rows if v)
     return (
-        "<details class='identity'><summary class='fold-btn'>What your sign-in shares</summary>"
         f"<dl class='meta'>{facts or '<dt>Nothing</dt><dd></dd>'}</dl>"
         "<p class='muted small'>The gateway uses your groups only to check you may use it. "
-        "Your assistant is told your name and nothing else from this list.</p></details>"
+        "Your assistant is told your name and nothing else from this list.</p>"
     )
 
 
@@ -2025,7 +2284,7 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
 def _forget_choices_card(csrf_in: str) -> str:
     """Once view choices follow the account, signing out no longer resets them; this does."""
     return (
-        "<div class='card' id='choices'><h2>Your view choices</h2>"
+        "<div class='card' id='choices'>"
         "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
         "account to every device. Light or dark mode stays on each device.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
@@ -2036,20 +2295,41 @@ def _forget_choices_card(csrf_in: str) -> str:
     )
 
 
-def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = False) -> str:
-    """Deleting your data is as easy to find as everything else on the page: no hiding it, no
-    guilt-trip wording. A red-outline "Delete my data…" opens the box that holds the tick and the
-    solid red final button (as Admin › Users' Delete data…)."""
+def _signout_box(csrf_in: str, *, open: bool = False) -> str:
+    """Sign out on all my devices asks first (Ben, 2026-10-28: every action that can't be undone
+    asks in a box): the same /logout form the card's button posted, inside the box."""
+    return ui.box(
+        "signout",
+        "Sign out on all my devices?",
+        f"<form id='signoutf' class='inbox' method='post' action='/logout'>{csrf_in}"
+        "<p>Every browser and the Android app where you are signed in to this gateway are signed "
+        "out, this one too. Connected assistants keep working; disconnect them under Assistants.</p>"
+        "</form>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            "<button type='submit' class='danger' form='signoutf' name='everywhere' value='1' "
+            f"data-busy-text='Signing out…'>{icon('x')}Sign out on all my devices</button>",
+        ],
+        open=open,
+        close_href=DETAILS,
+    )
+
+
+def _delete_box(csrf_in: str, backup_days: int | None = None, *, open: bool = False) -> str:
+    """Deleting your data is as easy to find as everything else on the list: no hiding it, no
+    guilt-trip wording. The red row "Delete my data…" opens this box, which says what goes, and
+    holds the tick and the solid red final button (as Admin › Users' Delete data…)."""
     kept = (
         f" Nightly database backups keep a copy until they age out after {backup_days} days."
         if backup_days
         else ""
     )
-    box = ui.box(
+    return ui.box(
         "delete",
         "Delete my data?",
         f"<form id='deletef' class='inbox' method='post' action='/account'>{csrf_in}"
         "<input type='hidden' name='action' value='delete_data'>"
+        f"<p>Delete everything this gateway keeps for your account: {DELETED_LIST}.{kept}</p>"
         "<p>Everything this gateway keeps for your account is deleted and you are signed out. Your "
         "decks on Archidekt are not touched. This can't be undone.</p>"
         "<label class='check'><input type='checkbox' id='delete-tick' name='confirm' value='yes' required>"
@@ -2062,17 +2342,7 @@ def _delete_card(csrf_in: str, backup_days: int | None = None, *, open: bool = F
             ),
         ],
         open=open,
-        close_href="/account/details",
-    )
-    return (
-        "<div class='card' id='delete-data'><h2>Delete my data</h2>"
-        f"<p>Delete everything this gateway keeps for your account: {DELETED_LIST}. Your decks on "
-        f"Archidekt are not touched. This can't be undone.{kept}</p>"
-        "<div class='ui-actions'>"
-        + ui.box_opener(
-            "Delete my data…", "/account/details?delete=1", "delete", kind="danger", icon_name="trash"
-        )
-        + f"</div>{box}</div>"
+        close_href=DETAILS,
     )
 
 

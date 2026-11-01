@@ -86,7 +86,7 @@ def new_deck_error_html(exc: DeckError) -> str:
     if exc.kind == "not_linked":
         return (
             "<b>Link your Archidekt account first.</b> The deck is made in your Archidekt account. "
-            "<a href='/account/details#archidekt'>Link it under Account details</a>"
+            "<a href='/account/details/archidekt'>Link it under Account details</a>"
         )
     if exc.kind == "rate_limited" and "pending proposals" in str(exc):
         return (

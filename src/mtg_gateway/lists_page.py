@@ -1783,7 +1783,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 f"<div class='card'><h2>Link your Archidekt account</h2><p>{what} appear here once "
                 "Archidekt is "
                 "linked.</p><div class='actions'>"
-                "<a class='btn btn-primary' href='/account/details#archidekt'>Link "
+                "<a class='btn btn-primary' href='/account/details/archidekt'>Link "
                 "Archidekt</a></div></div>"
             )
             return respond(head_of(tab) + body, sub, sid, status=200, tab=tab)

@@ -36,6 +36,7 @@ from .pages import (
     limited_form,
     login_redirect,
     read_limited,
+    section_href,
 )
 from .theme import esc, icon
 
@@ -359,7 +360,7 @@ def picture_box(csrf_in: str, username: str, *, open: bool, error: str = "") -> 
             ),
         ],
         open=open,
-        close_href="/account/details#profile",
+        close_href=section_href("profile"),
         cls="pr-box",
     )
 
@@ -376,24 +377,62 @@ def account_cards(
     values: dict[str, str] | None = None,
     open_box: str | None = None,
 ) -> str:
-    """The four cards after Your Archidekt lists while Archidekt is linked. ``now`` is the profile
-    as Archidekt answers it (None: it couldn't be read); ``ok``/``saved`` the notice a redirect
-    carries; ``error``/``error_in`` Archidekt's refusal and the card it belongs to; ``values`` what
-    was typed, kept in the fields after a refusal. ``stamp`` is the page's render stamp
-    (pages.press_stamp): every form carries it as ``shown``, and the press is refused without it."""
+    """The cards in one piece (the Account details list with its rows folded open)."""
+    return "".join(
+        cards(
+            now,
+            csrf,
+            stamp=stamp,
+            ok=ok,
+            saved=saved,
+            error=error,
+            error_in=error_in,
+            values=values,
+            open_box=open_box,
+        ).values()
+    )
+
+
+def cards(
+    now: dict[str, Any] | None,
+    csrf: str | None,
+    *,
+    stamp: str = "",
+    ok: str = "",
+    saved: str = "",
+    error: str = "",
+    error_in: str = "",
+    values: dict[str, str] | None = None,
+    open_box: str | None = None,
+    heading: bool = True,
+) -> dict[str, str]:
+    """The Archidekt sections of Account details while Archidekt is linked, each its own page
+    (pages.SECTIONS): ``profile`` (the picture, username and bio), ``email`` (the four switches),
+    ``defaults`` (the new device defaults) and ``only`` (what stays on Archidekt, at the foot of the
+    profile page). ``now`` is the profile as Archidekt answers it (None: it couldn't be read, and
+    each page says so); ``ok``/``saved`` the notice a redirect carries; ``error``/``error_in``
+    Archidekt's refusal and the card it belongs to; ``values`` what was typed, kept in the fields
+    after a refusal. ``stamp`` is the page's render stamp (pages.press_stamp): every form carries it
+    as ``shown``, and the press is refused without it. ``heading`` False leaves out the three
+    cards' own headings (each one's page names it)."""
     csrf_in = _hidden(csrf, stamp)
     v = values or {}
+
+    def h2(words: str) -> str:
+        return f"<h2>{words}</h2>" if heading else ""
+
     if now is None:
-        return (
-            "<div class='card' id='profile'><h2>Archidekt profile</h2>"
-            + ui.notice(
-                "Archidekt did not answer, so your profile and settings can't be shown right now. "
-                "Reload the page to try again.",
-                "warn",
-                role="status",
-            )
-            + "</div>"
+        unread = ui.notice(
+            "Archidekt did not answer, so your profile and settings can't be shown right now. "
+            "Reload the page to try again.",
+            "warn",
+            role="status",
         )
+        return {
+            "profile": f"<div class='card' id='profile'>{h2('Archidekt profile')}{unread}</div>",
+            "email": f"<div class='card' id='email'>{h2('Email and alerts on Archidekt')}{unread}</div>",
+            "defaults": f"<div class='card' id='defaults'>{h2('New device default settings')}{unread}</div>",
+        }
     me = profile.summary(now)
     username = str(v.get("username", me["username"]))
     bio = str(v.get("bio", me["bio"]))
@@ -415,14 +454,14 @@ def account_cards(
         return ""
 
     prof = (
-        f"<div class='card' id='profile'><h2>Archidekt profile</h2>{note('profile')}{note('picture')}"
+        f"<div class='card' id='profile'>{h2('Archidekt profile')}{note('profile')}{note('picture')}"
         "<div class='ui-row full'><p class='lab'>Picture</p>"
         "<p class='help'>A JPEG or PNG up to 1 MB.</p>"
         "<div class='ctl'><div class='pr-me'><span class='big' aria-hidden='true'>"
         f"{esc(_initial(me['username']))}"
         "</span><div class='ui-actions'>"
         + ui.box_opener(
-            "Upload a picture…", "/account/details?picture=1#profile", "picture", icon_name="image"
+            "Upload a picture…", section_href("profile", "picture=1"), "picture", icon_name="image"
         )
         + "</div></div></div></div>"
         f"<form method='post' action='/account/profile' id='pr-f'>{csrf_in}"
@@ -456,7 +495,7 @@ def account_cards(
             )
         )
     email = (
-        f"<div class='card' id='email'><h2>Email and alerts on Archidekt</h2>{note('email')}"
+        f"<div class='card' id='email'>{h2('Email and alerts on Archidekt')}{note('email')}"
         + "".join(email_rows)
         + "</div>"
     )
@@ -489,7 +528,7 @@ def account_cards(
             ctl = _select_form(csrf_in, name=name, label=label, choices=choices, cur=cur)
             pref_rows.append(_row(f"<label for='pr-{name}'>{esc(label)}</label>", help_text, ctl))
     defaults = (
-        "<div class='card' id='defaults'><h2>New device default settings</h2>"
+        f"<div class='card' id='defaults'>{h2('New device default settings')}"
         "<p class='muted small'>What Archidekt starts with on a device you haven't set up yet.</p>"
         f"{note('defaults')}" + "".join(pref_rows) + "</div>"
     )
@@ -499,7 +538,7 @@ def account_cards(
         f"<p><a class='btn btn-plain' href='{ON_ARCHIDEKT_URL}' target='_blank' rel='noopener noreferrer'>"
         f"{icon('external')} Open Archidekt</a></p></div>"
     )
-    return prof + email + defaults + only
+    return {"profile": prof, "email": email, "defaults": defaults, "only": only}
 
 
 def collection_visibility(
@@ -655,28 +694,21 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     async def account_again(
         request: Request, sub: str, sid: str | None, *, error: str, error_in: str, values: dict[str, str]
     ) -> Response:
-        """The Account page drawn again with Archidekt's refusal in the card it belongs to."""
-        from .pages import ACCOUNT_CSP, ACCOUNT_CSS, account_html
+        """That section's page drawn again with Archidekt's refusal in its card."""
+        from .pages import account_response, section_html
 
-        body = await account_html(
+        section = "profile" if error_in == "picture" else error_in
+        body = await section_html(
             state,
             sub,
             _csrf(s, sid),
+            section,
             open_box="picture" if error_in == "picture" else None,
             profile_error=error,
             profile_error_in=error_in,
             profile_values=values,
         )
-        return page(
-            "Account",
-            body,
-            sub=sub,
-            sid=sid,
-            status=400,
-            csp=ACCOUNT_CSP,
-            extra_css=ACCOUNT_CSS + CSS,
-            extra_scripts=("pages.js", "profile.js"),
-        )
+        return account_response(page, f"<div class='acc'>{body}</div>", sub, sid, status=400, section=section)
 
     @server.custom_route("/account/profile", methods=["POST"], include_in_schema=False)
     async def profile_post(request: Request) -> Response:
@@ -691,7 +723,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         action = data.get("action") or ""
         on = data.get("on") == "1"
         shown = data.get("shown")
-        back = "/collection" if data.get("next") == "/collection" else "/account/details"
+        back = "/collection" if data.get("next") == "/collection" else section_href("profile")
         card = {"profile": "profile", "email": "email", "preference": "defaults"}.get(action, "")
         try:
             if action == "profile":
@@ -709,7 +741,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                     saved.append("username")
                     unconfirmed = unconfirmed or verified(out) is False
                 code = "ok=unconfirmed" if unconfirmed else f"ok=profile&saved={','.join(saved)}"
-                return RedirectResponse(f"/account/details?{code}#profile", status_code=303)
+                return RedirectResponse(section_href("profile", code), status_code=303)
             if action == "email":
                 out = await press(sub, shown, field="email", switch=data.get("switch") or "", on=on)
             elif action == "preference":
@@ -740,7 +772,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         if wants_json(request):
             return JSONResponse({"ok": True, "notice": text, "verified": verified(out)})
         code = "ok=unconfirmed" if verified(out) is False else f"ok={card}"
-        return RedirectResponse(f"/account/details?{code}#{card}", status_code=303)
+        return RedirectResponse(section_href(card, code), status_code=303)
 
     @server.custom_route("/account/picture", methods=["POST"], include_in_schema=False)
     async def picture_post(request: Request) -> Response:
@@ -779,7 +811,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         forget(sub)
         if wants_json(request):
             return JSONResponse({"ok": True, "notice": PICTURE_SAVED, "verified": out.get("verified")})
-        return RedirectResponse("/account/details?ok=picture#profile", status_code=303)
+        return RedirectResponse(section_href("profile", "ok=picture"), status_code=303)
 
     # -- the bell ---------------------------------------------------------------------------------
 
@@ -834,7 +866,7 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             f"<div class='bell-page'><div class='ui-head'><h1>Alerts{badge}</h1></div>"
             "<p class='ui-sub'>Your alerts from Archidekt.</p>"
             f"<div class='card'>{body}<p class='muted small bell-foot'>{esc(BELL_NOTE)}</p>"
-            "<div class='ui-actions'><a class='btn btn-plain' href='/account/details#email'>"
+            f"<div class='ui-actions'><a class='btn btn-plain' href='{section_href('email')}'>"
             f"{icon('settings')} Settings</a>"
             "</div></div></div>",
             sub=sub,

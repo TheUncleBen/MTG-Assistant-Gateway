@@ -107,7 +107,7 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
         ctx = _context(browser, server, sid, 344, touch=True)
         page = ctx.new_page()
         rows = []
-        for path in ("/admin/users", "/account", "/account/details"):
+        for path in ("/admin/users", "/account", "/account/details", "/account/details/archidekt"):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
             rows += page.evaluate(
                 # the approval mode's own chevron fold (mode-info) and the Account page's rows that
@@ -120,7 +120,7 @@ def test_a_plain_fold_out_keeps_its_marker_on_a_touch_screen(server: Server) -> 
                 " Math.round(s.getBoundingClientRect().height)])"
             )
         browser.close()
-    assert any(t.startswith("What your sign-in shares") for t, _, _ in rows), rows
+    assert any(t.startswith("What linking gives") for t, _, _ in rows), rows  # the disclosure's fold
     for text, display, height in rows:
         assert display == "marker", (text, display)
         assert height >= 40, (text, height)

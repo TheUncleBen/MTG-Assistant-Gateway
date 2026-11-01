@@ -12,6 +12,15 @@
   // an older app's notification: /account#summary) opens that part of Account details.
   if (location.pathname === "/account" && location.hash.length > 1 && document.querySelector(".yhub"))
     location.replace("/account/details" + location.hash);
+  // The list's rows open their own pages (0.7.46): a link to a part that moved there
+  // (/account/details#notifications, #summary, #profile, #email, #defaults, #archidekt, #choices)
+  // opens that page at that part. The list says which (data-section-pages, pages.py SECTIONS).
+  var list = document.querySelector(".ydetails[data-section-pages]");
+  if (list && location.pathname === "/account/details" && location.hash.length > 1) {
+    var part = location.hash.slice(1), pages = {};
+    try { pages = JSON.parse(list.getAttribute("data-section-pages")) || {}; } catch (e) { pages = {}; }
+    if (pages[part]) location.replace(pages[part] + location.hash);
+  }
   document.addEventListener("click", function (e) {
     var a = e.target && e.target.closest ? e.target.closest("[data-history-back]") : null;
     if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button) return;

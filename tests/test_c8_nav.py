@@ -155,6 +155,6 @@ async def test_the_lists_live_in_binder_with_the_pins_among_them(member: Browser
     assert "<a class='yrow' href='/collection/lists'>" in hub and "<span class='lbl'>Lists</span>" in hub
     assert "href='/lists'" not in hub and "My lists" not in hub
     details = (await member.http.get("/account/details")).text
-    lists = details.split("<div class='card' id='lists'>")[1].split("</div></div>")[0]
+    lists = details.split("<details class='yrow' id='lists'>")[1].split("</details>")[0]
     assert "href='/lists/pins'" not in lists and "href='/collection/wants'" in lists
     assert "href='/collection/lists'" in lists and "My lists" not in details
