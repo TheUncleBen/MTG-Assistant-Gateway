@@ -356,8 +356,8 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
 
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 1rem}
 main.wrap{flex:1;padding:1rem 1rem 3rem}
-h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:break-word}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:break-word}
+h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
 h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
@@ -2258,11 +2258,14 @@ SEARCH_PANEL_CSS = """
   .spanel .xlink,.spanel .rbar .more,.spanel .rbar .dirw,.spanel .rbar .size,.spanel .rbar .lbl,
   .spanel .rbar .clr,.spanel .rbar .brk,.spanel .rbar .brka,.spanel .rbar.cards .brka{display:none}
   .spanel .rbar .sort:has(.sortcw) .sortw{display:none}
-  /* Sort takes a row of its own under the count and the view, so the chosen order shows whole on
-     one line at any text size (audit D12); Clear filters stays last */
-  .spanel .rbar .sortcw{display:block;flex:1 1 auto;min-width:0}
-  .spanel .rbar .g.sort{flex:1 1 100%;min-width:0;order:1}
-  .spanel .rbar .clr{order:2}
+  .spanel .rbar .sortcw{display:block;flex:1 1 7em;min-width:0}
+  .spanel .rbar .g.sort{flex:1 1 7em;min-width:7em}
+  /* at large text the count, Sort and the view no longer share the row: Sort takes a row of its
+     own, so the chosen order shows whole (audit D12); Clear filters stays last */
+  @container sp (max-width:20em){
+    .spanel .rbar .g.sort{flex:1 1 100%;min-width:0;order:1}
+    .spanel .rbar .clr{order:2}
+  }
   .spanel .rbar .sortw,.spanel .rbar .sortw select,.spanel .rbar .sortw .msel-btn,
   .spanel .rbar .sortcw select,.spanel .rbar .sortcw .msel-btn{width:100%;flex:1 1 auto}
   .spanel .rbar .sortcw .msel-btn{padding:.4rem 1.6rem .4rem .6rem;background-position:right .5rem center;
