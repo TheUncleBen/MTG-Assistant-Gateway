@@ -29,6 +29,8 @@ import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -326,6 +328,10 @@ class MainActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, false)
         web.addJavascriptInterface(NativeBridge(), "MtgNative")
         web.webViewClient = Client()
+        // The /scan page's service worker sees the page's photo request first. Should WebView hand
+        // the request it leaves alone to the service worker side rather than to Client, the photo is
+        // answered there the same way (one process-wide client; this activity's replaces any older one).
+        ServiceWorkerController.getInstance().setServiceWorkerClient(ServiceWorkerClients.photo(this))
         web.webChromeClient = Chrome()
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             download(url, userAgent, contentDisposition, mimeType)
@@ -749,7 +755,7 @@ class MainActivity : ComponentActivity() {
                     panel.handoffFailed() // an origin the glue cannot quote; never crash the UI thread
                     return
                 }
-                photo = n to jpeg // served to the page by Client.shouldInterceptRequest, never sent anywhere
+                photo = n to jpeg // served to the page by photoResponse (or photoDirect), never sent anywhere
                 web.evaluateJavascript(js) { result ->
                     val seq = ScanGlue.acceptedSeq(result)
                     if (seq != null) panel.photoAccepted(seq) else panel.handoffFailed()
@@ -758,6 +764,17 @@ class MainActivity : ComponentActivity() {
 
             override fun continuous(on: Boolean) {
                 web.evaluateJavascript(ScanGlue.setContinuous(on), null)
+            }
+
+            override fun photoDirect(seq: Int) {
+                if (!onScanPage()) return
+                // Only the photo the page asked for, once; anything else is an empty answer, which
+                // the page reports at once as a photo that never arrived.
+                val current = photo
+                val jpeg = if (current != null && current.first == seq) current.second else ByteArray(0)
+                if (current != null && current.first == seq) photo = null
+                val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+                web.evaluateJavascript(ScanGlue.photoData(seq, b64), null)
             }
 
             override fun undo() {
@@ -1093,23 +1110,33 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         camera?.destroy {}
         camera = null
+        ServiceWorkerClients.release(this)
         if (this::web.isInitialized) web.destroy()
         super.onDestroy()
     }
 
     // -- WebView clients -----------------------------------------------------
 
-    private inner class Client : WebViewClient() {
-        /** The current phone photo, for the one URL the glue loads it from. Runs off the UI thread. */
-        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            val wanted = ScanGlue.photoSeqOf(origin, request.url.toString()) ?: return null
-            val current = photo
-            if (current == null || wanted != current.first) {
-                return WebResourceResponse("text/plain", "utf-8", 404, "Gone", emptyMap(), ByteArrayInputStream(ByteArray(0)))
-            }
-            val headers = mapOf("Cache-Control" to "no-store", "Content-Length" to current.second.size.toString())
-            return WebResourceResponse("image/jpeg", null, 200, "OK", headers, ByteArrayInputStream(current.second))
+    /**
+     * The current phone photo, for the one URL the glue loads it from, or null for any other request
+     * (it goes on as usual). Shared by [Client] and the service worker client ([ServiceWorkerClients]),
+     * whichever WebView asks. Only on the gateway's origin, only the photo number in flight. Runs off
+     * the UI thread.
+     */
+    internal fun photoResponse(url: String): WebResourceResponse? {
+        if (!this::origin.isInitialized) return null
+        val wanted = ScanGlue.photoSeqOf(origin, url) ?: return null
+        val current = photo
+        if (current == null || wanted != current.first) {
+            return WebResourceResponse("text/plain", "utf-8", 404, "Gone", emptyMap(), ByteArrayInputStream(ByteArray(0)))
         }
+        val headers = mapOf("Cache-Control" to "no-store", "Content-Length" to current.second.size.toString())
+        return WebResourceResponse("image/jpeg", null, 200, "OK", headers, ByteArrayInputStream(current.second))
+    }
+
+    private inner class Client : WebViewClient() {
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+            photoResponse(request.url.toString())
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             return when (nav.decide(request.url.toString(), request.isForMainFrame, request.isRedirect, request.hasGesture())) {
@@ -1419,5 +1446,31 @@ class MainActivity : ComponentActivity() {
         private const val REQ_PERM_WEB_CAMERA = 3
         private const val REQ_PERM_NATIVE_CAMERA = 4
         private const val REQ_PERM_NOTIFY = 5
+    }
+}
+
+/**
+ * The process-wide [ServiceWorkerClient] (WebView has one for all its instances), answering the
+ * photo hand-off for the activity that set it through the same [MainActivity.photoResponse] its
+ * WebViewClient uses. Holds the activity weakly, so a finished one is never kept alive by it.
+ */
+private object ServiceWorkerClients {
+    private var owner: java.lang.ref.WeakReference<MainActivity>? = null
+
+    /** Called on the UI thread. */
+    fun photo(activity: MainActivity): ServiceWorkerClient {
+        val ref = java.lang.ref.WeakReference(activity)
+        owner = ref
+        return object : ServiceWorkerClient() {
+            override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
+                ref.get()?.photoResponse(request.url.toString())
+        }
+    }
+
+    /** Called on the UI thread when [activity] is destroyed: unhooks its client unless a newer activity's replaced it. */
+    fun release(activity: MainActivity) {
+        if (owner?.get() !== activity) return
+        owner = null
+        ServiceWorkerController.getInstance().setServiceWorkerClient(null)
     }
 }

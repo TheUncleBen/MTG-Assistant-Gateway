@@ -15,7 +15,11 @@ class ScanGlueTest {
             assertTrue("glue should check $hook", install.contains("'$hook'"))
             assertTrue("glue should call $hook", install.contains("s.$hook("))
         }
-        assertTrue("the photo comes by URL, never as base64", !install.contains("atob("))
+        // The photo comes by URL; base64 only when that URL did not load, and only after asking.
+        val process = install.substring(install.indexOf("async function process"), install.indexOf("function outcome"))
+        assertTrue(process.contains("try { c = await load(url); } catch (e) { c = await loadDirect(n); }"))
+        assertEquals(1, Regex("atob\\(").findAll(install).count())
+        assertTrue(install.indexOf("atob(") > install.indexOf("photoData: function"))
         assertTrue("no fetch(data:) under the page's CSP", !install.contains("fetch("))
         assertTrue(install.contains("PHOTO_MAX = ${ScanGlue.PHOTO_MAX}"))
         assertTrue("no leftover Kotlin templates", !install.contains("$"))
@@ -106,6 +110,39 @@ class ScanGlueTest {
         assertEquals(12, ScanGlue.acceptedSeq("\"ok:12\""))
         for (other in listOf(null, "null", "\"ok\"", "\"no-scan\"", "\"no-glue\"", "\"ok:x\"", "ok:3")) {
             assertEquals(other, null, ScanGlue.acceptedSeq(other))
+        }
+    }
+
+    @Test fun aPhotoWhoseUrlFailsIsAskedForOnceAndSaidPlainly() {
+        // The glue asks the app for that one photo, takes it once (a blob: URL revoked after reading),
+        // and with nothing in time reports PHOTO_LOST, which the panel turns into a plain line.
+        assertTrue(install.contains("send({ type: 'photo-direct', seq: n });"))
+        assertTrue(install.contains("var DIRECT_MS = ${ScanGlue.DIRECT_MS};"))
+        assertTrue(install.contains("var PHOTO_LOST = '${ScanGlue.PHOTO_LOST}';"))
+        assertTrue(install.contains("delete direct[n];") && install.contains("URL.revokeObjectURL(u)"))
+        assertTrue(install.contains("if (!take) return 'stale';"))
+        // Well inside the panel's watchdog, so the plain line comes first.
+        assertTrue(ScanGlue.DIRECT_MS in 1000..15_000)
+    }
+
+    @Test fun photoDataQuotesOnlyBase64() {
+        val js = ScanGlue.photoData(4, "/9j/4AAQ+w==")
+        assertTrue(js, js.contains("photoData(4, '/9j/4AAQ+w==')"))
+        assertTrue(js.startsWith("(function(){") && js.endsWith("})();"))
+        assertTrue(ScanGlue.photoData(4, "").contains("photoData(4, '')"))
+        for (bad in listOf("a'b", "abc\n", "<script>", "ab==c", "a b")) {
+            try {
+                ScanGlue.photoData(4, bad)
+                fail("accepted $bad")
+            } catch (e: IllegalArgumentException) {
+                assertEquals("bad photo data", e.message)
+            }
+        }
+        try {
+            ScanGlue.photoData(0, "")
+            fail("accepted seq 0")
+        } catch (e: IllegalArgumentException) {
+            assertEquals("bad seq", e.message)
         }
     }
 
