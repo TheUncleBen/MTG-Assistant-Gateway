@@ -571,6 +571,18 @@
       e.preventDefault();
       e.stopPropagation();
     }, true);
+    // The menu sits on the body, so a root that is only part of the page (the deck page's stacks)
+    // never sees a press or a tap inside it: the lift of the finger that held must still be
+    // swallowed there, and a new press inside the menu is still a real tap.
+    if (root !== document && root !== document.body) {
+      document.addEventListener("pointerdown", function (e) { if (menu && menu.contains(e.target)) lift = false; }, true);
+      document.addEventListener("click", function (e) {
+        if (!swallow || !lift || !menu || !menu.contains(e.target) || root.contains(e.target)) return;
+        lift = false;
+        e.preventDefault();
+        e.stopPropagation();
+      }, true);
+    }
     root.addEventListener("pointerdown", function (e) {
       opened = false;
       // a new press is a real tap: the lift of the hold is over even when no click followed it

@@ -10819,6 +10819,21 @@ def deck_categories(deck: Deck) -> list[dict[str, Any]]:
     return sorted(out, key=lambda c: (not c["premier"], c["name"].casefold()))
 
 
+def category_keys(deck: Deck) -> list[tuple[str, dict[str, Any]]]:
+    """Each category of ``deck_categories`` with the key its form fields carry on Deck settings and
+    on the deck page: its record id, or ``d1``, ``d2``... in the panel's order for one Archidekt
+    sent without a record (its default Sideboard or Maybeboard until someone creates one; the
+    change gives it its record)."""
+    out, n = [], 0
+    for c in deck_categories(deck):
+        if c["record"]:
+            out.append((str(int(c["id"])), c))
+        else:
+            n += 1
+            out.append((f"d{n}", c))
+    return out
+
+
 def _touches_commander(deck: Deck, s: dict[str, Any], new_name: str | None = None) -> bool:
     """Whether changing category ``s`` (a ``category_state``) touches the commander: it is
     premier, it is named Commander (which the gateway treats as the commander zone by name), it
