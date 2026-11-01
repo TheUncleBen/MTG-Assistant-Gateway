@@ -59,19 +59,26 @@ def test_the_deck_menu_opens_from_more_and_a_right_click(server: Server, width: 
         for want in (
             "Rename…",
             "Move to folder…",
-            "Add a package…",
             "Share…",
             "Export…",
             "Compare with…",
             "Deck settings",
             "Deck stats",
             "Deck reports",
-            "History and snapshots",
+            "History",
             "Open on Archidekt",
             "Delete deck…",
         ):
             assert any(x == want for x in labels), (want, labels)
-        for gone in ("Open in a new tab", "Edit deck", "Goldfish", "Copy link", "Proposals for this deck"):
+        # Add a package… moved to the toolbar's ⋮ (mockup screen 5)
+        for gone in (
+            "Open in a new tab",
+            "Edit deck",
+            "Goldfish",
+            "Copy link",
+            "Proposals for this deck",
+            "Add a package…",
+        ):
             assert gone not in labels, (gone, labels)
         assert "More" not in labels and "Solo test only" not in labels  # Forge is off here
         assert menu.locator("[role=menuitem].danger", has_text="Delete deck…").count() == 1
@@ -130,13 +137,12 @@ def test_the_clone_box_and_a_cards_own_menu(server: Server) -> None:
         page.wait_for_url("**?ok=created", timeout=8000)
         new_id = int(page.url.split("/decks/")[1].split("?")[0])
         assert server.ark.deck_folder.get(new_id) == 501
-        # your own deck's card menu carries Add to deck… and Open on Scryfall too (F6)
+        # your own deck's card menu carries Add to another deck… and Open on Scryfall too (F6)
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         page.locator(".deckview .row[data-card='Cultivate']").first.click(button="right")
         labels = [t.strip() for t in _menu(page).locator("[role=menuitem]").all_inner_texts()]
-        assert any(x == "Add to deck…" for x in labels) and any(x == "Open on Scryfall" for x in labels), (
-            labels
-        )
+        assert any(x == "Add to another deck…" for x in labels), labels
+        assert any(x == "Open on Scryfall" for x in labels), labels
         assert any(x == "Remove from deck" for x in labels)
         assert not errors, errors
         browser.close()

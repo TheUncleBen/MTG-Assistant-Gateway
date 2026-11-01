@@ -35,7 +35,11 @@ def banner_bracket_html(deck: Any, stats: dict[str, Any]) -> str:
     bracket = stats.get("bracket_estimate") or {}
     if not bracket.get("bracket"):
         return ""
-    return f"<span class='bracket-est'>{ESTIMATE_LABEL}: {esc(bracket_name(bracket.get('bracket')))}</span>"
+    # the label gives way to the bracket alone on a phone (.lg, the deck banner's styles)
+    return (
+        f"<span class='bracket-est'><span class='lg'>{ESTIMATE_LABEL}: </span>"
+        f"{esc(bracket_name(bracket.get('bracket')))}</span>"
+    )
 
 
 def checks_bracket_row(checks: dict[str, Any]) -> tuple[str, str, bool] | None:
