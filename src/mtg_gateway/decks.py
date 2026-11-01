@@ -5398,9 +5398,9 @@ class DeckService:
             one = len(missing) == 1
             note["missing_on_archidekt"] = missing[:NAMES_LISTED]
             note["warnings"].append(
-                f"Archidekt doesn't have {_some_names(missing)}, so the deck can't be made with "
-                f"{'it' if one else 'them'}: fix the {'name' if one else 'names'} with amend_proposal, or "
-                f"leave {'it' if one else 'them'} out."
+                f"Archidekt doesn't have {_some_names(missing)}, so applying leaves "
+                f"{'it' if one else 'them'} out (fix the {'name' if one else 'names'} with amend_proposal "
+                "if a card was meant)."
             )
         if unchecked:
             note["unchecked_names"] = unchecked[:NAMES_LISTED]
@@ -7020,6 +7020,31 @@ class DeckService:
             )
         return kept, [{"name": n, "why": "Archidekt doesn't have this card"} for n in names]
 
+    async def _left_out_of_new_deck(
+        self, sub: str, row: dict[str, Any], cards: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+        """An assistant's new deck without the cards Archidekt has none of, and those cards, as an
+        assistant's edit leaves them out (``_left_out``): the deck is made with the rest and the
+        result names them, instead of the whole deck failing on one card after the member approved
+        it. A card asked for by set and number still fails it (never swapped quietly), as does a
+        deck left with no card at all; the member's own New deck page fails as before."""
+        if row.get("created_by_client") in (None, BROWSER_CLIENT, ADMIN_CLIENT):
+            return cards, []
+        gone: set[str] = set()
+        for name in dict.fromkeys(str(c["name"]) for c in cards if not c.get("set_code")):
+            if await self._lookup_printing(sub, Change(action="add", card_name=name)) == NOT_ON_ARCHIDEKT:
+                gone.add(name.casefold())
+        if not gone:
+            return cards, []
+        kept = [c for c in cards if c.get("set_code") or str(c["name"]).casefold() not in gone]
+        names = list(dict.fromkeys(str(c["name"]) for c in cards if c not in kept))
+        if not kept:
+            raise DeckError(
+                "not_found",
+                "Archidekt doesn't have " + ", ".join(f"“{n}”" for n in names) + ", so nothing was sent.",
+            )
+        return kept, [{"name": n, "why": "Archidekt doesn't have this card"} for n in names]
+
     async def _resolve_adds(
         self,
         sub: str,
@@ -8274,7 +8299,6 @@ class DeckService:
 
     async def _apply_create(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
         spec = row["changes"]
-        cards = spec["cards"]
         _token, link = self._token(sub)
         if spec.get("archidekt_username") and not _same_account(link, spec):
             raise DeckError(
@@ -8283,6 +8307,7 @@ class DeckService:
                 f"{link['archidekt_username']} is linked now. Nothing was created; ask for a new "
                 "proposal if the deck should go to this account.",
             )
+        cards, left_out = await self._left_out_of_new_deck(sub, row, spec["cards"])
         resolve: dict[tuple[str, str, str], int] = {}
         modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
@@ -8414,6 +8439,7 @@ class DeckService:
             "verified": not mismatches,
             "mismatched_cards": mismatches,
             **package_read,
+            **({"left_out": left_out} if left_out else {}),
         }
         if mismatches:
             progress.update(result)  # apply() records it with the error
@@ -12583,10 +12609,14 @@ def applied_text(
             + "; ".join(str(x) for x in r["package_saved_as"])
             + ". Change them under Deck settings › Package."
         )
-    if kind == "edit" and r.get("left_out"):  # DeckService._left_out
+    if kind in ("edit", "create_deck") and r.get("left_out"):  # DeckService._left_out(_of_new_deck)
         names = [str(x.get("name") or "") for x in r["left_out"] if isinstance(x, dict)]
         return (
-            "The rest of the change is on Archidekt, but "
+            (
+                "The deck is made on Archidekt, but "
+                if kind == "create_deck"
+                else "The rest of the change is on Archidekt, but "
+            )
             + ", ".join(f"“{n}”" for n in names)
             + (" was" if len(names) == 1 else " were")
             + " left out: Archidekt doesn't have "
