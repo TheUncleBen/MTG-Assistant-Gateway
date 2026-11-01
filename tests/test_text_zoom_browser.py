@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 
 import pytest
+
+from mtg_gateway import timing
 
 from .test_editor_browser import PNG
 from .test_overflow_sweep_browser import FOLDERS, MEASURE, MENUS, _seed, server  # noqa: F401
@@ -77,6 +80,11 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid, pending = _seed(server)
+    # Admin's Speed card with slow pages under their longest address patterns: the card's labels
+    # must wrap at 200% text on a phone (a loaded run used to leave such rows behind by chance)
+    now = time.time()
+    for route in ("/history/reports/{rid}/head-to-head", "/decks/api/decks/{deck_id}/delete-info"):
+        timing.speed_log.add(timing.PageTime(now, route, 12.5, 12.0, 11.0, 0, 200, 0.4))
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
