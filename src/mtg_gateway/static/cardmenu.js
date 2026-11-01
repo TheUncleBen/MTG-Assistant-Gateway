@@ -265,7 +265,7 @@
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: body
     }).then(function (r) {
-      return r.json().catch(function () { return { ok: false, message: ODD }; });
+      return r.json().catch(function () { return { ok: false, message: window.MtgFetch.UNREADABLE }; });
     }).then(function (d) {
       if (d.ok) {
         var a = el("a", "btn", "Open Wants");
