@@ -7,6 +7,7 @@ row's menu from a tap and a right-click, and History's Restore in it still sends
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -124,9 +125,10 @@ def test_the_rows_menus_open_from_a_tap_and_a_right_click_and_restore_sends_its_
             snap.locator("a.kebab").tap()
             _menu(page)
             assert "Restore (review first)" in _items(page) and "Test this version" in _items(page)
-            with page.expect_navigation():
-                page.locator(".ctxmenu [role=menuitem]", has_text="Restore (review first)").click()
-            assert "/proposals/" in page.url, page.url
+            # on a phone the menu first goes Back over its own history entry (a same-page navigation
+            # to /history), then the form is sent: wait for where it lands, not the first navigation
+            page.locator(".ctxmenu [role=menuitem]", has_text="Restore (review first)").click()
+            page.wait_for_url(re.compile(r"/proposals/[A-Za-z0-9_-]+$"), timeout=15000)
             assert page.locator("main", has_text="Liesa Test Deck").count() == 1
             assert errors == [], errors
             browser.close()
