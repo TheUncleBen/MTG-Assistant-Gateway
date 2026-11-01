@@ -136,7 +136,7 @@ SAVED_AS = {
 
 @pytest.mark.parametrize("variant", sorted(SAVED_AS))
 async def test_a_new_package_is_never_failed_once_it_exists(stack: Stack, variant: str) -> None:
-    """Review F5 (T-194, Ben: "it failed when I tried to create an empty package"): a package
+    """Review F5 (T-194, the owner: "it failed when I tried to create an empty package"): a package
     whose settings Archidekt saved another way ended Failed although it was made, and formats saved
     as objects crashed the check. The package is applied with a note saying what Archidekt saved and
     where to change it, and the block as read back is kept with the result for the next live run."""
@@ -525,7 +525,7 @@ def test_expired_package_lists_are_let_go() -> None:
 
 
 async def test_a_color_tag_goes_on_every_card_the_package_adds(stack: Stack) -> None:
-    """Ben, 23 Oct: Add package's Color tag option in this release, set as part of the add as
+    """The owner, 23 Oct: Add package's Color tag option in this release, set as part of the add as
     Archidekt's own add sends it (each new row's label), named on the review line and checked
     when it comes back."""
     token = await linked_user(stack)

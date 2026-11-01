@@ -634,8 +634,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     def categories_section(
         deck: Deck, csrf: str | None, note: str = "", values: dict[str, str] | None = None
     ) -> str:
-        """The deck's categories, as archidekt.com's deck settings has them (F7, Ben 21 Oct: option
-        a; create and delete, Ben 22 Oct): each name in its box and three switches, Premier, Not in
+        """The deck's categories, as archidekt.com's deck settings has them (F7, the owner 21 Oct: option
+        a; create and delete, the owner 22 Oct): each name in its box and three switches, Premier, Not in
         deck and Not in price; a plain Save categories (the main settings' Save changes stays the
         page's one orange button) and Undo changes, which puts the boxes back before saving. Each
         category with a record has a Delete button (an empty one is deleted; one with cards asks

@@ -76,7 +76,7 @@ APP_UA_MARK = "MTGAssistant/"
 # A computer's top bar lists the rail's pages (theme.rail_extra: Scan, Precons, Card models, Forum)
 # as links and drops More ▾ once the bar is this wide (0.7.46 redesign, screen 1; a container
 # query in the bar's own em, so a narrower window or 200% text brings More ▾ back, with every page
-# still in it). None: More ▾ at every width, as before. Open for Ben.
+# still in it). None: More ▾ at every width, as before. Open for the owner.
 TOPBAR_FULL_FROM: str | None = "70em"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
@@ -478,7 +478,7 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
 .check.mode input{margin-top:.15rem}
-/* Disclosure controls (Ben, 10-25: never bare blue text): a Details drop-down or a Show all is a
+/* Disclosure controls (the owner, 10-25: never bare blue text): a Details drop-down or a Show all is a
    grey capsule with its words and a chevron that turns when open, 36px inside a 44px tap area.
    summary.fold-btn is the capsule as a fold's own summary; .disc is the same capsule inside a
    summary that holds more (a heading, a count); .disc.round is its icon-only form for a tight row. */
@@ -597,7 +597,7 @@ button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;
 button.danger,.btn-danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.danger:hover,.btn-danger:hover{background:var(--danger-fill);color:#fff;filter:brightness(1.1)}
 button.secondary,.btn-ghost{background:transparent;border-color:transparent}
-/* A Show all or Show more button is the disclosure capsule (.disc) too (Ben, 10-25); its chevron
+/* A Show all or Show more button is the disclosure capsule (.disc) too (the owner, 10-25); its chevron
    turns once the list is open (aria-expanded). */
 button.disc{min-height:44px;border:4px solid transparent;background:var(--surface-2) padding-box;
   color:var(--text);font-weight:600;font-size:.9rem;border-radius:22px}
@@ -1234,7 +1234,7 @@ if TOPBAR_FULL_FROM:
 # 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
 # follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
 # (no flash) and by static/prefs.js when the S / M / L switch is pressed. Each page keeps its own
-# (Ben, 2026-10-28): the account's card.size.<page>, else the one size chosen for every page before
+# (the owner, 2026-10-28): the account's card.size.<page>, else the one size chosen for every page before
 # (card.size), else M. The printings dialog has its own too, on <html data-card-size-printings>
 # and on the dialog itself.
 CARD_SIZES = ("s", "m", "l")
@@ -1435,7 +1435,7 @@ main.wrap.ui-wide{max-width:1200px}
   background:var(--surface-2);color:var(--text);font-size:.8rem}
 
 /* quick-filter chips with counts: one row that scrolls sideways when it runs out of room, as a
-   phone's filter strips do, never a ragged second row (Ben, 2026-10-25) */
+   phone's filter strips do, never a ragged second row (the owner, 2026-10-25) */
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
@@ -2023,7 +2023,7 @@ _TOPSEARCH_CSS = """
   .topbar .topsearch{display:block} }
 @media (min-width:600px){ body.app .topbar .topsearch{display:block} }
 @media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
-/* Fill (Ben, 2026-10-25): where the box shows, it grows into the room between the brand (and a
+/* Fill (the owner, 2026-10-25): where the box shows, it grows into the room between the brand (and a
    computer's links) and the icons, up to 40rem, instead of a fixed 20rem with a gap before it */
 @media (min-width:600px) and (max-width:1279.98px) and ((pointer:coarse) or (hover:none)){
   .topbar .right{flex:1 1 auto;justify-content:flex-end} .topbar .left{flex:0 1 auto}
@@ -2171,7 +2171,7 @@ SEARCH_PANEL_CSS = """
 .spanel .rbar .brk,.spanel .rbar .brka{display:none;flex-basis:100%;height:0;margin-top:-8px}
 /* A narrower panel (an open Fold) keeps the count, Sort, the view and the card size on one row:
    "Sort by" is read out but not shown (the box says what it sorts by), and the bar breaks only
-   when even that row can't fit (Ben, 2026-10-25: no empty corner under the row) */
+   when even that row can't fit (the owner, 2026-10-25: no empty corner under the row) */
 @container sp (max-width:799.98px){ .spanel .rbar{column-gap:8px}
   .spanel .rbar .sort > .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);
     white-space:nowrap} }
@@ -2552,7 +2552,7 @@ def card_size_control(*, cls: str = "field cardsize") -> str:
     )
 
 
-# The site navigation (Ben, 2026-10-25): four places and More, the same on every screen. The top bar
+# The site navigation (the owner, 2026-10-25): four places and More, the same on every screen. The top bar
 # on a computer, the bottom tab bar on a phone and the rail (an unfolded Fold, a tablet, the app from
 # 600 px) list these; the rail adds More's pages and Alerts (the bell) instead of More. Assistant is the
 # assistant's own pages, Proposals, History and Reports, behind one switch (ASSISTANT_PAGES), with
@@ -2600,7 +2600,7 @@ MORE_GROUPS = [
 # for its badge. The mockup's rail also listed Watchlist and My lists, which 0.7.46 had already
 # given homes (Binder's switch and the Account page): the rail follows the code. Forum was on the
 # rail but not in the mockup: it closes the second group, as Community closes More. The phone
-# keeps its tab bar and More sheet. Each choice still open for Ben is one constant here.
+# keeps its tab bar and More sheet. Each choice still open for the owner is one constant here.
 RAIL_PAGES = ("/scan", "/precons", "/history/models", "/forum")
 RAIL_ALERTS_AT_FOOT = True  # No: Alerts sits inside the second group, under Forum
 RAIL_GROUP_LINE = True  # the thin line between the four places and the rest

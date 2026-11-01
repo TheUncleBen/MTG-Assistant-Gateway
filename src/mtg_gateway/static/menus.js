@@ -370,7 +370,7 @@
     var id = enc(d.id), items = [];
     var archidekt = "https://archidekt.com/decks/" + id;
     items.push(link("Open", "eye", d.href));
-    // the app has no tabs (Ben, 2026-10-25): a website-only item
+    // the app has no tabs (the owner, 2026-10-25): a website-only item
     if (!inApp()) items.push(link("Open in a new tab", "external", d.href, { ext: true }));
     if (d.own) items.push(link("Edit deck", "edit", "/decks/" + id + "/edit"));
     items.push(sep());
@@ -762,7 +762,7 @@
     var open = function () { Menu.whenClosed(function () { b.click(); }); };
     Card.open(cardMenuBase(name, { onOpen: open, focus: b }), x, y);
   }
-  // A card name drawn as a button opens the card when clicked (Ben, 2026-10-28: the report's names
+  // A card name drawn as a button opens the card when clicked (the owner, 2026-10-28: the report's names
   // did nothing): in the card viewer when the page has it (static/cardview.js), its text and
   // picture read by name, else on Card search. A page with its own use for the click (the
   // Compare page, My card models' link to Card search) handles it first.

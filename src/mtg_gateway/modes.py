@@ -229,7 +229,7 @@ _STILL_WAITS = (
 def mode_points(
     mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DEFAULT_BIG_EDIT_ROWS
 ) -> list[tuple[str, list[str]]]:
-    """What ``mode`` means, as the Account page's details show it (Ben, 2026-10-22: short, not a
+    """What ``mode`` means, as the Account page's details show it (the owner, 2026-10-22: short, not a
     block): ``(lead sentence, its points)`` pairs, the same meaning as ``mode_help`` broken up.
     A test checks each point against mode_help, so the two never say different things."""
     if mode == "manual":

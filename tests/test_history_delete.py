@@ -27,7 +27,7 @@ def _snapshot(db, sub: str, sid: str) -> None:  # noqa: ANN001
         deck_id="42",
         proposal_id=None,
         fingerprint="f",
-        deck={"id": "42", "name": "Immortal Reckoning", "cards": []},
+        deck={"id": "42", "name": "Liesa Test Deck", "cards": []},
     )
 
 
@@ -105,7 +105,7 @@ async def test_a_snapshot_is_deleted_unless_a_waiting_restore_puts_it_back(stack
                 "owner_sub": sub,
                 "kind": "restore",
                 "deck_id": "42",
-                "deck_name": "Immortal Reckoning",
+                "deck_name": "Liesa Test Deck",
                 "baseline_fingerprint": "f",
                 "changes": {"snapshot_id": "snapheld", "details": {}},
                 "diff_text": "",

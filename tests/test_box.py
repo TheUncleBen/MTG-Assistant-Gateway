@@ -190,7 +190,7 @@ def test_a_notice_is_a_tinted_strip_with_a_coloured_left_edge_and_no_border() ->
         ui.notice("x", "purple")
 
 
-# -- the app chip (Ben, 21 Oct: full name, no initials; 22 Oct: the known apps' own marks) ------------
+# -- the app chip (the owner, 21 Oct: full name, no initials; 22 Oct: the known apps' own marks) ------------
 
 
 def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> None:

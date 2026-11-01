@@ -454,7 +454,7 @@ def _refreshes(idp: FakeIdP) -> int:
 async def test_the_provider_token_is_renewed_before_it_runs_out_not_during_a_request(
     tmp_path: Path, idp: FakeIdP, monkeypatch
 ) -> None:
-    """Speed (Ben, 25 Oct): a request that finds the provider access token run out waits for a
+    """Speed (the owner, 25 Oct): a request that finds the provider access token run out waits for a
     refresh and then userinfo, two round trips to the identity provider. The gateway renews it in
     the background shortly before it runs out instead, so the request waits for userinfo only. The
     membership check itself is unchanged: still asked before the request, every time."""

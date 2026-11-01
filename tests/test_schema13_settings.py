@@ -948,7 +948,7 @@ def test_the_stack_keeps_the_deck_checks_floor(tmp_path: Path, monkeypatch: pyte
 
 
 def test_mtg_server_name_locks_the_gateway_name_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ben, 2026-10-28: MTG_SERVER_NAME is back. Empty leaves the Gateway name to the Settings page;
+    """The owner, 2026-10-28: MTG_SERVER_NAME is back. Empty leaves the Gateway name to the Settings page;
     a name locks that row with the stack's value."""
     _env(tmp_path, monkeypatch)
     assert MANAGED_SETTINGS["server_name"].env == "MTG_SERVER_NAME"

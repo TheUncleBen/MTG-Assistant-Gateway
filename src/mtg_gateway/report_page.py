@@ -1046,7 +1046,7 @@ def _row_items(cards: list[dict[str, Any]]) -> list[str]:
     return items
 
 
-# A long list shows its first rows and a "Show all" row for the rest (Ben, 10-25: less scrolling).
+# A long list shows its first rows and a "Show all" row for the rest (the owner, 10-25: less scrolling).
 SHOW_FIRST = 6
 
 

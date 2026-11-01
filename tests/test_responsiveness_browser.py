@@ -1,4 +1,4 @@
-"""Speed: the pages feel instant and self-contained (Ben, 21 Oct 2026, "fast, snappy, and
+"""Speed: the pages feel instant and self-contained (the owner, 21 Oct 2026, "fast, snappy, and
 responsive"). Headless Chromium with the CPU slowed 4x (CDP Emulation.setCPUThrottlingRate), the
 gateway with its fakes, at phone and desktop widths:
 
@@ -616,7 +616,7 @@ WATCH = r"""
 
 
 def test_loading_looks_only_where_the_page_waits_on_the_gateway(server: Server) -> None:
-    """Ben, 21 Oct: loading states only where we wait on Archidekt, Forge or similar. A control
+    """The owner, 21 Oct: loading states only where we wait on Archidekt, Forge or similar. A control
     that needs nothing from the gateway (a menu, a box the page holds, the card size, a sort list,
     Undo changes) sends no request and draws no loading look; one that asks the gateway (a deck's
     Delete…, which reads the deck first) shows its loading line while it waits."""

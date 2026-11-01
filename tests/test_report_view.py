@@ -23,7 +23,7 @@ def report(goldfish=GOLDFISH, validation=VALIDATION_ISSUES, **over):
     r = {
         "report_id": "rep_test",
         "deck_id": "42",
-        "deck_name": "Immortal Reckoning",
+        "deck_name": "Liesa Test Deck",
         "taken_at": int(time.time()) - 120,
         "stats": {
             "card_count": 100,
@@ -218,7 +218,7 @@ def test_page_without_a_simulation() -> None:
 def test_markdown_and_html_exports() -> None:
     r = report()
     md = rv.report_markdown(r)
-    assert md.startswith("# Deck report: Immortal Reckoning\n")
+    assert md.startswith("# Deck report: Liesa Test Deck\n")
     assert "| Commander | Liesa, Forgotten Archangel |" in md and "| Games | 300, through turn 10 |" in md
     assert (
         "## Quick solo test (300 games, no opponents)" in md
@@ -233,7 +233,7 @@ def test_markdown_and_html_exports() -> None:
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
     assert "<svg" in doc and ".tiles{display:grid}" in doc and "prefers-color-scheme: light" in doc
-    assert "<title>Deck report: Immortal Reckoning</title>" in doc
+    assert "<title>Deck report: Liesa Test Deck</title>" in doc
 
 
 AESI = "Aesi, Tyrant of Gyre Strait"
@@ -403,7 +403,7 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
     r = report(deck_url="https://archidekt.com/decks/42")
     html = rv.report_body_html(r)
     assert "data-copy='ask-model'" in html and rv.ASK_LABEL in html and "id='ask-model-status'" in html
-    assert "Immortal Reckoning" in html.split("id='ask-model'")[1] and "goldfish_" not in html
+    assert "Liesa Test Deck" in html.split("id='ask-model'")[1] and "goldfish_" not in html
     assert "never from memory" in html
     assert "ask-model" not in rv.report_export_html(r, stats_html="", theme_css="")
     assert rv.ASK_LABEL not in rv.report_markdown(r)
@@ -413,7 +413,7 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
 
 
 def test_the_copied_request_also_names_the_other_groups_as_context() -> None:
-    """Ben, 0.7.31 test round: the request for the assistant covers not only the cards played
+    """The owner, 0.7.31 test round: the request for the assistant covers not only the cards played
     without their effect but also those that need opponents, those that never mattered and the
     shortcuts, so the assistant can say where any of them matters."""
     r = report(deck_url="https://archidekt.com/decks/42")

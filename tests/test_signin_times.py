@@ -212,7 +212,7 @@ def _rejections(gw: Harness) -> list[str]:
 
 
 async def test_the_assistant_refresh_row_is_when_the_member_connects_again(gw: Harness) -> None:
-    """Ben, 2026-11-01 ("Every 30 days, as the row says"): the forced reconnect follows the
+    """The owner, 2026-11-01 ("Every 30 days, as the row says"): the forced reconnect follows the
     Assistant refresh row, 30 days by default, not a separate week."""
     client = await gw.register()
     tokens = await gw.tokens_for(client)

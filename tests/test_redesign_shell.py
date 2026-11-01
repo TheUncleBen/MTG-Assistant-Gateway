@@ -458,7 +458,7 @@ def test_the_hook_waits_for_an_app_that_has_it(chromium, server: Server) -> None
 
 def test_the_app_offers_pull_to_refresh_on_list_pages_only() -> None:
     rule = (ANDROID / "PullRefresh.kt").read_text(encoding="utf-8")
-    assert "const val DECK_PAGE = true" in rule  # open for Ben
+    assert "const val DECK_PAGE = true" in rule  # open for the owner
     for path in (
         '"/"',
         '"/decks"',

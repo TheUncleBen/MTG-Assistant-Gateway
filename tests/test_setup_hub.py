@@ -226,7 +226,7 @@ async def test_the_approved_wording_changes(harness: Harness, monkeypatch: pytes
         assert "whoami" not in claude.split("<h2>After connecting</h2>", 1)[1]
         android = (await b.http.get("/install?for=android")).text
         assert "Play Protect may warn that the developer is unknown. That is expected" in android
-        # Ben (25 Oct): a Samsung phone installs nothing while Auto Blocker is on, updates included,
+        # The owner (25 Oct): a Samsung phone installs nothing while Auto Blocker is on, updates included,
         # and Play Protect's offer to scan the app may be taken or not
         blocker = (
             "turn <strong>Auto Blocker</strong> off (Settings &gt; Security and privacy &gt; Auto Blocker)"

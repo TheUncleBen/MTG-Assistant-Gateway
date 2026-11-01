@@ -743,7 +743,7 @@ def _spy(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]
 async def test_a_delete_after_its_box_sends_two_archidekt_calls(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Speed (Ben, 25 Oct): the delete box reads the deck, so pressing Delete waits only for the
+    """Speed (the owner, 25 Oct): the delete box reads the deck, so pressing Delete waits only for the
     delete and the read-back. No backup copy is made for a delete (assistant tool review,
     2026-10-28), so no folder look-up either."""
     await linked_user(stack)

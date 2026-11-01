@@ -1,5 +1,5 @@
 """Every card name drawn as a button (``button.cardlink[data-card]``) opens the card when it is
-clicked (Ben, 2026-10-28: the report page's "Played without their effect" names did nothing): the
+clicked (the owner, 2026-10-28: the report page's "Played without their effect" names did nothing): the
 card viewer on a page that has it (static/cardview.js), else Card search, from static/menus.js,
 which every signed-in page loads. Skipped without a Chromium build."""
 

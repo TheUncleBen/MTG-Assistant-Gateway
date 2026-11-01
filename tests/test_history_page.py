@@ -70,7 +70,7 @@ def seed_history(db: Database, sub: str, *, now: int) -> None:
                 "owner_sub": sub,
                 "kind": "restore" if i == 4 else "edit",
                 "deck_id": deck,
-                "deck_name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
+                "deck_name": "Liesa Test Deck" if deck == "42" else "Reap the Tides",
                 "baseline_fingerprint": "f",
                 "changes": [],
                 "diff_text": f"+1 Sol Ring\n-1 Card {i}" if i % 2 == 0 else f"+1 Counterspell\n-1 Card {i}",
@@ -91,7 +91,7 @@ def seed_history(db: Database, sub: str, *, now: int) -> None:
                 fingerprint="f",
                 deck={
                     "id": deck,
-                    "name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
+                    "name": "Liesa Test Deck" if deck == "42" else "Reap the Tides",
                     "cards": [],
                     **owner,
                 },
@@ -108,7 +108,7 @@ def store_report(
     rid: str,
     *,
     deck_id: str = "42",
-    deck_name: str = "Immortal Reckoning",
+    deck_name: str = "Liesa Test Deck",
     taken_at: int | None = None,
     stats: dict | None = None,
     goldfish: str | None = GOLDFISH,
@@ -178,10 +178,10 @@ def test_db_lists_narrow_in_sql(tmp_path: Path) -> None:
     snaps = db.list_snapshots("u", limit=100, deck_id="42")
     assert len(snaps) == 15 and {x["deck_id"] for x in snaps} == {"42"}
     # only applied proposals (every fourth, all deck 42's) have a snapshot
-    assert len(db.list_snapshots("u", limit=100, search="immortal")) == 15
+    assert len(db.list_snapshots("u", limit=100, search="liesa")) == 15
     assert db.list_snapshots("u", limit=100, search="Reap") == []
     assert len(db.list_snapshots("u", limit=4, deck_id="42", offset=13)) == 2
-    assert db.history_decks("u") == {"42": "Immortal Reckoning", "43": "Reap the Tides"}
+    assert db.history_decks("u") == {"42": "Liesa Test Deck", "43": "Reap the Tides"}
     # a time window: since (inclusive) and until (exclusive), on proposals and snapshots alike
     recent = db.list_proposals("u", limit=100, since=now - 2 * DAY)
     assert {p["id"] for p in recent} == {f"p{i:02d}" for i in range(6)}  # one every 8 h: 6 in 2 days
@@ -240,7 +240,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
                 deck_id="42",
                 proposal_id=None,
                 fingerprint="f",
-                deck={"id": "42", "name": "Immortal Reckoning", "cards": []},
+                deck={"id": "42", "name": "Liesa Test Deck", "cards": []},
             )
             with gw.db.tx() as c:
                 c.execute("UPDATE snapshots SET taken_at = ? WHERE id = ?", (now - 30 * DAY - i, f"x{i:02d}"))
@@ -275,7 +275,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
         assert "Changes <span class='n'>15</span>" in body and "Snapshots <span class='n'>35</span>" in body
         assert "placeholder='Deck name'" in body and body.count("<select") == 3
         assert "<option value='42' selected>Sample Commander Deck</option>" in body
-        assert "Immortal Reckoning</option>" not in body
+        assert "Liesa Test Deck</option>" not in body
         assert (
             "<optgroup label='No longer on Archidekt'><option value='43'>Reap the Tides</option></optgroup>"
             in body
@@ -334,7 +334,7 @@ async def test_history_when_presets(stack: Stack, monkeypatch: pytest.MonkeyPatc
                 fingerprint="f",
                 deck={
                     "id": deck,
-                    "name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
+                    "name": "Liesa Test Deck" if deck == "42" else "Reap the Tides",
                     "cards": [],
                 },
             )
@@ -417,7 +417,7 @@ async def test_history_grouped_by_deck(stack: Stack) -> None:
             listing,
         )
         # deck 42's applied changes (applied as the test began) are newer than deck 43's report
-        assert heads == [("42", "Immortal Reckoning"), ("43", "Reap the Tides")]
+        assert heads == [("42", "Liesa Test Deck"), ("43", "Reap the Tides")]
         assert "<a class='ui-cap' href='/history?deck_id=43&amp;group=deck'>Only this deck</a>" in listing
         assert "open=p-p" in listing.split("<div class='tr' data-deck")[1]  # the newest entry leads
         # 15 changes, 15 snapshots and the report: a page of 25
@@ -446,7 +446,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert page.status_code == 200
         body = page.text.split("<main")[1]
         for text in (
-            "<h1><a href='/decks/42'>Immortal Reckoning</a></h1>",
+            "<h1><a href='/decks/42'>Liesa Test Deck</a></h1>",
             "<span class='k'>Commander</span> Liesa, Forgotten Archangel",
             "<span class='k'>Solo test games</span> 300, through turn 10 (seed 42)",
             "<a class='ui-cap' href='/reports'>All reports</a>",
@@ -474,10 +474,8 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert "/static/export.js" in page.text  # the Copy button's script
         md = await b.http.get("/history/reports/rep_real/export.md")
         assert md.status_code == 200 and md.headers["content-type"].startswith("text/markdown")
-        assert md.headers["content-disposition"].startswith(
-            'attachment; filename="Immortal_Reckoning-report-'
-        )
-        assert md.text.startswith("# Deck report: Immortal Reckoning") and "## Metrics" not in md.text
+        assert md.headers["content-disposition"].startswith('attachment; filename="Liesa_Test_Deck-report-')
+        assert md.text.startswith("# Deck report: Liesa Test Deck") and "## Metrics" not in md.text
         # the raw output is left on the report's page, which the file links to
         assert "https://mtg.test/history/reports/rep_real" in md.text
         # the file name carries the run's day, and Markdown carries plain times (no <time> markup)

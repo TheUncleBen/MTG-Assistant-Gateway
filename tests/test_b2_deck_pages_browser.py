@@ -54,7 +54,7 @@ def test_the_deck_menu_opens_from_more_and_a_right_click(server: Server, width: 
         menu = _menu(page)
         labels = [t.strip() for t in menu.locator("[role=menuitem]").all_inner_texts()]
         assert menu.locator(".head").inner_text() == "Sample Commander Deck"
-        # navigation round 2 (Ben, 2026-10-25): Edit, Test and play and Proposals sit on the
+        # navigation round 2 (the owner, 2026-10-25): Edit, Test and play and Proposals sit on the
         # banner, Copy link is in Share…, and the deck page opens in this tab
         for want in (
             "Rename…",
@@ -235,7 +235,7 @@ def test_deck_settings_rows_fit_every_width(server: Server, width: int, scheme: 
         browser.close()
 
 
-# -- the editable Categories panel (F7 a, Ben 21 Oct) ----------------------------------------------
+# -- the editable Categories panel (F7 a, the owner 21 Oct) ----------------------------------------------
 
 OPEN_BOXES = "() => document.querySelectorAll('.mtgbox[role=dialog]:not([hidden])').length"
 CAT_ROWS = """() => [...document.querySelectorAll('#categories li[data-cat]')].map(li => {
@@ -340,7 +340,7 @@ def test_the_categories_panel_fits_reads_and_saves_everywhere(
 
 @pytest.mark.parametrize(("width", "scheme"), [(344, "light"), (1280, "dark")])
 def test_create_and_delete_categories_ask_in_the_box(server: Server, width: int, scheme: str) -> None:
-    """Create and delete (Ben 22 Oct, one pane of glass): a plain new category is made at once; a
+    """Create and delete (the owner 22 Oct, one pane of glass): a plain new category is made at once; a
     row's Delete always asks in the box, and one with cards asks where they go first (Archidekt
     only deletes an empty category), the cards moving before the delete; every button inside the
     window, 44 px on a phone."""

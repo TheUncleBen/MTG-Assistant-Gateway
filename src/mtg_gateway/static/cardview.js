@@ -243,7 +243,7 @@
       card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? titleCase(card.finish) : ""].filter(Boolean).join(" · ");
     var price = card.price && !isNaN(Number(card.price)) ? money(card.price, "usd") : "";
     // The Printing row: a button that opens the Printings sheet (every printing, to watch one or,
-    // on your own deck, to use one), so the viewer itself leads to the other printings (Ben:
+    // on your own deck, to use one), so the viewer itself leads to the other printings (the owner:
     // "the printings button surfaced when you just click on a normal card"). A plain fact where
     // nothing can open the sheet (a custom card, or no picker on the page).
     var opener = printingsOpener(card);

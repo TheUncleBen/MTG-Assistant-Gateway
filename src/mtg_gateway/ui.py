@@ -165,7 +165,7 @@ def app_name(name: str | None) -> str:
     return name or UNNAMED_APP
 
 
-# The apps whose own mark is shown beside the name (Ben, 22 Oct): the official files in
+# The apps whose own mark is shown beside the name (the owner, 22 Oct): the official files in
 # static/logos/, byte for byte (docs/THIRD-PARTY-NOTICES.md). The Claude spark has one colour; the
 # OpenAI blossom comes as a black and a white file, the page's theme picking one (UI_CSS).
 # The mark follows where the app verifiably comes from, never the name it gives itself (N-3,
@@ -716,7 +716,7 @@ def load_more(
     done: str = "",
     into: str = "",
 ) -> str:
-    """ "Load more" under a list that grows in place (the standard's Load more button; Ben: a button,
+    """ "Load more" under a list that grows in place (the standard's Load more button; the owner: a button,
     never endless scrolling). ``href`` is the next page's address (the link works without scripts;
     a page's script may fetch it and append the rows). ``shown`` of ``total`` gives the line under
     it ("25 of 112"); ``done`` is the line shown instead when there is no more ("That is every

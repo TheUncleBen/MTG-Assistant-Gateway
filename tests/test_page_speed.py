@@ -1,4 +1,4 @@
-"""A page change is not held up by background work (Ben, 27 Oct 2026: "random 10-20 s page loads
+"""A page change is not held up by background work (the owner, 27 Oct 2026: "random 10-20 s page loads
 mid-use"): with the shipped pacing (a second between starts, 30 a minute), a member's page reads
 Archidekt while a slow background read (the deck sync, an assistant) is still waiting for its
 answer, instead of queueing behind it."""

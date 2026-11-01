@@ -1,4 +1,4 @@
-"""A change on one row of a card that has several (Ben, 2026-10-28): Sol Ring in the deck, in a
+"""A change on one row of a card that has several (the owner, 2026-10-28): Sol Ring in the deck, in a
 category left out of the deck other than Maybeboard and Sideboard ("Optional Artwork") and in
 the Sideboard. A remove, a quantity change, a move or a printing change that names the row's
 relation id changes that row only, whatever zone it is sent with, and the review names the row's

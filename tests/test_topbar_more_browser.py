@@ -1,4 +1,4 @@
-"""The top bar on a computer (navigation round 2, Ben 2026-10-25): the four places (Home, Decks,
+"""The top bar on a computer (navigation round 2, the owner 2026-10-25): the four places (Home, Decks,
 Binder, Assistant) at every width and text size, then "More ▾" with its three groups (Find: Search
 and Precons; Your cards: Scan and Card models; Community: Forum). History and Reports mark
 Assistant; a page under More marks More. Phones and the touch rail have no More ▾ in the bar."""

@@ -145,20 +145,20 @@ async def test_history_rows_open_their_details_and_keep_restore_in_the_menu(stac
         # (the snapshot's ⋮ offers the change it was taken before from data-review, L9)
         attrs = " data-deck='42' data-deck-href='/decks/42' data-review='/proposals/p00'>"
         assert snap.startswith("'" + attrs) or snap.startswith(" open'" + attrs)
-        assert "<a class='t' href='/history?open=s-s00'>Immortal Reckoning</a>" in snap
+        assert "<a class='t' href='/history?open=s-s00'>Liesa Test Deck</a>" in snap
         restore = "<form method='post' action='/history/restore' class='hy-restore'>"
         assert f"<span class='act'><span class='acts' hidden>{restore}" in snap
         details_cap = OPEN.format(href="/history?open=s-s00", word="Details")
         assert f"</span>{details_cap}<a class='kebab' href='/history?open=s-s00'" in snap
         assert " href='/decks/42'" not in snap  # no deck link in the row (the menu reads data-deck-href)
         rep = next(r for r in rows if "/history/reports/rep_a'" in r)
-        assert "<a class='t' href='/history/reports/rep_a'>Immortal Reckoning</a>" in rep
+        assert "<a class='t' href='/history/reports/rep_a'>Liesa Test Deck</a>" in rep
         open_cap = OPEN.format(href="/history/reports/rep_a", word="Open report")
         assert f"{open_cap}<a class='kebab' href='/history/reports/rep_a'" in rep
         # the details: the deck's page, one explanation, one row of buttons
         opened = (await b.http.get("/history?open=s-s00", headers=NAV)).text
         details = opened.split("<aside class='ui-drawer'")[1]
-        assert "<dt>Deck</dt><dd><a href='/decks/42'>Immortal Reckoning</a></dd>" in details
+        assert "<dt>Deck</dt><dd><a href='/decks/42'>Liesa Test Deck</a></dd>" in details
         acts = details.split("<div class='ui-actions'>")
         assert len(acts) == 2, details
         row = acts[1].split("</div>")[0]

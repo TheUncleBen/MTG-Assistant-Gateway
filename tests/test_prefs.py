@@ -257,7 +257,7 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
 
 
 async def test_each_page_keeps_its_own_card_size(stack: Stack) -> None:
-    """Ben, 2026-10-28: one card size for every page meant a change in the printings dialog resized
+    """The owner, 2026-10-28: one card size for every page meant a change in the printings dialog resized
     the deck page. Each page keeps its own (card.size.<page>), M until chosen, or the one size
     chosen before for every page, so nobody's choice is lost."""
     b = await linked(stack)

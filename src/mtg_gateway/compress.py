@@ -1,4 +1,4 @@
-"""Pages go out compressed (Ben, 25 Oct 2026: "everything seems slow"): page HTML is mostly repeated
+"""Pages go out compressed (the owner, 25 Oct 2026: "everything seems slow"): page HTML is mostly repeated
 markup and shrinks several times over, which matters on mobile data.
 
 Only a browser's page loads are compressed: a GET that asks for ``text/html``, outside the

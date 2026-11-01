@@ -65,7 +65,7 @@ async def test_the_companion_mark_has_words_in_the_grid_and_the_list(stack: Stac
 
 
 async def test_show_back_face_draws_the_back_picture_in_every_view(stack: Stack) -> None:
-    """L6 (Ben, 23 Oct): a row with Show back face on draws the card's back face in the grid, the
+    """L6 (the owner, 23 Oct): a row with Show back face on draws the card's back face in the grid, the
     Brewer view and the list row's hover preview, as archidekt.com does; the viewer's data keeps the
     front as data-img and carries the back as data-back; a card without a back keeps its front."""
     from mtg_gateway.deckpage import BACK_FACE_LAYOUTS

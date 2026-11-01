@@ -296,7 +296,7 @@ def test_the_boxes_work_in_place_or_land_on_the_review_page(server: Server) -> N
         assert ark.account.defaults["alice"] == {9003: ["Ramp"]}
         # the PDF: the link appears in the box, nothing stored
         pdf = _open_from_deck_menu(page, "Registration PDF…", "pdf")
-        pdf.locator("input[name=first_name]").fill("Ben")
+        pdf.locator("input[name=first_name]").fill("Sam")
         pdf.locator("input[name=last_name]").fill("Smith")
         pdf.locator("input[name=event]").fill("FNM")
         pdf.locator(".acts button", has_text="Make the PDF").click()
@@ -553,7 +553,7 @@ def test_my_decks_and_packages_mark_package_tiles_and_add_one_to_a_deck(
     exe = _chromium()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
-        # My Decks lists the decks only (Ben, 2026-10-25): the package waits under Packages
+        # My Decks lists the decks only (Sam, 2026-10-25): the package waits under Packages
         page.goto(f"{server.base}/decks", wait_until="networkidle")
         tile = page.locator("li.deck[data-deck-id='50']")
         page.locator("li.deck[data-deck-id='50'][data-package='1']").wait_for(state="hidden")

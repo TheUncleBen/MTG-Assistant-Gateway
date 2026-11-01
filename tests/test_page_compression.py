@@ -1,4 +1,4 @@
-"""Speed (Ben, 25 Oct 2026): pages go out compressed (a long deck page is about a sixth of its
+"""Speed (the owner, 25 Oct 2026): pages go out compressed (a long deck page is about a sixth of its
 size), and a page's form token is different on every load, so a compressed page can't be used to
 guess it a character at a time (the BREACH attack: someone who can watch the encrypted sizes and
 make the browser load pages with text of their choosing)."""

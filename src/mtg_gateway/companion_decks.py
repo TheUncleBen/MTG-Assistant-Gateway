@@ -375,7 +375,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         # plain button; parity release 2) and New deck (the one orange button): the boxes' links
         # are the old addresses, which open this page with the box open
         # The switch names the page (My Decks or Packages), so the heading is for screen readers only;
-        # the three actions share its row (Ben, 2026-10-25).
+        # the three actions share its row (the owner, 2026-10-25).
         packages = filters["show"] == "packages"
         # the switch keeps the folder open, as the Show filter it replaced did
         in_folder = f"folder={quote(folder, safe='')}" if folder else ""
@@ -390,7 +390,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 ],
                 filters["show"],
             )
-            # New deck first, then New folder and New package (Ben, 2026-10-25: "New deck / New
+            # New deck first, then New folder and New package (the owner, 2026-10-25: "New deck / New
             # folder / New package"); the one orange button is the page's own: New deck on My
             # Decks, New package on Packages (0.7.46 audit D-25)
             + "<span class='acts'>"

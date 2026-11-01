@@ -113,7 +113,7 @@ def _switches() -> list[str]:
 
 
 def test_only_the_feature_switches_have_an_env_variable_and_each_is_on():
-    """Ben, 2026-10-25: every feature is on by default; an env variable only turns one off. Ben,
+    """The owner, 2026-10-25: every feature is on by default; an env variable only turns one off. The owner,
     2026-10-28: MTG_SERVER_NAME is back too, for the Gateway name, and the three sign-in times
     that had a stack variable keep it (their Settings page rows, 0.7.46)."""
     from mtg_gateway.config import MANAGED_SETTINGS, Settings
@@ -154,7 +154,7 @@ def test_example_env_files_leave_each_switch_empty_so_the_page_can_change_it(nam
 
 @pytest.mark.parametrize("name", ENV_FILES)
 def test_example_env_files_have_the_gateway_name_empty_with_its_reason(name: str):
-    """Ben, 2026-10-28: MTG_SERVER_NAME is in each example under a one-line note, and the Settings
+    """The owner, 2026-10-28: MTG_SERVER_NAME is in each example under a one-line note, and the Settings
     page keeps the Gateway name until someone sets it in the stack. Empty like every other optional
     line (0.7.46 review): a name typed after a commented-out ``#MTG_SERVER_NAME=`` in Portainer's
     Advanced mode was silently ignored."""

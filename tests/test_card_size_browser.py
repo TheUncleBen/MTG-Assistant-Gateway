@@ -258,7 +258,7 @@ def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
 
 
 def test_the_printing_pickers_size_leaves_the_deck_pages_as_it_is(server: Server) -> None:
-    """Ben, 2026-10-28: each page keeps its own card size. L in the printings dialog leaves the
+    """The owner, 2026-10-28: each page keeps its own card size. L in the printings dialog leaves the
     deck page at M, on this page and the next time it opens, and on the account; the dialog opens
     at L again. A size chosen once for every page before is where each page starts."""
     from playwright.sync_api import sync_playwright
@@ -430,7 +430,7 @@ KEBAB = """
 def test_the_deck_tiles_menu_button_sits_below_the_colour_bar_at_every_size(
     server: Server, width: int
 ) -> None:
-    """Ben, 2026-10-28: the ⋮ overlapped the colour bar: its place was worked out for the M picture
+    """The owner, 2026-10-28: the ⋮ overlapped the colour bar: its place was worked out for the M picture
     alone. At S, M and L it sits under the picture, in the name's area."""
     from playwright.sync_api import sync_playwright
 

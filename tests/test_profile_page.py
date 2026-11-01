@@ -114,7 +114,7 @@ async def test_the_four_cards_follow_the_mockup_while_linked(member: Browser) ->
         ("Archidekt alerts", "Shows Archidekt's alerts in the bell."),
     ):
         assert _said(mail, label) and _said(mail, help_text), label
-    # Ben (25 Oct): the switches say what they do; no line telling a member that a switch saves
+    # The owner (25 Oct): the switches say what they do; no line telling a member that a switch saves
     assert "saves to Archidekt" not in mail and "when you press it" not in mail
     # the switches show Archidekt's values: contactable on, newsletter off, notifications on
     assert "id='pr-contactable' type='checkbox' name='on' value='1' checked" in mail
@@ -569,7 +569,7 @@ async def test_unlinking_forgets_the_profile_bell_and_list_counts(member: Browse
 async def test_group_by_sort_and_price_sources_are_on_the_page_with_archidekts_choices(
     member: Browser, stack: Stack
 ) -> None:
-    """Ben, 23 Oct: the three new-device defaults the first build left out, with every choice
+    """The owner, 23 Oct: the three new-device defaults the first build left out, with every choice
     Archidekt's own Account settings page lists (its saved script), and the two price sources set
     one at a time."""
     page = (await member.http.get(D)).text

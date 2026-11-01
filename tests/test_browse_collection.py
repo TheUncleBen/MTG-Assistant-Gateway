@@ -490,7 +490,7 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         hub = await b.http.get("/account", headers={**NAV, **APP_UA})
         for action in ("openCamera", "reload", "openCopiedLink", "changeGateway", "checkForUpdates"):
             assert f"data-native='{action}'" in hub.text, action
-        assert "openInBrowser" not in hub.text  # gone from the app (Ben, 2026-10-25)
+        assert "openInBrowser" not in hub.text  # gone from the app (the owner, 2026-10-25)
         assert "data-native" not in (await b.http.get("/account", headers=NAV)).text
     finally:
         await b.aclose()

@@ -1,4 +1,4 @@
-"""The navigation's second round (Ben, 2026-10-25): four places (Home, Decks, Binder, Assistant)
+"""The navigation's second round (the owner, 2026-10-25): four places (Home, Decks, Binder, Assistant)
 and More in two groups; the picture opens a settings-style Account page (account_hub.py) whose
 first row is Account details (/account/details); a switch at the top of Decks (My Decks or
 Packages) and of Assistant (Proposals, History or Reports); the deck page's Test and play, its

@@ -75,7 +75,7 @@ def test_the_markdown_is_clean() -> None:
     outside = _fences(md)
     # one title; the research service's own output (# Goldfish run, ## Metrics) is not copied in:
     # the file says where it is kept (test_report_export_outline)
-    assert [ln for ln in outside if ln.startswith("# ")] == ["# Deck report: Immortal Reckoning"]
+    assert [ln for ln in outside if ln.startswith("# ")] == ["# Deck report: Liesa Test Deck"]
     assert "## Metrics" not in md and "# Goldfish run" not in md and f"## {rv.RAW_HEADING}" in outside
     # no HTML outside the fences
     assert not [ln for ln in outside if re.search(r"<[a-z/][^>]*>", ln)], outside
@@ -99,17 +99,17 @@ def test_a_pasted_list_or_a_comparison_says_so_in_markdown() -> None:
     md = rv.report_markdown(r)
     assert "archidekt.com/decks/" not in md and "| Source | Pasted list |" in md
     deck = report(status="complete")
-    assert "| Deck | [Immortal Reckoning](https://archidekt.com/decks/42) |" in rv.report_markdown(deck)
+    assert "| Deck | [Liesa Test Deck](https://archidekt.com/decks/42) |" in rv.report_markdown(deck)
     cmp = report(status="complete")
     cmp.update(
-        deck_name="Immortal Reckoning vs Pasted list",
+        deck_name="Liesa Test Deck vs Pasted list",
         source={"kind": "compare", "label": "Comparison"},
         comparison={"tool": "goldfish_ab", "ok": True, "text": "# A/B\n\n## Deltas\n- kill turn -1"},
     )
     md = rv.report_markdown(cmp)
     assert "| Source | Comparison |" in md and "## Comparison\n\n````text\n# A/B\n\n## Deltas" in md
     assert [ln for ln in _fences(md) if ln.startswith("# ")] == [
-        "# Deck report: Immortal Reckoning vs Pasted list"
+        "# Deck report: Liesa Test Deck vs Pasted list"
     ]
 
 

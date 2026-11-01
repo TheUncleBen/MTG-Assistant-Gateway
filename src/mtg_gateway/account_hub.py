@@ -1,4 +1,4 @@
-"""The Account page your picture opens (Ben, 2026-10-25): a settings list in groups, as a phone's
+"""The Account page your picture opens (the owner, 2026-10-25): a settings list in groups, as a phone's
 Settings app draws it, balanced into two columns on a wide screen. Each row opens a page, or (Theme,
 Layout) folds open its choices in place. The account's own cards (approval mode, Archidekt, apps,
 notifications, your data) are one row in, under Account details (/account/details)."""

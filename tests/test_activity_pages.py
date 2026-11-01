@@ -214,7 +214,7 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
         assert _table(refused).count("<div class='tr ev") == 1 and "title='approval_refused'" in refused
         problems = (await b.http.get("/admin/activity?kind=problems&time=7d", headers=NAVIGATE)).text
         assert _table(problems).count("<div class='tr ev") == 2
-        # the "Refused or failed" quick start marks both chips as current (the fix Ben picked)
+        # the "Refused or failed" quick start marks both chips as current (the fix the owner picked)
         pchips = problems.split("<nav class='ui-chips' aria-label='Show'>", 1)[1].split("</nav>", 1)[0]
         assert pchips.count("aria-current='true'") == 2
         assert "aria-current='true'>" in pchips.split("Refused")[0] and "Failed <span" in pchips

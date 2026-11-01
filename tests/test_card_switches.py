@@ -1,4 +1,4 @@
-"""set_companion and set_back_face (Archidekt parity release 1, approved by Ben 22 Oct 2026, "All
+"""set_companion and set_back_face (Archidekt parity release 1, approved by the owner 22 Oct 2026, "All
 as recommended"): Archidekt's card menu switches a row's Companion and "show back face by
 default" (its modifyCards ``companion`` and ``flippedDefault``, read from its site code). The
 gateway sends them like the other row changes (set_label, set_mana_value): every row of the card

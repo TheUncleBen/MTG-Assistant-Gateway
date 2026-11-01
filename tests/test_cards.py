@@ -39,7 +39,7 @@ CARDED = {
     "card_printings": PRINTINGS_CARD_URI,
     "resolve_cards": PICKER_CARD_URI,
 }
-# Ben, 0.7.31 test round: ChatGPT lagged on long chats full of cards, so these reads answer in text
+# The owner, 0.7.31 test round: ChatGPT lagged on long chats full of cards, so these reads answer in text
 # alone. Their cards stay registered, unnamed, so the cards in older chats still draw.
 NO_CARD = (
     "get_deck",
@@ -609,7 +609,7 @@ async def test_a_link_stops_working_for_a_member_who_left_the_group(stack: Stack
 
 
 def test_cards_draw_no_frame_of_their_own() -> None:
-    """Ben, 0.7.31 test round: on ChatGPT the card looked like a card within a card, because the
+    """The owner, 0.7.31 test round: on ChatGPT the card looked like a card within a card, because the
     host frames the card and the card drew its own border and rounded corners inside that frame."""
     import re
 

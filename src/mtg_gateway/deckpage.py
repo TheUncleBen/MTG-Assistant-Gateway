@@ -352,7 +352,7 @@ def banner_html(
     making: bool = False,
 ) -> str:
     """The deck banner: name, facts, the buttons (Edit deck the page's one orange button, Clone
-    deck, Test and play, More; the same on every screen, Ben 2026-10-25) and the deck menu.
+    deck, Test and play, More; the same on every screen, the owner 2026-10-25) and the deck menu.
     ``waiting``: the member's proposals waiting on this deck, the count on the Proposals pill.
     ``making``: a new deck whose cards are still going in, whose Edit deck is off until it is done.
     The menu is the shared deck menu (static/deck.js builds it with cardmenu.js's layer, from the
@@ -786,7 +786,7 @@ WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so follo
 
 def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True, waiting: int = 0) -> str:
     """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them, and Proposals
-    (Ben, 2026-10-25): the member's proposals for this deck, with the count waiting, in a box
+    (the owner, 2026-10-25): the member's proposals for this deck, with the count waiting, in a box
     (waiting_strip.deck_box_html; the deck's Proposals list without scripts). The buttons are
     the person's own clicks: social.js asks for a confirmation and posts to /social/api; without
     script they are inert and the More menu's "Open on Archidekt" link is the way. With Archidekt
@@ -994,7 +994,7 @@ def toolbar_html(
         # page adds one copy in place (deck.js); without scripts the form opens the editor.
         f"<button type='submit' aria-label='Add'>{icon('plus')} "
         "<span>Add</span></button>"
-        # Add a package, where cards are added (Ben, 2026-10-25: packages easy to find): the
+        # Add a package, where cards are added (the owner, 2026-10-25: packages easy to find): the
         # package box (deck_extras.py); its old address opens this page with the box open
         f"<a class='btn addpkg' href='/decks/{{did}}/package' {ui.box_open_attr('package')}>"
         f"{icon('package')} <span>Add a package</span></a></div></form>"

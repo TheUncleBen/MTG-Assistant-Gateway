@@ -142,7 +142,7 @@ def action_bar(*, inline: bool = False) -> str:
 
 
 def deck_box_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -> str:
-    """The deck page's Proposals box, opened by the banner's Proposals pill (Ben, 2026-10-25: out
+    """The deck page's Proposals box, opened by the banner's Proposals pill (the owner, 2026-10-25: out
     of the way until asked for, as a settings list): the member's waiting proposals for the deck
     in one grouped list, Apply or Reject the checked ones, and the deck's whole Proposals list."""
     if not csrf:

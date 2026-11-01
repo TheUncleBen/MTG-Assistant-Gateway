@@ -25,7 +25,7 @@ import java.net.URISyntaxException
  * scrolls on its own, not while scrolled down.
  */
 object PullRefresh {
-    /** The deck page offers it too. Open for Ben: its top is dense with touch targets. */
+    /** The deck page offers it too. Open for the owner: its top is dense with touch targets. */
     const val DECK_PAGE = true
 
     /** The header a pull sends (the gateway's decks.PULL_HEADER), and its value. */

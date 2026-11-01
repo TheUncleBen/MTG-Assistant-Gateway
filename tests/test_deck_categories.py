@@ -1,5 +1,5 @@
 """The deck's own categories: rename and the flags Premier, Not in deck and Not in price (kind
-"categories", UI overhaul package C, approved by Ben 21 Oct 2026 23:49Z).
+"categories", UI overhaul package C, approved by the owner 21 Oct 2026 23:49Z).
 
 Archidekt's request is taken from its deck editor's public code (CATEGORIES-RESEARCH.md): PATCH
 /decks/category/{id}/ with the whole category. The fake behaves as that research expects (a rename

@@ -166,7 +166,7 @@ def test_reports_dashboard_pages_by_25(server: Server) -> None:
 
 @pytest.mark.parametrize("width", [390, 1280])
 def test_a_filter_applies_on_pick_with_no_show_button(server: Server, width: int) -> None:
-    """Ben's request (2026-10-19, 22:16Z): a drop-down filter applies as soon as an option is
+    """The owner's request (2026-10-19, 22:16Z): a drop-down filter applies as soon as an option is
     picked; the toolbar has no Show (or Search) button for a member with scripts."""
     from playwright.sync_api import sync_playwright
 

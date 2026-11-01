@@ -1,6 +1,6 @@
 """The deck's own categories: create, delete (empty only, or its cards moved first), delete unused,
 and a record for Archidekt's default Sideboard or Maybeboard (Archidekt parity release 1, approved
-by Ben 22 Oct 2026 14:04Z, "All as recommended").
+by the owner 22 Oct 2026 14:04Z, "All as recommended").
 
 Archidekt's requests come from its public site code (reviews/2026-10-22-archidekt-parity/REPORT.md):
 POST /decks/createCategory/ {name, includedInDeck, includedInPrice, isPremier, id: null, deck} and

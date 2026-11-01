@@ -238,7 +238,7 @@ async def test_the_review_page_sends_the_version_it_showed(stack: Stack) -> None
 
 async def test_the_deck_page_counts_its_proposals_and_home_counts_the_decks(stack: Stack) -> None:
     """The banner's Proposals pill carries the count of the deck's waiting changes and opens the
-    Proposals box (Ben, 2026-10-25: not in your face), which lists them to apply or reject."""
+    Proposals box (the owner, 2026-10-25: not in your face), which lists them to apply or reject."""
     h = stack.h
     token, b = await _signed_in(stack)
     try:

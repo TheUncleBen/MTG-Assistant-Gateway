@@ -134,8 +134,8 @@ def test_report_export_document_has_scheme_icon_and_title() -> None:
 
 
 def test_offline_page_names_the_site_and_follows_the_theme() -> None:
-    page = companion.offline_page("Ben's Gateway")
-    assert "<title>You&#x27;re offline · Ben&#x27;s Gateway</title>" in page
+    page = companion.offline_page("Sam's Gateway")
+    assert "<title>You&#x27;re offline · Sam&#x27;s Gateway</title>" in page
     assert "<link rel='icon' href='data:image/svg+xml," in page and "<img src='data:image/svg+xml," in page
     assert (
         ":root[data-theme=light]{" in page

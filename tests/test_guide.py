@@ -243,7 +243,7 @@ def test_the_backup_texts_follow_the_backup_settings() -> None:
     assert "keeps a snapshot (no backup copy on Archidekt) first." in off
 
 
-# -- 2026-10-21 overhaul (Ben's answers of 18:11Z): plain asks, the one closed tool-names fold ----
+# -- 2026-10-21 overhaul (the owner's answers of 18:11Z): plain asks, the one closed tool-names fold ----
 def test_member_text_names_no_tool_the_abilities_are_plain_asks() -> None:
     from mtg_gateway import tool_labels
 

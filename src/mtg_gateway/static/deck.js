@@ -194,7 +194,7 @@
       document.body.classList.contains("app");
   };
   var enc = encodeURIComponent;
-  // Mockup screen 3, for Ben: on a narrow phone the card menu's "More" group starts folded, so the
+  // Mockup screen 3, for the owner: on a narrow phone the card menu's "More" group starts folded, so the
   // count, the main rows and Remove fit one screen; false shows it open, as on wider screens.
   var MORE_FOLDED_ON_PHONE = false;
   function readJson(attr, fallback) { try { return JSON.parse(cards.getAttribute(attr)) || fallback; } catch (e) { return fallback; } }
@@ -3016,7 +3016,7 @@
   cards.addEventListener("touchend", endTouch);
   cards.addEventListener("touchcancel", endTouch);
 
-  // -- categories on the deck page (mockup screen 4, review F8; Ben's T-191 note) ---------------
+  // -- categories on the deck page (mockup screen 4, review F8; the owner's T-191 note) ---------------
   // Each stack's ⋮ (and a right-click, a press and hold or Shift+F10 on its head) opens the
   // category's menu: Rename…, Add category…, Add from template… | Premier, In deck, In price as
   // tick rows | Edit cards in editor | Delete…, and "+ Add category" after the last stack opens
@@ -3028,7 +3028,7 @@
   // the toast offers Undo: the inverse change, or after a delete the restore of its own snapshot
   // (undo-box.js). Without scripts the ⋮ is the drop-down to the editor and Deck settings, and
   // "+ Add category" opens Deck settings.
-  // Mockup choices for Ben (each flips here): Undo in the toast, as on Deck settings, rather
+  // Mockup choices for the owner (each flips here): Undo in the toast, as on Deck settings, rather
   // than in the toolbar's card history (UNDO_IN_TOAST false would end that history instead);
   // the delete box preselects the biggest category the cards can go to (PRESELECT_BIGGEST).
   var UNDO_IN_TOAST = true, PRESELECT_BIGGEST = true;
@@ -3771,11 +3771,11 @@
 
   // A group's name in a menu (This deck, Look into it, ...)
   function head(text) { return el("div", "ghead", text); }
-  // The deck menu, the same on every screen (Ben, 2026-10-25): what the banner's buttons do (Edit
+  // The deck menu, the same on every screen (the owner, 2026-10-25): what the banner's buttons do (Edit
   // deck, Clone deck, Test and play) is not repeated here, and the deck's proposals are the
   // banner's Proposals pill. Items that change the deck show on your own decks only, and not
   // while the deck is still being made (its page says so; the gateway would refuse them).
-  // Mockup screen 2's choices, for Ben (each one flips here): Add a package… in this menu as well
+  // Mockup screen 2's choices, for the owner (each one flips here): Add a package… in this menu as well
   // as the toolbar's button (false: the button alone); the Registration PDF as a row of the
   // Export box (false: its own item here); one Contests… item that asks enter or withdraw
   // (false: the two items); Share second, as "Share" (false: third, "Share and print").

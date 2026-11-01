@@ -67,7 +67,7 @@ def test_markdown_follows_the_outline() -> None:
     heads = [ln[3:] for ln in md.splitlines() if ln.startswith("## ")]
     assert _in_order(heads) == OUTLINE, heads
     # a table of what was tested, with both links
-    assert "| Deck | [Immortal Reckoning](https://archidekt.com/decks/42) |" in md
+    assert "| Deck | [Liesa Test Deck](https://archidekt.com/decks/42) |" in md
     assert f"| Report | [Open the report]({URL}) |" in md and "| Status | Complete |" in md
     # validation keeps its own headings; the names stay under their line
     val = md.split("## Validation", 1)[1].split("\n## ", 1)[0]

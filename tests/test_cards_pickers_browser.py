@@ -166,7 +166,7 @@ def test_a_tap_shows_the_printing_big_and_only_use_this_printing_sends_the_pick(
             card = _open(page, "printings-card", RESULT, width=375, theme="dark")
             card.locator(".tile").nth(5).wait_for()
             assert card.locator("#detail").is_hidden()
-            # this host offers no fullscreen (ChatGPT's Android app shows no Expand, Ben 10-31): the
+            # this host offers no fullscreen (ChatGPT's Android app shows no Expand, the owner 10-31): the
             # whole flow, look then pick, runs inline at the size the chat gives the card
             assert card.locator("#expand").get_attribute("class") == "small hidden"
             assert page.evaluate("() => !window.log.some(m => m.method === 'ui/request-display-mode')")

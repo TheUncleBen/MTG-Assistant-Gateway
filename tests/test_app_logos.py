@@ -1,4 +1,4 @@
-"""The connected app's own mark beside its name (Ben, 22 Oct): Claude and Claude Code show the
+"""The connected app's own mark beside its name (the owner, 22 Oct): Claude and Claude Code show the
 Claude spark, ChatGPT and Codex the OpenAI blossom (black on the light theme, white on the dark
 one, following the site's own theme switch), every other app the gateway's neutral icon. The files
 are the official ones, byte for byte, served as static files with a year's cache, and named in
