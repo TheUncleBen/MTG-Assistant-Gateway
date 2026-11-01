@@ -177,7 +177,7 @@ def _change_event(p: dict[str, Any]) -> dict[str, Any]:
         diff = "\n".join(lines)
     line = (
         _esc(f"{lead}: {summary}" if summary else lead)
-        + " · "
+        + " "  # the capsule follows the words with no "·" to orphan on a phone (review 2, L9)
         + ui.cap_link("Proposal", f"/proposals/{p['id']}")
     )
     details = (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "") + str(
@@ -236,7 +236,7 @@ def build_events(
             continue
         taken = _taken(p.get("taken") or "")
         when = f"Put back as it stood on {time_html(taken)}" if taken else "Put back as a snapshot had it"
-        line = f"{when} · " + ui.cap_link("Proposal", f"/proposals/{p['id']}")
+        line = f"{when} " + ui.cap_link("Proposal", f"/proposals/{p['id']}")
         diff = str(p.get("diff_text") or "")
         details = f"<p>{when}.</p>" + (f"<pre class='diff'>{_esc(diff)}</pre>" if diff.strip() else "")
         events.append(

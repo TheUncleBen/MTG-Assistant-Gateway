@@ -695,6 +695,22 @@
     ];
     Menu.open({ head: name, label: "List: " + name, items: items, focusBack: $("summary.kebab", head) || head }, x, y);
   }
+  // a watchlist list's row on Binder › Lists (lists_page): its ⋮, a right-click or a hold open
+  // the same Rename list… and Delete list… as the list's head on the Watchlist (the links of its
+  // no-script drop-down, which open the Watchlist with that box)
+  function listRowOf(node) {
+    var row = node && node.closest ? node.closest(".lp-hub .yrow.wlrow") : null;
+    return row && $("details.rowmenu", row) ? row : null;
+  }
+  function openListRowMenu(row, x, y) {
+    var name = ($("a.lbl span", row) || row).textContent.trim();
+    var items = [];
+    $$("details.rowmenu .menu > a", row).forEach(function (a) {
+      if (items.length) items.push(sep());
+      items.push(link(a.textContent.replace(/\s+/g, " ").trim(), a.getAttribute("data-icon") || "", a.getAttribute("href"), { danger: a.classList.contains("danger") }));
+    });
+    Menu.open({ head: name, label: "List: " + name, items: items, focusBack: $("summary.kebab", row) || row }, x, y);
+  }
   function openWatchMenu(tr, x, y) {
     var key = tr.id.slice(3);
     var wx = document.getElementById("wx-" + key);
@@ -788,12 +804,33 @@
     if (pick) {
       var risk = pick.getAttribute("data-risk") || "";
       var form = pick.form;
+      // Apply and Reject check this row alone and press the bar's own button, so the same box
+      // asks as for a checked row (Reject's red box with its reason, Apply's box with the plan);
+      // without the bar's script the form goes as it is and the server asks on its page
       var send = function (action) {
-        $$("input[name=pick]", form).forEach(function (p) { p.checked = p === pick; });
-        var a = el("input");
-        a.type = "hidden"; a.name = "action"; a.value = action;
-        form.appendChild(a);
-        Menu.whenClosed(function () { form.submit(); });
+        var picks = $$("input[name=pick]", form);
+        var was = picks.filter(function (p) { return p.checked; });
+        picks.forEach(function (p) { p.checked = p === pick; });
+        form.dispatchEvent(new Event("change", { bubbles: true }));
+        var btn = $(".ui-bar button[name=action][value=" + action + "], .wbar button[name=action][value=" + action + "]", form);
+        // "Keep it" (the box gone, nothing sent) puts the picks back as they were
+        var restore = function () {
+          var watch = new MutationObserver(function () {
+            if (document.querySelector(".mtgbox-scrim")) return;
+            watch.disconnect();
+            if ($("input[name=action]", form)) return;  // sent: the page is leaving
+            picks.forEach(function (p) { p.checked = was.indexOf(p) !== -1; });
+            form.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+          watch.observe(document.body, { childList: true, subtree: true });
+        };
+        Menu.whenClosed(function () {
+          if (btn && !btn.disabled && btn.hasAttribute("data-asks")) { btn.click(); restore(); return; }
+          var a = el("input");
+          a.type = "hidden"; a.name = "action"; a.value = action;
+          form.appendChild(a);
+          form.submit();
+        });
       };
       // only a change a press here may apply: a deck delete, or a change that needs its review
       // page, is approved there
@@ -820,7 +857,12 @@
     if (remake) items.push(item("Make a new deck from this", "plus", function () { remake.click(); }));
     if (report) items.push(link("Open report", "report", report.getAttribute("href")));
     if (test) items.push(item("Test this version", "report", function () { test.click(); }));
-    if (deckHref) { items.push(sep()); items.push(deckHref === "/lists" ? link("Open My lists", "decks", deckHref) : link("Open the deck", "decks", deckHref)); }
+    if (deckHref) {
+      items.push(sep());
+      // a lists change (templates, tags, pins) opens Binder › Lists, where those lists live
+      var lists = deckHref === "/lists" || deckHref === "/collection/lists";
+      items.push(lists ? link("Open Binder › Lists", "list", "/collection/lists") : link("Open the deck", "decks", deckHref));
+    }
     // a report or a snapshot: its Details with the confirm box open (restores are proposals)
     var chev = $("a.chev[href*='open=']", tr), dh = (details || chev) ? (details || chev).getAttribute("href") : "";
     if (/[?&]open=[sr]-/.test(dh)) { items.push(sep()); items.push(link("Delete…", "trash", dh + "&box=delete", { danger: true })); }
@@ -855,6 +897,7 @@
     { of: folderOf, open: openFolderMenu, el: function (f) { return f.el; } },
     { of: collectionRowOf, open: openCollectionMenu },
     { of: watchGroupOf, open: openWatchGroupMenu },
+    { of: listRowOf, open: openListRowMenu },
     { of: watchRowOf, open: openWatchMenu },
     { of: cardLinkOf, open: openCardLinkMenu },
     { of: proposalRowOf, open: openProposalMenu },

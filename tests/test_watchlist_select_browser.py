@@ -267,3 +267,50 @@ def test_every_surface_fits_at_100_and_200_percent_text(
         page.keyboard.press("Escape")
         assert errors == [], errors
         browser.close()
+
+
+def test_a_watchlist_list_row_opens_its_menu_from_a_right_click_and_a_hold(server: Server) -> None:
+    """Binder › Lists: a watchlist list's row has the same menu from a right-click (a mouse) and
+    a press and hold (a phone) as from its ⋮ (review 2, M7; R-228), without leaving the page."""
+    from playwright.sync_api import sync_playwright
+
+    sid = seed(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, width=1280, height=900, theme="light", exe=exe)
+        page.goto(f"{server.base}/collection/lists", wait_until="networkidle")
+        row = page.locator(".lp-hub .yrow.wlrow", has_text="Meren wants")
+        row.locator("a.lbl").click(button="right")
+        _menu(page)
+        assert _items(page) == ["Rename list…", "Delete list…"]
+        assert page.locator(".ctxmenu .head").inner_text().strip() == "Meren wants"
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        assert page.locator(".ctxmenu").count() == 0 and page.url.endswith("/collection/lists")
+        row.locator("summary.kebab").click()
+        _menu(page)
+        assert _items(page) == ["Rename list…", "Delete list…"]
+        page.keyboard.press("Escape")
+        browser.close()
+        # a phone: the hold, as Chrome on Android sends it (the touch, then its contextmenu)
+        browser, page, errors = _open(p, server, sid, width=375, height=812, theme="dark", exe=exe, ua=APP_UA)
+        page.goto(f"{server.base}/collection/lists", wait_until="networkidle")
+        row = page.locator(".lp-hub .yrow.wlrow", has_text="Meren wants")
+        row.scroll_into_view_if_needed()
+        b = row.locator("a.lbl").bounding_box()
+        x, y = b["x"] + 30, b["y"] + b["height"] / 2
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        page.wait_for_timeout(500)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
+        row.locator("a.lbl").evaluate(
+            """(a, xy) => a.dispatchEvent(new MouseEvent("contextmenu",
+                {bubbles: true, cancelable: true, clientX: xy[0], clientY: xy[1]}))""",
+            [x, y],
+        )
+        _menu(page)
+        assert _items(page) == ["Rename list…", "Delete list…"]
+        assert page.url.endswith("/collection/lists")
+        page.keyboard.press("Escape")
+        assert errors == [], errors
+        browser.close()

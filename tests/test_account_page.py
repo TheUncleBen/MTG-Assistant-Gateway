@@ -49,10 +49,11 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         assert (
             "<div class='acc acc-list'>" in page and ".ydetails .yfold" in page and "/static/pages.js" in page
         )
-        # the list: the four groups in the mockup's order, two columns (Archidekt over This gateway,
-        # Assistant over Your data), the member's card at the top
+        # the list: the four groups in the mockup's order, two columns balanced by their rows
+        # (Archidekt over Your data, 8 rows; Assistant over This gateway, 7: review 2, L10), the
+        # member's card at the top
         groups = re.findall(r"<section class='ygrp' data-g='(\d)'(?: id='apps')?><h2>([^<]*)</h2>", page)
-        assert groups == [("0", "Archidekt"), ("2", "This gateway"), ("1", "Assistant"), ("3", "Your data")]
+        assert groups == [("0", "Archidekt"), ("3", "Your data"), ("1", "Assistant"), ("2", "This gateway")]
         # on a phone the style orders them by data-g: the mockup's order, Your data last
         assert page.count("<div class='ycol'>") == 2 and "<div class='yme'>" in page
         assert "src='/account/avatar'" in page and "Signed in as" not in page
@@ -70,7 +71,8 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         )
         assert "Archidekt writes are switched on or off" not in page
         # Price alert defaults (mockup screen 8): a row under This gateway that opens the
-        # watchlist's box, its value the shipped default until the member saves their own
+        # watchlist's box, its value the shipped default until the member saves their own, short
+        # enough for the row's one line (review 2, L10)
         assert "<a class='yrow' href='/watchlist?box=defaults'><svg" in page
         # short enough for one line beside its label (independent review 2, L10)
         assert "<span class='lbl'>Price alert defaults</span><span class='val'>10% drop</span>" in page

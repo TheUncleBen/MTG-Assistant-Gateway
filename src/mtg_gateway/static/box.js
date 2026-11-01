@@ -280,12 +280,15 @@
       }
       if (out !== true) b.close();
     }, { icon: o.icon });
+    var cancelBtn = boxButton(o.cancel || "Cancel", "btn", null, { cancel: true });
     var b = openBox({
       title: o.title || "", wide: o.wide,
       body: o.body || el("p", null, o.text || ""),
-      actions: [boxButton(o.cancel || "Cancel", "btn", null, { cancel: true }), okBtn],
+      actions: [cancelBtn, okBtn],
       returnFocus: o.returnFocus, onClose: o.onClose
     });
+    // focus: "cancel" starts on the safe button even when the body has a field (a reason)
+    if (o.focus === "cancel") cancelBtn.focus({ preventScroll: true });
     return b;
   }
 

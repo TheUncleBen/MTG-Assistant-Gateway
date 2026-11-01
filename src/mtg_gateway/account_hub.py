@@ -230,6 +230,23 @@ HUB_CSS = """
   border:0;background:transparent;color:var(--text);font:inherit;justify-content:flex-start;text-align:left}
 .ygrp .yfold button svg.i,.ygrp .yfold button .i{width:18px;height:18px;flex:none;color:var(--orange-text)}
 .ygrp .yfold button.on{font-weight:700}
+/* large text on a narrow phone (the group under about 20 em of its own text: 200% at 375 px): a
+   row is a grid of its icon, its words and its chevron, the value on a line under the label, so
+   the icon never sits above the label and the chevron never drops to the left (independent
+   review 2, L11; the Assistants and Binder › Lists rows the same) */
+.ygrp .rows{container-type:inline-size}
+@container (max-width:20em){
+  .ygrp .rows > .yrow:not(details),.ygrp .rows > details.yrow > summary{display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;column-gap:.45rem;row-gap:.1rem;align-items:center;
+    padding:.45rem .4rem .45rem .5rem}  /* the words get the room the 1 rem sides took */
+  .ygrp .rows > .yrow > svg.i,.ygrp .rows > details.yrow > summary > svg.i,
+  .ygrp .rows > .yrow > .alogo,.ygrp .rows > .yrow > .radio{grid-column:1;grid-row:1 / span 2}
+  .ygrp .rows .yrow .lbl{grid-column:2;grid-row:1}
+  .ygrp .rows .yrow .val,.ygrp .rows .yrow.app .val{grid-column:2;grid-row:2;justify-self:start;
+    text-align:left;margin:0;max-width:none}
+  .ygrp .rows .yrow .ch,.ygrp .rows .yrow > details.dd{grid-column:3;grid-row:1 / span 2}
+  .ygrp .rows .yrow .ch{margin-right:-.2rem}
+}
 @media (hover:hover) and (pointer:fine){
   .ygrp .yrow{min-height:44px} .ygrp details.yrow > summary{min-height:44px}
   .ygrp a.yrow:hover,.ygrp button.yrow:hover,.ygrp details.yrow > summary:hover,
