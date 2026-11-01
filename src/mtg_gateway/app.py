@@ -1300,10 +1300,8 @@ def _notify_events(state: AppState) -> None:
     deck while an assistant's changes wait there for their own press, kept in step with every
     change to their proposals, and a deck report that finished."""
     notifier = state.notifier
-    if notifier is None or not notifier.enabled:
+    if notifier is None:
         return
-    notifier.watch_waiting(state.decks.waiting_by_deck)
-    state.db.watch_proposals(notifier.proposals_changed)
 
     def setting_changed(key: str) -> None:
         # an approval setting decides what waits for each member's press: count every deck with
@@ -1312,7 +1310,10 @@ def _notify_events(state: AppState) -> None:
             for sub, deck_id in state.db.pending_proposal_decks():
                 notifier.proposals_changed(sub, deck_id)
 
-    state.live.on_change.append(setting_changed)
+    if notifier.enabled:  # the phone's messages; the bell reads what waits live (profile_page.py)
+        notifier.watch_waiting(state.decks.waiting_by_deck)
+        state.db.watch_proposals(notifier.proposals_changed)
+        state.live.on_change.append(setting_changed)
 
     def report_finished(sub: str, report_id: str) -> None:
         notifier.soon(

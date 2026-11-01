@@ -1966,6 +1966,9 @@ CSS += BOX_CSS
 # /notifications page. Unseen rows are tinted; a row links to its target where there is one.
 BELL_CSS = """
 .bell-list{list-style:none;margin:0;padding:0}
+.bell-part{font-size:.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+  margin:.9rem 0 .2rem}
+.bell-part:first-child{margin-top:0}
 .bell-row{display:flex;gap:.6rem;align-items:flex-start;min-height:44px;padding:.45rem 0;
   border-top:1px solid var(--border-soft);text-decoration:none;color:var(--text)}
 .bell-list > li:first-child > .bell-row{border-top:0}

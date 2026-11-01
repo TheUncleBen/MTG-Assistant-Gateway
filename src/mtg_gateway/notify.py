@@ -126,6 +126,11 @@ GROUP_RE = re.compile(r"^deck-\d{1,12}$")
 NEW_DECKS = "0"  # the group of new decks an assistant proposed: no deck of their own yet
 
 RECOUNT_DELAY = 1.0  # seconds: changes close together (an apply all, a sweep) are counted once
+# The website's bell keeps the newest of the gateway's own alerts per member (0.7.46 audit QG-16):
+# the kinds below; "proposals" is read live (what waits now) and "alerts" are Archidekt's own,
+# which the bell reads from Archidekt already; a test message is for the phone alone.
+KEPT_ALERTS = 50
+BELL_EVENTS = ("prices", "reports", "summary")
 WAITING_TEXT = "Open it to look at the changes, then apply or reject them."
 
 
@@ -424,10 +429,14 @@ class Notifier:
         self, sub: str, event: str, title: str, message: str, path: str = "/", group: str | None = None
     ) -> bool:
         """Publish to the member's topic when they opted in and want this kind of event
-        (``event``: proposals, reports, prices, summary or test)."""
+        (``event``: proposals, reports, prices, summary or test). A price alert, a finished
+        report and a summary are kept for the website's bell first (:func:`bell_rows`), push
+        or no push."""
+        p = prefs(self.db, sub)
+        if event in BELL_EVENTS and p.get(f"on_{event}", True):
+            self.db.add_gateway_alert(sub, event, title, message, path, keep=KEPT_ALERTS)
         if not self.enabled:
             return False
-        p = prefs(self.db, sub)
         if not p["ntfy_on"] or not p["ntfy_topic"]:
             return False
         if event in EVENTS and not p[f"on_{event}"]:
@@ -458,8 +467,9 @@ class Notifier:
     def soon(
         self, sub: str, event: str, title: str, message: str, path: str = "/", group: str | None = None
     ) -> None:
-        """Send in the background: the caller (a proposal, a report) never waits for ntfy."""
-        if self.enabled:
+        """Send in the background: the caller (a proposal, a report) never waits for ntfy. An
+        alert the bell keeps is recorded even with no push server."""
+        if self.enabled or event in BELL_EVENTS:
             self._background(self.send(sub, event, title, message, path, group))
 
     def withdraw_soon(self, sub: str, group: str) -> None:
