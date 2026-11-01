@@ -266,7 +266,7 @@ class PriceService:
         self._run_lock = asyncio.Lock()
         self.binder = BinderStore(db)
         # each member's watchlist rows as last worked out (card_summaries): (stamp, rows)
-        self._summaries: dict[str, tuple[tuple[int, str], list[dict[str, Any]]]] = {}
+        self._summaries: dict[str, tuple[tuple[int, int, str], list[dict[str, Any]]]] = {}
         # Reads a member's whole Binder from Archidekt (collection.CollectionService.read_whole,
         # set by app.py): (rows, complete). None: Binders are not read (no collection service).
         self.read_binder: Callable[[str], Awaitable[tuple[list[dict[str, Any]], bool]]] | None = None
@@ -281,6 +281,16 @@ class PriceService:
     def _rows(self, sql: str, args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self.db._lock:
             return [dict(r) for r in self.db._conn.execute(sql, args).fetchall()]
+
+    def _records(self, sql: str, args: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        """As _rows, for many rows: plain tuples made into dicts by their column names, which is
+        quicker than a dict of each sqlite3.Row (a list at the cap is 5,000 rows of 30 columns)."""
+        with self.db._lock:
+            cur = self.db._conn.cursor()
+            cur.row_factory = None
+            cur.execute(sql, args)
+            names = [d[0] for d in cur.description]
+            return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
 
     def points(self, scryfall_id: str | None, days: int = 365) -> list[dict[str, Any]]:
         """A printing's stored points, oldest first, the last ``days`` days."""
@@ -386,10 +396,13 @@ class PriceService:
         """Every watched card's row without its history: the latest price and its day, and the
         change over 1, 7 and 30 days, as card_view works them out, in one query (each point is an
         index lookup), so a list of thousands draws, filters and sorts without reading a year of
-        prices per card. The rows are kept until anything is written to the database (a watch, an
-        alert, the day's prices, or a change by another writer: the connection's change count) or
-        the day turns, so a list at the cap costs the query once, not on every view."""
-        stamp = (self.db._conn.total_changes, day_of(now()))
+        prices per card. The rows are kept until something they are worked out from is written (a
+        watch, an alert, a list, a price, the member's Binder as last read, by any statement:
+        Database.watchlist_stamp) or the day turns, so a list at the cap costs the query once, not
+        on every view. Writes to anything else (a Binder visit, an assistant's tool call, another
+        member's watches) leave them in place. The stamp is read before the rows: a write between
+        the two only works them out again."""
+        stamp = (*self.db.watchlist_stamp(sub), day_of(now()))
         kept = self._summaries.get(sub)
         if kept is not None and kept[0] == stamp:
             return [dict(v) for v in kept[1]]
@@ -401,41 +414,38 @@ class PriceService:
 
     def _card_summaries(self, sub: str) -> list[dict[str, Any]]:
         span = self._since(366)
+        # a point with a price in the row's finish (dollars or euros), and that price in the
+        # row's currency: dollars when its newest point has them, else euros (as headline)
+        priced = (
+            "(CASE {w}.finish "
+            + " ".join(f"WHEN '{f}' THEN {col}" for f, col in _PRICED_IN.items())
+            + " END) IS NOT NULL"
+        )
+        usd, eur = _USD_IN.format(w="m", p="p"), _EUR_IN.format(w="m", p="p")
+        in_cur = f"CASE WHEN m.u0 IS NOT NULL THEN {usd} ELSE {eur} END"
 
-        def nth(n: int) -> str:
-            # the day of the newest priced point at or before n days before the latest one
+        def before(n: int) -> str:
+            # the price of the newest priced point at or before n days before the newest one
             return (
-                f"(SELECT p.day FROM price_points p WHERE p.scryfall_id = m.pkey AND p.day <= "
-                f"date(m.d0, '-{n} day') AND p.day >= ? AND (CASE m.finish "
-                + " ".join(f"WHEN '{f}' THEN {col}" for f, col in _PRICED_IN.items())
-                + " END) IS NOT NULL ORDER BY p.day DESC LIMIT 1)"
+                f"(SELECT {in_cur} FROM price_points p WHERE p.scryfall_id = m.pkey AND p.day <= "
+                f"date(m.d0, '-{n} day') AND p.day >= ? AND {priced.format(w='m')} "
+                f"ORDER BY p.day DESC LIMIT 1) AS b{n}"
             )
 
-        newest = (
-            "(SELECT p.day FROM price_points p WHERE p.scryfall_id = w.pkey AND p.day >= ? AND "
-            "(CASE w.finish "
-            + " ".join(f"WHEN '{f}' THEN {col}" for f, col in _PRICED_IN.items())
-            + " END) IS NOT NULL ORDER BY p.day DESC LIMIT 1)"
-        )
-        # the four days first, then each day's point by its key: plain columns, nothing to decode
-        prices_of = ", ".join(
-            f"{_USD_IN.format(w='k', p=f'q{n}')} AS u{n}, {_EUR_IN.format(w='k', p=f'q{n}')} AS e{n}"
-            for n in (0, *CHANGE_DAYS)
-        )
-        joins = " ".join(
-            f"LEFT JOIN price_points q{n} ON q{n}.scryfall_id = k.pkey AND q{n}.day = k.d{n}"
-            for n in (0, *CHANGE_DAYS)
-        )
-        # each step is MATERIALIZED, or SQLite works the newest day out again inside each of the
-        # three lookups that use it (eight index searches a row instead of four)
-        rows = self._rows(
+        # each step is MATERIALIZED, or SQLite works the newest day out again inside each lookup
+        # that uses it; each earlier price is one index search (its day and its price together)
+        rows = self._records(
             "WITH w AS MATERIALIZED (SELECT watch_cards.*, CASE WHEN set_code = '' AND oracle_id IS "
             f"NOT NULL THEN '{CHEAPEST}' || oracle_id ELSE scryfall_id END AS pkey FROM watch_cards "
             "WHERE sub = ?), "
-            f"m AS MATERIALIZED (SELECT w.*, {newest} AS d0 FROM w), "
-            f"k AS MATERIALIZED (SELECT m.*, {nth(1)} AS d1, {nth(7)} AS d7, {nth(30)} AS d30 FROM m) "
-            f"SELECT k.*, {prices_of} FROM k {joins} ORDER BY k.name, k.set_code, k.finish",
-            (sub, span, span, span, span),
+            "d AS MATERIALIZED (SELECT w.*, (SELECT p.day FROM price_points p WHERE p.scryfall_id = w.pkey "
+            f"AND p.day >= ? AND {priced.format(w='w')} ORDER BY p.day DESC LIMIT 1) AS d0 FROM w), "
+            f"m AS MATERIALIZED (SELECT d.*, {_USD_IN.format(w='d', p='q')} AS u0, "
+            f"{_EUR_IN.format(w='d', p='q')} AS e0 FROM d LEFT JOIN price_points q ON q.scryfall_id = "
+            "d.pkey AND q.day = d.d0) "
+            f"SELECT m.*, {', '.join(before(n) for n in CHANGE_DAYS)} FROM m "
+            "ORDER BY m.name, m.set_code, m.finish",
+            (sub, span, *(span for _ in CHANGE_DAYS)),
         )
         # "In binder · you own N": the copies of each name in the member's Binder as last read
         # whole (binder_prices), one query for the whole list; nothing until a first read
@@ -449,17 +459,16 @@ class PriceService:
         }
         out = []
         for r in rows:
-            view = {**self._card_head(r), "currency": "usd", "price": None, "day": None, "key": r["pkey"]}
-            view["scryfall_id"] = r.get("scryfall_id")
-            view["owned"] = owned.get(_norm(r["name"]), 0)
+            view = self._card_head(r)  # a new dict: added to in place
+            view.update(currency="usd", price=None, day=None, key=r["pkey"], scryfall_id=r.get("scryfall_id"))
+            view["owned"] = owned.get(_norm(r["name"]), 0) if owned else 0
             if r["d0"] is not None:
                 # dollars, or euros when the point has no dollar price (as headline)
                 cur = "usd" if r["u0"] is not None else "eur"
                 price = r["u0"] if cur == "usd" else r["e0"]
                 view.update(currency=cur, price=price, day=r["d0"])
                 for n in CHANGE_DAYS:
-                    before = r[f"u{n}"] if cur == "usd" else r[f"e{n}"]
-                    view[f"change_{n}d_pct"] = pct_change(before, price)
+                    view[f"change_{n}d_pct"] = pct_change(r[f"b{n}"], price)
             out.append(view)
         return out
 
