@@ -187,12 +187,14 @@ def add_folder_routes(server: MCPServer, state: AppState) -> FolderJobs:
     # -- folders -------------------------------------------------------------------------------
     @server.custom_route("/decks/api/folders", methods=["GET"], include_in_schema=False)
     async def folder_list(request: Request) -> Response:
-        """The member's folders for the Move and Inside lists: the backup folder never shows."""
+        """The member's folders for the Move and Inside lists: the backup folder never shows. The
+        tree My decks keeps (folder_view), which every write the member sends forgets; the move or
+        folder write itself checks the tree on Archidekt."""
         sub, refused = await member(request, write=False)
         if refused:
             return refused
         try:
-            info = await decks.folders(sub)
+            info = await decks.folder_view(sub)
         except DeckError as exc:
             return _from(exc)
         return ok(root_id=info["root_id"], folders=[_folder_out(f) for f in visible_folders(info)])

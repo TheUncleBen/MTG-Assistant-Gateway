@@ -41,7 +41,9 @@ from .theme import esc, icon
 
 PROFILE_TTL = 30.0  # seconds the profile read is kept for the pages (a press forgets it)
 COUNT_TTL = 60.0  # the bell's count
-LIST_TTL = 10.0  # the bell's list: Archidekt's own bell asks at most once every 10 s
+# The Alerts list (the page and the bell's box), kept per member this long; any write the member
+# sends forgets it (forget_list), so their own reply, follow or vote never shows the list from before.
+LIST_TTL = 60.0
 PROFILE_WAIT = 3.0  # seconds a page waits for the profile read before it says Archidekt did not answer
 PICTURE_BODY_LIMIT = profile.AVATAR_MAX_BYTES + 16_000  # the file plus the form's own fields
 HIST = "A copy of your profile from just before is kept under History."
@@ -167,11 +169,21 @@ _COUNT: dict[str, tuple[float, int]] = {}
 _LIST: dict[str, tuple[float, dict[str, Any]]] = {}
 _LOCKS: dict[str, asyncio.Lock] = {}
 _LAST_ERROR: dict[str, str] = {}
+_LIST_GEN: dict[str, int] = {}  # sub -> the member's writes seen (forget_list)
 
 
 def forget(sub: str) -> None:
     """A press changed the profile: the next page reads it again."""
     _PROFILE.pop(sub, None)
+
+
+def forget_list(sub: str, _path: str = "") -> None:
+    """A write the member sent (DeckService.write_hooks): the next Alerts view reads the list again,
+    and a read under way meanwhile keeps nothing."""
+    _LIST.pop(sub, None)
+    _LIST_GEN[sub] = _LIST_GEN.get(sub, 0) + 1
+    if len(_LIST_GEN) > 10_000:
+        _LIST_GEN.clear()
 
 
 def forget_all(sub: str) -> None:
@@ -239,8 +251,10 @@ async def notification_list(decks: Any, sub: str) -> dict[str, Any]:
     hit = _LIST.get(sub)
     if hit and hit[0] > time.monotonic():
         return hit[1]
+    gen = _LIST_GEN.get(sub, 0)
     got = await profile.notifications(decks, sub)
-    _LIST[sub] = (time.monotonic() + LIST_TTL, got)
+    if _LIST_GEN.get(sub, 0) == gen:
+        _LIST[sub] = (time.monotonic() + LIST_TTL, got)
     if notify.prefs(decks.db, sub)["ntfy_on"]:
         # what the member just saw here is never pushed to their phone later (alerts_push.py)
         alerts_push.seen_in_bell(decks.db, sub, profile.user_id(decks, sub), got["notifications"])
@@ -607,6 +621,8 @@ BELL_NOTE = (
 
 def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
     decks = h.decks
+    if forget_list not in decks.write_hooks:
+        decks.write_hooks.append(forget_list)
     page = h.page
     check_csrf = h.check_csrf
     s = h.s
