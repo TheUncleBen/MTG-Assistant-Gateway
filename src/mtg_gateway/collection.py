@@ -2398,7 +2398,8 @@ ul.collgrid .act{display:flex;align-items:center;min-width:0}
 @media (max-width:420px){
   html:not([data-card-size=l]) ul.collgrid{
     grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
-  ul.collgrid .cc .kebab{width:44px} }
+  ul.collgrid .cc .kebab{width:44px}
+}
 /* Select (0.7.46 audit QG-17): a tick box on every tile and row, the bar when one is ticked */
 .collection .col-bulkform{display:none}
 .collection .chk{display:grid;place-items:center;width:44px;height:44px;cursor:pointer;flex:0 0 auto}
@@ -2407,6 +2408,15 @@ ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;align-items:center
 ul.collgrid .nm .chk{grid-column:1;grid-row:1;margin-left:-.4rem}
 ul.collgrid .nm .name{grid-column:2;grid-row:1}
 ul.collgrid .nm .kebab{grid-column:3;grid-row:1}
+/* two tiles a row on a narrow phone left the name 81 px between Select's tick box and the ⋮ (two
+   44 px targets), breaking "Bannerkeeper": the name takes the first row whole and the tick box
+   and the ⋮ share the row under it */
+@media (max-width:420px){
+  html:not([data-card-size=l]) ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-rows:auto auto}
+  html:not([data-card-size=l]) ul.collgrid .nm .name{grid-column:1 / -1;grid-row:1}
+  html:not([data-card-size=l]) ul.collgrid .nm .chk{grid-column:1;grid-row:2}
+  html:not([data-card-size=l]) ul.collgrid .nm .kebab{grid-column:3;grid-row:2} }
 #col-notes .notice form.inline{display:inline-flex;margin:0 0 0 .5rem;vertical-align:middle}
 #col-notes .notice form.inline .btn{margin:0}
 ul.collgrid .cc.sel .pic,ul.colllist li.sel{outline:3px solid var(--orange-ctl);outline-offset:-3px}
