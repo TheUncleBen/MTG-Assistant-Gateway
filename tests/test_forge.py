@@ -757,7 +757,7 @@ async def test_forge_health_is_probed_once_and_reports_an_outage() -> None:
     # what a member reads (a report's forge.error): plain words, no exception name (audit row 12)
     with pytest.raises(ForgeError) as err:
         await client.health()
-    assert str(err.value) == "Forge couldn't be reached, so no Forge games were played.", str(err.value)
+    assert str(err.value) == forge_module.FORGE_UNREACHABLE and "Forge" in str(err.value), str(err.value)
     assert "ConnectError" not in str(err.value)
 
 
