@@ -356,8 +356,8 @@ details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
 
 .wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 1rem}
 main.wrap{flex:1;padding:1rem 1rem 3rem}
-h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
+h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:break-word}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:break-word}
 h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
@@ -1160,6 +1160,11 @@ _MOBILE_RULES = """
   body{b} .tabbar > a,body{b} .tabbar details.more summary{min-width:0;height:auto;min-height:56px;
     text-align:center;line-height:1.15}
   body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* large text: when a label no longer fits its tab (static/topbar.js measures), the bar shows the
+     icons alone and keeps every name for screen readers, so no tab reads "Assi…" (audit D13) */
+  body{b} .tabbar.icons > a > .lbl,body{b} .tabbar.icons details.more summary .lbl{position:absolute;
+    width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  body{b} .tabbar.icons > a,body{b} .tabbar.icons details.more summary{gap:0}
   body{b} .tabbar details.more summary.on,
   body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
@@ -1295,8 +1300,8 @@ html[data-card-size=s] ul.folderlist.grid{
 html[data-card-size=l] ul.folderlist.grid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,20.25rem),1fr))}
 /* card search, the collection and the printing picker */
-html[data-card-size=s] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,126px),1fr))}
-html[data-card-size=l] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,227px),1fr))}
+html[data-card-size=s] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,9rem),1fr))}
+html[data-card-size=l] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,16.2rem),1fr))}
 html[data-card-size=s] ul.collgrid{
   grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
 html[data-card-size=l] ul.collgrid{
@@ -1359,8 +1364,20 @@ main.wrap.ui-wide{max-width:1200px}
 /* position:relative: a part's count words for screen readers (.sr-only, absolutely placed) stay
    inside the switch's scroller; placed against the page, they widened it on a phone at 200% text */
 .hubseg{display:inline-flex;gap:2px;padding:3px;border-radius:12px;background:var(--seg-track);max-width:100%;
-  overflow-x:auto;scrollbar-width:none;position:relative}
+  overflow-x:auto;scrollbar-width:none;position:relative;border:0;margin:0}
 .hubseg::-webkit-scrollbar{display:none}
+/* the same switch as a row of tabs (role=tablist: the Export box, New deck's Cards, the Binder's
+   Add cards box, the custom card's faces, the Scan page) and as the admin pages' tabs: one tab
+   style everywhere (audit D11); a part that doesn't fit scrolls the switch, never wraps alone */
+.hubseg > button{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;flex:1 1 0;
+  min-height:38px;height:auto;margin:0;padding:0 1.1rem;border:0;border-radius:9px;background:transparent;
+  color:var(--text);font:inherit;font-weight:700;white-space:nowrap;cursor:pointer;line-height:1.2}
+.hubseg > button:hover{background:var(--surface-2);color:var(--text)}
+.hubseg > button[aria-selected=true]{background:var(--seg-on);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.hubseg > button:disabled{opacity:.5;cursor:default;background:transparent}
+.hubseg > button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.hubseg > button svg.i{width:16px;height:16px;flex:none}
+.hubseg > a,.hubseg > button{overflow-wrap:normal}
 /* more parts that way (static/topbar.js): the edge fades out */
 .hubseg.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
   mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
@@ -1377,15 +1394,15 @@ main.wrap.ui-wide{max-width:1200px}
 /* a part's count (Binder: Cards 18, Watchlist 3; mockup screen 8): a quiet grey pill */
 .hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;
   border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
-@media (pointer:coarse){ .hubseg a{min-height:44px} }
+@media (pointer:coarse){ .hubseg a,.hubseg > button{min-height:44px} }
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%}
   .hubbar{display:block}
   /* large text on a narrow phone: a part's name wraps between words, and a word longer than its
      part scrolls the switch sideways instead of the page */
-  .hubseg a{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15} }
+  .hubseg a,.hubseg > button{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15} }
 .ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
-.ui-head h1{margin:0}
+.ui-head h1{margin:0;min-width:0}
 /* enlarged text on a phone: the heading shrinks with the screen so a short word stays whole
    (overflow-wrap still breaks a word too long for any screen) */
 @media (max-width:599.98px){.ui-head h1{font-size:min(2rem,14vw)}}
@@ -1495,8 +1512,8 @@ main.wrap.ui-wide{max-width:1200px}
    (--cols-sm) with the status label beside the title (.stin) */
 .ui-table{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
   margin:0 0 1rem}
-.ui-table .tr{display:grid;grid-template-columns:var(--cols);align-items:center;gap:0 .75rem;min-height:44px;
-  padding:.45rem .75rem;border-top:1px solid var(--border-soft)}
+.ui-table .tr{display:grid;grid-template-columns:var(--cols);align-items:center;gap:0 10px;min-height:44px;
+  padding:.45rem 10px;border-top:1px solid var(--border-soft)}
 .ui-table .tr:first-child{border-top:0}
 .ui-table .th{font-size:.8rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;
   letter-spacing:.03em;background:var(--surface-2);min-height:36px}
@@ -1538,7 +1555,7 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table .sub{display:flex}
 }
 @media (max-width:599.98px){
-  .ui-table .tr{grid-template-columns:var(--cols-sm);padding:.55rem .6rem}
+  .ui-table .tr{grid-template-columns:var(--cols-sm);padding:.55rem 8px}
   .ui-table .th{display:none}
   .ui-table .sm-hide,.ui-table .act .sm-hide{display:none}
   .ui-table .stin{display:inline-flex;margin-left:.35rem;vertical-align:middle}
@@ -1555,7 +1572,8 @@ main.wrap.ui-wide{max-width:1200px}
    then the row's one main action as a capsule and its ⋮ together at the end, never on a line of
    their own. The columns a wide table lined up are the facts line here, so there is no header to
    fold away (the waiting list keeps its check-every row). */
-.ui-table.ui-rows .tr{grid-template-columns:var(--cols);gap:0 .6rem;padding:.5rem .75rem}
+/* the gaps and side padding in px: larger text widens the words, not the space between them */
+.ui-table.ui-rows .tr{grid-template-columns:var(--cols);gap:0 8px;padding:.5rem 10px}
 .ui-table.ui-rows .tr.th{grid-template-columns:var(--cols)}
 .ui-table.ui-rows .title .t{font-weight:600}
 .ui-table.ui-rows .title .t a{font-weight:600}
@@ -1573,7 +1591,12 @@ main.wrap.ui-wide{max-width:1200px}
    main action's chevron goes, as the title opens the same and the ⋮ has it, so the title keeps
    room for whole words (independent review 2, M5 sweep) */
 .ui-table.ui-rows{container-type:inline-size}
-@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > .ui-cap{display:none} }
+@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > .ui-cap{display:none}
+  /* a group row's Open deck drops under the name, so the name keeps whole words */
+  .ui-table.ui-rows .tr.group{display:flex;flex-wrap:wrap;gap:.25rem 8px}
+  .ui-table.ui-rows .tr.group > :first-child{flex:none}
+  .ui-table.ui-rows .tr.group .m{flex:1 1 8em}
+  .ui-table.ui-rows .tr.group .act{margin-left:auto} }
 .ui-table.ui-rows .act .acts[hidden]{display:none}
 /* a deck's group row: the name with its count under it, Open deck at the end */
 .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
@@ -1585,21 +1608,29 @@ main.wrap.ui-wide{max-width:1200px}
 /* a capsule on the group row's darker ground stays visible */
 .ui-table.ui-rows .tr.group .ui-cap{background:var(--surface-3) padding-box}
 @media (max-width:599.98px){
-  .ui-table.ui-rows .tr{padding:.5rem .6rem}
+  .ui-table.ui-rows .tr{padding:.5rem 8px}
   .ui-table.ui-rows .tr .act{margin-right:-6px}
   /* the main action is its chevron: the title keeps its line at any text size */
   .ui-table.ui-rows .act > .ui-cap{padding:0;margin:0;border:0;background:none}
   .ui-table.ui-rows .act > .ui-cap:hover{background:var(--surface-2)}
   .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto}
   .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
+  /* the group's Open deck keeps its capsule inside the row (audit D10) */
+  .ui-table.ui-rows .tr.group .act{margin-right:0}
+  .ui-table.ui-rows .tr.group .act > .ui-cap{padding:0 .6rem;min-height:36px}
+  .ui-table.ui-rows .tr.group .act > .ui-cap{min-height:44px}
   /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
      grows above and below the words without moving the lines around it (F14) */
   .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
     margin:-13px 0}
 }
+/* a link inside a line of text (a row's title, a deck named in a panel, a widget or a report's
+   facts line, the Install page's address): on a touch screen its tap area grows above and below
+   the words to 44 px without moving the lines around it (the padding makes the box, the negative
+   margins keep the line box as it is) */
 @media (pointer:coarse){
-  .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
-    margin:-13px 0}
+  .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
+  .rv-meta a,.inst a.mdaddr,a.tap{display:inline-block;padding:14px 0;margin:-14px 0;min-width:44px}
 }
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
@@ -1730,14 +1761,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-checks label{display:flex;align-items:center;gap:.6rem;min-height:44px;margin:0;font-weight:400}
 .ui-checks input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
 .ui-locked{display:inline-flex;align-items:center;gap:.3rem;color:var(--text-muted);font-size:.84rem}
-/* the admin pages' own tabs: even, wrapping in full rows; the current one tinted */
-.adm-nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6.4rem),1fr));gap:.35rem;
-  margin:0 0 .75rem}
-.adm-nav a{display:flex;align-items:center;justify-content:center;min-height:var(--ctl);padding:0 .4rem;
-  border:1px solid var(--card-border);border-radius:var(--radius);background:var(--surface);color:var(--text);
-  font-weight:700;text-decoration:none;white-space:nowrap}
-.adm-nav a[aria-current]{background:var(--orange-tint);border-color:var(--orange-text);
-  color:var(--orange-text)}
+/* the admin pages' tabs and the lists' tabs: the site's one switch (.hubseg), full width */
+.adm-nav{display:flex;width:100%;margin:0 0 .75rem}
 
 /* dashboard pages: a row of widgets (quick starts), then the full list */
 .ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
@@ -1929,11 +1954,7 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
   Menlo,Consolas,monospace;font-size:.9rem;line-height:1.4}
 .mtgbox .body .files{display:flex;flex-wrap:wrap;gap:.5rem;margin:0}
 .mtgbox .body .files .btn{margin:0}
-.mtgbox .body .segc{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 .5rem}
-.mtgbox .body .segc [role=tab]{min-height:var(--ctl);padding:0 .9rem;font-weight:400;
-  border-color:var(--border);background:var(--surface-2);color:var(--text)}
-.mtgbox .body .segc [role=tab][aria-selected=true]{background:var(--orange);border-color:var(--orange);
-  color:var(--on-orange);font-weight:700}
+.mtgbox .body .segc{display:flex;margin:0 0 .5rem}  /* the shared switch (.hubseg) */
 .mtgbox .body .check{display:flex;gap:.6rem;align-items:center;min-height:44px}
 .mtgbox .body .check input{width:20px;height:20px;min-height:0;margin:0;accent-color:var(--orange-ctl);
   flex:none}
@@ -2230,8 +2251,11 @@ SEARCH_PANEL_CSS = """
   .spanel .xlink,.spanel .rbar .more,.spanel .rbar .dirw,.spanel .rbar .size,.spanel .rbar .lbl,
   .spanel .rbar .clr,.spanel .rbar .brk,.spanel .rbar .brka,.spanel .rbar.cards .brka{display:none}
   .spanel .rbar .sort:has(.sortcw) .sortw{display:none}
-  .spanel .rbar .sortcw{display:block;flex:1 1 7em;min-width:0}
-  .spanel .rbar .g.sort{flex:1 1 7em;min-width:7em}
+  /* Sort takes a row of its own under the count and the view, so the chosen order shows whole on
+     one line at any text size (audit D12); Clear filters stays last */
+  .spanel .rbar .sortcw{display:block;flex:1 1 auto;min-width:0}
+  .spanel .rbar .g.sort{flex:1 1 100%;min-width:0;order:1}
+  .spanel .rbar .clr{order:2}
   .spanel .rbar .sortw,.spanel .rbar .sortw select,.spanel .rbar .sortw .msel-btn,
   .spanel .rbar .sortcw select,.spanel .rbar .sortcw .msel-btn{width:100%;flex:1 1 auto}
   .spanel .rbar .sortcw .msel-btn{padding:.4rem 1.6rem .4rem .6rem;background-position:right .5rem center;

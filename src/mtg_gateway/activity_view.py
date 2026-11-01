@@ -1214,7 +1214,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
         search=_search(log, names, admin_page=True, member_sub=None),
         filters=filters,
         search_label="Search activity",
-        placeholder="Search member, event or detail",
+        placeholder="Search",
         now=now,
     )
     if not rows:
@@ -1378,7 +1378,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
         search=_search(log, names, admin_page=False, member_sub=sub),
         filters=filters,
         search_label="Search my activity",
-        placeholder="Search event, deck or app",
+        placeholder="Search",
         now=now,
     )
     if not rows:

@@ -12,6 +12,7 @@ Archidekt asked the gateway to slow down, or other work for the member is still 
 from __future__ import annotations
 
 import html
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -180,6 +181,30 @@ def busy_response(
     return resp
 
 
+def age_words(read_at: float, now: float | None = None) -> str:
+    """How long ago ``read_at`` (wall time) was, in minutes or hours ("3 minutes", "1 hour")."""
+    seconds = max(0, int((time.time() if now is None else now) - read_at))
+    n, unit = (max(1, seconds // 60), "minute") if seconds < 3600 else (seconds // 3600, "hour")
+    return f"{n} {unit}{'' if n == 1 else 's'}"
+
+
+def held_text(exc: BaseException, read_at: float, what: str, *, now: float | None = None) -> str:
+    """What a page says over a copy shown as last read because Archidekt can't be asked
+    (decks.ShortReads.get_held); ``what`` names it: "your binder", "this list"."""
+    plan = busy_plan(exc)
+    why = plan.title if plan else "Archidekt can't be asked"
+    return f"{why.rstrip('.')}, so this is {what} as it was read {age_words(read_at, now)} ago."
+
+
+def held_html(exc: BaseException, read_at: float, what: str, url: str) -> str:
+    """The strip over a page shown as last read, with Try again (a fresh read of the page): the
+    deck page's (deckpage.deck_held_html) for the Binder, Lists, profiles and search."""
+    return (
+        f"<p class='notice warn held' role='status'>{html.escape(held_text(exc, read_at, what))} "
+        f"<a class='btn' href='{html.escape(url)}'>Try again</a></p>"
+    )
+
+
 def busy_text_response(exc: BaseException) -> Response | None:
     """The same answer for a download (export files): plain text, the same status and headers."""
     plan = busy_plan(exc)
@@ -222,5 +247,7 @@ __all__ = [
     "busy_plan",
     "busy_response",
     "busy_text_response",
+    "held_html",
+    "held_text",
     "same_url",
 ]

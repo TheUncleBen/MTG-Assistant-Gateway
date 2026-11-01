@@ -19,7 +19,7 @@ import pytest
 
 from mtg_gateway import profile_page
 from mtg_gateway.archidekt import Pacer
-from mtg_gateway.decks import ShortReads
+from mtg_gateway.decks import DeckError, ShortReads
 from mtg_gateway.timing import speed_log
 
 from .conftest import Stack, stack_with
@@ -374,3 +374,38 @@ async def test_a_reload_of_a_deck_list_that_fails_shows_the_kept_list(stack: Sta
     finally:
         stack.ark.inject.clear()
         await b.aclose()
+
+
+async def test_the_last_good_read_outlives_the_members_write_and_stands_in_while_busy() -> None:
+    """A page's last good read is kept through the member's writes (dated, for a page shown as
+    last read while Archidekt can't be asked); a refusal that is not Archidekt being busy, and a
+    refusal with nothing kept, are raised as they were."""
+    kept = ShortReads(60.0)
+    calls = 0
+
+    async def fetch() -> dict:
+        nonlocal calls
+        calls += 1
+        return {"n": calls}
+
+    async def busy() -> dict:
+        raise DeckError("rate_limited", "Too many requests", retry_after=30)
+
+    async def gone() -> dict:
+        raise DeckError("not_found", "No such list")
+
+    assert (await kept.get_held("m1", ("k",), fetch)) == ({"n": 1}, None)
+    kept.drop("m1")  # the member's write: the fresh copy goes, the last read stays
+    got, held = await kept.get_held("m1", ("k",), busy)
+    assert got == {"n": 1} and held["held_at"] > 0 and held["refused"].kind == "rate_limited"
+    got["n"] = 9  # a page changing what it got never changes the kept copy
+    assert (await kept.get_held("m1", ("k",), busy))[0] == {"n": 1}
+    with pytest.raises(DeckError, match="No such list"):
+        await kept.get_held("m1", ("k",), gone)
+    with pytest.raises(DeckError, match="Too many"):
+        await kept.get_held("m1", ("other",), busy)  # nothing kept under that key
+    with pytest.raises(DeckError, match="Too many"):
+        await kept.get_held("m2", ("k",), busy)  # another member's read is not this member's
+    kept.forget("m1")  # the link changed: the last read goes too
+    with pytest.raises(DeckError, match="Too many"):
+        await kept.get_held("m1", ("k",), busy)

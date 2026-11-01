@@ -43,7 +43,7 @@ from .archidekt import (
     page_turn,
 )
 from .binder_prices import BINDER_PAGE_SIZE, BINDER_READ_PAGES, BinderStore
-from .busy import busy_body, busy_headers, busy_plan, same_url
+from .busy import busy_body, busy_headers, busy_plan, held_html, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
 from .decks import DeckError, _writing, archidekt_wait, current_client, no_card_called, reloading
@@ -1875,7 +1875,7 @@ def add_box_html(
     cond = d.get("condition") if d.get("condition") in CONDITIONS[1:] else "NM"
     lang = d.get("language") if d.get("language") in LANGUAGES else "EN"
     tabs = (
-        "<div class='segc coltabs' role='tablist' aria-label='Add cards'>"
+        "<div class='hubseg segc coltabs' role='tablist' aria-label='Add cards'>"
         "<button type='button' role='tab' id='col-tab-add' data-coltab='add' "
         f"aria-selected='{str(not imp).lower()}' "
         f"aria-controls='col-addform'>{icon('plus')}Add a card</button>"
@@ -1890,7 +1890,8 @@ def add_box_html(
         "<input type='hidden' name='action' value='add'>"
         "<div class='fl'><label class='field span'><span>Name</span>"
         "<input id='addname' type='text' name='name' data-suggest='cards' "
-        "placeholder='Name, or “name (SET) 123” for one printing' autocomplete='off' required></label>"
+        "placeholder='Name' autocomplete='off' required aria-describedby='addname-help'></label>"
+        "<p class='muted small' id='addname-help'>“Name (SET) 123” adds one printing.</p>"
         "<label class='field'><span>Copies</span><input id='addqty' type='number' name='quantity' value='1' "
         f"min='1' max='{MAX_QUANTITY}'></label>"
         f"<label class='field'><span>Finish</span><select id='addfinish' name='finish'>"
@@ -2392,10 +2393,12 @@ ul.collgrid .pic .fin,ul.collgrid .pic .cond{position:absolute;bottom:6px;font-s
   line-height:1.5;padding:0 .4rem;border-radius:4px;background:rgba(0,0,0,.72);color:#fff}
 ul.collgrid .pic .fin{right:6px} ul.collgrid .pic .cond{left:6px}
 ul.collgrid .act{display:flex;align-items:center;min-width:0}
-/* two tiles a row on a narrow phone at S and M (one at L) */
+/* two tiles a row on a narrow phone at S and M (one at L); with larger text (the columns are
+   sized in rem) one tile a row, so a card's name is never broken inside a word */
 @media (max-width:420px){
-  html:not([data-card-size=l]) ul.collgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  ul.collgrid .cc .kebab{width:38px} }
+  html:not([data-card-size=l]) ul.collgrid{
+    grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
+  ul.collgrid .cc .kebab{width:44px} }
 /* Select (0.7.46 audit QG-17): a tick box on every tile and row, the bar when one is ticked */
 .collection .col-bulkform{display:none}
 .collection .chk{display:grid;place-items:center;width:44px;height:44px;cursor:pointer;flex:0 0 auto}
@@ -2436,7 +2439,7 @@ ul.colllist{list-style:none;margin:0 0 1rem;padding:0;container-type:inline-size
 ul.colllist .tr{padding:.45rem .75rem}
 ul.colllist .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
 ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0}
-ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere}
+ul.colllist .cardc .name{font-weight:700;overflow-wrap:break-word}
 ul.colllist .s{display:block;color:var(--text-muted);font-size:.84rem;overflow-wrap:anywhere}
 ul.colllist .smline{display:none}
 ul.colllist .thumbbtn{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -3150,6 +3153,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         # the profile (the Visibility line by the title) is read beside the collection, not after
         # it: one wait on Archidekt for the page, not two in a row
         profile_read = asyncio.ensure_future(profile_or_none(state.decks, sub))
+        # the member's last good read of this listing, kept through their writes: shown dated
+        # while Archidekt can't be asked (decks.short_reads.last), as the deck page shows a deck
+        last_key = ("binder", json.dumps(lq, sort_keys=True, default=str))
+        held: tuple[float, Any] | None = None
         try:
             got = await listing(sub, lq)
             whole = (
@@ -3162,7 +3169,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             )
         except CollectionError as exc:
             notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
-            if (plan := busy_plan(exc)) is not None:
+            if (plan := busy_plan(exc)) is not None and (held := state.decks.short_reads.last(sub, last_key)):
+                got, whole = held[1]["got"], held[1]["whole"]
+                notes = held_html(exc, held[0], "your binder", same_url(request)) + notes
+            elif plan is not None:
                 # the Binder keeps its title and notes; the busy words sit where the list goes
                 body = head() + notes_html + f"<h2 class='busy-title'>{_esc(plan.title)}</h2>"
                 busy = page(
@@ -3175,15 +3185,18 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
                 busy.headers.update(busy_headers(plan))
                 return busy
-            status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
-            return page(
-                "Binder",
-                head() + notes_html + problem(exc),
-                sub=sub,
-                sid=sid,
-                status=status,
-                heading=False,
-            )
+            else:
+                status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
+                return page(
+                    "Binder",
+                    head() + notes_html + problem(exc),
+                    sub=sub,
+                    sid=sid,
+                    status=status,
+                    heading=False,
+                )
+        else:
+            state.decks.short_reads.keep_last(sub, last_key, {"got": got, "whole": whole})
         rows = got["rows"]
         tag_names = [str(t["name"]) for t in whole.get("tags") or [] if t.get("name")]
         tag_colors = tag_colors_of(whole.get("tags"))

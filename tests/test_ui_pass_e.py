@@ -143,7 +143,7 @@ async def test_phone_rows_keep_the_date_on_the_one_second_line(member: Browser) 
 async def test_the_new_package_box_matches_new_deck(member: Browser) -> None:
     page = (await member.http.get("/decks")).text
     box = re.search(r"<div[^>]*id='newpkg'.*?</form>", page, re.S).group(0)
-    assert "placeholder='e.g. Golgari staples'" in box
+    assert "placeholder='Golgari staples'" in box
     assert "aria-live='polite'>0/120</span>" in box and "0 / 120" not in box
     assert "data-count='np-name-c'" not in box  # counted by newpackage.js alone, as New deck's name
     assert ".dx-box .body .dx-two + .dx-two{margin-top:.75rem}" in page
@@ -200,7 +200,7 @@ async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None
     redesign (Binder › Lists), at its own address /collection/wants (the answer's "wants")."""
     account_lists.forget_counts("user-1")
     page = (await member.http.get("/lists/templates")).text
-    tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", page).group(0)
+    tabs = re.search(r"<nav class='hubseg adm-nav lp-tabs'.*?</nav>", page).group(0)
     assert tabs.count("<span class='n'>") == 1 and "data-counts='/lists/api/counts'" in tabs, tabs
     links = re.findall(r"<a href='/(?:lists|collection)/([a-z]+)'", tabs)
     got = (await member.http.get("/lists/api/counts")).json()
@@ -208,7 +208,7 @@ async def test_every_tab_has_its_count_on_a_first_visit(member: Browser) -> None
     assert set(links) <= set(got["counts"]), (links, got)
     assert all(isinstance(got["counts"][k], int) for k in links), got
     again = (await member.http.get("/lists/templates")).text
-    tabs = re.search(r"<nav class='adm-nav lp-tabs'.*?</nav>", again).group(0)
+    tabs = re.search(r"<nav class='hubseg adm-nav lp-tabs'.*?</nav>", again).group(0)
     assert tabs.count("<span class='n'>") == 6, tabs
 
 

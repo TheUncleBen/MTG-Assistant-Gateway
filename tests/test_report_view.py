@@ -488,3 +488,29 @@ def test_markdown_explains_each_group_and_lists_the_shortcuts() -> None:
     assert f"{rv.APPROX_HEADING}: " in part and "\n- " in part.split(rv.APPROX_HEADING)[1]
     text = rv.report_body_html(report()).split("id='ask-model'")[1].split("</textarea>")[0]
     assert "These cards need opponents, which the solo test does not have: " in text
+
+
+def test_the_same_simulation_text_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A report page reads its simulation block in several places (the header, the tiles, the
+    Markdown copy, the coverage line): the regex work runs once per block and each caller gets
+    its own copy to mark up."""
+    rv._PARSED.clear()  # cold, whatever an earlier test parsed
+    calls: list[str] = []
+    real = rv.split_sections
+    monkeypatch.setattr(rv, "split_sections", lambda text: (calls.append(text[:20]), real(text))[1])
+    block = {"tool": "goldfish_run", "ok": True, "text": GOLDFISH}
+    first = rv.parse_goldfish(block, deck_size=100)
+    second = rv.parse_goldfish(dict(block), deck_size=100)  # an equal block loaded again
+    assert len(calls) == 1
+    assert first == second and first is not second
+    first["honesty"]["unrecognized"].append({"name": "Scratch"})
+    assert (
+        rv.parse_goldfish(block, deck_size=100)["honesty"]["unrecognized"]
+        == second["honesty"]["unrecognized"]
+    )
+    # another deck size is no second parse (the text's own size wins; one it lacks is filled in
+    # after); another text is its own parse
+    assert rv.parse_goldfish(block, deck_size=60)["deck_size"] == first["deck_size"]
+    assert rv.parse_goldfish({"ok": True, "text": "Goldfish\nno size here"}, deck_size=60)["deck_size"] == 60
+    assert rv.parse_goldfish({"ok": True, "text": "Goldfish\nno size here"}, deck_size=99)["deck_size"] == 99
+    assert len(calls) == 2

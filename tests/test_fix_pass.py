@@ -151,7 +151,7 @@ async def test_the_deck_search_name_box_says_what_it_takes(stack: Stack) -> None
     try:
         r = await b.http.get("/search", headers=NAV)
         assert "Deck name, or an Archidekt link or deck ID" in r.text
-        assert "placeholder='Deck name, link or ID'" in r.text
+        assert "placeholder='Name or link'" in r.text
     finally:
         await b.aclose()
 

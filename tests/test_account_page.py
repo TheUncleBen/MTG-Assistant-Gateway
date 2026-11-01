@@ -139,10 +139,12 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
         )
         opened = (await b.http.get("/account/details?signout=1")).text
         assert "data-open" in opened.split("id='signout' role='dialog'", 1)[1][:120]
-        # the forget-choices page keeps its plain button behind its tick
+        # the forget-choices page: its button opens the shared confirm box
         choices = (await b.http.get("/account/details/choices")).text
         assert "<h1>Your view choices</h1>" in choices and "<h2>Your view choices</h2>" not in choices
-        assert "<div class='ui-actions'><button>Forget my view choices</button></div>" in choices
+        assert (
+            "Forget my view choices…</button>" in choices and "id='forget-choices' role='dialog'" in choices
+        )
         assert "href='/account/details/choices'" in page
     finally:
         await b.aclose()
@@ -322,7 +324,7 @@ async def test_the_forms_without_an_action_post_to_account_details(stack: Stack)
     b = await linked_browser(stack)
     try:
         page = (await b.http.get("/account/details/choices")).text
-        bare = re.findall(r"<form method='post'(?![^>]*action=)[^>]*>", page)
+        bare = re.findall(r"<form (?:id='[a-z-]+' )?method='post'(?![^>]*action=)[^>]*>", page)
         assert len(bare) >= 1, bare  # at least Forget my choices (Save approval mode moved, see below)
         csrf = await b.csrf()
         r = await b.http.post(

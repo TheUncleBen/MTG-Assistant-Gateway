@@ -181,7 +181,7 @@ async def test_the_add_cards_box_has_two_tabs_and_opens_from_the_old_address(sta
         assert "<option value='nonfoil' selected>Normal</option>" in box and "Non-foil" not in page
         assert "<option value='NM' selected>Near Mint (NM)</option>" in box
         assert "<option value='DMG'>Damaged (DMG)</option>" in box
-        assert "placeholder='Name, or “name (SET) 123” for one printing'" in box
+        assert "placeholder='Name'" in box and "“Name (SET) 123” adds one printing." in box
         assert "Scanning a pile is quicker" in box
         assert (
             "A collection CSV or a card list, one card per line, up to 5,000 rows at a time. "

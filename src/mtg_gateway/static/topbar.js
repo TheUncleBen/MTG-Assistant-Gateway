@@ -68,6 +68,47 @@
   } else if (window.requestAnimationFrame) requestAnimationFrame(fit); else fit();
   window.addEventListener("resize", fit);
 })();
+/* The phone's tab bar at large text: a tab's label that no longer fits its tab (text-only zoom, a
+   phone's font scale) would be cut to "Assi…". The bar then shows the icons alone (.icons) and
+   keeps every name for screen readers (theme.py). Each label is measured with its own font, not
+   by its box, so the measure is the same whether the labels show or not; it is read again when
+   the bar or a tab changes size (the text size changing) and when the window does. */
+(function () {
+  "use strict";
+  var bar = document.querySelector(".tabbar");
+  if (!bar) return;
+  var tabs = Array.prototype.filter.call(bar.querySelectorAll(":scope > a, :scope > details.more > summary"),
+    function (t) { return t.querySelector(".lbl"); });
+  if (!tabs.length) return;
+  var ctx = document.createElement("canvas").getContext("2d");
+  function fits() {
+    for (var i = 0; i < tabs.length; i++) {
+      var tab = tabs[i], lbl = tab.querySelector(".lbl"), cs = getComputedStyle(lbl);
+      // the rail (an open Fold, a tablet) wraps its labels instead; only a one-line label is measured
+      if (cs.whiteSpace !== "nowrap") continue;
+      if (cs.display === "none") continue;
+      ctx.font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+      var room = tab.getBoundingClientRect().width - 4;
+      if (room > 0 && ctx.measureText(lbl.textContent).width > room) return false;
+    }
+    return true;
+  }
+  function fit() {
+    // measured with the labels shown (hidden ones all read as one line), in one frame: nothing
+    // is painted between the two class changes
+    var had = bar.classList.contains("icons");
+    if (had) bar.classList.remove("icons");
+    var icons = !fits();
+    if (icons !== had || icons) bar.classList.toggle("icons", icons);
+  }
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(fit);
+    ro.observe(bar);
+    tabs.forEach(function (t) { ro.observe(t); });
+  } else fit();
+  window.addEventListener("resize", fit);
+})();
+
 /* A place's switch (theme.hub_switch) scrolls sideways on a narrow phone at large text: it opens
    scrolled to the page's own part. */
 (function () {
@@ -91,7 +132,7 @@
     n.classList.toggle("more-end", over && n.scrollLeft + n.clientWidth < n.scrollWidth - 1);
   }
   function show(n) {
-    var cur = n.querySelector("[aria-current=page]");
+    var cur = n.querySelector("[aria-current=page], [aria-selected=true]");
     if (cur && n.scrollWidth > n.clientWidth + 1) {
       var r = n.getBoundingClientRect(), c = cur.getBoundingClientRect();
       if (c.right > r.right) n.scrollLeft += c.right - r.right + 8;

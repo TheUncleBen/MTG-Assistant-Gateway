@@ -2359,16 +2359,29 @@ def _mode_card(state: Any, sub: str, csrf_in: str, *, primary: bool = True) -> s
 
 
 def _forget_choices_card(csrf_in: str) -> str:
-    """Once view choices follow the account, signing out no longer resets them; this does."""
+    """Once view choices follow the account, signing out no longer resets them; this does. The
+    button opens the box every action that can't be undone asks in (ui.box: Cancel, then Forget;
+    audit D17); without scripts the box is a plain panel under the card."""
     return (
         "<div class='card' id='choices'>"
         "<p>Your views, card size, stats choices and dismissed tips follow your "
         "account to every device. Light or dark mode stays on each device.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
-        # the tick on its own 44 px row, the button under it
-        "<div class='ui-checks'><label><input type='checkbox' name='confirm' value='yes' required>"
-        "<span>Yes, forget my view choices on every device</span></label></div>"
-        "<div class='ui-actions'><button>Forget my view choices</button></div></form></div>"
+        "<div class='ui-actions'><button type='button' class='btn-plain' "
+        f"{ui.box_open_attr('forget-choices')}>Forget my view choices…</button></div></div>"
+        + ui.box(
+            "forget-choices",
+            "Forget your view choices?",
+            f"<form id='forgetf' method='post'>{csrf_in}"
+            "<input type='hidden' name='action' value='forget_choices'>"
+            "<input type='hidden' name='confirm' value='yes'>"
+            "<p>Every device goes back to the usual views, card size, stats choices and tips. "
+            "Light or dark mode stays as it is on each device.</p></form>",
+            actions=[
+                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Forget my view choices", kind="danger-solid", form="forgetf"),
+            ],
+            close_href=section_href("choices"),
+        )
     )
 
 

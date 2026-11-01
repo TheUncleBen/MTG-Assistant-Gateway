@@ -552,7 +552,7 @@ def package_box_html(
             "package",
             "Package link or id",
             v.get("package", ""),
-            placeholder="https://archidekt.com/decks/…",
+            placeholder="Link or ID",
             required=True,
         )
         + "<div class='dx-two'>"
@@ -865,13 +865,13 @@ def new_package_box_html(
         f"<p class='muted small'>{esc(NEW_PACKAGE_INTRO)}</p>"
         "<div class='dx-two'>"
         "<div class='field'><label for='np-name'>Name (required)</label>"
-        f"<input id='np-name' type='text' name='name' value='{esc(name)}' placeholder='e.g. Golgari staples' "
+        f"<input id='np-name' type='text' name='name' value='{esc(name)}' placeholder='Golgari staples' "
         "required maxlength='120' autocomplete='off'>"  # counted by static/newpackage.js, as New deck's name
         "<div class='dx-under'><span></span>"
         f"<span class='muted small' id='np-name-c' aria-live='polite'>{len(name)}/120</span></div></div>"
         "<div class='field'><label for='np-kw'>Keywords (required)</label>"
         f"<input id='np-kw' type='text' name='keywords' value='{esc(v.get('keywords', ''))}' "
-        f"placeholder='shocklands, fetchlands' required maxlength='{packages.KEYWORDS_MAX}' "
+        f"placeholder='e.g. shocklands' required maxlength='{packages.KEYWORDS_MAX}' "
         "autocomplete='off'><div class='dx-under'><span class='muted small'>Words people search packages "
         "by, separated by commas.</span></div></div></div>"
         + "<div class='dx-two'><div class='field'><span class='lbl' id='np-bl'>Budget</span>"
@@ -944,7 +944,7 @@ CSS = """
 .dx-box .body .field label{display:block;font-weight:700;margin:0 0 .25rem}
 .dx-box .body .field input[type=text],.dx-box .body .field select,.dx-box .body .field textarea{width:100%}
 .dx-box .body textarea{min-height:5rem;font-family:inherit;font-size:.95rem;line-height:1.4}
-.dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));
+.dx-box .body .dx-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));
   gap:.5rem .75rem}
 .dx-box .body .dx-two .field + .field{margin-top:0}
 .dx-box .body .dx-two + .dx-two{margin-top:.75rem}  /* a row's help line clear of the next row's labels */

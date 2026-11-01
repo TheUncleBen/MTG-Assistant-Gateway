@@ -102,7 +102,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cs-more-wrap .muted{font-size:.9rem}
 .cs-more-wrap button{margin:0;min-width:12rem}
 /* the tile grid: as many tiles of the chosen size as fit (M 168 px at least; S and L in the theme) */
-.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,168px),1fr));gap:1rem .9rem;
+.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,12rem),1fr));gap:1rem .9rem;
   list-style:none;margin:0 0 1rem;padding:0}
 .cardgrid .cc{display:flex;flex-direction:column;gap:.5rem;min-width:0}
 .cardgrid .pic,.cardlist .pic{all:unset;display:block;cursor:pointer;position:relative;aspect-ratio:5/7;
@@ -471,7 +471,7 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
             label="Name",
             name="q",
             value=f.name,
-            placeholder="Any part of a name",
+            placeholder="Name",
             input_id="c-q",
             search_label="Search cards",
             cross_html=sp.cross_link("Search decks instead", "/search", "decks"),
@@ -589,6 +589,11 @@ def _add_button(card: dict[str, Any], *, can_add: bool, reason: str, printing: b
 HINT_HTML = (
     "<p class='ui-hint cs-hint' id='cs-hint'>Watch a card with its <b>Watch</b> button, or right-click it "
     "(press and hold on a phone) for more.</p>"
+)
+# the same hint in the Android app: a phone's words only (audit D15)
+HINT_APP_HTML = (
+    "<p class='ui-hint cs-hint' id='cs-hint'>Watch a card with its <b>Watch</b> button, or press and hold "
+    "it for more.</p>"
 )
 
 

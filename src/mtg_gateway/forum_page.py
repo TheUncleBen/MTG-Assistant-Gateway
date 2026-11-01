@@ -378,7 +378,7 @@ def threads_html(got: dict[str, Any], *, strip: str = "") -> str:
     tools = ui.toolbar(
         section_href(group, section),
         search_label="Search threads",
-        placeholder="Search threads",
+        placeholder="Search",
         q=q,
         filters=[ui.filter_select("order", "Order", ORDERS, order)],
     )

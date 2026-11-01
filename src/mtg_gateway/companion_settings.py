@@ -755,7 +755,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<input type='hidden' name='action' value='create'>"
             "<h3><label for='newcat'>New category</label></h3><div class='row'>"
             "<input id='newcat' type='text' name='category' maxlength='60' required "
-            "placeholder='Name, e.g. Removal'>"
+            "placeholder='e.g. Removal'>"
             "<span class='ds-sw' role='group' aria-label='Switches of the new category'>"
             f"{new_switches}</span>"
             f"<button class='btn'>{icon('plus')} Create category</button></div></form>"
@@ -833,7 +833,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "<input id='tagname' type='text' name='name' maxlength='40' autocomplete='off' "
                 "data-suggest='tags' data-suggest-src='/decks/api/tags?q=' data-suggest-delay='250' "
                 f"data-suggest-exclude='{_esc(json.dumps(taken, ensure_ascii=False))}' "
-                "data-suggest-none='No Archidekt tag by that name' placeholder='Type to find a tag' "
+                "data-suggest-none='No Archidekt tag by that name' placeholder='Find a tag' "
                 f"value='{_esc(typed)}' "
                 "aria-describedby='tags-help"
                 + (" tags-msg' aria-invalid='true'" if bad else "'")
@@ -948,7 +948,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "data-suggest-none='Not among the people you follow' "
             "placeholder='Pick someone you follow' "
             if people
-            else "placeholder='Archidekt username' "
+            else "placeholder='Username' "
         )
         # the deck's name and the note for the box the forms ask in first (static/menus.js); the
         # confirmation page does the same without scripts

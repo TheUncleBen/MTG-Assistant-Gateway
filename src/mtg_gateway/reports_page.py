@@ -453,7 +453,7 @@ def toolbar_html(query: Query, decks: dict[str, str], apps_seen: list[str]) -> s
     return ui.toolbar(
         "/reports",
         search_label="Search reports",
-        placeholder="Search deck or commander",
+        placeholder="Search",
         q=query.q,
         filters=filters,
         keep={"show": query.show, "order": query.order},

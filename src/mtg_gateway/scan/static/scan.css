@@ -22,15 +22,11 @@
 .scan .snote{text-align:center;margin:0}
 .scan .snote .ui-cap{margin:.25rem 0 0}
 
-/* tabs: one row, the open tab underlined in orange; sticky on phones */
-.scan .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}  /* a second row at large text sizes */
-.scan .tabs button{flex:1 1 auto;min-width:0;background:transparent;border:0;border-bottom:3px solid transparent;color:var(--text-muted);
-  border-radius:0;padding:.5rem .4rem;font-weight:700;min-height:var(--ctl);line-height:1.15}
-.scan .tabs button:hover{background:var(--surface);color:var(--text)}
-.scan .tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--orange)}
+/* tabs: the site's one switch (site.css .hubseg), full width; sticky on phones */
+.scan .tabs{display:flex;width:100%;margin:0 0 .5rem}
 .scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--orange);
   color:var(--on-orange);border-color:var(--orange)}
-@media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;background:var(--bg);margin:0 -1rem;padding:0 1rem} }
+@media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;box-shadow:0 0 0 4px var(--bg)} }
 
 /* the options row: the Set box with its × inside, the Foil and Auto toggles; one row at every width */
 .scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:8px}

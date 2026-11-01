@@ -610,7 +610,7 @@ def export_box_html(deck: Deck, *, open: bool = False, pdf: bool = False) -> str
         "<p class='muted small'>Downloads are made in this browser from the deck as read now.</p>"
         f"<div class='files'>{files}</div></div>"
     )
-    body = f"<div class='segc xtabs' role='tablist' aria-label='Export'>{tablist}</div>{panes}"
+    body = f"<div class='hubseg segc xtabs' role='tablist' aria-label='Export'>{tablist}</div>{panes}"
     return ui.box(
         "export",
         f"Export “{deck_title(deck)}”",
@@ -640,7 +640,7 @@ def delete_box_html(
         f"<p>This deletes the deck ({plural(n, 'card')}) from your Archidekt account. {esc(undo)}</p>"
         "<div class='field'><label for='typed'>Type the deck's name to confirm</label>"
         f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
-        f"placeholder='{esc(title)}' data-typed='{esc(title)}'></div></form>"
+        f"placeholder='Deck name' data-typed='{esc(title)}'></div></form>"
     )
     return ui.box(
         "delete",
@@ -664,7 +664,7 @@ def compare_box_html(deck: Deck, *, open: bool = False) -> str:
     body = (
         f"<form id='cmpf' method='get' action='/decks/{did}/compare' class='stack'>"
         "<div class='field'><label for='cmp-with'>Other deck</label>"
-        "<input id='cmp-with' type='text' name='with' placeholder='Precon name, deck link or deck ID' "
+        "<input id='cmp-with' type='text' name='with' placeholder='Link or ID' "
         "autocomplete='off'></div>"
         "<details class='fold'><summary class='fold-btn'>…or paste a decklist</summary>"
         "<textarea name='paste' rows='5' aria-label='Paste a decklist' "
@@ -987,7 +987,7 @@ def toolbar_html(
         "<label for='quick'>Add to the deck</label><div class='quickrow'>"
         # the placeholder is short enough to read whole in the phone toolbar's field (the full
         # name of the control is its label, "Add to the deck", and the + beside it says Add)
-        "<input id='quick' type='text' name='add' placeholder='Type a name' data-suggest='cards' "
+        "<input id='quick' type='text' name='add' placeholder='Name' data-suggest='cards' "
         "data-suggest-submit "
         "autocomplete='off'>"
         # on a phone the label is hidden and only the icon shows: the name stays the same. The
@@ -1010,7 +1010,7 @@ def toolbar_html(
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
         + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
-        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Filter deck (eg: Sol Ring)' "
+        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Find in deck' "
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
         "</span></div>"
@@ -1596,8 +1596,10 @@ def _odds_html(cards: list[DeckCard]) -> str:
         f"<input type='number' name='n' value='7' min='1' max='{size}' aria-label='Cards drawn'> "
         "<span data-plural='n'>cards</span>"
         "</form>"
-        "<table class='qty oddstable'><thead><tr><th>Group</th><th>Qty</th><th>Odds</th></tr></thead>"
+        "<div class='qtyscroll'><table class='qty oddstable'><thead><tr><th>Group</th><th>Qty</th>"
+        "<th>Odds</th></tr></thead>"
         "<tbody><tr><td class='muted' colspan='3'>Turn on scripts to see the odds.</td></tr></tbody></table>"
+        "</div>"
         f"<script type='application/json' id='odds-data'>{data}</script>"
         "</div>"
     )
@@ -2303,7 +2305,7 @@ def compare_page_html(
         + f"<form method='get' action='/decks/{did}/compare' class='panel cmp-form'>"
         "<div class='row'><div class='field fld'><label for='cmp-with'>Other deck</label>"
         f"<input id='cmp-with' type='text' name='with' data-suggest='static' data-options='{options}' "
-        f"value='{esc('' if is_snap else other_ref)}' placeholder='Precon name, deck link or deck ID' "
+        f"value='{esc('' if is_snap else other_ref)}' placeholder='Link or ID' "
         "autocomplete='off'></div>"
         f"<button type='submit' class='{compare_kind}'>{icon('swap')} Compare</button></div>"
         f"<details class='fold'{' open' if paste else ''}><summary class='fold-btn'>…or paste a decklist"
@@ -3192,7 +3194,7 @@ def deck_list_controls_html(
             label="Filter package name" if show == "packages" else "Filter deck name",
             name="q",
             value=q,
-            placeholder="Example package name" if show == "packages" else "Example deck name",
+            placeholder="Package name" if show == "packages" else "Deck name",
             input_id="q",
             search_label="Filter",
             attrs=" maxlength='80'",
@@ -3236,7 +3238,7 @@ DECK_CSS = (
 .banner .privacy{color:#d6d6d6;display:inline-flex}
 .banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
-.banner .row b.orange{color:var(--orange);font-weight:700}
+.banner .row b.orange{color:#ffa94d;font-weight:700}  /* 4.5:1 on the banner's grey (audit D14) */
 .banner .row .ui-when{color:inherit;font-size:inherit}  /* the list date's muted grey: faint here */
 .banner .legal{display:inline-flex;align-items:center;gap:.3rem}
 .banner .legal.ok svg{color:#1ebb6c} .banner .legal.bad svg{color:#f21b3f}
@@ -3379,7 +3381,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .rows .owner-sm{text-decoration:none;max-width:100%;overflow-wrap:anywhere}
   /* a 44 px tap target on the facts line without a taller line: the padding makes the box, the
      negative margins keep the line box as it is (review 2, L8) */
-  .banner .rows .owner-sm{padding:10px 0;margin-top:-10px;margin-bottom:-10px}
+  .banner .rows .owner-sm{padding:10px 0;margin-top:-10px;margin-bottom:-10px;min-width:44px}
   .banner .rows .owner-sm:hover,.banner .rows .owner-sm:focus-visible{color:var(--orange);
     text-decoration:underline}
   .banner .lg{display:none} .banner .sm{display:inline}
@@ -3539,10 +3541,12 @@ ul.rows .row{display:grid;grid-template-columns:1.6rem minmax(0,1fr) auto 3rem 4
   gap:.4rem;--rowh:30px;min-height:var(--rowh);grid-template-rows:minmax(var(--rowh),auto);
   border-top:1px solid var(--surface-2);position:relative;font-size:1rem}
 ul.rows .row:hover{background:var(--surface-2)}
-ul.rows .row.side{opacity:.7}
+/* a sideboard or maybeboard row is quieter by its colour, not by fading the whole row (faded set
+   codes fell under 4.5:1; audit D14) */
+ul.rows .row.side .name,ul.rows .row.side .ty{color:var(--text-muted)}
 ul.rows .q{color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
 ul.rows .n{display:flex;align-items:center;gap:.35rem;min-width:0}
-ul.rows .n .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ul.rows .n .name{font-weight:700;overflow-wrap:break-word;min-width:0}
 ul.rows .mc{min-width:0}
 ul.rows .set{font-size:.78rem;color:var(--text-muted);text-align:center}
 ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
@@ -3671,7 +3675,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
   padding:max(12%,34px) 8% max(8%,26px);background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
   font-size:.8rem}
 .deckview .c .ph .t{display:flex;justify-content:space-between;gap:.3rem;align-items:flex-start}
-.deckview .c .ph .nm{font-weight:700;overflow-wrap:anywhere}
+.deckview .c .ph .nm{font-weight:700;overflow-wrap:break-word}
 .deckview .c .ph .ty{color:var(--text-muted);font-size:.72rem}
 .deckview.stacks .cards{display:flex;flex-direction:column}
 .deckview.stacks .c + .c{margin-top:-123%}
@@ -3691,7 +3695,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c.dragging{opacity:.4}
 .deckview .row.dragging{outline:2px dashed var(--orange);outline-offset:-2px;background:var(--surface-2)}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorize';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to move them';
   color:var(--text-muted)}
 @media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
@@ -3951,7 +3955,7 @@ html.cardview-open{overflow:hidden}
 .pie .slegend{flex-direction:column;gap:0}
 .pie .slegend .muted{font-size:.8rem}
 .rowbtn{min-height:24px;padding:0 .25rem;margin:0 0 0 -.25rem;border:0;background:none;color:var(--text);
-  font:inherit;text-align:left;overflow-wrap:anywhere;justify-content:flex-start;gap:.4rem}
+  font:inherit;text-align:left;overflow-wrap:break-word;justify-content:flex-start;gap:.4rem;max-width:100%}
 .ccard .cname .rowbtn{font-weight:700}
 [data-focus].on{outline:2px solid var(--focus);outline-offset:1px}
 .ooi{display:flex;gap:.4rem;align-items:baseline;margin:.75rem 0 0;font-size:.93rem}
@@ -3964,9 +3968,13 @@ html.cardview-open{overflow:hidden}
 .statfocus span{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
 .statfocus button{min-height:32px}
 /* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
+/* fixed columns: the numbers' column is narrow, the names have the rest, and a name breaks between
+   its words ("Enchantment" stays whole at large text); only a word longer than the whole column
+   (an unbroken category name) breaks inside */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
-table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}
+table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:break-word}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
 .legality ul{margin:.25rem 0 0;padding-left:1.2rem} .legality .ok{color:var(--green-text);font-weight:700}
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
@@ -3979,9 +3987,11 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
    native select behind a script-drawn one keeps the theme's 1 px size (it used to get 6rem here) */
 .odds .oddsform select:not(.msel-native),.odds .oddsform .msel,.odds .oddsform .msel-btn{max-width:100%}
 .odds .oddsform input{width:4rem;min-width:4rem}
-.odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
-.odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
-.odds .oddstable td:first-child{width:100%}
+.odds .qtyscroll{margin-top:.5rem}
+.odds .oddstable th{text-align:left;padding:.3rem .25rem;font-size:.85rem;color:var(--text-muted)}
+.odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3),
+.odds .oddstable th:nth-child(2),.odds .oddstable th:nth-child(3){text-align:right;white-space:nowrap;
+  width:1%}
 .odds .oddstable th{text-align:left;font-weight:600;color:var(--text-muted);font-size:.8rem}
 .odds .oddstable th:last-child{text-align:right}
 .checks ul{list-style:none;margin:.25rem 0 0;padding:0} .checks li{display:flex;gap:.4rem;
@@ -4045,8 +4055,9 @@ ul.decklist .thumb .views{position:absolute;right:.5rem;top:.5rem;font-size:12px
 ul.decklist .thumb .cbar{position:absolute;left:0;right:0;bottom:0;height:15px;border-radius:0;z-index:1;
   gap:0}
 ul.decklist .thumb .cbar.empty{display:none}
-ul.decklist .info{display:flex;gap:.6rem;align-items:center;min-height:75px;padding:.5rem .75rem}
-ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem;flex:1}
+ul.decklist .info{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;min-height:75px;
+  padding:.5rem .75rem}
+ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem;flex:1 1 8rem}
 /* a deck's name: up to two lines, then an ellipsis (one line cut "Meren Graveyard Value" to
    "Meren Grave…" on a computer's tiles) */
 ul.decklist .info .name{font-size:16px;font-weight:700;overflow:hidden;overflow-wrap:anywhere;
@@ -4060,7 +4071,7 @@ ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;
 ul.decklist.list .deck a{flex-direction:row;align-items:center}
 ul.decklist.list .thumb{width:90px;height:60px;flex:none}
 ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
-ul.decklist.list .info{flex:1;min-height:0}
+ul.decklist.list .info{flex:1 1 8rem;min-height:0}
 ul.decklist.list .tags{border-top:0;max-width:30%}
 @media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
@@ -4103,7 +4114,8 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .addbox form.addcard .targets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
 .addbox .tchip{margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;border-radius:999px;
   font-size:.86rem;font-weight:600;background:var(--surface);border:1px solid var(--border);
-  color:var(--text-muted)}
+  color:var(--text-muted);max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;text-align:left;justify-content:flex-start}
 .addbox .tchip.on{background:var(--orange-tint);border-color:var(--orange);color:var(--text)}
 .addbox .tchip.side{margin-left:auto}
 .addbox form.addcard .grow{position:relative}
@@ -4111,7 +4123,7 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .addbox form.addcard .go button{margin:0;height:var(--ctl);white-space:nowrap}
 .addbox form.addcard .go .foil{display:inline-flex;align-items:center;gap:.35rem;font-size:.9rem;
   white-space:nowrap}
-.addbox form.addcard .addstatus{grid-column:1 / -1;margin:0;min-height:1.2em}
+.addbox form.addcard .addstatus,.addbox form.addcard .addhelp{grid-column:1 / -1;margin:0;min-height:1.2em}
 .addbox form.addcard .addstatus:empty{display:none}
 .addprints{display:none}
 @media (min-width:900px){
@@ -4371,7 +4383,13 @@ html.printpick-open{overflow:hidden}
      buttons, the legend and the dialog strip's buttons: 44 px, set here, after their own rules
      above, so the touch size wins */
   .rowbtn,.curveaxis .mv,.slegend button{min-height:44px}
+  .rowbtn,.statctl button{min-width:44px}
   .statctl button{min-height:44px}
+  /* the curve's eight axis buttons share the box's width with no gap: 44 px wide from a 412 px
+     phone; on a narrower one (360 px: 8 x 44 is more than the box) each is an eighth of the box,
+     as wide as the box allows without a sideways scroll */
+  .curveaxis{gap:0}
+  .curveaxis .mv{min-width:min(44px,12.5%)}
   /* the curve's axis buttons share the box's width (a phone's 320 px holds no eight 44 px
      columns without a sideways scroll): 44 px high, as wide as the box lets them; the stack
      handle keeps its 28 px drawing inside the 44 px finger area its ::before draws */
@@ -4386,6 +4404,10 @@ html.printpick-open{overflow:hidden}
      label is the finger area) and the deck page's Undo and Redo: 44 px (review 0.7.46, F18) */
   .erow .qty button.mini,.erow .qty input{width:44px;min-width:44px;height:44px;min-height:44px}
   .erow details.dd summary.mini{width:44px;height:44px;min-height:44px}
+  .erow{grid-template-columns:44px minmax(0,1fr) auto minmax(7rem,10rem) auto}
+  .erow .thumbbtn{min-width:44px;display:flex;justify-content:center}
+  .erow .sel select,.erow .sel .msel-btn{height:44px;min-height:44px}
+  .erow button.remove{width:44px;min-width:44px;height:44px;min-height:44px}
   .editbar .backup,.addbox form.addcard .go .foil{min-height:44px;padding:0 .25rem}
   .editbar .backup input,.addbox form.addcard .go .foil input{width:22px;height:22px;margin:0}
   .bulkbar .histtools button,.bulkbar .btn-ghost.small{min-height:44px} }
@@ -4405,7 +4427,7 @@ html.printpick-open{overflow:hidden}
   /* Undo and Redo keep their names for screen readers; on a phone the arrows alone show */
   .editbar .undo .bl,.editbar .redo .bl{position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0);white-space:nowrap}
-  .editbar .undo,.editbar .redo{padding-inline:.6rem;flex:none}
+  .editbar .undo,.editbar .redo{padding-inline:.6rem;flex:none;min-width:44px}
   .editbar .backup{font-size:.8rem;white-space:normal;flex:1 1 6rem;min-width:0}
   .editbar .status{flex-basis:100%}
   .editor{padding-bottom:6rem}

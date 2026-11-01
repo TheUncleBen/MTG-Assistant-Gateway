@@ -29,7 +29,7 @@ from starlette.responses import JSONResponse, Response
 from . import prefs, ui
 from . import searchpanel as sp
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
-from .busy import busy_response
+from .busy import busy_response, held_html, same_url
 from .deckpage import (
     WRITES_OFF_FOLLOW,
     WRITES_OFF_TITLE,
@@ -300,7 +300,7 @@ def search_form_html(
                 name="commander",
                 value=query["commander"],
                 input_id="s-cmd",
-                placeholder="Card name, e.g. Atraxa, Praetors' Voice",
+                placeholder="e.g. Atraxa",
                 attrs=" data-suggest='cards' maxlength='120'",
                 cls="cmd",
             ),
@@ -309,7 +309,7 @@ def search_form_html(
                 name="owner",
                 value=query["owner"],
                 input_id="s-owner",
-                placeholder="Archidekt username",
+                placeholder="Username",
                 attrs=" maxlength='120'",
                 cls="who",
             ),
@@ -336,7 +336,7 @@ def search_form_html(
             label="Deck name, or an Archidekt link or deck ID",
             name="name",
             value=query["name"],
-            placeholder="Deck name, link or ID",
+            placeholder="Name or link",
             input_id="s-name",
             search_label="Search decks",
             cross_html=sp.cross_link("Search cards instead", cards_link, "image"),
@@ -730,7 +730,15 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         if asked:
             note = ""
             try:
-                found = await run_search(sub, query)
+                # kept briefly per member; while Archidekt can't be asked, the member's last read
+                # of the same search, dated (decks.short_reads)
+                found, held = await decks.short_reads.get_held(
+                    sub,
+                    ("search", json.dumps(query, sort_keys=True, default=str)),
+                    lambda: run_search(sub, query),
+                )
+                if held is not None:
+                    note = held_html(held["refused"], held["held_at"], "this search", same_url(request))
                 if query["commander"] and not found["decks"]:
                     names = await commander_names(state, query["commander"])
                     if not any(n.casefold() == query["commander"].casefold() for n in names):
@@ -900,8 +908,9 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         view, remember = view_of(request, sub)
         asked = archidekt_query(query)
         try:
-            # kept briefly per member, forgotten by any write they send (a follow is one)
-            found = await decks.short_reads.get(
+            # kept briefly per member, forgotten by any write they send (a follow is one); while
+            # Archidekt can't be asked, the member's last read of the profile, dated
+            found, held = await decks.short_reads.get_held(
                 sub,
                 ("profile", json.dumps(asked, sort_keys=True, default=str)),
                 lambda: decks.search_decks(sub, **asked),
@@ -930,9 +939,13 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             # no public decks: the person is looked up on their Archidekt profile page, so they
             # can still be followed (and a name nobody has says so)
             known, shown, owner_id = await _person(sub, username)
+        held_strip = (
+            held_html(held["refused"], held["held_at"], "this profile", same_url(request)) if held else ""
+        )
         resp = page(
             shown,
             profile_head_html(shown, owner_id, sub, known=known, has_decks=bool(rows) or filtered)
+            + held_strip
             + (
                 profile_bar_html(query, found, view=view)
                 + search_results_html(found, query, view=view, empty_text="No public decks yet.")

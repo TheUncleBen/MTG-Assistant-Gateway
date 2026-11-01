@@ -12,8 +12,12 @@ the Markdown and the self-contained HTML exports.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import re
+import threading
+from collections import OrderedDict
 from typing import Any
 
 from . import card_models, ui
@@ -323,12 +327,56 @@ def research_failure(block: Any, fallback: str) -> str | None:
     return None
 
 
+# Parsed simulation blocks by their content: a report page reads its block in several places
+# (the header, the tiles, the Markdown copy, the coverage line), and the same report is opened
+# again and again; the regex work runs once per block. Bounded, oldest out first.
+_PARSED: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_PARSED_MAX = 64
+_PARSED_LOCK = threading.Lock()
+
+
+def _block_key(block: dict[str, Any]) -> str:
+    """What parse_goldfish reads from a block, as one short digest."""
+    h = hashlib.blake2b(digest_size=16)
+    for part in (
+        block.get("text") if isinstance(block.get("text"), str) else "",
+        json.dumps(block.get("data"), sort_keys=True, default=str) if block.get("data") is not None else "",
+        json.dumps(block.get("quantities"), sort_keys=True, default=str) if block.get("quantities") else "",
+        json.dumps(block.get("mana_cards"), default=str) if block.get("mana_cards") else "",
+        json.dumps(block.get("error"), default=str) if block.get("error") else "",
+        str(bool(block.get("ok"))),
+    ):
+        h.update(part.encode("utf-8", "surrogatepass"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
 def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any] | None:
     """The simulation block of a stored report (``{"tool","ok","data"?,"text"?}``) as plain
     data. None for no block; never raises. ``deck_size`` (the deck's card count from the
-    statistics) backs the share-of-deck figures when the text does not say the deck size."""
+    statistics) backs the share-of-deck figures when the text does not say the deck size.
+    Each call returns its own copy (callers mark the cards up); the parse itself is kept."""
     if not isinstance(block, dict):
         return None
+    key = _block_key(block)
+    with _PARSED_LOCK:  # held through the parse: a second reader of the same block waits for it
+        hit = _PARSED.get(key)
+        if hit is not None:
+            _PARSED.move_to_end(key)
+            out = copy.deepcopy(hit)
+        else:
+            # parsed once whatever the caller's deck size: the text's own size wins, and a text
+            # without one takes the caller's below
+            out = _parse_goldfish(block, deck_size=None)
+            _PARSED[key] = copy.deepcopy(out)
+            while len(_PARSED) > _PARSED_MAX:
+                _PARSED.popitem(last=False)
+    if out["deck_size"] is None:
+        out["deck_size"] = deck_size
+    return out
+
+
+def _parse_goldfish(block: dict[str, Any], *, deck_size: int | None) -> dict[str, Any]:
     text = block.get("text")
     text = text if isinstance(text, str) else ""
     data = block.get("data") if isinstance(block.get("data"), dict) else None
