@@ -51,7 +51,7 @@
     <string name="notify_permission_denied">Push notifications are off for this app. Turn them on in Android\'s settings.</string>
     <!-- Launcher shortcuts, as the web manifest has them (companion_shell.py). -->
     <string name="shortcut_decks">My decks</string>
-    <string name="shortcut_scan">Scan page</string>
+    <string name="shortcut_scan">Scan</string>
     <string name="shortcut_scan_long">Open the scan page</string>
     <string name="shortcut_proposals">Proposals</string>
     <string name="shortcut_reports">Reports</string>
@@ -70,6 +70,7 @@
     <string name="sign_in_no_browser">No browser is installed to sign in with. Use “Sign in inside the app instead” on the page.</string>
     <string name="sign_in_finish_in_browser">The browser didn\'t ask you to sign in again, so finish signing in there and tap “Open the MTG Assistant Gateway app”.</string>
     <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
+    <string name="sign_in_interrupted">Android closed the app while you were signing in, so that sign-in was lost. Sign in again.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
     <string name="camera_permission_settings">The camera is off for this app. Allow Camera under Permissions, then try again.</string>
     <string name="scan_page_too_old">This gateway\'s scan page has no photo hooks; it needs a newer gateway version.</string>

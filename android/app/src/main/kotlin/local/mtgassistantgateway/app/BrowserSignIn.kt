@@ -24,8 +24,8 @@ import java.util.Base64
  *    the identity provider for a new sign-in and gives a code only when the ID token shows one,
  *    else it returns [isSchemeRefusal]'s address and the app finishes in a Custom Tab. In a
  *    Custom Tab the gateway's page opens `mtgassistant-signin://signin?code=...` through an
- *    `intent:` link naming this app's package, on a tap, or once by itself (where the browser
- *    allows) when the gateway saw a sign-in made during the leg.
+ *    `intent:` link naming this app's package, on a tap; when the gateway saw a sign-in made during
+ *    the leg, it redirects to that link itself ([INTENT_RETURN]), with the page as the fallback.
  * 4. The app posts the code with its verifier to [FINISH_PATH] in the WebView, which gets the
  *    session cookie. A code is worthless without the verifier, which never leaves this app.
  *
@@ -58,11 +58,32 @@ object BrowserSignIn {
     fun safeNext(next: String?): String =
         if (next != null && next.startsWith("/") && !next.startsWith("//") && '\\' !in next && next.length <= 200) next else "/"
 
-    /** The gateway's /login for the browser leg; [schemeReturn] for an Auth Tab on [SCHEME]. */
-    fun startUrl(origin: String, next: String?, challenge: String, fresh: Boolean, schemeReturn: Boolean = false): String =
+    /**
+     * Says the browser's part runs in a Custom Tab, not an Auth Tab (app_signin.INTENT_RETURN): after
+     * a new sign-in the gateway then redirects straight to the `intent:` link naming this app, so the
+     * Custom Tab comes back with no tap where the browser allows it.
+     */
+    const val INTENT_RETURN = "intent"
+
+    /** The gateway's /login for the browser leg; [schemeReturn] for an Auth Tab on [SCHEME], [customTab] for a Custom Tab. */
+    fun startUrl(
+        origin: String,
+        next: String?,
+        challenge: String,
+        fresh: Boolean,
+        schemeReturn: Boolean = false,
+        customTab: Boolean = false,
+    ): String =
         origin + "/login?next=" + URLEncoder.encode(safeNext(next), "UTF-8") +
             "&app_challenge=" + challenge + (if (fresh) "&fresh=1" else "") +
-            (if (schemeReturn) "&app_return=$SCHEME_RETURN" else "")
+            (if (schemeReturn) "&app_return=$SCHEME_RETURN" else if (customTab) "&app_return=$INTENT_RETURN" else "")
+
+    /**
+     * What the Account page's This app list says about coming back from the browser sign-in, from
+     * [pickAuthTabBrowser]'s answer: "auto" with a browser that has Auth Tabs (it returns by
+     * itself), else "tap" (a Custom Tab, which may wait for a tap on the gateway's page).
+     */
+    fun returnStatus(authTabBrowser: String?): String = if (authTabBrowser != null) "auto" else "tap"
 
     /**
      * The browser to open an Auth Tab in: the default one when it has Auth Tabs, else Chrome when

@@ -11,6 +11,7 @@ from __future__ import annotations
 import html
 import io
 import re
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +23,7 @@ from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 stack_options = stack_with(SHIPPED)
 WHO = "alice"
+BELL_WHERE = "Turn them off under Account › Account details › Email and alerts on Archidekt."
 
 
 def _png(size: tuple[int, int] = (64, 64), fmt: str = "PNG") -> bytes:
@@ -466,6 +468,10 @@ async def test_the_bell_count_and_list_are_read_after_the_page_and_kept_a_short_
     page = (await member.http.get("/notifications")).text
     assert "<title>Alerts" in page and "amy commented on “Meren”" in page
     assert profile_page.BELL_NOTE in page and "href='/account/details#email'" in page
+    # the note names the card as Account details titles it (review F12), in the page and the box
+    assert BELL_WHERE in profile_page.BELL_NOTE
+    bell_js = (Path(profile_page.__file__).parent / "static" / "bell.js").read_text(encoding="utf-8")
+    assert BELL_WHERE in bell_js and "Account › Email and alerts." not in bell_js
     assert "aria-current=page" in page.split("class='icon-btn bell'", 1)[1][:160]
 
 

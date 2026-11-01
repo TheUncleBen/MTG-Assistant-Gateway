@@ -535,6 +535,8 @@ OFFLINE_SCRIPT = (STATIC_DIR / "offline.js").read_text(encoding="utf-8")
 # with its underscores as spaces, first letter capitalised).
 EVENT_LABELS = {
     "browser_login": "Signed in on the website",
+    # the Android app's browser sign-in did not come back by itself (pages.login_app_return)
+    "app_signin_tap_page": "App sign-in showed the “Open the app” page in the browser",
     "login_ok": "Signed in",
     "login_denied": "Sign-in refused",
     "login_rejected_group": "Sign-in refused: not in an allowed group",

@@ -261,6 +261,31 @@ async def test_without_an_app_file_the_page_speaks_to_members(
                 "screen.</p>" in page
             )
             assert "docs/ANDROID.md" not in page and "If you run the gateway" not in page
-            assert "<a class='btn' href='/decks'>Back to decks</a>" in page and "btn-primary" not in page
+            # no odd way out of a setup page (review F6): the app list beside it is the way on
+            assert "Back to decks" not in page and "btn-primary" not in page
         finally:
             await b.aclose()
+
+
+APP_UA = {
+    "User-Agent": "Mozilla/5.0 (Linux; Android 16; wv) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.7.46"
+}
+
+
+async def test_app_mode_hides_android_choice(harness: Harness) -> None:
+    """Review F6: inside the Android app, Guided setup offers no Android app download (only what
+    makes sense on a platform is removed); its old address leads to Account, whose This app list
+    has Check for app updates."""
+    b = Browser(harness)
+    try:
+        await b.login("/install")
+        app = (await b.http.get("/install", headers=APP_UA)).text
+        assert "for=android" not in app.split("<main", 1)[1].split("</main>", 1)[0]
+        assert "href='/install?for=skill'" in app and "href='/install?for=claude'" in app
+        r = await b.http.get("/install?for=android", headers=APP_UA)
+        assert r.status_code == 303 and r.headers["location"] == "/account"
+        # the website keeps it
+        web = (await b.http.get("/install")).text
+        assert "href='/install?for=android'" in web
+    finally:
+        await b.aclose()

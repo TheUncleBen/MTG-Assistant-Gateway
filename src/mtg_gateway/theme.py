@@ -880,6 +880,9 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
     margin-top:-.6rem;margin-bottom:-.6rem}
   footer.site .links a{display:inline-flex;align-items:center;min-height:44px;padding:0 .5rem}
   .brand{min-height:44px;--brand-line:max(44px,1.35em)}
+  /* on a phone the brand is its 25 px mark alone: the link Home stays 44 px wide (review F12);
+     .topbar raises it over the later .brand{min-width:0} */
+  .topbar .brand{min-width:44px}
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
     padding:.6rem 0;min-height:44px;box-sizing:border-box}
   .banner .social a.soc,.banner .social button.soc{height:44px;min-height:44px;border-radius:22px}
@@ -1359,8 +1362,11 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-app img.logo{width:16px;height:16px;flex:none;display:inline-block;object-fit:contain}
 .ui-app img.on-light{display:none}
 /* OpenAI's file keeps its clear space inside the picture (the blossom fills its middle half): drawn
-   at twice the size in the same 16 px slot, the mark itself is as big as Claude's (T-201) */
-.ui-app img.on-light,.ui-app img.on-dark{width:32px;height:32px;margin:-8px;pointer-events:none}
+   at twice the size in the same 16 px slot, the mark itself is as big as Claude's (T-201). The
+   pictures sit out of the flow over their slot, so the row is no taller than Claude's (review F7) */
+.ui-app .logo-box{position:relative;flex:none;width:16px;height:16px}
+.ui-app img.on-light,.ui-app img.on-dark{position:absolute;left:-8px;top:-8px;width:32px;height:32px;
+  pointer-events:none}
 @media (prefers-color-scheme: dark){ :root:not([data-theme=light]) .ui-app img.on-light{display:none}
   :root:not([data-theme=light]) .ui-app img.on-dark{display:inline-block} }
 @media (prefers-color-scheme: light){ :root:not([data-theme=dark]) .ui-app img.on-light{display:inline-block}

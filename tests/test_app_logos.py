@@ -53,8 +53,10 @@ def test_each_known_app_gets_its_own_mark_and_every_other_app_the_neutral_icon()
     Claude Code from claude.ai, ChatGPT and Codex from chatgpt.com."""
     claude = f"<img class='logo' src='/static/logos/claude.svg' {IMG}"
     openai = (
+        "<span class='logo-box'>"
         f"<img class='logo on-light' src='/static/logos/openai-black.svg' {IMG}"
         f"<img class='logo on-dark' src='/static/logos/openai-white.svg' {IMG}"
+        "</span>"
     )
     assert ui.app_logo("claude") == claude and ui.app_logo("openai") == openai
     for name in ("Claude", "claude", " Claude  Code ", "claude-code"):
@@ -272,7 +274,8 @@ LOGOS_JS = """
   const r = img.getBoundingClientRect();
   return { src: img.getAttribute('src').split('?')[0].split('/').pop(), alt: img.getAttribute('alt'),
     shown: getComputedStyle(img).display !== 'none' && r.width > 0, w: r.width, h: r.height,
-    loaded: img.complete && img.naturalWidth > 0, name: img.parentElement.querySelector('.nm').textContent };
+    loaded: img.complete && img.naturalWidth > 0,
+    name: img.closest('.ui-app').querySelector('.nm').textContent };
 })
 """
 BG_JS = "() => getComputedStyle(document.body).backgroundColor"
@@ -406,3 +409,33 @@ def test_every_mark_is_drawn_at_the_chips_size(chip_server: ChipServer, want: st
     assert set(sizes) == {"Claude", "Claude Code", "ChatGPT", "Codex"}, sizes
     for name, (w, h) in sizes.items():
         assert 13 <= w <= 18 and 13 <= h <= 18, (name, w, h)
+
+
+def test_the_openai_mark_does_not_make_its_row_taller(chip_server: ChipServer) -> None:
+    """Review F7: OpenAI's picture is drawn twice the slot's size; it must overhang the 16 px slot
+    without growing the line, so ChatGPT's row is as tall as Claude's and a plain app's, and its
+    name sits at the same height."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = chip_server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": chip_server.base}])
+        page = ctx.new_page()
+        page.goto(f"{chip_server.base}/app-chips", wait_until="networkidle")
+        rows = page.evaluate(
+            """() => [...document.querySelectorAll('.chips .row')].filter(r => r.querySelector('.nm'))
+                .map(r => { const b = r.getBoundingClientRect();
+                  const n = r.querySelector('.nm').getBoundingClientRect();
+                  return { name: r.querySelector('.nm').textContent, h: b.height, top: n.top - b.top }; })"""
+        )
+        browser.close()
+    by = {r["name"]: r for r in rows}
+    assert {"Claude", "ChatGPT", "Codex"} <= set(by), rows
+    for name in ("ChatGPT", "Codex", "browser"):
+        assert abs(by[name]["h"] - by["Claude"]["h"]) <= 1, (name, rows)
+        assert abs(by[name]["top"] - by["Claude"]["top"]) <= 1, (name, rows)

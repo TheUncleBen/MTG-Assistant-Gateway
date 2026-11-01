@@ -196,7 +196,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # when the leg started: a sign-in it asks for must be made after this (auth_time)
             params["app_started"] = str(int(time.time()))
             back = q.get("app_return")
-            if back is not None:
+            if back == app_signin.INTENT_RETURN:
+                # The app opened a Custom Tab, not an Auth Tab: after a sign-in made during the leg
+                # the callback can send the browser to the intent: link itself (finish_browser_login).
+                params["app_return"] = back
+            elif back is not None:
                 # The app's retry, when the verified https Auth Tab can't be used: an Auth Tab on the
                 # app's own scheme (app_signin.py). The identity provider is then asked for a
                 # sign-in of its own, never a silent pass-through: any app can start this leg, and
@@ -365,9 +369,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def signed_out(request: Request) -> Response:
         """Says why this browser was signed out, when its (ended) session's cookie tells: the
         cookie outlives its session for that (SESSION_END_NOTICE) and goes here."""
+        nxt = _safe_next(request.query_params.get("next", "/"))
+        if current(request)[0]:
+            # still signed in (an old tab, a bookmark): saying "signed out" would be wrong
+            return RedirectResponse(nxt, status_code=303, headers={"Cache-Control": "no-store"})
         sid = request.cookies.get(session_cookie)
         reason = state.db.session_end_reason(sid) if sid else None
-        nxt = _safe_next(request.query_params.get("next", "/"))
         resp = small(
             "Signed out",
             smallpage.panel(
@@ -1093,7 +1100,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The Android app's sign-in: no session in this browser, a one-time code for the app,
             # handed over at the gateway's own address, where the app's Auth Tab closes by itself.
             headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
-            scheme = session["params"].get("app_return") == app_signin.SCHEME_RETURN
+            back = session["params"].get("app_return")
+            scheme = back == app_signin.SCHEME_RETURN
             # a sign-in made during this leg, which the leg asked for (prompt=login, max_age=0)
             fresh_in = session["params"].get("app_fresh") == "1" and app_signin.signed_in_since(
                 identity.raw_claims.get("auth_time"), session["params"].get("app_started")
@@ -1112,6 +1120,20 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             code = state.app_signins.issue(  # type: ignore[attr-defined]
                 identity.sub, challenge, nxt, fresh=fresh_in, grant=session.get("grant_holder")
             )
+            if back == app_signin.INTENT_RETURN and fresh_in:
+                # A Custom Tab: Chrome opens an intent: link only from a navigation the person
+                # started, which the return page's script is not, so this redirect ends the one
+                # their own Sign-in press started. The same rule as the page's own try (a sign-in
+                # made during the leg) and the same link, naming only the app's package; the page
+                # with the button is the fallback for a browser that won't open the app.
+                from . import app_page  # imports this module
+
+                fallback = f"{s.public_url.rstrip('/')}{app_signin.RETURN_PATH}?code={code}"
+                return RedirectResponse(
+                    app_signin.intent_url(code, app_page.app_package(), fallback),
+                    status_code=303,
+                    headers=headers,
+                )
             return RedirectResponse(
                 # the retry's Auth Tab on the app's own scheme (no Digital Asset Links check); else
                 # the gateway's address: the verified https Auth Tab, or the page with the button
@@ -1131,6 +1153,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         code = request.query_params.get("code", "")
         if app_signin.CODE.fullmatch(code):
             auto = state.app_signins.fresh(code)  # type: ignore[attr-defined]
+            first = state.app_signins.first_view(code)  # type: ignore[attr-defined]
+            if first is not None:
+                # The browser drew the page, so this sign-in did not come back by itself (an Auth
+                # Tab never loads it): the member's activity says so, once per code.
+                reason = "after a new sign-in" if first.fresh else "no new sign-in"
+                state.db.audit("app_signin_tap_page", sub=first.sub, detail={"reason": reason})
             resp = small(
                 "Signed in",
                 app_signin.return_body(code, app_page.app_package(), auto=auto),

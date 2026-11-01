@@ -131,7 +131,7 @@ def test_app_chip_names_the_app_and_never_guesses() -> None:
         "alt='' width='16' height='16'><span class='nm'>Claude</span></span>"
     )
     assert ui.app_chip("ChatGPT", client_id="https://chatgpt.com/oauth/c.json").endswith(
-        "alt='' width='16' height='16'><span class='nm'>ChatGPT</span></span>"
+        "alt='' width='16' height='16'></span><span class='nm'>ChatGPT</span></span>"  # its slot (F7)
     )
     assert ui.app_chip("Forge") == f"<span class='ui-app'>{plug}<span class='nm'>Forge</span></span>"
     assert "&lt;script&gt;" in ui.app_chip("<script>")
