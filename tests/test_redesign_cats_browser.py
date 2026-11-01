@@ -276,20 +276,27 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         assert _checked(page, "Premier") == "true"
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
-        # -- Delete…: the red box names where the cards go (the biggest counted, non-premier
-        # category picked), Keep it, then the solid red Delete category; Undo is the restore
+        # -- Delete…: the red box names where the cards go and what each choice does (review 2,
+        # M6), Keep it, then the solid red Delete category; Undo is the restore
         _kebab(page, "Ramp").click()
         menu.wait_for(timeout=3000)
         menu.locator("[role=menuitem]", has_text="Delete…").click()
         box.wait_for(timeout=3000)
         page.wait_for_timeout(200)
         assert box.locator("h2").inner_text() == "Delete “Ramp”?"
-        assert "Its 2 cards stay in the deck." in box.locator(".body").inner_text()
         options = box.locator("select#catmove option").all_inner_texts()
-        assert "Ramp" not in options and "Commander" in options
-        # the biggest category comes picked (Removal, 4 cards: Premier now, so the delete will
-        # ask once more); never the one deleted
-        assert box.locator("select#catmove").input_value() == "Removal"
+        assert "Ramp" not in options and "No category" in options
+        assert "Commander (makes them commanders)" in options and "Removal (makes them commanders)" in options
+        assert "Maybeboard (leaves the deck)" in options
+        # Removal (4 cards) is Premier now and the other categories are out of the deck, so no
+        # plain category is left to pick: "No category" comes picked, never Commander
+        assert box.locator("select#catmove").input_value() == ""
+        assert (
+            "Its 2 cards stay in the deck with no category, listed by type."
+            in box.locator(".body").inner_text()
+        )
+        box.locator("select#catmove").select_option("Removal")
+        assert "Its 2 cards move to “Removal” and become commanders." in box.locator(".body").inner_text()
         assert box.locator(".acts button[data-cancel]").inner_text().strip() == "Keep it"
         final = box.locator(".acts button.danger")
         assert final.inner_text().strip() == "Delete category"
@@ -349,4 +356,84 @@ def test_rename_premier_delete_and_add_from_the_deck_page(
         assert server.ark.category_deletes_with_cards == []
         assert page.evaluate(MEASURE) == []
         assert errors == []
+        browser.close()
+
+
+def test_the_delete_box_never_picks_commander_and_offers_no_category(server: Server) -> None:
+    """Review 2, M6: the delete box's pick is the biggest plain category (never Commander, a
+    Premier category or a board out of the deck), each choice is named for what it does, the
+    sentence follows the pick, and "No category" leaves the cards in the deck with none (an
+    Archidekt category delete after the cards are cleared); a Premier pick still asks once more."""
+    from playwright.sync_api import sync_playwright
+
+    sid = server.sign_in_and_link()
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 375, "dark", True, True)
+        menu = page.locator(".ctxmenu[role=menu]")
+        box = page.locator(BOX)
+        rows_before = page.locator(".deckview li.row").count()
+        # Removal (3 cards): Ramp (2, plain) comes picked, not Commander (Premier) or Maybeboard
+        _kebab(page, "Removal").click()
+        menu.wait_for(timeout=3000)
+        menu.locator("[role=menuitem]", has_text="Delete…").click()
+        box.wait_for(timeout=3000)
+        page.wait_for_timeout(200)
+        select = box.locator("select#catmove")
+        assert select.input_value() == "Ramp"
+        assert "Its 3 cards stay in the deck, in “Ramp”." in box.locator(".body").inner_text()
+        labels = select.locator("option").all_inner_texts()
+        assert labels[0] == "No category" and "Commander (makes them commanders)" in labels
+        assert "Maybeboard (leaves the deck)" in labels and "Removal" not in labels
+        select.select_option("Maybeboard")
+        assert "Its 3 cards move to “Maybeboard”, out of the deck." in box.locator(".body").inner_text()
+        select.select_option("")
+        assert (
+            "Its 3 cards stay in the deck with no category, listed by type."
+            in box.locator(".body").inner_text()
+        )
+        _shot(page, "delete-no-category-375")
+        box.locator(".acts button.danger").click()
+        page.wait_for_function(NO_STACK, arg="Removal", timeout=6000)
+        assert (
+            _toast(page)
+            == "Deleted “Removal”. Its 3 cards have no category now. Snapshot kept under History."
+        )
+        assert page.locator(".deckview li.row").count() == rows_before  # every card still in the deck
+        assert server.ark.category_deletes_with_cards == [] and len(server.ark.category_deletes) == 1
+        assert all("Removal" not in (r.get("categories") or []) for r in server.ark.decks[42]["cards"])
+        # with no plain category left, Ramp's box picks "No category"; Commander asks once more
+        _kebab(page, "Ramp").click()
+        menu.wait_for(timeout=3000)
+        menu.locator("[role=menuitem]", has_text="Delete…").click()
+        box.wait_for(timeout=3000)
+        page.wait_for_timeout(200)
+        assert select.input_value() == ""
+        select.select_option("Commander")
+        assert "Its 2 cards move to “Commander” and become commanders." in box.locator(".body").inner_text()
+        box.locator(".acts button.danger").click()
+        page.wait_for_function(BOX_TITLE, arg="Delete the category “Ramp”?", timeout=6000)
+        assert "makes them commanders" in box.locator(".body").inner_text()
+        box.locator(".acts button[data-cancel]").click()
+        page.wait_for_timeout(300)
+        assert len(server.ark.category_deletes) == 1  # kept
+        assert errors == [], errors
+        browser.close()
+
+
+def test_the_owners_name_in_the_banner_is_a_44px_target_on_a_phone(server: Server) -> None:
+    """The phone banner's owner link (review 2, L8): a 44 px tap target without a taller line."""
+    from playwright.sync_api import sync_playwright
+
+    sid = server.sign_in_and_link()
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 375, "light", True, True)
+        owner = page.locator(".banner .rows .owner-sm")
+        assert owner.is_visible()
+        b = owner.bounding_box()
+        assert b and b["height"] >= 44, b
+        line = owner.evaluate("el => el.parentElement.getBoundingClientRect().height")
+        assert line < 44 + 24, line  # the line itself stays short: the padding makes the target
+        assert errors == [], errors
         browser.close()

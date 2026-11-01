@@ -158,3 +158,61 @@ def test_at_200_percent_text_the_rows_hold_their_line(tmp_path: Path) -> None:
                 browser.close()
     finally:
         server.stop()
+
+
+def test_the_row_menus_reject_and_apply_ask_in_the_page_like_the_bar(tmp_path: Path) -> None:
+    """Reject or Apply from a Proposals row's ⋮ asks in the standard red pop-up box (the reason
+    optional, Reject in red, "Keep it"), as the bar's buttons do, on this page, never on a page of
+    its own (review 2, M3); the reason sent is stored on the proposal."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _exe()
+    server = _server(tmp_path)
+    try:
+        sid = _seed_rows(server)
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, server, sid, 375, "light", exe)
+            page.goto(f"{server.base}/proposals", wait_until="networkidle")
+            url = page.url
+            row = page.locator(ROWS["/proposals"], has_text="Arcane Signet").first
+            pid = row.locator("input[name=pick]").get_attribute("value")
+            row.locator("a.kebab").tap()
+            _menu(page)
+            page.locator(".ctxmenu [role=menuitem]", has_text="Reject").click()
+            box = page.locator(".mtgbox[role=dialog]:not([hidden])")
+            box.wait_for(timeout=3000)
+            assert page.url == url  # asked here, on the list
+            assert box.locator(".acts button[data-cancel]").inner_text().strip() == "Keep it"
+            ok = box.locator(".acts button.danger")
+            assert ok.inner_text().strip() == "Reject"
+            assert box.locator("label.reason textarea#reject-reason").count() == 1
+            assert "Reason (optional)" in box.locator("label.reason").inner_text()
+            red = page.evaluate("el => getComputedStyle(el).backgroundColor", ok.element_handle())
+            assert red.startswith("rgb(") and int(red[4:].split(",")[0]) > 150, red
+            page.keyboard.press("Escape")
+            page.locator(".mtgbox-scrim").first.wait_for(state="detached", timeout=3000)
+            assert page.locator("input[type=checkbox]:checked").count() == 0  # the pick is undone
+            # Apply from the ⋮ presses the bar's Apply: the same confirm (its guarded page) as a
+            # ticked row's, for this row alone
+            row.locator(".title").click(button="right")
+            _menu(page)
+            page.locator(".ctxmenu [role=menuitem]", has_text="Apply").click()
+            page.wait_for_selector("form.guarded button[value=apply]", timeout=8000)
+            assert page.url != url
+            page.go_back()
+            page.wait_for_load_state("networkidle")
+            row = page.locator(ROWS["/proposals"], has_text="Arcane Signet").first
+            row.locator("a.kebab").tap()
+            _menu(page)
+            page.locator(".ctxmenu [role=menuitem]", has_text="Reject").click()
+            box.wait_for(timeout=3000)
+            box.locator("textarea#reject-reason").fill("Not this week")
+            with page.expect_navigation():
+                box.locator(".acts button.danger").click()
+            page.wait_for_load_state("networkidle")
+            told = server.app.state.gateway.decks.describe("user-1", pid)
+            assert told["state"] == "rejected" and told["reject_reason"] == "Not this week"
+            assert errors == [], errors
+            browser.close()
+    finally:
+        server.stop()

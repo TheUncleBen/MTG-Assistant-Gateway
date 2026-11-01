@@ -356,14 +356,14 @@ def test_reject_asks_first_on_the_list_and_the_deck_strip(server: Server) -> Non
                     " text: e.textContent.trim()}))"
                 )
                 assert got == [
-                    {"focused": True, "cls": "btn", "text": "Cancel"},
+                    {"focused": True, "cls": "btn", "text": "Keep it"},
                     {"focused": False, "cls": "danger", "text": "Reject 2"},
                 ], (where, got)
                 _readable(page, ".mtgbox .bh h2, .mtgbox .body p, .mtgbox .acts button", where)
                 _no_sideways(page, vw, where)
                 if shots:
                     page.screenshot(path=f"{shots}/a-reject-box-{where}.png")
-                ask.locator("button", has_text="Cancel").click()
+                ask.locator("button", has_text="Keep it").click()
                 page.locator(".mtgbox-scrim").wait_for(state="detached", timeout=5000)
                 reject = bar.locator("button[name=action][value=reject]")
                 assert reject.is_visible() and reject.evaluate("e => e === document.activeElement"), where

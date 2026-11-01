@@ -919,7 +919,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             current_client.set(BROWSER_CLIENT_ID)
             for pid in picks:
                 try:
-                    state.decks.reject(sub, pid, via="browser")
+                    state.decks.reject(sub, pid, via="browser", reason=str(data.get("reason") or ""))
                 except DeckError:
                     continue  # already closed: nothing to do for it
             return RedirectResponse(_with_query(back, "ok=rejected_some"), status_code=303)
@@ -1960,11 +1960,13 @@ async def details_html(
             chev=False,
         )
     )
-    # The mockup's two columns on a wide screen: Archidekt over This gateway, Assistant over Your
-    # data; one under the other on a phone, Your data (the actions that ask first) last.
+    # Two columns on a wide screen, even (Ben: balanced columns; review 2, L10): Archidekt over
+    # Your data, Assistant over This gateway (the mockup's Archidekt over This gateway stood 9
+    # rows against 6); one under the other on a phone in the mockup's order, Your data (the
+    # actions that ask first) last.
     cols = [
-        [(0, GROUP_NAMES[0], archidekt, ""), (2, GROUP_NAMES[2], gateway, "")],
-        [(1, GROUP_NAMES[1], assistant, "apps"), (3, GROUP_NAMES[3], data, "")],
+        [(0, GROUP_NAMES[0], archidekt, ""), (3, GROUP_NAMES[3], data, "")],
+        [(1, GROUP_NAMES[1], assistant, "apps"), (2, GROUP_NAMES[2], gateway, "")],
     ]
     s = state.settings
     boxes = _signout_box(csrf_in, open=open_box == "signout") + _delete_box(
@@ -3620,10 +3622,12 @@ def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf:
         f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
         f"<input type='hidden' name='back' value='{html.escape(back)}'>"
         "<input type='hidden' name='sure' value='1'>"
-        f"{hidden}<p class='actions'>"
+        f"{hidden}<label for='reject-reason'>Reason (optional)"
+        "<textarea id='reject-reason' name='reason' rows='2' maxlength='500' "
+        "placeholder='Your assistant sees this'></textarea></label><p class='actions'>"
+        f"<a class='btn btn-plain' href='{html.escape(back)}'>Keep it</a> "
         f"<button type='submit' name='action' value='reject' class='danger'>"
-        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button> "
-        f"<a class='btn btn-plain' href='{html.escape(back)}'>Cancel</a></p></form>"
+        f"{'Reject' if len(picks) == 1 else f'Reject {len(picks)}'}</button></p></form>"
     )
 
 

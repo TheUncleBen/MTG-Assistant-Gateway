@@ -265,14 +265,14 @@
         sentence.textContent = "";
         if (!kept.length) {
           sentence.appendChild(document.createTextNode("None of this card's categories (" + (cats.join(", ") || "none") + ") is one of your category templates, so there is nothing to lock. Make a template first on "));
-          var a = el("a", null, "My lists"); a.href = "/lists/templates";
+          var a = el("a", null, "Binder › Lists › Category templates"); a.href = "/lists/templates";
           sentence.appendChild(a);
           sentence.appendChild(document.createTextNode("."));
           return;
         }
         sentence.appendChild(document.createTextNode("From now on, when you add “" + name + "” to any deck, it goes into "));
         sentence.appendChild(el("b", null, kept.join(", ")));
-        sentence.appendChild(document.createTextNode(" (its categories in this deck). Saved to My lists › Default categories."));
+        sentence.appendChild(document.createTextNode(" (its categories in this deck). Saved to Binder › Lists › Default categories."));
         if (out.length) { left.hidden = false; left.textContent = "Left out, not a template: " + out.join(", ") + "."; }
         if (ok) { ok.removeAttribute("data-gate-off"); ok.disabled = false; }
       }, function () { sentence.className = ""; sentence.textContent = "No connection; your category templates could not be read."; });

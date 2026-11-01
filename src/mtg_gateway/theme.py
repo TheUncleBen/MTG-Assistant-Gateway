@@ -1540,6 +1540,11 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-table.ui-rows .tr:not(.group) .act{align-self:start;margin-top:calc(.675em - 22px)}
 .ui-table.ui-rows .act .ui-cap{margin:0;white-space:nowrap}
 .ui-table.ui-rows .act .kebab{flex:none}
+/* large text on a narrow phone (the list under about 20 em of its own text: 200% at 375 px): the
+   main action's chevron goes, as the title opens the same and the ⋮ has it, so the title keeps
+   room for whole words (independent review 2, M5 sweep) */
+.ui-table.ui-rows{container-type:inline-size}
+@container (max-width:20em){ .ui-table.ui-rows .tr:not(.group) .act > .ui-cap{display:none} }
 .ui-table.ui-rows .act .acts[hidden]{display:none}
 /* a deck's group row: the name with its count under it, Open deck at the end */
 .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto;min-height:52px}
@@ -1886,6 +1891,8 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .body ul{margin:0;padding-left:1.25rem}
 .mtgbox .body ul li{margin:.2rem 0}
 .mtgbox .body .field{margin:0}
+.mtgbox .body label.reason{display:flex;flex-direction:column;gap:.3rem;margin:.75rem 0 0;font-weight:700}
+.mtgbox .body label.reason textarea{width:100%;margin:0;font-weight:400;resize:vertical}
 .mtgbox .body .field + .field{margin-top:.75rem}
 .mtgbox .body textarea{width:100%;min-height:16rem;resize:vertical;font-family:ui-monospace,SFMono-Regular,
   Menlo,Consolas,monospace;font-size:.9rem;line-height:1.4}
@@ -2560,7 +2567,7 @@ ACCOUNT_PAGES = ("/account", "/account/details")
 # picture opens; the lists and the Watchlist live in Binder.
 MORE_GROUPS = [
     ("Find", [("/search", "Search decks and cards", "search"), ("/precons", "Precons", "box")]),
-    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "box")]),
+    ("Your cards", [("/scan", "Scan", "scan"), ("/history/models", "Card models", "layers")]),
     ("Community", [("/forum", "Forum", "comment")]),
 ]
 # The rail without More (0.7.46 redesign, screen 1): an open Fold's rail has room for every page,

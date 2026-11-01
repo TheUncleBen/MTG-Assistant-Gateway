@@ -209,3 +209,11 @@ def test_the_row_menu_button_and_the_balanced_toolbar() -> None:
     for css in (proposals_view.PROPOSALS_CSS, history_view.HISTORY_CSS, reports_page.REPORTS_PAGE_CSS):
         assert BALANCED_TOOLS_CSS in css
     assert ".ui-table.ui-rows" in UI_CSS
+
+
+def test_a_history_line_never_ends_in_a_dot_before_its_capsule() -> None:
+    """The Proposal capsule follows the words with a space, not " · ": on a phone the dot
+    wrapped onto a line of its own (review 2, L9); the same for a restore's line."""
+    e = history_view._change_event({"id": "p1", "summary": "+1 Sol Ring", "kind": "deck_changes"})
+    words, _cap = e["line"].split("<a class='ui-cap'", 1)
+    assert words == "Applied a change: +1 Sol Ring " and "·" not in e["line"]

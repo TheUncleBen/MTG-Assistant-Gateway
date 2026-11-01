@@ -138,7 +138,8 @@ def test_the_list_and_every_page_fit_each_surface(
             if path == "/account/details":
                 # the list: four groups in the mockup's order, rows with values, no form on it
                 # (textContent: the style sets the headings in capitals), top to bottom on a phone;
-                # on a wide screen Archidekt over This gateway, Assistant over Your data
+                # on a wide screen Archidekt over Your data, Assistant over This gateway (the columns
+                # balanced by their rows, review 2, L10)
                 heads = page.evaluate(
                     "() => [...document.querySelectorAll('.ygrp')].map(g => [g.querySelector('h2')"
                     ".textContent.trim(), g.getBoundingClientRect().y, g.getBoundingClientRect().x])"
@@ -151,9 +152,21 @@ def test_the_list_and_every_page_fit_each_surface(
                     assert len(xs) == 2, heads
                     left = sorted((h for h in heads if round(h[2]) == xs[0]), key=lambda t: t[1])
                     right = sorted((h for h in heads if round(h[2]) == xs[1]), key=lambda t: t[1])
-                    assert [h for h, _y, _x in left] == ["Archidekt", "This gateway"]
-                    assert [h for h, _y, _x in right] == ["Assistant", "Your data"]
+                    assert [h for h, _y, _x in left] == ["Archidekt", "Your data"]
+                    assert [h for h, _y, _x in right] == ["Assistant", "This gateway"]
                     assert heads[0][2] + 300 < xs[1], heads  # columns as wide as the Account page's
+                    # the columns balanced by their rows (8 and 7), every row one line tall, so
+                    # the two columns end within a row of each other (review 2, L10)
+                    rows = page.evaluate(
+                        "() => [...document.querySelectorAll('.ygrp .rows > .yrow, "
+                        ".ygrp .rows > details.yrow')].map(r => Math.round(r.getBoundingClientRect().height))"
+                    )
+                    assert max(rows) - min(rows) <= 2 and max(rows) <= 52, rows
+                    ends = page.evaluate(
+                        "() => [...document.querySelectorAll('.ycol')]"
+                        ".map(c => Math.round(c.getBoundingClientRect().bottom))"
+                    )
+                    assert len(ends) == 2 and abs(ends[0] - ends[1]) <= max(rows) + 2, (ends, rows)
                 # every group as wide as the list (one under the other on a phone)
                 widths = page.evaluate(
                     "() => [...document.querySelectorAll('.ygrp')].map(g => g.offsetWidth)"
