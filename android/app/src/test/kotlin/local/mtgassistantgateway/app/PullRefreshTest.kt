@@ -16,6 +16,8 @@ class PullRefreshTest {
             "/", "/decks", "/decks?folder=Commander", "/collection", "/collection/wants", "/watchlist",
             "/proposals", "/history", "/reports", "/notifications", "/precons", "/cards?q=sol+ring",
             "/search?q=meren", "/forum", "/forum/general/rules", "/activity", "/decks/",
+            "/collection/lists", "/lists/templates", "/lists/defaults?page=2", "/lists/tags",
+            "/lists/custom?q=elf", "/users/alice", "/users/Some%20One?order=name",
         )) {
             assertTrue(path, PullRefresh.offered(origin, "$origin$path"))
         }
@@ -30,10 +32,18 @@ class PullRefreshTest {
         for (path in listOf(
             "/decks/12345/edit", "/decks/12345/settings", "/decks/12345/goldfish", "/decks/new",
             "/decks/new-package", "/scan", "/scan/sessions", "/account", "/account/details",
-            "/admin/settings", "/lists/templates", "/login", "/install?for=android", "/guide",
+            "/admin/settings", "/login", "/install?for=android", "/guide", "/lists/templates/new",
+            "/lists/custom/picture", "/users/alice/decks", "/users",
         )) {
             assertFalse(path, PullRefresh.offered(origin, "$origin$path"))
         }
+    }
+
+    /** A pull says so in its own header (the gateway's decks.PULL_HEADER) and loads the page itself. */
+    @Test fun aPullLoadsThePageWithItsHeader() {
+        assertEquals(mapOf("X-MTG-Pull" to "1"), PullRefresh.HEADERS)
+        assertEquals("$origin/decks/12345?view=grid", PullRefresh.target("$origin/decks/12345?view=grid#main"))
+        assertEquals("$origin/users/alice", PullRefresh.target("$origin/users/alice"))
     }
 
     @Test fun anotherSiteOrNoPageNeverOffersIt() {

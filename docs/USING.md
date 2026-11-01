@@ -568,7 +568,10 @@ what only one of the two paths can do.
 The [Android app](ANDROID.md) shows these same pages as a native-feeling
 app with the phone camera built in. The app's own actions (Scan with the
 app's camera, Reload, Open a copied link, Change gateway, Check for app
-updates) are under This app on the Account page. On a foldable, the folded screen has the tabs at the bottom and the
+updates) are under This app on the Account page. Pull down from the top of a
+list page, a deck page, Binder › Lists and its lists, or a profile to read it
+again from Archidekt; a pull on a deck page always reads the deck again, where
+the menu's Reload shows a read from the last 30 seconds as it is. On a foldable, the folded screen has the tabs at the bottom and the
 unfolded screen moves them to a rail down the left edge. No Android phone? Add the site to your home screen from the
 browser and it opens like an app, scanning included.
 

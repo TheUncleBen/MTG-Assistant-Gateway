@@ -33,7 +33,7 @@ from .archidekt import no_retry
 from .busy import busy_response
 from .companion import DECK_CSP
 from .deckpage import image_url
-from .decks import DeckError, current_client, own_snapshot
+from .decks import DeckError, current_client, own_snapshot, reloading
 from .pages import (
     BROWSER_CLIENT_ID,
     TOO_BIG,
@@ -1821,6 +1821,8 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(HUB)
+        if reloading(("lists-hub", sub)):  # a reload or the app's pull: the counts are read again
+            account_lists.read_counts_again(sub)
         prices_svc = getattr(state, "prices", None)
         watch_lists = None
         ungrouped = 0

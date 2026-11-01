@@ -263,12 +263,19 @@ else your gateway serves. A few things are native:
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
 - **Pull to refresh.** On a page that shows a list (Home, Decks, a deck page,
-  Binder, Proposals, History, Reports, Alerts, Precons, Card search, Forum),
-  pulling down from the very top shows an orange disc under the top bar;
-  letting go past the threshold reloads the page, as the browser's Reload
-  does, so the deck page reads Archidekt again. It is not offered on forms,
-  the deck editor or the scanner, and a touch that starts inside an open box,
-  a menu, or a part of the page that scrolls on its own never pulls the page.
+  Binder, Binder › Lists and each of its lists, Proposals, History, Reports,
+  Alerts, Precons, Card search, Forum, a member's profile), pulling down from
+  the very top shows an orange disc under the top bar; letting go past the
+  threshold loads the page again and reads it from Archidekt instead of the
+  copy the gateway keeps for a while. On a deck page a pull always reads the
+  deck from Archidekt (a pull within three seconds of the last read shows that
+  read). The app tells the gateway it was a pull with its own `X-MTG-Pull`
+  header; the reads still wait their turn in the gateway's shared Archidekt
+  pacer and count against your own Archidekt limit. A pull loads the page's
+  address again, so a page shown after sending a form never sends the form
+  twice. It is not offered on forms, the deck editor or the scanner, and a
+  touch that starts inside an open box, a menu, or a part of the page that
+  scrolls on its own never pulls the page.
 - **Back** goes back a page; on the first page it leaves the app.
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the
