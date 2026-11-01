@@ -55,7 +55,7 @@ from .pages import (
     browser_session,
     csrf_form_ok,
     csrf_header_ok,
-    login_redirect,
+    login_redirect_here,
     press_stamp,
     read_limited,
 )
@@ -1560,7 +1560,7 @@ def _stepper(r: dict[str, Any], csrf_in: str, rid: str) -> str:
 
 def _shims(r: dict[str, Any], csrf_in: str) -> str:
     """Hidden pieces the shared card menu (static/menus.js) reaches for: the Remove from collection
-    form (the page's script asks first, then removes) and the Details… hook (opening it opens the
+    form (the page's script removes at once, with Undo) and the Details… hook (opening it opens the
     Details box)."""
     name = _esc(r["name"])
     return (
@@ -1818,7 +1818,8 @@ def add_box_html(
     )
     import_form = (
         f"<form method='post' action='/collection' id='col-importform' class='importform' role='tabpanel' "
-        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'}>"
+        f"aria-labelledby='col-tab-import' data-pane='import'{'' if imp else ' hidden'} "
+        "data-draft='binder-import'>"
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         "<input type='hidden' name='action' value='import'>"
         "<p class='muted small'>A collection CSV or a card list, one card per line, "
@@ -2545,11 +2546,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "Archidekt is slow or down the page cannot show it.</p></section>"
         )
 
-    def listing_query(qp: Any) -> dict[str, Any]:
-        """The list's address: name filter, sort and direction, offset (the old ``page`` too)."""
+    def listing_query(qp: Any, request: Request | None = None, sub: str | None = None) -> dict[str, Any]:
+        """The list's address: name filter, sort and direction, offset (the old ``page`` too).
+        With ``request`` and ``sub``, the sort is the one remembered on the account when the
+        address names none, and a pick from this site is remembered (prefs.sort_choice)."""
         q = _clean(qp.get("q"), 80)
-        sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
-        direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
+        if request is not None and sub:
+            sort, direction = prefs.sort_choice(
+                state.db,
+                sub,
+                request,
+                "collection",
+                sorts=SORTS,
+                default="added",
+                dirs=DIRECTION_WORDS,
+                default_dir="desc",
+            )
+        else:
+            sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
+            direction = qp.get("dir") if qp.get("dir") in DIRECTION_WORDS else "desc"
         try:
             offset = max(0, min(int(qp.get("offset") or 0), 1_000_000))
         except ValueError:
@@ -2653,9 +2668,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def collection_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         qp = request.query_params
-        lq = listing_query(qp)
+        lq = listing_query(qp, request, sub)
         view, remember = prefs.view_choice(state.db, sub, request, "collection", ("grid", "list"), "grid")
         view_in_link = view if qp.get("view") in ("grid", "list") else None
         csrf = _csrf(s, sid) or ""
@@ -2871,7 +2886,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return who
         sub, sid = who
         qp = request.query_params
-        lq = listing_query(qp)
+        lq = listing_query(qp, request, sub)
         view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
         try:
             got = await listing(sub, lq)
@@ -2925,7 +2940,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         """The page's own forms (no script needed): add by name, one more, one fewer, remove."""
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         data = await form(request)
         back = _safe_next(data.get("next") or "/collection")
         if not back.startswith("/collection"):
@@ -3057,7 +3072,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def export_csv(request: Request) -> Response:
         sub, _sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/collection")
+            return login_redirect_here(request, "/collection")
         try:
             text = await service.export_csv(sub)
         except CollectionError as exc:

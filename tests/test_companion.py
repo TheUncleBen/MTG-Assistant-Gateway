@@ -1105,7 +1105,7 @@ async def test_new_deck_page_says_which_card_was_not_found(stack: Stack) -> None
         assert "Definitely Not A Card Zzz" in page.text  # the result names the card
         # the code for a proposal that really does not exist is unchanged
         gone = await b.http.get("/proposals/nope?err=not_found", headers=NAV)
-        assert "No such proposal" in gone.text
+        assert "This proposal could not be found." in gone.text and "Back to Assistant" in gone.text
     finally:
         await b.aclose()
 

@@ -25,7 +25,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 
 from . import prefs, prices
 from .decks import DeckError
-from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
+from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect_here, read_limited
 from .theme import render
 from .watchlist_page import WATCH_PAGE_CSS, Query, alert_text, watchlist_fragment_html, watchlist_page_html
 
@@ -123,7 +123,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
     async def watchlist_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/watchlist")
+            return login_redirect_here(request, "/watchlist")
         qp = request.query_params
         ok = qp.get("ok", "")
         query = Query.parse(qp)
@@ -188,7 +188,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
     async def watchlist_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
-            return login_redirect("/watchlist")
+            return login_redirect_here(request, "/watchlist")
         raw = await read_limited(request, MAX_FORM * 8)  # the bulk form carries up to 5,000 ids
         fields = parse_qs((raw or b"").decode("utf-8", "replace"))
         data = {k: v[0] for k, v in fields.items()}

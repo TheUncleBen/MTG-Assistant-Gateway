@@ -248,13 +248,14 @@
   }
 
   // -- the save: the deck page's own edit endpoint (api.py), one proposal applied at once --------
+  // through the shared MtgFetch (static/fetchjson.js): a session that ended rejects with
+  // err.signedOut (the toast then offers Sign in, which comes back here) and a lost connection
+  // with err.noConnection, each in the site's one wording
+  var Fetch = window.MtgFetch;
   function api(path, body) {
-    return fetch(path, {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: JSON.stringify(body)
-    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
+    return Fetch.json(path, { method: "POST", body: JSON.stringify(body), csrf: CSRF });
   }
+  function signInAction() { return Fetch.signInLink("btn"); }
   var editUrl = "/api/v1/decks/" + enc(deckId) + "/edit";
   var saving = false;
   // -- a change big enough to ask first (modes.hand_edit_confirm): the endpoint made the proposal
@@ -395,7 +396,7 @@
   }
   function showError(err) {
     if (err && err.cancelled) return;
-    toast((err && err.message) || "No connection; nothing was changed.", { error: true });
+    toast((err && err.message) || "No connection; nothing was changed.", { error: true, actions: err && err.signedOut ? [signInAction()] : [] });
   }
 
   // -- custom cards (deckpage.custom_card_row): the member's own custom cards in the deck ------
@@ -430,7 +431,7 @@
       if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
       throw new Error(d.message || "The change could not be saved.");
     }, function (err) {
-      if (err && err.cancelled) throw err;
+      if (err && (err.cancelled || err.signedOut || err.noConnection)) throw err;
       throw new Error("No connection; nothing was changed.");
     });
   }
@@ -546,7 +547,7 @@
       dropSavingNote(card, "Custom");
       if (back) back();
       if (err && err.cancelled) { dismissToast(); throw err; }
-      toast("Not saved: " + ((err && err.message) || "no connection").replace(/\.$/, "") + ".", { error: true });
+      toast("Not saved: " + whyNot(err) + ".", { error: true, actions: err && err.signedOut ? [signInAction()] : [] });
       throw err;
     });
   }
@@ -752,6 +753,12 @@
      answer carries (what the deck shows now) are drawn instead (D-04). again: a Try again's own
      failure, after which there is nothing more to put back. */
   var NO_RETRY = ["not_found", "unknown_cards", "invalid", "forbidden", "too_large", "not_linked"];
+  // why a save did not go through, as the end of a sentence ("Add not saved: …")
+  function whyNot(err) {
+    if (err && err.signedOut) return "you're signed out";
+    if (!err || err.noConnection || !err.message) return "no connection, nothing was changed";
+    return err.message.replace(/\.$/, "");
+  }
   function notSaved(plan, job, err, again) {
     var back = again ? "" : job.undo();
     if (err && err.cancelled) { dismissToast(); return; }
@@ -769,8 +776,9 @@
         return;
       }
     }
-    var why = ((err && err.message) || "no connection").replace(/\.$/, "");
-    var said = job.what + " not saved: " + why + "." + (back ? " " + back : "");
+    var said = job.what + " not saved: " + whyNot(err) + "." + (back ? " " + back : "");
+    // signed out: Try again cannot help; Sign in comes back to this page
+    if (err && err.signedOut) { toast(said, { error: true, actions: [signInAction()] }); return; }
     // a refusal of the change itself (no such card, a change the deck can't take) would fail the
     // same way again: no Try again then; a name that is no card gets a card search instead
     if (err && NO_RETRY.indexOf(err.code) >= 0) {
@@ -1946,13 +1954,14 @@
   function addToBinder(btn, name) {
     btn.disabled = true;
     btn.textContent = "Adding…";
-    fetch("/collection/api/add", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: JSON.stringify({ items: [{ name: name, quantity: 1 }], source: "manual" })
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      btn.textContent = d.ok && d.added && d.added.length ? "Added to your binder" : "Could not add (" + ((d && d.message) || "lookup failed") + ")";
-    }).catch(function () { btn.textContent = "Could not add: no connection"; });
+    Fetch.answer("/collection/api/add", {
+      body: JSON.stringify({ items: [{ name: name, quantity: 1 }], source: "manual" }), csrf: CSRF, what: "the card was not added"
+    }).then(function (d) {
+      if (d.ok && d.added && d.added.length) { btn.textContent = "Added to your binder"; return; }
+      btn.disabled = false;
+      btn.textContent = "Could not add: " + Fetch.problem(d, "the card was not added").text.replace(/\.$/, "");
+      if (d.signedOut && btn.parentNode) btn.parentNode.insertBefore(signInAction(), btn.nextSibling);
+    });
   }
   function scryfallLink(name, cls) {
     var scry = el("a", cls || "btn", "Open on Scryfall");
@@ -2562,7 +2571,8 @@
       }).catch(function (err) {
         all.disabled = false;
         status.className = "status notice error";
-        status.textContent = err && err.cancelled ? "" : "Could not save: " + ((err && err.message) || "no connection");
+        status.textContent = err && err.cancelled ? "" : "Could not save: " + whyNot(err) + ".";
+        if (err && err.signedOut) { status.appendChild(document.createTextNode(" ")); status.appendChild(signInAction()); }
         refresh();
       });
     }
@@ -3029,7 +3039,6 @@
     var catUrl = "/decks/" + enc(deckId) + "/categories";
     var busy = 0;
     var HISTORY = " Snapshot kept under History.";
-    var NO_NET = "No connection; nothing was changed.";
     var NO_RECORD = "This category has no record on Archidekt yet, so there is nothing to delete.";
     function q(name) { return "“" + name + "”"; }
     function info() { return readJson("data-catinfo", []); }
@@ -3052,9 +3061,7 @@
         else fd.set(k, fields[k]);
       });
       busy++;
-      return fetch(catUrl, { method: "POST", credentials: "same-origin", body: fd, headers: { Accept: "application/json" } })
-        .then(function (r) { return r.json(); })
-        .then(function (d) { busy--; return d || { ok: false }; }, function () { busy--; return { ok: false, message: NO_NET }; });
+      return Fetch.answer(catUrl, { method: "POST", body: fd }).then(function (d) { busy--; return d; });
     }
     // What Deck settings' form sends for one category: what it was when the page drew it (the
     // was_ fields) and what it is to be: its name, and each switch that is on. ``over``: the
@@ -3526,19 +3533,11 @@
   // The box shows only the three approved messages: the gateway's own reason goes to
   // the console, never on screen. Signed out, retrying can't help: err.signedOut.
   function fetchList(src) {
-    return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (d) {
-        if (r.ok && d && d.ok && typeof d.list === "string") return d;
-        if (r.status === 401) {
-          var out = new Error("You're signed out. Reload the page to sign in.");
-          out.signedOut = true;
-          throw out;
-        }
-        if (window.console) console.warn("Play on EDHPlay: the deck list request failed (HTTP " + r.status + ")" + (d && d.message ? ": " + d.message : ""));
-        throw new Error("The deck list couldn't be loaded.");
-      });
-    }, function () {
-      throw new Error("The deck list couldn't be loaded: no connection.");
+    return window.MtgFetch.answer(src, { what: "the deck list could not be loaded" }).then(function (d) {
+      if (d && d.ok && typeof d.list === "string") return d;
+      if (d.signedOut || d.noConnection) { var out = new Error(d.message); out.signedOut = !!d.signedOut; throw out; }
+      if (window.console) console.warn("Play on EDHPlay: the deck list request failed (HTTP " + d.status + ")" + (d && d.message ? ": " + d.message : ""));
+      throw new Error("The deck list couldn't be loaded.");
     });
   }
   var dialog = null, back = null;
@@ -3639,7 +3638,8 @@
         var p = make("p", "notice error");
         p.setAttribute("role", "alert");
         p.appendChild(make("span", "", err.message));
-        if (!err.signedOut) {
+        if (err.signedOut) p.appendChild(window.MtgFetch.signInLink("btn small"));
+        else {
           var again = make("button", "btn small", "Try again");
           again.type = "button";
           again.addEventListener("click", function () { load(); go.focus(); });

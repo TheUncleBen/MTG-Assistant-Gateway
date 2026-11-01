@@ -175,9 +175,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
         return csrf_form_ok(s, sid, data)
 
-    def to_login(next_path: str) -> Response:
-        return RedirectResponse(f"/login?next={_safe_next(next_path)}", status_code=302)
-
     # -- sign in / out ------------------------------------------------------
     @server.custom_route("/login", methods=["GET"], include_in_schema=False)
     async def login(request: Request) -> Response:
@@ -427,7 +424,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         to open (the forms' redirects, the old one-press forms' addresses) is Account details."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/account")
+            return login_redirect_here(request, "/account")
         if request.query_params:
             return await account_details(request)
         resp = page(
@@ -447,7 +444,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         of 0.7.45, the app's older links) opens that section's page with it."""
         sub, sid = current(request)
         if not sub:
-            return to_login(DETAILS)
+            return login_redirect_here(request, DETAILS)
         q = request.query_params
         ok, err = q.get("ok"), q.get("err")
         if "disconnect" in q or "disconnect_all" in q:
@@ -488,7 +485,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if section not in SECTIONS:
             return Response(status_code=404)
         if not sub:
-            return to_login(section_href(section))
+            return login_redirect_here(request, section_href(section))
         q = request.query_params
         if not DETAIL_PAGES:  # the rows fold open on the list: the list, at that row
             query = "&".join(f"{k}={quote(v, safe='')}" for k, v in q.multi_items())
@@ -540,7 +537,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def account_post(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return to_login("/account")
+            return login_redirect_here(request, "/account")
         # Whatever this form does (link, unlink, ...) is the member's own browser acting.
         current_client.set(BROWSER_CLIENT_ID)
         data = await form(request)
@@ -704,7 +701,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def assistants_list(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return to_login(assistants.PAGE)
+            return login_redirect_here(request, assistants.PAGE)
         q = request.query_params
         notice = ""
         if q.get("ok") == "disconnected_assistant":
@@ -726,7 +723,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def assistants_list_post(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return to_login(assistants.PAGE)
+            return login_redirect_here(request, assistants.PAGE)
         current_client.set(BROWSER_CLIENT_ID)
         data = await form(request)
         if isinstance(data, Response):
@@ -745,7 +742,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         what each mode does), posting to Account details' own form action."""
         sub, sid = current(request)
         if not sub:
-            return to_login(assistants.DEFAULT_PAGE)
+            return login_redirect_here(request, assistants.DEFAULT_PAGE)
         q = request.query_params
         ok = q.get("ok") if str(q.get("ok") or "").startswith("mode_") else None
         notice = _notice(ok, q.get("err") if q.get("err") == "mode_invalid" else None)
@@ -762,7 +759,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         slug = request.path_params["slug"]
         if not sub:
-            return to_login(f"{assistants.PAGE}/{quote(slug, safe='')}")
+            return login_redirect_here(request, f"{assistants.PAGE}/{quote(slug, safe='')}")
         a = assistants.find(state.db, sub, slug)
         if a is None:
             # disconnected, or never this member's: the list says what is connected
@@ -802,7 +799,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         slug = request.path_params["slug"]
         if not sub:
-            return to_login(f"{assistants.PAGE}/{quote(slug, safe='')}")
+            return login_redirect_here(request, f"{assistants.PAGE}/{quote(slug, safe='')}")
         # Whatever this form does is the member's own browser acting, never an assistant (modes.py)
         current_client.set(BROWSER_CLIENT_ID)
         data = await form(request)
@@ -858,7 +855,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     async def proposals(request: Request) -> Response:
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
         query = proposals_view.read_query(request.query_params)
         body = proposals_view.list_html(state, sub, _csrf(s, sid), query, notice=notice)
@@ -879,7 +876,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         confirm with the order they will run in; Reject rejects them at once (FLEX flow C)."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         raw = await read_limited(request, MAX_FORM)
         if raw is None:
             return page("Too large", "<p>That form was too large.</p>", status=413)
@@ -968,7 +965,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         """The confirm's Apply: the member's one press for the whole selection (batch.py)."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -1032,7 +1029,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         bid = request.path_params["bid"]
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         run = state.decks.batches.get(sub, bid)
         if run is None:
             return page(
@@ -1078,7 +1075,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         than the apply; then, on the guarded Undo, the restore."""
         sub, sid = current(request)
         if not sub:
-            return to_login("/proposals")
+            return login_redirect_here(request, "/proposals")
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -1160,13 +1157,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         pid = request.path_params["pid"]
         sub, sid = current(request)
         if not sub:
-            return to_login(f"/proposals/{pid}")
+            return login_redirect_here(request, f"/proposals/{pid}")
         try:
             p = state.decks.describe(sub, pid)
         except DeckError:
             return page(
-                "Not found",
-                "<p>No such proposal for your account.</p>",
+                "Proposal not found",
+                "<p>This proposal could not be found. It may belong to another account, or its link "
+                "may be wrong.</p>"
+                f"<p><a class='btn btn-primary' href='/proposals'>{icon('back')} Back to Assistant</a></p>",
                 status=404,
                 sub=sub,
                 sid=sid,
@@ -1253,7 +1252,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         pid = request.path_params["pid"]
         sub, sid = current(request)
         if not sub:
-            return to_login(f"/proposals/{pid}")
+            return login_redirect_here(request, f"/proposals/{pid}")
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -1573,10 +1572,28 @@ def login_redirect(next_path: str) -> Response:
     return RedirectResponse(f"/login?next={quote(_safe_next(next_path), safe='/?=')}", status_code=302)
 
 
+def login_redirect_here(request: Request, fallback: str = "/account") -> Response:
+    """Sign in and come back to this very page. A GET keeps its whole address, path and query
+    (a shared thread link, a price alert's ``?open=``, a folder, a filter), so the member lands
+    where the link pointed. A POST cannot be replayed after the sign-in, so it comes back to
+    ``fallback``, the page its form lives on (0.7.46 audit QG-05)."""
+    if request.method in ("GET", "HEAD"):
+        return login_redirect(request_path(request))
+    return login_redirect(fallback)
+
+
+def request_path(request: Request) -> str:
+    """The request's path with its query, as the browser sent it (same-origin, no host)."""
+    query = request.url.query
+    return request.url.path + (f"?{query}" if query else "")
+
+
 def _safe_next(value: str | None) -> str:
+    """Only a relative address on this site: never another host (``//evil``) or a backslash a
+    browser might read as one. A long query (a search's filters) keeps its whole address."""
     if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
         return "/account"
-    return value[:200]
+    return value[:1000]
 
 
 MAX_FORM = 16_384
@@ -2740,6 +2757,12 @@ def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
     return p.get("state") == "failed"
 
 
+# a refusal written for the assistant's call (a field "must be" a list, a non-empty list, a dict)
+_DEVELOPER_WORDS = re.compile(
+    r"\bmust be a (non-empty )?(list|dict|whole number|integer)|non-empty list|\bJSON\b"
+)
+
+
 def _page_step(p: dict[str, Any]) -> str:
     """What happens next, said to the person reading the review page. next_step speaks to the
     assistant (call this tool, do not call that one), so the page words it on its own."""
@@ -2809,6 +2832,10 @@ def _page_step(p: dict[str, Any]) -> str:
     if state == "failed":
         # the reason, in the gateway's words (DeckError messages: no codes), then what is left
         why = str(result.get("detail") or "").strip()
+        if _DEVELOPER_WORDS.search(why):
+            # a proposal whose own content failed the checks (an empty or malformed change list):
+            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21)
+            why = "the proposal is empty or damaged. Ask your assistant for a new one"
         lead = (
             f"This change could not be applied: {why.rstrip('.')}. "
             if why

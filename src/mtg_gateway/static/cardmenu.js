@@ -92,20 +92,22 @@
     var i = document.querySelector("input[name=csrf]");
     return i ? i.value : "";
   }
-  var ODD = "The gateway sent an answer this page could not read. Reload the page to see whether the change was made.";
+  // through the shared MtgFetch (static/fetchjson.js): neither ever rejects; a session that
+  // ended or a lost connection comes back as {ok: false} with the site's one wording and
+  // d.signedOut / d.noConnection, so every page shows the same words (and Sign in: fail below)
   function post(path, body) {
-    return fetch(path, {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-      body: JSON.stringify(body)
-    }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
-    });
+    return window.MtgFetch.answer(path, { method: "POST", body: JSON.stringify(body), csrf: csrf() });
   }
   function getJSON(path) {
-    return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
-      return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: ODD }; });
-    });
+    return window.MtgFetch.answer(path);
+  }
+  /* a change that did not go through, as a red toast: the gateway's own reason, or ``fallback``;
+     signed out and no connection get their one wording, and signed out a Sign in button that
+     comes back to this page (Try again cannot help then). ``extra``: more actions. */
+  function fail(d, fallback, extra) {
+    var pr = window.MtgFetch.problem(d, null);
+    var text = d && (d.signedOut || d.noConnection) ? pr.text : ((d && d.message) || fallback);
+    toast(text, { error: true, actions: pr.actions.concat(extra || []) });
   }
   // A proposal the deck page owes a reject (static/deck.js: a question left open when the page
   // was left). The reject goes out as the page leaves, but a request that outlives its page is
@@ -228,6 +230,11 @@
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
     return Promise.resolve(false);
   }
+  // any button with data-copy-text copies that text and says so (data-copy-said)
+  document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest ? e.target.closest("button[data-copy-text]") : null;
+    if (b) copyAndSay(b.getAttribute("data-copy-text"), b.getAttribute("data-copy-said") || "Copied.");
+  });
   function copyAndSay(text, said) {
     return copyText(text).then(function (ok) {
       if (ok) toast(said, { ok: true, ms: 4000 });
@@ -244,7 +251,7 @@
         toast(d.message || name + " added to your binder.", { ok: true, actions: [a] });
         return true;
       }
-      toast(d.message || "The card could not be added to your binder.", { error: true });
+      fail(d, "The card could not be added to your binder.");
       return false;
     }, function () { toast("No connection; the card was not added.", { error: true }); return false; });
   }
@@ -258,7 +265,7 @@
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: body
     }).then(function (r) {
-      return r.json().catch(function () { return { ok: false, message: ODD }; });
+      return r.json().catch(function () { return { ok: false, message: window.MtgFetch.UNREADABLE }; });
     }).then(function (d) {
       if (d.ok) {
         var a = el("a", "btn", "Open Wants");
@@ -266,7 +273,7 @@
         toast(d.notice || "Pinned on Archidekt.", { ok: true, actions: [a] });
         return true;
       }
-      toast(d.message || "The card could not be pinned.", { error: true });
+      fail(d, "The card could not be pinned.");
       return false;
     }, function () { toast("No connection; the card was not pinned.", { error: true }); return false; });
   }
@@ -342,7 +349,7 @@
     return post("/watchlist/api/watch", body).then(function (d) {
       done();
       if (!d.ok) {
-        toast(d.message || "The card could not be watched.", { error: true });
+        fail(d, "The card could not be watched.");
         throw new Error("refused");
       }
       var w = d.watch || {};
@@ -666,7 +673,7 @@
   window.MtgMenu = {
     open: openMenu, close: close, isOpen: function () { return !!menu; }, bind: bind,
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
-    toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, csrf: csrf, oweReject: oweReject,
+    toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, fail: fail, csrf: csrf, oweReject: oweReject,
     copyText: copyText, copyAndSay: copyAndSay, collect: collect, pin: pin, enabled: enabled, phone: phone, norm: norm,
     // true while the menu's own history.back() has not landed yet (static/box.js and
     // static/feedback.js ask), and through the task in which it lands (feedback.js's popstate
