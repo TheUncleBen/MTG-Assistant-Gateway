@@ -90,6 +90,9 @@ async def test_a_lock_held_by_another_process_does_not_stall_the_loop(stack: Sta
             longest = await ticker.done()
     finally:
         holder.wait(timeout=30)
+    # the same four requests with no lock held already keep the loop busy for 0.1 to 0.2 s at a
+    # time in this test client (drawing the pages), so a loaded machine gets headroom; before the
+    # change it stalled the whole 3 s
     assert longest < 1.0, f"the loop stalled {longest:.2f} s while another process held the lock"
     # every request went on once the lock was free, and none was turned away
     assert took >= 2.0, took

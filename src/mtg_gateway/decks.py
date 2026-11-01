@@ -7020,31 +7020,6 @@ class DeckService:
             )
         return kept, [{"name": n, "why": "Archidekt doesn't have this card"} for n in names]
 
-    async def _left_out_of_new_deck(
-        self, sub: str, row: dict[str, Any], cards: list[dict[str, Any]]
-    ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-        """An assistant's new deck without the cards Archidekt has none of, and those cards, as an
-        assistant's edit leaves them out (``_left_out``): the deck is made with the rest and the
-        result names them, instead of the whole deck failing on one card after the member approved
-        it. A card asked for by set and number still fails it (never swapped quietly), as does a
-        deck left with no card at all; the member's own New deck page fails as before."""
-        if row.get("created_by_client") in (None, BROWSER_CLIENT, ADMIN_CLIENT):
-            return cards, []
-        gone: set[str] = set()
-        for name in dict.fromkeys(str(c["name"]) for c in cards if not c.get("set_code")):
-            if await self._lookup_printing(sub, Change(action="add", card_name=name)) == NOT_ON_ARCHIDEKT:
-                gone.add(name.casefold())
-        if not gone:
-            return cards, []
-        kept = [c for c in cards if c.get("set_code") or str(c["name"]).casefold() not in gone]
-        names = list(dict.fromkeys(str(c["name"]) for c in cards if c not in kept))
-        if not kept:
-            raise DeckError(
-                "not_found",
-                "Archidekt doesn't have " + ", ".join(f"“{n}”" for n in names) + ", so nothing was sent.",
-            )
-        return kept, [{"name": n, "why": "Archidekt doesn't have this card"} for n in names]
-
     async def _resolve_adds(
         self,
         sub: str,
@@ -8307,7 +8282,14 @@ class DeckService:
                 f"{link['archidekt_username']} is linked now. Nothing was created; ask for a new "
                 "proposal if the deck should go to this account.",
             )
-        cards, left_out = await self._left_out_of_new_deck(sub, row, spec["cards"])
+        cards = spec["cards"]
+        # An assistant's new deck leaves out a card Archidekt has none of, as its deck edit does
+        # (_left_out): the deck is made with the rest and the result names it, instead of failing
+        # on one card after the member approved it. A card asked for by set and number still fails
+        # it (never swapped quietly), as does a deck left with no card; the member's own New deck
+        # page fails as before.
+        may_leave_out = row.get("created_by_client") not in (None, BROWSER_CLIENT, ADMIN_CLIENT)
+        gone: list[str] = []
         resolve: dict[tuple[str, str, str], int] = {}
         modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
@@ -8316,16 +8298,31 @@ class DeckService:
         for c in cards:  # resolve every printing before creating anything
             card = found.get(row_key(c))
             repeat = card is not None
+            leave_out = may_leave_out and not c.get("set_code")
+            if leave_out and c["name"] in gone:
+                progress["resolved_cards"] += 1
+                continue
             if card is None:
-                card = await self._call(
-                    sub,
-                    lambda token, *_, c=c: self.client.resolve_card(
-                        token,
-                        c["name"],
-                        set_code=c.get("set_code") or None,
-                        collector_number=c.get("collector_number") or None,
-                    ),
-                )
+                try:
+                    if leave_out and self._printing_cached(Change(action="add", card_name=c["name"])) == (
+                        NOT_ON_ARCHIDEKT
+                    ):
+                        raise DeckError("not_found", "")
+                    card = await self._call(
+                        sub,
+                        lambda token, *_, c=c: self.client.resolve_card(
+                            token,
+                            c["name"],
+                            set_code=c.get("set_code") or None,
+                            collector_number=c.get("collector_number") or None,
+                        ),
+                    )
+                except DeckError as exc:
+                    if not (leave_out and exc.kind == "not_found"):
+                        raise
+                    gone.append(c["name"])
+                    progress["resolved_cards"] += 1
+                    continue
                 found[row_key(c)] = card
             resolve[row_key(c)] = card["id"]
             progress["resolved_cards"] += 1
@@ -8340,6 +8337,14 @@ class DeckService:
                     f"{card['set_code'].upper()} {card['collector_number']}".strip() or "its default printing"
                 )
                 printing_notes.append(f"{c['name']}: {wanted} not found on Archidekt, added {got} instead")
+        left_out = [{"name": n, "why": "Archidekt doesn't have this card"} for n in gone]
+        if gone:
+            cards = [c for c in cards if c.get("set_code") or c["name"] not in gone]
+            if not cards:
+                raise DeckError(
+                    "not_found",
+                    "Archidekt doesn't have " + ", ".join(f"“{n}”" for n in gone) + ", so nothing was sent.",
+                )
         if spec.get("package"):  # a card package: the New package form's one request
             made = await self._call(
                 sub,
