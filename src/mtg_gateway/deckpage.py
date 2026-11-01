@@ -3810,6 +3810,8 @@ html.cardview-open{overflow:hidden}
 /* the note of a save sits above the card menu, which stays open for more quantity steps; a
    question ("Save anyway?") and an error sit above the card viewer too */
 .deck-toast[role=alertdialog],.deck-toast.error{z-index:66}
+/* a note that was there before the card menu opened goes under it (deck.js) */
+.deck-toast.under-menu{z-index:57}
 .deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
 .deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
