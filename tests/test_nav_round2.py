@@ -239,8 +239,15 @@ def test_the_proposals_pill_counts_the_decks_waiting_changes() -> None:
 def test_the_deck_menus_groups_in_order() -> None:
     js = (Path(theme.__file__).parent / "static" / "deck.js").read_text(encoding="utf-8")
     body = js.split("function items() {")[1].split("\n  }\n")[0]
+    # The Share group's head is chosen by a switch (SHARE_SECOND, on since the redesign of the deck
+    # menu, mockup screen 2): Share comes second, before Look into it, and is named "Share".
+    assert re.search(r"\bSHARE_SECOND = true\b", js)
+    body = body.replace('head(SHARE_SECOND ? "Share" : "Share and print")', 'head("Share")')
+    assert "if (SHARE_SECOND) out = out.concat(shareItems, [sep()], look);" in body
     heads = re.findall(r'head\("([^"]+)"\)', body)
-    assert heads == ["This deck", "Look into it", "Share and print", "Community"]
+    assert heads == ["This deck", "Share", "Look into it", "Community"]
+    order = [body.index(f'head("{h}")') for h in ("This deck", "Share", "Look into it", "Community")]
+    assert order[0] < order[1] < order[2] < order[3] < body.index('"Delete deck…"')
     for gone in ("Open in a new tab", "Copy link", "Proposals for this deck", '"Goldfish"', "Clone"):
         assert gone not in body, gone
     assert 'item("Share…", "send", share)' in body and 'link("Deck reports"' in body
@@ -304,10 +311,24 @@ def test_the_switch_raises_its_chosen_part_in_both_themes() -> None:
     assert ".hubseg a[aria-current=page]{background:var(--seg-on);" in theme.CSS
 
 
-def test_the_deck_pills_go_two_by_two_on_a_phone() -> None:
+def test_the_deck_pills_share_one_row_on_a_phone() -> None:
+    """On a phone the deck's pills fit without crowding the banner. They went two by two; since the
+    deck page's phone top (mockup screen 5) they share one row, each its icon and count at a 44 px
+    tap width, the words kept for a screen reader, and a confirmation takes the row under them.
+    Edit / Clone / Test / More are equal buttons in one row above them."""
     from mtg_gateway.deckpage import DECK_CSS
 
-    assert ".banner .social{display:grid;grid-template-columns:1fr 1fr}" in DECK_CSS
+    css = " ".join(DECK_CSS.split())
+    phone = css.split("@media (max-width:599.98px){ .banner .social{")[1].split("} }")[0]
+    assert phone.startswith("display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;")
+    assert ".banner .social .soc{justify-content:center;min-width:44px;height:36px;" in phone
+    assert ".banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;" in phone
+    assert ".banner .social .confirm{flex-basis:100%" in phone
+    assert (
+        ".banner .controls .primary{display:grid;width:100%;gap:.4rem; "
+        "grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}"
+    ) in css
+    assert "grid-template-columns:1fr 1fr}" not in phone
 
 
 def test_menu_icons_read_at_3_to_1_on_the_light_menu() -> None:
