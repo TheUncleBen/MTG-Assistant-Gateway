@@ -76,6 +76,8 @@ logger = logging.getLogger(__name__)
 
 MAX_ITEMS_PER_CALL = 100  # each card costs one or two Archidekt calls, paced about a second apart
 MAX_QUANTITY = 9_999
+MAX_BULK_ROWS = 200  # Select's bar changes at most this many rows in one press (one write each)
+BULK_UNDO_TTL = 15 * 60  # seconds a bulk removal can be undone
 MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
 # Finding records: one unfiltered read of this many covers a binder that small; a bigger one is read
 # by Archidekt's ``cardName`` filter, a name at a time, up to FILTERED_PAGES pages of it.
@@ -1579,6 +1581,16 @@ def _shims(r: dict[str, Any], csrf_in: str) -> str:
     )
 
 
+BULK_FORM = "col-bulk"
+
+
+def _tick(r: dict[str, Any]) -> str:
+    """The row's tick box for Select (0.7.46 audit QG-17): the whole 44 px cell is the target; its
+    value carries the card's name beside the id, so the write finds the record in one read."""
+    name = str(r.get("name") or "")
+    return ui.check_cell("sel", f"{r['id']} {name}", f"Select {name}", form=BULK_FORM)
+
+
 def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
     """One entry: card search's tile with the stepper and ⋮ (grid), or one table row (list)."""
     img = r.get("image_small") or ""
@@ -1613,7 +1625,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             f"<li class='cc c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
             f"<button type='button' class='pic thumbbtn' aria-label='Show {name}' title='Show the card'>"
             f"{body}{badges}</button>"
-            f"<div class='meta'><span class='nm'><span class='name' title='{name}'>{name}</span>"
+            f"<div class='meta'><span class='nm'>{_tick(r)}<span class='name' title='{name}'>{name}</span>"
             f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span>"
             + (f"<span class='pr'>{_esc(price)}</span>" if price else "")
             + f"</div><div class='act'>{stepper}</div>{shims}</li>"
@@ -1635,7 +1647,8 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         sub_sm += f" · <span class='pr'>{price}</span>"
     return (
         f"<li class='tr row' role='row' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-        f"<span class='cardc' role='cell'><button type='button' class='thumbbtn' aria-label='Show {name}' "
+        f"<span class='cardc' role='cell'>{_tick(r)}<button type='button' class='thumbbtn' "
+        f"aria-label='Show {name}' "
         f"title='Show the card'>{thumb}</button><span class='tx'><span class='name' title='{name}'>{name}"
         "</span>"
         + (f"<span class='s lg'>{_esc(r['type_line'])}</span>" if r.get("type_line") else "")
@@ -2028,6 +2041,84 @@ def widgets_html(
     return ui.widgets(items)
 
 
+def bulk_html(csrf: str, back: str, tags: list[str]) -> str:
+    """Select's bar (0.7.46 audit QG-17): hidden until a row is ticked; the rows' tick boxes and the
+    boxes' fields belong to one hidden form, so a press sends the ticked rows with the box's
+    choice. Condition…, Finish… and Tags… open a box; Remove goes at once (the notice offers
+    Undo); Cancel clears the ticks."""
+    csrf_in = (
+        f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        f"<input type='hidden' name='next' value='{_esc(back)}'>"
+    )
+    form = (
+        f"<form method='post' action='/collection' id='{BULK_FORM}' class='col-bulkform'>{csrf_in}"
+        "<input type='hidden' name='action' value='bulk'></form>"
+    )
+    actions = [
+        ui.box_opener("Condition…", "/collection", "col-bulk-cond"),
+        ui.box_opener("Finish…", "/collection", "col-bulk-finish"),
+        ui.box_opener("Tags…", "/collection", "col-bulk-tags"),
+        f"<button type='submit' class='btn btn-outline-danger' form='{BULK_FORM}' name='do' value='remove'>"
+        f"{icon('trash')}Remove</button>",
+        "<button type='button' class='btn col-clear'>Cancel</button>",
+    ]
+    bar = ui.selection_bar("0 selected", actions, label="Selected cards", hidden=True)
+    cond = ui.box(
+        "col-bulk-cond",
+        "Set the condition",
+        "<p><span data-bulk-count>The selected cards</span> get this condition on Archidekt.</p>"
+        f"<label class='field'><span>Condition</span><select name='condition' form='{BULK_FORM}'>"
+        f"{_opts(CONDITIONS, 'NM', CONDITION_LABELS)}</select></label>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Set condition", kind="primary", form=BULK_FORM, name="do", value="condition"),
+        ],
+        label="Set the condition",
+    )
+    fin = ui.box(
+        "col-bulk-finish",
+        "Set the finish",
+        "<p><span data-bulk-count>The selected cards</span> get this finish on Archidekt. A printing with "
+        "no such finish is refused and says so.</p>"
+        f"<label class='field'><span>Finish</span><select name='finish' form='{BULK_FORM}'>"
+        f"{_opts(FINISHES, 'nonfoil', MODIFIERS)}</select></label>",
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Set finish", kind="primary", form=BULK_FORM, name="do", value="finish"),
+        ],
+        label="Set the finish",
+    )
+    if tags:
+        ticks = "".join(
+            f"<label class='chkline'><input type='checkbox' name='tags' value='{_esc(t)}' "
+            f"form='{BULK_FORM}'> {_esc(t)}</label>"
+            for t in tags
+        )
+        tag_body = (
+            "<p><span data-bulk-count>The selected cards</span> get these tags, and no others. "
+            "Tick none to clear their tags.</p>"
+            f"<div class='chklist'>{ticks}</div>"
+        )
+    else:
+        tag_body = (
+            "<p>You have no binder tags yet. Make one under Binder › Lists › Binder tags, then tag "
+            "cards here.</p>"
+        )
+    tag_box = ui.box(
+        "col-bulk-tags",
+        "Set the tags",
+        tag_body,
+        actions=[
+            ui.box_button("Cancel", cancel=True),
+            ui.box_button(
+                "Set tags", kind="primary", form=BULK_FORM, name="do", value="tags", disabled=not tags
+            ),
+        ],
+        label="Set the tags",
+    )
+    return form + bar + cond + fin + tag_box
+
+
 def panel_html(
     *,
     q: str,
@@ -2083,8 +2174,13 @@ def panel_html(
             f"<select id='col-tag' name='tag'>{tag_opts}</select></span>" + sort_html
         )
     count_text = f"{count:,} {'entry' if count == 1 else 'entries'}"
+    # Select (the page's script shows it): ticks every row on screen, or clears them all
+    select = (
+        "<button type='button' class='btn col-select' aria-pressed='false' hidden>"
+        f"{icon('check')}Select</button>"
+    )
     bar = sp.results_bar(
-        count_html=sp.count_html(count_text, count_id="col-count"),
+        count_html=sp.count_html(count_text, count_id="col-count") + select,
         sort_html=sort_html,
         view_html=sp.view_group(view),
         clear_html="<a class='btn clr' href='/collection'>Clear filters</a>",
@@ -2157,6 +2253,22 @@ ul.collgrid .act{display:flex;align-items:center;min-width:0}
 @media (max-width:420px){
   html:not([data-card-size=l]) ul.collgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
   ul.collgrid .cc .kebab{width:38px} }
+/* Select (0.7.46 audit QG-17): a tick box on every tile and row, the bar when one is ticked */
+.collection .col-bulkform{display:none}
+.collection .chk{display:grid;place-items:center;width:44px;height:44px;cursor:pointer;flex:0 0 auto}
+.collection .chk input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
+ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;align-items:center}
+ul.collgrid .nm .chk{grid-column:1;grid-row:1;margin-left:-.4rem}
+ul.collgrid .nm .name{grid-column:2;grid-row:1}
+ul.collgrid .nm .kebab{grid-column:3;grid-row:1}
+#col-notes .notice form.inline{display:inline-flex;margin:0 0 0 .5rem;vertical-align:middle}
+#col-notes .notice form.inline .btn{margin:0}
+ul.collgrid .cc.sel .pic,ul.colllist li.sel{outline:3px solid var(--orange-ctl);outline-offset:-3px}
+ul.colllist .cardc .chk{margin-left:-.4rem}
+.collection .col-select[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text)}
+.mtgbox .body .chklist{display:flex;flex-wrap:wrap;gap:0 1rem}
+.mtgbox .body .chkline{display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
+.mtgbox .body .chkline input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
 /* the 44 px stepper */
 .collection form.qty{display:inline-flex;align-items:center;gap:0;margin:0}
 .collection main form.qty > button{all:unset;cursor:pointer;box-sizing:border-box;margin:0;
@@ -2311,7 +2423,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         raw = await read_limited(request, IMPORT_FORM_BYTES)  # an import pastes up to 2 MB of text
         if raw is None:
             return {}
-        return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
+        fields = parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
+        # the bar's ticked rows (sel) and the Tags box's ticks come several times: kept one a line
+        return {k: ("\n".join(v) if k in ("sel", "tags") else v[0]) for k, v in fields.items()}
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
         return csrf_form_ok(s, sid, data)
@@ -2371,6 +2485,132 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             return None
         results.pop(token or "", None)
         return hit[2] if time.monotonic() - hit[1] <= IMPORT_RESULT_TTL else None
+
+    # -- Select's bar (0.7.46 audit QG-17) -------------------------------------------------------
+    # The ticked rows go one record at a time through the same writes a row's menu uses (update,
+    # remove, each read back); a row that could not be changed is named, the rest still go. A
+    # removal's rows are kept for Undo a while, by a token that is the member's own.
+    bulk_undos: dict[str, tuple[str, float, list[dict[str, Any]]]] = {}
+    BULK_DOES = ("condition", "finish", "tags", "remove")
+    BULK_SAID = {"condition": "Condition set", "finish": "Finish set", "tags": "Tags set"}
+    STOP_KINDS = ("not_linked", "auth", "writes_disabled", "unavailable", "rate_limited", "busy")
+
+    def bulk_rows(data: dict[str, str]) -> list[tuple[int, str]]:
+        """The ticked rows: ``sel`` lines of "id name" (the name finds the record in one read)."""
+        rows: list[tuple[int, str]] = []
+        for line in (data.get("sel") or "").split("\n"):
+            rid, _, name = line.strip().partition(" ")
+            if rid.isdigit() and 0 < int(rid) < 10**12:
+                rows.append((int(rid), _clean(name, 200)))
+        return rows
+
+    def bulk_notice(sub: str, kind: str, message: str, *, undo: str = "") -> str:
+        token = keep_result(sub, {"message": message, "kind": kind, "undo": undo})
+        return f"{'ok' if kind == 'ok' else 'err'}=bulk&t={token}"
+
+    def _cards(n: int) -> str:
+        return f"{n} card" if n == 1 else f"{n} cards"
+
+    def _keep_undo(sub: str, items: list[dict[str, Any]]) -> str:
+        now = time.monotonic()
+        for k in [k for k, (_, t, _) in bulk_undos.items() if now - t > BULK_UNDO_TTL]:
+            bulk_undos.pop(k, None)
+        while len(bulk_undos) >= IMPORT_RESULTS_MAX:
+            bulk_undos.pop(next(iter(bulk_undos)))
+        token = secrets.token_urlsafe(18)
+        bulk_undos[token] = (sub, now, items)
+        return token
+
+    async def bulk_change(sub: str, data: dict[str, str]) -> str:
+        """One press of the bar: the redirect's notice code."""
+        doing = data.get("do", "")
+        rows = bulk_rows(data)
+        if doing not in BULK_DOES:
+            return "err=invalid"
+        if not rows:
+            return bulk_notice(sub, "error", "Tick a card first.")
+        if len(rows) > MAX_BULK_ROWS:
+            return bulk_notice(
+                sub,
+                "error",
+                f"Select changes at most {MAX_BULK_ROWS} cards at a time. Tick fewer and go on with "
+                "the rest after.",
+            )
+        fields: dict[str, Any] = {}
+        if doing == "condition":
+            if data.get("condition", "") not in CONDITIONS:
+                return "err=invalid"
+            fields["condition"] = data.get("condition", "")
+        elif doing == "finish":
+            if data.get("finish") not in FINISHES:
+                return "err=invalid"
+            fields["finish"] = data["finish"]
+        elif doing == "tags":
+            fields["tags"] = [t for t in (data.get("tags") or "").split("\n") if t.strip()]
+        done = 0
+        failed: list[str] = []
+        kept: list[dict[str, Any]] = []
+        tags: list[dict[str, Any]] | None = None
+        for rid, name in rows:
+            try:
+                if doing == "remove":
+                    out = await service.remove(sub, rid, name=name)
+                    row = out["removed"]
+                    if row.get("tags"):
+                        if tags is None:
+                            tags = await service.tags(sub)
+                        ids, _missing = collection_tags.ids_for([str(t) for t in row["tags"]], tags)
+                    else:
+                        ids = []
+                    kept.append(
+                        {
+                            "name": row["name"],
+                            "set": row.get("set") or "",
+                            "collector_number": row.get("collector_number") or "",
+                            "scryfall_id": row.get("scryfall_id") or "",
+                            "card_id": row.get("archidekt_card_id"),
+                            "quantity": row.get("quantity") or 1,
+                            "finish": row.get("finish") or "nonfoil",
+                            "condition": row.get("condition") or "",
+                            "language": row.get("lang") or "EN",
+                            "tag_ids": ids,
+                            "purchase_price": row.get("purchase_price"),
+                        }
+                    )
+                else:
+                    await service.update(sub, rid, fields, name=name)
+                done += 1
+            except CollectionError as exc:
+                if exc.kind in STOP_KINDS:
+                    if done or failed:
+                        # part went: the page says so before the refusal's own notice
+                        exc.args = (f"{_cards(done)} changed before Archidekt stopped answering: {exc}",)
+                    raise
+                failed.append(f"{name or rid} ({exc})")
+        if doing == "remove":
+            text = f"{_cards(done)} removed from your binder."
+            undo = _keep_undo(sub, kept) if kept else ""
+        else:
+            text = f"{BULK_SAID[doing]} on {_cards(done)}."
+            undo = ""
+        if failed:
+            text += f" {len(failed)} could not be changed: " + "; ".join(failed[:5])
+            if len(failed) > 5:
+                text += f"; and {len(failed) - 5} more"
+            text += "."
+        return bulk_notice(sub, "ok" if done else "error", text, undo=undo)
+
+    async def bulk_restore(sub: str, token: str | None) -> str:
+        """Undo of a bar's Remove: the kept rows added back (their printing, tags and price paid)."""
+        hit = bulk_undos.pop(token or "", None)
+        if hit is None or hit[0] != sub or time.monotonic() - hit[1] > BULK_UNDO_TTL:
+            return bulk_notice(sub, "error", "That Undo is no longer available.")
+        out = await service.add(sub, hit[2], source="manual", trusted=True, limit=MAX_BULK_ROWS)
+        n = len(out["added"])
+        text = f"{_cards(n)} are back in your binder." if n != 1 else "1 card is back in your binder."
+        if out["skipped"]:
+            text += f" {len(out['skipped'])} could not be added back."
+        return bulk_notice(sub, "ok" if n else "error", text)
 
     # -- an import or a restore, in the background (collection_bulk) -------------------------------
     # One job per member at a time, its state in the database: the page polls
@@ -2490,7 +2730,22 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             x + (text if html else _esc(text)), kind, html=True, role="alert" if kind == "error" else "status"
         )
 
-    def notice(code: str | None, *, sub: str = "", token: str | None = None) -> str:
+    def notice(code: str | None, *, sub: str = "", token: str | None = None, csrf: str = "") -> str:
+        if code == "bulk" and token:
+            said = take_result(sub, token)
+            if said is None or not said.get("message"):
+                return ""
+            text = _esc(str(said["message"]))
+            undo = str(said.get("undo") or "")
+            if undo and csrf:
+                text += (
+                    f" <form method='post' action='/collection' class='inline'>"
+                    f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+                    "<input type='hidden' name='action' value='bulk_restore'>"
+                    f"<input type='hidden' name='token' value='{_esc(undo)}'>"
+                    "<button type='submit' class='btn small'>Undo</button></form>"
+                )
+            return strip(text, "ok" if said.get("kind") == "ok" else "error", html=True)
         if code == "added" and token:
             said = take_result(sub, token)
             if said is not None and said.get("message"):
@@ -2705,7 +2960,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "toomany",
             "unreadable",
         )
-        notes = notice(result, sub=sub, token=qp.get("r"))
+        notes = notice(result, sub=sub, token=qp.get("r") or qp.get("t"), csrf=csrf)
         # prices kept: opening the Binder puts it in the daily price check (binder_prices)
         if priced():
             service.binder.seen(sub, _price_clock())
@@ -2874,6 +3129,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 + cards
                 + f"<p class='muted col-nomatch'{' hidden' if rows else ''}>No cards match that filter.</p>"
                 + more_html(lq, view_in_link, got)
+                + bulk_html(csrf, same_url(request), tag_names)
                 + export_help_html()
                 + add_box
                 + details_box
@@ -3054,6 +3310,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     fields["tags"] = [k[4:] for k, v in data.items() if k.startswith("tag:") and v]
                 await service.update(sub, rid, fields, name=_clean(data.get("name"), 200))
                 code = "ok=updated"
+            elif action == "bulk":
+                code = await bulk_change(sub, data)
+            elif action == "bulk_restore":
+                code = await bulk_restore(sub, data.get("token"))
             elif action in ("inc", "dec", "remove"):
                 rid = _rid(data.get("id"))
                 name = _clean(data.get("name"), 200)
