@@ -6,13 +6,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import account_lists, deck_extras, modes, packages, prefs, recheck, ui
+from . import account_lists, deck_extras, modes, packages, prefs, proposals_view, recheck, ui
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import (
     FORMAT_IDS,
@@ -23,6 +24,7 @@ from .archidekt import (
     Deck,
     featured_scryfall_id,
     format_label,
+    hand_save,
     rich_text,
 )
 from .busy import busy_response
@@ -37,6 +39,8 @@ from .decks import (
     category_line,
     current_client,
     deck_categories,
+    deletes_categories,
+    one_click,
     parse_category_changes,
     unused_category_changes,
 )
@@ -63,6 +67,7 @@ OK_SECTIONS = {
     "categories": "categories",
     "category_created": "categories",
     "category_deleted": "categories",
+    "package_differs": "package",
     "categories_unused": "categories",
     "cover": "cover",
     "cover_auto": "cover",
@@ -358,8 +363,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         pkg_values: dict[str, str] | None = None,
         templates: list[dict[str, Any]] | None = None,
         template_error: str = "",
+        undo: str = "",
     ) -> str:
-        """The settings page on the shared form rows (F7). ``templates``: the member's category
+        """The settings page on the shared form rows (F7). ``undo``: the Undo button drawn with the
+        notice after a category delete (undo_form). ``templates``: the member's category
         templates, read for the Add template box drawn open (its old address, or a refusal).
         ``error`` shows in the main panel (the main settings form's own refusal) or, with
         ``error_in``, inside that section next to its form, as the ?ok= notices of the section
@@ -370,7 +377,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if error and error_in == section:
                 return ui.notice(error, "error", role="alert", cls="ds-note", id=f"{section}-msg")
             if not error and ok in SETTINGS_OK_MESSAGES and OK_SECTIONS.get(ok) == section:
-                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note")
+                return ui.notice(SETTINGS_OK_MESSAGES[ok], "ok", role="status", cls="ds-note") + undo
             return ""
 
         fmt_current = v.get("deck_format", deck.format or "")
@@ -562,7 +569,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         picked = (
             v.get("formats", "")
             if v
-            else "\n".join(FORMAT_NAMES[i] for i in block.get("intendedFormats") or [] if i in FORMAT_NAMES)
+            else "\n".join(FORMAT_NAMES[i] for i in packages.format_ids(block.get("intendedFormats")))
         )
         return (
             f"<form method='post' action='/decks/{did}/package-settings#package' class='ui-card ds-pkg' "
@@ -1060,6 +1067,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         except DeckError as exc:
             return settings_problem(request, deck_id, exc, sub, sid)
         ok = request.query_params.get("ok") or ""
+        undo = ""
+        if ok == "category_deleted":
+            undo = undo_form(sub, sid, deck, request.query_params.get("undo") or "")
         templates = None
         if request.query_params.get("templates"):
             try:
@@ -1075,10 +1085,29 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 following=await following_or_none(sub),
                 ok=ok,
                 templates=templates,
+                undo=undo,
             ),
             sub,
             sid,
         )
+
+    def undo_form(sub: str, sid: str | None, deck: Deck, pid: str) -> str:
+        """Undo of the member's category delete (review F10), drawn with its notice: the review
+        page's Undo (POST /proposals/undo, in its box when scripts run), a restore of the snapshot
+        the delete took just before it (decks.deletes_categories), which re-creates the category
+        and moves its cards back. Only the member's own applied delete on this deck has one."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pid):
+            return ""
+        row = state.db.get_proposal(pid, sub)
+        if (
+            row is None
+            or row.get("state") != "applied"
+            or str(row.get("deck_id")) != str(deck.id)
+            or not deletes_categories(row)
+            or not row.get("snapshot_id")
+        ):
+            return ""
+        return proposals_view.undo_box_form(_csrf(s, sid), row)
 
     def settings_response(body: str, sub: str, sid: str | None, status: int = 200) -> Response:
         return page(
@@ -1092,7 +1121,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             deck_css=True,
             heading=False,
             extra_css=SETTINGS_CSS + deck_extras.PACKAGE_FIELDS_CSS,
-            extra_scripts=("decksettings.js",),
+            extra_scripts=("decksettings.js", "undo-box.js"),
         )
 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
@@ -1156,7 +1185,9 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             out: dict[str, Any] = {"ok": True, "message": SETTINGS_OK_MESSAGES.get(code, "Saved.")}
             if anchor == "categories":
                 try:
-                    deck = await decks.get_own_deck(sub, deck_id)
+                    # the save's own read back (decks.one_click), else the deck read now
+                    kept = one_click.get() or {}
+                    deck = kept.get("verified") or await decks.get_own_deck(sub, deck_id)
                     out["html"] = categories_section(deck, _csrf(s, sid))
                 except DeckError:
                     pass  # the page keeps what it has
@@ -1253,7 +1284,13 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         deck_id = request.path_params["deck_id"]
 
         async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
+            # the member's one-click save: this read serves the proposal, its apply and the check
+            # before the write, and the read back draws the panel (decks.one_click); its calls
+            # start from the page burst (archidekt.hand_save)
+            one_click.set({})
+            hand_save.set(True)
             deck = await decks.get_own_deck(sub, deck_id)
+            read_at = time.monotonic()
             action = data.get("action") or "save"
             unused = action == "unused"
             move_field = pick_error = title_name = ""
@@ -1393,7 +1430,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     deck_css=True,
                     status=400 if pick_error else 200,
                 )
-            p = await decks.propose_categories(sub, deck.id, changes, delete_unused=unused)
+            p = await decks.propose_categories(
+                sub, deck.id, changes, delete_unused=unused, read=deck, read_at=read_at
+            )
+            # the member's own save keeps the gateway's snapshot but makes no backup copy on
+            # Archidekt, as the deck page's quick edits (review F1): a copy costs several paced calls
+            decks.keep_no_backup(sub, p["proposal_id"])
             if wants_json(data):
                 # the page's own instant save: applied here, so a refusal is answered in words
                 # (hand_action) and the page draws the panel again from the answer
@@ -1403,7 +1445,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 return ok
             done = await apply_now(sub, p["proposal_id"], ok="categories", deck_id=deck.id)
             if done.headers.get("location") == f"/decks/{deck.id}?ok=categories":
-                return RedirectResponse(f"/decks/{deck.id}/settings?ok={ok}#categories", status_code=303)
+                # a delete's notice offers its Undo (review F10)
+                undo = f"&undo={p['proposal_id']}" if action == "delete" else ""
+                return RedirectResponse(
+                    f"/decks/{deck.id}/settings?ok={ok}{undo}#categories", status_code=303
+                )
             return done  # Archidekt refused or writes are off: the review page says why
 
         return await hand_action(request, deck_id, run, ok="categories", anchor="categories")

@@ -301,6 +301,21 @@ def _undo_form(it: dict[str, Any], csrf: str | None, label: str, cls: str) -> st
     )
 
 
+def undo_box_form(csrf: str | None, row: dict[str, Any], label: str = "Undo", cls: str = "btn") -> str:
+    """Undo of the member's own applied change, drawn beside the notice that says it was done
+    (a category delete on Deck settings, a template added from My lists): the review page's
+    Undo (POST /proposals/undo, in its box when undo-box.js runs), from the stored ``row``."""
+    return (
+        "<form method='post' action='/proposals/undo' class='undo' data-undo-box>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf or '')}'>"
+        "<input type='hidden' name='action' value='preview'>"
+        f"<input type='hidden' name='snapshot' value='{esc(str(row['snapshot_id']))}'>"
+        f"<input type='hidden' name='applied' value='{esc(str(row['id']))}'>"
+        f"<input type='hidden' name='after' value='{int(row.get('applied_at') or 0)}'>"
+        f"<button class='{esc(cls)}'>{esc(label)}</button></form>"
+    )
+
+
 def _undoable(it: dict[str, Any], csrf: str | None) -> bool:
     return bool(it["state"] == "applied" and it["kind"] in UNDO_KINDS and it["snapshot_id"] and csrf)
 

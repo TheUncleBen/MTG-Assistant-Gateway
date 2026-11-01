@@ -559,6 +559,26 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
     assert row["label"] == ",#656565"
 
 
+async def test_a_color_tag_given_by_name_gets_the_members_own_color(stack: Stack) -> None:
+    """Review F13: a tag given by its name alone ("Cut") went on grey, though the member's own
+    "Cut" on My lists is red. The name is looked up in the member's color tags first (any case);
+    a name they don't have stays grey, and a color given with it is kept as given."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.account.tags["alice"] = [{"id": 1, "name": "Cut", "color": "#ff4d4f"}]
+
+    async def propose(change: dict) -> dict:
+        args = {"deck_id": "42", "changes": [change]}
+        return structured(await call(h, token, "propose_deck_changes", args))
+
+    p = await propose({"action": "set_label", "name": "Sol Ring", "label": "cut"})
+    assert p["ok"] and "Sol Ring: color tag no tag -> Cut (#ff4d4f)" in p["diff"], p
+    p = await propose({"action": "set_label", "name": "Cultivate", "label": "Maybe"})
+    assert p["ok"] and "color tag no tag -> Maybe (#656565)" in p["diff"], p
+    p = await propose({"action": "set_label", "name": "Command Tower", "label": "Cut", "color": "#000000"})
+    assert p["ok"] and "color tag no tag -> Cut (#000000)" in p["diff"], p
+
+
 async def test_every_modify_sends_the_colour_tag_as_the_site_does(stack: Stack) -> None:
     """Archidekt.com sends a row's colour tag with every modify, ",#656565" for a row with no
     tag; the gateway does the same, so a quantity change on an untagged row carries it too."""
@@ -757,7 +777,7 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
     assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
     p = await propose({"deck_format": "modern"})
     assert p["ok"], p
-    assert "bracket: 3 -> none" in p["diff"], p["diff"]
+    assert "Commander bracket: 3 → none" in p["diff"], p["diff"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
     assert ark.decks[42]["deckFormat"] == 2 and ark.decks[42]["edhBracket"] is None
@@ -806,8 +826,8 @@ async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack:
     assert a["ok"] and a["snapshot_id"], a
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
-    assert 'name: "New" -> "Sample Commander Deck"' in r["diff"], r["diff"]
-    assert "bracket: 2 -> none" in r["diff"], r["diff"]
+    assert "Deck name: “New” → “Sample Commander Deck”" in r["diff"], r["diff"]
+    assert "Commander bracket: 2 → none" in r["diff"], r["diff"]
     done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["result"]["verified"] is True, done
     assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["deckFormat"] == 2

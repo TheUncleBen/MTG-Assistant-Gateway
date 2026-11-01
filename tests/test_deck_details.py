@@ -32,10 +32,10 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     assert p["ok"] and p["state"] == "pending" and p["kind"] == "details", p
     assert p["deck_id"] == "42" and p["deck_name"] == "Sample Commander Deck"
     assert set(p["diff"].splitlines()) == {
-        'name: "Sample Commander Deck" -> "Aesi Lands"',
-        "format: unknown -> commander",
-        "bracket: none -> 3",
-        "private: no -> yes",
+        "Deck name: “Sample Commander Deck” → “Aesi Lands”",
+        "Format: unknown → commander",
+        "Commander bracket: none → 3",
+        "Private: no → yes",
     }, p["diff"]
     assert p["changes"] == details
     assert "these details" in p["next_step"]
@@ -74,9 +74,9 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     )
     assert p2["ok"], p2
     assert set(p2["diff"].splitlines()) == {
-        "bracket: 3 -> none",
-        "private: yes -> no",
-        'description: (changed, 120 chars) "' + "x" * 120 + '"',
+        "Commander bracket: 3 → none",
+        "Private: yes → no",
+        "Description: changed, 120 chars: “" + "x" * 120 + "”",
     }
     # Making a deck public waits for the member's press even in Full auto
     assert p2["assistant_may_apply"] is False and p2["risk_reason"] == "makes the deck public", p2
@@ -179,9 +179,9 @@ async def test_details_proposal_shows_on_the_review_page_and_only_to_its_owner(s
     assert page.status_code == 200, page.text
     assert "Deck details that will change" in page.text
     assert "3 deck details changed; no cards change" in page.text
-    assert "&quot;Aesi &lt;Lands&gt;&quot;" in page.text and "<Lands>" not in page.text
-    assert "<span class='act'>unlisted</span>" in page.text
-    assert "(changed, 2 chars)" in page.text
+    assert "“Aesi &lt;Lands&gt;”" in page.text and "<Lands>" not in page.text
+    assert "<span class='act'>Unlisted</span>" in page.text
+    assert "Description: changed, 2 chars" in page.text
     assert "Net " not in page.text and "Card changes" not in page.text
     assert "Apply these changes to Archidekt" in page.text
 
@@ -646,15 +646,15 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"] and r["kind"] == "restore", r
     lines = r["diff"].splitlines()
-    assert lines[0].startswith(f"Restore to snapshot {a['snapshot_id']} taken ")
+    assert lines[0].startswith("Put the deck back as it stood on ") and a["snapshot_id"] not in lines[0]
     # the head counts the review lines under it (not Archidekt's write entries)
     assert lines[0].endswith(" (5 changes)"), lines[0]
     assert set(lines[1:]) == {
-        'name: "Aesi Lands" -> "Sample Commander Deck"',
-        "description: (cleared)",
-        "format: modern -> commander",
-        "bracket: none -> 3",
-        "private: yes -> no",
+        "Deck name: “Aesi Lands” → “Sample Commander Deck”",
+        "Description: cleared",
+        "Format: modern → commander",
+        "Commander bracket: none → 3",
+        "Private: yes → no",
     }, lines
     assert r["changes"]["details"] == {
         "name": "Sample Commander Deck",
@@ -711,8 +711,8 @@ async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> N
     patches_before = len(ark.patches)
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
-    assert 'name: "Renamed by test" -> "Sample Commander Deck"' in r["diff"], r["diff"]
-    assert "private: yes -> no" in r["diff"], r["diff"]
+    assert "Deck name: “Renamed by test” → “Sample Commander Deck”" in r["diff"], r["diff"]
+    assert "Private: yes → no" in r["diff"], r["diff"]
     done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["state"] == "applied", done
     assert done["result"]["verified"] is True

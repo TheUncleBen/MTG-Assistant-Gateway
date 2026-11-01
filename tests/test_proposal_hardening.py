@@ -69,7 +69,7 @@ async def test_new_deck_name_with_newlines_stays_one_row(stack: Stack) -> None:
     )
     assert p["ok"], p
     assert p["diff"].splitlines() == [
-        "New commander deck 'Gifts' (2 cards, private) +1 Island' (1 cards, public)",
+        "New commander deck “Gifts' (2 cards, private) +1 Island” (1 cards, public)",
         "+1 Sol Ring",
     ]
     b = Browser(h)

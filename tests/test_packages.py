@@ -57,7 +57,7 @@ async def test_a_new_package_is_made_with_the_new_package_request(stack: Stack) 
     token = await linked_user(stack)
     p = await _new_package(stack, token)
     assert p["diff"].startswith(
-        "New card package 'Fetches' (0 cards, private; keywords “fetchlands”, budget $$$"
+        "New card package “Fetches” (0 cards, private; keywords “fetchlands”, budget $$$"
     )
     assert not [d for d in stack.ark.decks.values() if d.get("cardPackage")]  # nothing made yet
     out = await _browser_apply(stack.h, p["proposal_id"])
@@ -107,21 +107,87 @@ async def test_a_new_package_saved_in_other_words_or_read_late_is_applied(stack:
     assert out["result"]["verified"] is True
 
 
-async def test_a_new_package_saved_differently_says_what_differed(stack: Stack) -> None:
-    stack.ark.account.package_saves = lambda b: {**b, "budget": 1}
+# Every answer Archidekt could give to a new package's settings (none recorded live, T-194): the
+# block as saved (a function of the block sent), and what the member is told when it differs.
+SAVED_AS = {
+    "faithful": (lambda b: b, None),
+    "formats_reordered": (lambda b: {**b, "intendedFormats": list(reversed(b["intendedFormats"]))}, None),
+    "budget_zero_for_none": (lambda b: {**b, "budget": 0}, None),  # asked for none
+    "keywords_lowercased_trimmed": (lambda b: {**b, "keywords": " " + b["keywords"].lower() + " "}, None),
+    "formats_as_objects": (
+        lambda b: {**b, "intendedFormats": [{"id": f} for f in b["intendedFormats"]]},
+        None,
+    ),
+    "formats_as_names": (lambda b: {**b, "intendedFormats": ["commander", "Modern"]}, None),
+    "formats_as_named_objects": (
+        lambda b: {**b, "intendedFormats": [{"id": 3, "name": "Commander"}, {"id": 2, "name": "Modern"}]},
+        None,
+    ),
+    "formats_dropped": (
+        lambda b: {**b, "intendedFormats": []},
+        "formats any format (asked for Commander, Modern)",
+    ),
+    "budget_changed": (lambda b: {**b, "budget": 1}, "budget $ (asked for $$$)"),
+    "formats_null": (lambda b: {**b, "intendedFormats": None}, "formats any format"),
+    "formats_garbled": (lambda b: {**b, "intendedFormats": "3,2"}, "formats"),
+    "block_dropped": (lambda b: None, "no package settings on the deck"),
+}
+
+
+@pytest.mark.parametrize("variant", sorted(SAVED_AS))
+async def test_a_new_package_is_never_failed_once_it_exists(stack: Stack, variant: str) -> None:
+    """Review F5 (T-194, the owner: "it failed when I tried to create an empty package"): a package
+    whose settings Archidekt saved another way ended Failed although it was made, and formats saved
+    as objects crashed the check. The package is applied with a note saying what Archidekt saved and
+    where to change it, and the block as read back is kept with the result for the next live run."""
+    saves, differs = SAVED_AS[variant]
+    stack.ark.account.package_saves = saves
     token = await linked_user(stack)
-    p = await _new_package(stack, token)
-    assert (await _browser_apply(stack.h, p["proposal_id"])) == {"ok": False, "error": "verify_mismatch"}
-    said = "Made, but Archidekt saved it differently: budget $ (asked for $$$)."
+    package = {"keywords": "Fetchlands", "intended_formats": ["commander", "modern"]}
+    if variant != "budget_zero_for_none":
+        package["budget"] = 3
+    p = await _new_package(stack, token, package=package)
+    out = await _browser_apply(stack.h, p["proposal_id"])
+    assert out.get("state") == "applied", (variant, out)
+    made = int(out["result"]["deck_id"])
+    assert made in stack.ark.decks
+    if differs is None:
+        assert out["result"]["verified"] is True and "package_saved_as" not in out["result"], out
+        return
+    said = out["result"]["package_saved_as"]
+    assert any(differs in d for d in said), said
+    assert "package_block" in out["result"]  # what Archidekt sent back, kept as it came
+    assert out["applied_text"].startswith("The package is made on Archidekt, but Archidekt saved"), out
+    assert "Deck settings" in out["applied_text"]
     b = Browser(stack.h)
     await b.login()
     try:
-        out = (await b.http.get(f"/api/v1/proposals/{p['proposal_id']}")).json()
-        assert out["state"] == "failed" and out["result"]["detail"] == said, out
-        page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
-        assert "<title>New card package: Fetches" in page
-        assert html.escape(said) in page and "refused" not in page
-        assert "Check the new card package on Archidekt" in page
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}?ok=applied")).text
+        assert html.escape("Applied. " + out["applied_text"]) in page, page
+    finally:
+        await b.aclose()
+
+
+async def test_a_new_package_from_the_website_opens_its_settings_when_saved_differently(stack: Stack) -> None:
+    """Review F5: the New package form's own press lands on the package's settings, with a notice
+    that says Archidekt saved them differently, so the member can put them right at once."""
+    from mtg_gateway import companion
+
+    stack.ark.account.package_saves = lambda b: {**b, "intendedFormats": [{"id": 3}]}
+    await linked_user(stack)
+    b = Browser(stack.h)
+    await b.login()
+    try:
+        csrf = await b.csrf("/decks")
+        r = await b.http.post(
+            "/decks/new-package",
+            data={"csrf": csrf, "name": "Staples", "keywords": "staples", "format": ["commander", "pauper"]},
+        )
+        assert r.status_code == 303, r.text
+        where = r.headers["location"]
+        assert where.endswith("/settings?ok=package_differs#package"), where
+        page = (await b.http.get(where.partition("#")[0])).text
+        assert html.escape(companion.SETTINGS_OK_MESSAGES["package_differs"]) in page
     finally:
         await b.aclose()
 
@@ -149,7 +215,7 @@ async def test_package_settings_change_by_the_blocks_own_id(stack: Stack) -> Non
     )
     assert p["ok"] is True, p
     assert (
-        "package: keywords “fetchlands”, budget $$$, for Commander -> keywords “fetches”, budget any"
+        "Package: keywords “fetchlands”, budget $$$, for Commander → keywords “fetches”, budget any"
         in p["diff"]
     )
     done = await _browser_apply(stack.h, p["proposal_id"])

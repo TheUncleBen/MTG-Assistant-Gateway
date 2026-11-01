@@ -518,8 +518,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         if name.casefold() in siblings:
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
         changes.update(name=name, parent=parent["id"])
-        where_to = "your top level" if not parent["depth"] else f"'{parent['name']}'"
-        row["text"] = f"Create the folder '{name}' in {where_to}"
+        where_to = "your top level" if not parent["depth"] else f"“{parent['name']}”"
+        row["text"] = f"Create the folder “{name}” in {where_to}"
     elif action == "deck_help":
         what = str(params.get("help_action") or "post")
         if what not in HELP_ACTIONS:

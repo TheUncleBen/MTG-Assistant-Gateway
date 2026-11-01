@@ -962,7 +962,9 @@ BACKUP_MADE_JOB = "backup_made:"
 # Why a snapshot can't be deleted now (Database.snapshot_held), in the member's words.
 # The proposals History lists as changes to a deck once applied (owner decision C7: History is the
 # deck's timeline); account-wide ones (lists, collection, Archidekt actions) are not a deck's.
-DECK_CHANGE_KINDS = ("edit", "restore", "details", "categories", "create_deck")
+# the applied changes History lists; "lists" are the member's Archidekt lists (My lists), each
+# entry with the list as it was just before (review F7)
+DECK_CHANGE_KINDS = ("edit", "restore", "details", "categories", "create_deck", "lists")
 SNAPSHOT_HELD_RESTORE = (
     "A restore that is waiting puts the deck back to this snapshot, so it can't be deleted. Reject "
     "or apply that restore first."
