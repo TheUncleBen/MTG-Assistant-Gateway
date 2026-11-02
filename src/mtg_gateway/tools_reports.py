@@ -48,10 +48,6 @@ FORGE_READ_ONLY = (
     "This app was connected read-only (scope mtg.read), so no Forge games were started; the solo "
     "test comparison is kept."
 )
-FORGE_NEEDS_DECKS = (
-    "Forge games need both sides as Archidekt decks or snapshots: a pasted list can't be seated at a "
-    "Forge table."
-)
 FORGE_NEEDS_COMMANDERS = (
     "Forge plays only Commander decks with a commander marked, so no Forge games were started."
 )
@@ -351,7 +347,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 code = _input_code(out["goldfish_ab"])
                 out.update(ok=False, error="simulation_failed", message=message, **code)
         if simulate if forge is None else forge:  # Forge as for one deck: on with the solo test
-            out["forge"] = await _forge_pair(deck_a, deck_b, (cmd_a, cmd_b), origin, forge is True)
+            # a pasted list sits at the table as a deck does (run_deck_report plays one too)
+            seat_a, _ = _report_deck(deck_a, text_a)
+            seat_b, _ = _report_deck(deck_b, text_b)
+            out["forge"] = await _forge_pair(seat_a, seat_b, (cmd_a, cmd_b), origin, forge is True)
         return out
 
     def _side_name(deck: Any) -> str:
@@ -400,42 +399,41 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
     ) -> dict[str, Any]:
         """Forge games for a comparison, as the website's Compare page plays them: both decks
         against the same precons (picked for the higher of their brackets), kept as two Head to
-        head reports, within the member's Forge queue (both start or wait, or neither). Says why
-        not when there are none: no Forge here, a read-only app, a pasted list, no commander."""
+        head reports, within the member's Forge queue (both start or wait, or neither). A side
+        with no ``origin`` is a pasted list (a list deck), kept as a report filed under no deck.
+        Says why not when there are none: no Forge here, a read-only app, no commander."""
         reports = state.reports
         if reports.forge is None:
             return {"started": False, "note": FORGE_NOT_HERE} if asked else {"started": False}
         if not token_may_write():
             return {"started": False, "note": FORGE_READ_ONLY}
-        if "a" not in origin or "b" not in origin:
-            return {"started": False, "note": FORGE_NEEDS_DECKS}
         if modes != ("commander", "commander"):
             return {"started": False, "note": FORGE_NEEDS_COMMANDERS}
         sub = _sub()
         hold, full = reports.reserve_pair(sub)
         if full is not None:
             return {"started": False, "note": full}
+
+        async def seat(side: str, deck: Any, **pairing: Any) -> dict[str, Any]:
+            if side not in origin:  # a pasted list: a report of no deck, as run_deck_report's
+                return await reports.run_source(
+                    sub, deck, source=None, simulate=False, forge=True, pair_hold=hold, **pairing
+                )
+            kind, ref = origin[side]
+            return await reports.run(
+                sub,
+                ref,
+                simulate=False,
+                forge=True,
+                deck=deck,
+                snapshot_id=ref if kind == "snapshot" else None,
+                pair_hold=hold,
+                **pairing,
+            )
+
         try:
-            first = await reports.run(
-                sub,
-                origin["a"][1],
-                simulate=False,
-                forge=True,
-                deck=deck_a,
-                snapshot_id=origin["a"][1] if origin["a"][0] == "snapshot" else None,
-                pair_with=deck_b,
-                pair_hold=hold,
-            )
-            second = await reports.run(
-                sub,
-                origin["b"][1],
-                simulate=False,
-                forge=True,
-                deck=deck_b,
-                snapshot_id=origin["b"][1] if origin["b"][0] == "snapshot" else None,
-                same_opponents_as=first["report_id"],
-                pair_hold=hold,
-            )
+            first = await seat("a", deck_a, pair_with=deck_b)
+            second = await seat("b", deck_b, same_opponents_as=first["report_id"])
         except DeckError as exc:
             return {"started": False, "note": str(exc), "error": exc.kind}
         finally:

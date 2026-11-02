@@ -9,6 +9,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
 from mtg_gateway.reports import PROPOSAL_NOT_WAITING, ReportService
@@ -243,7 +245,7 @@ async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack:
     audit row 10): compare_decks with simulate keeps the A/B as a report and, for two Commander
     decks, starts both decks' Forge games against the same precons, as the website's Compare page
     does (two Head to head reports, within the member's Forge queue). Where it can't, it says why."""
-    from mtg_gateway.tools_reports import FORGE_NEEDS_DECKS, FORGE_READ_ONLY
+    from mtg_gateway.tools_reports import FORGE_READ_ONLY
 
     from .test_forge import BRACKETED
     from .test_round4_data import _app_token
@@ -275,11 +277,6 @@ async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack:
             ids["a"],
             ids["b"],
         )
-        # a pasted list can't sit at a Forge table: the comparison is kept and the reason given
-        listed = structured(
-            await call(h, token, "compare_decks", {"a": "42", "b_list": LIST, "simulate": True, "games": 20})
-        )
-        assert listed["stored"] is True and listed["forge"] == {"started": False, "note": FORGE_NEEDS_DECKS}
         # forge false: no Forge games, as run_deck_report's forge false
         off = structured(
             await call(
@@ -296,6 +293,48 @@ async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack:
             await call(h, reader, "compare_decks", {"a": "42", "b": "43", "simulate": True, "games": 20})
         )
         assert ro["stored"] is True and ro["forge"] == {"started": False, "note": FORGE_READ_ONLY}, ro
+    finally:
+        if reports._forge_task is not None:
+            reports._forge_task.cancel()
+
+
+@pytest.mark.parametrize("args", [{"a": "42", "b_list": LIST}, {"a_list": LIST, "b": "42"}])
+async def test_a_comparison_with_a_pasted_list_plays_it_at_the_forge_table_too(
+    stack: Stack, args: dict[str, str]
+) -> None:
+    """run_deck_report plays a pasted list by Forge, and compare_decks refused one ("a pasted list
+    can't be seated at a Forge table"): the two tools contradicted each other (0.7.46 re-audit,
+    F1-d). A pasted list now sits at the comparison's Forge table as a deck does, on either side,
+    both against the same precons."""
+    from .test_forge import BRACKETED
+
+    h = stack.h
+    gw = h.app.state.gateway
+    reports = gw.reports
+    fake = FakeForge(brackets=BRACKETED)
+    reports.forge, reports.forge_interval = fake.client(), 0.05
+    token = await linked_user(stack)
+    sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+    try:
+        out = structured(await call(h, token, "compare_decks", {**args, "simulate": True, "games": 20}))
+        assert out["stored"] is True, out
+        forge = out["forge"]
+        assert forge["started"] is True, forge
+        ids = forge["report_ids"]
+        # the pair's second report seats the first one's opponents, as for two decks
+        assert reports.pair_of(sub, ids["b"]) == (ids["a"], ids["b"]), ids
+        listed = reports.get(sub, ids["b" if "b_list" in args else "a"])
+        assert listed["deck_id"] in ("", None), listed["deck_id"]  # filed under no deck
+        assert listed["deck_name"] == "Pasted list", listed["deck_name"]
+        b = await _browser(stack)
+        try:
+            from urllib.parse import urlparse
+
+            page = await b.http.get(urlparse(forge["head_to_head_url"]).path)
+            assert page.status_code == 200, page.text[:500]
+            assert "Pasted list" in page.text
+        finally:
+            await b.aclose()
     finally:
         if reports._forge_task is not None:
             reports._forge_task.cancel()

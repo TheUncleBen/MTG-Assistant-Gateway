@@ -437,7 +437,7 @@ class ReportService:
         sub: str,
         deck: Deck,
         *,
-        source: dict[str, Any],
+        source: dict[str, Any] | None,
         stats: dict[str, Any] | None = None,
         simulate: bool = True,
         games: int = DEFAULT_GAMES,
@@ -447,15 +447,24 @@ class ReportService:
         on_stored: Callable[[str], None] | None = None,
         paired_with: Deck | None = None,
         ab_with: tuple[str, str, tuple[str, str]] | None = None,
+        pair_with: Deck | None = None,
+        same_opponents_as: str | None = None,
+        pair_hold: PairHold | None = None,
     ) -> dict[str, Any]:
         """A report of a deck that is not a stored deck as it is: a pasted list (``list_deck``), a
         waiting proposal's resulting deck (``proposal_deck``) or a comparison's A/B (``goldfish``:
         the A/B already run, kept as the report's simulation; ``ab_with``: the two lists and their
         modes, the A/B run once the report is stored, as the website's). Stored and kept like any
         report, with ``source`` (its kind, label and what it relates to) in its settings; never a
-        reused one. ``on_stored``: as for ``run``; ``paired_with``: see ``_run``."""
+        reused one. ``on_stored``: as for ``run``; ``paired_with``: see ``_run``. ``pair_with``,
+        ``same_opponents_as`` and ``pair_hold``: a side of a comparison's Forge table, as for
+        ``run`` (a pasted list sits there as a deck does); ``source`` None then makes it the pair's
+        Head to head report."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        if same_opponents_as is not None and pair_with is not None:
+            raise DeckError("invalid", BOTH_PAIRINGS)
+        shared = self._share_from(sub, same_opponents_as) if same_opponents_as is not None else None
         out = await self._run(
             sub,
             deck.id,
@@ -471,6 +480,9 @@ class ReportService:
             background=on_stored is not None,
             paired_with=paired_with,
             ab_with=ab_with,
+            shared=shared,
+            pair_with=pair_with,
+            pair_hold=pair_hold,
         )
         out["stored"] = True
         return out
