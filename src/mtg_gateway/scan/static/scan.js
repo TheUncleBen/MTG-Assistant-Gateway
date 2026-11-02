@@ -1639,11 +1639,12 @@
       onclick: (e) => { e.stopPropagation(); const r = b.getBoundingClientRect(); onOpen(r.left, r.bottom, b); } }, icon('more'));
     return b;
   }
-  /* What was done, in the site's toast when its script is on the page; else as a notice in `box`. */
-  function told(box, text) {
+  /* What was done, in the site's toast when its script is on the page; else as a notice in `box`.
+     `actions`: buttons shown after the words (Undo), for 15 s in the toast. */
+  function told(box, text, actions) {
     const CM = window.MtgCardMenu;
-    if (CM && CM.toast) { CM.toast(text, { ok: true }); return; }
-    if (box) { box.textContent = ''; box.append(h('div', { class: 'notice ok', text })); }
+    if (CM && CM.toast) { CM.toast(text, { ok: true, actions: actions || [], ms: actions && actions.length ? 15000 : undefined }); return; }
+    if (box) { box.textContent = ''; box.append(h('div', { class: 'notice ok' }, text, ...(actions || []))); }
   }
   const scryfallLink = (it) => (it.card && it.card.scryfall_uri) || ('https://scryfall.com/search?q=' + encodeURIComponent('!"' + (it.name || '') + '"'));
 
@@ -1680,7 +1681,18 @@
     const summary = h('p', { class: 'muted summary', id: 'summary' });
     const msg = h('div', { id: 'list-msg' });
     const changed = () => { state.dirty = true; saveDraft(); draw(); renderBadge(); };
-    const remove = (it) => { const i = state.items.indexOf(it); if (i >= 0) state.items.splice(i, 1); changed(); };
+    // Remove goes at once, with Undo (QOL-01): the row comes back where it was, with its copies
+    const remove = (it) => {
+      const i = state.items.indexOf(it); if (i < 0) return;
+      state.items.splice(i, 1); changed();
+      const undo = h('button', { type: 'button', class: 'btn small', onclick: () => {
+        undo.disabled = true;
+        if (state.items.indexOf(it) >= 0) return;
+        state.items.splice(Math.min(i, state.items.length), 0, it); changed();
+        told(msg, (it.name || 'The card') + ' is back in the list.');
+      } }, 'Undo');
+      told(msg, 'Removed ' + (it.name || '?') + '.', [undo]);
+    };
     // The card's menu: Open card, Add to deck…, Add to collection, Watch this card (watchlists
     // on), Change printing…, the quantity, Copy name, Open on Scryfall, Remove. Add to deck,
     // Add to collection and Watch are the card menu's own items (cardmenu.js), as on every page.
@@ -1702,7 +1714,7 @@
         } },
         { text: 'Open on Scryfall', icon: 'external', href: scryfallLink(it), ext: true },
         'sep',
-        { text: 'Remove', icon: 'x', danger: true, onClick: () => { remove(it); told(msg, 'Removed ' + name + '.'); } });
+        { text: 'Remove', icon: 'x', danger: true, onClick: () => remove(it) });
       // the row is redrawn after a quantity step, so its ⋮ is looked up when the menu closes
       const backTo = () => { const i = state.items.indexOf(it); return i < 0 ? null : ul.querySelector('li[data-index="' + i + '"] .kebab'); };
       openMenu({ name, label: 'Card: ' + name, items, focusBack: back || backTo }, x, y);

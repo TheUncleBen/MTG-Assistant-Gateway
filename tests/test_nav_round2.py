@@ -359,3 +359,17 @@ def test_a_deck_tiles_name_takes_two_lines_before_its_ellipsis() -> None:
     from mtg_gateway.deckpage import DECK_CSS
 
     assert "-webkit-line-clamp:2;line-clamp:2}" in DECK_CSS
+
+
+def test_the_account_page_has_an_assistants_row_so_a_mode_change_is_three_taps(server: Server) -> None:
+    """/account › Assistants › the assistant › pick (0.7.46 re-audit QG-14): the "Assistants and
+    apps" group opens with the Assistants row (each assistant's own approval mode), before the
+    Guide and the skill."""
+    h = _client(server)
+    hub = h.get("/account").text
+    group = hub.split("<h2>Assistants and apps</h2>", 1)[1].split("</section>", 1)[0]
+    assert "<a class='yrow' href='/account/assistants'>" in group
+    assert group.index("href='/account/assistants'") < group.index("href='/guide'")
+    assert "<span class='lbl'>Assistants</span>" in group
+    assistants = h.get("/account/assistants").text
+    assert "<h1>Assistants</h1>" in assistants

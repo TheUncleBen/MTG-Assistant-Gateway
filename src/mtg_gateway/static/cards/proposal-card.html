@@ -144,6 +144,10 @@ button.danger:disabled{color:var(--red)}
   var pressedHere = false;
   var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
+  // Undo on the card (QOL-01): the code this card applied its change with, kept for its Undo
+  // button (undo_proposal takes the same code); the kinds the gateway can undo (decks.UNDO_KINDS)
+  var undoCode = null, undoFor = null;
+  var UNDO_KINDS = /^(edit|details|restore|categories)$/;
   var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel;
   function openLink(url) { B.openLink(url, function (text) { setStatus(text, ""); }); }
 
@@ -363,7 +367,8 @@ button.danger:disabled{color:var(--red)}
     // the site's labels: a word, a colour and an icon (ui.LABELS)
     var STATE_ICON = { pending: "clock", updated: "refresh", needs_look: "alert", held: "pause", applying: "spinner",
       applied: "check", rejected: "x", expired: "hourglass", replaced: "arrows", superseded: "arrows", withdrawn: "back", failed: "alert" };
-    B.label(st, sc.state === "pending" ? ({ updated: "Updated", needs_look: "Needs a look", held: "Held" }[sc.status] || "Waiting") : (STATE_TEXT[sc.state] || sc.state || ""),
+    if (sc.undone) B.label(st, "Undone", "applied", "undo");
+    else B.label(st, sc.state === "pending" ? ({ updated: "Updated", needs_look: "Needs a look", held: "Held" }[sc.status] || "Waiting") : (STATE_TEXT[sc.state] || sc.state || ""),
       stKey === "held" ? "pending" : stKey === "superseded" ? "replaced" : stKey, STATE_ICON[stKey] || "");
     $("summary").textContent = summaryFor(sc, rows);
     var list = $("rows"); list.replaceChildren();
@@ -452,7 +457,7 @@ button.danger:disabled{color:var(--red)}
   function release(stillReading) {
     if (!stillReading) stopWatching();
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
-    approval = null; applySet = null; heldCode = null;
+    approval = null; applySet = null; heldCode = null; undoCode = null; undoFor = null;
     $("rows").replaceChildren(); $("also-actions").replaceChildren();
     $("summary").textContent = ""; $("note").textContent = ""; $("foot").textContent = "";
     sc0 = { version: sc0.version, card_seq: sc0.card_seq, state: sc0.state };
@@ -662,6 +667,7 @@ button.danger:disabled{color:var(--red)}
           // pending, and this card's code approves it again (the code stays valid while pending).
           var meta = {};
           if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
+          if (sc.state === "applied" && heldCode) { undoCode = heldCode; undoFor = pid; }
           // waiting again after an apply stopped: its timed reads start over, so an amend is followed
           if (sc.state === "pending") refreshes = 0;
           render({ structuredContent: sc, _meta: meta });
@@ -784,11 +790,19 @@ button.danger:disabled{color:var(--red)}
       deck.onclick = function (e) { e.preventDefault(); openLink(p.result.deck_url); };
       a.appendChild(deck);
     }
-    // Undo exists for a deck edit, a details change and a restore (the review page's Undo)
-    if (p.state === "applied" && p.review_url && /^(edit|details|restore)$/.test(String(p.kind || "edit"))) {
-      var undo = el("a", "link", "Undo on the review page"); undo.href = "#";
-      undo.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
-      a.appendChild(undo);
+    // Undo exists for a deck edit, a details change, a category change and a restore: on this
+    // card when it applied the change itself (undo_proposal, with the code it applied with),
+    // else the review page's Undo. An undone change has nothing left to undo from here.
+    if (p.state === "applied" && !p.undone && UNDO_KINDS.test(String(p.kind || "edit")) && p.snapshot_id !== null) {
+      if (undoCode && undoFor === p.proposal_id) {
+        var undoBtn = el("button", "", "Undo"); undoBtn.type = "button"; undoBtn.id = "undo";
+        undoBtn.onclick = function () { undoApplied(undoBtn); };
+        a.appendChild(undoBtn);
+      } else if (p.review_url) {
+        var undo = el("a", "link", "Undo on the review page"); undo.href = "#";
+        undo.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
+        a.appendChild(undo);
+      }
     }
     var openRow = $("open-row"); openRow.replaceChildren();
     if (p.review_url) {
@@ -798,6 +812,38 @@ button.danger:disabled{color:var(--red)}
     }
     openRow.className = "open-row" + (p.review_url ? "" : " hidden");
     reportSize();
+  }
+
+  // Undo of the change this card applied (undo_proposal, a tool only this card calls): the
+  // deck goes back as it was before it, at once. Refused when more than that change would go
+  // back: the gateway's words, and the review page's Undo (which shows what goes back) as the way on.
+  function undoApplied(btn) {
+    if (!proposal || !undoCode || busy) return;
+    busy = true; btn.disabled = true;
+    var pid = proposal.proposal_id, code = undoCode;
+    setStatus("Undoing…", "");
+    request("tools/call", { name: "undo_proposal", arguments: { proposal_id: pid, approval: code } })
+      .then(function (res) {
+        busy = false;
+        var sc = (res && res.structuredContent) || {};
+        if (sc.ok === false || (res && res.isError) || !sc.undone) {
+          var msg = String(sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.");
+          undoCode = null; undoFor = null;  // the review page's Undo is the way on
+          renderActions();
+          setStatus(msg, "err");
+          tellModel("The user pressed Undo on the proposal card for " + pid + ", but the gateway answered: " + msg);
+          return;
+        }
+        undoCode = null; undoFor = null;
+        proposal = Object.assign({}, proposal, { undone: true });
+        render({ structuredContent: proposal, _meta: {} });
+        setStatus(String(sc.message || "Undone. The deck is back as it was before that change."), "ok");
+        tellModel("The user pressed Undo on the proposal card: proposal " + pid + " was undone (restore " + String(sc.proposal_id || "") + " applied); the deck is back as it was before that change.");
+      })
+      .catch(function () {
+        busy = false; btn.disabled = false;
+        setStatus("Could not reach the gateway, so this card can't tell whether the change was undone. Check the review page.", "err");
+      });
   }
 
   // "Propose the rest" of a change that stopped partway: the gateway works out what is still
@@ -881,7 +927,7 @@ button.danger:disabled{color:var(--red)}
   function applyAll() {
     if (!proposal || !applySet || busy) return;
     busy = true; confirming = false;
-    var set = applySet, pid = proposal.proposal_id;
+    var set = applySet, pid = proposal.proposal_id, ownCode = approval;
     renderAlso();
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = true; if (no) no.disabled = true;
@@ -909,6 +955,7 @@ button.danger:disabled{color:var(--red)}
           return;
         }
         applySet = null; pressedHere = true;
+        if (ownCode && (sc.applied || []).some(function (c) { return String(c.proposal_id) === pid; })) { undoCode = ownCode; undoFor = pid; }
         var summary = String(sc.summary || "");
         request("tools/call", { name: "get_proposal", arguments: readArgs(pid) })
           .then(function (r2) {
@@ -1073,6 +1120,7 @@ button.danger:disabled{color:var(--red)}
           return;
         }
         heldCode = sc.state === "applying" ? approval : null;
+        if (decision === "approve" && sc.state === "applied") { undoCode = approval; undoFor = pid; }
         approval = null; busy = false;
         if (decision === "approve") pressedHere = true;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });

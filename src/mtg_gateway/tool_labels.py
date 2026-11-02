@@ -52,6 +52,7 @@ TOOLS: dict[str, ToolWords] = {
     ),
     "apply_proposal": ToolWords("Apply a change", "Apply that change"),
     "confirm_proposal": ToolWords("Apply or reject from a chat card", "Apply (a chat card's button)"),
+    "undo_proposal": ToolWords("Undo from a chat card", "Undo (a chat card's button)"),
     "propose_rest": ToolWords("Propose the rest of a change", "Propose the rest (a chat card's button)"),
     "reject_proposal": ToolWords("Reject a change", "Reject that change"),
     "get_snapshot": ToolWords("Read a snapshot", "Show me that snapshot"),

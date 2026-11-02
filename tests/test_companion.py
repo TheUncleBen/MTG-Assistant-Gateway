@@ -655,7 +655,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
             if busy.status_code == 429:
                 break
         assert busy is not None and busy.status_code == 429, busy.text
-        assert "<a class='btn btn-primary' href='/decks/42/compare?with=43'>Try again</a>" in busy.text
+        assert "<a class='btn' href='/decks/42/compare?with=43'>Try again</a>" in busy.text
         assert busy.headers["cache-control"] == "no-store" and int(busy.headers["retry-after"]) >= 1
         again = await b.http.get("/decks/42/compare?with=43", headers=NAV)
         assert again.status_code in (200, 429), again.status_code  # a page, never 405
@@ -1212,15 +1212,20 @@ BUSY_DOWNLOADS = (
 
 
 def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -> None:
+    """The page keeps its own frame and title; the busy words are the held pages' strip with Try
+    again (0.7.46 re-audit D29), never a page headed by the error."""
     assert r.status_code == status, (path, r.status_code, r.text[:300])
-    if path.startswith("/collection"):  # the Binder keeps its own frame, the busy words in its list
-        assert "<title>Binder" in r.text and f"<h2 class='busy-title'>{title}</h2>" in r.text, path
-    else:
-        assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    assert f"<h1>{title}</h1>" not in r.text and "busy-title" not in r.text, path
+    what = "your binder" if path.startswith("/collection") else "this page"
+    assert (
+        f"<p class='notice warn held' role='status'>{title}, so {what} can't be read yet. "
+        f"<a class='btn' href='{html.escape(path)}'>Try again</a></p>" in r.text
+    ), (path, r.text[:300])
+    if path.startswith("/collection"):
+        assert "<title>Binder" in r.text, path
     # never Archidekt's raw words: codes, exception names, seconds (0.7.46 audit D-05, C-15)
     for raw in ("HTTP 5", "HTTP 4", "ReadTimeout", "request failed:", " seconds"):
         assert raw not in r.text, (path, raw)
-    assert f"<a class='btn btn-primary' href='{html.escape(path)}'>Try again</a>" in r.text, path
     assert 1 <= int(r.headers["retry-after"]) <= max_wait, (path, r.headers)
     assert r.headers["cache-control"] == "no-store", path
     for wrong in ("Deck not found", "Cannot edit", "could not be run", "Archidekt could not find"):

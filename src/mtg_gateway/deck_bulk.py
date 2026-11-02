@@ -41,6 +41,7 @@ STOP_KINDS = ("not_linked", "auth", "writes_disabled", "unavailable", "rate_limi
 BULK_CSS = """
 .decks-bulkform{display:none}
 ul.decklist .deck{position:relative}
+body.decks-selectable:not(.decks-selecting) ul.decklist .deck .chk{display:none}
 ul.decklist .deck .chk{display:grid;place-items:center;width:44px;height:44px;cursor:pointer;
   position:absolute;top:0;left:0;z-index:2;border-radius:var(--radius) 0 var(--radius) 0;
   background:var(--surface)}
@@ -61,7 +62,7 @@ def tick_html(deck_id: str, name: str) -> str:
 
 
 def select_button_html() -> str:
-    """Select: drawn hidden, the page's script shows it (it ticks what is on screen)."""
+    """Select: drawn hidden, the page's script shows it (it opens the select mode)."""
     return (
         "<button type='button' class='btn decks-select' aria-pressed='false' hidden>"
         f"{icon('check')}Select</button>"
@@ -69,13 +70,14 @@ def select_button_html() -> str:
 
 
 def bulk_html(csrf: str, folders: dict[str, Any] | None, here: str) -> str:
-    """The hidden form, the bar (hidden until a deck is ticked) and its two boxes."""
+    """The hidden form, the bar (hidden until Select opens the select mode) and its two boxes."""
     form = (
         f"<form method='post' action='/decks/bulk' id='{BULK_FORM}' class='decks-bulkform'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='next' value='{esc(here)}'></form>"
     )
     actions = [
+        "<button type='button' class='btn decks-all'>Select all</button>",
         ui.box_opener("Move to folder…", "/decks?bulk=move", "decks-bulk-move"),
         ui.box_opener("Visibility…", "/decks?bulk=vis", "decks-bulk-vis"),
         "<button type='button' class='btn decks-clear'>Cancel</button>",

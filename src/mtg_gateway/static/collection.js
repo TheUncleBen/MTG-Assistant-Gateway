@@ -542,12 +542,16 @@
     });
   });
 
-  // -- Select and the bulk bar (0.7.46 audit QG-17) --------------------------------------------
-  // A tick on any tile or row shows the bar (its count, Condition…, Finish…, Tags…, Remove,
+  // -- Select and the bulk bar (0.7.46 audit QG-17; re-audit N03) -------------------------------
+  // Select opens the select mode: the tick boxes show (hidden otherwise, less clutter), nothing is
+  // ticked, and the bar shows (its count, Select all, Condition…, Finish…, Tags…, Remove,
   // Cancel); the tick boxes and the boxes' fields belong to the one hidden form (#col-bulk), so a
-  // press sends the ticked cards with the box's choice. Select ticks every card on screen (the
-  // ones the name box left showing), or clears them all. Without this script there is no Select
-  // button, and the boxes open as pages of their own.
+  // press sends the ticked cards with the box's choice. Select all ticks every card on screen
+  // (the ones the name box left showing), or clears them all once they all are. Cancel, or Select
+  // again, closes the mode. Without this script there is no Select button, the tick boxes always
+  // show, and the boxes open as pages of their own.
+  var section = $(".collection");
+  function selecting() { return !!section && section.classList.contains("selecting"); }
   function boxes() { return $$(".collection #cards .chk input[name=sel]"); }
   function ticked() { return boxes().filter(function (b) { return b.checked; }); }
   function shown() { return boxes().filter(function (b) { var li = b.closest("li"); return li && !li.hidden; }); }
@@ -555,12 +559,14 @@
     var n = ticked().length, bar = $(".collection .ui-bar[aria-label='Selected cards']");
     boxes().forEach(function (b) { var li = b.closest("li"); if (li) li.classList.toggle("sel", b.checked); });
     if (bar) {
-      bar.hidden = n === 0;
+      bar.hidden = !selecting();
       var c = $(".count", bar);
       if (c) c.textContent = n + " selected";
+      var on = shown(), all = $(".col-all", bar);
+      if (all) all.textContent = n > 0 && on.length > 0 && on.every(function (b) { return b.checked; }) ? "Select none" : "Select all";
     }
-    var sel = $(".collection .col-select"), on = shown();
-    if (sel) sel.setAttribute("aria-pressed", n > 0 && on.length > 0 && on.every(function (b) { return b.checked; }) ? "true" : "false");
+    var sel = $(".collection .col-select");
+    if (sel) sel.setAttribute("aria-pressed", selecting() ? "true" : "false");
     $$("[data-bulk-count]").forEach(function (w) { w.textContent = n === 1 ? "The selected card" : "The " + n + " selected cards"; });
     $$("#col-bulk-cond p, #col-bulk-finish p, #col-bulk-tags p").forEach(function (w) {
       var t = w.childNodes[1];
@@ -568,8 +574,15 @@
     });
   }
   function setAll(on) { shown().forEach(function (b) { b.checked = on; }); if (!on) boxes().forEach(function (b) { b.checked = false; }); redraw(); }
+  function mode(on) {
+    if (!section) return;
+    section.classList.toggle("selecting", on);
+    if (!on) setAll(false); else redraw();
+    say(on ? "Select is on: tick the cards, then pick an action." : "Select is off.");
+  }
   var selectBtn = $(".collection .col-select");
   if (selectBtn) selectBtn.hidden = false;
+  if (section && selectBtn) section.classList.add("selectable");
   document.addEventListener("change", function (e) {
     var t = e.target;
     if (t && t.name === "sel" && t.closest && t.closest(".collection #cards")) redraw();
@@ -577,10 +590,11 @@
   document.addEventListener("click", function (e) {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     var sel = e.target.closest ? e.target.closest(".collection .col-select") : null;
-    if (sel) { setAll(sel.getAttribute("aria-pressed") !== "true"); return; }
+    if (sel) { mode(!selecting()); return; }
     var bar = e.target.closest ? e.target.closest(".collection .ui-bar[aria-label='Selected cards']") : null;
     if (!bar) return;
-    if (e.target.closest(".col-clear")) { setAll(false); return; }
+    if (e.target.closest(".col-clear")) { mode(false); if (selectBtn) selectBtn.focus(); return; }
+    if (e.target.closest(".col-all")) { var on = shown(); setAll(!(on.length && on.every(function (b) { return b.checked; }))); return; }
     var opener = e.target.closest("a[data-box-open]");
     if (opener && ticked().length === 0) {
       e.preventDefault();

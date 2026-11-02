@@ -2119,10 +2119,11 @@ def widgets_html(
 
 
 def bulk_html(csrf: str, back: str, tags: list[str], tag_colors: dict[str, str] | None = None) -> str:
-    """Select's bar (0.7.46 audit QG-17): hidden until a row is ticked; the rows' tick boxes and the
-    boxes' fields belong to one hidden form, so a press sends the ticked rows with the box's
-    choice. Condition…, Finish… and Tags… open a box; Remove goes at once (the notice offers
-    Undo); Cancel clears the ticks."""
+    """Select's bar (0.7.46 audit QG-17): hidden until Select opens the select mode (nothing
+    ticked; re-audit N03); the rows' tick boxes and the boxes' fields belong to one hidden form, so
+    a press sends the ticked rows with the box's choice. Select all ticks every row on screen;
+    Condition…, Finish… and Tags… open a box; Remove goes at once (the notice offers Undo);
+    Cancel clears the ticks and closes the mode."""
     csrf_in = (
         f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         f"<input type='hidden' name='next' value='{_esc(back)}'>"
@@ -2132,6 +2133,7 @@ def bulk_html(csrf: str, back: str, tags: list[str], tag_colors: dict[str, str] 
         "<input type='hidden' name='action' value='bulk'></form>"
     )
     actions = [
+        "<button type='button' class='btn col-all'>Select all</button>",
         ui.box_opener("Condition…", "/collection", "col-bulk-cond"),
         ui.box_opener("Finish…", "/collection", "col-bulk-finish"),
         ui.box_opener("Tags…", "/collection", "col-bulk-tags"),
@@ -2286,7 +2288,7 @@ def panel_html(
             f"<select id='col-tag' name='tag'>{tag_opts}</select></span>" + sort_html
         )
     count_text = f"{count:,} {'entry' if count == 1 else 'entries'}"
-    # Select (the page's script shows it): ticks every row on screen, or clears them all
+    # Select (the page's script shows it): opens the select mode, nothing ticked (re-audit N03)
     select = (
         "<button type='button' class='btn col-select' aria-pressed='false' hidden>"
         f"{icon('check')}Select</button>"
@@ -2405,8 +2407,10 @@ ul.collgrid .act{display:flex;align-items:center;min-width:0}
     grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
   ul.collgrid .cc .kebab{width:44px}
 }
-/* Select (0.7.46 audit QG-17): a tick box on every tile and row, the bar when one is ticked */
+/* Select (0.7.46 audit QG-17): a tick box on every tile and row, shown while the select mode is
+   on (the script adds .selecting to the list's section; without the script they always show) */
 .collection .col-bulkform{display:none}
+.collection.selectable:not(.selecting) .chk{display:none}
 .collection .chk{display:grid;place-items:center;width:44px;height:44px;cursor:pointer;flex:0 0 auto}
 .collection .chk input{width:20px;height:20px;margin:0;accent-color:var(--orange-ctl)}
 ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;align-items:center}
@@ -3188,11 +3192,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 got, whole = held[1]["got"], held[1]["whole"]
                 notes = held_html(exc, held[0], "your binder", same_url(request)) + notes
             elif plan is not None:
-                # the Binder keeps its title and notes; the busy words sit where the list goes
-                body = head() + notes_html + f"<h2 class='busy-title'>{_esc(plan.title)}</h2>"
+                # the Binder keeps its title and notes; the busy strip sits where the list goes
                 busy = page(
                     "Binder",
-                    body + busy_body(plan, same_url(request)),
+                    head() + notes_html + busy_body(plan, same_url(request), "your binder"),
                     sub=sub,
                     sid=sid,
                     status=plan.status,

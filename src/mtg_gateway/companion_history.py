@@ -452,7 +452,7 @@ def add_history_routes(
             p = await decks.propose_deck_from_snapshot(sub, snap_id)
         except DeckError as exc:
             if (plan := busy_plan(exc)) is not None:
-                busy = page(plan.title, busy_body(plan, details), sub=sub, sid=sid, status=plan.status)
+                busy = page("History", busy_body(plan, details), sub=sub, sid=sid, status=plan.status)
                 busy.headers.update(busy_headers(plan))
                 return busy
             buttons = (
@@ -795,7 +795,7 @@ def add_history_routes(
         except DeckError as exc:
             if (plan := busy_plan(exc)) is not None:
                 busy = page(
-                    plan.title,
+                    "Report",
                     busy_body(plan, f"/history/reports/{rid}"),
                     sub=sub,
                     sid=sid,
@@ -857,7 +857,7 @@ def add_history_routes(
             report = await reports.start(sub, job=lambda mark: job(sub, data, mark))
         except DeckError as exc:
             if (plan := busy_plan(exc)) is not None:
-                busy = page(plan.title, busy_body(plan, back[0]), sub=sub, sid=sid, status=plan.status)
+                busy = page(title, busy_body(plan, back[0]), sub=sub, sid=sid, status=plan.status)
                 busy.headers.update(busy_headers(plan))
                 return busy
             return page(

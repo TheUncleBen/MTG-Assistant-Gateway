@@ -580,3 +580,94 @@ async def test_apply_proposal_without_elicitation_is_unchanged(stack: Stack) -> 
     assert got["ok"] is False and got["error"] == "browser_required" and got["review_url"] == p["review_url"]
     assert _writes(stack.ark) == 0
     assert time.time() > 0 and asyncio.iscoroutinefunction(apply_on_review_page)
+
+
+# -- the card's Undo (0.7.46 re-audit QG-18, QOL-01) ----------------------------------------------
+
+
+def _copies(ark: FakeArchidekt, name: str) -> int:
+    return sum(
+        int(c["quantity"])
+        for c in ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] == name and not c.get("deletedAt")
+    )
+
+
+async def test_card_undo_puts_the_deck_back_and_is_the_cards_alone(stack: Stack) -> None:
+    """After the card's Apply, its Undo button calls undo_proposal with the same code: the deck
+    goes back as it was before that change (a restore applied at once, as the review page's Undo
+    does), the audit says the card did it, and the same press again has nothing left to undo.
+    A wrong code is refused and logged; the tool is the card's, not the assistant's."""
+    h = stack.h
+    token = await linked_user(stack)
+    tools = await _tools(h, token)
+    assert tools["undo_proposal"]["_meta"]["ui"]["visibility"] == ["app"]
+    assert "undo_proposal" in WRITE_TOOLS
+    before = _copies(stack.ark, "Sol Ring")
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    done = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert done["state"] == "applied" and done["kind"] == "edit" and done["snapshot_id"], done
+    assert _copies(stack.ark, "Sol Ring") == before + 1
+    deck_after = json.dumps(stack.ark.decks[42], sort_keys=True)
+    # a wrong code: refused, logged, nothing sent
+    bad = structured(
+        await call(h, token, "undo_proposal", {"proposal_id": p["proposal_id"], "approval": "x"})
+    )
+    assert bad["ok"] is False and bad["error"] == "invalid_approval", bad
+    assert json.dumps(stack.ark.decks[42], sort_keys=True) == deck_after
+    # the card's code: the deck is back as it was before the change
+    undone = structured(
+        await call(h, token, "undo_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert undone["ok"] is True and undone["undone"] is True, undone
+    assert undone["state"] == "applied" and undone["kind"] == "restore"
+    assert undone["message"] == "Undone. The deck is back as it was before that change."
+    assert _copies(stack.ark, "Sol Ring") == before
+    audit = [r for r in h.db.audit_for_user("user-1", 50) if r["event"] == "proposal_applied"]
+    assert audit and audit[0]["detail"]["via"] == "app"
+    assert undone["undo_of"] == p["proposal_id"] and undone["proposal_id"] != p["proposal_id"]
+    # again: nothing left to undo, and nothing is sent
+    sent = _writes(stack.ark)
+    again = structured(
+        await call(h, token, "undo_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert again["ok"] is False and again["error"] == "nothing_to_undo", again
+    assert _writes(stack.ark) == sent
+
+
+async def test_card_undo_refuses_when_more_than_the_change_would_go_back(stack: Stack) -> None:
+    """A later change on the deck since the apply: the card's Undo would take that back too, so
+    it is refused with the review page's warning, where the member sees what goes back."""
+    h = stack.h
+    token = await linked_user(stack)
+    before = _copies(stack.ark, "Sol Ring"), _copies(stack.ark, "Arcane Signet")
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    assert (
+        structured(
+            await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+        )["state"]
+        == "applied"
+    )
+    later = await _propose(h, token, "Arcane Signet")
+    p2, code2 = structured(later), later["_meta"][APPROVAL_META_KEY]
+    assert (
+        structured(
+            await call(h, token, "confirm_proposal", {"proposal_id": p2["proposal_id"], "approval": code2})
+        )["state"]
+        == "applied"
+    )
+    sent = _writes(stack.ark)
+    refused = structured(
+        await call(h, token, "undo_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert refused["ok"] is False and refused["error"] == "more_would_go_back", refused
+    assert "review page" in refused["message"] and refused["review_url"].endswith(p["proposal_id"])
+    assert _writes(stack.ark) == sent
+    assert (_copies(stack.ark, "Sol Ring"), _copies(stack.ark, "Arcane Signet")) == (
+        before[0] + 1,
+        before[1] + 1,
+    )

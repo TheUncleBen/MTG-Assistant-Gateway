@@ -269,6 +269,7 @@ _ON_PROPOSALS = frozenset(
     {
         "apply_proposal",
         "confirm_proposal",
+        "undo_proposal",
         "confirm_waiting",
         "reject_proposal",
         "amend_proposal",

@@ -1,7 +1,8 @@
-"""Select on the Binder in a browser (0.7.46 audit QG-17, QOL-17): the tick boxes show on every
-tile and row, Select ticks what is on screen, the bar appears with the count and fits at phone and
-desktop widths, Condition… sets every ticked row, Remove goes at once and the notice's Undo brings
-the rows back. Set MTG_BINDER_SHOTS to a folder to keep screenshots."""
+"""Select on the Binder in a browser (0.7.46 audit QG-17, QOL-17; re-audit N03): Select opens
+the select mode with nothing ticked (the tick boxes show only then), the bar appears with the
+count and Select all and fits at phone and desktop widths, Condition… sets every ticked row,
+Remove goes at once and the notice's Undo brings the rows back. Set MTG_BINDER_SHOTS to a folder
+to keep screenshots."""
 
 from __future__ import annotations
 
@@ -50,23 +51,31 @@ def test_select_ticks_the_rows_and_the_bar_changes_and_removes_them(
         page.goto(f"{server.base}/collection?view={view}", wait_until="networkidle")
         ticks = page.locator("#cards .chk input[name=sel]")
         assert ticks.count() == 4
-        assert ticks.first.is_visible()
+        assert not ticks.first.is_visible()  # the tick boxes come with the select mode
         bar = page.locator(".ui-bar[aria-label='Selected cards']")
         assert not bar.is_visible()
         _shot(page, f"binder-select-{view}-{width}-{theme}-before")
-        # Select ticks every card on screen; the bar shows the count
+        # Select opens the mode with nothing ticked: the boxes show, the bar says 0 selected
         select = page.locator(".col-select")
         assert select.is_visible()
         select.click()
         bar.wait_for(state="visible", timeout=3000)
-        assert bar.locator(".count").inner_text() == "4 selected"
+        assert ticks.first.is_visible() and page.locator("#cards .chk input:checked").count() == 0
+        assert bar.locator(".count").inner_text() == "0 selected"
         assert select.get_attribute("aria-pressed") == "true"
         assert page.evaluate(MEASURE) == [], (view, width)
+        _shot(page, f"binder-select-{view}-{width}-{theme}-mode")
+        # an action with nothing ticked asks for a tick; Select all ticks every card on screen
+        bar.locator("a[data-box-open='col-bulk-cond']").click()
+        page.locator(".toast", has_text="Tick a card first.").wait_for(timeout=3000)
+        assert page.locator("#col-bulk-cond").get_attribute("hidden") is not None
+        bar.locator(".col-all").click()
+        assert bar.locator(".count").inner_text() == "4 selected"
+        assert page.evaluate(MEASURE) == [], (view, width)
         _shot(page, f"binder-select-{view}-{width}-{theme}-ticked")
-        # one untick: the count follows and Select is no longer "all"
+        # one untick: the count follows
         ticks.first.click()
         assert bar.locator(".count").inner_text() == "3 selected"
-        assert select.get_attribute("aria-pressed") == "false"
         # Condition… names the count and sets it on the ticked rows (one write each, read back)
         bar.locator("a[data-box-open='col-bulk-cond']").click()
         box = page.locator("#col-bulk-cond")
@@ -82,6 +91,7 @@ def test_select_ticks_the_rows_and_the_bar_changes_and_removes_them(
         assert sorted(r["condition"] for r in rows.values()) == [1, 2, 2, 2]
         # Remove goes at once; the notice offers Undo, which brings the rows back
         page.locator(".col-select").click()
+        page.locator(".ui-bar[aria-label='Selected cards'] .col-all").click()
         page.locator("#cards .chk input[name=sel]").first.click()
         page.locator(".ui-bar[aria-label='Selected cards'] button[value=remove]").click()
         page.wait_for_url("**/collection?*ok=bulk*", timeout=8000)
@@ -98,5 +108,16 @@ def test_select_ticks_the_rows_and_the_bar_changes_and_removes_them(
         )
         assert len(rows) == 4 and page.locator("#cards > li[data-id]").count() == 4
         assert page.locator(".ui-bar[aria-label='Selected cards']").is_hidden()
+        assert not page.locator("#cards .chk input[name=sel]").first.is_visible()
+        # Cancel leaves the mode: the ticks and the boxes go
+        page.locator(".col-select").click()
+        page.locator(".ui-bar[aria-label='Selected cards']").wait_for(state="visible", timeout=3000)
+        page.locator("#cards .chk input[name=sel]").first.click()
+        assert page.locator(".ui-bar[aria-label='Selected cards'] .count").inner_text() == "1 selected"
+        page.locator(".ui-bar[aria-label='Selected cards'] .col-clear").click()
+        assert page.locator(".ui-bar[aria-label='Selected cards']").is_hidden()
+        assert page.locator("#cards .chk input:checked").count() == 0
+        assert not page.locator("#cards .chk input[name=sel]").first.is_visible()
+        assert page.locator(".col-select").get_attribute("aria-pressed") == "false"
         assert errors == []
         browser.close()

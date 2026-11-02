@@ -1,5 +1,6 @@
-"""Select on My decks in a browser (0.7.46 audit QG-17, QOL-17): a tick box on every deck tile,
-Select ticks what is on screen, the bar shows the count and fits at phone and desktop widths
+"""Select on My decks in a browser (0.7.46 audit QG-17, QOL-17; re-audit N03): Select opens the
+select mode with nothing ticked (the tick boxes show only then), the bar shows the count and
+Select all and fits at phone and desktop widths
 (nothing overlaps a tile's link), Move to folder… moves every ticked deck and the notice says
 how many went. Set MTG_FOLDER_SHOTS to a folder to keep screenshots."""
 
@@ -43,7 +44,8 @@ def test_select_ticks_the_decks_and_the_bar_moves_them(
         page.goto(f"{server.base}/decks?view={view}&q=a", wait_until="networkidle")  # every folder
         page.wait_for_selector("section.fv-area", timeout=10_000)
         ticks = page.locator("#decks-list .deck .chk input[name=deck_id]")
-        assert ticks.count() == 4 and ticks.first.is_visible()  # the sample deck and the three seeded
+        assert ticks.count() == 4  # the sample deck and the three seeded
+        assert not ticks.first.is_visible()  # the tick boxes come with the select mode
         bar = page.locator(".ui-bar[aria-label='Selected decks']")
         assert not bar.is_visible()
         assert page.evaluate(MEASURE) == [], (view, width)
@@ -52,8 +54,16 @@ def test_select_ticks_the_decks_and_the_bar_moves_them(
         assert select.is_visible()
         select.click()
         bar.wait_for(state="visible", timeout=3000)
-        assert bar.locator(".count").inner_text() == "4 selected"
+        assert ticks.first.is_visible() and page.locator("#decks-list .chk input:checked").count() == 0
+        assert bar.locator(".count").inner_text() == "0 selected"
         assert select.get_attribute("aria-pressed") == "true"
+        assert page.evaluate(MEASURE) == [], (view, width)
+        _shot(page, f"decks-select-{view}-{width}-{theme}-mode")
+        bar.locator("a[data-box-open='decks-bulk-move']").click()
+        page.locator(".toast", has_text="Tick a deck first.").wait_for(timeout=3000)
+        assert page.locator("#decks-bulk-move").get_attribute("hidden") is not None
+        bar.locator(".decks-all").click()
+        assert bar.locator(".count").inner_text() == "4 selected"
         assert page.evaluate(MEASURE) == [], (view, width)
         _shot(page, f"decks-select-{view}-{width}-{theme}-ticked")
         left_out = int(ticks.first.get_attribute("value"))
@@ -76,5 +86,15 @@ def test_select_ticks_the_decks_and_the_bar_moves_them(
                 assert ark.deck_folder.get(did) == 504, did
         _shot(page, f"decks-select-{view}-{width}-{theme}-moved")
         assert page.locator(".ui-bar[aria-label='Selected decks']").is_hidden()
+        assert not page.locator("#decks-list .deck .chk input[name=deck_id]").first.is_visible()
+        # Cancel leaves the mode: the ticks and the boxes go
+        page.locator(".decks-select").click()
+        page.locator(".ui-bar[aria-label='Selected decks']").wait_for(state="visible", timeout=3000)
+        page.locator("#decks-list .deck .chk input[name=deck_id]").first.click()
+        assert page.locator(".ui-bar[aria-label='Selected decks'] .count").inner_text() == "1 selected"
+        page.locator(".ui-bar[aria-label='Selected decks'] .decks-clear").click()
+        assert page.locator(".ui-bar[aria-label='Selected decks']").is_hidden()
+        assert page.locator("#decks-list .chk input:checked").count() == 0
+        assert not page.locator("#decks-list .deck .chk input[name=deck_id]").first.is_visible()
         assert errors == [], errors
         browser.close()
