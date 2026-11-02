@@ -37,7 +37,7 @@ def _playing(server: Server, rid: str, done: int, *, state: str = "running") -> 
         "job_id": "job-1",
         "games_requested": 5,
         "queued_at": int(time.time()) - 300,
-        "seats": ["Immortal Reckoning", "Precon 1", "Precon 2", "Precon 3"],
+        "seats": ["Liesa Test Deck", "Precon 1", "Precon 2", "Precon 3"],
         "result": {"games": done, "games_requested": 5},
     }
     with server.db.tx() as c:
@@ -100,7 +100,7 @@ def test_the_deck_page_and_home_follow_a_test_until_it_ends(server: Server, tmp_
             home.goto(f"{server.base}/", wait_until="networkidle")
             row = home.locator("section.needs li", has_text="test running")
             assert "1 test running: Forge has played 3 of 5 games." in row.inner_text()
-            assert "Immortal Reckoning · 5 min so far" in row.inner_text()
+            assert "Liesa Test Deck · 5 min so far" in row.inner_text()
             # the test ends: both say so, with the way to the report, and stop asking
             _playing(server, "rep_run", 5, state="done")
             page.wait_for_function("() => document.body.innerText.includes('Test finished.')", timeout=15000)

@@ -635,7 +635,10 @@ def _loading_looks(d: Driver) -> None:
     asked: list[str] = []
 
     def record(req) -> None:  # noqa: ANN001
-        if req.url.startswith(d.server.base) and "/static/" not in req.url:
+        # a picture the page already holds (a custom card's, through the gateway's own route)
+        # loads when its tile comes near the window, which a layout change can bring about; the
+        # browser's lazy loading is not a control's wait on the gateway
+        if req.url.startswith(d.server.base) and "/static/" not in req.url and req.resource_type != "image":
             asked.append(req.method + " " + req.url[len(d.server.base) :])
 
     page.on("request", record)
