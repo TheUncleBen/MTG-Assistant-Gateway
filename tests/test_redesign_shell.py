@@ -475,7 +475,7 @@ def test_the_app_offers_pull_to_refresh_on_list_pages_only() -> None:
         assert path in rule, path
     assert 'Regex("^/decks/\\\\d+$")' in rule  # the deck page, never its editor or settings
     # Binder › Lists' own pages and profiles, never the box addresses under them
-    assert 'Regex("^/lists/(templates|defaults|tags|custom)$")' in rule
+    assert 'Regex("^/lists/(templates|defaults|tags|btags|custom)$")' in rule  # btags: Binder tags
     assert 'Regex("^/users/[^/]+$")' in rule
     assert (
         "/scan" not in rule.split("object PullRefresh")[1]

@@ -810,7 +810,8 @@ async def test_deck_pages(stack: Stack) -> None:
             "export.md" in shown.text and "export.html" in shown.text and "data-copy='rep-md'" in shown.text
         )
         hist = await b.http.get("/history", headers=NAV)
-        assert hist.status_code == 200 and "Open report</a>" in hist.text and "class='ui-tools'" in hist.text
+        # the tools form is "ui-tools n3" when it has three filters (they share a row on a phone)
+        assert hist.status_code == 200 and "Open report</a>" in hist.text and "class='ui-tools" in hist.text
         act = await b.http.get("/activity", headers=NAV)
         assert act.status_code == 200 and "Archidekt account linked" in act.text
         for path in ("/decks", "/decks/42", "/history", "/activity"):

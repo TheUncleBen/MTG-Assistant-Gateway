@@ -480,6 +480,10 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"{server.base}/reports", wait_until="networkidle")
+        fold = page.locator("label.glance-lbl")
+        if fold.is_visible():  # a phone: the tiles sit behind one line until it is tapped
+            fold.click()
+            page.locator(".wdg .go .btn").first.wait_for(state="visible")
         if shots:
             page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}.png", full_page=True)
         state = page.evaluate(

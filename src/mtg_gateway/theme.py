@@ -2291,10 +2291,15 @@ SEARCH_PANEL_CSS = """
   .spanel .xlink,.spanel .rbar .more,.spanel .rbar .dirw,.spanel .rbar .size,.spanel .rbar .lbl,
   .spanel .rbar .clr,.spanel .rbar .brk,.spanel .rbar .brka,.spanel .rbar.cards .brka{display:none}
   .spanel .rbar .sort:has(.sortcw) .sortw{display:none}
-  /* the chosen order on one line ("Set release, newest first"): the sort asks for 12 em, so the
-     card size's buttons go to the next row sooner than the choice wraps (re-audit D12) */
-  .spanel .rbar .sortcw{display:block;flex:1 1 12em;min-width:0}
-  .spanel .rbar .g.sort{flex:1 1 12em;min-width:7em}
+  /* the count, Sort and the view share one row (the sort fills what the count and the view
+     leave), so no group is ever alone on a row */
+  .spanel .rbar .sortcw{display:block;flex:1 1 7em;min-width:0}
+  .spanel .rbar .g.sort{flex:1 1 7em;min-width:7em}
+  /* Precons' count ("123 decks in 45 sets") is long: it takes the first row and Sort and the
+     view the next, where the sort has 12 em, so the chosen order ("Set release ↓") stays on one
+     line instead of wrapping beside the count (re-audit D12) */
+  .precons .spanel .rbar .cnt{flex:1 1 100%}
+  .precons .spanel .rbar .sortcw,.precons .spanel .rbar .g.sort{flex:1 1 12em}
   /* a bar with Select beside its count (My decks, the Binder): four pieces never fit a phone's
      row, so the count and Select share the first row at its two ends and Sort and the view the
      next, with nothing alone on a row */

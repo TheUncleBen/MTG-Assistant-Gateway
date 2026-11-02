@@ -895,7 +895,8 @@ def test_the_search_boxs_magnifier_sits_clear_of_its_text(
                 m = page.evaluate(SEARCH_ICON)
                 if m is None:
                     problems.append(f"@{width}px {path} scripts={script}: no search box")
-                elif not m["clear"] or m["wrapped"] != script or m["height"] != (44 if touch else 36):
+                # 44 px with a mouse too (0.7.46: every control is a 44 px target on every pointer)
+                elif not m["clear"] or m["wrapped"] != script or m["height"] != 44:
                     problems.append(f"@{width}px {path} scripts={script}: {m}")
             ctx.close()
     assert problems == [], "\n".join(problems)

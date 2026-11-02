@@ -178,8 +178,9 @@ def _touch(cdp, kind: str, x: float = 0, y: float = 0) -> None:
 
 def test_a_held_card_drags_to_a_category_off_screen_by_touch(server: Server) -> None:
     """On a phone: a finger held near the bottom edge scrolls the page on under a held card, so a
-    category off screen is reachable; Android's own long press does not open the card menu under
-    a held card; the drop saves at once."""
+    category off screen is reachable; the hold opens the card's menu during the hold (0.7.46),
+    Android's own long press does not open a second one, and the slide closes it as the card
+    moves; the drop saves at once."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -198,11 +199,12 @@ def test_a_held_card_drags_to_a_category_off_screen_by_touch(server: Server) -> 
             f"""() => document.elementFromPoint({x}, {y}).dispatchEvent(new MouseEvent('contextmenu',
                 {{bubbles: true, cancelable: true, clientX: {x}, clientY: {y}}}))"""
         )
-        assert page.locator(".ctxmenu").count() == 0
+        assert page.locator(".ctxmenu").count() == 1  # the hold's own menu, one only
         for i in range(1, 11):
             _touch(cdp, "touchMove", x, y + (790 - y) * i / 10)
             page.wait_for_timeout(16)
         assert page.locator(".dragghost").count() == 1
+        assert page.locator(".ctxmenu").count() == 0  # the slide moves the card: the menu made way
         _poll(page, "document.querySelector(\"[data-group='Sorcery']\").getBoundingClientRect().top < 600")
         _touch(cdp, "touchMove", x, 450)
         page.wait_for_timeout(100)
