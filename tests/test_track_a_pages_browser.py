@@ -189,9 +189,10 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
                     reached = True
                     break
             assert reached, "Tab never reached Apply"
-            if button.get_attribute("aria-disabled") == "true":
-                # pressed while locked: refused, nothing sent
-                page.keyboard.press("Enter")
+            # pressed while locked: refused, nothing sent. The look and the press are one step in
+            # the page, so the guard can't unlock between them (it unlocks on its own once the box
+            # has been seen and a key was pressed, which the Tabs above may already have done)
+            if button.evaluate("e => e.getAttribute('aria-disabled') === 'true' && (e.click(), true)"):
                 page.wait_for_timeout(300)
                 assert "/proposals/applied/" not in page.url and server.ark.patches == []
             page.wait_for_function(
@@ -564,6 +565,8 @@ def test_the_deck_page_never_scrolls_sideways(tmp_path: Path) -> None:
                                 ctx.route("**/decks/42", sized)
                                 page = ctx.new_page()
                                 page.goto(f"{s.base}/decks/42", wait_until="load")
+                                # a page drawn late (its frame first) fills in after "load"
+                                page.locator("section.panel.description").wait_for(state="attached")
                                 assert page.locator("section.panel.description").count() == 1, where
                                 fs = page.evaluate("getComputedStyle(document.documentElement).fontSize")
                                 assert text == "100%" or fs == "32px", (where, fs)

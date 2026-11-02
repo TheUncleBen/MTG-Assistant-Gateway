@@ -23,15 +23,13 @@ import pytest
 from mtg_gateway import sync as sync_mod
 
 from .conftest import AUTO, Stack, StackOptions
-from .test_db_lock_wait import _hold as _hold_lock
 from .test_db_lock_wait import _Ticker
 from .test_deck_sync import _edit_elsewhere, _later, _propose, _sync
 from .test_decks_and_proxy import call, linked_user, structured
 
 SUB = "user-1"
-# The longest the loop may go without turning while a job meets a held lock. Drawing a page in this
-# test client alone takes 0.1 to 0.2 s, so these tests draw none while they measure.
-GAP = 0.15
+# These tests draw no page while they measure: drawing one in this test client alone takes 0.1 to
+# 0.2 s of the loop.
 HOLD = 3.0
 # A loop that waited for the lock on the loop would stand still for the whole hold (the gateway did,
 # measured at 4.5 s for a 4 s hold); a loop that waits off the loop turns every 10 ms, 300 times in
@@ -144,22 +142,32 @@ async def test_the_deck_sync_waits_off_the_loop_for_a_lock_taken_while_it_reads(
 
 async def test_a_job_in_a_worker_thread_waits_without_holding_up_the_loops_reads(stack: Stack) -> None:
     """The hourly purge runs in a worker thread. While another process holds the lock, the purge
-    waits for it; the loop's own reads (every page reads the database) carry on meanwhile."""
+    waits for it; the loop's own reads (every page reads the database) carry on meanwhile. Before
+    the fix the purge held the connection's in-process lock while it waited, so the first read on
+    the loop stood still until the hold ended: no turns and no reads inside the hold. Measured as
+    turns and reads inside the hold (as the sync test above), not as one longest gap, which a
+    loaded runner can stretch past any small bound without anything being wrong."""
     h = stack.h
     await linked_user(stack)
-    holder = _hold_lock(str(h.settings.db_path), 3.0)
-    reads = 0
+    holder = _Holder(str(h.settings.db_path), HOLD)
+    read_at: list[float] = []
     try:
-        with _Ticker() as ticker:
+        with _TickCounter() as ticker:
+            holder.take()
             purge = asyncio.ensure_future(asyncio.to_thread(h.db.purge_expired))
-            await asyncio.sleep(0.2)  # the purge is waiting for the lock by now
             while not purge.done():
                 assert h.db.get_user(SUB) is not None  # a read, as a page makes
-                reads += 1
+                read_at.append(time.monotonic())
                 await asyncio.sleep(0.02)
             await purge
-            longest = await ticker.done()
+            await ticker.done()
     finally:
-        holder.wait(timeout=30)
-    assert reads > 50, reads  # the loop kept reading through the 3 s
-    assert longest < GAP, f"the loop stalled {longest:.2f} s behind the purge's wait"
+        holder.wait()
+    assert holder.taken_at is not None
+    end = holder.taken_at + HOLD
+    # the purge could only finish once the lock was let go: it waited through the hold
+    assert read_at[-1] >= end - 0.2, (holder.taken_at, read_at[-1])
+    in_hold = [t for t in ticker.ticks if holder.taken_at <= t <= end]
+    assert len(in_hold) >= TICKS_IN_HOLD, f"the loop turned {len(in_hold)} times in the {HOLD:.0f} s hold"
+    reads = [t for t in read_at if holder.taken_at + 0.2 <= t <= end]  # the purge is waiting by then
+    assert len(reads) > 30, f"the loop read {len(reads)} times while the purge waited"

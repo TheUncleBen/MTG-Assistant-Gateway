@@ -67,7 +67,9 @@ def test_a_slow_page_draws_its_frame_then_the_page(server: Server, width: int) -
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid = _link(server)
-    _slow(server, 5.0)
+    # Archidekt answers after 10 s: a frame drawn first comes well inside that on a loaded runner,
+    # and a page that waited for the answer (the bug) could not
+    _slow(server, 10.0)
     with sync_playwright() as p:
         browser = _browser(p, exe)
         ctx = browser.new_context(viewport={"width": width, "height": 800})
@@ -78,7 +80,7 @@ def test_a_slow_page_draws_its_frame_then_the_page(server: Server, width: int) -
         t0 = time.monotonic()
         page.goto(f"{server.base}/notifications", wait_until="domcontentloaded")
         first = time.monotonic() - t0
-        assert first < 3.0, first  # the frame, long before Archidekt's 5 s answer (load allowed for)
+        assert first < 6.0, first  # the frame, long before Archidekt's 10 s answer
         assert page.locator("[data-late] .late-note").inner_text() == "Reading this page from Archidekt…"
         assert page.locator("header.topbar").count() == 1
         _until(page, "document.readyState !== 'loading' && !document.querySelector('[data-late]')", 30)
@@ -136,9 +138,11 @@ def test_an_older_deck_page_on_reload_shows_at_once_and_loads_the_change(server:
             k: (t - decks_mod.PAGE_DECK_RELOAD - 1, d) for k, (t, d) in decks._page_decks.items()
         }
         server.ark.decks[42]["name"] = "Renamed on the site"
-        _slow(server, 1.5)
+        # the read takes 8 s, so a page that waited for it (the bug) is told apart from the copy on
+        # show by a wide margin, whatever the runner's load
+        _slow(server, 8.0)
         t0 = time.monotonic()
         page.reload(wait_until="domcontentloaded")
-        assert time.monotonic() - t0 < 1.4  # the copy on show, not the slow read
-        _until(page, "document.title.indexOf('Renamed on the site') === 0", 15)
+        assert time.monotonic() - t0 < 4.0  # the copy on show, not the slow read
+        _until(page, "document.title.indexOf('Renamed on the site') === 0", 30)
         browser.close()
