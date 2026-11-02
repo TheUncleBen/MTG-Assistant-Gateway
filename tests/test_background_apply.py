@@ -125,7 +125,7 @@ async def test_the_review_page_shows_progress_and_refreshes_while_applying(stack
     r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applying"), r.headers
     page = await b.http.get(r.headers["location"])
-    assert "Applying. This is a large change" in page.text
+    assert "Applying. Archidekt is updated a step at a time" in page.text
     assert "sent 1 of 3 changes" in page.text
     # the refresh reloads the plain page, so the "Applying" notice does not outlive the apply
     assert f"content='5;url=/proposals/{p['proposal_id']}'" in page.text

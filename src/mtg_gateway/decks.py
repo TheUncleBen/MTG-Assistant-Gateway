@@ -193,6 +193,10 @@ MAX_PACKAGE_PAGES = 4  # the member's own card packages read for My decks, 50 a 
 # than an assistant app waits for one tool call); get_proposal and the review page show its
 # progress until it ends.
 APPLY_WAIT_SECONDS = 20.0
+# The same wait for a member's own press on the review page (and Apply on the Proposals bar's
+# box): a person at the page is better served by the progress, which updates by itself, than by a
+# press that seems to do nothing for 20 s. A small change still lands on its outcome directly.
+BROWSER_APPLY_WAIT_SECONDS = 3.0
 # A new deck's cards go to Archidekt this many to a request (modifyCards takes a list), instead of
 # one request per card: a 125-card deck is three writes, not 125.
 CARD_WRITE_BATCH = 50
@@ -6346,8 +6350,13 @@ class DeckService:
         shown_status: str | None = None,
         shown_status_at: int | None = None,
         logged_via: str | None = None,
+        wait: float | None = None,
     ) -> dict[str, Any]:
-        """``logged_via`` is what the audit row records in place of ``via`` (the REST API's bearer applies,
+        """``wait`` is how long the caller waits for the outcome before it gets the proposal as it
+        stands ("applying", with progress): APPLY_WAIT_SECONDS unless the caller asks for less
+        (the review page, BROWSER_APPLY_WAIT_SECONDS).
+
+        ``logged_via`` is what the audit row records in place of ``via`` (the REST API's bearer applies,
         which are checked as ``mcp`` but logged as ``api``). ``archidekt_backup=False`` (a member's own hand
         edit, the save bar's tick box unticked, or a quick edit on the deck page) skips the extra backup copy
         on Archidekt; the gateway's own snapshot is always taken. The assistant's applies always keep the
@@ -6446,7 +6455,8 @@ class DeckService:
 
         task.add_done_callback(done)
         try:
-            return await asyncio.wait_for(asyncio.shield(task), timeout=APPLY_WAIT_SECONDS)
+            timeout = APPLY_WAIT_SECONDS if wait is None else min(wait, APPLY_WAIT_SECONDS)
+            return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
         except TimeoutError:
             return self.describe(sub, proposal_id)
 

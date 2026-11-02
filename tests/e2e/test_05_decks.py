@@ -322,7 +322,10 @@ def test_users_cannot_see_or_touch_each_others_decks_and_proposals(clients, env:
             assert amy["ok"] and amy["name"] == "Amy's deck" and amy["owner"] == "amy", amy
         async with browser_page() as page:
             await gateway_browser_sign_in(page, env, "bob-test", f"/proposals/{STATE['edit']}")
-            assert "No such proposal for your account" in await page.inner_text("body")
+            body = await page.inner_text("body")
+            # The not-found page's wording since 0.7.46 (a way back, no hint whose it is).
+            assert "This proposal could not be found." in body, body
+            assert "Back to Assistant" in body, body
 
     run(go())
 
@@ -347,7 +350,14 @@ def test_writes_on_apply_is_browser_only_and_the_review_page_applies(clients, en
             assert "Arcane Signet" in text and "Rampant Growth" in text and "waiting" in text.lower(), text
             # the form carries a CSRF token; a POST without one is refused (also covered by unit tests)
             await click_guarded(page, "form.guarded button[value=apply]")
-            await page.wait_for_url(f"{PUBLIC_URL}/proposals/{pid}?ok=applied", timeout=60_000)
+            # The press lands on the outcome, or, when Archidekt takes longer than the page's short
+            # wait, on the progress, which updates itself to the outcome: wait for the outcome.
+            landed = {f"{PUBLIC_URL}/proposals/{pid}?ok={ok}" for ok in ("applied", "applying")}
+            await page.wait_for_url(lambda u: u in landed, timeout=60_000)
+            await page.wait_for_function(
+                "() => document.body.innerText.includes('Done. Archidekt matches this proposal.')",
+                timeout=120_000,
+            )
             text = await page.inner_text("body")
             assert "applied" in text.lower() and "Done. Archidekt matches this proposal." in text, text
         async with c.session() as s:

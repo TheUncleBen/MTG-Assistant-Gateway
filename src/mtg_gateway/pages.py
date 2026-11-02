@@ -36,6 +36,7 @@ from . import (
     smallpage,
     ui,
 )
+from . import decks as decks_mod
 from .archidekt import PATIENCE_SPENT, page_turn
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -1029,7 +1030,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 "writes_disabled_some" if exc.kind == "writes_disabled" and len(picks) > 1 else _err_code(exc)
             )
             return RedirectResponse(_with_query(back, f"err={code}"), status_code=303)
-        await state.decks.batches.wait(run["batch_id"], BATCH_WAIT_SECONDS)
+        await state.decks.batches.wait(run["batch_id"], decks_mod.BROWSER_APPLY_WAIT_SECONDS)
         return RedirectResponse(f"/proposals/applied/{run['batch_id']}", status_code=303)
 
     @server.custom_route("/proposals/applied/{bid}", methods=["GET"], include_in_schema=False)
@@ -1180,10 +1181,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 current="/proposals",
             )
         err = request.query_params.get("err")
+        ok = request.query_params.get("ok")
+        if ok == "applying" and p["state"] != "applying":
+            # The press's address after the apply ended (the page's own updates ask for it, and a
+            # reload or Back does): the outcome's notice, never "Applying" over a finished change.
+            ok, err = ("applied", None) if p["state"] == "applied" else (None, err or "failed")
         on_top = _failure_on_top(p, err)
         # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
-        notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
-        if not on_top and request.query_params.get("ok") == "applied" and p.get("applied_text"):
+        notice = _err(_page_step(p)) if on_top else _notice(ok, err)
+        if not on_top and ok == "applied" and p.get("applied_text"):
             # an account action or binder change says what it did, not that a deck matches
             notice = f"<div class='notice ok'>{html.escape('Applied. ' + p['applied_text'])}</div>"
         title = (
@@ -1209,9 +1215,13 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         full = request.query_params.get("full") == "1"
         no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
         where = p.get("deck_name") or "your account"
+        # While it applies, static/applied-live.js asks for this page every 3 s and swaps in the
+        # panel's body (and the list's row) once they change, so the outcome shows without a reload.
+        live = " data-applied-live" if p["state"] == "applying" else ""
         panel = ui.side_panel(
             proposal_heading(p),
-            notice
+            f"<div id='proposal-live' aria-live='polite'{live}>"
+            + notice
             + _proposal_body(
                 p,
                 _csrf(s, sid),
@@ -1219,6 +1229,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 step=not on_top,
                 others=others,
             )
+            + "</div>"
             + (
                 ""
                 if full
@@ -1242,10 +1253,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             current="/proposals",
             main_class="ui-wide",
             heading=False,
-            # While a long apply runs in the background the page reloads itself to show progress.
-            # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
+            # While a long apply runs in the background the page updates itself (applied-live.js);
+            # without scripts it reloads the plain page, so the "Applying" notice goes once it ends.
             head_extra=(
-                f"<meta http-equiv='refresh' content='5;url=/proposals/{quote(pid, safe='')}'>"
+                "<noscript><meta http-equiv='refresh' "
+                f"content='5;url=/proposals/{quote(pid, safe='')}'></noscript>"
+                f"<script src='{APPLIED_LIVE_SCRIPT}' defer></script>"
                 if p["state"] == "applying"
                 else ""
             )
@@ -1301,6 +1314,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     # a page drawn before the status field was added sends none: as before
                     shown_status=str(data["seen_status"])[:20] if "seen_status" in data else None,
                     shown_status_at=int(at) if at.isdigit() and len(at) < 16 else None,
+                    # a person is at the page: a short wait, then the progress, which updates itself
+                    wait=decks_mod.BROWSER_APPLY_WAIT_SECONDS,
                 )
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
@@ -1612,8 +1627,8 @@ OK_MESSAGES = {
     "linked": "Archidekt account linked. Your assistant can now read your decks.",
     "unlinked": "Unlinked. The gateway's copy of the session was deleted.",
     "applied": "Applied. Archidekt now matches this proposal.",
-    "applying": "Applying. This is a large change, so Archidekt is updated a step at a time to stay "
-    "within its limits. You can leave this page; the progress below refreshes by itself.",
+    "applying": "Applying. Archidekt is updated a step at a time to stay within its limits. You can "
+    "leave this page; the progress below updates by itself.",
     "rejected": "Rejected. Nothing was sent to Archidekt.",
     "disconnected": "The app was disconnected.",  # the Account page names the app when it can
     "disconnected_all": "All apps were disconnected.",
@@ -3673,7 +3688,6 @@ def _pretty(obj: Any) -> str:
 # -- 0.7.29: the waiting changes as a list with checkboxes, applied together (batch.py) ------------
 
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
-BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{LIST_CSS}</style>"
 # The Undo buttons open their confirm in a box (static/undo-box.js); the "Undo this change?" page
 # stays as the answer without scripts. The Applied page's rows update in place while applying.

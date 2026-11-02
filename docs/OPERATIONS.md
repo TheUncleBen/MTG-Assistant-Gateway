@@ -842,9 +842,10 @@ Because of this pacing a large apply takes minutes: about 80 seconds for a
 40 are new to it, and 6 to 7 minutes for a new deck of 100 different cards
 (one lookup and one write per card). An assistant app doesn't wait that long for one tool call,
 so after 20 seconds the apply answers "applying" with how far it got and
-carries on in the background. `proposal_status`, the proposal's review page
-(which refreshes itself) and the in-chat card all show its progress until it
-ends. Restarting the gateway mid-apply gives it 90 seconds to finish, then
+carries on in the background. A member's own Apply on the review page (or on
+the Proposals list) waits 3 seconds instead, then shows the progress.
+`proposal_status`, the proposal's review page (which updates itself) and the
+in-chat card all show its progress until it ends. Restarting the gateway mid-apply gives it 90 seconds to finish, then
 stops it and records the proposal as failed ("interrupted") with what had
 already been sent; the snapshot taken before it is kept for an undo.
 

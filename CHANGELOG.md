@@ -515,6 +515,9 @@ name per thing.
 - Large text: the Binder and Assistant switches show their current page and fade the edge that
   has more.
 - A proposal marked Needs a look no longer offers Apply or Delete; a failed change says why.
+- Pressing Apply on a large change (on its page or from the Proposals list) shows its progress within
+  3 seconds instead of after a wait of up to 20 seconds, and the page then shows the outcome by
+  itself.
 - Signing in to the Android app comes back to the app by itself. The app could not see the phone's
   browsers, so it never opened the tab that returns to the app. It now opens that tab on the
   gateway's address first and only then tries the app's own address, and a fresh sign-in there

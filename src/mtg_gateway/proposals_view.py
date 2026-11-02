@@ -666,8 +666,12 @@ def list_row(
     flag = f"<span class='flag'>{closing}</span>" if closing else ""
     cls = "tr" + (" open" if it["id"] == open_id else "")
     href = f"/proposals/{it['id']}{qs}"
+    # the open change's row updates with its panel while it applies (static/applied-live.js)
+    live = ""
+    if it["id"] == open_id:
+        live = " id='proposal-live-row'" + (" data-applied-live" if it["state"] == "applying" else "")
     return (
-        f"<div class='{cls}'{_deck_attr(it)}><span class='title'>"
+        f"<div class='{cls}'{_deck_attr(it)}{live}><span class='title'>"
         f"<a class='t' href='{esc(href)}'>{num}{esc(it['summary'])}</a>"
         f"<span class='deck'>{esc(_deck_line(it))}</span>"
         f"<span class='sub'>{_risk_label(it)}{_status_label(it)}{_chip(it)}"
