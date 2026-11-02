@@ -9,8 +9,10 @@ test; and a Forge that can't be reached, a timeout or a failure are said in plai
 from __future__ import annotations
 
 import asyncio
+import gc
 import html
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -229,6 +231,32 @@ async def test_a_restart_while_a_run_is_handed_over_starts_it_again(tmp_path: Pa
     )
     assert len([j for j in fake.started if "solo" not in j]) == 1 and len(fake.started) == 2
     _stop_service(again)
+
+
+async def test_a_start_stopped_before_it_began_leaves_no_unfinished_work_behind(tmp_path: Path) -> None:
+    """The background start of a report's Forge parts stopped in the same moment it was made (the
+    gateway shutting down as a report was made): nothing is left half-made. The start's own work
+    is made when the start runs, so a stop before then has nothing to drop (CI saw "coroutine
+    '_start_forge_parts' was never awaited" from such a stop), and the report is no longer marked
+    as being handed over."""
+    fake = SlowForge()
+    _, reports = _service(tmp_path, fake)
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        out = await reports.run("alice", "42", games=300, options={"seed": 1})
+        rid = out["report_id"]
+        tasks = list(reports._launching.values())
+        assert tasks, "the Forge start is handed to the background"
+        for t in tasks:
+            t.cancel()  # before the start ran once: the gateway stopped in the same moment
+        await asyncio.gather(*tasks, return_exceptions=True)
+        assert rid not in reports._launching
+        del out, tasks
+        gc.collect()
+    dropped = [w for w in seen if issubclass(w.category, RuntimeWarning)]
+    assert dropped == [], [str(w.message) for w in dropped]
+    assert fake.started == []
+    _stop_service(reports)
 
 
 # -- the member's Stop -----------------------------------------------------------------------
