@@ -2035,18 +2035,23 @@ def value_widget(
             ),
             actions=[now_btn] if csrf else [],
         )
+    # no entry priced: no value to show (as Scan's list value), never "$0.00"
+    priced = int(value.get("entries") or 0) > int(value.get("unpriced") or 0)
+    # only dollar prices count (a euro price is not converted), and "$" alone could be any dollar
+    usd = ", in US dollars" if priced else ""
     parts = []  # the copies are under Entries
     if value.get("day"):
         when = _day_words(value["day"], now)
-        parts.append("Today's prices" if when == "today" else f"Prices of {when}")
+        parts.append(("Today's prices" if when == "today" else f"Prices of {when}") + usd)
+    elif priced:
+        parts.append("In US dollars")
     n = int(value.get("unpriced") or 0)
     if n:
         parts.append(f"{n:,} {'entry has' if n == 1 else 'entries have'} no price")
     if not value.get("complete"):
         parts.append(f"your first {value['entries']:,} entries")
-    # no entry priced: no value to show (as Scan's list value), never "$0.00"; read whole but no
-    # price came yet (Scryfall was not answering, or none of the printings is priced): say so
-    priced = int(value.get("entries") or 0) > n
+    # read whole but no price came yet (Scryfall was not answering, or none of the printings is
+    # priced): say so
     big = (money(value["usd"]) or "$0.00") if priced else "–"
     if n and not priced and not value.get("day"):
         parts.append("Prices come with the daily price check.")

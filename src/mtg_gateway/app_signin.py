@@ -9,7 +9,14 @@ and autofill work, and the browser hands the result back to the app.
    asks the app to sign in with the browser (``MtgNative.signInWithBrowser``), with a link to
    sign in inside the app instead.
 2. The app makes a random verifier, keeps it, and opens
-   ``/login?next=...&app_challenge=<SHA-256 of the verifier>`` in the browser.
+   ``/login?next=...&app_challenge=<SHA-256 of the verifier>`` in the browser. That address shows
+   a page first (``confirm_body``): an app asked to sign in to this gateway, Continue only if you
+   just pressed Sign in in the gateway's app. Any app on the phone can open that address, and
+   without the page the browser went straight to the identity provider's real sign-in page, where
+   a person who types their password hands that app the result (the scheme leg below). Only
+   Continue goes on to the provider: a post carrying a one-use token that this browser alone
+   holds in a cookie (``AppSignins.start_leg``), so neither a link nor another site's page can
+   press it for the person.
 3. After the identity provider, ``/auth/callback`` sets no cookie in the browser. It keeps a
    one-time code (two minutes, in memory) bound to the challenge and sends the browser to
    ``RETURN_PATH?code=...`` on the gateway's own address. Where a browser on the phone has an
@@ -84,6 +91,14 @@ FRESH_SKEW = 5  # seconds of clock difference allowed between the gateway and th
 # nothing for any app; the app then finishes in a Custom Tab (BrowserSignIn.isSchemeRefusal).
 SCHEME_REFUSED = f"{SCHEME}://signin?error=sign_in_not_fresh"
 MAX_PENDING = 500
+# The page between the app's address and the identity provider (confirm_body): where its
+# Continue and Cancel post, how long it stays good, and the cookie that binds it to this browser.
+# /login itself, so the post that leaves for the provider gets this browser's login key as a GET
+# of /login does (app.LoginCookieMiddleware): the callback accepts only the browser holding it.
+CONTINUE_PATH = "/login"
+LEG_TTL = 600
+LEG_COOKIE = "mtg_app_leg"
+TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
 def challenge_of(verifier: str) -> str:
@@ -102,15 +117,54 @@ class _Pending:
     shown: bool = False  # the browser drew the return page (recorded once, in the member's activity)
 
 
-class AppSignins:
-    """One-time codes waiting for the app, keyed by the code's SHA-256. In memory on purpose: a
-    code lives two minutes, and a restart only means signing in again."""
+@dataclass
+class _Leg:
+    """A browser leg the app asked for, waiting for the person's Continue on the page before the
+    identity provider (confirm_body)."""
 
-    def __init__(self, ttl: int = CODE_TTL, clock=time.monotonic):
+    challenge: str
+    next_path: str
+    app_return: str | None
+    fresh: bool
+    expires: float
+
+
+class AppSignins:
+    """One-time codes waiting for the app, keyed by the code's SHA-256, and the browser legs
+    waiting for Continue, keyed by their token's SHA-256. In memory on purpose: a code lives two
+    minutes, a leg ten, and a restart only means signing in again."""
+
+    def __init__(self, ttl: int = CODE_TTL, clock=time.monotonic, leg_ttl: int = LEG_TTL):
         self._ttl = ttl
+        self._leg_ttl = leg_ttl
         self._clock = clock
         self._lock = threading.Lock()
         self._codes: dict[str, _Pending] = {}
+        self._legs: dict[str, _Leg] = {}
+
+    def start_leg(self, challenge: str, next_path: str, app_return: str | None, fresh: bool) -> str:
+        """Keep a leg until the person presses Continue (or Cancel) on the page; the token goes in
+        the page's form and in this browser's cookie, and ``take_leg`` wants both."""
+        token = secrets.token_urlsafe(32)
+        now = self._clock()
+        with self._lock:
+            for k in [k for k, v in self._legs.items() if v.expires <= now]:
+                del self._legs[k]
+            while len(self._legs) >= MAX_PENDING:
+                del self._legs[next(iter(self._legs))]
+            self._legs[self._key(token)] = _Leg(challenge, next_path, app_return, fresh, now + self._leg_ttl)
+        return token
+
+    def take_leg(self, token: str, cookie: str | None) -> _Leg | None:
+        """The leg for ``token`` when this browser's cookie holds the same token, else None. A leg
+        is gone after its first press, Continue or Cancel, so a page can't be used twice."""
+        if not TOKEN.fullmatch(token or "") or not cookie or not hmac.compare_digest(token, cookie):
+            return None
+        with self._lock:
+            leg = self._legs.pop(self._key(token), None)
+        if leg is None or leg.expires <= self._clock():
+            return None
+        return leg
 
     @staticmethod
     def _key(code: str) -> str:
@@ -210,13 +264,49 @@ def handoff_body(next_path: str, fresh: bool) -> str:
     )
 
 
+def confirm_body(site: str, token: str) -> str:
+    """The page between the app's address and the identity provider: an app asked to sign in, and
+    only the person who just pressed Sign in in the gateway's app should go on. Continue and
+    Cancel post the leg's token to ``CONTINUE_PATH``. Render it with ``heading=False`` and
+    ``smallpage.HEAD``, with the identity provider's origin in the page's form-action."""
+    form = (
+        f"<form method='post' action='{CONTINUE_PATH}'>"
+        f"<input type='hidden' name='leg' value='{html.escape(token)}'>"
+        "<button type='submit' name='action' value='continue' class='primary'>Continue</button>"
+        "<button type='submit' name='action' value='cancel' class='btn-plain'>Cancel</button></form>"
+    )
+    return smallpage.panel(
+        "Sign in to the app?",
+        f"<p>An app asked to sign in to “{html.escape(site)}”.</p>"
+        "<p>Continue only if you just pressed <b>Sign in</b> in the MTG Assistant Gateway app. If you "
+        "didn't, press Cancel: an app that signs in this way gets access to your account.</p>",
+        form,
+        "<p class='muted small' style='margin-bottom:0'>Continue opens your identity provider's "
+        "sign-in page.</p>",
+    )
+
+
+def canceled_body() -> str:
+    """After Cancel, or a page that is no longer good: nothing was signed in, and the way to sign in
+    is in the app (Sign in here would start the website's own sign-in)."""
+    return smallpage.panel(
+        "Sign-in canceled",
+        "<p>Nothing was signed in. You can close this tab.</p>",
+        extra_html="<p class='muted small' style='margin-bottom:0'>To sign in to the MTG Assistant "
+        "Gateway app, go back to it and press <b>Sign in</b> again.</p>",
+    )
+
+
 def return_body(code: str, package: str, *, auto: bool = False) -> str:
     """The browser's last page: a button that opens the app with the one-time code. With ``auto``
     (a sign-in made during the leg, ``AppSignins.fresh``) app-signin.js follows it once by itself
     where the browser allows that without a tap. The script runs once the page has loaded, so the
     small print is drawn before it leaves."""
     url = html.escape(intent_url(code, package))
-    flag = " data-auto='1'" if auto else ""
+    # data-once: what app-signin.js remembers, so it tries once per code without keeping the code
+    # itself in the browser's storage (a hash of it, under one fixed key)
+    once = hashlib.sha256(code.encode("ascii")).hexdigest()[:32]
+    flag = f" data-auto='1' data-once='{once}'" if auto else ""
     button = (
         f"<a class='btn btn-primary' id='app-return' href='{url}'{flag}>"
         "Open the MTG Assistant Gateway app</a>"

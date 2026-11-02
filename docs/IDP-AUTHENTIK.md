@@ -457,118 +457,123 @@ gets the member's own picture, nothing more.
 
 ## 12. Optional: removed-member clean-up
 
-### What it does and why
+### Do you need it?
 
-When you take someone out of the gateway's group in Authentik, the gateway
-deletes their stored Archidekt session the next time they (or one of their
-apps) reach it. Someone who never comes back, or whose Authentik account
-was deactivated or deleted, would keep that session on the server until an
-admin presses **Disable** or **Unlink**, or it expires.
+When you take someone out of the gateway's group in Authentik, the gateway deletes their saved
+Archidekt sign-in the next time they (or one of their apps) reach it. If they never come back,
+or their Authentik account was deactivated or deleted, their saved sign-in stays on the server
+until an admin presses **Disable** or **Unlink** for them, or it expires.
 
-The clean-up closes that gap. Once an hour the gateway asks Authentik who
-is in `MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP` right now. It deletes the
-stored Archidekt session of every linked member who is in neither group, or
-whose account is deactivated, and writes an `archidekt_link_swept` entry in
-the activity log. Members' Account pages say whether it is on.
+The clean-up closes that gap. Once an hour the gateway asks Authentik who is in
+`MTG_REQUIRED_GROUP` (and `MTG_ADMIN_GROUP`, if you set one) right now. It deletes the saved
+Archidekt sign-in of every linked member who is in neither group, or whose Authentik account is
+deactivated, and notes it in the activity log (`archidekt_link_swept`).
 
-It is optional and stays off until you give the gateway an Authentik API
-token. The token belongs to a service account that may only **view** the
-gateway's one or two groups. It can't add anyone to a group or change one.
+It is off until you give the gateway an Authentik API token. Skip this section if you don't want
+it: nothing else depends on it.
+
+**What you will have at the end:** a service account in Authentik that may only *view* the
+gateway's one or two groups (it can't add anyone to a group or change one), an API token for it
+stored as a Docker secret, and an admin row that says *Working*.
 
 ### Before you start
 
-- An Authentik admin account. Everything below was checked on Authentik
-  2026.8.3: the objects through its API, the labels in its admin interface.
-- The exact names of your gateway groups: the value of
-  `MTG_REQUIRED_GROUP` (here `MTG Assistant Gateway Users`) and of
-  `MTG_ADMIN_GROUP` if you set one.
+- An Authentik admin account. These steps were checked on Authentik 2026.8.3: the objects
+  through its API, the labels in its admin interface.
+- The exact names of your gateway groups: the value of `MTG_REQUIRED_GROUP` (for example
+  `MTG Assistant Gateway Users`) and of `MTG_ADMIN_GROUP` if you set one.
 - A shell on a Swarm manager (or in the folder of your Compose file).
+- Your stack's name. The commands below use `mtg`, as the rest of these docs do; put your own in
+  its place. The gateway's service is then `mtg_mtg-assistant-gateway`
+  (`<stack>_mtg-assistant-gateway`).
 
-Never paste the token into a chat, an issue or the stack's environment. It
-goes only into a Docker secret, in step 6.
+The token goes only into a Docker secret (step 6). Never paste it into a chat, an issue or the
+stack's environment variables.
 
-### Set it up
+### Steps 1 to 5: in Authentik's admin interface
 
-1. **Create a service account.** **Directory → Users → New User → Service
-   Account → Next**. Username `mtg-gateway-sweep`. Switch **Create group**
-   off and **Expiring** off (it is on by default). Press **Next → Review
-   Credentials → Close**. Ignore the password it shows: it is an app
-   password, and Authentik refuses it as an API token.
-2. **Create a role with no permissions.** **Directory → Roles → New Role**,
-   Role Name `mtg-gateway-sweep` → **Create Role**. Add nothing under its
-   **Permissions** tab.
-3. **Give the role to the service account.** **Directory → Groups → New
-   Group**: Group Name `mtg-gateway-sweep`, move the role to **Selected
-   Roles** → **Create Group**. Open the new group → **Users → Add Existing
-   User → +**, select the service account → **Confirm → Assign**. The
-   group's user list hides service accounts by default, so it may still say
-   *No objects found*; the service account's own **Groups** tab shows it.
+1. **Make a service account.** **Directory → Users → New User → Service Account → Next.**
+   Username: `mtg-gateway-sweep`. Switch **Create group** off and **Expiring** off (it starts
+   on). Press **Next → Review Credentials → Close**. Ignore the password it shows: it is an app
+   password, and Authentik won't take it as an API token.
+
+2. **Make an empty role.** **Directory → Roles → New Role.** Role Name: `mtg-gateway-sweep` →
+   **Create Role**. Add nothing on its **Permissions** tab.
+
+3. **Give the role to the service account, through a group of its own.** **Directory → Groups →
+   New Group.** Group Name: `mtg-gateway-sweep`; move the role `mtg-gateway-sweep` to
+   **Selected Roles** → **Create Group**. Open the new group → **Users → Add Existing User → +**,
+   tick `mtg-gateway-sweep` → **Confirm → Assign**.
+   *Check:* the group's user list may still say *No objects found* (it hides service accounts).
+   Open the service account instead: its **Groups** tab lists `mtg-gateway-sweep`.
    Don't bind this group to the gateway's application.
-4. **Let the role view only the gateway's groups.** **Directory → Groups**,
-   open the group named in `MTG_REQUIRED_GROUP` → **Permissions → Assign
-   Role Object Permission** → Role `mtg-gateway-sweep`, switch on **Can
-   view Group** only → **Assign Role Object Permission**. Do the same on
-   the group named in `MTG_ADMIN_GROUP`, if you set one. Never give the
-   role **Can view Group** for all groups (a global permission, on the
-   role's own Permissions tab): the token could then read every member of
-   every group, admins included.
 
-   The same through the API, with an admin token in `$A` and each group's
-   UUID (from its page address):
+4. **Let the role view only the gateway's groups.** **Directory → Groups**, open the group named
+   in `MTG_REQUIRED_GROUP` → **Permissions → Assign Role Object Permission.** Role:
+   `mtg-gateway-sweep`; switch on **Can view Group** and nothing else → **Assign Role Object
+   Permission**. Do the same on the `MTG_ADMIN_GROUP` group, if you have one.
+   Don't give the role **Can view Group** on its own **Permissions** tab: that is for *all*
+   groups, and the token could then read every member of every group, admins included.
+   (The same through Authentik's API is under [Details](#details-for-the-curious).)
 
-   ```bash
-   curl -sS -X POST -H "Authorization: Bearer $A" -H 'Content-Type: application/json' \
-     https://auth.example.com/api/v3/rbac/permissions/assigned_by_roles/<role-uuid>/assign/ \
-     -d '{"permissions":["authentik_core.view_group"],"model":"authentik_core.group","object_pk":"<group-uuid>"}'
-   ```
-5. **Create the token.** **Directory → Tokens and App passwords → New
-   Token**: Identifier `mtg-gateway-sweep-api`, User `mtg-gateway-sweep`,
-   Intent **API Token**, **Expiring** off (it is on by default; an expired
-   token just stops the clean-up) → **Create Token**. Copy it with the row
-   action **Copy token**.
-6. **Store it as the `mtg_authentik_api_token` Docker secret.** The stack file always attaches
-   this secret. Until you replace it, it holds the word `off` (DEPLOY.md step 4), which keeps the
-   clean-up off.
-   Docker secrets can't be changed, so on a Swarm manager take the old one out of the gateway,
-   delete it and create it again with the token. Paste the token at the silent prompt and press
-   Enter; nothing shows on screen, and the token doesn't land in your shell history:
+5. **Make the token.** **Directory → Tokens and App passwords → New Token.** Identifier:
+   `mtg-gateway-sweep-api`; User: `mtg-gateway-sweep`; Intent: **API Token**; switch
+   **Expiring** off (it starts on; an expired token just stops the clean-up) → **Create Token**.
+   In the token's row, use **Copy token**. Keep it on the clipboard for step 6.
 
-   ```bash
-   docker service update --secret-rm mtg_authentik_api_token mtg_mtg-assistant-gateway
-   docker secret rm mtg_authentik_api_token
-   read -rs T && printf %s "$T" | docker secret create mtg_authentik_api_token - ; unset T
-   ```
+### Step 6: store the token as a Docker secret (shell)
 
-   (Your stack's name in place of `mtg` in `mtg_mtg-assistant-gateway`.) If you are setting up a
-   new gateway and haven't created the secret yet, the last line alone is enough.
+The stack file always attaches a secret named `mtg_authentik_api_token`. Until now it holds the
+word `off` ([DEPLOY.md step 4](DEPLOY.md#4-docker-secrets-once)), which keeps the clean-up off.
+Docker secrets can't be edited, so take the old one off the gateway, delete it and make it again
+with the token.
 
-   With plain Docker Compose, the token goes in `secrets/mtg_authentik_api_token.txt` next to
-   `docker-compose.yml` in place of the word `off` that `make-secrets.sh` wrote there:
+**Swarm (Portainer):** on a Swarm manager, run these three lines. At the third, paste the token
+and press Enter: nothing shows on screen, and the token stays out of your shell history.
 
-   ```bash
-   read -rs T && printf %s "$T" > secrets/mtg_authentik_api_token.txt ; unset T
-   ```
+```bash
+docker service update --secret-rm mtg_authentik_api_token mtg_mtg-assistant-gateway
+docker secret rm mtg_authentik_api_token
+read -rs T && printf %s "$T" | docker secret create mtg_authentik_api_token - ; unset T
+```
 
-   Replacing the token later works the same way: the three Swarm lines above, or the Compose line.
-7. **Redeploy.** The stack file and `docker-compose.yml` already attach the secret and point the
-   gateway at it, so neither needs an edit: in Portainer, **Update the stack**; without Portainer,
-   `docker stack deploy` again; with Compose, `docker compose up -d --force-recreate gateway` (the
-   gateway reads the token when it starts, and a plain `up -d` doesn't restart it when only the
-   file changed). There is nothing to set: the stack and Compose files point
-   `MTG_AUTHENTIK_API_TOKEN_FILE` at `/run/secrets/mtg_authentik_api_token`, and the gateway reaches
-   Authentik's API at the scheme and host of `MTG_OIDC_ISSUER` (`https://auth.example.com`).
+If you are setting up a new gateway and haven't made the secret yet, the last line alone is
+enough.
 
-8. **Check it on the admin page.** Open **Admin**. In the **System** card,
-   the **Removed-member clean-up** row says what is happening and what to
-   do next (table below). Right after the redeploy it says *On. The first
-   check runs 2 minutes after the gateway starts*. Reload a few minutes later:
-   it should start with *Working*.
+*Check:* `docker secret ls` lists `mtg_authentik_api_token`, made just now.
+
+**Docker Compose:** in the folder with `docker-compose.yml`, replace the word `off` that
+`make-secrets.sh` wrote in `secrets/mtg_authentik_api_token.txt`:
+
+```bash
+read -rs T && printf %s "$T" > secrets/mtg_authentik_api_token.txt ; unset T
+```
+
+### Step 7: redeploy
+
+Nothing in the stack file or the variables changes: the stack and Compose files already point
+the gateway at `/run/secrets/mtg_authentik_api_token` (`MTG_AUTHENTIK_API_TOKEN_FILE`), and the
+gateway reaches Authentik's API at the scheme and host of `MTG_OIDC_ISSUER`
+(`https://auth.example.com`). The gateway reads the token when it starts.
+
+- Portainer: **Stacks → your stack → Update the stack** (this also puts the secret back on the
+  gateway after step 6 took it off).
+- Swarm without Portainer: `docker stack deploy` again, as you deployed it.
+- Compose: `docker compose up -d --force-recreate gateway` (a plain `up -d` doesn't restart the
+  gateway when only the secret file changed).
+
+### Step 8: check it
+
+Open **Admin** (in the site menu, or **Account › Admin**) → **Overview**, the **System** card, row
+**Removed-member clean-up**. Right after the redeploy it says *On. The first check runs 2 minutes
+after the gateway starts; reload this page then.* Reload after a few minutes: it should start
+with *Working*. If it says anything else, find its words in the table below.
 
 ### What the admin row says, and what to do
 
 | The row says | What it means | What to do |
 | --- | --- | --- |
-| *Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.* | The `mtg_authentik_api_token` secret holds the word `off`, or `MTG_AUTHENTIK_API_TOKEN_FILE` is empty. | Nothing, if you don't want the clean-up. Otherwise follow the steps above. |
+| *Off. This optional hourly check deletes the saved Archidekt sign-in of people who no longer have access. To turn it on, follow docs/IDP-AUTHENTIK.md section 12.* | The `mtg_authentik_api_token` secret holds the word `off` (or, outside the stack and Compose files, `MTG_AUTHENTIK_API_TOKEN_FILE` is unset). | Nothing, if you don't want the clean-up. Otherwise follow the steps above. |
 | *Off: the Authentik API token can't be read (…)* | The file named in `MTG_AUTHENTIK_API_TOKEN_FILE` is missing or empty. | Check that the secret exists (`docker secret ls`), that your stack file is the current one (one from before 0.7.37 has the secret's lines commented out), and that `MTG_AUTHENTIK_API_TOKEN_FILE` is unset or `/run/secrets/mtg_authentik_api_token`. Redeploy. |
 | *Off: it needs MTG_REQUIRED_GROUP.* | There is a token but no required group to compare with. | Set `MTG_REQUIRED_GROUP` and redeploy. |
 | *On. The first check runs 2 minutes after the gateway starts; reload this page then.* | It is set up and waiting for its first round. | Reload the page after two minutes. |
@@ -589,7 +594,44 @@ on: hourly, asking https://auth.example.com about …` at start,
 clean-up skipped, nothing deleted: …` when a round is refused. The token is
 never shown or logged.
 
-### What the token can read
+### Replacing the token later
+
+Make a new token (step 5), then do steps 6 and 7 again. Then delete the old token under
+**Directory → Tokens and App passwords**.
+
+### Turning it off
+
+Put the word `off` back in the secret and redeploy. On Swarm:
+
+```bash
+docker service update --secret-rm mtg_authentik_api_token mtg_mtg-assistant-gateway
+docker secret rm mtg_authentik_api_token
+printf off | docker secret create mtg_authentik_api_token -
+```
+
+then **Update the stack** in Portainer (or `docker stack deploy` again). With Compose:
+
+```bash
+printf off > secrets/mtg_authentik_api_token.txt
+docker compose up -d --force-recreate gateway
+```
+
+The admin row then says *Off*. Then delete the service account `mtg-gateway-sweep` in Authentik:
+deleting only the token is not enough, because the account can make itself another one, and a
+deactivated account gets its tokens back when someone activates it again.
+
+### Details for the curious
+
+**Step 4 through the API.** With an admin token in `$A`, the role's UUID and each group's UUID
+(from their pages' addresses):
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $A" -H 'Content-Type: application/json' \
+  https://auth.example.com/api/v3/rbac/permissions/assigned_by_roles/<role-uuid>/assign/ \
+  -d '{"permissions":["authentik_core.view_group"],"model":"authentik_core.group","object_pk":"<group-uuid>"}'
+```
+
+#### What the token can read
 
 Checked on Authentik 2026.8.3 with the grant from step 4: the token lists
 those two groups and nothing else (another group, including
@@ -620,13 +662,7 @@ directly.
 nothing. So do an answer split into pages, a member entry without `uid` or
 `is_active`, and a redirect.
 
-### Turning it off
-
-Empty `MTG_AUTHENTIK_API_TOKEN_FILE` and redeploy. Then delete the service
-account in Authentik (deleting only the token leaves the account able to
-make another, and deactivating it lasts only until someone activates it).
-
-### If you set it up with 0.7.7's steps
+#### If you set it up with 0.7.7's steps
 
 0.7.7 gave the role **Can view Group** as a global permission, so that token
 could read every group, and the account could have made itself more tokens.

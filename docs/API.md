@@ -225,6 +225,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/proposals`, `/proposals/{pid}` | Review and Apply, Reject |
 | `/scan` | The card scanner (see SCANNING.md) |
 | `/account`, `/login`, `/logout`, `/signed-out`, `/data-deleted` | Account, Archidekt link, sign-in and sign-out, and the page shown after a member deletes their data |
+| `POST /login` | Continue or Cancel on the page the Android app's sign-in shows in the phone's browser before the sign-in service ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)) |
 | `POST /login/app` | The Android app finishing a sign-in made in the phone's browser: a one-time code and the app's secret ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)) |
 | `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the top bar and the Account page |
 | `/app`, `/app/mtg-assistant-gateway.apk`, `/app/latest.json` | `/app` redirects to `/install?for=android`; the APK download and the version file the app checks for updates ([ANDROID.md](ANDROID.md)) |

@@ -384,7 +384,8 @@ condition and count.
   and language next time** keeps your choices for the box and for a card
   menu's **Add to binder**.
 - **Value** (with watchlists on): what the binder is worth at today's
-  Scryfall prices, each entry in its finish, with each row's price. Opening
+  Scryfall prices (TCGplayer's, in US dollars, as the tile says), each entry
+  in its finish, with each row's price. Opening
   the Binder puts it in the daily price check, which reads it whole once a
   day while you open it at least every 60 days; **Work it out now** does the
   first read at once. Entries Scryfall has no dollar price for are counted,

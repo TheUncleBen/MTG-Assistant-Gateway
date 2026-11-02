@@ -723,3 +723,32 @@ def test_a_binder_read_whole_with_no_prices_yet_says_so(tmp_path) -> None:
         c.execute("INSERT INTO price_points (scryfall_id, day, usd) VALUES ('s-1', '2023-11-14', 1.5)")
     out = value_widget(store.value(SUB), reading=False, now=1_700_000_000.0)
     assert "$3.00" in out and "2 entries have no price" in out and "daily price check" not in out
+
+
+def test_the_binder_value_says_it_is_in_us_dollars() -> None:
+    """The Binder's value counts dollar prices only (a euro price is not converted), so the tile
+    says so: "$" alone could be any dollar. The same words as the watched deck value's source
+    (prices.DECK_VALUE_SOURCE: TCGplayer's, in US dollars)."""
+    from mtg_gateway.collection import value_widget
+
+    now = 1_700_000_000.0
+    today = dt.datetime.fromtimestamp(now, dt.UTC).strftime("%Y-%m-%d")
+    out = value_widget(
+        {"usd": 3.0, "priced": 1, "unpriced": 0, "entries": 1, "complete": True, "day": today},
+        reading=False,
+        now=now,
+    )
+    assert "$3.00" in out and "Today's prices, in US dollars" in html.unescape(out)
+    old = value_widget(
+        {"usd": 3.0, "priced": 1, "unpriced": 0, "entries": 1, "complete": True, "day": None},
+        reading=False,
+        now=now,
+    )
+    assert "In US dollars" in old
+    # no value shown: nothing to name a currency for
+    none = value_widget(
+        {"usd": 0.0, "priced": 0, "unpriced": 1, "entries": 1, "complete": True, "day": None},
+        reading=False,
+        now=now,
+    )
+    assert "dollars" not in none
