@@ -12,7 +12,7 @@ import re
 import pytest
 
 from .test_editor_browser import PNG
-from .test_overflow_sweep_browser import FOLDERS, _seed, server  # noqa: F401
+from .test_overflow_sweep_browser import FOLDERS, MEASURE, _seed, server  # noqa: F401
 from .test_scan_browser import _chromium_path
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import TEXT_200
@@ -457,6 +457,32 @@ def test_no_word_breaks_in_two_at_200_percent_text(server: Server, walk) -> None
             for path in pages:
                 _goto(server, page, path, zoom)
                 problems += [f"{path} @{tag}: {f}" for f in page.evaluate(MID_WORD, WORDS_IN)]
+            ctx.close()
+            assert errors == []
+        browser.close()
+    assert problems == [], "\n".join(problems)
+
+
+def test_the_stats_tables_keep_their_words_whole_on_the_narrowest_phones(server: Server, walk) -> None:  # noqa: F811
+    """The deck page's stats panel sits in one column on a phone, its type and rarity tables beside
+    nothing: with 200% text on a 360 px and on a 320 px phone a type name ("Enchantment",
+    "Creature") wraps whole, never inside the word (the tables take half the panel's padding where
+    the panel is that narrow in its own text, deckpage.py)."""
+    from playwright.sync_api import sync_playwright
+
+    exe, sid, _pages = walk
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        for width in (360, 320):
+            ctx = browser.new_context(**dict(WEB_360, viewport={"width": width, "height": 800}))
+            page, errors = _open(server, ctx, sid)
+            for path in ("/decks/42", "/decks/42?view=grid", "/decks/42?view=table"):
+                _goto(server, page, path, TEXT_200)
+                assert page.locator("#stats table.qty td", has_text="Enchantment").count() >= 1, path
+                split = page.evaluate(MID_WORD, "#stats table.qty")
+                problems += [f"{path} @200% {width}: {f}" for f in split]
+                assert page.evaluate(MEASURE) == [], (path, width)
             ctx.close()
             assert errors == []
         browser.close()

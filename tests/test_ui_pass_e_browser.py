@@ -18,7 +18,7 @@ import copy
 
 import pytest
 
-from mtg_gateway import account_lists
+from mtg_gateway import account_lists, lists_page
 
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import _chromium, _page
@@ -471,9 +471,11 @@ def test_my_lists_tabs_count_and_the_current_tab_stays_in_view(server: Server) -
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 390, "light", exe)
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
-        # a first visit: every tab has its count, not the open one alone (five lists: Pinned cards
-        # is a tab again, at /collection/wants, since the Binder redesign)
-        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 5")
+        # a first visit: every tab has its count, not the open one alone (six lists: Pinned cards
+        # is a tab again, at /collection/wants, since the Binder redesign, and Binder tags joined
+        # them in 0.7.46: lists_page.TABS)
+        assert len(lists_page.TABS) == 6
+        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 6")
         # larger text after the load: the current tab is brought back into view
         page.evaluate(TEXT_200)
         page.wait_for_timeout(400)
