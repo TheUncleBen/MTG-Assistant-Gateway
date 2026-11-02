@@ -344,7 +344,7 @@ async def test_the_forms_without_an_action_post_to_account_details(stack: Stack)
         await b.aclose()
 
 
-async def test_ben_can_flip_the_sections_to_fold_open_on_the_list(gw: Harness, monkeypatch) -> None:
+async def test_the_owner_can_flip_the_sections_to_fold_open_on_the_list(gw: Harness, monkeypatch) -> None:
     """The owner's open choice (mockup screen 7): each section on its own page (the default), or every
     section folded under its row on the list. One constant flips it; with it off a section's
     address is its fold on the list, and the old #part links need no script."""

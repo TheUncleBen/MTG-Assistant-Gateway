@@ -94,6 +94,12 @@ docs. Please keep it that way:
   node names and placeholder usernames. Recorded API responses get their
   owner fields replaced (see
   [tests/fixtures/live/README.md](tests/fixtures/live/README.md)).
+  `tests/test_repo_privacy.py` checks every tracked file: URLs name only
+  public services or reserved example hosts, and the owner's deck ids and
+  names (the repository secrets `MTG_PRIVATE_DECK_IDS` and
+  `MTG_PRIVATE_NAMES`, comma-separated, never written in the repository)
+  appear nowhere. CI fails that test when the secrets are missing; locally,
+  set the same two environment variables to run the full check.
 - **Nothing site-specific in code.** Anything that differs between
   deployments is an environment variable or a Docker secret, with a sensible
   default, and is documented in the environment reference.

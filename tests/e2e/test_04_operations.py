@@ -144,7 +144,7 @@ def test_mystic_forge_is_not_reachable_through_the_edge(env: Env):
 
 
 @pytest.fixture
-def ben_tokens(env: Env, http: httpx.Client):
+def alice_tokens(env: Env, http: httpx.Client):
     """A real signed-in token pair for alice-test, obtained through the browser flow."""
     import asyncio
     from urllib.parse import urlencode
@@ -175,8 +175,8 @@ def ben_tokens(env: Env, http: httpx.Client):
     return client, r.json()
 
 
-def test_backup_export_now_and_restore(http: httpx.Client, ben_tokens, tmp_path: Path):
-    _, tokens = ben_tokens
+def test_backup_export_now_and_restore(http: httpx.Client, alice_tokens, tmp_path: Path):
+    _, tokens = alice_tokens
     c = container_of(GATEWAY)
     out = sh("docker", "exec", c, "mtg-gateway", "backup")
     assert "backup written: /backups/mtg-gateway-" in out
@@ -209,8 +209,8 @@ def test_backup_export_now_and_restore(http: httpx.Client, ben_tokens, tmp_path:
     assert tokens["refresh_token"].encode() not in restored.read_bytes()
 
 
-def test_state_survives_a_service_restart(http: httpx.Client, ben_tokens):
-    _, tokens = ben_tokens
+def test_state_survives_a_service_restart(http: httpx.Client, alice_tokens):
+    _, tokens = alice_tokens
     assert mcp_tools_list(http, tokens["access_token"]).status_code == 200
     before = container_of(GATEWAY)
     sh("docker", "service", "update", "--force", "--detach", GATEWAY)

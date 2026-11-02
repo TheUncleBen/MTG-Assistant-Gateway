@@ -22,7 +22,7 @@ EST = {
 }
 
 
-def test_label_is_the_one_ben_chose() -> None:
+def test_label_is_the_one_the_owner_chose() -> None:
     assert ESTIMATE_LABEL == "Archidekt's estimate from cards"
 
 

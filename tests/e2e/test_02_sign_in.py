@@ -10,15 +10,15 @@ from .conftest import PUBLIC_URL, LoginNotCompleted
 async def test_two_users_get_their_own_identities(mcp_client):
     alice = mcp_client("alice-test", client_name="Claude-like client")
     bob = mcp_client("bob-test", client_name="ChatGPT-like client")
-    me_ben = await alice.whoami()
+    me_alice = await alice.whoami()
     me_friend = await bob.whoami()
 
     # Each person gets their own identity; the assistant is told only the display name (minimum
     # disclosure: no email, groups, subject, client or scopes).
-    assert me_ben == {
+    assert me_alice == {
         "signed_in": True,
         "name": "Alice Test",
-        "gateway_version": me_ben["gateway_version"],
+        "gateway_version": me_alice["gateway_version"],
         "account_page": f"{PUBLIC_URL}/account",
     }
     assert me_friend["name"] == "Bob Test"
