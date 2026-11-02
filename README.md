@@ -122,7 +122,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) | Everyone | Licences of the components the gateway is built on |
 | [tests/e2e/README.md](tests/e2e/README.md) | Contributors | The end-to-end test setup: a real Swarm stack, Authentik and a scripted client |
 
-Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
+Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/); `scripts/make_doc_screenshots.py` takes them again from the app at HEAD on the test harness (a fake Archidekt with the fixture deck), so they can be refreshed after a change.
 
 ## Features
 
