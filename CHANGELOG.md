@@ -205,7 +205,8 @@ name per thing.
   press, and Remove takes them out at once with Undo, which puts them back with their printing,
   tags and price paid. My decks' bar offers Move to folder… and Visibility… for up to 50 decks; it
   never deletes, as each deck's own box does that. A row or deck that could not be changed is
-  named and the rest still go. Both work without scripts.
+  named and the rest still go. Both work without scripts. On a phone the results bar's count and
+  Select share the first row and Sort and the view the next.
 - **Undo** for Stop watching (a row's and the bar's), which brings the cards back with their price
   alerts, list and added price, and for a category template, color tag, default category, pin or
   custom card you made, saved or deleted on the Lists pages. The Binder's − on the last copy and
@@ -255,6 +256,13 @@ name per thing.
 - “Add to a deck…” on a category template adds it at once, with Undo. Premier and Not in deck
   templates open their review page first.
 - History, Proposals and My activity add more rows with Load more instead of Newer and Older pages.
+- The report page reads a simulation's text once per view instead of once per section, and
+  switching between My Decks and Packages happens in place.
+- While Archidekt is busy the Binder, Binder › Lists, profiles and search show the last good copy
+  with the deck page's banner and Try again, instead of the busy page.
+- Large text: the filter rows on Proposals, Activity and Admin stack one a row, and Sort on a
+  results bar takes a row of its own only then.
+- Holding a finger on a Binder tile's picture opens its menu; a tap still opens the card viewer.
 - The review page says what the deck will be once applied: its size, whether it is legal, and its
   price and the change. It says in one line what Apply does, with a How it works link to the
   Guide, and on a phone Apply and Reject sit in a bar at the foot of the screen, above the tab bar,
@@ -566,10 +574,21 @@ name per thing.
 - The bell says “You're signed out” with a Sign in button when you signed out in another tab.
 - “Sign-in unavailable” offers the Guide instead of a Home button that led back to it.
 - Back after changing Theme or Layout goes to the page before.
-- Large text: the tab bar's and rail's labels grow; the scanner hint no longer covers the dashed
-  box; Account's Theme and Layout rows, the review page's facts, the Proposals / History / Reports
-  switch, Forge tables, proposal titles and Admin's user details no longer run together or push
-  the page sideways.
+- Large text: the tab bar's and rail's labels grow, and at 200% the phone's tab bar shows its
+  icons alone, each still named; the scanner hint no longer covers the dashed box; Account's
+  Theme and Layout rows, the review page's facts, the Proposals / History / Reports switch, Forge
+  tables, proposal titles and Admin's user details no longer run together or push the page
+  sideways. No search or filter placeholder is cut, and no word is split in two: deck card names
+  wrap whole, as do the deck stats tables (down to a 320 px phone), the Binder and odds tables and
+  the Guide's search box.
+- The Export, Budget, Admin, Precons and Binder switches no longer wrap onto two lines: they share
+  one tab style that scrolls sideways, and a tab's count is legible on its track in the light
+  theme. The deck toolbar's ⋮ stays beside its button on a 360 px phone, and Proposals' “Open
+  deck” is no longer clipped.
+- In the Android app every control, link in text and menu item is a 44 px target, drop-down items
+  included.
+- The editor's head no longer runs the page wide for a deck name with no space in it, and on a
+  narrow phone's Binder grid a card's name takes a row of its own.
 - Home keeps two deck tiles a row on narrow screens such as a folded phone's cover screen.
 - The ⋮ on a deck tile sits under the picture at every card size.
 - Deck settings lists Archidekt's Maybeboard and Sideboard on a deck that hasn't changed them yet.
