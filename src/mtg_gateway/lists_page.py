@@ -1582,7 +1582,7 @@ CSS = """
 /* the site's one switch (.hubseg, as the admin tabs); on a phone it scrolls sideways, the
    current tab brought into view by topbar.js */
 .lp-tabs{margin:0 0 1rem}
-.lp-tabs a .n{font-weight:400;color:var(--text-muted);margin-left:.1rem}
+.lp-tabs a .n{font-weight:400;color:var(--seg-muted);margin-left:.1rem}  /* legible on the track */
 .lp-tabs a[aria-current] .n{color:inherit}
 .lp .ui-table .tr{min-height:52px}
 .lp .ui-table .tr.lp-empty{display:block}

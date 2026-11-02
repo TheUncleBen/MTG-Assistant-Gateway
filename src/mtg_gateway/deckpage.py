@@ -3894,8 +3894,15 @@ html.cardview-open{overflow:hidden}
 .deckview.stacks .stack{min-width:0}
 
 /* deck stats panel */
+.stats{container:stats/inline-size}
 .stats .head{display:flex;justify-content:space-between;align-items:center;gap:1rem}
 .stats .grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(16rem,1fr);gap:1.5rem}
+/* the narrowest phones at large text (a 320 px phone at 200% text leaves the panel 7em inside its
+   padding): the stats take half of the padding and the side tables drop their cells' side
+   padding, so a type name ("Enchantment") wraps whole rather than inside the word */
+@container stats (max-width:16em){ .stats .grid{margin:0 -.5rem}
+  .stats .side table.qty td{padding-left:0;padding-right:0} .stats .side .rowbtn{margin-left:0}
+  .stats .side table.qty td:last-child{padding-left:.5rem} }
 .stats .lbl{font-weight:700;margin:.75rem 0 .25rem}
 .cbar{display:flex;height:36px;border-radius:3px;overflow:hidden;background:var(--surface-2);gap:2px}
 .cbar .seg{display:block;height:100%;clip-path:polygon(0 0,100% 0,calc(100% - 7px) 100%,0 100%);min-width:6px}

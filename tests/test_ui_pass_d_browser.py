@@ -17,7 +17,7 @@ import re
 import httpx
 import pytest
 
-from mtg_gateway import account_lists
+from mtg_gateway import account_lists, lists_page
 
 from .test_card_search_filters_browser import CONTRAST
 from .test_cardsearch_browser import _chromium, _page
@@ -297,12 +297,13 @@ def test_my_lists_tabs_sit_on_one_row(server: Server, width: int, theme: str) ->
         page.goto(f"{server.base}/lists/custom", wait_until="networkidle")
         page.wait_for_timeout(300)
         tabs = page.locator(".lp-tabs a")
-        # five lists: Pinned cards is a tab again (at /collection/wants) since the Binder redesign
-        assert tabs.count() == 5
-        # a first visit draws the open tab's count; the other four arrive after the page has drawn
-        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 5")
-        tops = [_rect(tabs.nth(i))["t"] for i in range(5)]
-        heights = [_rect(tabs.nth(i))["h"] for i in range(5)]
+        # six lists: Pinned cards is a tab again (at /collection/wants) since the Binder redesign,
+        # and Binder tags joined them in 0.7.46 (lists_page.TABS)
+        assert tabs.count() == len(lists_page.TABS) == 6
+        # a first visit draws the open tab's count; the other five arrive after the page has drawn
+        page.wait_for_function("() => document.querySelectorAll('.lp-tabs a .n').length === 6")
+        tops = [_rect(tabs.nth(i))["t"] for i in range(6)]
+        heights = [_rect(tabs.nth(i))["h"] for i in range(6)]
         if width < 600:
             # one row that scrolls sideways, every tab the same height, the current one in view
             assert len(set(round(t) for t in tops)) == 1, tops

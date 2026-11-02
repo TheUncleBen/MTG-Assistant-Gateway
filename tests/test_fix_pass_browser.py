@@ -451,10 +451,12 @@ PHONE_BAR = """() => {
   const bar = document.querySelector('.spanel .rbar');
   const cnt = bar.querySelector('.cnt'), sort = bar.querySelector('.g.sort');
   const view = bar.querySelector('.view');
+  const sel = bar.querySelector('.cnt + .btn:not([hidden])');
   const name = document.querySelector('.spanel .sp-name .search');
   const fbtn = document.querySelector('.spanel .fbtn');
   const mid = e => (R(e).top + R(e).bottom) / 2;
-  return {cnt: mid(cnt), sort: mid(sort), view: mid(view), nameB: R(name).bottom, fbtnT: R(fbtn).top};
+  return {cnt: mid(cnt), sort: mid(sort), view: mid(view), nameB: R(name).bottom, fbtnT: R(fbtn).top,
+          sel: sel ? mid(sel) : null, selR: sel ? R(sel).right : null, barR: R(bar).right};
 }"""
 
 
@@ -462,7 +464,9 @@ PHONE_BAR = """() => {
 @pytest.mark.parametrize("path", ["/cards?q=s", "/search?format=3", "/decks?folder=501"])
 def test_the_phone_results_bar_and_name_row(server: Server, width: int, path: str) -> None:
     """4: the count, Sort and the view share one row (deck search's longer count at 344 is on its
-    own line, as the mockup draws it); 6: Filters sits beside the name box."""
+    own line, as the mockup draws it); 6: Filters sits beside the name box. My decks' bar has
+    Select beside the count since 0.7.46: there the count and Select share the first row, at its
+    two ends, and Sort and the view the next, so no control is ever alone on a row."""
     from playwright.sync_api import sync_playwright
 
     sid = _link(server)
@@ -471,8 +475,11 @@ def test_the_phone_results_bar_and_name_row(server: Server, width: int, path: st
         page.goto(f"{server.base}{path}", wait_until="networkidle")
         got = page.evaluate(PHONE_BAR)
         assert abs(got["sort"] - got["view"]) < 2, got  # the same row: their middles meet
-        if not (width == 344 and path.startswith("/search")):
-            assert abs(got["cnt"] - got["sort"]) < 2, got
+        if path.startswith("/decks"):
+            assert got["sel"] is not None and abs(got["cnt"] - got["sel"]) < 2, got
+            assert abs(got["selR"] - got["barR"]) < 2 and got["sort"] > got["sel"] + 20, got
+        elif not (width == 344 and path.startswith("/search")):
+            assert got["sel"] is None and abs(got["cnt"] - got["sort"]) < 2, got
         assert got["fbtnT"] < got["nameB"], got  # the Filters button beside the name box
         assert errors == [], errors
         browser.close()

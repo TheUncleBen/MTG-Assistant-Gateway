@@ -91,6 +91,7 @@ _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
     --group-bg:#ffffff; /* an inset grouped list's card (iOS style), white on the page */
     --seg-track:var(--surface-3); --seg-on:var(--surface); /* a switch's track and its chosen part */
+    --seg-muted:#4c4c4c; /* a softer word on the track (a tab's count): 4.8:1 on --surface-3 */
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
     --text:#383838; --link:#1d55b3; /* 5.2:1 on --surface-2 (the menu); Archidekt's #4183c4 is 3.8:1 */
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
@@ -171,7 +172,7 @@ CSS = (
   /* Archidekt dark-mode set (body.dark-mode) */
   --bg:#181818; --surface:#232323; --surface-2:#383838; --surface-3:#4b4b4b; --group-bg:#232323;
   /* a switch's chosen part is lighter than its track, raised as on iOS: #e3e3e3 on it 5.4:1 */
-  --seg-track:#2f2f2f; --seg-on:#5a5a5a;
+  --seg-track:#2f2f2f; --seg-on:#5a5a5a; --seg-muted:#a8a8a8; /* 5.6:1 on the track */
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
   --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
   --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */
@@ -2207,6 +2208,7 @@ SEARCH_PANEL_CSS = """
   border-top:1px solid var(--border-soft);padding-top:12px}
 .spanel .rbar .cnt{font-size:1.15rem;font-weight:900;margin:0 auto 0 0;white-space:nowrap}
 .spanel .rbar .g{display:inline-flex;align-items:center;gap:8px;flex:none;margin:0}
+.spanel .rbar .cnt + .btn{margin:0}  /* Select beside the count, level with it (not a form's button) */
 .spanel .rbar .lbl{font-weight:400;color:var(--text-muted);margin:0;white-space:nowrap}
 .spanel .rbar .sortw,.spanel .rbar .dirw,.spanel .rbar .sortcw{position:relative;display:block;min-width:0}
 .spanel .rbar .sortw select,.spanel .rbar .dirw select,.spanel .rbar .sortcw select,
@@ -2260,6 +2262,10 @@ SEARCH_PANEL_CSS = """
   .spanel .rbar .sort:has(.sortcw) .sortw{display:none}
   .spanel .rbar .sortcw{display:block;flex:1 1 7em;min-width:0}
   .spanel .rbar .g.sort{flex:1 1 7em;min-width:7em}
+  /* a bar with Select beside its count (My decks, the Binder): four pieces never fit a phone's
+     row, so the count and Select share the first row at its two ends and Sort and the view the
+     next, with nothing alone on a row */
+  .spanel .rbar .cnt + .btn + .brka{display:block}
   /* at large text the count, Sort and the view no longer share the row: Sort takes a row of its
      own, so the chosen order shows whole (audit D12); Clear filters stays last */
   @container sp (max-width:20em){
