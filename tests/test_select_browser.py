@@ -353,7 +353,11 @@ def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int
         page.wait_for_timeout(500)
         assert page.locator("#msel-list").count() == 0
         assert page.url.endswith("/decks"), page.url  # the brand link under the tap was not followed
-        # the sheet still works after that: a row tap picks
+        # the sheet still works after that: a row tap picks. The button is measured again: the
+        # sheet scrolls the page to keep the button above it (select.js keepAbove), and on a
+        # phone Sort sits on the bar's second row, under the count and Select, so it did
+        btn = page.locator(".rbar .sortcw .msel-btn:visible, #f-order-btn:visible").first.bounding_box()
+        assert btn is not None
         page.touchscreen.tap(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2)
         listbox.wait_for(state="visible", timeout=3000)
         page.wait_for_timeout(300)
