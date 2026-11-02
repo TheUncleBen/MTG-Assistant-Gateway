@@ -122,10 +122,19 @@ button.danger:disabled{color:var(--red)}
   // the shared host protocol (_bridge.js), inlined by cards.card_html
   var B = Bridge;
   var APPROVAL_KEY = "mtg/approval";
-  var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck
-  var MAX_IMAGES = 6;    // Scryfall thumbnails at most: the first rows only, the rest is text
-  var COLLAPSE_AT = 6;   // a longer list shows a summary and this many rows until "Show all"
-  var ROWS_READ = 8;     // rows a timed read asks for (Show all reads the whole list once)
+  // "Apply all": this app's waiting changes on the deck
+  var SET_KEY = "mtg/approval_set";
+  // the card's number: in _meta since 0.7.46 (out of what the model reads), before in the result
+  function seqOf(r) {
+    r = r || {};
+    return Number((r._meta || {})["mtg/card_seq"] || (r.structuredContent || {}).card_seq) || 0;
+  }
+  // MAX_IMAGES: Scryfall thumbnails at most (the first rows only, the rest is text); COLLAPSE_AT: a
+  // longer list shows a summary and this many rows until "Show all"; ROWS_READ: rows a timed read
+  // asks for (Show all reads the whole list once)
+  var MAX_IMAGES = 6;
+  var COLLAPSE_AT = 6;
+  var ROWS_READ = 8;
   // buttons stay disabled this long after the card is drawn
   var ARM_DELAY_MS = 700;
   // While a waiting proposal's card is on screen it reads the proposal again this often, so it
@@ -460,10 +469,10 @@ button.danger:disabled{color:var(--red)}
     approval = null; applySet = null; heldCode = null; undoCode = null; undoFor = null;
     $("rows").replaceChildren(); $("also-actions").replaceChildren();
     $("summary").textContent = ""; $("note").textContent = ""; $("foot").textContent = "";
-    sc0 = { version: sc0.version, card_seq: sc0.card_seq, state: sc0.state };
+    sc0 = { version: sc0.version, state: sc0.state };
   }
   var SLIM_KEYS = ["proposal_id", "state", "kind", "review_url", "deck_id", "deck_name", "version",
-    "card_seq", "closed_at", "closed_by", "closed_by_app", "applied_at", "expires_at", "created_by"];
+    "closed_at", "closed_by", "closed_by_app", "applied_at", "expires_at", "created_by"];
   function slim(p) {
     var keep = {};
     SLIM_KEYS.forEach(function (k) { if (p[k] !== undefined) keep[k] = p[k]; });
@@ -547,7 +556,7 @@ button.danger:disabled{color:var(--red)}
         if (sc.ok === false || (res && res.isError) || !sc.state) { retryLater(); return; }
         failures = 0;
         if (busy || proposal !== p || sc.proposal_id !== p.proposal_id) return;
-        if (Number(sc.card_seq || 0) > mySeq && (sc.state === "pending" || sc.state === "applying")) {
+        if (seqOf(res) > mySeq && (sc.state === "pending" || sc.state === "applying")) {
           stepAside(sc);
           return;
         }
@@ -1143,7 +1152,7 @@ button.danger:disabled{color:var(--red)}
   // no project name in the app's name: the file is public
   B.start("Proposal card", function (params) {
     var first = (params && params.structuredContent) || {};
-    mySeq = Number(first.card_seq) || 0; sc0 = first;
+    mySeq = seqOf(params); sc0 = first;
     // a newer card is below: the host showing this one again changes nothing
     if (stepped) return;
     render(params); refresh();

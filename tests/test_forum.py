@@ -168,3 +168,12 @@ async def test_an_oversized_forum_page_is_not_read_whole() -> None:
     except ArchidektError as exc:
         assert exc.kind == "changed"
     assert sent <= SITE_PAGE_MAX + 2 * 65536
+
+
+async def test_a_missing_thread_is_called_a_thread_by_the_tool_too(stack: Stack) -> None:
+    """The tool says what the forum page says: the thread could not be found, never "that deck"."""
+    token = await linked_user(stack)
+    got = structured(await call(stack.h, token, "get_forum", {"thread_id": 1}))
+    assert got["ok"] is False and got["error"] == "not_found", got
+    assert "deck" not in got["message"], got
+    assert got["message"] == "That thread could not be found. It may have been deleted on Archidekt.", got

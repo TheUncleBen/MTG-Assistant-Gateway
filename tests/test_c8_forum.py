@@ -87,3 +87,49 @@ async def test_a_linked_member_still_gets_the_reply_box(stack: Stack) -> None:
         assert "Link Archidekt to reply" not in home
     finally:
         await b.aclose()
+
+
+async def test_the_assistant_tells_an_unlinked_member_to_link_archidekt_for_a_thread(stack: Stack) -> None:
+    """get_forum for a thread Archidekt shows to signed-in readers only: the plain "link your
+    Archidekt account" answer with where, not Archidekt's raw sign-in sentence (0.7.46 re-audit)."""
+    from .test_decks_and_proxy import call, mcp_token, structured
+
+    b = Browser(stack.h)
+    await b.login()
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    got = structured(await call(stack.h, token, "get_forum", {"thread_id": 700001}))
+    assert got["ok"] is False, got
+    assert got["error"] == "not_linked" and got["error_code"] == "FAILED_PRECONDITION", got
+    assert "asked for a sign-in" not in got["message"], got
+    where = stack.h.settings.public_url.rstrip("/") + "/account"
+    assert f"Link one at {where}." in got["message"], got
+    assert "signed-in readers" in got["message"], got
+
+
+async def test_an_unlinked_member_reading_a_deck_archidekt_hides_is_told_to_link(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """get_deck read without a link, where Archidekt wants a signed-in reader: the same plain answer
+    with where to link, not Archidekt's raw sign-in sentence."""
+    import httpx
+
+    from .test_decks_and_proxy import call, mcp_token, structured
+
+    ark = stack.ark
+    real = ark.handle
+
+    def signed_in_only(request):
+        if request.url.path.startswith("/api/decks/42/") and "Authorization" not in request.headers:
+            return httpx.Response(401, json={"detail": "Authentication credentials were not provided."})
+        return real(request)
+
+    monkeypatch.setattr(ark.transport, "handler", signed_in_only)
+    b = Browser(stack.h)
+    await b.login()
+    await b.aclose()
+    token = await mcp_token(stack.h)
+    got = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
+    assert got["ok"] is False and got["error"] == "not_linked", got
+    assert "asked for a sign-in" not in got["message"], got
+    assert "Link one at " + stack.h.settings.public_url.rstrip("/") + "/account." in got["message"], got

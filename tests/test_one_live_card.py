@@ -322,38 +322,45 @@ async def test_no_refusal_points_to_a_parameter_that_does_not_exist(stack: Stack
 
 
 async def test_each_card_drawn_gets_the_next_number_and_the_cards_own_read_does_not(stack: Stack) -> None:
+    """The number is the card's own bookkeeping: it rides in the result's _meta, never in the
+    structured content the model reads (0.7.46 re-audit)."""
     h = stack.h
     await linked_user(stack)
     await _mode(h, "manual")
     a, _ = await _app_token(h, "ChatGPT")
     b, _ = await _app_token(h, "Claude")
-    first = structured(await _new(h, a))
+    res = await _new(h, a)
+    first = structured(res)
     pid = first["proposal_id"]
-    assert first["card_seq"] == 1
-    amended = structured(
-        await call(
-            h, a, "amend_proposal", {"proposal_id": pid, "version": 1, "new_deck": {"cards": _cards("Opt")}}
-        )
+    assert _seq(res) == 1 and "card_seq" not in first
+    res = await call(
+        h, a, "amend_proposal", {"proposal_id": pid, "version": 1, "new_deck": {"cards": _cards("Opt")}}
     )
-    assert amended["card_seq"] == 2
+    assert _seq(res) == 2 and "card_seq" not in structured(res)
     # the card's own read says the newest number and counts nothing
     for _ in range(2):
-        assert structured(await call(h, a, "get_proposal", {"proposal_id": pid}))["card_seq"] == 2
+        read = await call(h, a, "get_proposal", {"proposal_id": pid})
+        assert _seq(read) == 2 and "card_seq" not in structured(read)
     # the model's status check draws no card and has no number
     status = structured(await call(h, a, "proposal_status", {"proposal_id": pid}))
     assert status["ok"] and status["version"] == 2 and "card_seq" not in status
     # another app's chat counts its own cards: drawing one there leaves this app's newest as it is
-    theirs = structured(
-        await call(h, b, "propose_new_deck", {"name": "Taken over", "cards": _cards("Opt"), "replaces": pid})
-    )
-    assert theirs["proposal_id"] == pid and theirs["version"] == 3 and theirs["card_seq"] == 1, theirs
-    assert structured(await call(h, a, "get_proposal", {"proposal_id": pid}))["card_seq"] == 2
+    over = {"name": "Taken over", "cards": _cards("Opt"), "replaces": pid}
+    res = await call(h, b, "propose_new_deck", over)
+    theirs = structured(res)
+    assert theirs["proposal_id"] == pid and theirs["version"] == 3 and _seq(res) == 1, theirs
+    assert _seq(await call(h, a, "get_proposal", {"proposal_id": pid})) == 2
     # a refusal draws no live card and takes no number
-    stale = structured(
-        await call(h, a, "amend_proposal", {"proposal_id": pid, "version": 1, "new_deck": {"name": "Q"}})
-    )
-    assert stale["ok"] is False and "card_seq" not in stale
-    assert structured(await call(h, a, "get_proposal", {"proposal_id": pid}))["card_seq"] == 2
+    res = await call(h, a, "amend_proposal", {"proposal_id": pid, "version": 1, "new_deck": {"name": "Q"}})
+    assert structured(res)["ok"] is False and _seq(res) is None and "card_seq" not in structured(res)
+    assert _seq(await call(h, a, "get_proposal", {"proposal_id": pid})) == 2
+
+
+def _seq(res: dict) -> int | None:
+    """The card number a result carries, in its _meta (approve.CARD_SEQ_META_KEY)."""
+    from mtg_gateway.approve import CARD_SEQ_META_KEY
+
+    return (res.get("_meta") or {}).get(CARD_SEQ_META_KEY)
 
 
 async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_version(stack: Stack) -> None:
@@ -368,25 +375,25 @@ async def test_the_gateway_refuses_an_approve_from_an_older_card_of_the_same_ver
     )
     p, old_code = structured(res), res["_meta"][APPROVAL_META_KEY]
     pid = p["proposal_id"]
-    assert p["card_seq"] == 1
+    assert _seq(res) == 1
     # the same request again: the waiting proposal answers, and the chat draws its card again
     again = await call(
         h, token, "propose_deck_changes", {"deck_id": "42", "changes": [{"action": "add", "name": "Opt"}]}
     )
     redrawn = structured(again)
-    assert redrawn["proposal_id"] == pid and redrawn["card_seq"] == 2 and redrawn["version"] == 1, redrawn
+    assert redrawn["proposal_id"] == pid and _seq(again) == 2 and redrawn["version"] == 1, redrawn
     new_code = again["_meta"][APPROVAL_META_KEY]
     assert new_code != old_code
     # the older card's read: no code; the newest card's read: its code; a read naming no card
     # (a card from before card numbers) is an older card too once this app has drawn a numbered
     # one: no code, and the newest card's number, so it steps aside
     older = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": 1})
-    assert structured(older)["card_seq"] == 2 and APPROVAL_META_KEY not in (older.get("_meta") or {})
+    assert _seq(older) == 2 and APPROVAL_META_KEY not in (older.get("_meta") or {})
     newest = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": 2})
     assert newest["_meta"][APPROVAL_META_KEY] == new_code
     for unnumbered in ({"proposal_id": pid}, {"proposal_id": pid, "card_seq": 0}):
         plain = await call(h, token, "get_proposal", unnumbered)
-        assert structured(plain)["card_seq"] == 2 and APPROVAL_META_KEY not in (plain.get("_meta") or {})
+        assert _seq(plain) == 2 and APPROVAL_META_KEY not in (plain.get("_meta") or {})
     before = len(ark.patches)
     stale = structured(
         await call(
@@ -419,7 +426,7 @@ async def test_a_card_from_before_card_numbers_still_gets_its_code_when_no_card_
     with h.db.tx() as c:
         c.execute("UPDATE proposals SET card_seqs = NULL WHERE id = ?", (pid,))
     plain = await call(h, token, "get_proposal", {"proposal_id": pid})
-    assert "card_seq" not in structured(plain)
+    assert "card_seq" not in structured(plain) and _seq(plain) is None
     code = plain["_meta"][APPROVAL_META_KEY]
     done = structured(
         await call(

@@ -151,6 +151,34 @@ async def test_unknown_names_cost_one_lookup_each_at_the_real_pace(stack: Stack)
     assert _asked(sf, n) == [] and time.monotonic() - t0 < 0.5
 
 
+async def test_unknown_names_before_the_catalog_has_loaded_wait_for_it_instead_of_walking(
+    stack: Stack,
+) -> None:
+    """Right after a start the catalog has not loaded yet: six unknown names cost 25 paced Scryfall
+    requests and 12 s, walking autocompletes for each name. The call now fetches the catalog (one
+    request) and goes on as when it is loaded: one batched read and one fuzzy lookup per name."""
+    import time
+
+    sf = FakeScryfall()
+    sf.catalog = sf.names_catalog()
+    _paced(stack, sf)
+    service = stack.gw.scan
+    service.names = type(service.names)(lambda s=service: s.scryfall)  # a fresh start: not loaded
+    assert not service.names.loaded
+    token = await linked_user(stack)
+    n = len(sf.requests)
+    t0 = time.monotonic()
+    out = structured(await call(stack.h, token, "resolve_cards", {"cards": [{"name": x} for x in UNKNOWN]}))
+    took = time.monotonic() - t0
+    assert [c["status"] for c in out["cards"]] == ["not_found"] * len(UNKNOWN), out
+    asked = _asked(sf, n)
+    assert sum("/catalog/card-names" in url for _m, url in asked) == 1, asked
+    assert sum("/cards/collection" in url for _m, url in asked) == 1, asked
+    assert not any("/autocomplete" in url for _m, url in asked), asked
+    assert len(asked) == 2 + len(UNKNOWN), asked
+    assert took < 0.5 * (1 + len(UNKNOWN)) + 1.5, took  # was 12 s
+
+
 async def test_a_misread_name_is_still_recovered_at_the_real_pace(stack: Stack) -> None:
     """Cutting the lookups keeps what they recover: OCR misreads the resolver's tests know (a digit
     for a letter, l for i, a stray first letter, extra letters at the end) still find their card,

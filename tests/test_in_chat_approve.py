@@ -135,7 +135,10 @@ async def test_approval_code_travels_only_in_meta(stack: Stack) -> None:
     # get_proposal shows the card again with the same code while the proposal is pending (the
     # card's read names its own number).
     again = await call(
-        h, token, "get_proposal", {"proposal_id": sc["proposal_id"], "card_seq": sc["card_seq"]}
+        h,
+        token,
+        "get_proposal",
+        {"proposal_id": sc["proposal_id"], "card_seq": res["_meta"][approve.CARD_SEQ_META_KEY]},
     )
     assert again["_meta"][APPROVAL_META_KEY] == code
     # An error result carries no code (there is nothing to approve).
@@ -461,7 +464,8 @@ async def test_a_read_only_token_of_the_same_app_gets_no_approval_codes(stack: S
         return r.json()["access_token"]
 
     full = await token_for("mtg")
-    drawn = [structured(await _propose(h, full, card)) for card in ("Sol Ring", "Opt")]
+    results = [await _propose(h, full, card) for card in ("Sol Ring", "Opt")]
+    drawn = [{**structured(r), "card_seq": r["_meta"][approve.CARD_SEQ_META_KEY]} for r in results]
     pids = [p["proposal_id"] for p in drawn]
     reader = await token_for("mtg.read")
     for token, codes in ((full, True), (reader, False)):

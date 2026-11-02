@@ -438,7 +438,7 @@ class ReportService:
         sub: str,
         deck: Deck,
         *,
-        source: dict[str, Any],
+        source: dict[str, Any] | None,
         stats: dict[str, Any] | None = None,
         simulate: bool = True,
         games: int = DEFAULT_GAMES,
@@ -448,15 +448,24 @@ class ReportService:
         on_stored: Callable[[str], None] | None = None,
         paired_with: Deck | None = None,
         ab_with: tuple[str, str, tuple[str, str]] | None = None,
+        pair_with: Deck | None = None,
+        same_opponents_as: str | None = None,
+        pair_hold: PairHold | None = None,
     ) -> dict[str, Any]:
         """A report of a deck that is not a stored deck as it is: a pasted list (``list_deck``), a
         waiting proposal's resulting deck (``proposal_deck``) or a comparison's A/B (``goldfish``:
         the A/B already run, kept as the report's simulation; ``ab_with``: the two lists and their
         modes, the A/B run once the report is stored, as the website's). Stored and kept like any
         report, with ``source`` (its kind, label and what it relates to) in its settings; never a
-        reused one. ``on_stored``: as for ``run``; ``paired_with``: see ``_run``."""
+        reused one. ``on_stored``: as for ``run``; ``paired_with``: see ``_run``. ``pair_with``,
+        ``same_opponents_as`` and ``pair_hold``: a side of a comparison's Forge table, as for
+        ``run`` (a pasted list sits there as a deck does); ``source`` None then makes it the pair's
+        Head to head report."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        if same_opponents_as is not None and pair_with is not None:
+            raise DeckError("invalid", BOTH_PAIRINGS)
+        shared = self._share_from(sub, same_opponents_as) if same_opponents_as is not None else None
         out = await self._run(
             sub,
             deck.id,
@@ -472,6 +481,9 @@ class ReportService:
             background=on_stored is not None,
             paired_with=paired_with,
             ab_with=ab_with,
+            shared=shared,
+            pair_with=pair_with,
+            pair_hold=pair_hold,
         )
         out["stored"] = True
         return out
@@ -495,11 +507,24 @@ class ReportService:
         row = self.db.get_proposal(str(proposal_id or "").strip(), sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
-        if row.get("state") != "pending" or (row.get("expires_at") or 0) < time.time():
-            raise DeckError("invalid", PROPOSAL_NOT_WAITING)
-        deck, stats, now = await self.proposal_deck(sub, row)
+        # A proposal no longer waiting is tested too, read-only (0.7.46 re-audit, F1-d): an applied
+        # one as it was applied (the deck from just before it, which the apply kept as a snapshot,
+        # plus its changes), a closed one as what it would make of the deck as it is now. One whose
+        # apply is under way or did not finish can't be: the deck may hold part of it.
+        state = str(row.get("state") or "")
+        waiting = state == "pending" and (row.get("expires_at") or 0) >= time.time()
+        if state in ("applying", "failed"):
+            raise DeckError("invalid", PROPOSAL_APPLYING if state == "applying" else PROPOSAL_PART_APPLIED)
+        if state == "applied":
+            deck, stats, now = await self.applied_deck(sub, row)
+            suffix = " (applied)"
+        else:
+            deck, stats, now = await self.proposal_deck(sub, row)
+            suffix = "" if waiting else " (not applied)"
         no = row.get("board_no")
-        label = (f"Proposal #{no}" if no else "Proposal") + f" for “{row.get('deck_name') or deck.name}”"
+        label = (
+            (f"Proposal #{no}" if no else "Proposal") + f" for “{row.get('deck_name') or deck.name}”" + suffix
+        )
         source = {
             "kind": "proposal",
             "label": label,
@@ -518,6 +543,24 @@ class ReportService:
             on_stored=on_stored,
             paired_with=now if simulate else None,
         )
+
+    async def applied_deck(
+        self, sub: str, row: dict[str, Any]
+    ) -> tuple[Deck, dict[str, Any] | None, Deck | None]:
+        """An applied proposal's resulting deck, as ``proposal_deck``: a deck edit on the deck as it
+        stood just before the apply (the snapshot the apply kept; refused when it is gone), or a
+        new deck's list. Nothing is read from Archidekt."""
+        if (row.get("kind") or "edit") != "edit":
+            return await self.proposal_deck(sub, row)
+        from .archidekt import parse_deck
+        from .decks import parse_changes
+
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        snap = self.db.get_snapshot(str(result.get("snapshot_id") or ""), sub) if result else None
+        if not snap or not isinstance(snap.get("deck"), dict):
+            raise DeckError("invalid", PROPOSAL_APPLIED_GONE)
+        before = parse_deck(snap["deck"])
+        return deck_after(before, parse_changes(row["changes"], row_flags=True)), None, before
 
     async def proposal_deck(
         self, sub: str, row: dict[str, Any]
@@ -1391,6 +1434,43 @@ class ReportService:
         hold = PairHold()
         self._pair_holds.setdefault(sub, []).append(hold)
         return hold, None
+
+    async def start_forge_pair(
+        self, sub: str, a: tuple[Deck, tuple[str, str] | None], b: tuple[Deck, tuple[str, str] | None]
+    ) -> tuple[dict[str, str] | None, str | None]:
+        """A comparison's Forge games: both decks against the same precons (picked for the higher
+        of their brackets), kept as two Head to head reports, within the member's Forge queue
+        (both start or wait, or neither). Each side is the deck already read and where it came
+        from, ("deck", id) or ("snapshot", id), or None for a pasted list (a report of no deck).
+        Returns ({"a": id, "b": id}, None), or (None, why not) when the queue has no room."""
+        hold, full = self.reserve_pair(sub)
+        if full is not None:
+            return None, full
+
+        async def seat(side: tuple[Deck, tuple[str, str] | None], **pairing: Any) -> dict[str, Any]:
+            deck, origin = side
+            if origin is None:
+                return await self.run_source(
+                    sub, deck, source=None, simulate=False, forge=True, pair_hold=hold, **pairing
+                )
+            kind, ref = origin
+            return await self.run(
+                sub,
+                ref,
+                simulate=False,
+                forge=True,
+                deck=deck,
+                snapshot_id=ref if kind == "snapshot" else None,
+                pair_hold=hold,
+                **pairing,
+            )
+
+        try:
+            first = await seat(a, pair_with=b[0])
+            second = await seat(b, same_opponents_as=first["report_id"])
+        finally:
+            self.release_pair(sub, hold)
+        return {"a": first["report_id"], "b": second["report_id"]}, None
 
     def release_pair(self, sub: str, hold: PairHold | None) -> None:
         """Give back what a comparison's hold still reserves (nothing once both runs are saved)."""
@@ -2889,9 +2969,16 @@ class ReportService:
 # get_deck_report view "forge": the parts of a Forge section that say how the games went
 FORGE_RESULT_KEYS = ("state", "result", "opponent_choice", "seed", "games_requested", "games")
 
-PROPOSAL_NOT_WAITING = (
-    "That proposal is no longer waiting, so its resulting deck can't be tested. Run the report on "
-    "the deck itself."
+PROPOSAL_APPLYING = (
+    "That proposal is being applied now, so its resulting deck can't be tested yet. Test it once it is done."
+)
+PROPOSAL_PART_APPLIED = (
+    "That proposal's apply did not finish, so the deck may hold part of it and its resulting deck "
+    "can't be worked out. Run the report on the deck itself."
+)
+PROPOSAL_APPLIED_GONE = (
+    "That proposal was applied, and the copy of the deck from just before it is no longer kept, so its "
+    "resulting deck can't be rebuilt. Run the report on the deck itself, which has the change."
 )
 PROPOSAL_NOT_A_LIST = (
     "Only a proposal that changes a deck's cards, or makes a new deck, can be tested. Run the "

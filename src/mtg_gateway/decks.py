@@ -4470,6 +4470,14 @@ class DeckService:
                     # the member's link stopped working on this request: that, and how to link
                     # again, is what they need to hear, not why the read without it failed
                     raise DeckError(linked.kind, str(linked)) from exc
+                if exc.kind == "auth" and not (sub and self.db.get_link(sub)):
+                    # Archidekt shows this deck to signed-in readers only: the member's missing
+                    # link and where to make one, not Archidekt's raw sign-in sentence
+                    raise DeckError(
+                        "not_linked",
+                        "Archidekt shows this deck to signed-in readers only. "
+                        + refusals.not_linked(self.settings.public_url),
+                    ) from exc
                 raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     # -- the deck sync's reads (sync.py) ----------------------------------------
@@ -5799,9 +5807,6 @@ class DeckService:
                 else {}
             ),
             "board_no": row.get("board_no"),
-            # how many cards this app's chat has drawn for it: a card with a lower number of its
-            # own steps aside for the newest (approve.py)
-            **({"card_seq": seq} if (seq := _card_seq(row, current_client.get())) else {}),
             **status_info,
             "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
             + (

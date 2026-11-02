@@ -9,9 +9,11 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
-from mtg_gateway.reports import PROPOSAL_NOT_WAITING, ReportService
+from mtg_gateway.reports import ReportService
 
 from .conftest import Stack, stack_with
 from .fake_mystic_forge import SIM_CALLS
@@ -72,10 +74,16 @@ async def test_a_proposals_resulting_deck_is_simulated_and_kept_under_its_deck(s
         assert f"href='/proposals/{p['proposal_id']}'" in report and "Proposal #" in report
     finally:
         await b.aclose()
-    # once it is no longer waiting, its resulting deck is not simulated
+    # once it is applied, its resulting deck is the deck from just before it plus its changes
+    # (the snapshot the apply kept), tested read-only against that deck
     structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    SIM_CALLS.clear()
     late = structured(await call(h, token, "run_deck_report", {"proposal_id": p["proposal_id"], "games": 20}))
-    assert late["ok"] is False and late["message"] == PROPOSAL_NOT_WAITING, late
+    assert late["ok"] is True and late["source"]["kind"] == "proposal", late
+    assert late["source"]["label"] == f"Proposal #{p['board_no']} for “{p['deck_name']}” (applied)", late
+    ((tool, sent),) = [c for c in SIM_CALLS if c[0] == "goldfish_run"]
+    deck = str(sent["deck"])
+    assert "Arcane Signet" in deck and "Acidic Slime" not in deck and "14 Forest" in deck, deck
     nope = structured(await call(h, token, "run_deck_report", {"proposal_id": "nope", "games": 20}))
     assert nope["ok"] is False and nope["error"] == "not_found", nope
     both = structured(
@@ -243,7 +251,7 @@ async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack:
     audit row 10): compare_decks with simulate keeps the A/B as a report and, for two Commander
     decks, starts both decks' Forge games against the same precons, as the website's Compare page
     does (two Head to head reports, within the member's Forge queue). Where it can't, it says why."""
-    from mtg_gateway.tools_reports import FORGE_NEEDS_DECKS, FORGE_READ_ONLY
+    from mtg_gateway.tools_reports import FORGE_READ_ONLY
 
     from .test_forge import BRACKETED
     from .test_round4_data import _app_token
@@ -275,11 +283,6 @@ async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack:
             ids["a"],
             ids["b"],
         )
-        # a pasted list can't sit at a Forge table: the comparison is kept and the reason given
-        listed = structured(
-            await call(h, token, "compare_decks", {"a": "42", "b_list": LIST, "simulate": True, "games": 20})
-        )
-        assert listed["stored"] is True and listed["forge"] == {"started": False, "note": FORGE_NEEDS_DECKS}
         # forge false: no Forge games, as run_deck_report's forge false
         off = structured(
             await call(
@@ -299,3 +302,90 @@ async def test_a_simulated_comparison_plays_both_decks_at_one_forge_table(stack:
     finally:
         if reports._forge_task is not None:
             reports._forge_task.cancel()
+
+
+@pytest.mark.parametrize("args", [{"a": "42", "b_list": LIST}, {"a_list": LIST, "b": "42"}])
+async def test_a_comparison_with_a_pasted_list_plays_it_at_the_forge_table_too(
+    stack: Stack, args: dict[str, str]
+) -> None:
+    """run_deck_report plays a pasted list by Forge, and compare_decks refused one ("a pasted list
+    can't be seated at a Forge table"): the two tools contradicted each other (0.7.46 re-audit,
+    F1-d). A pasted list now sits at the comparison's Forge table as a deck does, on either side,
+    both against the same precons."""
+    from .test_forge import BRACKETED
+
+    h = stack.h
+    gw = h.app.state.gateway
+    reports = gw.reports
+    fake = FakeForge(brackets=BRACKETED)
+    reports.forge, reports.forge_interval = fake.client(), 0.05
+    token = await linked_user(stack)
+    sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+    try:
+        out = structured(await call(h, token, "compare_decks", {**args, "simulate": True, "games": 20}))
+        assert out["stored"] is True, out
+        forge = out["forge"]
+        assert forge["started"] is True, forge
+        ids = forge["report_ids"]
+        # the pair's second report seats the first one's opponents, as for two decks
+        assert reports.pair_of(sub, ids["b"]) == (ids["a"], ids["b"]), ids
+        listed = reports.get(sub, ids["b" if "b_list" in args else "a"])
+        assert listed["deck_id"] in ("", None), listed["deck_id"]  # filed under no deck
+        assert listed["deck_name"] == "Pasted list", listed["deck_name"]
+        b = await _browser(stack)
+        try:
+            from urllib.parse import urlparse
+
+            page = await b.http.get(urlparse(forge["head_to_head_url"]).path)
+            assert page.status_code == 200, page.text[:500]
+            assert "Pasted list" in page.text
+        finally:
+            await b.aclose()
+    finally:
+        if reports._forge_task is not None:
+            reports._forge_task.cancel()
+
+
+async def test_a_proposal_no_longer_waiting_is_tested_or_says_plainly_why_not(stack: Stack) -> None:
+    """A rejected (or withdrawn, expired) proposal's resulting deck is what it would make of the deck
+    as it is now, tested read-only; one whose apply did not finish says why it can't be, as does an
+    applied one whose snapshot is gone (0.7.46 re-audit, F1-d)."""
+    from mtg_gateway.reports import PROPOSAL_APPLIED_GONE, PROPOSAL_PART_APPLIED
+
+    h = stack.h
+    gw = h.app.state.gateway
+    token = await linked_user(stack)
+    sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+    changes = [{"action": "add", "card_name": "Arcane Signet", "quantity": 1, "category": "Ramp"}]
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    assert p["ok"], p
+    structured(await call(h, token, "reject_proposal", {"proposal_id": p["proposal_id"]}))
+    SIM_CALLS.clear()
+    rep = structured(await call(h, token, "run_deck_report", {"proposal_id": p["proposal_id"], "games": 20}))
+    assert rep["ok"] is True, rep
+    assert rep["source"]["label"].endswith("(not applied)"), rep["source"]
+    ((tool, sent),) = [c for c in SIM_CALLS if c[0] == "goldfish_run"]
+    assert "Arcane Signet" in str(sent["deck"])
+    assert stack.ark.patches == []  # read-only: nothing went to Archidekt
+    # the review page offers the test for it too
+    b = await _browser(stack)
+    try:
+        page = (await b.http.get(f"/proposals/{p['proposal_id']}", headers=NAV)).text
+        assert f"action='/proposals/{p['proposal_id']}/test'" in page
+    finally:
+        await b.aclose()
+    # an apply that did not finish: the deck may hold part of it
+    q = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    with gw.db.tx() as c:
+        c.execute("UPDATE proposals SET state = 'failed' WHERE id = ?", (q["proposal_id"],))
+    asked = {"proposal_id": q["proposal_id"], "games": 20}
+    failed = structured(await call(h, token, "run_deck_report", asked))
+    assert failed["ok"] is False and failed["message"] == PROPOSAL_PART_APPLIED, failed
+    # applied, but the snapshot from before it is gone: said plainly
+    r = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
+    structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    row = gw.db.get_proposal(r["proposal_id"], sub)
+    with gw.db.tx() as c:  # pruned with the deck's older snapshots
+        c.execute("DELETE FROM snapshots WHERE id = ?", (str((row.get("result") or {})["snapshot_id"]),))
+    gone = structured(await call(h, token, "run_deck_report", {"proposal_id": r["proposal_id"], "games": 20}))
+    assert gone["ok"] is False and gone["message"] == PROPOSAL_APPLIED_GONE, gone

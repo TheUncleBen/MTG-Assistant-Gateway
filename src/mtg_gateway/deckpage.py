@@ -2294,7 +2294,15 @@ def compare_page_html(
         else ""
     )
     ab_html = (
-        compare_ab_html(deck, other_ref, other_name, csrf=csrf, primary=not forge_html)
+        compare_ab_html(
+            deck,
+            other_ref,
+            other_name,
+            csrf=csrf,
+            primary=not forge_html,
+            # Forge games too, as compare_decks plays them with its A/B: two Commander decks
+            forge=forge_on and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other),
+        )
         if shown and ab_on and isinstance(other, Deck)
         else ""
     )
@@ -2488,18 +2496,31 @@ COMPARE_AB_LINE = (
 )
 
 
-def compare_ab_html(deck: Deck, other_ref: str, other_name: str, *, csrf: str | None, primary: bool) -> str:
+COMPARE_AB_FORGE = "Forge games too: both decks against the same opponents"
+
+
+def compare_ab_html(
+    deck: Deck, other_ref: str, other_name: str, *, csrf: str | None, primary: bool, forge: bool = False
+) -> str:
     """The paired solo test of this deck (A) against the other (B), kept as a comparison report
-    (POST /decks/<id>/compare/ab)."""
+    (POST /decks/<id>/compare/ab). ``forge``: Forge is on and both are Commander decks, so the
+    form offers both decks' Forge games against the same precons too, ticked as compare_decks
+    plays them with its A/B."""
     if not csrf or not other_ref:
         return ""
     kind = "btn-primary" if primary else "btn-plain"
+    tick = (
+        "<label class='check cmp-ab-forge'><input type='checkbox' name='forge' value='1' checked> "
+        f"{COMPARE_AB_FORGE}</label>"
+        if forge
+        else ""
+    )
     return (
         "<section class='ui-card cmp-forge cmp-ab'><h2>Solo test both (A/B)</h2>"
         f"<p class='muted small'>{COMPARE_AB_LINE}</p>"
         f"<form method='post' action='/decks/{esc(deck.id)}/compare/ab'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
-        f"<input type='hidden' name='with' value='{esc(other_ref)}'>"
+        f"<input type='hidden' name='with' value='{esc(other_ref)}'>{tick}"
         f"<button type='submit' class='{kind}' data-busy-label='Starting…'>{icon('swap')} Solo test "
         f"“{esc(deck_title(deck))}” against “{esc(other_name)}”</button></form>"
         "</section>"
@@ -2534,6 +2555,7 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
 
 COMPARE_CSS = """
 .cmp-back{margin-bottom:.25rem}
+.cmp-ab .cmp-ab-forge{display:flex;width:100%;min-height:44px;margin:.25rem 0 .75rem}
 .cmp-form{padding:.75rem 1rem;margin:0 0 1rem}
 .cmp-form .row{display:flex;gap:.5rem;align-items:flex-end}
 .cmp-form .row .fld{flex:1;min-width:0;margin:0}

@@ -199,10 +199,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The Android app's sign-in, running in the phone's browser (app_signin.py). This
             # browser's own session, if any, is not handed over: the identity provider decides.
             if not app_signin.CHALLENGE.fullmatch(challenge):
-                return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
+                return small("Sign-in failed", smallpage.signin_failed(login_href(nxt)), status=400)
             back = q.get("app_return")
             if back is not None and back not in (app_signin.INTENT_RETURN, app_signin.SCHEME_RETURN):
-                return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
+                return small("Sign-in failed", smallpage.signin_failed(login_href(nxt)), status=400)
             # Any app on the phone can open this address: a page first, and only its Continue goes
             # on to the identity provider (app_continue).
             token = state.app_signins.start_leg(challenge, nxt, back, fresh)  # type: ignore[attr-defined]
@@ -233,7 +233,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 # This browser's sign-in ended for a reason it should hear first (an unused or
                 # longest time, the sign-in service, an admin): the page says why, with Sign in.
                 return RedirectResponse(
-                    f"/signed-out?next={quote(nxt, safe='/?=&')}",
+                    f"/signed-out?next={quote_next(nxt)}",
                     status_code=303,
                     headers={"Cache-Control": "no-store"},
                 )
@@ -246,7 +246,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         try:
             url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
         except LoginError as exc:
-            return login_failed(exc, f"/login?next={nxt}")
+            return login_failed(exc, login_href(nxt))
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
         if fresh:
             resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
@@ -298,7 +298,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 BROWSER_CLIENT_ID, params, force_login=fresh, max_age=max_age
             )
         except LoginError as exc:
-            return login_failed(exc, f"/login?next={leg.next_path}")
+            return login_failed(exc, login_href(leg.next_path))
         resp = RedirectResponse(url, status_code=303, headers={"Cache-Control": "no-store"})
         resp.delete_cookie(leg_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         if fresh:
@@ -440,7 +440,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             smallpage.panel(
                 "Signed out",
                 smallpage.p(signed_out_text(reason, state)),
-                smallpage.button("Sign in", f"/login?next={quote(nxt, safe='/?=&')}", primary=True),
+                smallpage.button("Sign in", login_href(nxt), primary=True),
             ),
             signin_link=False,  # the page's own Sign in is the one way on
         )
@@ -1400,7 +1400,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return login_failed(exc, "/login")
         nxt = _safe_next(str(session["params"].get("next", "/account")))
         if identity is None:
-            return small("Sign-in canceled", smallpage.signin_canceled(f"/login?next={nxt}"))
+            return small("Sign-in canceled", smallpage.signin_canceled(login_href(nxt)))
         challenge = session["params"].get("app_challenge")
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
             # The Android app's sign-in: no session in this browser, a one-time code for the app,
@@ -1646,10 +1646,21 @@ def signed_out_text(reason: str | None, state: Any) -> str:
     return "You are signed out of this gateway."
 
 
-def login_redirect(next_path: str) -> Response:
+def quote_next(next_path: str) -> str:
+    """A return address made safe (``_safe_next``) and encoded as one query value: its own ``&``
+    and ``#`` are escaped, so the whole address, query and all, comes back after the sign-in."""
     from urllib.parse import quote
 
-    return RedirectResponse(f"/login?next={quote(_safe_next(next_path), safe='/?=')}", status_code=302)
+    return quote(_safe_next(next_path), safe="/?=")
+
+
+def login_href(next_path: str) -> str:
+    """The sign-in link that comes back to ``next_path``: the one way every page builds it."""
+    return f"/login?next={quote_next(next_path)}"
+
+
+def login_redirect(next_path: str) -> Response:
+    return RedirectResponse(login_href(next_path), status_code=302)
 
 
 def login_redirect_here(request: Request, fallback: str = "/account") -> Response:
@@ -3313,18 +3324,25 @@ def _lists_delete_box(p: dict[str, Any]) -> str:
 # Proposals the website can test (owner decision C7): a deck edit (paired against the deck as it is)
 # and a new deck's list.
 TESTABLE_KINDS = frozenset({"edit", "create_deck"})
+# and in every state but one whose apply is under way or did not finish (reports.run_proposal): an
+# applied one as it was applied, a closed one as what it would make of the deck now
+UNTESTABLE_STATES = frozenset({"applying", "failed"})
 TEST_THIS_CHANGE = "Test this change"
 
 
 def _proposal_tests(p: dict[str, Any], csrf: str | None, *, now: float) -> str:
-    """The proposal's test reports, newest first, and a Test this change button while it waits."""
+    """The proposal's test reports, newest first, and a Test this change button (UNTESTABLE_STATES)."""
     links = [
         ui.button_link(
             f"Report, {ui.when_text(x.get('taken_at'), now=now)}", f"/history/reports/{x['report_id']}"
         )
         for x in p.get("sim_reports") or []
     ]
-    if p.get("state") == "pending" and p.get("can_test") and (p.get("kind") or "edit") in TESTABLE_KINDS:
+    if (
+        p.get("state") not in UNTESTABLE_STATES
+        and p.get("can_test")
+        and (p.get("kind") or "edit") in TESTABLE_KINDS
+    ):
         links.insert(
             0,
             f"<form method='post' action='/proposals/{html.escape(str(p['proposal_id']))}/test' "

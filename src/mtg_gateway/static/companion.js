@@ -228,6 +228,15 @@
     (children || []).forEach(function (c) { if (c) e.appendChild(c); });
     return e;
   }
+  // a change that could not be sent, in the site's one wording (static/fetchjson.js): signed out
+  // with Sign in back to this page, no connection, or the gateway's own message
+  function sayProblem(status, x, what, fallback) {
+    var pr = window.MtgFetch.problem(x, what);
+    var text = pr.signedOut || pr.noConnection ? pr.text : (x && x.message) || fallback || pr.text;
+    status.textContent = text;
+    pr.actions.forEach(function (a) { status.appendChild(document.createTextNode(" ")); status.appendChild(a); });
+    if (status.classList.contains("status")) status.className = "status notice error";
+  }
   function svg(name) {
     var tpl = document.getElementById("icon-" + name);
     if (tpl) return tpl.content.firstElementChild.cloneNode(true);
@@ -671,12 +680,9 @@
     var btn = pasteForm.querySelector("button");
     btn.disabled = true;
     status.textContent = "Checking " + items.length + " name" + (items.length === 1 ? "" : "s") + "…";
-    fetch("/scan/api/resolve", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
-      body: JSON.stringify({ cards: items })
+    window.MtgFetch.json("/scan/api/resolve", {
+      method: "POST", csrf: cfg.csrf, body: JSON.stringify({ cards: items }), what: "nothing was added"
     })
-      .then(function (res) { return res.json(); })
       .then(function (d) {
         var zone = zoneIn.value === "side" ? "side" : "main";
         var missed = [];
@@ -691,7 +697,7 @@
         status.textContent = found + " card" + (found === 1 ? "" : "s") + " added to the pending changes" + (missed.length ? "; " + missed.length + " name" + (missed.length === 1 ? " was" : "s were") + " not recognized and stay in the box." : ".");
         btn.disabled = false;
       })
-      .catch(function () { status.textContent = "The names could not be checked (network error); nothing was added."; btn.disabled = false; });
+      .catch(function (err) { sayProblem(status, err, "nothing was added", "The names could not be checked; nothing was added."); btn.disabled = false; });
   });
   root.querySelector("button.undo").addEventListener("click", undo);
   root.querySelector("button.redo").addEventListener("click", redo);
@@ -805,16 +811,16 @@
     status.className = "status";
     var old = root.querySelector(".confirmbar");
     if (old) old.remove();
-    fetch("/api/v1/proposals", {
+    // never rejects: signed out and no connection come back as {ok: false} in the site's words
+    window.MtgFetch.answer("/api/v1/proposals", {
       method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
+      csrf: cfg.csrf,
+      what: "nothing was changed",
       body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true,
         archidekt_backup: !(backupBox && !backupBox.checked) })
     })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (res) {
-        var d = res.d || {};
+      .then(function (d) {
+        var res = { ok: d.status >= 200 && d.status < 300 };
         if (res.ok && d.applied) {
           root.dataset.leaving = "1";
           window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved";
@@ -830,21 +836,20 @@
           root.querySelector(".editbar").appendChild(bar);
           yes.addEventListener("click", function () {
             yes.disabled = true;
-            fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
-              method: "POST", credentials: "same-origin",
-              headers: { "X-CSRF-Token": cfg.csrf, "Content-Type": "application/json" },
+            window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
+              method: "POST", csrf: cfg.csrf, what: "nothing was changed",
               body: JSON.stringify({ version: d.version, archidekt_backup: !(backupBox && !backupBox.checked) })
-            }).then(function (r) { return r.json(); }).then(function (a) {
+            }).then(function (a) {
               if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
-              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false; saving = false;
-            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; saving = false; });
+              bar.remove(); sayProblem(status, a, "nothing was changed", "Archidekt refused the change; nothing was saved."); btn.disabled = false; saving = false;
+            });
           });
           no.addEventListener("click", function () {
             bar.remove(); btn.disabled = false; saving = false;
             // the proposal made for the check is not wanted: reject it so Proposals stays clean
-            fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
-              method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
-            }).catch(function () { /* a leftover pending proposal is harmless */ });
+            window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
+              method: "POST", csrf: cfg.csrf
+            });  // never rejects; a leftover pending proposal is harmless
           });
           yes.focus();
         } else if (res.ok && d.proposal_id) {
@@ -852,15 +857,9 @@
           root.dataset.leaving = "1";
           window.location.href = "/proposals/" + encodeURIComponent(d.proposal_id);
         } else {
-          status.textContent = d.message || "The changes could not be saved.";
-          status.className = "status notice error";
+          sayProblem(status, d, "nothing was changed", "The changes could not be saved.");
           btn.disabled = false; saving = false;
         }
-      })
-      .catch(function () {
-        status.textContent = "Network error; nothing was changed.";
-        status.className = "status notice error";
-        btn.disabled = false; saving = false;
       });
   }
   root.querySelector("button.review").addEventListener("click", function () { save(false); });

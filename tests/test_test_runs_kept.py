@@ -322,3 +322,56 @@ async def test_a_forge_pair_is_shown_head_to_head_and_kept_out_of_the_trend(stac
         assert f"href='/history/reports/{second}/head-to-head'" in report
     finally:
         await b.aclose()
+
+
+async def test_the_compare_pages_ab_offers_forge_games_as_compare_decks_does(stack: Stack) -> None:
+    """compare_decks with a solo test also plays both decks at one Forge table; the website's A/B
+    was solo test only (0.7.46 re-audit, F1-d). Where Forge is on and both decks have a commander,
+    the A/B form has the same choice (on by default, as the tool's): both reports' Forge games
+    against the same precons, linked from the A/B report as its head to head."""
+    import asyncio
+
+    from .test_forge import BRACKETED, FakeForge
+
+    b = await linked_browser(stack)
+    gw = stack.h.app.state.gateway
+    reports = gw.reports
+    try:
+        stack.ark.private.discard(43)
+        csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", (await b.http.get("/decks/42/compare")).text)
+        assert csrf
+        csrf = csrf.group(1)
+        # no Forge on this gateway: the A/B is the solo test only, with no Forge choice
+        page = (await b.http.get("/decks/42/compare?with=43", headers=NAV)).text
+        assert "action='/decks/42/compare/ab'" in page and "name='forge'" not in page
+        fake = FakeForge(brackets=BRACKETED)
+        reports.forge, reports.forge_interval = fake.client(), 0.05
+        page = (await b.http.get("/decks/42/compare?with=43", headers=NAV)).text
+        ab_form = page.split("action='/decks/42/compare/ab'", 1)[1].split("</form>", 1)[0]
+        assert "<input type='checkbox' name='forge' value='1' checked>" in ab_form, ab_form
+        assert "same opponents" in ab_form
+        r = await b.http.post("/decks/42/compare/ab", data={"csrf": csrf, "with": "43", "forge": "1"})
+        assert r.status_code == 303, r.text
+        await reports.settle()
+        sub = _sub(stack)
+        rid = r.headers["location"].rsplit("/", 1)[1]
+        ab = reports.get(sub, rid)
+        pair = ab["source"].get("forge_pair")
+        assert pair and set(pair) == {"a", "b"}, ab["source"]
+        assert reports.pair_of(sub, pair["b"]) == (pair["a"], pair["b"])
+        shown = (await b.http.get(f"/history/reports/{rid}", headers=NAV)).text
+        assert f"href='/history/reports/{pair['b']}/head-to-head'" in shown
+        for _ in range(500):  # the pair's games end before the next A/B asks for the queue
+            if reports._forge_task is None or reports._forge_task.done():
+                break
+            await asyncio.sleep(0.02)
+        # the box left unticked: the solo test A/B alone, as before
+        r = await b.http.post("/decks/42/compare/ab", data={"csrf": csrf, "with": "43"})
+        assert r.status_code == 303, r.text
+        await reports.settle()
+        alone = reports.get(sub, r.headers["location"].rsplit("/", 1)[1])
+        assert "forge_pair" not in alone["source"], alone["source"]
+    finally:
+        if reports._forge_task is not None:
+            reports._forge_task.cancel()
+        await b.aclose()

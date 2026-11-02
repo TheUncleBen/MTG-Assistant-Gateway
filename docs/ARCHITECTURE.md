@@ -316,7 +316,8 @@ For the exact devices and plans tested, see
   `amend_proposal` and `combine_proposals`; `apply_proposal` draws none) names it in
   `_meta.ui.resourceUri`, a host that renders MCP Apps shows it with the
   result, and each card is numbered among its proposal's cards in that app's
-  chat (`card_seqs`, schema 16): a card that reads a higher number steps aside
+  chat (`card_seqs`, schema 16; the result carries it in `_meta` as `mtg/card_seq`, never in
+  the structured content the model reads): a card that reads a higher number steps aside
   to one line, so only the newest asks for a press, and the gateway holds to
   it: a card's approval code names its number, so an older card's press is
   refused (`not_newest_card`, "Use the newest card") and its reads carry no

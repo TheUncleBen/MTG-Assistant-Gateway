@@ -68,10 +68,14 @@ window.addEventListener("message", (ev) => {
   } else if (m.method === "ui/notifications/initialized") {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
   } else if (m.method === "tools/call" && m.params.name === "get_proposal") {
-    const sc = window.getReply === null ? (window.toolResult || {}).structuredContent : window.getReply;
+    let sc = window.getReply === null ? (window.toolResult || {}).structuredContent : window.getReply;
+    // a reply's "__meta" is the read's _meta (the card number, a code), not structured content
+    const meta = (sc && sc.__meta) || {};
+    if (sc && sc.__meta) { sc = Object.assign({}, sc); delete sc.__meta; }
     if (sc === "refuse") send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
     else send({jsonrpc: "2.0", id: m.id,
-               result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc}});
+               result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc,
+                        _meta: meta}});
   } else if (m.method === "tools/call") {
     const sc = window.confirmReply;
     const text = JSON.stringify(sc);

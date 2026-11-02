@@ -140,6 +140,20 @@ class NameCatalog:
         self._next_try = time.monotonic() + RETRY_AFTER_FAILURE
         self._task = loop.create_task(self.load())
 
+    async def ready(self, wait: float) -> bool:
+        """Whether the catalog is loaded, starting its load when it is missing and waiting up to
+        ``wait`` seconds for a load under way. A resolve call that would otherwise walk paced
+        Scryfall autocompletes for each unknown name waits for this one request instead. A load
+        that failed lately is not retried here (RETRY_AFTER_FAILURE), so this returns at once."""
+        if self._names:
+            return True
+        self.ensure()
+        task = self._task
+        if task is not None and not task.done() and wait > 0:
+            # never raises for the load itself (it logs its own failure) nor cancels it on time out
+            await asyncio.wait({task}, timeout=wait)
+        return bool(self._names)
+
     def close(self) -> None:
         """Cancel a download still running (called when the gateway shuts down)."""
         if self._task is not None and not self._task.done():

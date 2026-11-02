@@ -83,6 +83,8 @@ NO_LIST_PASTED = "Paste a decklist to test: one card per line, like “1 Sol Rin
 SNAPSHOT_GONE = "That snapshot isn't in your history. It may have been deleted."
 AB_UNAVAILABLE = "The paired solo test needs the research service, which is not set up on this gateway."
 AB_PICK_ONE = "Pick a deck or a snapshot to test against."
+# the A/B with Forge games when the member's Forge queue is full (after the queue's own words)
+AB_FORGE_FULL = "Untick Forge games to run the solo test A/B on its own."
 
 # A missing report, or someone else's (NEW-WORDING 34): the shared small-page look.
 REPORT_NOT_FOUND_TITLE = "Report not found"
@@ -923,7 +925,7 @@ def add_history_routes(
         (B), kept as a comparison report: the website's compare_decks with an A/B."""
         deck_id = request.path_params["deck_id"]
 
-        async def run(sub: str, other: str, mark: Any) -> dict[str, Any]:
+        async def run(sub: str, other: str, mark: Any, with_forge: bool) -> dict[str, Any]:
             import dataclasses
 
             from . import deck_stats
@@ -955,6 +957,15 @@ def add_history_routes(
                 **({"b_deck_id": str(deck_b.id)} if not other.startswith("snap_") and deck_b.id else {}),
             }
             modes = (sim_mode(stats), sim_mode(deck_stats.compute(deck_b)))
+            if with_forge and reports.forge is not None and modes == ("commander", "commander"):
+                # both decks' Forge games against the same precons too, as compare_decks plays
+                # them with its A/B; started first, so a full Forge queue says so before anything
+                # is kept, and linked from the A/B report as its head to head
+                snap_b = ("snapshot", other[5:]) if other.startswith("snap_") else ("deck", other)
+                ids, full = await reports.start_forge_pair(sub, (deck_a, ("deck", deck_id)), (deck_b, snap_b))
+                if ids is None:
+                    raise DeckError("invalid", f"{full} {AB_FORGE_FULL}")
+                source["forge_pair"] = ids
             return await reports.run_source(
                 sub,
                 dataclasses.replace(deck_a, name=f"{a_name} vs {b_name}"),
@@ -967,7 +978,7 @@ def add_history_routes(
             )
 
         def job(sub: str, data: dict[str, str], mark: Any) -> Any:
-            return run(sub, str(data.get("with") or "").strip(), mark)
+            return run(sub, str(data.get("with") or "").strip(), mark, data.get("forge") == "1")
 
         out = await _start_test(
             request, job, title=TEST_NOT_STARTED, back=(f"/decks/{deck_id}/compare", "Back to Compare")
