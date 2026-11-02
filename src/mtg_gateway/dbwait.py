@@ -82,7 +82,7 @@ BUSY_REASON = "Its database is being backed up or changed."
 # kept is not known for a change, so a changing tool's answer says to look before sending again.
 TOOL_BUSY = (
     "The gateway is busy (its database is being backed up or changed), so this call could not "
-    "finish. Try again in a moment."
+    "finish. Try again."
 )
 TOOL_BUSY_CHANGE = (
     " If it was a change, check where it stands first (list_my_proposals or get_proposal), so "
