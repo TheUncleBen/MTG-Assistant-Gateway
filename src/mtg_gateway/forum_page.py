@@ -816,8 +816,7 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         words = str(exc)
         if exc.kind == "not_found":
             status = 404
-            # Archidekt's generic "could not find that deck" is about a thread here (QG-19)
-            words = "That thread could not be found. It may have been deleted on Archidekt."
+            words = forum.THREAD_NOT_FOUND  # forum.thread's own words, the tool's too
         elif exc.kind == "invalid" and words.startswith("thread_id must be"):
             words = OPEN_BAD  # the open form's own words, not the tool's field name
         body = (

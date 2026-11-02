@@ -194,9 +194,7 @@ async def _signin_pages(h: Harness, monkeypatch: pytest.MonkeyPatch, nxt: str) -
     # this browser's sign-in ended (an admin signed it out): /login sends it to /signed-out first
     with monkeypatch.context() as m:
         m.setattr(h.db, "session_end_reason", lambda _sid: "admin")
-        r = await h.http.get(
-            "/login", params={"next": nxt}, headers=NAVIGATE, cookies=ended
-        )
+        r = await h.http.get("/login", params={"next": nxt}, headers=NAVIGATE, cookies=ended)
         assert r.status_code == 303 and r.headers["location"].startswith("/signed-out?"), r.headers
         loc = r.headers["location"]
         pages["sign-in ended (redirect)"] = [parse_qs(urlparse(loc).query).get("next", [""])[0]]
@@ -207,7 +205,9 @@ async def _signin_pages(h: Harness, monkeypatch: pytest.MonkeyPatch, nxt: str) -
     # canceled at the identity provider
     start = await h.http.get("/login", params={"next": nxt})
     state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
-    r = await h.http.get("/auth/callback", params={"state": state, "error": "access_denied"}, headers=NAVIGATE)
+    r = await h.http.get(
+        "/auth/callback", params={"state": state, "error": "access_denied"}, headers=NAVIGATE
+    )
     pages["canceled"] = _sign_in_links(r.text)
     h.http.cookies.clear()
     return pages
@@ -224,7 +224,9 @@ async def test_each_sign_in_page_link_keeps_the_whole_return_address(
     assert not wrong, wrong
 
 
-async def test_no_sign_in_page_link_leaves_the_site(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_no_sign_in_page_link_leaves_the_site(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     for bad in HOSTILE:
         pages = await _signin_pages(harness, monkeypatch, bad)
         for name, got in pages.items():

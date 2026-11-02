@@ -4464,6 +4464,14 @@ class DeckService:
                     # the member's link stopped working on this request: that, and how to link
                     # again, is what they need to hear, not why the read without it failed
                     raise DeckError(linked.kind, str(linked)) from exc
+                if exc.kind == "auth" and not (sub and self.db.get_link(sub)):
+                    # Archidekt shows this deck to signed-in readers only: the member's missing
+                    # link and where to make one, not Archidekt's raw sign-in sentence
+                    raise DeckError(
+                        "not_linked",
+                        "Archidekt shows this deck to signed-in readers only. "
+                        + refusals.not_linked(self.settings.public_url),
+                    ) from exc
                 raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
     # -- the deck sync's reads (sync.py) ----------------------------------------

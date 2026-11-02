@@ -20,6 +20,7 @@ import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import refusals
 from .archidekt import ArchidektError
 from .decklist import clean_text
 from .decks import DeckError, archidekt_wait
@@ -69,13 +70,28 @@ def linked(decks: DeckService, sub: str) -> bool:
     return decks.db.get_link(sub) is not None
 
 
+# A thread that Archidekt answers 404 for: its client's generic words are about a deck (QG-19)
+THREAD_NOT_FOUND = "That thread could not be found. It may have been deleted on Archidekt."
+
+
+def signed_in_only(public_url: str = "") -> str:
+    """A part of the forum Archidekt shows to signed-in readers only, read by a member with no
+    link: what to do and where, never Archidekt's raw "asked for a sign-in" sentence."""
+    return "Archidekt shows this part of the forum to signed-in readers only. " + refusals.not_linked(
+        public_url
+    )
+
+
 async def _anonymous(decks: DeckService, sub: str, fn: Any) -> Any:
     """``fn()`` as an anonymous reader, inside the member's Archidekt slot (counted against their
-    budget like any other read)."""
+    budget like any other read). Archidekt wanting a signed-in reader is the member's missing
+    link (``not_linked``), said with where to link one."""
     async with decks.archidekt_slot(sub):
         try:
             return await fn()
         except ArchidektError as exc:
+            if exc.kind == "auth":
+                raise DeckError("not_linked", signed_in_only(decks.settings.public_url)) from exc
             raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
 
@@ -238,10 +254,17 @@ async def thread(decks: DeckService, sub: str, thread_id: Any, *, page: int = 1)
 
     tid = _thread_id(thread_id)
     page = max(1, min(int(page or 1), MAX_PAGE))
-    if linked(decks, sub):
-        body = await decks._call(sub, lambda token, *_: decks.client.comment_thread(token, tid, page=page))
-    else:
-        body = await _anonymous(decks, sub, lambda: decks.client.comment_thread(None, tid, page=page))
+    try:
+        if linked(decks, sub):
+            body = await decks._call(
+                sub, lambda token, *_: decks.client.comment_thread(token, tid, page=page)
+            )
+        else:
+            body = await _anonymous(decks, sub, lambda: decks.client.comment_thread(None, tid, page=page))
+    except DeckError as exc:
+        if exc.kind == "not_found":
+            raise DeckError("not_found", THREAD_NOT_FOUND) from exc
+        raise
     kids = body.get("children")
     results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
     links = kids.get("links") if isinstance(kids, dict) else {}
