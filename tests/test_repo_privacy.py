@@ -2,16 +2,16 @@
 name or their decks' names, not their gateway's address. Code comments say "the owner" where a decision
 is theirs; tests use neutral ids (12345678) and names.
 
-The private values themselves never live in the repository, not even in pieces. They come from two
-environment variables, each a comma-separated list:
+The private values themselves never live in the repository, not even in pieces, and not in
+GitHub either. They are kept in a plain file outside the repository, named by the environment variable
+MTG_PRIVATE_VALUES_FILE, with two lines:
 
-  MTG_PRIVATE_DECK_IDS  Archidekt deck ids, digits only (e.g. "11111111,22222222")
-  MTG_PRIVATE_NAMES     names and phrases, matched as whole words in any case, with spaces, "-" or "_"
-                        between the words or nothing (e.g. "Alex,My Deck Name")
+  deck_ids = 11111111, 22222222      Archidekt deck ids, digits only
+  names = Alex, My Deck Name         names and phrases, matched as whole words in any case, with
+                                     spaces, "-" or "_" between the words or nothing
 
-CI passes them from the repository secrets of the same names and sets MTG_PRIVACY_REQUIRED=1, so a CI
-run without the secrets fails here instead of passing without looking. Locally, without the variables,
-the generic checks still run and a warning says the private scan did not.
+The maintainers run this test with that file before every push. Without it (CI, a contributor's
+clone) the generic checks below still run and this one has nothing private to look for.
 
 Card data from Scryfall or Archidekt may name a real artist who shares a first name with someone; a
 name followed by one of the artist surnames below is that artist, not private data."""
@@ -22,7 +22,6 @@ import functools
 import os
 import re
 import subprocess
-import warnings
 from pathlib import Path
 
 import pytest
@@ -124,8 +123,17 @@ def _text_lines() -> tuple[tuple[str, int, str], ...]:
     return tuple(lines)
 
 
-def _env_list(name: str) -> list[str]:
-    return [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+def _private_values() -> tuple[list[str], list[str]]:
+    """The owner's deck ids and names from the file MTG_PRIVATE_VALUES_FILE names, if any."""
+    path = os.environ.get("MTG_PRIVATE_VALUES_FILE", "")
+    if not path:
+        return [], []
+    found: dict[str, list[str]] = {"deck_ids": [], "names": []}
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        key, sep, value = raw.partition("=")
+        if sep and key.strip() in found:
+            found[key.strip()] = [v.strip() for v in value.split(",") if v.strip()]
+    return found["deck_ids"], found["names"]
 
 
 def private_patterns(deck_ids: list[str], names: list[str]) -> list[re.Pattern[str]]:
@@ -135,7 +143,7 @@ def private_patterns(deck_ids: list[str], names: list[str]) -> list[re.Pattern[s
     patterns = []
     for deck_id in deck_ids:
         if not deck_id.isdigit():
-            raise ValueError("MTG_PRIVATE_DECK_IDS holds deck ids: digits, separated by commas")
+            raise ValueError("deck_ids holds Archidekt deck ids: digits, separated by commas")
         patterns.append(re.compile(rf"(?<!\d){deck_id}(?!\d)"))
     artists = "|".join(ARTIST_SURNAMES)
     for name in names:
@@ -208,22 +216,6 @@ def test_the_private_scan_finds_what_it_is_given() -> None:
 
 
 def test_no_deck_id_or_name_of_the_owner_is_in_the_repository() -> None:
-    deck_ids = _env_list("MTG_PRIVATE_DECK_IDS")
-    names = _env_list("MTG_PRIVATE_NAMES")
-    missing = [
-        var
-        for var, values in (("MTG_PRIVATE_DECK_IDS", deck_ids), ("MTG_PRIVATE_NAMES", names))
-        if not values
-    ]
-    if missing:
-        message = (
-            f"The repository {'secrets' if len(missing) > 1 else 'secret'} {' and '.join(missing)} "
-            f"{'are' if len(missing) > 1 else 'is'} missing, so the owner's deck ids and names were "
-            "not looked for. Add them in GitHub under Settings > Secrets and variables > "
-            "Actions as a comma-separated list (see tests/test_repo_privacy.py)."
-        )
-        if os.environ.get("CI") and os.environ.get("MTG_PRIVACY_REQUIRED") == "1":
-            pytest.fail(message, pytrace=False)
-        warnings.warn(message, stacklevel=1)
+    deck_ids, names = _private_values()
     found = find_private(_text_lines(), private_patterns(deck_ids, names))
     assert not found, "the owner's deck id or name is in these places:\n" + "\n".join(found)

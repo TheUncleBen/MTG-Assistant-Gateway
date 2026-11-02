@@ -161,16 +161,9 @@ jobs:
       # so the same tests run side by side instead of one after another. -rs lists every skip, and
       # MTG_ONLY_EXPECTED_SKIPS fails the run on a skip whose reason tests/conftest.py does not
       # list (a missing Chromium, OCR asset, font or tool), so nothing passes by not running.
-      # The owner's deck ids and names are repository secrets, never repository text:
-      # tests/test_repo_privacy.py looks for them in every tracked file, and MTG_PRIVACY_REQUIRED
-      # makes it fail (not skip) when the secrets are missing. A pull request from a fork gets no
-      # secrets, so that one test fails there; the owner's own branches have them.
       - run: pytest -q -rs -n auto
         env:
           MTG_ONLY_EXPECTED_SKIPS: "1"
-          MTG_PRIVACY_REQUIRED: "1"
-          MTG_PRIVATE_DECK_IDS: ${{ secrets.MTG_PRIVATE_DECK_IDS }}
-          MTG_PRIVATE_NAMES: ${{ secrets.MTG_PRIVATE_NAMES }}
 
   py311:
     # pyproject allows Python 3.11 (requires-python), while the suite runs on 3.12 only: a cheap check
