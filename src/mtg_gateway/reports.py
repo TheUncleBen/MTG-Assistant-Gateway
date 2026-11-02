@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import functools
 import json
 import logging
 import re
@@ -773,7 +774,7 @@ class ReportService:
         if plays_solo:
             solo = (solo_start["text"], solo_start["name"], solo_start["seed"], solo_start["partner"])
         if launch is not None or solo is not None:
-            self._launch(rid, self._start_forge_parts(sub, rid, launch, solo))
+            self._launch(rid, lambda: self._start_forge_parts(sub, rid, launch, solo))
         return self.get(sub, rid)
 
     async def _research(
@@ -931,25 +932,31 @@ class ReportService:
         while self._background:
             await asyncio.gather(*list(self._background), return_exceptions=True)
 
-    def _launch(self, rid: str, work: Awaitable[None]) -> None:
+    def _launch(self, rid: str, start: Callable[[], Awaitable[None]]) -> None:
         """Hand report rid's Forge start to the background. Held until it ends (``_launching``), so
         the refresher knows the run is being handed over; one left "starting" with nobody handing
-        it over (a gateway restart in the middle) waits its turn again (``_refresh_forge_runs``)."""
+        it over (a gateway restart in the middle) waits its turn again (``_refresh_forge_runs``).
+        ``start`` makes the start's work when the background task runs it: a task stopped before
+        it ran once (the gateway shutting down in the same moment) then has nothing half-made to
+        drop, and the done callback (never a ``finally`` inside the task, which such a stop skips)
+        takes the report out of ``_launching``."""
 
         async def go() -> None:
             try:
-                await self._as_job(work)
+                await self._as_job(start())
             except Exception:  # never left unread: the run says what happened (see _start_forge)
                 logger.exception("handing report %s to Forge failed", rid)
                 self._start_broke(rid)
-            finally:
-                if self._launching.get(rid) is task:
-                    self._launching.pop(rid, None)
+
+        def done(_: asyncio.Task[None]) -> None:
+            self._forge_cancels.discard(task)
+            if self._launching.get(rid) is task:
+                self._launching.pop(rid, None)
 
         task = asyncio.get_running_loop().create_task(go())
         self._launching[rid] = task
         self._forge_cancels.add(task)
-        task.add_done_callback(self._forge_cancels.discard)
+        task.add_done_callback(done)
         self._ensure_forge_refresher()
 
     def _start_broke(self, rid: str) -> None:
@@ -1214,7 +1221,7 @@ class ReportService:
             if hold is not None:
                 self.release_pair(sub, hold)
         for side_id, launch in launches:
-            self._launch(side_id, self._launch_run(side_id, launch))
+            self._launch(side_id, functools.partial(self._launch_run, side_id, launch))
         detail = {"report_id": rid, "games": games, **({"with": pair[0]} if pair else {})}
         self.db.audit("report_more_games", sub=sub, client_id=current_client.get(), detail=detail)
         return self.get(sub, rid)
