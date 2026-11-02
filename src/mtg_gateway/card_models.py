@@ -437,6 +437,22 @@ class KeptModels:
         rows = self.db.get_card_models([key], sub)
         return any(str(dict(r).get("added_by", sub)) == sub for r in rows or [])
 
+    def own_name(self, sub: str, name: str) -> str | None:
+        """The name ``sub``'s own kept model for the card is saved under, or None when they keep
+        none. Raises StoreError when the store cannot be read (no answer says "none" unchecked)."""
+        if not self.available or not name.strip():
+            return None
+        try:
+            rows = self.db.get_card_models([card_key(name)], sub)
+        except Exception as exc:
+            logger.exception("reading a kept card model failed")
+            raise StoreError("the gateway could not read the saved model") from exc
+        for row in rows or []:
+            r = dict(row)
+            if str(r.get("added_by", sub)) == sub and r.get("name"):
+                return str(r["name"])
+        return None
+
     def remove(self, sub: str, name: str) -> bool:
         """Delete ``sub``'s kept model for the card (an admin removes any from the admin
         page). True when one was deleted, False when there

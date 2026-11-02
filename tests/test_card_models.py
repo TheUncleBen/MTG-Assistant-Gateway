@@ -661,10 +661,21 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
             and out["removed"] is False
             and out["message"] == "You have no saved model for this card."
         )
+        # one call removes nothing: it hands the member the confirm, and only their press removes
         out = structured(await call(h, token, "remove_card_model", {"card_name": "sol ring"}))
-        assert out == {"ok": True, "removed": True} and store.rows.keys() == {
-            ("someone-else", "arcane signet")
-        }
+        assert out["ok"] and out["removed"] is False, out
+        assert (sub, "sol ring") in store.rows  # still kept after the call
+        assert out["remove_url"] == f"{h.settings.public_url}/history/models?remove=Sol%20Ring", out
+        assert "Remove" in out["message"] and "nothing is removed" in out["message"].lower(), out
+        confirm = await b.http.get(out["remove_url"].removeprefix(h.settings.public_url), headers=NAV)
+        assert "Remove the card model of “Sol Ring”?" in confirm.text
+        assert "id='rm-mine-sol-ring-f'" in confirm.text and (sub, "sol ring") in store.rows
+        mm_csrf = re.search(r"name='csrf' value='([^']+)'", confirm.text).group(1)
+        pressed = await b.http.post(
+            "/history/models/remove", data={"csrf": mm_csrf, "back": "/history/models", "card": "Sol Ring"}
+        )
+        assert pressed.headers["location"] == "/history/models?models=removed"
+        assert store.rows.keys() == {("someone-else", "arcane signet")}
         gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
@@ -681,8 +692,14 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         shown = await b.http.get(failed.headers["location"], headers=NAV)
         assert "could not be removed. Try again later." in shown.text and "already removed" not in shown.text
         assert "<p class='notice error'>The card model could not be removed." in shown.text
+
+        # a store that can't be read is never reported as "no saved model"
+        def unreadable(keys: list[str], who: str) -> list[dict[str, Any]]:
+            raise OSError("disk")
+
+        monkeypatch.setattr(store, "get_card_models", unreadable)
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
-        assert out["ok"] is False and "could not remove" in out["message"]
+        assert out["ok"] is False and "could not read" in out["message"], out
         monkeypatch.undo()
         monkeypatch.setattr(card_models, "SWITCHED_ON", True)
         # switched off: the Remove route removes nothing and no notice shows
