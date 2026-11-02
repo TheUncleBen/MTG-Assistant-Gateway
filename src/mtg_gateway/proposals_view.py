@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 from . import ui
 from .clickguard import GUARD_SCRIPT
 from .db import RISK_REASON_KEY
-from .decks import ADMIN_CLIENT, BROWSER_CLIENT
+from .decks import ADMIN_CLIENT, BROWSER_CLIENT, UNDO_KINDS
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
 from .theme import BALANCED_TOOLS_CSS, esc
@@ -101,7 +101,6 @@ EXPIRE_SOON = 2 * 86400  # an "expires in" flag under two days left, as before
 # Changes that are not edits to one of the member's decks ("Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection", "lists")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck", "purge_removed")
-UNDO_KINDS = ("edit", "details", "restore", "categories")
 
 # Waiting list: tick box, the change with its facts, then Review and the ⋮ (one line at every
 # width, ui-rows); every other chip: the change with its facts, then Review and the ⋮.

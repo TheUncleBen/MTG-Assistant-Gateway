@@ -25,6 +25,7 @@
 .confirm p{margin:0;font-size:.8125rem}
 .res{margin:8px 0 0;padding-left:18px;font-size:.8125rem}
 .res li{margin:3px 0;overflow-wrap:anywhere}
+.res li .undo{margin-left:8px;vertical-align:middle}
 h2.dh{font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 4px}
 /* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads
    (as the proposal card) */
@@ -64,8 +65,9 @@ button.danger:disabled{color:var(--red)}
   // changes has Approve and Reject (confirm_proposal, with the per-proposal code in _meta);
   // another app's has its review link only. "Apply all N" applies this app's own together,
   // after a confirm that lists the order, each re-checked against the deck just before it is
-  // sent (confirm_waiting, with the set's code); get_apply_result follows a long run. Undo is on
-  // the result page, which needs the member's sign-in.
+  // sent (confirm_waiting, with the set's code); get_apply_result follows a long run. Each
+  // change applied has Undo on its result line (undo_proposal, with its own code; QOL-01); the
+  // result page has the details and an Undo of the whole set.
   var B = Bridge, el = B.el, $ = B.$;
   var APPROVALS_KEY = "mtg/approvals", SET_KEY = "mtg/approval_set";
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
@@ -260,7 +262,13 @@ button.danger:disabled{color:var(--red)}
   var polls = 0, told = false;
   function showResult(sc) {
     var rl = $("res-list"); rl.replaceChildren();
-    (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
+    (sc.applied || []).forEach(function (c) {
+      decided[c.proposal_id] = { text: "Applied", kind: "ok" };
+      var li = el("li", "", "Applied: " + label(c));
+      if (codes[c.proposal_id] && !undone[c.proposal_id]) { li.appendChild(document.createTextNode(" ")); li.appendChild(undoButton(c, li)); }
+      if (undone[c.proposal_id]) li.textContent = "Undone: " + label(c);
+      rl.appendChild(li);
+    });
     (sc.not_sent || []).forEach(function (c) { if (decided[c.proposal_id]) return; rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + whyAfter(c.why) : ""))); });
     (sc.failed || []).forEach(function (c) { decided[c.proposal_id] = { text: "Failed", kind: "err", why: c.why ? String(c.why) : "" }; rl.appendChild(el("li", "", "Failed: " + label(c) + (c.why ? ". " + c.why : ""))); });
     $("result").className = rl.children.length ? "" : "hidden";
@@ -295,6 +303,42 @@ button.danger:disabled{color:var(--red)}
         ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
         ((sc.not_sent || []).length ? " Not sent (still waiting or closed): " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
     }
+  }
+
+  // Undo of one applied change, on its result line: the deck goes back as it was before it, at
+  // once. Refused when more than that change would go back: the gateway's words, and the result
+  // page (Undo or see the details) as the way on.
+  var undone = {};
+  function undoButton(c, li) {
+    var b = el("button", "small", "Undo"); b.type = "button"; b.className = "small undo";
+    b.onclick = function () {
+      if (busy) return;
+      busy = true; b.disabled = true;
+      B.setStatus("Undoing…", "");
+      B.request("tools/call", { name: "undo_proposal", arguments: { proposal_id: c.proposal_id, approval: codes[c.proposal_id] } })
+        .then(function (res) {
+          busy = false;
+          var sc = (res && res.structuredContent) || {};
+          if (sc.ok === false || (res && res.isError) || !sc.undone) {
+            var msg = String(sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.");
+            b.remove();
+            B.setStatus(msg, "err");
+            B.tellModel("The user pressed Undo for proposal " + c.proposal_id + " on the waiting changes card, but the gateway answered: " + msg);
+            return;
+          }
+          undone[c.proposal_id] = true;
+          decided[c.proposal_id] = { text: "Undone", kind: "ok" };
+          li.textContent = "Undone: " + label(c);
+          B.setStatus(String(sc.message || "Undone. The deck is back as it was before that change."), "ok");
+          draw();
+          B.tellModel("The user pressed Undo on the waiting changes card: proposal " + c.proposal_id + " was undone; the deck is back as it was before that change.");
+        })
+        .catch(function () {
+          busy = false; b.disabled = false;
+          B.setStatus("Could not reach the gateway, so this card can't tell whether the change was undone. Check the Proposals page.", "err");
+        });
+    };
+    return b;
   }
 
   function decide(x, decision) {

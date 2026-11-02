@@ -34,6 +34,7 @@ from .decks import (
     APPLY_WAIT_SECONDS,
     MAX_CHANGES,
     REJECT_REASON_MAX,
+    UNDO_KINDS,
     DeckError,
     _clean_deck_id,
     archidekt_wait,
@@ -1336,6 +1337,80 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 except DeckError:
                     pass
             return _card_result(out, None)
+
+    UNDONE = "Undone. The deck is back as it was before that change."
+
+    @server.tool(
+        name="undo_proposal",
+        title="Undo an applied proposal from its card",
+        description=("For the proposal card's Undo button only, never the assistant."),
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        meta=dict(CONFIRM_TOOL_META),
+    )
+    async def undo_proposal(proposal_id: str, approval: str) -> CallToolResult:
+        """The card's Undo of the change it applied (0.7.46 re-audit QG-18, QOL-01): the review
+        page's Undo with the card's code in place of the page's form, applied at once (a restore
+        of the snapshot taken before that apply; it can itself be undone). Refused when more
+        than that change would go back (a later change to the deck, or an edit made on Archidekt
+        since): the review page shows what goes back, and its Undo asks first."""
+        try:
+            sub = _sub()
+            review_url = f"{s.public_url}/proposals/{proposal_id}"
+            if not s.apply_in_chat:
+                p = state.decks.describe(sub, proposal_id)
+                raise DeckError(
+                    "in_chat_disabled",
+                    "This gateway doesn't apply changes from the chat card. Use the Proposals page.",
+                    review_url=p["review_url"],
+                    state=p["state"],
+                )
+            row = state.decks.check_approval(sub, proposal_id, approval)
+            snapshot_id = str(row.get("snapshot_id") or "")
+            if row.get("state") != "applied" or row.get("kind") not in UNDO_KINDS or not snapshot_id:
+                raise DeckError(
+                    "invalid",
+                    "This change can't be undone from here. The review page says what can be done.",
+                    review_url=review_url,
+                    state=row.get("state"),
+                )
+            look = await state.decks.undo_preview(
+                sub, snapshot_id, applied=[proposal_id], after_at=int(row.get("applied_at") or 0)
+            )
+            if look["nothing"]:
+                raise DeckError(
+                    "nothing_to_undo",
+                    "Nothing to undo: the deck is already as it was before that change.",
+                    review_url=review_url,
+                    state=row["state"],
+                )
+            if look["later"] or look["outside"]:
+                raise DeckError(
+                    "more_would_go_back",
+                    f"{look['warning']} Undo on the review page, which shows what goes back.",
+                    review_url=review_url,
+                    state=row["state"],
+                )
+            done = await state.decks.undo(
+                sub, snapshot_id, seen=look["fingerprint"], applied=[proposal_id], via="app"
+            )
+            undone = done.get("state") == "applied"
+            return _card_result(
+                {
+                    "ok": True,
+                    "undone": undone,
+                    "undo_of": proposal_id,
+                    "message": UNDONE if undone else str(done.get("next_step") or ""),
+                    **done,
+                },
+                None,
+            )
+        except DeckError as exc:
+            return _card_result(_tool_error(exc), None)
 
     def _scan_session(sub: str, ref: str) -> dict[str, Any]:
         if state.scan is None:

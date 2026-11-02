@@ -859,3 +859,123 @@ def test_the_member_only_note_says_what_each_kind_does() -> None:
                     assert "deletes the deck" not in text, (kind, text)
         finally:
             browser.close()
+
+
+def test_undo_on_the_card_calls_undo_proposal_with_the_code_and_says_undone() -> None:
+    """Undo on the card itself (0.7.46 re-audit QG-18, QOL-01): after the card's Apply, an Undo
+    button (not a link to the review page) calls undo_proposal with the same code; the card then
+    says the deck is back and tells the model. A refusal (more would go back) shows the gateway's
+    words and the way to the review page's Undo."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            applied = {
+                **PROPOSAL,
+                "state": "applied",
+                "snapshot_id": "s-1",
+                "result": {"deck_url": "https://archidekt.com/decks/42"},
+            }
+            card = _open(
+                page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "code-123"}}, applied
+            )
+            card.locator("#approve:enabled").wait_for(timeout=10_000)
+            card.locator("#approve").click()
+            card.locator("#status.ok").wait_for(timeout=5_000)
+            undo = card.locator("#actions button", has_text="Undo")
+            assert undo.count() == 1 and undo.get_attribute("id") == "undo"
+            assert card.locator("a.link", has_text="Undo on the review page").count() == 0
+            box = undo.bounding_box()
+            assert box and box["height"] >= 44, box
+            # refused: the gateway's words, and the review page's Undo as the way on
+            page.evaluate(
+                "(r) => { window.confirmReply = r; }",
+                {
+                    "ok": False,
+                    "error": "more_would_go_back",
+                    "message": "This also reverts 1 later change to this deck. Undo on the review page, which shows what goes back.",
+                    "review_url": "https://mtg.test/proposals/p-1",
+                    "state": "applied",
+                },
+            )
+            undo.click()
+            card.locator("#status.err").wait_for(timeout=5_000)
+            assert card.locator("#status").inner_text().startswith("This also reverts 1 later change")
+            calls = [m for m in _calls(page, "tools/call") if m["params"]["name"] == "undo_proposal"]
+            assert calls and calls[-1]["params"]["arguments"] == {
+                "proposal_id": "p-1",
+                "approval": "code-123",
+            }
+            assert card.locator("a.link", has_text="Undo on the review page").count() == 1
+            assert card.locator("#actions button", has_text="Undo").count() == 0
+            # drawn again as applied: Undo is offered once more, and this time it goes through
+            page.evaluate(
+                "(r) => { window.confirmReply = r; }",
+                {
+                    "ok": True,
+                    "undone": True,
+                    "undo_of": "p-1",
+                    "proposal_id": "p-2",
+                    "kind": "restore",
+                    "state": "applied",
+                    "message": "Undone. The deck is back as it was before that change.",
+                },
+            )
+            card.locator("a.link", has_text="Undo on the review page").click()
+            page.wait_for_function("() => window.log.some(m => m.method === 'ui/open-link')", timeout=5_000)
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+def test_undo_on_the_card_goes_through_and_tells_the_model() -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            applied = {**PROPOSAL, "state": "applied", "snapshot_id": "s-1", "result": None}
+            card = _open(
+                page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "code-123"}}, applied
+            )
+            card.locator("#approve:enabled").wait_for(timeout=10_000)
+            card.locator("#approve").click()
+            card.locator("#undo").wait_for(timeout=5_000)
+            page.evaluate(
+                "(r) => { window.confirmReply = r; }",
+                {
+                    "ok": True,
+                    "undone": True,
+                    "undo_of": "p-1",
+                    "proposal_id": "p-2",
+                    "kind": "restore",
+                    "state": "applied",
+                    "message": "Undone. The deck is back as it was before that change.",
+                },
+            )
+            card.locator("#undo").click()
+            page.wait_for_function(
+                "() => window.log.some(m => m.params && m.params.name === 'undo_proposal')", timeout=5_000
+            )
+            card.locator("#status.ok", has_text="Undone.").wait_for(timeout=5_000)
+            assert (
+                card.locator("#status").inner_text()
+                == "Undone. The deck is back as it was before that change."
+            )
+            assert card.locator("#undo").count() == 0  # nothing left to undo from here
+            assert card.locator("#state").inner_text().lower() == "undone"
+            ctx = _calls(page, "ui/update-model-context")
+            assert any("pressed Undo" in c["params"]["content"][0]["text"] for c in ctx), ctx
+            assert card.locator(OPEN_CAP, has_text=OPEN_WORDS).count() == 1
+        finally:
+            browser.close()
+    assert not errors, errors

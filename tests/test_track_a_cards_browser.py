@@ -252,11 +252,23 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
             assert card.locator("#status:focus").count() == 1
             assert card.locator("#status").inner_text() == "Applied 1. 1 not sent."
             assert card.locator("#res-list li").all_inner_texts() == [
-                "Applied: #1 +1 Opt",
+                "Applied: #1 +1 Opt Undo",  # Undo on the line itself (QOL-01)
                 "Not sent: #2 -1 Island. Needs a look.",
             ]
             assert card.locator("#row-p1 .done").inner_text() == "Applied"
             assert card.locator("#actions a.link", has_text="Undo or see the details").count() == 1
+            # Undo of that one change: undo_proposal with its own code; the line says so
+            page.evaluate(
+                "(r) => { window.replies.undo_proposal = r; }",
+                {"ok": True, "undone": True, "undo_of": "p1", "proposal_id": "p9", "state": "applied"},
+            )
+            undo = card.locator("#res-list li button.undo")
+            assert undo.count() == 1 and undo.bounding_box()["height"] >= 44
+            undo.click()
+            card.locator("#status.ok", has_text="Undone.").wait_for()
+            assert _tool_calls(page, "undo_proposal") == [{"proposal_id": "p1", "approval": "code-1"}]
+            assert card.locator("#res-list li").all_inner_texts()[0] == "Undone: #1 +1 Opt"
+            assert card.locator("#row-p1 .done").inner_text() == "Undone"
             _shot(page, "waiting-card-result-390")
         finally:
             browser.close()
@@ -524,8 +536,8 @@ def test_a_change_decided_on_the_waiting_card_is_not_reported_as_not_sent() -> N
             card.locator("#go:not([disabled])").click()
             card.locator("#result:not(.hidden)").wait_for()
             assert card.locator("#res-list li").all_inner_texts() == [
-                "Applied: #2 +1 Ponder",
-                "Applied: #4 +1 Brainstorm",
+                "Applied: #2 +1 Ponder Undo",
+                "Applied: #4 +1 Brainstorm Undo",
             ]
         finally:
             browser.close()

@@ -308,12 +308,26 @@ def test_the_list_cards_menu_opens_every_way_and_its_items_work(server: Server, 
         expect(page.locator("#picker .sheet[role=dialog]")).to_be_visible()
         page.keyboard.press("Escape")
         expect(page.locator("#picker")).to_have_count(0)
-        # Remove takes the row off the list
+        # Remove takes the row off the list at once; the toast offers Undo (QOL-01, re-audit
+        # QG-24), which puts the row back where it was, with its copies
         rows.nth(1).locator(".kebab").click()
         menu.get_by_role("menuitem", name="Remove").click()
         expect(rows).to_have_count(1)
         expect(page.locator("#list-badge")).to_have_text("3")
         assert page.evaluate("() => window.__scan.state.items.map((i) => i.name)") == ["Sol Ring"]
+        toast = page.locator(".toast.cards-toast")
+        expect(toast).to_contain_text("Removed Cultivate.")
+        undo = toast.locator("button", has_text="Undo")
+        box = undo.bounding_box()
+        assert box and (box["height"] >= 44 or not touch), box
+        undo.click()
+        expect(rows).to_have_count(2)
+        expect(page.locator("#list-badge")).to_have_text("4")
+        assert page.evaluate("() => window.__scan.state.items.map((i) => [i.name, i.quantity])") == [
+            ["Sol Ring", 3],
+            ["Cultivate", 1],
+        ]
+        expect(page.locator(".toast.cards-toast")).to_contain_text("Cultivate is back in the list.")
         assert errors == []
         browser.close()
 

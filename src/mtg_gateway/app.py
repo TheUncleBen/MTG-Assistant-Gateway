@@ -265,6 +265,7 @@ WRITE_TOOLS = frozenset(
         "get_registration_pdf",
         "apply_proposal",
         "confirm_proposal",
+        "undo_proposal",  # the card's Undo of what it applied (0.7.46)
         "propose_rest",  # the card's "Propose the rest" (0.7.46)
         "reject_proposal",
         # 0.7.29: tidying the waiting changes and "Apply all" on a card

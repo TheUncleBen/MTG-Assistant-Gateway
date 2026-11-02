@@ -409,6 +409,8 @@ def _made_by_another_app(row: dict[str, Any], client: str | None) -> bool:
 
 
 # Undo refused: the deck changed after its preview was shown.
+# The proposal kinds an apply of which the member can undo (the review page's Undo, the card's)
+UNDO_KINDS = ("edit", "details", "restore", "categories")
 UNDO_CHANGED = (
     "The deck changed after you opened this Undo, so nothing was sent. Open the change again and "
     "press Undo to see what it would put back now."
@@ -6647,7 +6649,13 @@ class DeckService:
         }
 
     async def undo(
-        self, sub: str, snapshot_id: str, *, seen: str | None = None, applied: list[str] | None = None
+        self,
+        sub: str,
+        snapshot_id: str,
+        *,
+        seen: str | None = None,
+        applied: list[str] | None = None,
+        via: str = "browser",
     ) -> dict[str, Any]:
         """The member's "Undo": a restore of the snapshot, applied at once by their own press (the
         restore is an ordinary proposal, so it can itself be undone). ``seen`` is the deck's
@@ -6675,7 +6683,7 @@ class DeckService:
         )
         made = await self.propose_restore(sub, snapshot_id)
         return await self.apply(
-            sub, made["proposal_id"], via="browser", archidekt_backup=False if one_click else None
+            sub, made["proposal_id"], via=via, archidekt_backup=False if one_click else None
         )
 
     async def aclose(self, grace: float = SHUTDOWN_GRACE_SECONDS) -> None:
