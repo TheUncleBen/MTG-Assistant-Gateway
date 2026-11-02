@@ -664,9 +664,7 @@ def test_the_card_sent_to_the_chat_leaves_out_the_sources_comments_and_indentati
     from mtg_gateway.cards import card_html as any_card
 
     html = card_html()
-    # 85,318 bytes before the comments and indentation were left out; 0.7.46's Undo on the card
-    # (its button, its call and its answers) added about 2.2 KB to the 68,000 this was held to
-    assert len(html.encode()) < 71_000, len(html.encode())
+    assert len(html.encode()) < 68_000, len(html.encode())  # 85,318 bytes before
     lines = html.split("\n")
     assert not [x for x in lines if x.strip().startswith(("//", "/*"))]
     assert not [x for x in lines if x != x.strip() or not x.strip()][:-1]
