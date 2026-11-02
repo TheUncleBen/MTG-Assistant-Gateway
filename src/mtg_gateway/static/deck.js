@@ -79,7 +79,10 @@
   }
 
   // -- forms that apply on change ----------------------------------------------------------
+  // A form marked data-live (My decks) applies its own changes in place (decks.js): sending it as
+  // well would read the list twice for one change.
   $$("#viewform, #listform").forEach(function (form) {
+    if (form.hasAttribute("data-live")) return;
     $$("select", form).forEach(function (sel) {
       sel.addEventListener("change", function () { form.requestSubmit ? form.requestSubmit() : form.submit(); });
     });

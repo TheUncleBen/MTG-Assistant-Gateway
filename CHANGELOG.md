@@ -550,6 +550,8 @@ name per thing.
   returns with no tap. Account › This app says whether sign-in comes back by itself. The “Open the
   MTG Assistant Gateway app” page stays as the last way.
 - A page no longer waits behind a slow Archidekt request from the deck check or an assistant.
+- Changing a drop-down on My decks (sort or format) reads the deck list once, in place,
+  instead of also sending the form, which read the list twice.
 - A new deck reaches Archidekt 50 cards to a request instead of one request per card. Edits to it
   wait until it is made.
 - A change to one row of a card that has several (for example a card both in the deck and in a
