@@ -214,3 +214,39 @@ def test_continue_goes_to_the_provider_and_cancel_ends_the_leg(idp_server) -> No
         finally:
             browser.close()
 
+
+def test_the_return_page_keeps_no_code_in_storage_and_tries_once_per_code(server: Server) -> None:
+    """Security review A-05: the page remembered its one try under a key made of its whole link, so
+    the one-time code sat in the browser's storage. Now one fixed key holds a hash of the code:
+    a reload of the same page never tries again, a new code in the same tab tries once."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 800})
+            tried: list[str] = []
+            page.on("request", lambda r: tried.append(r.url) if r.url.startswith("intent:") else None)
+            codes = []
+            for n in (1, 2):
+                code = server.app.state.gateway.app_signins.issue(
+                    "user-1", challenge_of("v" * 43), "/decks", fresh=True
+                )
+                codes.append(code)
+                for _ in range(2):  # the page, then a reload of it
+                    page.goto(f"{server.base}{RETURN_PATH}?code={code}", wait_until="commit")
+                    page.locator("footer.site").wait_for(state="attached", timeout=10_000)
+                    page.wait_for_function(
+                        "() => { try { return sessionStorage.getItem('mtg-app-return') !== null; }"
+                        " catch (e) { return false; } }",
+                        timeout=10_000,
+                    )
+                stored = page.evaluate(
+                    "() => Object.keys(sessionStorage).map(k => k + '=' + sessionStorage.getItem(k))"
+                )
+                assert len(stored) == 1 and stored[0].startswith("mtg-app-return="), stored
+                assert not [c for c in codes if any(c in s for s in stored)], stored
+                assert len(tried) == n, tried  # once for this code, reload or not
+        finally:
+            browser.close()

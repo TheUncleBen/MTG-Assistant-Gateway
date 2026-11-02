@@ -303,7 +303,10 @@ def return_body(code: str, package: str, *, auto: bool = False) -> str:
     where the browser allows that without a tap. The script runs once the page has loaded, so the
     small print is drawn before it leaves."""
     url = html.escape(intent_url(code, package))
-    flag = " data-auto='1'" if auto else ""
+    # data-once: what app-signin.js remembers, so it tries once per code without keeping the code
+    # itself in the browser's storage (a hash of it, under one fixed key)
+    once = hashlib.sha256(code.encode("ascii")).hexdigest()[:32]
+    flag = f" data-auto='1' data-once='{once}'" if auto else ""
     button = (
         f"<a class='btn btn-primary' id='app-return' href='{url}'{flag}>"
         "Open the MTG Assistant Gateway app</a>"
