@@ -19,6 +19,10 @@
    words with no code of its own. MtgFetch.problem(x, what) gives the text and the Sign in
    button for any of those answers or errors, for a toast, a strip or a note.
 
+   A script's own fetch (not through MtgFetch) gets the same words as a page-wide note: signed
+   out, with Sign in back to this page, for any request; no connection for a change. See
+   "signed out or no connection" below.
+
    The gateway busy (dbwait.py: a request waited the limit for the database's write lock and
    was turned away with a 503 marked X-MTG-Busy, nothing changed): every request a page's script
    sends, through MtgFetch or a plain fetch (window.fetch is this script's from here on, loaded
@@ -75,6 +79,8 @@
     if (o.signal) init.signal = o.signal;
     if (o.cache) init.cache = o.cache;
     if (o.keepalive) init.keepalive = true;
+    // this script's own request: its caller shows the words, so the page-wide note stays away
+    init.mtgShared = true;
     return fetch(href, init);
   }
   /* The gateway's JSON, or a rejection: err.signedOut, err.noConnection, or the answer's own
@@ -242,10 +248,97 @@
       park(entry, r);
     });
   }
+  // -- signed out or no connection, for a script's own fetch ------------------------------------
+  /* A script that sends a plain fetch (not through MtgFetch) and reads only "did it work" used to
+     say its own "Network error" with no way back in. Every same-origin request a page's script
+     sends is watched here instead: a signed-out answer (a 401, a redirect not followed, or one
+     followed to the sign-in page) puts up one note, "You're signed out, so nothing was changed."
+     with Sign in back to this page; a change that got no answer at all puts up "No connection;
+     nothing was changed." A request that failed for want of an answer is told apart from a
+     signed-out one that the browser could not follow to the sign-in provider (another site) by
+     one small look at the gateway's /api/v1/me. The script's own promise is answered as before.
+     MtgFetch's own requests (marked mtgShared) are left to their caller, which says the same. */
+  var sessionNote = null;
+  var offlineNote = null;
+  var probing = null;
+  function sameOrigin(input) {
+    try {
+      var u = new URL(typeof input === "string" ? input : (input && input.url) || "", location.href);
+      return u.origin === location.origin;
+    } catch (e) { return false; }
+  }
+  function methodOf(input, init) {
+    var m = (init && init.method) || (input && typeof input === "object" && input.method) || "GET";
+    return String(m).toUpperCase();
+  }
+  function landedOnSignIn(r) {
+    if (!r || !r.redirected || !r.url) return false;
+    try {
+      var path = new URL(r.url).pathname;
+      return path === "/login" || path === "/signed-out" || path === "/logout";
+    } catch (e) { return false; }
+  }
+  function note(cls, text, actions, onClose) {
+    var n = el("div", "toast cards-toast error " + cls);
+    n.setAttribute("role", "alert");
+    n.appendChild(el("span", "msg", text));
+    actions.forEach(function (a) { n.appendChild(a); });
+    var x = el("button", "close icon-only", "×");
+    x.type = "button";
+    x.setAttribute("aria-label", "Dismiss");
+    x.addEventListener("click", onClose);
+    n.appendChild(x);
+    (document.body || document.documentElement).appendChild(n);
+    return n;
+  }
+  function hideOffline() {
+    if (offlineNote) offlineNote.remove();
+    offlineNote = null;
+  }
+  function showSignedOut() {
+    hideOffline();
+    if (sessionNote) return;
+    sessionNote = note("session-toast", SIGNED_OUT, [signInLink("btn btn-primary")], function () {
+      if (sessionNote) sessionNote.remove();
+      sessionNote = null;
+    });
+  }
+  function showOffline() {
+    if (sessionNote || offlineNote) return;
+    offlineNote = note("offline-toast", NO_CONNECTION, [], hideOffline);
+  }
+  window.addEventListener("online", hideOffline);
+  // a change that got no answer: signed out (the sign-in provider's page could not be read) or
+  // no connection, by one look at the gateway; a read that got none says nothing (a poll, a
+  // lookup: its own script stays quiet or says so)
+  function noAnswer(write) {
+    if (!probing) {
+      probing = nativeFetch.call(window, "/api/v1/me", {
+        credentials: "same-origin", redirect: "manual", cache: "no-store", headers: { Accept: "application/json" }
+      }).then(function (r) { return isSignedOut(r) ? "signed_out" : "answered"; }, function () { return "offline"; });
+      probing.then(function () { probing = null; }, function () { probing = null; });
+    }
+    probing.then(function (seen) {
+      if (seen === "signed_out") showSignedOut();
+      else if (seen === "offline" && write) showOffline();
+    });
+  }
+  function watch(input, init, p) {
+    if ((init && init.mtgShared) || !sameOrigin(input)) return p;
+    var write = ["GET", "HEAD"].indexOf(methodOf(input, init)) < 0;
+    return p.then(function (r) {
+      if (isSignedOut(r) || landedOnSignIn(r)) showSignedOut();
+      else if (r && r.status < 500) hideOffline();
+      return r;
+    }, function (err) {
+      if (!(err && err.name === "AbortError")) noAnswer(write);
+      throw err;
+    });
+  }
   function busyFetch(input, init) {
     var again = function () { return nativeFetch.call(window, input, init); };
     var signal = init && init.signal;
-    return again().then(function (r) { return isBusy(r) ? hold(again, signal, r) : r; });
+    return watch(input, init, again().then(function (r) { return isBusy(r) ? hold(again, signal, r) : r; }));
   }
   if (typeof nativeFetch === "function") window.fetch = busyFetch;
 
