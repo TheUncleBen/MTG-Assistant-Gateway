@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 import pytest
 
@@ -75,6 +76,29 @@ def _frame_and_body(page) -> tuple[float, float]:
     frame = page.evaluate("() => document.getElementById('f').getBoundingClientRect().height")
     body = page.frames[1].evaluate("() => document.body.getBoundingClientRect().height")
     return frame, min(1400, body)
+
+
+def _frame_follows(page, timeout: float = 5.0) -> tuple[float, float]:
+    """The frame's height once it is the card's own (within 2 px): the card reports its size to
+    the host a moment after it drew (one report for a burst of changes, _bridge.js), so a look
+    the instant the list is in the page can still see the frame as it was (CI, a slow runner
+    with two workers, saw 10 px against a 1400 px card). Waits on that, with a deadline."""
+    deadline = time.monotonic() + timeout
+    while True:
+        frame, body = _frame_and_body(page)
+        if abs(frame - body) <= 2:
+            return frame, body
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"the frame never followed the card: frame {frame}, card {body}")
+        page.wait_for_timeout(20)
+
+
+def _height(card, selector: str) -> float:
+    """A control's height in the card's own CSS px (its getBoundingClientRect). Playwright's
+    bounding_box is the host page's content quads, float32 scaled by the screen's pixel ratio:
+    at 2.625 a 44 px box reads 43.99999237 or 44.0000076 with the frame's y offset (the caption
+    wrapping on the runner's fonts moves it), which is noise, not a smaller target."""
+    return card.locator(selector).first.evaluate("e => e.getBoundingClientRect().height")
 
 
 def _no_inner_scroll(page) -> list[str]:
@@ -201,7 +225,7 @@ def test_printings_card_shows_a_page_of_even_tiles_and_grows_with_show_more_not_
                     # Show more says what is left and adds a page; the frame follows
                     more = card.locator("#more")
                     assert re.search(r"Show \d+ more", more.inner_text()) and "70 left" in more.inner_text()
-                    assert more.bounding_box()["height"] >= 44
+                    assert _height(card, "#more") >= 44
                     more.click()
                     page.wait_for_timeout(300)
                     assert len(_tiles(card)) == 2 * len(tiles)
@@ -256,7 +280,7 @@ def test_printings_card_has_a_bigger_pictures_switch_and_a_readable_detail_witho
                 assert expand.is_visible() == (host == "claude"), host
                 big = card.locator("#bigger")
                 assert big.is_visible() and big.inner_text() == "Bigger pictures"
-                assert big.bounding_box()["height"] >= 44
+                assert _height(card, "#bigger") >= 44
                 card_w = card.locator("#card").bounding_box()["width"]
                 before = _tiles(card)
                 assert len({round(t["x"]) for t in before}) == 2
@@ -282,8 +306,8 @@ def test_printings_card_has_a_bigger_pictures_switch_and_a_readable_detail_witho
                 assert pic and pic["width"] >= card_w * 0.8, (host, pic, card_w)
                 card.locator("#dtext", has_text="deals 3 damage").wait_for(timeout=5_000)
                 assert "<b>not markup</b>" in card.locator("#dtext").inner_text()
-                assert card.locator("#use").bounding_box()["height"] >= 44
-                assert card.locator("#back").bounding_box()["height"] >= 44
+                assert _height(card, "#use") >= 44
+                assert _height(card, "#back") >= 44
                 assert _no_inner_scroll(page) == []
                 _shot(page, f"audit-printings-detail-{host}-412")
                 page.wait_for_timeout(200)
@@ -373,7 +397,7 @@ def test_deck_card_ellipsises_a_long_category_header_and_keeps_its_count() -> No
             assert nb["x"] + nb["width"] <= cb["x"] + 1 and cb["x"] + cb["width"] <= gb["x"] + gb["width"] + 1
             assert name.evaluate("e => getComputedStyle(e).textOverflow") == "ellipsis"
             assert name.evaluate("e => e.scrollWidth > e.clientWidth")  # clipped with an ellipsis, not cut
-            assert gb["height"] >= 44 and card.locator("#viewbtn").bounding_box()["height"] >= 44
+            assert gb["height"] >= 44 and _height(card, "#viewbtn") >= 44
             assert not _sideways(page) and _no_inner_scroll(page) == []
             _shot(page, "audit-deck-360-light")
             card.locator("#viewbtn").click()
@@ -408,8 +432,7 @@ def test_deck_card_shows_a_page_of_rows_then_show_all() -> None:
             assert card.locator(".row.cardrow").count() == 30
             assert "Show all 62" in card.locator("#more").inner_text()
             assert _no_inner_scroll(page) == []
-            frame, body = _frame_and_body(page)
-            assert abs(frame - body) <= 2
+            _frame_follows(page)
             card.locator("#more").click()
             card.locator(".row.cardrow").nth(61).wait_for()
             assert card.locator("#more").count() == 0
@@ -556,8 +579,7 @@ def test_cards_fit_every_width_light_and_dark_on_both_hosts() -> None:
                         page.wait_for_timeout(250)
                         assert not _sideways(page), (host, theme, width)
                         assert _no_inner_scroll(page) == [], (host, theme, width)
-                        frame, body = _frame_and_body(page)
-                        assert abs(frame - body) <= 2, (host, theme, width, frame, body)
+                        _frame_follows(page)
                         if width == 1280:
                             assert len({round(t["x"]) for t in _tiles(card)}) <= 3
                         card = _open(page, "picker-card", picker, width=width, theme=theme, host_extra=extra)
