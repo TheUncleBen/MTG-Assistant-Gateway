@@ -54,6 +54,10 @@ MAX_SCRYFALL_PREFIX_LOOKUPS = 2
 # lookups, four seconds at the production pace (whole-application audit, row 5). An hour, so a
 # card Scryfall adds (a new set's previews) is found the same day.
 NOT_FOUND_TTL = 3600
+# A name the batched read did not place waits this long for the card-name catalog when it has not
+# loaded yet (the first moments after a start): one request, instead of a paced walk of
+# autocompletes for each name (0.7.46 re-audit: six unknown names cost 25 requests and 12 s).
+CATALOG_WAIT_SECONDS = 8.0
 MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
@@ -635,6 +639,12 @@ class ScanService:
                 checks[i] = card
                 continue
             results[i] = Resolution(inp, status, summarize(card))
+
+        # 1b. Names left to place need the card-name catalog for their suggestions and recovery: when
+        # it has not loaded yet, its one request is waited for (within the call's deadline) rather
+        # than walking paced autocompletes name by name.
+        if any(r is None and inp.name for r, inp in zip(results, inputs, strict=True)):
+            await self.names.ready(min(CATALOG_WAIT_SECONDS, max(0.0, budget.deadline - time.monotonic())))
 
         # 2. Everything else: fuzzy, then suggestions. Recovery lookups share one budget per call.
         # A 429 from Scryfall pauses all lookups for its Retry-After window. Names already
