@@ -506,11 +506,24 @@ class ReportService:
         row = self.db.get_proposal(str(proposal_id or "").strip(), sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
-        if row.get("state") != "pending" or (row.get("expires_at") or 0) < time.time():
-            raise DeckError("invalid", PROPOSAL_NOT_WAITING)
-        deck, stats, now = await self.proposal_deck(sub, row)
+        # A proposal no longer waiting is tested too, read-only (0.7.46 re-audit, F1-d): an applied
+        # one as it was applied (the deck from just before it, which the apply kept as a snapshot,
+        # plus its changes), a closed one as what it would make of the deck as it is now. One whose
+        # apply is under way or did not finish can't be: the deck may hold part of it.
+        state = str(row.get("state") or "")
+        waiting = state == "pending" and (row.get("expires_at") or 0) >= time.time()
+        if state in ("applying", "failed"):
+            raise DeckError("invalid", PROPOSAL_APPLYING if state == "applying" else PROPOSAL_PART_APPLIED)
+        if state == "applied":
+            deck, stats, now = await self.applied_deck(sub, row)
+            suffix = " (applied)"
+        else:
+            deck, stats, now = await self.proposal_deck(sub, row)
+            suffix = "" if waiting else " (not applied)"
         no = row.get("board_no")
-        label = (f"Proposal #{no}" if no else "Proposal") + f" for “{row.get('deck_name') or deck.name}”"
+        label = (
+            (f"Proposal #{no}" if no else "Proposal") + f" for “{row.get('deck_name') or deck.name}”" + suffix
+        )
         source = {
             "kind": "proposal",
             "label": label,
@@ -529,6 +542,24 @@ class ReportService:
             on_stored=on_stored,
             paired_with=now if simulate else None,
         )
+
+    async def applied_deck(
+        self, sub: str, row: dict[str, Any]
+    ) -> tuple[Deck, dict[str, Any] | None, Deck | None]:
+        """An applied proposal's resulting deck, as ``proposal_deck``: a deck edit on the deck as it
+        stood just before the apply (the snapshot the apply kept; refused when it is gone), or a
+        new deck's list. Nothing is read from Archidekt."""
+        if (row.get("kind") or "edit") != "edit":
+            return await self.proposal_deck(sub, row)
+        from .archidekt import parse_deck
+        from .decks import parse_changes
+
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        snap = self.db.get_snapshot(str(result.get("snapshot_id") or ""), sub) if result else None
+        if not snap or not isinstance(snap.get("deck"), dict):
+            raise DeckError("invalid", PROPOSAL_APPLIED_GONE)
+        before = parse_deck(snap["deck"])
+        return deck_after(before, parse_changes(row["changes"], row_flags=True)), None, before
 
     async def proposal_deck(
         self, sub: str, row: dict[str, Any]
@@ -2931,9 +2962,16 @@ class ReportService:
 # get_deck_report view "forge": the parts of a Forge section that say how the games went
 FORGE_RESULT_KEYS = ("state", "result", "opponent_choice", "seed", "games_requested", "games")
 
-PROPOSAL_NOT_WAITING = (
-    "That proposal is no longer waiting, so its resulting deck can't be tested. Run the report on "
-    "the deck itself."
+PROPOSAL_APPLYING = (
+    "That proposal is being applied now, so its resulting deck can't be tested yet. Test it once it is done."
+)
+PROPOSAL_PART_APPLIED = (
+    "That proposal's apply did not finish, so the deck may hold part of it and its resulting deck "
+    "can't be worked out. Run the report on the deck itself."
+)
+PROPOSAL_APPLIED_GONE = (
+    "That proposal was applied, and the copy of the deck from just before it is no longer kept, so its "
+    "resulting deck can't be rebuilt. Run the report on the deck itself, which has the change."
 )
 PROPOSAL_NOT_A_LIST = (
     "Only a proposal that changes a deck's cards, or makes a new deck, can be tested. Run the "

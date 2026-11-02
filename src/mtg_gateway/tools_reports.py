@@ -460,8 +460,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "check. A deck with a commander plays from the command zone at 40 life; a deck of 60 or "
             "more cards without one plays a 60-card game (20 life, on the play, sideboard left out). "
             "deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (the commander "
-            "marked [Commander] or *CMDR*); or give proposal_id to test one of the user's waiting "
-            "proposals as it would be once applied. Every report is stored for the user "
+            "marked [Commander] or *CMDR*); or give proposal_id to test one of the user's "
+            "proposals as it would be (or was) once applied. Every report is stored for the user "
             "(list_deck_reports, the Reports and History pages). Reads the deck and changes nothing on "
             "Archidekt. An unchanged deck within ten minutes returns the existing report (not when "
             "options are given). options passes the solo test's knobs; forge_seed seeds the Forge games. "
@@ -510,7 +510,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         proposal_id: Annotated[
             str | None,
             Field(
-                description="A waiting proposal of yours: test the deck as it would be once applied "
+                description="A proposal of yours: test the deck as it would be (or was) once applied "
                 "(instead of deck_ref)."
             ),
         ] = None,

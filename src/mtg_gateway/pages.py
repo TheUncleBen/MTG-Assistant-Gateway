@@ -3252,18 +3252,25 @@ def _lists_delete_box(p: dict[str, Any]) -> str:
 # Proposals the website can test (owner decision C7): a deck edit (paired against the deck as it is)
 # and a new deck's list.
 TESTABLE_KINDS = frozenset({"edit", "create_deck"})
+# and in every state but one whose apply is under way or did not finish (reports.run_proposal): an
+# applied one as it was applied, a closed one as what it would make of the deck now
+UNTESTABLE_STATES = frozenset({"applying", "failed"})
 TEST_THIS_CHANGE = "Test this change"
 
 
 def _proposal_tests(p: dict[str, Any], csrf: str | None, *, now: float) -> str:
-    """The proposal's test reports, newest first, and a Test this change button while it waits."""
+    """The proposal's test reports, newest first, and a Test this change button (UNTESTABLE_STATES)."""
     links = [
         ui.button_link(
             f"Report, {ui.when_text(x.get('taken_at'), now=now)}", f"/history/reports/{x['report_id']}"
         )
         for x in p.get("sim_reports") or []
     ]
-    if p.get("state") == "pending" and p.get("can_test") and (p.get("kind") or "edit") in TESTABLE_KINDS:
+    if (
+        p.get("state") not in UNTESTABLE_STATES
+        and p.get("can_test")
+        and (p.get("kind") or "edit") in TESTABLE_KINDS
+    ):
         links.insert(
             0,
             f"<form method='post' action='/proposals/{html.escape(str(p['proposal_id']))}/test' "
