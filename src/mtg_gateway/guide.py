@@ -66,8 +66,10 @@ GUIDE_CSS = """
 .gtoc a:hover,.gtoc a:focus-visible{background:var(--surface-2)}
 /* a topic page: the way back, the topic, the topics before and after */
 .gcrumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;color:var(--text-muted)}
-.gmain .ui-head h1{display:flex;align-items:center;gap:.5rem}
-.gmain .ui-head h1 svg{color:var(--orange);width:28px;height:28px;flex:none}
+/* the icon sits in the heading's text, so a long word wraps under it at 200% text on a narrow
+   phone instead of being squeezed beside it (re-audit N02) */
+.gmain .ui-head h1{display:block}
+.gmain .ui-head h1 svg{color:var(--orange);width:28px;height:28px;vertical-align:-.2em;margin-right:.4rem}
 .gturn{display:flex;justify-content:space-between;gap:.75rem;margin:1.5rem 0 0;padding-top:1rem;
   border-top:1px solid var(--border-soft)}
 .gturn .btn{margin:0;max-width:48%;display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
@@ -92,9 +94,9 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .gnav li ul{margin:.1rem 0 .25rem .75rem;border-left:2px solid var(--border-soft);padding-left:.35rem}
 .gnav a{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border-radius:var(--radius);
   color:var(--text);text-decoration:none;min-height:2.2rem}
-@media (pointer:coarse){.gnav a{min-height:44px}}
-.gnav .part{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;font-weight:800}
-.gnav .part svg{color:var(--orange)}
+.gnav a{min-height:44px}
+.gnav .part{display:block;padding:.4rem .6rem;font-weight:800}
+.gnav .part svg{color:var(--orange);vertical-align:-.2em;margin-right:.4rem}
 .gnav li ul a{font-size:.95rem;color:var(--text-muted)}
 .gnav a:hover{background:var(--surface-2);color:var(--text)}
 .gnav a[aria-current=page]{background:var(--orange-tint);color:var(--text);font-weight:700;
@@ -107,8 +109,8 @@ details.gnav > summary::-webkit-details-marker{display:none}
 .gmain a:not([class]):hover{color:var(--orange-text)}
 .gpart{margin:0 0 1.5rem}
 .gpart > header{margin:0 0 .75rem}
-.gpart > header h2{display:flex;align-items:center;gap:.5rem;font-size:1.6rem;margin:0 0 .15rem}
-.gpart > header h2 svg{color:var(--orange);width:28px;height:28px}
+.gpart > header h2{display:block;font-size:1.6rem;margin:0 0 .15rem}
+.gpart > header h2 svg{color:var(--orange);width:28px;height:28px;vertical-align:-.2em;margin-right:.4rem}
 .gpart > header p{margin:0;color:var(--text-muted)}
 .gsec{margin:0 0 1rem;scroll-margin-top:4.5rem}
 .gpart,.guide h4{scroll-margin-top:4.5rem}
@@ -157,7 +159,8 @@ details.gnav > summary::-webkit-details-marker{display:none}
   box-shadow:var(--shadow)}
 .gtop.hide{display:none}
 .gtop svg{transform:rotate(180deg)}
-@media (max-width:599px){.gtop{bottom:calc(4.5rem + env(safe-area-inset-bottom))}}
+@media (max-width:599px){.gtop{bottom:calc(4.5rem + env(safe-area-inset-bottom))}
+  .gpart > header h2{font-size:min(1.6rem,9vw)}}  /* 200% text: a word stays whole */
 @media (min-width:900px){
   .guide{grid-template-columns:16rem minmax(0,1fr);gap:1.5rem}
   .guide .gside{position:sticky;top:4rem;max-height:calc(100vh - 5rem);overflow:auto;padding-right:.25rem}

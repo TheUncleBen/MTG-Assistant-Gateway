@@ -512,9 +512,18 @@ def widget(
     )
 
 
-def widgets(items: Iterable[str], *, label: str = "At a glance") -> str:
-    """The row of 3 to 6 widgets (two a row on the open Fold and on phones)."""
-    return f"<section class='ui-widgets' aria-label='{esc(label)}'>{''.join(items)}</section>"
+def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "") -> str:
+    """The row of 3 to 6 widgets (two a row on the open Fold). On a phone the row is folded
+    behind one line (``line``, or the label) so the list comes first on the screen (re-audit
+    N11); the fold is a tick box and its label, which works without scripts, and the widgets
+    show whole from 600 px, where the tick box and its label are hidden (theme.py)."""
+    fid = "glance-" + "".join(c if c.isalnum() else "-" for c in label.casefold())
+    return (
+        f"<input type='checkbox' class='glance-tgl' id='{fid}'>"
+        f"<label class='glance-lbl' for='{fid}'>{icon('stats')}<span>{esc(line or label)}</span>"
+        f"{icon('chev')}</label>"
+        f"<section class='ui-widgets' aria-label='{esc(label)}'>{''.join(items)}</section>"
+    )
 
 
 class Chip(NamedTuple):
@@ -559,8 +568,10 @@ def toolbar(
     hidden = "".join(
         f"<input type='hidden' name='{esc(k)}' value='{esc(v)}'>" for k, v in (keep or {}).items() if v
     )
+    # three filters share one row on a phone (n3), as two do; one alone was full width (audit D31)
+    cls = "ui-tools n3" if len(filters) == 3 else "ui-tools"
     return (
-        f"<form class='ui-tools' role='search' method='get' action='{esc(action)}'>{hidden}"
+        f"<form class='{cls}' role='search' method='get' action='{esc(action)}'>{hidden}"
         f"<label class='search'><span class='sr-only'>{esc(search_label)}</span>{icon('search')}"
         f"<input type='search' name='{esc(name)}' value='{esc(q)}' placeholder='{esc(placeholder)}'></label>"
         f"{''.join(filters)}"

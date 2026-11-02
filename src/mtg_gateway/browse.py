@@ -126,7 +126,8 @@ BROWSE_CSS = """
 .profile .social .note{flex-basis:100%;color:var(--text-muted);font-size:.9rem;margin:0}
 @media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%} }
 .popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
-.popular a{display:inline-flex;align-items:center;height:30px;padding:0 .7rem;border-radius:15px;
+.popular a{display:inline-flex;align-items:center;min-height:44px;padding:.1rem .7rem;border-radius:15px;
+  max-width:100%;overflow-wrap:anywhere;
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
     border:1px solid var(--border)}
 .popular a:hover{border-color:var(--orange);color:var(--orange)}
@@ -151,7 +152,7 @@ BROWSE_CSS = """
 @media (max-width:599.98px){ .precons .sp-xlink-sm{display:block} .precons .sp-xlink-sm .btn{margin:0} }
 .precons .loadmore,.profile-page .loadmore{display:flex;flex-direction:column;align-items:center;gap:.4rem;
   margin:.5rem 0 1.25rem}
-.precons .loadmore .btn,.profile-page .loadmore .btn{margin:0;min-width:12rem}
+.precons .loadmore .btn,.profile-page .loadmore .btn{margin:0;min-width:min(12rem,calc(100vw - 2rem))}
 .precons .loadmore p,.profile-page .loadmore p{margin:0}
 /* a profile: the results bar alone in the panel; the follow question's buttons are 44 px */
 .profile .who h1{font-size:1.5rem;margin:0}

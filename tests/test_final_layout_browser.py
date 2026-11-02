@@ -229,6 +229,7 @@ def test_the_reports_tiles_are_two_a_row_on_a_phone(reports: ReportsServer, widt
     with sync_playwright() as p:
         browser, page, errors = _context(p, reports.base, sid, width, theme, True)
         page.goto(f"{reports.base}/reports", wait_until="networkidle")
+        page.locator("label.glance-lbl").click()  # the tiles open on a tap on a phone
         got = page.evaluate(WIDGETS)
         _shot(page, f"reports-tiles-{width}-{theme}")
         assert got["tiles"] == 4, got
@@ -237,6 +238,7 @@ def test_the_reports_tiles_are_two_a_row_on_a_phone(reports: ReportsServer, widt
         assert got["targets"] and min(got["targets"]) >= 44, got
         assert got["sideways"] <= 0, got
         page.goto(f"{reports.base}/proposals", wait_until="networkidle")
+        page.locator("label.glance-lbl").click()
         same = page.evaluate(WIDGETS)
         assert same["columns"] <= 2 and same["share"] >= 0.4, same
         assert errors == [], errors

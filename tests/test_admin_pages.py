@@ -103,6 +103,10 @@ async def test_the_overview_is_six_widgets_then_system_updates_and_activity_by_d
         assert "<span class='big'>86</span>" in text  # 84 + 2 tool calls
         assert "<span class='big'>3</span><span class='det'>3 today</span>" in text  # the errors
         assert "<div class='wdg alert'>" in text  # errors in the alert tone
+        # no Mystic Forge, Forge or clean-up here: the System widget says what runs, in words,
+        # not "0 services set up" (re-audit D31)
+        assert "<span class='big'>Gateway only</span>" in text and "services set up" not in text
+        assert "Mystic Forge, Forge and member clean-up are not set up" in text
         assert "class='spark' role='img' aria-label='Tool calls per day, oldest first:" in text
         assert "<section class='ui-card' id='system'" in text and "<details id='how-to-update'>" in text
         assert text.index("id='system'") < text.index("id='how-to-update'")

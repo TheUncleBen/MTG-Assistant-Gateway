@@ -1004,7 +1004,13 @@ ACT_CSS = """
 @media (max-width:899.98px){.act-page form.ui-tools{grid-template-columns:repeat(var(--nf),minmax(0,1fr))}
   .act-page form.ui-tools .search{grid-column:1 / -1}}
 @media (max-width:599.98px){.act-page form.ui-tools{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .act-page form.ui-tools .f:last-of-type:nth-of-type(odd){grid-column:1 / -1}}
+  .act-page form.ui-tools .f:last-of-type:nth-of-type(odd){grid-column:1 / -1}
+  /* My activity's three filters share one row, as the other pages' do (re-audit D31) */
+  .act-page form.ui-tools.n3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .act-page form.ui-tools.n3 .f:last-of-type:nth-of-type(odd){grid-column:auto}}
+/* large text: one filter a row, as theme.py's rule for every toolbar */
+@container (max-width:20em){.act-page form.ui-tools.n3 .f,
+  .act-page form.ui-tools.n3 .f:last-of-type:nth-of-type(odd){grid-column:1 / -1}}
 .act-table .tr{column-gap:.75rem}
 /* with large text a widget's word can be wider than its half of a phone's row */
 .act-page .wdg .big,.act-page .wdg .lab,.act-page .wdg .det{overflow-wrap:anywhere}

@@ -1840,7 +1840,7 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-crumbs{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:center;margin:0 0 .25rem;
   font-size:.93rem}
 .rv-page .rv-crumbs a{display:inline-flex;align-items:center;min-height:32px}
-@media (pointer:coarse){.rv-page .rv-crumbs a{min-height:44px}}
+.rv-page .rv-crumbs a{min-height:44px}
 .rv-page .rv-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 1rem}
 .rv-page .rv-title{min-width:0;flex:1 1 24rem}
@@ -2054,6 +2054,13 @@ REPORT_PAGE_CSS = (
   .rv-page .rv-dstats .tile{border-left:0;border-top:1px solid var(--border-soft)}
   .rv-page .rv-dstats .tile:nth-child(-n+2){border-top:0}
   .rv-page .rv-dstats .tile:nth-child(even){border-left:1px solid var(--border-soft)}}
+/* the strip narrow in its own text (200% text on a phone): one number a row, so a label
+   ("Archidekt's estimate") keeps whole words */
+.rv-page .rv-dstats{container-type:inline-size}
+@container (max-width:22em){.rv-page .rv-dstats .tiles{grid-template-columns:1fr}
+  .rv-page .rv-dstats .tile{border-left:0;border-top:1px solid var(--border-soft);padding:.6rem .4rem}
+  .rv-page .rv-dstats .tile:nth-child(even){border-left:0}
+  .rv-page .rv-dstats .tile:first-child{border-top:0}}
 .rv-page .rv-raw{padding:.25rem 1rem .5rem}
 .rv-page .rv-raw pre,.rv-page .rv-ab{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
 .rv-page .rv-np p{overflow-wrap:anywhere}
@@ -2125,7 +2132,7 @@ REPORT_PAGE_CSS = (
 .rv-page .rv-list{list-style:none;margin:0 0 .5rem;padding:0;columns:16rem auto;column-gap:1.5rem}
 .rv-page .rv-list li{display:flex;gap:.5rem;align-items:baseline;break-inside:avoid;min-height:32px;
   padding:.15rem 0}
-@media (pointer:coarse){.rv-page .rv-list li{min-height:44px;align-items:center}}
+.rv-page .rv-list li{min-height:44px;align-items:center}
 .rv-page .rv-list .q{min-width:1.6rem;text-align:right;color:var(--text-muted);
   font-variant-numeric:tabular-nums}
 .rv-page .rv-list .cardlink{overflow-wrap:anywhere}

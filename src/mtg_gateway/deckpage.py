@@ -2810,7 +2810,7 @@ GOLDFISH_CSS = """
    let them shrink, down to 44px, instead of the switch cutting off L */
 .gf-size .sizeseg{max-width:100%}
 .gf-size .sizeseg button{flex:0 1 auto;min-width:min(2.75rem,44px)}
-@media (pointer:coarse){ .gf-size .sizeseg button{min-width:44px} }
+.gf-size .sizeseg button{min-width:44px}
 .gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
   padding:.75rem;margin:0 0 1rem;min-width:0}
 .gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}
@@ -3215,7 +3215,7 @@ def deck_list_controls_html(
 DECK_CSS = (
     """
 /* deck banner (cardBanner / deckHeaderInfo) */
-.banner{position:relative;margin:0 -1rem 1rem;color:#fff;isolation:isolate;z-index:2}
+.banner{position:relative;margin:0 calc(-1 * var(--gutter)) 1rem;color:#fff;isolation:isolate;z-index:2}
 /* the toolbar below is positioned too; while a banner menu is open the banner must win */
 .banner:has(details[open]){z-index:6}
 /* no featured art: no empty grey band on phones */
@@ -3322,9 +3322,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   font-variant-numeric:tabular-nums}
 .comments .cmt .acts button.vote svg.i{width:16px;height:16px}
 .comments .cmt .acts button.vote[aria-pressed=true]{color:var(--orange-text);font-weight:700}
-@media (pointer:coarse),(max-width:599.98px){
   .comments .cmt .acts button{min-height:44px;height:auto;padding:0 .75rem}
-}
 .comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
   font-size:.85rem}
 .comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}
@@ -3422,7 +3420,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   /* the row's spare width goes to the text field (its placeholder reads whole), not to View,
      which keeps its own width; under 360 px the field has the first row to itself and View fills
      the next one beside ⋮ */
-  .toolbar.compact form.quick{flex:1 1 11rem;min-width:0;margin:0}
+  .toolbar.compact form.quick{flex:1 1 9rem;min-width:0;margin:0}
   .toolbar.compact form.quick > label{position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0)}
   .toolbar.compact .quickrow{flex-wrap:nowrap}
@@ -3500,7 +3498,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   color:var(--text-muted);cursor:pointer}
 .stackhead .kebab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
 .stackhead .kebab:hover,.stackhead .kebab:focus-visible{color:var(--orange-text);background:var(--surface-2)}
-@media (pointer:coarse){ .stackhead .kebab{width:44px;height:44px;margin:-8px -6px -8px 0} }
+.stackhead .kebab{width:44px;height:44px;margin:-8px -6px -8px 0}
 /* a press and hold on a category's head opens its menu: no text selection under the finger */
 .deckview[data-catinfo] .stackhead h2{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 /* "+ Add category" after the last stack: a dashed outline, the width of a stack */
@@ -3546,7 +3544,7 @@ ul.rows .row:hover{background:var(--surface-2)}
 ul.rows .row.side .name,ul.rows .row.side .ty{color:var(--text-muted)}
 ul.rows .q{color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
 ul.rows .n{display:flex;align-items:center;gap:.35rem;min-width:0}
-ul.rows .n .name{font-weight:700;overflow-wrap:break-word;min-width:0}
+ul.rows .n .name{font-weight:700;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto;min-width:0}
 ul.rows .mc{min-width:0}
 ul.rows .set{font-size:.78rem;color:var(--text-muted);text-align:center}
 ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
@@ -3588,6 +3586,18 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 @media (hover:hover) and (min-width:700px){ ul.rows .row:hover .hover{display:block} }
 @media (max-width:600px){ ul.rows .row{grid-template-columns:1.6rem minmax(0,1fr) auto}
   ul.rows .set,ul.rows .price{display:none} }
+/* a list narrow in its own text (200% text on a phone): the mana cost goes under the name, which
+   keeps the row's width, so a name wraps between words and never inside one (re-audit, 320 px) */
+ul.rows{container-type:inline-size}
+@container (max-width:22em){
+  ul.rows .row:not(.brew){grid-template-columns:1.6rem minmax(0,1fr)}
+  ul.rows .row:not(.brew) > .mc{grid-column:2;grid-row:2;justify-self:start;margin:-.1rem 0 .3rem}
+  ul.rows .row:not(.brew) > .mc:empty{display:none}
+  /* the name first, the category and owned dots after it: a name wider than the cell takes the
+     cell whole and the dots go under it, instead of the name losing their width */
+  ul.rows .row:not(.brew) > .n{flex-wrap:wrap;row-gap:.1rem}
+  ul.rows .row:not(.brew) > .n > .tagdot,ul.rows .row:not(.brew) > .n > .owned{order:1}
+  ul.rows .row:not(.brew) > .compmark,ul.rows .row:not(.brew) > .custom-badge{grid-row:3} }
 
 /* no opacity here or on a dragged row: in the text and Brewer views' columns a change of opacity
    lays every column out again, which takes as long as moving the stack itself */
@@ -3635,6 +3645,10 @@ ul.rows .hover img{width:100%;height:100%;display:block}
   .deckview.table ul.rows .row,.deckview.table ul.rows .th{
     grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
   .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
+/* the table narrow in its own text (200% text on a phone): the name's row, as the text view's */
+@container (max-width:22em){
+  .deckview.table ul.rows .row{grid-template-columns:1.6rem minmax(0,1fr)}
+  .deckview.table ul.rows .th,.deckview.table ul.rows .mv{display:none} }
 /* Scroll view: each group one row of whole cards, scrolled sideways inside its own strip */
 /* brewer view: each card's picture, name and cost, type line and rules text, in columns */
 .deckview.brewer{columns:340px;column-gap:1.5rem}
@@ -3828,7 +3842,6 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .sub .on:disabled,.ctxmenu .finsub .on:disabled{color:var(--toolbar-active);font-weight:700}
 .ctxmenu .off[aria-disabled=true]{color:var(--text-muted);cursor:default}
 /* finger-sized on touch screens: every row, the − and + steps and the Move to list's rows */
-@media (pointer:coarse){
   .ctxmenu .qtyrow{min-height:44px}
   .ctxmenu .qtyrow .step{width:44px;min-width:44px;height:44px;min-height:44px}
   .ctxmenu .sub button,.ctxmenu .finsub button{min-height:44px}
@@ -3836,7 +3849,6 @@ html.cardview-open{overflow:hidden}
   /* the viewer's × and its − / + steppers: finger-sized (set after their own rules, so this wins) */
   .cardview .close{width:44px;height:44px;min-height:44px}
   .cardview .acts .qtyctl button{width:44px;min-width:44px;min-height:44px}
-}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
@@ -4075,14 +4087,25 @@ ul.decklist .info .name{font-size:16px;font-weight:700;overflow:hidden;overflow-
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 ul.decklist .deck a:hover .name{text-decoration:underline}
 ul.decklist .info .fmt,ul.decklist .info .sub{font-size:.86rem;color:var(--text-muted);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
+  overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}
+ul.decklist .info .name{hyphens:auto;-webkit-hyphens:auto}
+/* a tile narrow in its own text (200% text on a 320 px phone): the ⋮ goes onto the picture's
+   corner (as Home's covers draw it) and the words keep the tile's width, so a deck's name wraps
+   between words */
+ul.decklist{container-type:inline-size}
+@container (max-width:22em){
+  ul.decklist.grid .deck .info{padding-right:.75rem}
+  ul.decklist.grid .deck > .kebab{top:.25rem;right:.25rem;transform:none;color:#fff;
+    background:rgba(0,0,0,.55)} }
 ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;
   border-top:1px solid var(--border-soft);
   font-size:.86rem;color:var(--text-muted);min-height:2rem;align-items:center}
 ul.decklist.list .deck a{flex-direction:row;align-items:center}
 ul.decklist.list .thumb{width:90px;height:60px;flex:none}
 ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
-ul.decklist.list .info{flex:1 1 8rem;min-height:0}
+/* the words ask for 12 em of their own text: at 200% text on a phone they go under the picture
+   and keep the row's width, so a deck's name wraps between words (re-audit, 320 px) */
+ul.decklist.list .info{flex:1 1 12em;min-height:0}
 ul.decklist.list .tags{border-top:0;max-width:30%}
 @media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
@@ -4104,7 +4127,8 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 /* the save bar sticks just under the site's top bar (theme.py: sticky, 50px tall, plus the safe
    area in the app), never over it */
 .editbar{position:sticky;top:50px;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
-  background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:0 -1rem 1rem;
+  background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;
+  margin:0 calc(-1 * var(--gutter)) 1rem;
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
 @media (min-width:600px){ body.app .editbar{top:calc(50px + env(safe-area-inset-top))}
   html:has(.editbar){scroll-padding-top:120px} }
@@ -4395,7 +4419,6 @@ html.printpick-open{overflow:hidden}
   .printpick .ppfiltbtn{display:inline-flex}
   .printpick .ppfilters:not(.open){display:none} }
 /* finger-sized on a touch screen (44 px) */
-@media (pointer:coarse){
   /* the stats panel's buttons that pick out cards (colours, types, keywords), the curve's axis
      buttons, the legend and the dialog strip's buttons: 44 px, set here, after their own rules
      above, so the touch size wins */
@@ -4427,7 +4450,7 @@ html.printpick-open{overflow:hidden}
   .erow button.remove{width:44px;min-width:44px;height:44px;min-height:44px}
   .editbar .backup,.addbox form.addcard .go .foil{min-height:44px;padding:0 .25rem}
   .editbar .backup input,.addbox form.addcard .go .foil input{width:22px;height:22px;margin:0}
-  .bulkbar .histtools button,.bulkbar .btn-ghost.small{min-height:44px} }
+  .bulkbar .histtools button,.bulkbar .btn-ghost.small{min-height:44px}
 /* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
    tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
    showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room

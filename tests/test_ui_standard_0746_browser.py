@@ -315,11 +315,16 @@ MENU_ITEMS = (
 )
 
 
-def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> None:  # noqa: F811
-    """In the app (touch, 412 px) every link, button, box and tab is at least 44 px each way:
-    the stats pie and bars, type rows, Undo and Redo, the category picker, the Binder's menu
-    button, the watchlist's links and links inside text (0.7.46 audit), and every item of every
-    menu (the top bar's, More, the sort menus, a row's ⋮ menu), which were 35 px."""
+MOUSE_1280 = dict(viewport={"width": 1280, "height": 860})
+
+
+@pytest.mark.parametrize("kw", [APP_412, MOUSE_1280], ids=["app 412", "mouse 1280"])
+def test_every_control_is_a_44_px_target(server: Server, walk, kw: dict) -> None:  # noqa: F811
+    """In the app (touch, 412 px) and on a computer (a mouse, 1280 px) every link, button, box and
+    tab is at least 44 px each way: the stats pie and bars, type rows, Undo and Redo, the category
+    picker, the Binder's menu button, the watchlist's links and links inside text (0.7.46 audit),
+    and every item of every menu (the top bar's, More, the sort menus, a row's ⋮ menu), which
+    were 35 px. The owner (2026-11-02): the 44 px rule holds with a mouse too."""
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
 
@@ -327,7 +332,7 @@ def test_every_control_is_a_44_px_target_in_the_app(server: Server, walk) -> Non
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        ctx = browser.new_context(**APP_412)
+        ctx = browser.new_context(**kw)
         page, errors = _open(server, ctx, sid)
         for path in pages:
             _goto(server, page, path)

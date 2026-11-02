@@ -56,6 +56,16 @@ HOME_CSS = """
 .home .needs li[hidden]{display:none}
 .home .list-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:1.5rem 0 .75rem}
 .home .list-head h2{margin:0}
+/* desktop (1280 px up): the deck covers take the page's width, with what needs you and the
+   connection details in a column beside them, so the page's lower half is not empty (0.7.46
+   re-audit D28); the covers grow from 10rem to 17rem a column (three a row at 1280 px, four at 1440) */
+@media (min-width:1280px){
+  .home .home-grid.side{display:grid;grid-template-columns:minmax(0,1fr) 24rem;grid-template-rows:auto 1fr;
+    gap:1rem;align-items:start}
+  .home .home-grid.side > .panel:not(.connect){grid-column:1;grid-row:1 / span 2;margin:0}
+  .home .home-grid.side > .needs,.home .home-grid.side > .connect{grid-column:2;margin:0}
+  .home .home-grid .recent{grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))}
+}
 /* phones: the covers as one row to swipe, each cover a screen's half */
 @media (max-width:599.98px){
   .home .recent{display:flex;overflow-x:auto;scroll-snap-type:x proximity;gap:.6rem;
@@ -320,6 +330,15 @@ def recent_html(decks: list[dict[str, Any]], covers: dict[str, dict[str, Any]]) 
     return "<div class='recent'>" + "".join(out) + "</div>"
 
 
+def home_grid(needs: str, recent: str, connect: str) -> str:
+    """Needs you, the My decks panel and the connection details, in that order. On a desktop
+    (1280 px up) the panel takes the page's width with the other two in a column beside it,
+    when there is a panel and something to put beside it (class ``side``); otherwise they
+    follow each other as on a phone."""
+    side = " side" if recent and (needs or connect) else ""
+    return f"<div class='home-grid{side}'>{needs}{recent}{connect}</div>"
+
+
 def connect_html(mcp_url: str) -> str:
     """Connect an AI assistant: the connector address and the ways in, shown only while no
     assistant is connected (afterwards the Account page has it)."""
@@ -433,7 +452,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         newdeck = new_deck_box_html(csrf, None, back="/") if link["linked"] and csrf else ""
         resp = render(
             "Home",
-            hero + joined + needs + recent + connect + newdeck,
+            hero + joined + home_grid(needs, recent, connect) + newdeck,
             site=s.server_name,
             signed_in=True,
             csrf=csrf,

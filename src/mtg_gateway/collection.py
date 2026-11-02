@@ -2110,7 +2110,8 @@ def widgets_html(
     if not large:
         foils = sum(1 for r in rows if (r.get("finish") or "nonfoil") != "nonfoil")
         items.append(ui.widget("Foils", "sun", foils, detail="Foil or etched entries"))
-    return ui.widgets(items)
+    line = f"{total:,} {'entry' if total == 1 else 'entries'} · {week} added this week"
+    return ui.widgets(items, line=line)
 
 
 def bulk_html(csrf: str, back: str, tags: list[str], tag_colors: dict[str, str] | None = None) -> str:
@@ -2316,7 +2317,7 @@ COLLECTION_CSS = """
 .collection .ui-head .acts details.colmore{margin:0}
 .collection .ui-head .acts details.colmore > summary.btn{margin:0;display:inline-flex;align-items:center;
   gap:.35rem}
-.collection .ui-head .acts details.colmore .menu{min-width:12rem}
+.collection .ui-head .acts details.colmore .menu{min-width:min(12rem,calc(100vw - 16px))}
 .collection .ui-head .acts details.colmore .menu a,.collection .ui-head .acts details.colmore .menu button{
   min-height:44px}
 .collection .ui-head .acts details.colmore form.clearf{margin:0}
@@ -2448,8 +2449,8 @@ ul.colllist{list-style:none;margin:0 0 1rem;padding:0;container-type:inline-size
   ul.colllist .cardc .sub .lgh{display:block} }
 ul.colllist .tr{padding:.45rem .75rem}
 ul.colllist .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
-ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0}
-ul.colllist .cardc .name{font-weight:700;overflow-wrap:break-word}
+ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
+ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
 ul.colllist .s{display:block;color:var(--text-muted);font-size:.84rem;overflow-wrap:anywhere}
 ul.colllist .smline{display:none}
 ul.colllist .thumbbtn{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -2487,14 +2488,25 @@ ul.colllist .qc{justify-self:start}
 ul.colllist .th .qc{justify-self:start}
 @media (max-width:899.98px){ ul.colllist .cardc .lg{display:none} }
 @media (max-width:599.98px){
-  ul.colllist .tr.row{grid-template-rows:auto auto;align-items:start}
+  /* the two-column layout (the name's cell and the ⋮): the container rule above would keep the
+     three-column one, which left the name 32 px at 360 px (re-audit N01) */
+  ul.colllist .tr.row{grid-template-columns:var(--cols-sm);grid-template-rows:auto auto;align-items:start}
   ul.colllist .cardc{grid-column:1;grid-row:1}
   ul.colllist .act{grid-column:2;grid-row:1}
   ul.colllist .qc{grid-column:1 / span 2;grid-row:2;margin-top:.35rem;
     padding-left:calc(34px * var(--thumb-scale,1) + .6rem)}
   ul.colllist .sub{display:none} ul.colllist .smline{display:block} }
+/* a narrow list in its own text (a 320 px phone, or 200% text on any phone): the name and its
+   lines go under the tick box and the picture, across the whole cell, so a name wraps between
+   words and never inside one */
+@container (max-width:22em){
+  ul.colllist .tr.row{grid-template-columns:minmax(0,1fr) var(--ctl)}
+  ul.colllist .cardc{flex-wrap:wrap;grid-column:1 / -1}
+  ul.colllist .cardc .tx{flex-basis:100%}
+  ul.colllist .act{grid-column:2;grid-row:2;align-self:center}
+  ul.colllist .qc{grid-column:1;padding-left:0} }
 .loadmore{display:flex;flex-direction:column;align-items:center;gap:.4rem;margin:.5rem 0 1.25rem}
-.loadmore .btn{margin:0;min-width:12rem}
+.loadmore .btn{margin:0;min-width:min(12rem,calc(100vw - 2rem))}
 .loadmore p{margin:0}
 .col-nomatch[hidden]{display:none}
 .coll-empty{text-align:center;padding:2rem 1rem}

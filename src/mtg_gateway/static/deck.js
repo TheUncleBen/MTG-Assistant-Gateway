@@ -2911,16 +2911,24 @@
   });
   } // droppable
 
-  // touch: press and hold a card for 350 ms. Let go without moving and the card's menu opens;
-  // slide it (on the category grouping of your own deck) and it moves onto another category.
+  // touch: press and hold a card for 350 ms and the card's menu opens under the finger, as every
+  // other list's does (re-audit D09: it waited for the finger to lift). Slide the held card
+  // instead (on the category grouping of your own deck) and the menu closes as the card moves
+  // onto another category; let go without moving and the menu stays.
   // The copy under the finger moves by transform and the stack under it is looked up once a frame,
   // not on every touchmove; near the window's top or bottom edge the page scrolls on by itself.
   var hold = null, armed = null, touchCard = null, ghost = null, lastTarget = null, startX = 0, startY = 0;
   var touchX = 0, touchY = 0, ghostW = 0, touchFrame = 0;
-  function armTouch(card) {
+  function armTouch(card, x, y) {
     armed = card;
     card.classList.add("held");
     if (navigator.vibrate) navigator.vibrate(20);
+    // the menu opens now, where the finger is; the tap that ends the hold is swallowed
+    if (!(menu && menuCard === card)) {
+      swallowClick = true;
+      var r = card.getBoundingClientRect();
+      openMenu(card, x == null ? r.left + r.width / 2 : x, y == null ? r.top + r.height / 2 : y);
+    }
   }
   function startTouchDrag(t) {
     touchCard = armed;
@@ -2967,15 +2975,18 @@
     // a hold whose touch never ended (no touchend or touchcancel came) is over now
     if (armed && armed !== card && !touchCard) { armed.classList.remove("held"); armed = null; }
     clearTimeout(hold);
-    hold = setTimeout(function () { armTouch(card); }, 350);
+    var hx = t.clientX, hy = t.clientY;
+    hold = setTimeout(function () { armTouch(card, hx, hy); }, 350);
   }, { passive: true });
   cards.addEventListener("touchmove", function (e) {
     var t = e.touches[0];
     var moved = Math.abs(t.clientX - startX) > 8 || Math.abs(t.clientY - startY) > 8;
     if (!armed && !touchCard) { if (moved) clearTimeout(hold); return; }  // a plain scroll
     if (armed && !touchCard) {
-      if (!moved || menu) return;
+      if (!moved) return;
       if (!canDrag) { armed.classList.remove("held"); armed = null; return; }  // sliding elsewhere: let the page scroll
+      if (menu && menuCard === armed) closeMenu();  // the slide moves the card: the menu makes way
+      else if (menu) return;
       startTouchDrag(t);
     }
     e.preventDefault();
@@ -3001,8 +3012,11 @@
       setTimeout(function () { dragged = null; }, 0);
       return;
     }
+    // a hold the browser cancelled (its own drag took the touch): no tap follows, so the next
+    // tap on a card must not be swallowed (the menu the hold opened stays)
+    if (wasArmed && e.type === "touchcancel") swallowClick = false;
     if (wasArmed && e.type === "touchend") {
-      // held still: the card's menu, where the finger was
+      // held still: the menu opened at the hold stays; the lift's tap is swallowed
       if (e.cancelable) e.preventDefault();
       swallowClick = true;
       setTimeout(function () { swallowClick = false; }, 400);
