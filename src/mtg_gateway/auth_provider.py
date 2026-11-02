@@ -18,6 +18,7 @@ import hmac
 import ipaddress
 import logging
 import secrets
+import sqlite3
 import time
 from collections.abc import Callable
 from typing import Any
@@ -38,7 +39,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
-from . import assistants, masked, smallpage
+from . import assistants, dbwait, masked, smallpage
 from .cimd import (
     CimdBusy,
     CimdError,
@@ -153,6 +154,13 @@ LOGIN_STARTS_PER_MINUTE = 30
 # never got it), the retry is answered instead of being taken for a stolen token (0.7.46 audit
 # PA-2): see GatewayAuthProvider._retry_grace.
 RETRY_GRACE_SECONDS = 30
+# A token request that finds the database's write lock held by another connection (a backup, an
+# admin command) waits for it off the event loop this long, then is refused with TOKEN_BUSY:
+# nothing of it was written, so the app's refresh token (or code) still works when it asks again.
+TOKEN_WAIT_SECONDS = 10.0
+TOKEN_BUSY = (
+    "the gateway is busy (its database is being backed up or changed); nothing was changed, try again"
+)
 
 
 @dataclasses.dataclass
@@ -856,17 +864,49 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         # Asked before the code is used up, so a brief identity-provider outage doesn't burn it
         # (a retry would otherwise look like a replayed code).
         await self._require_member(authorization_code.subject)
-        # Single use: marking it used is the check, so a replayed code fails here.
-        if not self.db.use_auth_code(authorization_code.code, family):
-            raise TokenError("invalid_grant", "authorization code already used")
-        return self._issue(
-            client.client_id,
-            authorization_code.subject,
-            authorization_code.scopes,
-            authorization_code.resource,
-            family,
-            auth_time=int(time.time()),
-        )
+        subject = authorization_code.subject
+
+        def exchange() -> OAuthToken:
+            # Single use: marking it used is the check, so a replayed code fails here.
+            if not self.db.use_auth_code(authorization_code.code, family):
+                raise TokenError("invalid_grant", "authorization code already used")
+            return self._issue(
+                client.client_id,
+                subject,
+                authorization_code.scopes,
+                authorization_code.resource,
+                family,
+                auth_time=int(time.time()),
+            )
+
+        # the code is used up and the tokens saved together, or neither (_all_or_nothing)
+        return await self._all_or_nothing(exchange)
+
+    async def _all_or_nothing(self, work: Callable[[], OAuthToken]) -> OAuthToken:
+        """Run a token request's writes (``work``: using up a code or retiring a refresh token,
+        then saving the new tokens) in one transaction, so a database lock taken by another
+        connection can never land between them: before, a refresh retired the old token, then
+        could not save the new one, and the app's retry with the old token looked like reuse
+        and signed the member out (0.7.46 re-audit). While another connection holds the lock it
+        waits off the event loop (TOKEN_WAIT_SECONDS); still held, the request is refused with
+        TOKEN_BUSY and nothing written, so the same refresh token (or code) works on the retry.
+        A refusal (TokenError) keeps what it wrote: a revoked sign-in stays revoked."""
+        if not self.db.write_free():
+            await dbwait.until_write_free(self.db, TOKEN_WAIT_SECONDS)
+        refused: TokenError | None = None
+        try:
+            with self.db.atomic():
+                try:
+                    return work()
+                except TokenError as exc:
+                    refused = exc
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            logger.warning("a token request was turned away: the database stayed locked")
+            raise TokenError("invalid_request", TOKEN_BUSY) from exc
+        assert refused is not None  # work() either returned or was refused
+        raise refused
 
     async def load_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: str
@@ -902,6 +942,17 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             # and when the provider can't be reached this refresh token stays usable for a retry.
             await self._require_member(refresh_token.subject)
         old_hash = hash_token(refresh_token.token)
+        # the old token is retired and the new pair saved together, or neither (_all_or_nothing)
+        return await self._all_or_nothing(lambda: self._rotate(client, refresh_token, scopes, old_hash))
+
+    def _rotate(
+        self,
+        client: OAuthClientInformationFull,
+        refresh_token: RefreshToken,
+        scopes: list[str],
+        old_hash: str,
+    ) -> OAuthToken:
+        """exchange_refresh_token's writes, run in one transaction."""
         row = self.db.get_token(refresh_token.token, "refresh")
         retry = None
         if row is None and old_hash in self._retries:

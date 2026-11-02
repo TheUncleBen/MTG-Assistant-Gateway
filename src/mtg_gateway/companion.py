@@ -638,6 +638,7 @@ EVENT_LABELS = {
     "issuer_repinned": "Sign-in provider address updated",
     "proposal_amended": "Proposal changed by the app",
     "proposal_apply_stopped": "Applying a proposal stopped before any change; it waits again",
+    "proposal_read_back": "A change cut off by a restart was checked against the deck",
     "proposal_reopened": "Proposal brought back",
     "proposal_withdrawn": "Proposal withdrawn",
     "proposals_applied_together": "Proposals applied together",

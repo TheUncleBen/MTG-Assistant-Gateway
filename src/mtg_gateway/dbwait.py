@@ -1,48 +1,61 @@
-"""Requests wait off the event loop while the database is locked (0.7.46 audit, row 9).
+"""While another connection holds the database's write lock, reads go ahead and writes wait off
+the event loop (0.7.46 audit, row 9; re-audit).
 
 The gateway's database work runs on the event loop, and a write that finds the database locked
 by another connection (``mtg-gateway backup``, an admin command run in the container, a worker
-thread's purge) waits up to db.BUSY_TIMEOUT_MS for it. Nearly every request writes something
-(the usage counters, a sign-in's last use, a waiting proposal's hold), so one such lock held for
-a few seconds stalled every request and every background job together, pages, assistants and the
-health check alike, for as long as it was held.
+thread's purge) waits up to db.BUSY_TIMEOUT_MS for it. In WAL mode a read never waits for a
+writer, so only writes have to.
 
 Before a request goes on, this asks the database, without waiting, whether a write could start
-(Database.write_free). Nearly always it can, and the request goes on as before. When it can't,
-the request waits on a worker thread (Database.wait_write_free, one wait shared by every request
-that finds it locked), so the loop keeps serving what doesn't need the database, then goes on;
-after WAIT_LIMIT_SECONDS it is answered 503 with Retry-After, saying to try again: JSON for a
-program or a page's script (static/fetchjson.js holds the request and shows one note with Try
-again), a page in the site's look for a browser's own navigation, whose Try again sends the same
-request again, a posted form with it (``busy_page``). Both are marked X-MTG-Busy, which the
-Android app reads to leave the page in view instead of its own error box.
+(Database.write_free). Nearly always it can, and the request goes on as before. When it can't:
+
+- A request that should only read goes ahead at once (``_read_through``): a page or JSON read
+  (GET or HEAD; never a sign-in step, NEVER_READ_THROUGH) or an assistant's call of tools that
+  only read (``reads``; never a proposal or an apply). Its writes don't wait (db.ReadThrough): the
+  usage counters are skipped, and any other write that finds the lock held fails at once, having
+  changed nothing. Its answer is held back until it ends; when a write of it failed so, the
+  answer is dropped and the request waits as below and then runs again from the start. Before
+  anything that changes something outside the gateway (an Archidekt write or sign-in, the
+  identity provider's tokens, a push notification: ``before_side_effect``) it goes back to
+  waiting, so that change is made once and what it gives back is kept.
+- Any other request waits on a worker thread (Database.wait_write_free, one wait shared by every
+  request that finds it locked), so the loop keeps serving, then goes on; after
+  WAIT_LIMIT_SECONDS it is answered 503 with Retry-After, saying to try again: JSON for a program
+  or a page's script (static/fetchjson.js holds the request and shows one note with Try again), a
+  page in the site's look for a browser's own navigation, whose Try again sends the same request
+  again, a posted form with it (``busy_page``). Both are marked X-MTG-Busy, which the Android app
+  reads to leave the page in view instead of its own error box.
 
 Background jobs don't pass through here; they wait the same way where they already wait on the
-network (``job`` and ``settle`` below), and a job run in a worker thread waits for the lock
-without holding up the loop (Database._begin_off_loop).
+network (``job`` and ``settle`` below; a member's apply is one), and a job run in a worker thread
+waits for the lock without holding up the loop (Database._begin_off_loop).
 
 What it does not change: a lock taken by another connection after a request has passed this check
 still makes that request's next write wait on the loop (up to BUSY_TIMEOUT_MS, as before). Writes
 keep their wait rather than failing at once, so a change Archidekt already took is always
-recorded; a request can't be stopped and run again once it may have changed something.
-"""
+recorded; a request can't be stopped and run again once it may have changed something. A tool
+call whose write still finds the lock is answered busy, never with a raw error
+(``tool_busy_middleware``); an apply records how it ended once the lock is free (decks); a token
+request writes all or nothing (auth_provider)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import html
+import json
 import logging
 import re
+import sqlite3
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl
 
 from starlette.datastructures import Headers
 from starlette.responses import HTMLResponse, JSONResponse, Response
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 if TYPE_CHECKING:
     from .db import Database
@@ -53,6 +66,11 @@ logger = logging.getLogger(__name__)
 WAIT_LIMIT_SECONDS = 20.0
 # Static files and the health check never need a write, so they never wait.
 SKIP_PREFIXES = ("/static/", "/scan/static/", "/healthz")
+# Sign-in steps: each one changes something at the identity provider or keeps a one-time code,
+# so it always waits for the lock rather than going ahead (DatabaseWaitMiddleware._may_read).
+NEVER_READ_THROUGH = ("/auth/", "/authorize", "/login", "/logout", "/token", "/register", "/revoke")
+# An assistant's request body is read ahead (to see which tools it calls) up to this size.
+READ_AHEAD_LIMIT = 1024 * 1024
 # Paths answered for programs, which get JSON (as app._MACHINE_PREFIXES).
 MACHINE_PREFIXES = ("/api/", "/mcp", "/.well-known/", "/token", "/register", "/revoke", "/authorize")
 BUSY_MESSAGE = (
@@ -60,13 +78,34 @@ BUSY_MESSAGE = (
 )
 # The busy page says the same in two lines: the reason, then what to do.
 BUSY_REASON = "Its database is being backed up or changed."
+# A tool call whose own write met the lock after it passed the check: whether anything of it was
+# kept is not known for a change, so a changing tool's answer says to look before sending again.
+TOOL_BUSY = (
+    "The gateway is busy (its database is being backed up or changed), so this call could not "
+    "finish. Try again in a moment."
+)
+TOOL_BUSY_CHANGE = (
+    " If it was a change, check where it stands first (list_my_proposals or get_proposal), so "
+    "nothing is made twice."
+)
 
 
 class DatabaseWaitMiddleware:
-    def __init__(self, app: ASGIApp, *, db: Database, limit: float = WAIT_LIMIT_SECONDS):
+    """See the module's docstring. ``reads(name)``: whether the assistant tool ``name`` only reads
+    (a call of nothing else goes ahead while the lock is held); None: every assistant call waits."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        db: Database,
+        limit: float = WAIT_LIMIT_SECONDS,
+        reads: Callable[[str], bool] | None = None,
+    ):
         self.app = app
         self.db = db
         self.limit = limit
+        self.reads = reads
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -76,7 +115,16 @@ class DatabaseWaitMiddleware:
         ):
             await self.app(scope, receive, send)
             return
-        if await self.until_write_free(self.limit):
+        deadline = time.monotonic() + self.limit
+        body: bytes | None = b""
+        if self._may_read(scope):
+            if str(scope.get("method", "")).upper() == "POST":
+                body, receive = await _read_body(receive)
+            if body is not None and self._reads_only(scope, body):
+                if await self._read_through(scope, receive, send, deadline):
+                    return
+                receive = _again(body, receive)  # it needed a write: run again once the lock is free
+        if await self.until_write_free(max(0.0, deadline - time.monotonic())):
             await self.app(scope, receive, send)
             return
         logger.warning("a request was turned away: the database stayed locked for %.0f s", self.limit)
@@ -84,6 +132,71 @@ class DatabaseWaitMiddleware:
 
     async def until_write_free(self, limit: float) -> bool:
         return await until_write_free(self.db, limit)
+
+    def _may_read(self, scope: Scope) -> bool:
+        """A page or JSON read (GET or HEAD, not a sign-in step), or an assistant's call."""
+        path = str(scope.get("path", ""))
+        method = str(scope.get("method", "")).upper()
+        if path == "/mcp" or path.startswith("/mcp/"):
+            return method == "POST" and self.reads is not None
+        return method in ("GET", "HEAD") and not path.startswith(NEVER_READ_THROUGH)
+
+    def _reads_only(self, scope: Scope, body: bytes) -> bool:
+        path = str(scope.get("path", ""))
+        if not (path == "/mcp" or path.startswith("/mcp/")):
+            return True
+        from .app import mcp_only_reads
+
+        return self.reads is not None and mcp_only_reads(body, self.reads)
+
+    async def _read_through(self, scope: Scope, receive: Receive, send: Send, deadline: float) -> bool:
+        """Run a request that should only read while another connection holds the write lock,
+        without waiting for it (db.ReadThrough). Its answer is held back until it ends: when a write
+        of it found the lock held, the answer is dropped and False returned, so the request is run
+        again, from the start, once the lock is free. Nothing of it was written then, and nothing
+        left the gateway that changes anything (before_side_effect), so running it again is safe.
+        A streamed answer (an event stream) is passed on as it comes; its writes wait as before."""
+        from .db import DatabaseBusy, ReadThrough, read_through
+
+        through = ReadThrough(self.db, deadline)
+        held: list[Message] = []
+        passing = False
+
+        async def keep(message: Message) -> None:
+            nonlocal passing
+            if not passing and message["type"] == "http.response.start" and _streamed(message):
+                passing = True
+                through.active = False  # can't be run again: its writes wait from here
+                for m in held:
+                    await send(m)
+                held.clear()
+            if passing:
+                await send(message)
+            else:
+                held.append(message)
+
+        token = read_through.set(through)
+        try:
+            await self.app(scope, receive, keep)
+        except Exception as exc:
+            if passing or not (through.busy or isinstance(exc, DatabaseBusy)):
+                raise
+            through.busy = True
+        finally:
+            through.active = False
+            read_through.reset(token)
+        if passing:
+            return True
+        if through.busy:
+            if not through.committed:
+                return False
+            # part of it was written before the lock was taken again: not run twice
+            logger.warning("a read went ahead during a database lock and met it again; answered busy")
+            await (await _busy(scope, _again(b"", receive)))(scope, receive, send)
+            return True
+        for m in held:
+            await send(m)
+        return True
 
 
 async def until_write_free(db: Database, limit: float) -> bool:
@@ -105,6 +218,122 @@ async def until_write_free(db: Database, limit: float) -> bool:
             return False
         if db.write_free():
             return True
+
+
+def tool_busy_middleware(only_reads: Callable[[str], bool]):
+    """MCP middleware: a tool call whose write found the database locked past the busy timeout
+    (another connection took the lock after the call passed the check above) is answered with
+    the plain busy refusal (error "busy", retryable), never the framework's raw "Error executing
+    tool". ``only_reads(name)``: the tool changes nothing, so its answer says nothing was changed.
+    Sits inside schema_error_middleware, which adds the error code."""
+    from mcp import types
+
+    from .db import lock_failures
+
+    async def _mw(ctx: Any, call_next: Any) -> Any:
+        if ctx.method != "tools/call" or not isinstance(ctx.params, dict):
+            return await call_next(ctx)
+        name = str(ctx.params.get("name") or "")
+        seen: dict[str, bool] = {}
+        token = lock_failures.set(seen)
+        try:
+            result = await call_next(ctx)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            seen["locked"] = True
+            result = None
+        finally:
+            lock_failures.reset(token)
+        failed = result is None or (
+            result.get("isError") if isinstance(result, dict) else getattr(result, "isError", False)
+        )
+        if not (seen.get("locked") and failed):
+            return result
+        logger.warning("tool %s met the database's lock and was answered busy", name)
+        message = BUSY_MESSAGE if only_reads(name) else TOOL_BUSY + TOOL_BUSY_CHANGE
+        body = {"ok": False, "error": "busy", "message": message, "retry_after": 5}
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps(body))],
+            structuredContent=body,
+            isError=True,
+        ).model_dump(by_alias=True, exclude_none=True, mode="json")
+
+    return _mw
+
+
+async def before_side_effect() -> None:
+    """Awaited just before anything that changes something outside the gateway (an Archidekt
+    write or sign-in, the identity provider's tokens, a push notification). In a request let
+    through while the lock is held (db.ReadThrough) it turns the request back to the old way:
+    it waits, off the loop, until the lock is free, and its writes from here on wait for it, so
+    what the outside change gives back is always kept and the request is never run twice. When
+    one of its writes already found the lock held (it will be run again), or the lock stays held
+    past the request's limit, DatabaseBusy is raised before anything is sent."""
+    from .db import DatabaseBusy, read_through
+
+    through = read_through.get()
+    if through is None or not through.active:
+        return
+    if through.busy:
+        raise DatabaseBusy()
+    through.active = False
+    if not through.db.write_free() and not await until_write_free(
+        through.db, max(0.0, through.deadline - time.monotonic())
+    ):
+        through.busy = True
+        raise DatabaseBusy()
+
+
+def _streamed(start: Message) -> bool:
+    """Whether a response is a stream (server-sent events, a line-by-line relay), sent as it comes."""
+    for name, value in start.get("headers") or []:
+        if name.lower() == b"content-type":
+            kind = value.decode("latin-1").split(";")[0].strip().lower()
+            return kind in ("text/event-stream", "application/x-ndjson")
+    return False
+
+
+async def _read_body(receive: Receive) -> tuple[bytes | None, Receive]:
+    """A request's body read ahead (None when longer than READ_AHEAD_LIMIT or the client left),
+    and a ``receive`` that hands the app the same messages, then carries on with the real one."""
+    held: list[Message] = []
+    size = 0
+    complete = False
+    while True:
+        message = await receive()
+        held.append(message)
+        if message["type"] != "http.request":
+            break
+        size += len(message.get("body", b""))
+        if size > READ_AHEAD_LIMIT:
+            break
+        if not message.get("more_body", False):
+            complete = True
+            break
+    body = b"".join(m.get("body", b"") for m in held) if complete else None
+
+    async def replay() -> Message:
+        if held:
+            return held.pop(0)
+        return await receive()
+
+    return body, replay
+
+
+def _again(body: bytes | None, receive: Receive) -> Receive:
+    """A ``receive`` for running a request again: its body once more, then the real one (which
+    only says when the client leaves)."""
+    sent = False
+
+    async def again() -> Message:
+        nonlocal sent
+        if not sent and body is not None:
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return await receive()
+
+    return again
 
 
 # -- background jobs -------------------------------------------------------------------------------

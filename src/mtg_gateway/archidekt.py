@@ -1246,6 +1246,12 @@ apply_writes: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Contex
     "archidekt_apply_writes", default=None
 )
 _backup_write: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_backup_write", default=False)
+# Set around a member's apply (decks.py) with ``apply_writes``: called just before each of the
+# apply's writes is sent (not the backup copy's), so the database notes that its writes have begun
+# before Archidekt can have any of them. When the note can't be made, the write is not sent.
+before_apply_write: contextvars.ContextVar[Callable[[], None] | None] = contextvars.ContextVar(
+    "archidekt_before_apply_write", default=None
+)
 # Answers after which Archidekt did not act on a write: a 429, a 403, a 404, a 401.
 NOT_ACTED_ON = frozenset({"rate_limited", "forbidden", "not_found", "auth"})
 
@@ -1468,12 +1474,20 @@ class ArchidektClient(AccountRequests):
                     return copy.deepcopy(value)
                 finally:
                     add_time(archidekt_time, time.perf_counter() - started)
+        if method != "GET":
+            # changes something on Archidekt (or signs in there): a request let through while the
+            # database is locked waits for it first, so what comes back is kept (dbwait.py)
+            await dbwait.before_side_effect()
         is_write = method != "GET" and not path.startswith("/rest-auth/")
         # Two calls may be out at once: a read answered before a write landed but finished after it
         # (or made while one is out) is not kept, or the cache would serve the deck as it was.
         writes_seen = self._writes_begun
         if key is not None and key not in self._flights:
             return await self._first_reader(method, path, key, writes_seen, token, scheme, params)
+        if is_write and apply_writes.get() is not None and not _backup_write.get():
+            note = before_apply_write.get()
+            if note is not None:
+                note()
         if is_write:
             self._writes_begun += 1
             self._writes_out += 1

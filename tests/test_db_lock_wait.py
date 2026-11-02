@@ -105,7 +105,9 @@ async def test_a_lock_held_by_another_process_does_not_stall_the_loop(stack: Sta
 async def test_a_lock_held_past_the_limit_is_answered_busy(
     stack: Stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Rather than hold a request forever, one that waited the limit is told to try again."""
+    """Rather than hold a request forever, one that waited the limit is told to try again. The
+    Proposals page writes (it holds a change whose first step failed), so it waits for the lock
+    even though a page only reading would go ahead (test_db_lock_reads.py)."""
     h = stack.h
     browser = Browser(h)
     await browser.login()
@@ -114,14 +116,14 @@ async def test_a_lock_held_past_the_limit_is_answered_busy(
     h.app.middleware_stack = None  # built again with the shorter limit
     holder = _hold(str(h.settings.db_path), 2.0)
     try:
-        page = await browser.http.get("/account", headers={"accept": "text/html"})
-        api = await browser.http.get("/api/v1/proposals")
+        page = await browser.http.get("/proposals", headers={"accept": "text/html"})
+        api = await browser.http.get("/proposals", headers={"accept": "application/json"})
     finally:
         holder.wait(timeout=30)
     assert page.status_code == 503 and "The gateway is busy" in page.text, page.text
     assert page.headers["retry-after"] == "5"
     assert api.status_code == 503 and api.json()["error"] == "busy", api.text
-    assert (await browser.http.get("/account")).status_code == 200  # and served once it is free
+    assert (await browser.http.get("/proposals")).status_code == 200  # and served once it is free
 
 
 async def test_static_files_and_the_health_check_never_wait(stack: Stack) -> None:

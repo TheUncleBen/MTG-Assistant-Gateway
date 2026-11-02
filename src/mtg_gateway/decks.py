@@ -29,6 +29,7 @@ import math
 import pickle
 import re
 import secrets
+import sqlite3
 import time
 import uuid
 import weakref
@@ -69,6 +70,7 @@ from .archidekt import (
     art_url,
     backup_name,
     backup_writes,
+    before_apply_write,
     category_sort_key,
     finish_modifier,
     front_face,
@@ -197,6 +199,14 @@ APPLY_WAIT_SECONDS = 20.0
 # box): a person at the page is better served by the progress, which updates by itself, than by a
 # press that seems to do nothing for 20 s. A small change still lands on its outcome directly.
 BROWSER_APPLY_WAIT_SECONDS = 3.0
+# What an apply notes in the database just before each of its Archidekt writes
+# (Database.note_apply_progress): an apply cut off by a crash then still says its writes had begun.
+JOURNAL_KEYS = ("writes_started", "sent_entries", "of_entries", "snapshot_id", "deck_id", "categories_saved")
+# How long an apply waits, off the event loop, to record how it ended while another connection
+# holds the database's write lock, before it gives up (the restart then fails it as interrupted).
+RECORD_WAIT_SECONDS = 600.0
+# Deck edits failed as interrupted are read back (read_back_interrupted) up to this long after.
+READ_BACK_WITHIN_SECONDS = 2 * 86400
 # A new deck's cards go to Archidekt this many to a request (modifyCards takes a list), instead of
 # one request per card: a 125-card deck is three writes, not 125.
 CARD_WRITE_BATCH = 50
@@ -5773,7 +5783,11 @@ class DeckService:
                 else {}
             ),
             "snapshot_id": row["snapshot_id"],
-            "result": {k: v for k, v in row["result"].items() if k not in (NO_BACKUP_KEY, RISK_REASON_KEY)}
+            "result": {
+                k: v
+                for k, v in row["result"].items()
+                if k not in (NO_BACKUP_KEY, RISK_REASON_KEY, "apply_progress")
+            }
             or None
             if isinstance(row["result"], dict)
             else row["result"],
@@ -5844,6 +5858,16 @@ class DeckService:
                     (row["result"] or {}).get("sent_entries")
                     or (row["result"] or {}).get("categories_saved")
                     or (row["result"] or {}).get("answer_lost")
+                    or (
+                        state == "failed"
+                        and isinstance(row["result"], dict)
+                        and may_have_changed(row["result"])
+                    )
+                ),
+                interrupted=(
+                    interrupted_outcome(row["result"])
+                    if state == "failed" and isinstance(row["result"], dict)
+                    else ""
                 ),
                 kind=kind,
                 card_may_approve=self.card_may_approve(row),
@@ -5915,8 +5939,12 @@ class DeckService:
         keys = ("state", "closed_at", "closed_by", "closed_by_app", "may_have_changed", "rest_offered")
         extra = {k: p[k] for k in keys if p.get(k)}
         after = (
+            # still under way: proposal_status says the same (never "make a new one" meanwhile)
+            "it is still being applied: check it again with get_proposal in a while, and don't ask "
+            "for it again or make a new proposal."
+            if p["state"] == "applying"
             # its own apply may have changed Archidekt: asking for it again would make it twice
-            "check the deck before asking for this change again."
+            else "check the deck before asking for this change again."
             if p.get("may_have_changed")
             else "ask for a new proposal if the change is still wanted."
         )
@@ -6575,15 +6603,65 @@ class DeckService:
             raise DeckError("invalid", "None of the selected changes can be applied together.")
         return self.batches.start(self, sub, the_plan, via=via)
 
+    async def read_back_interrupted(self) -> int:
+        """Read back the deck of each deck edit cut off while its writes were out (a restart, a
+        crash, the six-hour backstop: interrupted_outcome "may"), against the snapshot taken before
+        it, and keep what it shows (``read_back``): "all" of the change is on the deck, "none" of
+        it (the deck is as it was), or "part". Each is read once; one whose read fails (Archidekt
+        down, the account unlinked) is tried again on the next round. Returns how many were read."""
+        n = 0
+        since = int(time.time()) - int(READ_BACK_WITHIN_SECONDS)
+        for found in self.db.interrupted_to_read_back(since):
+            sub, pid = found["owner_sub"], found["id"]
+            row = self.db.get_proposal(pid, sub)
+            if row is None or row["state"] != "failed" or not isinstance(row.get("result"), dict):
+                continue
+            try:
+                before = parse_deck(self.snapshot(sub, str(row["snapshot_id"]))["deck"])
+                now = await self.get_own_deck(sub, row["deck_id"])
+                changes = parse_changes(row["changes"], row_flags=True)
+            except Exception as exc:  # tried again on the next round
+                logger.info("could not read back the deck of an interrupted change: %s", exc)
+                continue
+            if not edit_mismatches(before, changes, now):
+                outcome = "all"
+            elif now.rows_fingerprint() == before.rows_fingerprint():
+                outcome = "none"
+            else:
+                outcome = "part"
+
+            def keep(r: Any, outcome: str = outcome) -> dict[str, Any] | None:
+                if not isinstance(r, dict) or r.get("error") != "interrupted" or r.get("read_back"):
+                    return None
+                return {**r, "read_back": outcome, "read_back_at": int(time.time())}
+
+            if self.db.edit_proposal_result(pid, sub, keep):
+                n += 1
+                self._audit("proposal_read_back", sub=sub, detail={"proposal_id": pid, "read_back": outcome})
+        return n
+
+    async def read_back_loop(self, every: float = 3600.0) -> None:
+        """At start-up and then every ``every`` seconds: read_back_interrupted (an apply the
+        six-hour backstop fails is read back on the next round)."""
+        while True:
+            try:
+                with dbwait.job(self.db):
+                    await self.read_back_interrupted()
+            except Exception:  # never let one bad round end the loop
+                logger.exception("reading back interrupted changes failed")
+            await asyncio.sleep(every)
+
     def rest_offered(self, row: dict[str, Any]) -> bool:
         """Whether a failed deck edit offers "Propose the rest": part of it reached Archidekt, or
         may have (some entries were sent, or a write went out unanswered), and its snapshot of the
         deck before it is kept."""
         result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        cut_off = interrupted_outcome(result)
         return bool(
             row.get("state") == "failed"
             and (row.get("kind") or "edit") == "edit"
-            and (result.get("sent_entries") or result.get("answer_lost"))
+            and (result.get("sent_entries") or result.get("answer_lost") or cut_off in ("may", "part"))
+            and cut_off not in ("all", "none")
             and result.get("snapshot_id")
             and not result.get("rest_proposal_id")
         )
@@ -6771,11 +6849,22 @@ class DeckService:
         new = row.get("kind") == "create_deck"
         account = row.get("kind") in ("lists", "action")  # not one deck: the member's account
         self._progress[proposal_id] = progress
+        progress["writes_started"] = False
+
+        def journal() -> None:
+            # just before each write is sent: a crash after this still leaves the note
+            progress["writes_started"] = True
+            self.db.note_apply_progress(proposal_id, {k: progress[k] for k in JOURNAL_KEYS if k in progress})
+
         # This task's own context: a rate limit is waited out instead of failing the apply halfway,
         # within one allowance for the whole apply
         patient.set(Patience())
         wait_note.set(progress)
         apply_writes.set(progress)  # every write of the apply counts as a change
+        before_apply_write.set(journal)
+        # after each Archidekt answer, its database work waits off the loop while another
+        # connection holds the write lock (dbwait.settle), so a change Archidekt took is recorded
+        dbwait._job_db.set(self.db)
         try:
             await lock.acquire()  # another apply on this deck may hold it
         except BaseException:  # cancelled while waiting (shutdown): never leave it in applying
@@ -6889,7 +6978,7 @@ class DeckService:
                     if partial
                     else str(exc)
                 )
-                self.db.finish_proposal(
+                await self._record_when_free(
                     proposal_id, state="failed", result={**progress, "error": exc.kind, "detail": detail}
                 )
                 board.settle(self, sub, proposal_id, "failed")  # holds its dependents
@@ -6906,23 +6995,38 @@ class DeckService:
                     ) from exc
                 raise
             except BaseException as exc:  # cancelled or unexpected: never leave a proposal in applying
-                kind = "internal" if isinstance(exc, Exception) else "interrupted"
-                unexpected = (
-                    f"Applying failed unexpectedly. "
-                    f"{_partial_note(progress, collection=coll, clone=clone, new_deck=new, account=account)}"
-                )
-                stored = {**progress, "error": kind, **({"detail": unexpected} if kind == "internal" else {})}
-                self.db.finish_proposal(proposal_id, state="failed", result=stored)
-                board.settle(self, sub, proposal_id, "failed")
-                self._audit(
-                    "proposal_failed",
-                    sub=sub,
-                    detail={"proposal_id": proposal_id, "error": kind, **_sent(progress)},
-                )
-                if not isinstance(exc, Exception):
-                    raise
-                logger.exception("apply failed")
-                raise DeckError("internal", unexpected) from exc
+                if _db_locked(exc) and "recording" in progress:
+                    # Archidekt took the change and it was read back; only recording it met the
+                    # database's lock (held by another connection): it is recorded once the lock
+                    # is free, never sent again
+                    await self._record_when_free(proposal_id, state="applied", **progress["recording"])
+                    result = self.describe(sub, proposal_id)
+                else:
+                    kind = "internal" if isinstance(exc, Exception) else "interrupted"
+                    note = _partial_note(
+                        progress, collection=coll, clone=clone, new_deck=new, account=account
+                    )
+                    unexpected = f"Applying failed unexpectedly. {note}"
+                    progress.pop("recording", None)
+                    stored = {
+                        **progress,
+                        "error": kind,
+                        **({"detail": unexpected} if kind == "internal" else {}),
+                    }
+                    if isinstance(exc, Exception):
+                        await self._record_when_free(proposal_id, state="failed", result=stored)
+                    else:  # cancelled (shutdown): recorded now, without waiting
+                        self.db.finish_proposal(proposal_id, state="failed", result=stored)
+                    board.settle(self, sub, proposal_id, "failed")
+                    self._audit(
+                        "proposal_failed",
+                        sub=sub,
+                        detail={"proposal_id": proposal_id, "error": kind, **_sent(progress)},
+                    )
+                    if not isinstance(exc, Exception):
+                        raise
+                    logger.exception("apply failed")
+                    raise DeckError("internal", unexpected) from exc
         finally:
             lock.release()
         self._audit(
@@ -6933,6 +7037,31 @@ class DeckService:
             # the result was described before the audit row above existed
             result["applied_via"] = self._applied_via(sub, proposal_id)
         return result
+
+    def record_applied(
+        self, proposal_id: str, result: dict[str, Any], progress: dict[str, Any], **kw: Any
+    ) -> None:
+        """Record an apply as applied with ``result``. Kept in ``progress`` first, so when only
+        this recording meets the database's lock, the apply records it once the lock is free
+        (_apply_slotted) instead of calling a change Archidekt took a failure."""
+        progress["recording"] = {"result": result, **kw}
+        self.db.finish_proposal(proposal_id, state="applied", result=result, **kw)
+
+    async def _record_when_free(self, proposal_id: str, **kw: Any) -> None:
+        """finish_proposal for how an apply ended, waiting off the event loop while another
+        connection holds the database's write lock (at most RECORD_WAIT_SECONDS), so an apply
+        is never left "applying" because the database was busy when it ended."""
+        deadline = time.monotonic() + RECORD_WAIT_SECONDS
+        while True:
+            left = deadline - time.monotonic()
+            if not self.db.write_free() and left > 0:
+                await dbwait.until_write_free(self.db, left)
+            try:
+                self.db.finish_proposal(proposal_id, **kw)
+                return
+            except sqlite3.OperationalError as exc:
+                if not _db_locked(exc) or deadline - time.monotonic() <= 0:
+                    raise
 
     def _stopped_extras(self, sub: str, proposal_id: str) -> dict[str, Any]:
         """What the answer to an apply that stopped after it may have changed Archidekt carries, as
@@ -7063,7 +7192,7 @@ class DeckService:
                 + ", ".join(mismatches)
                 + f". A snapshot ({snapshot_id}) of the deck before the change was kept.",
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     async def _left_out(
@@ -8162,7 +8291,7 @@ class DeckService:
         applied = await self.collection_apply(sub, changes, progress)
         # verified comes from collection_apply's read-back of the records it touched
         result = {**applied, "verified": applied.get("verified") is True, "snapshot_id": None}
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     @_dedupe
@@ -8259,7 +8388,7 @@ class DeckService:
                 f"Archidekt made the copy ({result['deck_url']}) but it does not match the source for: "
                 + ", ".join(mismatches),
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     async def _apply_restore(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -8346,7 +8475,7 @@ class DeckService:
                 + "; ".join(mismatches)
                 + f". A snapshot ({snapshot_id}) of the deck before the restore was kept.",
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     async def _apply_create(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -8533,7 +8662,7 @@ class DeckService:
                 else f"The deck was created (deck ID {created.id}) but these cards do not match the "
                 "proposal: " + ", ".join(mismatches) + (f". {differently}" if saved_otherwise else ""),
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     def reject(
@@ -9718,7 +9847,7 @@ class DeckService:
                 + ", ".join(mismatches)
                 + f". A snapshot ({snapshot_id}) of the deck before the change was kept.",
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     # -- the deck's own categories: rename and flags (kind "categories") -------------------------
@@ -9991,7 +10120,7 @@ class DeckService:
                 + f". A snapshot ({snapshot_id}) of the deck from just before was kept: Restore under "
                 "History puts the categories back.",
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     # -- the member's own custom cards in a deck (kind "custom_cards") ----------------------------
@@ -10119,7 +10248,7 @@ class DeckService:
                 + f". A snapshot ({snapshot_id}) of the deck's cards and details before the change "
                 "was kept; it does not hold custom cards.",
             )
-        self.db.finish_proposal(row["id"], state="applied", result=result)
+        self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
 
     # -- hand actions (the member's own browser; the assistant reaches folder, tag and cover only
@@ -12130,6 +12259,12 @@ def owns_deck(deck: Deck, link: dict[str, Any]) -> bool | None:
     )
 
 
+def _db_locked(exc: BaseException) -> bool:
+    """Whether ``exc`` is SQLite's "database is locked": another connection held the write lock
+    past the busy timeout."""
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc)
+
+
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in ("sent_entries", "of_entries", "snapshot_id", "deck_id") if k in progress}
 
@@ -12320,7 +12455,21 @@ def may_have_changed(result: dict[str, Any]) -> bool:
         or result.get("categories_saved")
         or result.get("done")
         or result.get("error") == "verify_mismatch"
+        or interrupted_outcome(result) in ("may", "all", "part")
     )
+
+
+def interrupted_outcome(result: dict[str, Any]) -> str:
+    """For an apply cut off before it finished (a restart, a crash, the six-hour backstop, a
+    shutdown): "nothing" when no Archidekt write had begun, "may" when one had (or it is not
+    known: recorded before that was noted), or how the deck read back afterwards showed it
+    (read_back_interrupted: "all", "part" or "none"). "" for any other result."""
+    if result.get("error") != "interrupted":
+        return ""
+    read = result.get("read_back")
+    if read in ("all", "part", "none"):
+        return str(read)
+    return "nothing" if result.get("writes_started") is False else "may"
 
 
 def _changed_anything(progress: dict[str, Any]) -> bool:
@@ -12448,8 +12597,12 @@ def _partial_note(
         )
     if not sent:
         return "No deck rows were changed."
+    of = progress.get("of_entries")
     note = (
-        f"{sent} of {progress.get('of_entries', '?')} deck row changes had already been sent, "
+        # every row went out: the deck may well have the whole change, not a part of it
+        f"All {sent} deck row changes had already been sent, so the deck may have the whole change."
+        if isinstance(of, int) and sent >= of
+        else f"{sent} of {of if of is not None else '?'} deck row changes had already been sent, "
         "so the deck is partly changed."
     )
     if progress.get("snapshot_id"):
@@ -12796,8 +12949,10 @@ def _next_step(
     opens_first: str = "",
     applied: str = "",
     shows_card: bool = False,
+    interrupted: str = "",
 ) -> str:
-    """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
+    """What the assistant should do next with a proposal in ``state``. ``interrupted``: for an
+    apply cut off before it finished, ``interrupted_outcome`` of its result. ``rate_limited``: for an
     apply that stopped on Archidekt's waits, the same note its stored message ends with
     (``_rate_limited_note``), so the two never disagree. ``applied``: ``applied_text`` for an
     account action or collection change. ``shows_card``: the calling app is one known to show the
@@ -12915,6 +13070,8 @@ def _next_step(
         return "Done. The deck on Archidekt matches this proposal."
     if state == "failed" and rate_limited:
         return rate_limited
+    if state == "failed" and interrupted:
+        return _interrupted_step(interrupted, kind)
     if state == "failed" and partial and kind == "edit":
         return (
             "Part of this change reached Archidekt before it stopped. Tell the user: Propose the rest, "
@@ -12944,6 +13101,49 @@ def _next_step(
         }.get(closed_by or "", "Rejected.")
         return f"{who} Nothing was changed; create a new proposal for different edits."
     return "This proposal is no longer actionable."
+
+
+def _interrupted_step(outcome: str, kind: str) -> str:
+    """next_step for an apply cut off before it finished (interrupted_outcome): never "nothing
+    was changed" unless that is known, and never an invitation to make the change again while
+    Archidekt may already have it, which would make it twice."""
+    if outcome == "all":
+        return (
+            "The gateway stopped before it recorded this change, but the deck read again afterwards "
+            "shows the whole change is on the deck, so there is nothing more to do. Tell the user it "
+            "is done. Don't apply it again or propose it again."
+        )
+    if outcome == "none":
+        return (
+            "The gateway stopped while applying this, and the deck read again afterwards shows none "
+            "of it, so nothing was changed on Archidekt. Create a new proposal if you still want these "
+            "edits."
+        )
+    if outcome == "nothing":
+        return (
+            "Applying stopped when the gateway restarted, before anything was sent to Archidekt. "
+            "Nothing was changed on Archidekt. Create a new proposal if you still want these edits."
+        )
+    if kind == "edit" and outcome == "part":
+        return (
+            "The gateway stopped partway through this change, and the deck read again afterwards shows "
+            "part of it. Tell the user: Propose the rest, on its card or review page, makes a new "
+            "proposal of what is still missing (or propose_restore_snapshot with result.snapshot_id "
+            "puts the deck back). Don't retry it yourself."
+        )
+    if kind == "edit":
+        return (
+            "The gateway stopped while this change was being sent to Archidekt, so part or all of it "
+            "may be on the deck. Tell the user: Propose the rest, on its card or review page, reads "
+            "the deck and proposes only what is still missing (or propose_restore_snapshot with "
+            "result.snapshot_id puts the deck back). Don't apply it again yourself."
+        )
+    return (
+        "The gateway stopped while this change was being sent to Archidekt, so part or all of it "
+        "may be there. Read the deck (or binder) as it is now before proposing anything for it "
+        "again, so nothing is made twice; result.snapshot_id, when there is one, can be restored "
+        "with propose_restore_snapshot. Don't retry it yourself."
+    )
 
 
 def cards_from_json(text: str) -> list[dict[str, Any]]:

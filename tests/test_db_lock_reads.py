@@ -1,0 +1,172 @@
+"""While another process holds the database's write lock (a backup, an admin command), what only
+reads goes ahead at once and only what writes waits (0.7.46 re-audit). Before, every page and
+every assistant call waited the whole lock (whoami took 8 s), though in WAL mode a read never
+waits for a writer.
+
+A request that should only read (a page or JSON read, an assistant's call of read-only tools) is
+let through without waiting. Its answer is held back until it ends: if it turned out to need a
+write, that write failed at once without changing anything, the answer is dropped, and the
+request runs again, from the start, once the lock is free, as every request did before. Before
+anything that changes something outside the gateway (an Archidekt write, the identity
+provider's tokens, a notification), such a request goes back to waiting first, so that change is
+never made twice and what it gives back is always kept."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+
+import httpx
+import pytest
+
+from mtg_gateway import dbwait
+from mtg_gateway.db import Database, DatabaseBusy, read_through
+
+from .conftest import Stack
+from .test_db_lock_wait import _hold
+from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .test_unanswered_writes import ONE
+
+
+async def test_reads_answer_at_once_while_another_process_holds_the_lock(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    browser = Browser(h)
+    await browser.login()
+    for path in ("/decks", "/account", "/"):  # warm: first reads, caches
+        assert (await browser.http.get(path)).status_code == 200
+    await call(h, token, "whoami", {})
+    holder = _hold(str(h.settings.db_path), 4.0)
+    try:
+        started = time.monotonic()
+        replies = await asyncio.gather(
+            call(h, token, "whoami", {}),
+            call(h, token, "list_my_proposals", {}),
+            browser.http.get("/decks"),
+            browser.http.get("/account"),
+            browser.http.get("/"),
+        )
+        took = time.monotonic() - started
+        assert h.db.write_free() is False  # the lock really was held all along
+    finally:
+        holder.wait(timeout=30)
+    assert took < 2.0, f"reads took {took:.2f} s while the lock was held"
+    who = structured(replies[0])
+    assert who.get("ok") is not False and not replies[0].get("isError"), replies[0]
+    assert structured(replies[1]).get("ok") is not False, replies[1]
+    assert [r.status_code for r in replies[2:]] == [200, 200, 200]
+    await browser.aclose()
+
+
+async def test_a_write_still_waits_for_the_lock_and_then_goes_on(stack: Stack) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    holder = _hold(str(h.settings.db_path), 2.0)
+    try:
+        started = time.monotonic()
+        out = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": ONE}))
+        took = time.monotonic() - started
+    finally:
+        holder.wait(timeout=30)
+    assert out["ok"] and out["state"] == "pending", out
+    assert took >= 1.5, took  # it waited for the lock
+    mine = structured(await call(h, token, "list_my_proposals", {}))["proposals"]
+    assert [p["id"] for p in mine] == [out["proposal_id"]]  # made once
+
+
+async def test_a_read_that_needs_a_write_runs_again_once_the_lock_is_free(stack: Stack) -> None:
+    """The Proposals page writes when it finds a change that should now be held: it is run again
+    after the lock, and the page drawn then is the one the member sees."""
+    h = stack.h
+    await linked_user(stack)
+    browser = Browser(h)
+    await browser.login()
+    calls = {"n": 0}
+    real = Database.hold_blocked
+
+    def counted(self, sub):
+        calls["n"] += 1
+        with self.tx() as c:  # a write, as when a change has to be held
+            c.execute("UPDATE users SET last_seen_at = last_seen_at WHERE sub = ?", (sub,))
+        return real(self, sub)
+
+    holder = _hold(str(h.settings.db_path), 2.0)
+    try:
+        Database.hold_blocked = counted  # type: ignore[method-assign]
+        started = time.monotonic()
+        page = await browser.http.get("/proposals")
+        took = time.monotonic() - started
+    finally:
+        Database.hold_blocked = real  # type: ignore[method-assign]
+        holder.wait(timeout=30)
+    assert page.status_code == 200, page.text[:500]
+    assert took >= 1.5, took  # it waited for the lock to run again
+    assert calls["n"] == 2, calls  # the first run's write failed at once; the second went through
+    await browser.aclose()
+
+
+def _app(db: Database, steps: list[str], sent: list[str]):
+    """A tiny app: each request does ``steps`` in order: "write" (a write, its failure ignored as
+    some pages do), "outside" (a change outside the gateway, after before_side_effect)."""
+
+    async def app(scope, receive, send):
+        for step in steps:
+            if step == "write":
+                try:
+                    with db.tx() as c:
+                        c.execute("UPDATE users SET last_seen_at = 1 WHERE sub = 'nobody'")
+                except DatabaseBusy:
+                    pass
+            else:
+                await dbwait.before_side_effect()
+                sent.append("outside")
+        await send(
+            {"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]}
+        )
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    return app
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [["write", "outside"], ["outside", "write"], ["write"], ["outside"]],
+    ids=["write-then-outside", "outside-then-write", "write", "outside"],
+)
+async def test_nothing_outside_is_done_twice(stack: Stack, steps: list[str]) -> None:
+    """Whatever the order of a read's write and its change outside the gateway, the outside change
+    is made once, after the lock is free, and the request is answered."""
+    db = stack.h.db
+    sent: list[str] = []
+    mw = dbwait.DatabaseWaitMiddleware(_app(db, steps, sent), db=db, limit=10)
+    transport = httpx.ASGITransport(app=mw)
+    holder = _hold(str(db.path), 1.5)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            r = await client.get("/page")
+    finally:
+        holder.wait(timeout=30)
+    assert r.status_code == 200 and r.text == "ok"
+    assert sent == (["outside"] if "outside" in steps else []), sent
+    assert read_through.get() is None
+
+
+async def test_sign_in_steps_and_writes_never_go_ahead(stack: Stack) -> None:
+    db = stack.h.db
+    mw = dbwait.DatabaseWaitMiddleware(lambda *a: None, db=db, reads=lambda name: True)
+    for method, path in (
+        ("GET", "/auth/callback"),
+        ("GET", "/authorize"),
+        ("GET", "/login"),
+        ("POST", "/decks"),
+        ("POST", "/api/v1/proposals"),
+    ):
+        assert not mw._may_read({"type": "http", "method": method, "path": path}), (method, path)
+    for method, path in (
+        ("GET", "/decks"),
+        ("HEAD", "/account"),
+        ("GET", "/api/v1/proposals"),
+        ("POST", "/mcp"),
+    ):
+        assert mw._may_read({"type": "http", "method": method, "path": path}), (method, path)
+    assert not mw._reads_only({"path": "/mcp"}, b'{"jsonrpc":"2.0","id":1,"method":"initialize"}')

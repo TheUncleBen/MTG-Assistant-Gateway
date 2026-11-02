@@ -52,6 +52,7 @@ from .decks import (
     custom_card_line,
     detail_word,
     diff_of,
+    interrupted_outcome,
     row_label,
     row_line,
     tag_change_text,
@@ -2851,6 +2852,42 @@ def _deck_after_html(p: dict[str, Any]) -> str:
     return f"<p class='ui-why pr-after'>{html.escape(line)}</p>"
 
 
+def _cut_off_step(p: dict[str, Any], result: dict[str, Any], outcome: str) -> str:
+    """An apply cut off before it finished (a restart, a crash, one that ran past six hours):
+    decks.interrupted_outcome says whether any write had begun, or what the deck read back
+    afterwards showed. "Nothing was changed" only when that is known."""
+    again = FAILED_PLAIN_STEP_OWN if _made_by_member(p) else FAILED_PLAIN_STEP
+    if outcome == "all":
+        return (
+            "Applying was cut off before the gateway recorded it, but the deck read again afterwards "
+            "has all of this change, so there is nothing more to do."
+        )
+    if outcome == "none":
+        return "Applying was cut off, and the deck read again afterwards has none of this change. " + again
+    if outcome == "nothing":
+        return "Applying was cut off before anything was sent to Archidekt. " + again
+    if p.get("rest_offered"):
+        found = (
+            "and the deck read again afterwards has part of it"
+            if outcome == "part"
+            else "so part or all of it may be on the deck"
+        )
+        return (
+            f"Applying was cut off while this change was being sent to Archidekt, {found}. Propose "
+            "the rest reads the deck and makes a new proposal of only what is still missing, for you "
+            "to review."
+        )
+    undo = (
+        "; the snapshot taken just before it can be restored from History."
+        if result.get("snapshot_id")
+        else "."
+    )
+    return (
+        "Applying was cut off while this change was being sent to Archidekt, so part or all of it may "
+        f"be there. Check before making it again{undo}"
+    )
+
+
 def _made_by_member(p: dict[str, Any]) -> bool:
     """Whether the member made this change on the gateway's own pages (or it predates a maker)."""
     return p.get("created_by_client") in (None, "", BROWSER_CLIENT_ID, ADMIN_CLIENT)
@@ -2939,6 +2976,9 @@ def _page_step(p: dict[str, Any]) -> str:
             f"{n} of the changes {'was' if n == 1 else 'were'} made on Archidekt before this stopped. "
             "Check Binder › Lists; the entries as they were just before are under Before, below."
         )
+    cut_off = interrupted_outcome(result) if state == "failed" else ""
+    if cut_off:
+        return _cut_off_step(p, result, cut_off)
     if state == "failed" and p.get("rest_offered"):
         return (
             "Part of this change reached Archidekt before it stopped. Propose the rest makes a new "

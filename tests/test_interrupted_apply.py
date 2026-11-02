@@ -1,0 +1,205 @@
+"""An apply cut off while its write was out (a crash, an out-of-memory kill, a restart, the six-hour
+backstop) never says "Nothing further was changed. Create a new proposal": Archidekt may already
+have the change, and making it again would make it twice. The apply keeps a note in the database
+just before each Archidekt write, so even a hard crash leaves a record that writes had begun; the
+proposal then says the change may be on the deck and offers Propose the rest (which reads the deck
+and proposes only what is missing). After a restart the gateway reads the deck back and says what
+landed. An apply cut off before any write went out still says, truly, that nothing was changed."""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import time
+
+import httpx
+
+from .conftest import Stack
+from .fake_archidekt import FakeArchidekt
+from .test_approval_modes import _set_mode
+from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .test_unanswered_writes import DUPLICATE_INVITES, ONE, _propose, _qty
+
+SUB = "user-1"
+
+
+def _hang(ark: FakeArchidekt, *, method: str, path: str) -> tuple[asyncio.Event, asyncio.Event]:
+    """The first ``method`` request whose path holds ``path`` reaches Archidekt (a write lands),
+    and its answer never comes back while the test runs. Returns (out, release)."""
+    orig = ark.transport.handler
+    out, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        resp = orig(req)
+        if req.method == method and path in req.url.path and not out.is_set():
+            out.set()
+            await release.wait()
+        return resp
+
+    ark.transport.handler = handler
+    return out, release
+
+
+async def _start_apply(stack: Stack, token: str, pid: str, out: asyncio.Event) -> asyncio.Task:
+    task = asyncio.ensure_future(call(stack.h, token, "apply_proposal", {"proposal_id": pid}))
+    await asyncio.wait_for(out.wait(), 30)
+    return task
+
+
+def _crash(stack: Stack) -> list[asyncio.Task]:
+    """The process that ran the apply is gone: nothing it held in memory is left (the test keeps
+    its task only to end it)."""
+    decks = stack.gw.decks
+    gone = list(decks._running.values())
+    decks._running.clear()
+    decks._progress.clear()
+    return gone
+
+
+async def _end(stack: Stack, task: asyncio.Task, release: asyncio.Event, gone: list[asyncio.Task]) -> None:
+    release.set()
+    task.cancel()
+    await asyncio.gather(task, *gone, *stack.gw.decks._running.values(), return_exceptions=True)
+
+
+async def _review_page(stack: Stack, pid: str) -> str:
+    """The member's review page of the change, its words only."""
+    b = Browser(stack.h)
+    await b.login()
+    try:
+        page = (await b.http.get(f"/proposals/{pid}", headers={"accept": "text/html"})).text
+    finally:
+        await b.aclose()
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page.split("<main", 1)[-1]))
+
+
+async def test_a_restart_while_the_write_was_out_never_says_nothing_changed(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    pid = await _propose(h, token, ONE)
+    out, release = _hang(ark, method="PATCH", path="/decks/42/modifyCards")
+    task = await _start_apply(stack, token, pid, out)
+    gone = _crash(stack)
+    try:
+        assert h.db.fail_interrupted_applies() == 1  # the gateway starts again
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["state"] == "failed", got
+        for bad in DUPLICATE_INVITES:
+            assert bad not in got["next_step"], got["next_step"]
+        assert got.get("may_have_changed") is True, got
+        assert got.get("rest_offered") is True, got
+        assert "Propose the rest" in got["next_step"], got["next_step"]
+        assert "may" in got["next_step"], got["next_step"]
+        # a second apply is refused, and its refusal does not invite the change again either
+        again = structured(await call(h, token, "apply_proposal", {"proposal_id": pid}))
+        assert again["ok"] is False, again
+        for bad in DUPLICATE_INVITES:
+            assert bad not in again["message"], again["message"]
+        page = await _review_page(stack, pid)  # the member's own page says the same
+        for bad in (*DUPLICATE_INVITES, "Ask your assistant for a new proposal"):
+            assert bad not in page, page
+        assert "part or all of it may be on the deck" in page and "Propose the rest" in page, page
+    finally:
+        await _end(stack, task, release, gone)
+
+
+async def test_the_six_hour_backstop_never_says_nothing_changed(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    pid = await _propose(h, token, ONE)
+    out, release = _hang(ark, method="PATCH", path="/decks/42/modifyCards")
+    task = await _start_apply(stack, token, pid, out)
+    gone = _crash(stack)
+    try:
+        with h.db.tx() as c:  # the apply started seven hours ago and never finished
+            c.execute("UPDATE proposals SET applied_at = ? WHERE id = ?", (int(time.time()) - 7 * 3600, pid))
+        h.db.purge_expired()
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["state"] == "failed", got
+        for bad in DUPLICATE_INVITES:
+            assert bad not in got["next_step"], got["next_step"]
+        assert got.get("may_have_changed") is True and got.get("rest_offered") is True, got
+    finally:
+        await _end(stack, task, release, gone)
+
+
+async def test_after_a_restart_the_deck_is_read_back_and_says_what_landed(stack: Stack) -> None:
+    """The gateway starts again and reads the deck: the whole change is there, so it says so,
+    and offers nothing to make again."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    pid = await _propose(h, token, ONE)
+    out, release = _hang(ark, method="PATCH", path="/decks/42/modifyCards")
+    task = await _start_apply(stack, token, pid, out)
+    gone = _crash(stack)
+    try:
+        assert h.db.fail_interrupted_applies() == 1
+        assert _qty(ark, "Forest") == 3  # Archidekt took it
+        assert await stack.gw.decks.read_back_interrupted() == 1
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["state"] == "failed", got
+        assert got["result"]["read_back"] == "all", got["result"]
+        assert "the whole change is on the deck" in got["next_step"], got["next_step"]
+        for bad in (*DUPLICATE_INVITES, "Propose the rest"):
+            assert bad not in got["next_step"], got["next_step"]
+        assert not got.get("rest_offered"), got
+        page = await _review_page(stack, pid)
+        assert "the deck read again afterwards has all of this change" in page, page
+        for bad in (*DUPLICATE_INVITES, "Ask your assistant for a new proposal"):
+            assert bad not in page, page
+        assert await stack.gw.decks.read_back_interrupted() == 0  # read once
+    finally:
+        await _end(stack, task, release, gone)
+
+
+async def test_after_a_restart_a_change_that_did_not_land_is_said_plainly(stack: Stack) -> None:
+    """Writes had begun but the deck read back is as it was: nothing was changed, said truly."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    pid = await _propose(h, token, ONE)
+    orig = ark.transport.handler
+    out, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "/decks/42/modifyCards" in req.url.path and not out.is_set():
+            out.set()  # the write never reaches Archidekt
+            await release.wait()
+            raise httpx.ConnectError("gone", request=req)
+        return orig(req)
+
+    ark.transport.handler = handler
+    task = await _start_apply(stack, token, pid, out)
+    gone = _crash(stack)
+    try:
+        assert h.db.fail_interrupted_applies() == 1
+        assert await stack.gw.decks.read_back_interrupted() == 1
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["result"]["read_back"] == "none", got["result"]
+        assert "nothing was changed" in got["next_step"].lower(), got["next_step"]
+        assert not got.get("may_have_changed"), got
+    finally:
+        await _end(stack, task, release, gone)
+
+
+async def test_an_apply_cut_off_before_any_write_says_nothing_was_changed(stack: Stack) -> None:
+    """Cut off while it still read the deck: no write had begun, so "nothing was changed" is
+    true, and the note that writes had begun is what tells the two apart."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    pid = await _propose(h, token, ONE)
+    out, release = _hang(ark, method="GET", path="/decks/42/")
+    task = await _start_apply(stack, token, pid, out)
+    gone = _crash(stack)
+    try:
+        assert h.db.fail_interrupted_applies() == 1
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["state"] == "failed" and not got.get("may_have_changed"), got
+        assert "Nothing was changed on Archidekt" in got["next_step"], got["next_step"]
+        assert ark.patches == []
+    finally:
+        await _end(stack, task, release, gone)

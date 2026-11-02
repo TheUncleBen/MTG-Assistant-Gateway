@@ -17,6 +17,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
 from mtg_gateway import dbwait
+from mtg_gateway.db import DatabaseBusy, read_through
 
 
 class _LockedDb:
@@ -34,8 +35,18 @@ class _LockedDb:
 
 
 async def _echo(request: Request) -> PlainTextResponse:
+    _writes()
     body = (await request.body()).decode("utf-8", "replace")
     return PlainTextResponse(f"{request.method} {request.url.path}?{request.url.query} {body}")
+
+
+def _writes() -> None:
+    """Each request here writes something: one let through while the lock is held (a read, as
+    far as the gateway can tell beforehand) finds the lock at its write and waits (dbwait.py)."""
+    through = read_through.get()
+    if through is not None and through.active:
+        through.busy = True
+        raise DatabaseBusy()
 
 
 def _client(db: _LockedDb, limit: float = 0.0) -> httpx.AsyncClient:

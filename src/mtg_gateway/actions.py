@@ -872,7 +872,7 @@ async def apply(
         result = {"folder_id": folder["id"], "name": folder["name"], "verified": True}
     else:
         raise DeckError("invalid", "This proposal names an action this gateway does not know.")
-    decks.db.finish_proposal(row["id"], state="applied", snapshot_id=result.get("snapshot_id"), result=result)
+    decks.record_applied(row["id"], result, progress, snapshot_id=result.get("snapshot_id"))
     return decks.describe(sub, row["id"])
 
 

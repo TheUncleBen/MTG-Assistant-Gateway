@@ -79,7 +79,7 @@ from .companion import add_companion_routes
 from .compress import PageGzip
 from .config import LiveSettings, Settings, with_stored
 from .db import SESSION_END_NOTICE, Database
-from .dbwait import DatabaseWaitMiddleware
+from .dbwait import DatabaseWaitMiddleware, tool_busy_middleware
 from .decks import (
     FULL_SCOPE,
     DeckError,
@@ -987,6 +987,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         except Exception:  # never keep the gateway from starting; the hourly round tries again
             logger.exception("sealing or purging stored Archidekt sessions failed")
         tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        # the decks of changes cut off by the last shutdown (or the backstop) are read back
+        tasks.append(asyncio.create_task(state.decks.read_back_loop()))
         if state.reports is not None:
             state.reports.resume_forge_runs()  # Forge runs left unfinished by the last shutdown
         if state.scan is not None:
@@ -1408,6 +1410,7 @@ def create_app(
 
     server.middleware.append(numbers_as_text_middleware(gateway_schema))
     server.middleware.append(schema_error_middleware())
+    server.middleware.append(tool_busy_middleware(mcp_reads))  # inside it: the code is added
     if mf_proxy is not None:
         # proxied archidekt_* research calls draw on the member's Archidekt budget too
         mf_proxy.archidekt_budget = state.decks.budget_refusal
@@ -1450,7 +1453,12 @@ def create_app(
     app.add_middleware(BodyLimitMiddleware)
     # Outside everything that reads or writes the database: a request waits off the loop while
     # another connection holds the write lock (dbwait.py).
-    app.add_middleware(DatabaseWaitMiddleware, db=db)
+    app.add_middleware(
+        DatabaseWaitMiddleware,
+        db=db,
+        # an assistant's call of tools that only read goes ahead while the lock is held
+        reads=lambda name: state.mcp_reads is not None and state.mcp_reads(name) and name not in WRITE_TOOLS,
+    )
     app.add_middleware(PageGzip)
     # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
     # nosniff and HSTS too.

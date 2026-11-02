@@ -973,7 +973,7 @@ async def apply(  # noqa: C901, PLR0912, PLR0915
         "mismatches": mismatches,
         "snapshot_id": None,
     }
-    decks.db.finish_proposal(row["id"], state="applied", result=result)
+    decks.record_applied(row["id"], result, progress)
     return decks.describe(sub, row["id"])
 
 

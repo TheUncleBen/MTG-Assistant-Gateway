@@ -443,6 +443,7 @@ class Notifier:
         (``event``: proposals, reports, prices, summary or test). A price alert, a finished
         report and a summary are kept for the website's bell first (:func:`bell_rows`), push
         or no push."""
+        await dbwait.before_side_effect()  # a notification sent can't be taken back
         p = prefs(self.db, sub)
         if event in BELL_EVENTS and p.get(f"on_{event}", True):
             self.db.add_gateway_alert(sub, event, title, message, path, keep=KEPT_ALERTS)

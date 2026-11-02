@@ -235,6 +235,77 @@ DECK_COVER_RETENTION_SECONDS = 180 * 86400
 PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
+# Set around a tool call (dbwait.tool_busy_middleware) to a dict that a write which found the
+# database locked past BUSY_TIMEOUT_MS marks ("locked"), so the call is answered "busy" instead
+# of a raw error.
+lock_failures: ContextVar[dict[str, bool] | None] = ContextVar("db_lock_failures", default=None)
+
+
+class DatabaseBusy(sqlite3.OperationalError):
+    """A write found the write lock held by another connection while its request was let through
+    without waiting for it (``ReadThrough``): raised at once instead of waiting on the event loop.
+    The request is then run again once the lock is free (dbwait.DatabaseWaitMiddleware)."""
+
+    def __init__(self) -> None:
+        super().__init__("database is locked (the request went ahead without waiting)")
+
+
+class ReadThrough:
+    """One request let through while another connection holds the write lock because it should
+    only read (dbwait.DatabaseWaitMiddleware). Its writes don't wait: one that finds the lock held
+    raises DatabaseBusy and marks ``busy`` (unless it is an optional one, ``optional_writes``);
+    ``committed`` notes a write that landed (the lock was free for it). ``active`` is False once
+    the request ends or turns to waiting (dbwait.before_side_effect). ``deadline``: when its
+    wait for the lock, should it need one, runs out (time.monotonic)."""
+
+    def __init__(self, db: Database, deadline: float) -> None:
+        self.db = db
+        self.deadline = deadline
+        self.active = True
+        self.busy = False
+        self.committed = False
+
+
+read_through: ContextVar[ReadThrough | None] = ContextVar("db_read_through", default=None)
+_optional: ContextVar[bool] = ContextVar("db_optional_write", default=False)
+
+
+@contextmanager
+def optional_writes() -> Iterator[None]:
+    """Writes nothing depends on (the usage counters): in a request let through while the lock
+    is held, one that finds it held is skipped by its caller without making the request wait."""
+    token = _optional.set(True)
+    try:
+        yield
+    finally:
+        _optional.reset(token)
+
+
+def _note_locked(exc: BaseException) -> None:
+    if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc) and not _optional.get():
+        seen = lock_failures.get()
+        if seen is not None:
+            seen["locked"] = True
+
+
+# The result of an apply cut off before it finished (a restart, a crash, the six-hour backstop),
+# for an UPDATE of proposals with :why: what the apply noted before its Archidekt writes
+# (apply_progress, note_apply_progress) and whether any write had begun (``writes_started``; an
+# apply cut off before its first write changed nothing), the snapshot taken before it and, for
+# a new deck, the deck made. The deck an edit was for is not a change, so it is not kept as
+# ``deck_id`` (which says a new deck was made).
+_STARTED_SQL = "COALESCE(json_extract(result_json, '$.apply_progress.writes_started'), 0)"
+INTERRUPTED_SQL = (
+    "json_patch(COALESCE(json_extract(result_json, '$.apply_progress'), '{}'), json_object("
+    "'error', 'interrupted', "
+    f"'writes_started', json(CASE WHEN {_STARTED_SQL} THEN 'true' ELSE 'false' END), "
+    f"'detail', :why || CASE WHEN {_STARTED_SQL} "
+    "THEN ', while the change was being sent to Archidekt, so part or all of it may be there. Read "
+    "the deck before doing anything else with it' "
+    "ELSE ', before anything was sent to Archidekt, so nothing was changed there' END, "
+    "'snapshot_id', snapshot_id, "
+    "'deck_id', CASE WHEN kind = 'create_deck' THEN deck_id END))"
+)
 # Remembered choices that follow the account: how many one account may keep and how large
 # one may be, so a page script cannot grow the database without bound.
 MAX_PREFS_PER_ACCOUNT = 300
@@ -1140,6 +1211,7 @@ class Database:
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._atomic_thread: int | None = None  # the thread inside atomic(), if any
         self._anonymous_audit_inserts = 0
         self.price_days = PRICE_RETENTION_DAYS
         # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
@@ -1275,15 +1347,45 @@ class Database:
             self._conn.close()
 
     @contextmanager
+    def atomic(self) -> Iterator[sqlite3.Connection]:
+        """One transaction around several of this class's writes (each tx() inside becomes a
+        savepoint of it): they all land or none does, and no other connection can take the write
+        lock between them. Nothing awaited inside: the connection is held throughout."""
+        with self.tx() as c:
+            outer = self._atomic_thread
+            self._atomic_thread = threading.get_ident()
+            try:
+                yield c
+            finally:
+                self._atomic_thread = outer
+
+    @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
+        if self._atomic_thread == threading.get_ident():
+            with self._lock:  # inside atomic(): a savepoint of its transaction
+                self._conn.execute("SAVEPOINT tx")
+                try:
+                    yield self._conn
+                except Exception:
+                    self._conn.execute("ROLLBACK TO tx")
+                    self._conn.execute("RELEASE tx")
+                    raise
+                else:
+                    self._conn.execute("RELEASE tx")
+            return
         if threading.current_thread() is not threading.main_thread():
             self._begin_off_loop()  # holds self._lock on return, the transaction begun
         else:
             self._lock.acquire()
+            through = read_through.get()
             try:
-                self._conn.execute("BEGIN IMMEDIATE")
-            except BaseException:
+                if through is not None and through.active:
+                    self._begin_without_waiting(through)
+                else:
+                    self._conn.execute("BEGIN IMMEDIATE")
+            except BaseException as exc:
                 self._lock.release()
+                _note_locked(exc)
                 raise
         try:
             yield self._conn
@@ -1292,8 +1394,29 @@ class Database:
             raise
         else:
             self._conn.execute("COMMIT")
+            through = read_through.get()
+            if through is not None and through.active:
+                through.committed = True
         finally:
             self._lock.release()
+
+    def _begin_without_waiting(self, through: ReadThrough) -> None:
+        """BEGIN IMMEDIATE for a request let through while the lock is held (ReadThrough): never
+        waits; DatabaseBusy when the lock is still held."""
+        if str(self.path) == ":memory:":
+            self._conn.execute("BEGIN IMMEDIATE")
+            return
+        self._conn.execute("PRAGMA busy_timeout=0")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            if not _optional.get():
+                through.busy = True
+            raise DatabaseBusy() from exc
+        finally:
+            self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
 
     def _begin_off_loop(self) -> None:
         """BEGIN IMMEDIATE for a worker thread (a job run with asyncio.to_thread), returning with
@@ -1967,6 +2090,32 @@ class Database:
             is not None
         )
 
+    def note_apply_progress(self, proposal_id: str, progress: dict[str, Any]) -> None:
+        """Keep, with a proposal being applied, what its apply has done so far (decks: just
+        before each Archidekt write), so an apply cut off by a crash, an out-of-memory kill or the
+        backstop still says that its writes had begun (INTERRUPTED_SQL)."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE proposals SET result_json = json_set(COALESCE(result_json, '{}'), "
+                "'$.apply_progress', json(?)) WHERE id = ? AND state = 'applying'",
+                (json.dumps(progress), proposal_id),
+            )
+
+    def interrupted_to_read_back(self, since: int, limit: int = 20) -> list[dict[str, Any]]:
+        """Deck edits failed as interrupted since ``since`` whose writes had begun (or may have:
+        recorded before that was noted) and whose deck has not been read back yet (decks
+        read_back_interrupted): id and owner."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, owner_sub FROM proposals WHERE state = 'failed' AND kind = 'edit' "
+                "AND snapshot_id IS NOT NULL AND COALESCE(applied_at, created_at) >= ? "
+                "AND json_extract(result_json, '$.error') = 'interrupted' "
+                "AND COALESCE(json_extract(result_json, '$.writes_started'), 1) != 0 "
+                "AND json_extract(result_json, '$.read_back') IS NULL ORDER BY applied_at LIMIT ?",
+                (since, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def revoke_family(self, family: str) -> None:
         with self.tx() as c:
             c.execute("UPDATE tokens SET revoked = 1 WHERE family = ?", (family,))
@@ -1981,16 +2130,15 @@ class Database:
     def fail_interrupted_applies(self) -> int:
         """At startup, mark every proposal still 'applying' as failed. There is one gateway process,
         so an apply left running by the previous one (a crash, a redeploy) can't still be going.
-        The result points at the snapshot taken before it and the deck, so the member can check."""
+        The result (INTERRUPTED_SQL) keeps what the apply noted before each Archidekt write
+        (note_apply_progress), so even after a hard crash it says whether any write had begun,
+        and points at the snapshot taken before it, so the member can check."""
         with self.tx() as c:
             ids = [r[0] for r in c.execute("SELECT id FROM proposals WHERE state = 'applying'")]
             n = c.execute(
-                """UPDATE proposals SET state = 'failed',
-                   result_json = COALESCE(result_json, json_object('error', 'interrupted',
-                       'detail', 'the gateway restarted before the apply finished; check the deck on '
-                                 || 'Archidekt and restore the snapshot if it is only partly changed',
-                       'snapshot_id', snapshot_id, 'deck_id', deck_id))
-                   WHERE state = 'applying'"""
+                f"UPDATE proposals SET state = 'failed', result_json = {INTERRUPTED_SQL} "
+                "WHERE state = 'applying'",
+                {"why": "the gateway restarted before the apply finished"},
             ).rowcount
         self.settle_risks(ids)  # only the ones failed just now
         return n
@@ -2088,12 +2236,9 @@ class Database:
             )
             closed += [r[0] for r in c.execute(stuck, (now - 6 * 3600,))]
             n += c.execute(
-                """UPDATE proposals SET state = 'failed',
-                   result_json = COALESCE(result_json, json_object('error', 'interrupted',
-                       'detail', 'the apply did not finish; check the snapshot and the deck on Archidekt',
-                       'snapshot_id', snapshot_id, 'deck_id', deck_id))
-                   WHERE state = 'applying' AND COALESCE(applied_at, created_at) < ?""",
-                (now - 6 * 3600,),
+                f"UPDATE proposals SET state = 'failed', result_json = {INTERRUPTED_SQL} "
+                "WHERE state = 'applying' AND COALESCE(applied_at, created_at) < :before",
+                {"why": "the apply did not finish", "before": now - 6 * 3600},
             ).rowcount
         # only the proposals that expired or failed just now: the full scan is the one-time
         # backfill at startup (DeckService wires it in), never a tick's work
@@ -2312,7 +2457,8 @@ class Database:
 
     # metrics (per-day counters; see metrics.Metrics) ------------------------
     def metrics_increment(self, day: str, sub: str | None, kind: str, name: str, n: int = 1) -> None:
-        with self.tx() as c:
+        """A usage counter: an optional write (optional_writes), as nothing depends on it."""
+        with optional_writes(), self.tx() as c:
             c.execute(
                 """INSERT INTO metrics (day, sub, kind, name, n) VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(day, sub, kind, name) DO UPDATE SET n = n + excluded.n""",
