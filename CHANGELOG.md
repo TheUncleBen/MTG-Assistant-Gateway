@@ -532,7 +532,7 @@ name per thing.
 - **Every control is a 44 px target with a mouse** as well as on a touch screen.
 - On a phone the Proposals, Binder, History, Reports and Activity pages lead with their list; the
   stat tiles sit behind one line that gives the gist.
-- `remove_card_model` asks first: the assistant gives you a link to My card models with that
+- `remove_card_model` asks first: the assistant gives you a link to Card models with that
   card's Remove box open, and only your press of Remove removes it (see the upgrade notes).
 - The Authentik guide's removed-member clean-up (docs/IDP-AUTHENTIK.md, section 12) reads start to
   finish; to turn the clean-up off, put the word `off` back in its secret.

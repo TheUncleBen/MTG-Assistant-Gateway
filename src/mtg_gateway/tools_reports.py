@@ -41,7 +41,7 @@ KEPT_MODELS_TEXT = (
     "from the card's exact Oracle text. "
 )
 
-# remove_card_model's answer: the confirm is the member's own press on My card models.
+# remove_card_model's answer: the confirm is the member's own press on Card models.
 REMOVE_MODEL_NOTE = (
     "Nothing is removed until the user presses Remove in the box on that page; give them the link. "
     "Later solo tests then play the card without its effect again. Nothing changes on Archidekt."
@@ -627,7 +627,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             description=(
                 "Ask the user to remove their saved card model for one card (a report's "
                 "goldfish.kept_models lists them), only when they asked. It removes nothing itself: "
-                "remove_url opens My card models with that card's Remove box open, where only the "
+                "remove_url opens Card models with that card's Remove box open, where only the "
                 "user's press removes it. card_name is the card's name (the front face is enough)."
             ),
             annotations={"readOnlyHint": True, "openWorldHint": False},

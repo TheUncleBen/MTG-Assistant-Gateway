@@ -1277,6 +1277,8 @@ PROPOSAL_TOOLS: frozenset[str] = frozenset(
         "propose_delete_report",
         "propose_delete_snapshot",
         "propose_delete_scan_session",
+        # removes nothing itself: it links the Card models page with the Remove box open (0.7.46)
+        "remove_card_model",
         "propose_rest",  # the card's own Propose the rest
         "amend_proposal",
         "combine_proposals",
