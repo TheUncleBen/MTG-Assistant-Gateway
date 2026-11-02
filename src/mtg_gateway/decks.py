@@ -6630,6 +6630,26 @@ class DeckService:
             else:
                 outcome = "part"
 
+            if outcome == "all":
+                # the whole change is on the deck: it was applied, as a finished apply records it,
+                # so its holds are lifted and Undo puts the deck back to its snapshot
+                result = {
+                    "snapshot_id": row["snapshot_id"],
+                    "sent_entries": int(row["result"].get("sent_entries") or 0),
+                    "verified": True,
+                    "mismatched_cards": [],
+                    "after_fingerprint": now.fingerprint(),
+                    "read_back": "all",
+                    "read_back_at": int(time.time()),
+                }
+                if self.db.applied_after_read_back(pid, sub, result):
+                    n += 1
+                    self._audit(
+                        "proposal_read_back", sub=sub, detail={"proposal_id": pid, "read_back": outcome}
+                    )
+                    board.settle(self, sub, pid, "applied")
+                continue
+
             def keep(r: Any, outcome: str = outcome) -> dict[str, Any] | None:
                 if not isinstance(r, dict) or r.get("error") != "interrupted" or r.get("read_back"):
                     return None

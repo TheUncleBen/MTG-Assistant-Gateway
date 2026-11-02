@@ -14,11 +14,14 @@ import time
 
 import httpx
 
+from mtg_gateway.decks import BROWSER_CLIENT, current_client
+
 from .conftest import Stack
 from .fake_archidekt import FakeArchidekt
 from .test_approval_modes import _set_mode
 from .test_decks_and_proxy import Browser, call, linked_user, structured
 from .test_unanswered_writes import DUPLICATE_INVITES, ONE, _propose, _qty
+from .track_a_helpers import press_approve
 
 SUB = "user-1"
 
@@ -53,6 +56,11 @@ def _crash(stack: Stack) -> list[asyncio.Task]:
     gone = list(decks._running.values())
     decks._running.clear()
     decks._progress.clear()
+    decks._deck_locks.clear()
+    decks._archidekt_in_flight.clear()
+    decks._slot_waiters.clear()
+    pacer = decks.client.pacer  # the call left unanswered no longer fills a slot of a new process
+    pacer._in_flight = pacer._background_in_flight = 0
     return gone
 
 
@@ -125,32 +133,60 @@ async def test_the_six_hour_backstop_never_says_nothing_changed(stack: Stack) ->
         await _end(stack, task, release, gone)
 
 
-async def test_after_a_restart_the_deck_is_read_back_and_says_what_landed(stack: Stack) -> None:
-    """The gateway starts again and reads the deck: the whole change is there, so it says so,
-    and offers nothing to make again."""
+async def test_after_a_restart_a_change_read_back_whole_is_applied(stack: Stack) -> None:
+    """The gateway starts again and reads the deck: the whole change is there, so the change is
+    applied, as a finished apply records it: the change that waits on it is no longer held, it
+    offers nothing to make again, and Undo puts the deck back to its snapshot."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    await _set_mode(h, "auto")
+    await _set_mode(h, "manual")
     pid = await _propose(h, token, ONE)
+    after = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {
+                "deck_id": "42",
+                "changes": [{"action": "set_quantity", "card_name": "Island", "quantity": 2}],
+                "separate": True,
+                "depends_on": [pid],
+            },
+        )
+    )
+    assert after["ok"], after
     out, release = _hang(ark, method="PATCH", path="/decks/42/modifyCards")
-    task = await _start_apply(stack, token, pid, out)
+    task = asyncio.ensure_future(press_approve(h, token, pid))
+    await asyncio.wait_for(out.wait(), 30)
     gone = _crash(stack)
     try:
         assert h.db.fail_interrupted_applies() == 1
+        held = structured(await call(h, token, "get_proposal", {"proposal_id": after["proposal_id"]}))
+        assert held["status"] == "held", held  # it waits on a change that failed
         assert _qty(ark, "Forest") == 3  # Archidekt took it
         assert await stack.gw.decks.read_back_interrupted() == 1
         got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
-        assert got["state"] == "failed", got
-        assert got["result"]["read_back"] == "all", got["result"]
-        assert "the whole change is on the deck" in got["next_step"], got["next_step"]
+        assert got["state"] == "applied", got
+        assert got["result"]["read_back"] == "all" and got["snapshot_id"], got
+        assert got["next_step"].startswith("Done."), got["next_step"]
         for bad in (*DUPLICATE_INVITES, "Propose the rest"):
             assert bad not in got["next_step"], got["next_step"]
-        assert not got.get("rest_offered"), got
+        assert not got.get("rest_offered") and not got.get("may_have_changed"), got
         page = await _review_page(stack, pid)
-        assert "the deck read again afterwards has all of this change" in page, page
-        for bad in (*DUPLICATE_INVITES, "Ask your assistant for a new proposal"):
+        for bad in (*DUPLICATE_INVITES, "Ask your assistant for a new proposal", "could not be applied"):
             assert bad not in page, page
+        # the hold it caused is lifted, as after an apply that finished
+        free = structured(await call(h, token, "get_proposal", {"proposal_id": after["proposal_id"]}))
+        assert free["state"] == "pending" and free.get("status") != "held", free
         assert await stack.gw.decks.read_back_interrupted() == 0  # read once
+        # Undo puts the deck back to the snapshot taken before the change
+        reset = current_client.set(BROWSER_CLIENT)
+        try:
+            undone = await stack.gw.decks.undo(SUB, got["snapshot_id"], applied=[pid])
+        finally:
+            current_client.reset(reset)
+        assert undone["state"] == "applied", undone
+        assert _qty(ark, "Forest") == 15
     finally:
         await _end(stack, task, release, gone)
 

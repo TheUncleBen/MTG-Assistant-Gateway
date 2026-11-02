@@ -2101,6 +2101,22 @@ class Database:
                 (json.dumps(progress), proposal_id),
             )
 
+    def applied_after_read_back(self, proposal_id: str, owner_sub: str, result: dict[str, Any]) -> bool:
+        """Mark a deck edit failed as interrupted applied (``result``), when the deck read back
+        afterwards has the whole change (decks.read_back_interrupted). Only while it is still that
+        failed, unread change. True when it was marked."""
+        with self.tx() as c:
+            done = c.execute(
+                "UPDATE proposals SET state = 'applied', applied_at = ?, result_json = ? "
+                "WHERE id = ? AND owner_sub = ? AND state = 'failed' "
+                "AND json_extract(result_json, '$.error') = 'interrupted' "
+                "AND json_extract(result_json, '$.read_back') IS NULL",
+                (int(time.time()), json.dumps(result), proposal_id, owner_sub),
+            ).rowcount
+        if done:
+            self.settle_risks([proposal_id])
+        return bool(done)
+
     def interrupted_to_read_back(self, since: int, limit: int = 20) -> list[dict[str, Any]]:
         """Deck edits failed as interrupted since ``since`` whose writes had begun (or may have:
         recorded before that was noted) and whose deck has not been read back yet (decks
