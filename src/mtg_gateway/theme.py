@@ -707,6 +707,12 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .notice.ok{border-left-color:var(--green);background:var(--green-tint);color:var(--green-text)}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
 .notice.info{border-left-color:var(--blue);background:var(--blue-tint);color:var(--text)}
+/* a draft put back (static/draft.js): the words and Discard on one line where they fit */
+.notice.draft-note{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;grid-column:1/-1}
+.notice.draft-note .btn{margin:0;min-height:44px}
+/* why a page can't be read yet (busy.busy_body), under its strip, with the area's own page */
+.busy-why{color:var(--text-muted);display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
+.busy-why .btn{margin:0}
 .notice a{color:inherit;text-decoration:underline}
 /* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
 .notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
@@ -2854,7 +2860,8 @@ def render(
             f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
         )
         # The site search (cards and decks; cardsearch.py, static/suggest.js): Enter on plain text
-        # is the deck search, a card row opens /cards for it, and a right-click or a press and hold
+        # is the deck search, Enter on a card's exact name (its row shown) or a card row opens
+        # /cards for it, and a right-click or a press and hold
         # on one opens the card menu (static/cardmenu.js). It fills the bar between the brand and
         # the icons; folded behind the magnifier on phones.
         search_form = (

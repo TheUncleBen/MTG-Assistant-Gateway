@@ -77,7 +77,10 @@ async def test_a_busy_binder_keeps_its_frame_and_says_collection(stack: Stack) -
         stack.ark.inject = [(429, "30")] * 10
         r = await b.http.get("/collection", headers=NAV)
         assert r.status_code == 429
-        assert "<title>Binder" in r.text and "<h2 class='busy-title'>Archidekt is busy</h2>" in r.text
+        assert (
+            "<title>Binder" in r.text and "<h1 class='sr-only'>Binder: Cards</h1>" in r.text
+        )  # its own frame
+        assert "Archidekt is busy, so your binder can't be read yet." in r.text and "busy-title" not in r.text
         assert "your collection" in r.text and "your decks" not in r.text
         assert "My decks" not in r.text.split("<main", 1)[1]
         for raw in RAW:

@@ -118,3 +118,77 @@ def test_binder_import_and_deck_comment_keep_their_drafts(server: Server) -> Non
             assert errors == [], errors
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize("width", [412, 1280])
+def test_a_draft_put_back_says_so_and_discard_clears_it_while_esc_keeps_it(
+    server: Server, width: int
+) -> None:
+    """A restored draft is never silent (0.7.46 re-audit N04): the form says "Your unsent draft
+    is back." with Discard. Esc and Cancel keep the draft (that is what a draft is for); Discard
+    clears it, and the form is empty after a reload too. The same note on every kept form: the
+    deck comment here."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        try:
+            page.goto(f"{server.base}/decks/new", wait_until="networkidle")
+            box = page.locator("#newdeck")
+            box.wait_for()
+            assert box.locator(".draft-note").count() == 0  # nothing to put back: no note
+            box.locator("#name").fill("Old idea")
+            # Esc closes the box; New deck opens it again with the draft and the note
+            page.keyboard.press("Escape")
+            page.wait_for_function("() => document.getElementById('newdeck').hidden")
+            page.goto(f"{server.base}/decks/new", wait_until="networkidle")
+            box = page.locator("#newdeck")
+            box.wait_for()
+            assert box.locator("#name").input_value() == "Old idea"
+            note = box.locator(".draft-note")
+            assert note.is_visible() and note.inner_text().startswith("Your unsent draft is back.")
+            assert note.get_attribute("role") == "status"
+            discard = note.locator("button", has_text="Discard")
+            bb = discard.bounding_box()
+            assert bb and bb["height"] >= 44, bb
+            # Cancel keeps it too
+            box.locator(".acts button", has_text="Cancel").click()
+            page.wait_for_function("() => document.getElementById('newdeck').hidden")
+            page.goto(f"{server.base}/decks/new", wait_until="networkidle")
+            box = page.locator("#newdeck")
+            box.wait_for()
+            assert box.locator("#name").input_value() == "Old idea"
+            # Discard: the form is empty, the note is gone, and a reload shows nothing
+            box.locator(".draft-note button", has_text="Discard").click()
+            assert box.locator("#name").input_value() == ""
+            assert box.locator(".draft-note").count() == 0
+            assert box.locator(".nd-pt").inner_text() == "Unnamed deck"  # the preview followed
+            page.goto(f"{server.base}/decks/new", wait_until="networkidle")
+            box = page.locator("#newdeck")
+            box.wait_for()
+            assert box.locator("#name").input_value() == "" and box.locator(".draft-note").count() == 0
+
+            # a deck's comment: the same note, and typing on takes the note away (the draft is
+            # the member's again; Discard would throw away the new typing)
+            page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+            ctext = page.locator("#ctext")
+            ctext.scroll_into_view_if_needed()
+            ctext.fill("A comment typed on a phone")
+            page.reload(wait_until="networkidle")
+            form = page.locator("form.newcomment")
+            assert form.locator("#ctext").input_value() == "A comment typed on a phone"
+            note = form.locator(".draft-note")
+            assert note.is_visible() and note.inner_text().startswith("Your unsent draft is back.")
+            form.locator("#ctext").press("End")
+            form.locator("#ctext").type(" and more")
+            assert form.locator(".draft-note").count() == 0
+            page.reload(wait_until="networkidle")
+            form = page.locator("form.newcomment")
+            assert form.locator("#ctext").input_value() == "A comment typed on a phone and more"
+            form.locator(".draft-note button", has_text="Discard").click()
+            assert form.locator("#ctext").input_value() == ""
+            assert errors == [], errors
+        finally:
+            browser.close()

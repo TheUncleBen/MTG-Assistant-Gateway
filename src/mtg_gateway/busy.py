@@ -145,9 +145,12 @@ def area_text(text: str, noun: str | None) -> str:
     )
 
 
-def busy_body(plan: BusyPlan, url: str) -> str:
-    """The busy panel for the page at ``url``. Archidekt's own words (``plan.detail``: codes,
-    seconds) are left out: the text says what happened and that nothing is wrong."""
+def busy_body(plan: BusyPlan, url: str, what: str = "this page") -> str:
+    """What a page shows in its own frame while Archidekt can't be asked and there is no held
+    copy (0.7.46 re-audit D29): the strip the held pages show (busy.held_html), with Try again
+    (a fresh read of ``url``), then why, and the area's own page. ``what`` names the page ("your
+    binder"). Archidekt's own words (``plan.detail``: codes, seconds) are left out: the text says
+    what happened and that nothing is wrong."""
     noun, back, label = area_of(url)
     second = (
         f" <a class='btn' href='{html.escape(back)}'>{html.escape(label)}</a>"
@@ -155,9 +158,10 @@ def busy_body(plan: BusyPlan, url: str) -> str:
         else ""
     )
     return (
-        f"<div class='panel'><p>{html.escape(area_text(plan.text, noun))}</p>"
-        f"<div class='actions'><a class='btn btn-primary' href='{html.escape(url)}'>Try again</a>"
-        f"{second}</div></div>"
+        f"<p class='notice warn held' role='status'>{html.escape(plan.title.rstrip('.'))}, so "
+        f"{html.escape(what)} can't be read yet. "
+        f"<a class='btn' href='{html.escape(url)}'>Try again</a></p>"
+        f"<p class='busy-why'>{html.escape(area_text(plan.text, noun))}{second}</p>"
     )
 
 
@@ -168,15 +172,19 @@ def busy_response(
     *,
     sub: str,
     sid: str | None,
+    title: str | None = None,
+    head: str = "",
     **page_kw: Any,
 ) -> Response | None:
-    """The shared page for a busy or unreachable Archidekt, rendered with the caller's own
-    ``page(title, body, sub=, sid=, status=)``; None when ``exc`` is some other failure."""
+    """The shared answer for a busy or unreachable Archidekt, rendered with the caller's own
+    ``page(title, body, sub=, sid=, status=)``: the page keeps its own ``title`` (and ``head``,
+    the page's heading block, with ``heading=False`` in ``page_kw``) over the busy strip; without
+    a title the strip's words are the title. None when ``exc`` is some other failure."""
     plan = busy_plan(exc)
     if plan is None:
         return None
-    body = busy_body(plan, same_url(request))
-    resp = page(plan.title, body, sub=sub, sid=sid, status=plan.status, **page_kw)
+    body = head + busy_body(plan, same_url(request))
+    resp = page(title or plan.title, body, sub=sub, sid=sid, status=plan.status, **page_kw)
     resp.headers.update(_headers(plan))
     return resp
 

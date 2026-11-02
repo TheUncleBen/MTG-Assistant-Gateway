@@ -756,7 +756,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                                 f"Did you mean: {links}?</p>"
                             )
             except DeckError as exc:
-                if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Search decks"):
                     return busy
                 body += search_form_html(query, view=view) + f"<div id='s-results'>{problem(exc)}</div>"
             else:
@@ -840,7 +840,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         try:
             listing = await decks.precons(sub)
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Preconstructed decks"):
                 return busy
             return page(
                 "Preconstructed decks",
@@ -916,7 +916,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 lambda: decks.search_decks(sub, **asked),
             )
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title=username):
                 return busy
             return page(
                 username,

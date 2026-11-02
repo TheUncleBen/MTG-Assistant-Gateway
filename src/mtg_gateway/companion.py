@@ -335,7 +335,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     def deck_problem(request: Request, exc: DeckError, *, sub: str, sid: str | None) -> Response:
         """A deck that cannot be shown (the deck page, Goldfish, Compare, Export): the shared busy
         page while Archidekt is busy, else one sentence for the case and Back to my decks."""
-        if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+        if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Deck"):
             return busy
         title = deck_problem_title(exc)
         # the sentence is the page's title; the panel holds the way back, not the sentence again

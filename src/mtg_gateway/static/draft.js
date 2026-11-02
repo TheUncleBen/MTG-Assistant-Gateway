@@ -14,6 +14,11 @@
    dropped. Loaded on every signed-in page before the page scripts (theme.py); a form added to
    the page later is kept with MtgDraft.keep(form, key).
 
+   A draft put back is never silent (re-audit N04): the form opens with "Your unsent draft is
+   back." and Discard, which clears the draft and puts the form's own values back. Cancel, Esc
+   and Back keep the draft (that is what it is for); typing on takes the note away, as the draft
+   is the member's own again.
+
    The key is the member's: data-who in the top bar (a hash of the member's id, theme.py), so
    the next member on a shared browser never sees another's draft. */
 (function () {
@@ -97,6 +102,33 @@
   /* keep: the form (or any element holding fields) under ``key``; returns {key, restored, clear}.
      Called again with another key (a box reused for another card), the form is kept under the
      new key from then on, with that key's draft put back. */
+  // the note over a form whose draft was put back: Discard drops the draft and puts the form's
+  // own values (``own``, as the page drew them) back; typing in the form takes the note away
+  function note(root, key, own) {
+    var old = root.querySelector(":scope > .draft-note");
+    if (old) old.remove();
+    var p = document.createElement("p");
+    p.className = "notice info draft-note";
+    p.setAttribute("role", "status");
+    var text = document.createElement("span");
+    text.textContent = "Your unsent draft is back.";
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "btn small"; btn.textContent = "Discard";
+    p.appendChild(text); p.appendChild(btn);
+    var gone = function () { if (p.parentNode) p.remove(); root.removeEventListener("input", onInput); };
+    var onInput = function (e) { if (e.target !== root) gone(); };  // the member's own typing, not restore()
+    btn.addEventListener("click", function () {
+      drop(key);
+      root.removeEventListener("input", onInput);
+      restore(root, own);
+      drop(key);  // the restore's input event saved the form again
+      gone();
+      var first = fields(root)[0];
+      if (first) first.focus();
+    });
+    root.addEventListener("input", onInput);
+    root.insertBefore(p, root.firstChild);
+  }
   function keep(root, key) {
     if (!root || !key) return null;
     var h = root.__draft;
@@ -104,7 +136,11 @@
     var d = read(key), restored = false;
     if (d) {
       if (d.sent && !cameBack) drop(key);
-      else restored = restore(root, d.v);
+      else {
+        var own = values(root);
+        restored = restore(root, d.v);
+        if (restored) note(root, key, own);
+      }
     }
     if (h) { h.key = key; h.restored = restored; return h; }
     h = { key: key, restored: restored, clear: function () { drop(h.key); } };

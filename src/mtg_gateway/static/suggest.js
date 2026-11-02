@@ -285,6 +285,14 @@
         list.appendChild(goRow("Decks with commander " + c.name, href, "decks"));
       });
     }
+    // the card row whose name is exactly the text typed (folded as the lookup folds), or -1
+    function exactRow() {
+      var q = fold(text());
+      for (var i = 0; i < items.length; i++) {
+        if (!items[i].getAttribute("data-href") && fold(items[i].getAttribute("data-name") || "") === q) return i;
+      }
+      return -1;
+    }
     function pick(i) {
       var name = items[i] ? items[i].getAttribute("data-name") : "";
       if (!name) return;
@@ -346,7 +354,8 @@
       // goes as typed (the gateway says when the name is no card)
       if (pendingEnter) {
         pendingEnter = false;
-        if (names.length) pick(0);
+        if (site) { if (exactRow() >= 0) pick(exactRow()); else if (input.form) { close(); submit(input.form); } }
+        else if (names.length) pick(0);
         else if (input.hasAttribute("data-suggest-submit") && input.form) { close(); submit(input.form); }
       }
     }
@@ -422,6 +431,12 @@
         // the list belongs to the current text: take its first row; an older list: take the first
         // row of the answer that is on its way (typing again cancels that)
         if (shownFor === fold(text())) pick(0); else pendingEnter = true;
+      } else if (site && items.length) {
+        // the top bar (QOL-21): the exact name typed, its card row on screen, opens the card; any
+        // other text is the deck search. An older list: decided once the answer is in.
+        if (shownFor !== fold(text())) { e.preventDefault(); pendingEnter = true; }
+        else if (exactRow() >= 0) { e.preventDefault(); pick(exactRow()); }
+        else close();
       } else close(); }
       else if (e.key === "Escape") { e.preventDefault(); close(); }
       else if (e.key === "Tab") { close(); }

@@ -107,6 +107,9 @@ def groups(csrf: str, *, admin: bool, app: bool) -> list[tuple[int, str, list[Ro
             2,
             "Assistants and apps",
             [
+                # each assistant's own approval mode, three taps from any page (0.7.46 re-audit
+                # QG-14): avatar › Assistants › the assistant
+                _row("Assistants", "proposals", "/account/assistants"),
                 _row("Guide", "guide", "/guide"),
                 _row("Assistant skill", "report", "/install?for=skill"),
                 *([] if app else [_row("Android app", "download", "/install?for=android")]),

@@ -111,7 +111,7 @@ def add_deck_tool_routes(
             # to it forgets that read, and the save checks the deck on Archidekt itself
             deck, how = await decks.page_own_deck(sub, deck_id)
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Edit deck"):
                 return busy
             return page(
                 "Cannot edit this deck",
@@ -768,7 +768,7 @@ def add_deck_tool_routes(
             if (plan := busy_plan(exc)) is not None:
                 # the shared busy page, but Try again opens the Compare page: this route takes POST only
                 compare_url = f"/decks/{deck_id}/compare{query}"
-                busy = page(plan.title, busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
+                busy = page("Compare", busy_body(plan, compare_url), sub=sub, sid=sid, status=plan.status)
                 busy.headers.update(_headers(plan))
                 return busy
             # the deck lost its commander after the page loaded: plain words, not the assistant's

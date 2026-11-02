@@ -6,6 +6,7 @@ same strip the deck page and My decks use. A page never read before still gets t
 
 from __future__ import annotations
 
+import html
 import re
 
 import httpx
@@ -56,13 +57,25 @@ def test_pages_already_read_show_their_last_read_while_archidekt_is_busy(server:
         assert "retry-after" not in r.headers, path
 
 
-def test_a_page_never_read_still_gets_the_busy_page(server: Server) -> None:  # noqa: F811
+def test_a_page_never_read_keeps_its_frame_with_the_busy_strip_and_try_again(server: Server) -> None:  # noqa: F811
+    """No held copy to show (0.7.46 re-audit D29): the page keeps its own title and frame, with
+    the same strip the held pages show (Try again in it) over why, HTTP 429 with Retry-After,
+    never a page whose heading is the error."""
     sid, _ = _seed(server)
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}, timeout=30)
     _spend(server, h)
-    r = h.get("/users/alice?order=-viewCount")  # the seed read the profile in its usual order only
-    assert r.status_code == 429 and "<h1>Too many requests right now</h1>" in r.text
-    r = h.get("/search?name=Nothing")
-    assert r.status_code == 429 and "<h1>Too many requests right now</h1>" in r.text
-    r = h.get("/users/nobodyhere")
-    assert r.status_code == 429 and "<h1>Too many requests right now</h1>" in r.text
+    for path, title in (
+        ("/users/alice?order=-viewCount", "alice"),  # the seed read the profile in its usual order only
+        ("/search?name=Nothing", "Search decks"),
+        ("/users/nobodyhere", "nobodyhere"),
+        ("/forum", "Forum"),
+    ):
+        r = h.get(path)
+        assert r.status_code == 429 and 1 <= int(r.headers["retry-after"]) <= 600, (path, r.status_code)
+        assert f"<title>{title} · " in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:400])
+        assert "<h1>Too many requests" not in r.text and "busy-title" not in r.text, path
+        strip = re.search(r"<p class='notice warn held' role='status'>(.*?)</p>", r.text, re.S)
+        assert strip, (path, "no strip")
+        assert strip.group(1).startswith("Too many requests right now, so this page can't be read yet."), path
+        assert f"<a class='btn' href='{html.escape(path)}'>Try again</a>" in strip.group(1), path
+        assert "used up its Archidekt allowance" in r.text, path

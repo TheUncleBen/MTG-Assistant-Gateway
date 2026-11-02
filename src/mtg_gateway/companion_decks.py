@@ -348,7 +348,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         )
         filters = read_filters(qp)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait, last_read_ok=True)
-        if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
+        if failure is not None and (
+            busy := busy_response(failure, request, page, sub=sub, sid=sid, title="My decks")
+        ):
             return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
         unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable
@@ -1045,7 +1047,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 sub, deck_id, data.get("name") or None, folder_id=int(fid) if fid else None
             )
         except DeckError as exc:
-            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Clone"):
                 return busy
             # someone else's deck (or no link) goes back to its page with the message; a folder
             # that is not the member's ("not_found" with a folder picked) stays in the box

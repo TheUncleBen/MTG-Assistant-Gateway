@@ -1040,7 +1040,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     def settings_problem(
         request: Request, deck_id: str, exc: DeckError, sub: str, sid: str | None
     ) -> Response:
-        if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+        if busy := busy_response(exc, request, page, sub=sub, sid=sid, title="Deck settings"):
             return busy
         return page(
             "Cannot edit this deck",
