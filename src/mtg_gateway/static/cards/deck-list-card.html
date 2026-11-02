@@ -76,8 +76,10 @@
       body.appendChild(sub);
       var links = el("div", "links");
       var nm = String(d.name || "this deck");
+      // one way in a deck (re-audit D26: two pills under every deck were clutter): the deck's own
+      // page here, which has the Archidekt link; Archidekt itself only when there is no page here
       if (appUrl(d)) { var o = link("Open in the app", appUrl(d)); o.setAttribute("aria-label", "Open " + nm + " in the app"); links.appendChild(o); }
-      if (typeof d.url === "string" && d.url) { var ar = link("Archidekt", d.url); ar.setAttribute("aria-label", "Open " + nm + " on Archidekt"); links.appendChild(ar); }
+      else if (typeof d.url === "string" && d.url) { var ar = link("Archidekt", d.url); ar.setAttribute("aria-label", "Open " + nm + " on Archidekt"); links.appendChild(ar); }
       body.appendChild(links);
       li.appendChild(body);
       list.appendChild(li);

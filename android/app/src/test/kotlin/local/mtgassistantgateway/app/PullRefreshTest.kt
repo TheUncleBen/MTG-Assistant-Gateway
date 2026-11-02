@@ -16,7 +16,7 @@ class PullRefreshTest {
             "/", "/decks", "/decks?folder=Commander", "/collection", "/collection/wants", "/watchlist",
             "/proposals", "/history", "/reports", "/notifications", "/precons", "/cards?q=sol+ring",
             "/search?q=meren", "/forum", "/forum/general/rules", "/forum/threads/all", "/activity", "/decks/",
-            "/collection/lists", "/lists/templates", "/lists/defaults?page=2", "/lists/tags",
+            "/collection/lists", "/lists/templates", "/lists/defaults?page=2", "/lists/tags", "/lists/btags",
             "/lists/custom?q=elf", "/users/alice", "/users/Some%20One?order=name",
         )) {
             assertTrue(path, PullRefresh.offered(origin, "$origin$path"))

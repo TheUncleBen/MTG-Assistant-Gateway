@@ -196,11 +196,10 @@ CSS = (
   --shadow:0 3px 6px rgba(0,0,0,.5); --scrim:rgba(0,0,0,.4);
   /* boxes (dialogs): rounder than the panels, with a soft lifted shadow, so a pop-up feels native */
   --radius-box:14px; --shadow-box:0 18px 48px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.35);
-  --ctl:39px; /* phatButton / phatInput / phatDropdown height */
+  --ctl:44px; /* phatButton / phatInput / phatDropdown height: 44 px with a finger and a mouse alike */
 }
-/* Touch screens: every standard control (buttons, inputs, selects, the custom select) is 44 px
-   tall, the release's touch-target rule; with a mouse the 39 px Archidekt height stays */
-@media (pointer:coarse){ :root{--ctl:44px} }
+/* Every control is 44 px each way, with a finger and with a mouse (the owner, 2026-11-02: the 44 px
+   rule holds on every pointer); the rules below were for touch screens only until then. */
 @media (prefers-color-scheme: light){ :root:not([data-theme=dark]){"""
     + _LIGHT
     + """} }
@@ -339,7 +338,7 @@ details.dd .menu button.danger:focus-visible{background:var(--border);color:var(
 .topbar .signin{height:34px;min-height:34px;padding:0 .9rem;background:var(--surface);
   border-color:var(--border);color:var(--text);white-space:nowrap}
 .topbar .signin:hover{background:var(--surface-2);color:var(--text)}
-@media (pointer:coarse){.topbar .signin{height:44px;min-height:44px}}
+.topbar .signin{height:44px;min-height:44px}
 .menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
 .menu .on,details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
@@ -355,10 +354,18 @@ details.dd .menu button.danger:focus-visible{background:var(--border);color:var(
 .dd-trigger .ic{color:var(--orange);margin-right:.25rem}
 details.dd[open] > summary.dd-trigger{border-color:var(--orange)}
 
-.wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 1rem}
-main.wrap{flex:1;padding:1rem 1rem 3rem}
-h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:break-word}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:break-word}
+/* the side gutters (1rem, 14 px) stop at 16 px when the text is enlarged: at 200% text on a 360 px
+   phone a 12-letter word of a heading needs the 4 px a gutter of 28 px took (re-audit N02); a
+   full-bleed element spans them with var(--gutter) */
+:root{--gutter:min(1rem,16px)}
+.wrap{width:100%;max-width:52rem;margin:0 auto;padding:0 var(--gutter)}
+main.wrap{flex:1;padding:1rem var(--gutter) 3rem}
+/* a heading wraps between words, at a hyphen where the browser has a dictionary, and inside a
+   word only when the word alone is wider than the line: "anywhere", not "break-word", since
+   break-word keeps a word's whole width as the heading's least width, which at 200% text on a
+   320 px phone pushed the page sideways (re-audit N02) */
+h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
+h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
 h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
@@ -369,7 +376,7 @@ ul.plain{list-style:none;margin:0;padding:0}
 
 /* panels (Archidekt: 3px radius, 1px border, light-background, no shadow) */
 .card,.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
-  padding:1rem;margin:0 0 1rem}
+  padding:1rem var(--gutter);margin:0 0 1rem}  /* the sides as the page's gutters, see .wrap */
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
 .panel h2,.card h2{font-size:1.5rem}
@@ -489,6 +496,8 @@ input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2p
   color:var(--text);font-weight:600;font-size:.9rem;line-height:1.2;text-align:left;
   -webkit-user-select:none;user-select:none}
 details > summary.fold-btn{margin-inline-start:-4px} /* the capsule's edge lines up with the text */
+/* a heading as the capsule's words keeps its longest word whole: the capsule grows to it */
+details > summary.fold-btn > h2{overflow-wrap:break-word;min-width:0}
 details > summary.fold-btn::-webkit-details-marker{display:none}
 .disc::after,details > summary.fold-btn::after{content:"";flex:none;width:6px;height:6px;
   margin-left:auto;border:solid currentColor;border-width:0 2px 2px 0;
@@ -530,7 +539,7 @@ details.mode-info > summary:focus-visible{outline:0}
    full 44px. The row stays a 44px tap target, and at 200% text the name may wrap — nothing
    scrolls sideways. */
 @media (max-width:599.98px){
-  .mode-list{margin-inline:-1rem;border-left:0;border-right:0;border-radius:0}
+  .mode-list{margin-inline:calc(-1 * var(--gutter));border-left:0;border-right:0;border-radius:0}
   .mode-pick{gap:8px;padding:13px 44px 13px 12px;font-size:.84rem}
   details.mode-info > summary{right:0;width:44px;top:max(0px,calc(13px + .6em - 22px))}
   .mode-body{padding:0 12px 14px 30px;font-size:.9rem}
@@ -614,7 +623,7 @@ form > button,form .btn{margin-top:1rem}
 button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radius:3px}
 .exportblock .head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;
   margin-top:1.25rem}
-.exportblock .head h2{margin:0;min-width:0;overflow-wrap:anywhere}
+.exportblock .head h2{margin:0;min-width:0;flex:1 1 12em;overflow-wrap:anywhere}
 .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:.85rem}
 button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
@@ -685,7 +694,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
   background-repeat:no-repeat;background-position:right .9rem center;background-size:10px 6px}
 .suggest-list.picklist li:not(.head){min-height:44px;padding-top:max(.55rem,calc((44px - 1.3em) / 2));
   padding-bottom:max(.55rem,calc((44px - 1.3em) / 2))}
-@media (pointer:coarse){ .suggest-list.picklist li:not(.head){padding-top:.75rem;padding-bottom:.75rem} }
+.suggest-list.picklist li:not(.head){padding-top:.75rem;padding-bottom:.75rem}
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
@@ -858,12 +867,14 @@ details.raw{margin:.5rem 0 0}
   main.wrap:has(.apply form.guarded){padding-bottom:calc(5.5rem + 5rem + env(safe-area-inset-bottom))}
   .has-tabbar main.wrap:has(.apply form.guarded){
     padding-bottom:calc(5.5rem + 9rem + env(safe-area-inset-bottom))} }
-/* Locked (until the click guard unlocks them), Apply and Reject keep labels that read: outlined in
-   their colour, not faded. */
-.apply form.guarded button[data-guard]:disabled{opacity:1;background:transparent;
-  border:1px dashed currentColor}
-.apply form.guarded button.primary:disabled{color:var(--orange-text)}
-.apply form.guarded button.danger:disabled{color:var(--danger-text)}
+/* Locked (until the click guard unlocks them), Apply and Reject keep their own look: the orange
+   and the red, not faded, not outlined (a dashed outline read as disabled, re-audit N16); the lock
+   is said beside them (.guard-hint, with the lock icon) until it opens. */
+.apply form.guarded button[data-guard]:disabled{opacity:1;cursor:wait}
+form.guarded .choice .guard-hint{display:flex;align-items:center;gap:.35rem;flex-basis:100%;width:100%;
+  margin:0 0 .2rem}
+form.guarded .choice .guard-hint[hidden]{display:none}
+form.guarded .choice .guard-hint svg.i{width:16px;height:16px;flex:none;color:var(--orange-text)}
 /* A tap on a locked button lands on its row instead (a disabled button takes no events, so the
    browser would move focus to the nearest focusable ancestor, <main tabindex=-1>, and scroll the
    page to it); static/clickguard.js then keeps focus where it was. */
@@ -880,7 +891,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 
 /* companion layout: wide pages */
 .wide .wrap{max-width:2300px}
-.wide main.wrap{padding-left:1rem;padding-right:1rem}
+.wide main.wrap{padding-left:var(--gutter);padding-right:var(--gutter)}
 
 /* below 1024 px the links sit closer and a little smaller, so the search box keeps room for its
    whole placeholder beside an admin's eight links, in wide fonts too */
@@ -909,7 +920,6 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 /* Touch screens: every control at least 44 px tall (the release's rule), including the small
    ones a mouse never minds: the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
-@media (pointer:coarse){
   .addbox button.tchip,.popular a,.cardview .chip{min-height:44px}
   .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:44px;height:44px}
   /* kept a list item (a flex summary loses its native fold-out marker in Chromium); the padding
@@ -937,7 +947,6 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   .hrow details > summary:not(.fold-btn),.report details summary:not(.fold-btn){min-height:44px;
     display:flex;align-items:center}
   ul.rows .row:not(._){--rowh:44px}
-}
 /* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
    the bar keeps its text links and drops the brand's word, so nothing runs under the account
    button and the page needs no sideways scroll. The word returns above 800 px. */
@@ -952,7 +961,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .topbar nav.site .navmore > summary span{font-size:.8em}
 .topbar nav.site .navmore .menu{left:0;right:auto;min-width:14rem}
 /* the rail's pages as links of their own, from TOPBAR_FULL_FROM (the query below) */
-.topbar nav.site a.xtra{display:none}
+.topbar nav.site a.xtra{display:none;min-width:44px;justify-content:center}
 /* the count of proposals waiting (Assistant), in the bell's orange */
 .nb{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:9px;padding:0 5px;
   background:var(--orange);color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:1;
@@ -1010,6 +1019,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
+.home .hero > div{flex:1 1 14rem;min-width:0}
 .home .hero h1{margin:0;font-size:1.6rem}
 .home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
 .home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
@@ -1164,8 +1174,8 @@ _MOBILE_RULES = """
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
   /* large text (a phone's font scale): a label wraps inside its tab and the bar grows */
-  body{b} .tabbar > a,body{b} .tabbar details.more summary{min-width:0;height:auto;min-height:56px;
-    text-align:center;line-height:1.15}
+  body{b} .tabbar > a,body{b} .tabbar details.more,body{b} .tabbar details.more summary{min-width:0;
+    height:auto;min-height:56px;text-align:center;line-height:1.15}
   body{b} .tabbar > a > .lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* large text: when a label no longer fits its tab (static/topbar.js measures), the bar shows the
      icons alone and keeps every name for screen readers, so no tab reads "Assi…" (audit D13) */
@@ -1278,9 +1288,9 @@ CSS += """
 .sizeseg button + button{border-left:1px solid var(--control-border)}
 .sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
 .sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
-@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px}
+.sizeseg button{min-height:44px;min-width:44px}
   /* the Grid / List switch: its own rule takes 2 px off --ctl for the border; a finger gets 44 */
-  .spanel .segc label{min-height:44px;min-width:44px} }
+  .spanel .segc label{min-height:44px;min-width:44px}
 .field.cardsize .sizeseg{display:flex;width:max-content}
 @media (min-width:1000.02px){
   .listbar .controls:has(.cardsize){
@@ -1401,7 +1411,7 @@ main.wrap.ui-wide{max-width:1200px}
 /* a part's count (Binder: Cards 18, Watchlist 3; mockup screen 8): a quiet grey pill */
 .hubseg a .cn{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;
   border-radius:10px;background:var(--surface-3);color:var(--text);font-size:.78rem;font-weight:700}
-@media (pointer:coarse){ .hubseg a,.hubseg > button{min-height:44px} }
+.hubseg a,.hubseg > button{min-height:44px}
 .hubbar{display:flex;justify-content:center;margin:0 0 14px}
 @media (max-width:599.98px){ .hubseg{display:flex;width:100%}
   .hubbar{display:block}
@@ -1512,7 +1522,8 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-tools .f{flex:1 1 9.5rem;display:flex;align-items:center}
 .ui-tools .f > :not(.msel-native){width:100%}  /* the hidden native select keeps its own size */
 .ui-tools select{margin:0}
-@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)} }
+@media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)}
+  .ui-tools.n3 .f{flex:1 1 calc(33.333% - .34rem)} }
 /* large text on a phone (the row under 20 em of its own text): one filter a row, so no choice is
    cut to "All…" (0.7.46 audit D31) */
 @container (max-width:20em){ .ui-tools .f,.ui-tools .search{flex-basis:100%;grid-column:1 / -1} }
@@ -1555,11 +1566,9 @@ main.wrap.ui-wide{max-width:1200px}
 .daygroup,.ui-table .tr.daygroup{background:transparent;color:var(--text-muted);font-weight:700;
   font-size:.85rem;
   grid-template-columns:1fr;min-height:32px}
-@media (pointer:coarse){
   /* the tick box's cell is the 44 px target; it overhangs its 32 px column into the padding */
   .ui-table .chk{width:44px;margin:-.45rem -6px}
   .ui-table .th button,.ui-table .group a{display:inline-flex;align-items:center;min-height:44px}
-}
 @media (max-width:899.98px){
   .ui-table .tr{grid-template-columns:var(--cols-md)}
   .ui-table .md-hide{display:none}
@@ -1639,10 +1648,8 @@ main.wrap.ui-wide{max-width:1200px}
    facts line, the Install page's address): on a touch screen its tap area grows above and below
    the words to 44 px without moving the lines around it (the padding makes the box, the negative
    margins keep the line box as it is) */
-@media (pointer:coarse){
   .ui-table .title .t a,.ui-table .title a.t,.ui-table .tr.group > span a,.ui-meta dd a,.wdg .det a,
   .rv-meta a,.inst a.mdaddr,a.tap{display:inline-block;padding:14px 0;margin:-14px 0;min-width:44px}
-}
 
 /* buttons: one orange main button; Reject, Delete and Remove as a red outline; the rest plain */
 .btn-outline-danger,button.btn-outline-danger{background:transparent;color:var(--danger-text);
@@ -1776,6 +1783,25 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .adm-nav{display:flex;width:100%;margin:0 0 .75rem}
 
 /* dashboard pages: a row of widgets (quick starts), then the full list */
+/* the fold on phones (ui.widgets): the tick box is read by screen readers and the keyboard, its
+   label is the one line shown; from 600 px both are gone and the widgets show whole */
+.glance-tgl{position:absolute;width:44px;height:44px;margin:0;opacity:0;pointer-events:none}
+.glance-lbl{display:none}
+@media (min-width:600px){.glance-tgl{display:none}}  /* no fold: nothing for the keyboard to reach */
+@media (max-width:599.98px){
+  .glance-lbl{display:flex;align-items:center;gap:.5rem;min-height:44px;margin:0 0 .75rem;padding:0 .75rem;
+    border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
+    font-weight:700;cursor:pointer}
+  .glance-lbl > span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+  .glance-lbl svg.i{width:18px;height:18px;flex:none}
+  .glance-lbl svg.i:last-child{transition:transform .15s}
+  .glance-tgl:focus-visible + .glance-lbl{outline:2px solid var(--focus);outline-offset:2px}
+  .glance-tgl:checked + .glance-lbl{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
+  .glance-tgl:checked + .glance-lbl svg.i:last-child{transform:rotate(180deg)}
+  .glance-tgl:not(:checked) + .glance-lbl + .ui-widgets{display:none}
+  .glance-tgl:checked + .glance-lbl + .ui-widgets{padding:.75rem;margin-bottom:1rem;
+    border:1px solid var(--card-border);
+    border-top:0;border-radius:0 0 var(--radius-panel) var(--radius-panel);background:var(--surface-2)} }
 .ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
   margin:0 0 1.25rem}
 .wdg{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:.85rem 1rem;background:var(--surface);
@@ -1893,7 +1919,6 @@ CARD_MENU_CSS = """
 .suggest-list li.watchable > .wbtn{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);
   box-shadow:none}
 .suggest-list li.watchable > .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
-@media (pointer:coarse){
   .wbtn{height:44px;min-height:44px;min-width:44px}
   .wbtn.icon{width:44px}
   .suggest-list li.watchable{padding-right:4rem}
@@ -1901,7 +1926,6 @@ CARD_MENU_CSS = """
   /* every menu's items (the top bar's, a row's ⋮, More, the sort menus): finger-sized */
   .menu a,.menu button,.menu .item,details.dd .menu a,details.dd .menu button,details.dd .menu .item{
     min-height:44px}
-}
 /* a row without an icon keeps an empty slot the icon's width, so every row's text lines up */
 .ctxmenu .ic-slot{display:inline-block;width:18px;height:18px;flex:none}
 /* the toast after a watch (and after an add on Card search) */
@@ -1910,10 +1934,10 @@ CARD_MENU_CSS = """
 .toast.cards-toast .btn,.toast.cards-toast button{margin:0}
 .toast.cards-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;border-radius:50%;font-size:1.2rem}
 /* finger-sized on touch, in the corner the toast keeps clear for it (.toast > .close above) */
-@media (pointer:coarse){.toast.cards-toast .close{width:44px;height:44px;min-height:44px}}
+.toast.cards-toast .close{width:44px;height:44px;min-height:44px}
 /* its action (Open Wants, Open the watchlist) is a button, finger-sized on a phone or the Fold */
 .toast.cards-toast a.btn{text-decoration:none}
-@media (pointer:coarse),(max-width:899.98px){.toast.cards-toast .btn{min-height:44px}}
+.toast.cards-toast .btn{min-height:44px}
 .toast.cards-toast .ok{width:18px;height:18px;flex:none;fill:none;stroke:var(--green-text);stroke-width:2.4}
 """
 CSS += CARD_MENU_CSS
@@ -1933,7 +1957,8 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox-scrim.in{opacity:1}
 .mtgbox-scrim.out{pointer-events:none}
 .mtgbox{display:flex;flex-direction:column;width:min(100%,30rem);max-height:calc(100vh - 2rem);
-  max-height:calc(100dvh - 2rem);padding:.75rem 1.25rem 1.25rem;background:var(--surface);color:var(--text);
+  max-height:calc(100dvh - 2rem);padding:.75rem min(1.25rem,18px) 1.25rem;background:var(--surface);
+  color:var(--text);
   border:1px solid var(--border-soft);border-radius:var(--radius-box);box-shadow:var(--shadow-box)}
 .mtgbox-scrim > .mtgbox{transform:translateY(10px) scale(.98);
   transition:transform .22s cubic-bezier(.2,.8,.3,1)}
@@ -2062,7 +2087,7 @@ _TOPSEARCH_CSS = """
   color:var(--navbar-muted);pointer-events:none}
 .topbar .topsearch .box input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
   background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
-@media (pointer:coarse){ .topbar .topsearch .box input{height:44px;border-radius:22px} }
+.topbar .topsearch .box input{height:44px;border-radius:22px}
 .topbar .topsearch .box input::placeholder{color:var(--navbar-muted)}
 .topbar .topsearch .box input:focus{background:var(--surface);color:var(--text);
   border-color:var(--orange);outline-offset:1px}
@@ -2201,7 +2226,7 @@ SEARCH_PANEL_CSS = """
 .spanel .pickm-pop label{display:flex;align-items:center;gap:.6rem;min-height:40px;padding:0 .9rem;margin:0;
   white-space:nowrap;cursor:pointer;font-weight:400}
 .spanel .pickm-pop label:hover{background:var(--border)}
-@media (pointer:coarse){ .spanel .pickm-pop label{min-height:44px} }
+.spanel .pickm-pop label{min-height:44px}
 .pickm-scrim{position:fixed;inset:0;z-index:199;background:var(--scrim)}
 .spanel .pickm.sheet .pickm-pop{position:fixed;left:0;right:0;top:auto;bottom:0;z-index:200;min-width:0;
   max-height:min(70vh,70dvh);overflow:auto;overscroll-behavior:contain;border-bottom:0;
@@ -2266,8 +2291,10 @@ SEARCH_PANEL_CSS = """
   .spanel .xlink,.spanel .rbar .more,.spanel .rbar .dirw,.spanel .rbar .size,.spanel .rbar .lbl,
   .spanel .rbar .clr,.spanel .rbar .brk,.spanel .rbar .brka,.spanel .rbar.cards .brka{display:none}
   .spanel .rbar .sort:has(.sortcw) .sortw{display:none}
-  .spanel .rbar .sortcw{display:block;flex:1 1 7em;min-width:0}
-  .spanel .rbar .g.sort{flex:1 1 7em;min-width:7em}
+  /* the chosen order on one line ("Set release, newest first"): the sort asks for 12 em, so the
+     card size's buttons go to the next row sooner than the choice wraps (re-audit D12) */
+  .spanel .rbar .sortcw{display:block;flex:1 1 12em;min-width:0}
+  .spanel .rbar .g.sort{flex:1 1 12em;min-width:7em}
   /* a bar with Select beside its count (My decks, the Binder): four pieces never fit a phone's
      row, so the count and Select share the first row at its two ends and Sort and the view the
      next, with nothing alone on a row */
@@ -2316,7 +2343,8 @@ html.sp-sheet-open,html.sp-sheet-open body{overflow:hidden}
 .loadmore{display:flex;flex-direction:column;align-items:center;gap:.5rem;margin:.5rem 0 1.5rem}
 .loadmore[hidden],.loadmore [hidden]{display:none}
 .loadmore .muted{font-size:.9rem;margin:0}
-.loadmore button{margin:0;min-width:12rem}
+.loadmore button{margin:0;min-width:min(12rem,calc(100vw - 2rem));max-width:100%;white-space:normal;
+  height:auto;min-height:var(--ctl)}
 """
 CSS += SEARCH_PANEL_CSS
 
@@ -2329,6 +2357,11 @@ CSS += """
 html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,.7,.3,1) forwards}
 @keyframes navprogress{from{transform:scaleX(.08)}to{transform:scaleX(.92)}}
 @media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
+/* enlarged text on a phone: a heading shrinks with the screen, so a long word ("Winterbourne-")
+   stays whole at 200% text on a 320 px phone instead of breaking letter by letter (last, after
+   the headings' own sizes above) */
+@media (max-width:599.98px){h1{font-size:min(2rem,14vw)} h2{font-size:min(1.5rem,9.5vw)}
+  .home .hero h1{font-size:min(1.6rem,10vw)} .mtgbox .bh h2{font-size:min(1.25rem,9vw)}}
 """
 
 

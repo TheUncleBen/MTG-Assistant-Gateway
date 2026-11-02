@@ -149,8 +149,11 @@ def test_the_boxes_and_rows_work_in_place(server: Server) -> None:
         note = row.locator("textarea")
         note.fill("Trade for it")
         assert row.locator("[data-counter]").inner_text() == "12 / 256"
-        page.locator("body").click(position={"x": 5, "y": 5})
-        page.wait_for_timeout(400)
+        # leaving the field saves the note (lists.js posts action=edit): wait for that answer
+        with page.expect_response(
+            lambda r: r.request.method == "POST" and "action=edit" in (r.request.post_data or "")
+        ):
+            page.locator("body").click(position={"x": 5, "y": 5})
         assert ark.pins["alice"][0]["notes"] == "Trade for it"
         # below one copy asks first; the box removes the pin
         row.locator(".lp-step button[aria-label='One fewer']").click()

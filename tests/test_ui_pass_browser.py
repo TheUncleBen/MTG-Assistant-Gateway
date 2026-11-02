@@ -234,6 +234,8 @@ def test_small_links_and_buttons_are_44px_targets_on_a_touch_screen(server: Serv
             if path == "/decks/42":
                 if page.locator("#stats").count():
                     page.locator("#stats").scroll_into_view_if_needed()
+            if page.locator("label.glance-lbl").count():  # a phone: the widgets open on a tap
+                page.locator("label.glance-lbl").click()
             found = page.evaluate(
                 "(sel) => [...document.querySelectorAll(sel)].filter(e => e.getBoundingClientRect().width)"
                 ".map(e => [e.className, Math.round(e.getBoundingClientRect().height)])",

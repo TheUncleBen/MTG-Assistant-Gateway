@@ -923,9 +923,13 @@ def _overview_body(state: Any, now: float | None = None) -> str:
         ui.widget(
             "System",
             "box",
-            working,
-            unit=f"of {len(counted)} services working" if counted else "services set up",
-            detail_html=f"{backup_line} · {copies_line}",
+            working if counted else "Gateway only",
+            unit=f"of {len(counted)} services working" if counted else "",
+            detail_html=(
+                f"{backup_line} · {copies_line}"
+                if counted
+                else f"Mystic Forge, Forge and member clean-up are not set up · {backup_line} · {copies_line}"
+            ),
             actions=[ui.button_link("System details", "#system")],
             tone="alert" if system_bad else "",
         ),

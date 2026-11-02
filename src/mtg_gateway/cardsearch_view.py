@@ -214,7 +214,7 @@ html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32
 .cardlist .wbtn{position:static;width:var(--ctl);height:var(--ctl);min-height:var(--ctl);
   border-radius:var(--radius);box-shadow:none}
 .cardlist .wbtn.on{box-shadow:inset 0 0 0 99px var(--green-tint)}
-@media (pointer:coarse){html[data-card-size=s] .cardgrid .wbtn{width:44px}}
+html[data-card-size=s] .cardgrid .wbtn{width:44px}
 @media (max-width:899.98px){.cardlist .acts{grid-area:add}}
 /* two cards a row on a narrow phone at S and M (one at L), as the Binder's grid: at M a 168 px
    tile fit once across a 375 px phone, each taller than the screen (0.7.46 full review, D, F9).
@@ -224,7 +224,7 @@ html[data-card-size=s] .cardgrid .wbtn{padding:0;justify-content:center;width:32
   html:not([data-card-size=l]) .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
     overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   html:not([data-card-size=l]) .cardgrid .wbtn{padding:0;justify-content:center;width:32px}}
-@media (max-width:420px) and (pointer:coarse){html:not([data-card-size=l]) .cardgrid .wbtn{width:44px}}
+@media (max-width:420px){html:not([data-card-size=l]) .cardgrid .wbtn{width:44px}}
 /* the card menu on results: theme.CARD_MENU_CSS (static/cardmenu.js) */
 .cardgrid .pic img{-webkit-touch-callout:none}
 """

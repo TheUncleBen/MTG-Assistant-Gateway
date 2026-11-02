@@ -1273,7 +1273,7 @@ WATCH_PAGE_CSS = (
 .watch-page .w-t .thumb.deckart{height:48px;background:var(--orange-tint);color:var(--orange-text)}
 .watch-page .w-t .title .t a{font-weight:700}
 /* the grid's card name is a 44 px target on a touch screen (audit D07) */
-@media (pointer:coarse){ .watch-page a.wcard{display:inline-flex;align-items:center;min-height:44px} }
+.watch-page a.wcard{display:inline-flex;align-items:center;min-height:44px}
 .watch-page .w-t .title .deck{color:var(--text-muted);font-size:.86rem}
 .watch-page .w-t .px{font-variant-numeric:tabular-nums;font-weight:700}
 .watch-page .w-t .px small{display:block;font-weight:400;color:var(--text-muted);font-size:.8rem}
@@ -1357,7 +1357,7 @@ WATCH_PAGE_CSS = (
   padding:0 .75rem;font-weight:700}
 .watch-page .seg button + button{border-left:1px solid var(--card-border)}
 .watch-page .seg button[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text)}
-@media (pointer:coarse){.watch-page .seg button{min-height:44px}}
+.watch-page .seg button{min-height:44px}
 .watch-page .pc{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:10rem auto;
   gap:.2rem .5rem}
 .watch-page .pc-y{display:flex;flex-direction:column;justify-content:space-between;font-size:.8rem;

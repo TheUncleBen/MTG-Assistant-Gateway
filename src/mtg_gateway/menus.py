@@ -31,14 +31,14 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 /* Card search: the ⋮ at the end of the name line of a tile or a row; the deck editor's rows and
    the Collection's keep their own buttons, the menu comes from a right-click or a hold */
 .cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:34px;height:34px;margin-left:auto}
-@media (pointer:coarse){.cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:44px;height:44px}}
+.cardgrid .nm .kebab.inline,.cardlist .nmc .kebab.inline{width:44px;height:44px}
 /* a table row's ⋮ sits with its open action; in a proposal row, after the title's words */
 .ui-table .tr .act + .kebab,.ui-table .tr .kebab{flex:none;align-self:center}
 /* a title cell holding the row's ⋮ (the open action is the title's own link): the ⋮ floats at the
    cell's right on the title's first line, never on a line of its own under the status, and the
    lines below it keep the cell's full width */
 .ui-table .title > .kebab.inline{float:right;margin:-6px 0 0 .25rem;width:34px;height:34px}
-@media (pointer:coarse){.ui-table .title .kebab.inline{width:44px;height:44px}}
+.ui-table .title .kebab.inline{width:44px;height:44px}
 /* the My decks heading: + New folder and New deck at its end (New deck the one orange button) */
 .ui-head.phead{align-items:center;justify-content:space-between;margin:0 0 12px}
 .ui-head.phead .acts{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}

@@ -67,6 +67,8 @@ def test_binder_value_prices_and_add_box_fit(server: Server, width: int, theme: 
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme, touch=width < 900)
         page.goto(f"{server.base}/collection", wait_until="networkidle")
+        if width < 600:  # a phone: the widgets sit behind their one line until it is tapped
+            page.locator("label.glance-lbl").click()
         now_btn = page.locator(".wdg button", has_text="Work it out now")
         b = now_btn.bounding_box()
         assert b is not None and b["height"] >= (44 if width < 900 else 36)
@@ -158,11 +160,15 @@ def test_the_value_being_worked_out_follows_the_read_by_itself(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme=theme, touch=width < 900)
         page.goto(f"{server.base}/collection", wait_until="networkidle")
+        if width < 600:  # a phone: the widgets sit behind their one line until it is tapped
+            page.locator("label.glance-lbl").click()
         gate = threading.Event()
         server.ark.hold_whole_binder_reads = gate
         try:
             with page.expect_navigation(wait_until="domcontentloaded"):
                 page.locator(".wdg button", has_text="Work it out now").click()
+            if width < 600:  # the page came back with its widgets folded again
+                page.locator("label.glance-lbl").click()
             line = page.locator("[data-value-reading]")
             line.wait_for(timeout=5000)
             assert "updates by itself" in line.inner_text() and "minute" not in line.inner_text()

@@ -319,6 +319,8 @@ def test_table_switches_layout_at_600_and_900(kit: KitServer) -> None:
         ctx = _ctx(browser, kit, sid, 1280, 800, False, "light")
         page = ctx.new_page()
         page.goto(kit.base + "/ui-kit", wait_until="networkidle")
+        # below 600 px the widgets sit behind their one line until it is tapped: open them
+        page.evaluate("document.querySelector('.glance-tgl').checked = true")
         for width, cols, head, md, sub, stin in (
             (1280, 7, True, True, False, False),
             (900, 7, True, True, False, False),
@@ -510,6 +512,7 @@ def test_phone_search_box_heading_and_widgets_at_200_percent_text(kit: KitServer
             ctx = _ctx(browser, kit, sid, w, 800, True, "light")
             page = ctx.new_page()
             page.goto(kit.base + "/ui-kit", wait_until="networkidle")
+            page.locator("label.glance-lbl").click()  # the widgets open on a tap on a phone
             got = page.evaluate(PHONE_FIT_JS)
             assert got["border"] == ["1px"] * 4, (w, got)
             assert got["radius"] == [got["theme"]] * 4 and got["theme"] not in ("", "0px"), (w, got)

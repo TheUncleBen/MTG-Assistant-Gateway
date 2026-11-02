@@ -127,7 +127,7 @@ CSS = """
 .fm form.fm-open .field input{width:100%;min-height:44px}
 .fm form.fm-open .btn{margin:0;min-height:44px}
 .fm .fm-links{margin:.5rem 0 1rem}
-.fm .loadmore .btn{margin:0;min-width:12rem}
+.fm .loadmore .btn{margin:0;min-width:min(12rem,calc(100vw - 2rem))}
 /* the thread's first post: its ⋮ at the end of the header line (a reply's ⋮ is the deck page's
    comment panel's, deckpage.py) */
 .fm .fm-post .ph .kebab{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;

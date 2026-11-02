@@ -1735,7 +1735,7 @@ CSS = """
   .lp .list-head .acts{flex:1 1 auto;justify-content:flex-end}
   .lp-img{grid-template-columns:minmax(0,1fr)}
 }
-@media (pointer:coarse){ .lp-defpick .main{min-height:44px} .lp-tagpv input[type=color]{height:44px} }
+.lp-defpick .main{min-height:44px} .lp-tagpv input[type=color]{height:44px}
 """
 
 

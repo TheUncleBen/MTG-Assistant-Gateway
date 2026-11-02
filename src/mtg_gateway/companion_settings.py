@@ -90,7 +90,7 @@ SETTINGS_CSS = """
 @media (min-width:1100px){.ds-wrap{grid-template-columns:11rem minmax(0,52rem)}
   .ds-nav{display:block;position:sticky;top:12px;align-self:start;margin-top:118px}}
 .ds-nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--border-soft)}
-.ds-nav a{display:flex;align-items:center;min-height:36px;padding:0 .75rem;color:var(--text-muted);
+.ds-nav a{display:flex;align-items:center;min-height:44px;padding:0 .75rem;color:var(--text-muted);
   text-decoration:none;font-weight:700;font-size:.92rem;margin-left:-2px;border-left:2px solid transparent}
 .ds-nav a:hover,.ds-nav a:focus-visible{color:var(--text);border-left-color:var(--border)}
 .ds-nav a.dz{color:var(--danger-text)}
@@ -178,7 +178,7 @@ SETTINGS_CSS = """
 .ds .follownote p{margin:0;font-weight:400}
 .ds .follownote p.lead{font-weight:700}
 .ds .follownote .btn{color:var(--text)}
-@media (pointer:coarse){.ds .taglist button.mini{width:44px;height:44px}}
+.ds .taglist button.mini{width:44px;height:44px}
 @media (max-width:599.98px){.ds .ui-row.wctl{grid-template-columns:1fr}
   .ds .ui-row.plain .ctl{justify-self:start}
   .ds .ds-cover{grid-template-columns:1fr}.ds .ds-cover .pv{max-width:12rem}

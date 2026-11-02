@@ -211,7 +211,7 @@ body.picker-open{overflow:hidden}
 .scan .confirmbar button{min-height:var(--ctl)}
 /* phones: the capture bar sticks to the bottom of the screen, above the site's tab bar */
 @media (max-width:599.98px){
-  .scan .controls{position:sticky;bottom:0;z-index:3;padding:.6rem 1rem calc(.6rem + env(safe-area-inset-bottom));margin:0 -1rem;
+  .scan .controls{position:sticky;bottom:0;z-index:3;padding:.6rem 1rem calc(.6rem + env(safe-area-inset-bottom));margin:0 calc(-1 * var(--gutter,1rem));
     background:var(--bg);border-top:1px solid var(--border-soft)}
   .has-tabbar .scan .controls{bottom:calc(56px + env(safe-area-inset-bottom));padding-bottom:.6rem}
 }

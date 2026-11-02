@@ -224,7 +224,14 @@ def test_widget() -> None:
         ui.widget("x", "x", 1, actions=["a", "b", "c"])
     with pytest.raises(ValueError):
         ui.widget("x", "x", 1, tone="green")
-    assert ui.widgets(["<i>"]) == "<section class='ui-widgets' aria-label='At a glance'><i></section>"
+    # the row folds behind a tick box and its label on a phone (theme.py hides them from 600 px)
+    assert ui.widgets(["<i>"], line="3 waiting").endswith(
+        "<section class='ui-widgets' aria-label='At a glance'><i></section>"
+    )
+    assert "<input type='checkbox' class='glance-tgl' id='glance-at-a-glance'>" in ui.widgets(["<i>"])
+    assert "<label class='glance-lbl' for='glance-at-a-glance'>" in ui.widgets(["<i>"], line="3 waiting")
+    assert "<span>3 waiting</span>" in ui.widgets(["<i>"], line="3 waiting")
+    assert "<span>At a glance</span>" in ui.widgets(["<i>"])
 
 
 def test_chips_count_and_mark_the_current_one() -> None:

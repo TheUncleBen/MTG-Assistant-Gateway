@@ -107,7 +107,10 @@ async def test_deck_toolbar_selects_sit_inside_their_own_form(stack: Stack) -> N
         assert "</form>" in quick  # the Quick add form closes before the view form opens
         # the banner art is painted by a ::before layer, so the banner itself no longer clips the
         # More menu (the old rule was .banner{overflow:hidden})
-        banner_rule = ".banner{position:relative;margin:0 -1rem 1rem;color:#fff;isolation:isolate;z-index:2}"
+        banner_rule = (
+            ".banner{position:relative;margin:0 calc(-1 * var(--gutter)) 1rem;color:#fff;isolation:isolate;"
+            "z-index:2}"
+        )
         css = (await b.http.get(re.search(r"href='(/static/deck\.css\?v=[0-9a-f]{12})'", r.text)[1])).text
         assert ".banner::before{" in css and banner_rule in css
         # stacks view groups the cards by category with drag-and-drop hooks on the owner's deck

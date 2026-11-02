@@ -1033,7 +1033,10 @@ def test_deck_list_card_lists_decks_with_covers_and_links_at_320px() -> None:
         assert cover.get_attribute("src").startswith("https://api.scryfall.com/")
         assert rows.nth(1).locator("img").count() == 0
         assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/42"
-        assert _keyboard_open(page, card, "Archidekt") == "https://archidekt.com/decks/42"
+        # one link a deck: the page here (it has the Archidekt link), not Archidekt as a second
+        # pill under every deck (re-audit D26)
+        assert rows.first.locator(".links a").count() == 1
+        assert card.locator("a.link", has_text="Archidekt").count() == 0
 
     _display_card("deck-list-card", {"structuredContent": MY_DECKS}, "#list .row.deck", check)
 

@@ -432,8 +432,13 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     undo = [it for it in sorted(applied, key=closed_at, reverse=True) if _undoable(it, csrf)]
     acts4 = [_undo_form(undo[0], csrf, "Undo last apply", "btn-plain")] if undo else []
     w4 = ui.widget("Last 7 days", "check", len(applied), unit="applied", detail=det4, actions=acts4)
+    # the phone's one line over the folded widgets
+    line = f"{len(waiting)} waiting" + (
+        f" · {len(look)} need{'s' if len(look) == 1 else ''} a look" if look else ""
+    )
+    line += f" · {len(applied)} applied in 7 days"
     if not BY_APP_WIDGET:
-        return ui.widgets([w1, w2, w3, w4])
+        return ui.widgets([w1, w2, w3, w4], line=line)
     # 5. Waiting by app
     by_app = {}
     for it in waiting:
@@ -459,7 +464,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         actions=[ui.button_link("Assistants", "/account/assistants")],
         wide_sm=True,
     )
-    return ui.widgets([w1, w2, w3, w4, w5])
+    return ui.widgets([w1, w2, w3, w4, w5], line=line)
 
 
 # -- rows ----------------------------------------------------------------------------------------

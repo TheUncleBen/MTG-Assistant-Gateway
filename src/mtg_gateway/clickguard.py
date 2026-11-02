@@ -36,6 +36,8 @@ import hmac
 import html
 import time
 
+from .theme import icon
+
 GUARD_SCRIPT = "/static/clickguard.js"
 # The script's timings (kept in step with static/clickguard.js, which reads them from data-*).
 GUARD_DWELL_MS = 800
@@ -66,6 +68,9 @@ def submitted_too_soon(secret: str, scope: str, value: str | None, now: float | 
         return True
     age = (time.time() if now is None else now) - int(ms_text) / 1000
     return age < MIN_FORM_AGE or age > _MAX_STAMP_AGE
+
+
+GUARD_HINT = "Locked for a moment: on a phone, tap once to unlock, then tap your choice."
 
 
 def guarded_form(
@@ -117,9 +122,9 @@ def guarded_form(
         f"<form{fid} method='post'{act} class='guarded'{' data-tab' if tab_reachable else ''} "
         f"data-dwell='{GUARD_DWELL_MS}' "
         f"data-settle='{GUARD_SETTLE_MS}'>{fields}"
-        f"<div class='choice'>{row(True)}{extra}</div>"
-        "<p class='muted small guard-hint'>On a phone, tap once to unlock, then tap your choice."
-        "</p></form>"
+        # the lock's note sits in the buttons' row, above them, so it is in the pinned bar on a phone
+        f"<div class='choice'><p class='muted small guard-hint'>{icon('lock')} {GUARD_HINT}</p>"
+        f"{row(True)}{extra}</div></form>"
         "<noscript><style>form.guarded{display:none}</style>"
         f"<form method='post'{act}>{fields}<div class='choice'>{row(False)}{extra}</div></form></noscript>"
         f"<script src='{GUARD_SCRIPT}' defer></script>"

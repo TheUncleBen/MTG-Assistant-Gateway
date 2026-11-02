@@ -44,7 +44,7 @@ object PullRefresh {
     private val FORUM = Regex("^/forum(/(?!thread(/|$))[^/]+/[^/]+)?$")
 
     /** Binder › Lists' own pages (lists_page.TABS), never the box addresses under them. */
-    private val LIST = Regex("^/lists/(templates|defaults|tags|custom)$")
+    private val LIST = Regex("^/lists/(templates|defaults|tags|btags|custom)$")
 
     /** A profile: someone's public decks (browse.user_page). */
     private val PROFILE = Regex("^/users/[^/]+$")
