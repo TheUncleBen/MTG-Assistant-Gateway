@@ -898,7 +898,8 @@ def test_undo_on_the_card_calls_undo_proposal_with_the_code_and_says_undone() ->
                 {
                     "ok": False,
                     "error": "more_would_go_back",
-                    "message": "This also reverts 1 later change to this deck. Undo on the review page, which shows what goes back.",
+                    "message": "This also reverts 1 later change to this deck. Undo on the review page, "
+                    "which shows what goes back.",
                     "review_url": "https://mtg.test/proposals/p-1",
                     "state": "applied",
                 },
