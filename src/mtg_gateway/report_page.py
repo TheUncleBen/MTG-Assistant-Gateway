@@ -1731,6 +1731,13 @@ def report_page_html(
         meta.append(f"<span><a href='{_esc(pair_href)}'>{source_label_html(r)}</a></span>")
     elif src:
         meta.append(f"<span>{source_label_html(r)}</span>")
+    forge_pair = src.get("forge_pair") if src.get("kind") == "compare" else None
+    if isinstance(forge_pair, dict) and isinstance(forge_pair.get("b"), str):
+        # the website's A/B with Forge games: both decks' games against the same precons
+        meta.append(
+            f"<span><a href='/history/reports/{_esc(forge_pair['b'])}/head-to-head'>"
+            "Forge games: head to head</a></span>"
+        )
     if s["commander"]:
         meta.append(f"<span><span class='k'>Commander</span> {_esc(front_face(s['commander']))}</span>")
     if g and g.get("games"):

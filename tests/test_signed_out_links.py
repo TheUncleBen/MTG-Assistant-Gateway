@@ -168,9 +168,7 @@ async def _signin_pages(h: Harness, monkeypatch: pytest.MonkeyPatch, nxt: str) -
     """Each sign-in page that offers a Sign in or Try again link, opened with ``next=nxt``; for each
     one the ``next`` its links carry. A page that redirects instead is followed once."""
     from mtg_gateway.app_signin import challenge_of
-    from mtg_gateway.auth_provider import LoginError
-
-    from mtg_gateway.auth_provider import cookie_name
+    from mtg_gateway.auth_provider import LoginError, cookie_name
 
     good = challenge_of("v" * 43)
     ended = {cookie_name("mtg_session", h.settings): "ended"}

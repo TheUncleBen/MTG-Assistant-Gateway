@@ -409,41 +409,18 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             return {"started": False, "note": FORGE_READ_ONLY}
         if modes != ("commander", "commander"):
             return {"started": False, "note": FORGE_NEEDS_COMMANDERS}
-        sub = _sub()
-        hold, full = reports.reserve_pair(sub)
-        if full is not None:
-            return {"started": False, "note": full}
-
-        async def seat(side: str, deck: Any, **pairing: Any) -> dict[str, Any]:
-            if side not in origin:  # a pasted list: a report of no deck, as run_deck_report's
-                return await reports.run_source(
-                    sub, deck, source=None, simulate=False, forge=True, pair_hold=hold, **pairing
-                )
-            kind, ref = origin[side]
-            return await reports.run(
-                sub,
-                ref,
-                simulate=False,
-                forge=True,
-                deck=deck,
-                snapshot_id=ref if kind == "snapshot" else None,
-                pair_hold=hold,
-                **pairing,
-            )
-
         try:
-            first = await seat("a", deck_a, pair_with=deck_b)
-            second = await seat("b", deck_b, same_opponents_as=first["report_id"])
+            ids, full = await reports.start_forge_pair(
+                _sub(), (deck_a, origin.get("a")), (deck_b, origin.get("b"))
+            )
         except DeckError as exc:
             return {"started": False, "note": str(exc), "error": exc.kind}
-        finally:
-            reports.release_pair(sub, hold)
+        if ids is None:
+            return {"started": False, "note": full}
         return {
             "started": True,
-            "report_ids": {"a": first["report_id"], "b": second["report_id"]},
-            "head_to_head_url": (
-                f"{state.settings.public_url}/history/reports/{second['report_id']}/head-to-head"
-            ),
+            "report_ids": ids,
+            "head_to_head_url": f"{state.settings.public_url}/history/reports/{ids['b']}/head-to-head",
             "note": FORGE_PAIR_NOTE,
         }
 

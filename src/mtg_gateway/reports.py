@@ -1397,6 +1397,43 @@ class ReportService:
         self._pair_holds.setdefault(sub, []).append(hold)
         return hold, None
 
+    async def start_forge_pair(
+        self, sub: str, a: tuple[Deck, tuple[str, str] | None], b: tuple[Deck, tuple[str, str] | None]
+    ) -> tuple[dict[str, str] | None, str | None]:
+        """A comparison's Forge games: both decks against the same precons (picked for the higher
+        of their brackets), kept as two Head to head reports, within the member's Forge queue
+        (both start or wait, or neither). Each side is the deck already read and where it came
+        from, ("deck", id) or ("snapshot", id), or None for a pasted list (a report of no deck).
+        Returns ({"a": id, "b": id}, None), or (None, why not) when the queue has no room."""
+        hold, full = self.reserve_pair(sub)
+        if full is not None:
+            return None, full
+
+        async def seat(side: tuple[Deck, tuple[str, str] | None], **pairing: Any) -> dict[str, Any]:
+            deck, origin = side
+            if origin is None:
+                return await self.run_source(
+                    sub, deck, source=None, simulate=False, forge=True, pair_hold=hold, **pairing
+                )
+            kind, ref = origin
+            return await self.run(
+                sub,
+                ref,
+                simulate=False,
+                forge=True,
+                deck=deck,
+                snapshot_id=ref if kind == "snapshot" else None,
+                pair_hold=hold,
+                **pairing,
+            )
+
+        try:
+            first = await seat(a, pair_with=b[0])
+            second = await seat(b, same_opponents_as=first["report_id"])
+        finally:
+            self.release_pair(sub, hold)
+        return {"a": first["report_id"], "b": second["report_id"]}, None
+
     def release_pair(self, sub: str, hold: PairHold | None) -> None:
         """Give back what a comparison's hold still reserves (nothing once both runs are saved)."""
         holds = self._pair_holds.get(sub, [])
