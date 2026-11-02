@@ -46,7 +46,15 @@ from .binder_prices import BINDER_PAGE_SIZE, BINDER_READ_PAGES, BinderStore
 from .busy import busy_body, busy_headers, busy_plan, held_html, same_url
 from .cardsearch_view import CARDS_CSS
 from .deckpage import image_url
-from .decks import DeckError, _writing, archidekt_wait, current_client, no_card_called, reloading
+from .decks import (
+    DeckError,
+    _writing,
+    archidekt_wait,
+    current_client,
+    may_have_landed,
+    no_card_called,
+    reloading,
+)
 from .pages import (
     BROWSER_CLIENT_ID,
     NO_STORE,
@@ -465,6 +473,20 @@ def record_key(rec: dict[str, Any]) -> tuple[Any, str, str, str]:
     )
 
 
+def in_flight(index: int, name: str, key: tuple[Any, ...], before: int, target: int) -> dict[str, Any]:
+    """One card's write as it goes out (CollectionService.add): its line, its card's name, the
+    entry it goes to (record_key), the copies that entry held before and holds once it lands.
+    What read_back needs to tell whether it landed; kept as JSON with an import."""
+    return {"index": index, "name": name, "key": list(key), "before": before, "target": target}
+
+
+def _may_have_landed(exc: CollectionError) -> bool:
+    """Whether a card write that failed may still have reached the binder: Archidekt never
+    answered it (a timeout, a 5xx), as opposed to refusing it or the call never leaving."""
+    cause = exc.__cause__
+    return isinstance(cause, (DeckError, ArchidektError)) and may_have_landed(cause)  # type: ignore[arg-type]
+
+
 class _Found:
     """The records an add or a record lookup has read so far, by record_key."""
 
@@ -715,6 +737,7 @@ class CollectionService:
         limit: int = MAX_ITEMS_PER_CALL,
         trusted: bool = False,
         first_index: int = 0,
+        before_write: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
@@ -731,7 +754,14 @@ class CollectionService:
         ``before_item()`` is awaited before each card (an import's pause while the budget is low).
         A long import (collection_bulk) passes its own ``found`` (what it has read of the Binder,
         kept between its chunks), ``limit``, ``trusted`` (a restore: normalise_items) and
-        ``first_index`` (its chunk's first line); the rows' ``index`` count from it."""
+        ``first_index`` (its chunk's first line); the rows' ``index`` count from it.
+        ``before_write(card)`` is told, just before a card's write is sent, what that write is
+        (``in_flight``), so an import keeps it and a restart or a lost answer never adds it twice.
+
+        Outside a proposal's apply, a card whose write Archidekt may have taken without answering
+        (a timeout after it landed) is read back (``read_back``): when it landed it is counted as
+        added, when it did not the failure stands, and when the read fails too the error carries
+        the card as ``in_flight``, so whoever sends it again reads it back first."""
         self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition", "language")})
@@ -749,7 +779,7 @@ class CollectionService:
                 if before_item is not None:
                     await before_item()
                 try:
-                    await self._add_one(sub, index, spec, opts, found, out, progress)
+                    await self._add_one(sub, index, spec, opts, found, out, progress, before_write)
                     break
                 except CollectionError as exc:
                     # ``retry``: an import waits out a refusal of the member's budget, or Archidekt
@@ -821,6 +851,7 @@ class CollectionService:
         found: _Found,
         out: dict[str, Any],
         progress: dict[str, Any] | None,
+        before_write: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """One card of ``add``: resolve its printing, find a record of it in that finish (found),
         and add the copies there or create one. Its row lands in ``out``. A printing already
@@ -869,38 +900,27 @@ class CollectionService:
         key = next((k for k in keys if k in found.existing), keys[0])
         have = found.existing.get(key)
         before = int(have.get("quantity") or 0) if have is not None else 0
-        if have is not None:
-            qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
-            written = await self._own_write(
-                sub,
-                lambda token: self.client.collection_set(token, have, quantity=qty),
-                progress,
+        qty = min(MAX_QUANTITY, before + opts["quantity"]) if have is not None else opts["quantity"]
+        card = in_flight(index, str(printing.get("name") or spec["name"]), key, before, qty)
+        if before_write is not None:
+            before_write(card)
+        try:
+            rec = await self._write_one(sub, have, qty, printing, spec, opts, finish, progress)
+        except CollectionError as exc:
+            if progress is not None or not _may_have_landed(exc):
+                raise
+            try:
+                landed = await self.read_back(sub, card)
+            except Exception as again:  # the read failed too: whoever sends it again reads first
+                exc.in_flight = card  # type: ignore[attr-defined]
+                raise exc from again
+            if landed is None:
+                raise  # read back as it was: the write did not land, the failure stands
+            rec = (
+                landed
+                if isinstance(landed.get("card"), dict)
+                else self._landed_stub(have, printing, spec, qty)
             )
-            rec = {**have, **written, "card": have.get("card")}
-        else:
-            written = await self._own_write(
-                sub,
-                lambda token: self.client.collection_add(
-                    token,
-                    printing["id"],
-                    opts["quantity"],
-                    modifier=MODIFIERS[finish],
-                    # with none picked, English and Near Mint, as archidekt.com's own new
-                    # record (its site code)
-                    condition=opts["condition"] or "NM",
-                    language=opts["language"],
-                    tags=spec.get("tag_ids") or None,
-                    purchase_price=spec.get("purchase_price"),
-                ),
-                progress,
-            )
-            rec = {
-                "condition": opts["condition"] or "NM",
-                "language": lang,
-                **written,
-                "modifier": MODIFIERS[finish],
-                "card": self._card_stub(printing, spec, written),
-            }
         found.existing[record_key(rec)] = rec
         row = row_out(rec)
         # the row's quantity is what the record holds now; these say what this add changed
@@ -914,6 +934,74 @@ class CollectionService:
             row["image"] = image_url(spec["scryfall_id"], "normal")
         self.binder.put(sub, row)
         out["added"].append(row)
+
+    async def read_back(self, sub: str, card: dict[str, Any]) -> dict[str, Any] | None:
+        """Whether the write ``card`` (``in_flight``) landed, by the member's binder as it is
+        now: the record it went to, or None when that entry still holds the copies it held before
+        (or, for a new entry, there is none). Anything else counts as landed, so a card is never
+        sent twice; Archidekt's errors are raised as they are."""
+        found = _Found()
+        found.tried_whole = True
+        await self._records_for(sub, str(card["name"]), found)
+        key = tuple(card["key"])
+        rec = found.existing.get(key)  # type: ignore[call-overload]
+        qty = int(rec.get("quantity") or 0) if rec is not None else 0
+        if qty == int(card["before"]):
+            return None
+        return rec if rec is not None else {"quantity": card["target"]}
+
+    def _landed_stub(
+        self, have: dict[str, Any] | None, printing: dict[str, Any], spec: dict[str, Any], qty: int
+    ) -> dict[str, Any]:
+        """The record for a write read back as landed when the entry it went to is no longer
+        there to show (deleted meanwhile): as the write left it."""
+        if have is not None:
+            return {**have, "quantity": qty}
+        return {"quantity": qty, "card": self._card_stub(printing, spec, {})}
+
+    async def _write_one(
+        self,
+        sub: str,
+        have: dict[str, Any] | None,
+        qty: int,
+        printing: dict[str, Any],
+        spec: dict[str, Any],
+        opts: dict[str, Any],
+        finish: str,
+        progress: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """The one write of a card of ``add``: its copies onto the entry ``have`` (``qty`` in all),
+        or a new entry. Returns the record as written."""
+        if have is not None:
+            written = await self._own_write(
+                sub,
+                lambda token: self.client.collection_set(token, have, quantity=qty),
+                progress,
+            )
+            return {**have, **written, "card": have.get("card")}
+        written = await self._own_write(
+            sub,
+            lambda token: self.client.collection_add(
+                token,
+                printing["id"],
+                opts["quantity"],
+                modifier=MODIFIERS[finish],
+                # with none picked, English and Near Mint, as archidekt.com's own new
+                # record (its site code)
+                condition=opts["condition"] or "NM",
+                language=opts["language"],
+                tags=spec.get("tag_ids") or None,
+                purchase_price=spec.get("purchase_price"),
+            ),
+            progress,
+        )
+        return {
+            "condition": opts["condition"] or "NM",
+            "language": opts["language"],
+            **written,
+            "modifier": MODIFIERS[finish],
+            "card": self._card_stub(printing, spec, written),
+        }
 
     @staticmethod
     def _card_stub(printing: dict[str, Any], spec: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any]:
@@ -2843,12 +2931,19 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             reason = str((job.get("result") or {}).get("stopped") or "it could not go on").rstrip(".")
             restore = job["kind"] == "restore"
             n = int(job_result(job).get("cards") or 0)
-            return (
+            line = "entry" if restore else "line"
+            said = (
                 f"{'Put back' if restore else 'Imported'} {n:,} {'card' if n == 1 else 'cards'}, then the "
-                f"{'restore' if restore else 'import'} stopped at {'entry' if restore else 'line'} "
-                f"{done + 1:,} of {of:,}: {reason}. Everything before that is in your binder. Resume carries "
-                "on from there."
+                f"{'restore' if restore else 'import'} stopped at {line} {done + 1:,} of {of:,}: {reason}."
             )
+            if (job.get("result") or {}).get("in_flight"):
+                # its write was out when it stopped: Archidekt may have taken it (collection_bulk)
+                return (
+                    f"{said} That {line}'s card was being sent when it stopped, so it may already be "
+                    "in your binder; everything before it is. Resume checks your binder for it first, "
+                    "so it is never added twice."
+                )
+            return f"{said} Everything before that is in your binder. Resume carries on from there."
         if job["state"] == "done":
             return f"Finished: {done:,} of {of:,} {noun} done."
         return f"{what}: {done:,} of {of:,} {noun} done. You can leave this page; it goes on."

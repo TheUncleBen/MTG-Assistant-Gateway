@@ -9,9 +9,12 @@ waits (paused) so the member's own changes still go through, and a refusal that 
 Archidekt asking to slow down (429), is waited out and the card tried again. Where it stands is
 kept in the database (``binder_jobs``, one row per member), so a stop (Archidekt down, a
 refusal, the gateway restarting) keeps the lines done: the Binder page says what went in, where it
-stopped and why, and Resume carries on from the next line. Only the lines after the last one
-counted as done are sent again; a stop in the instant between a card's write and its count can
-add that one card twice.
+stopped and why, and Resume carries on from the next line. The card whose write is out is kept
+with the job too (``in_flight``, saved just before the write is sent): a write Archidekt took
+without answering is read back at once (CollectionService.read_back) and counted when it landed;
+when that read fails, or the gateway stopped while the write was out, the page says that card may
+already be in the binder and Resume reads it back before sending anything for it, so no card is
+ever added twice.
 
 **Clear.** Archidekt's ``DELETE /collection/clear/`` removes every entry, with no undo. The gateway
 asks it only through an account action (actions.py ``clear_collection``) that waits for the
@@ -136,7 +139,10 @@ class ImportStore:
         state: str | None = None,
         done: int | None = None,
         result: dict[str, Any] | None = None,
+        in_flight: dict[str, Any] | None | bool = False,
     ) -> None:
+        """``in_flight``: the card whose write is about to go out (kept in the result), None to
+        drop it once its line is counted, False (the default) to leave it as it is."""
         sets, args = ["updated_at = ?"], [int(time.time())]
         if state is not None:
             sets.append("state = ?")
@@ -147,6 +153,11 @@ class ImportStore:
         if result is not None:
             sets.append("result_json = ?")
             args.append(json.dumps(result, separators=(",", ":")))
+        if isinstance(in_flight, dict):
+            sets.append("result_json = json_set(result_json, '$.in_flight', json(?))")
+            args.append(json.dumps(in_flight, separators=(",", ":")))
+        elif in_flight is None:
+            sets.append("result_json = json_remove(result_json, '$.in_flight')")
         with self.db.tx() as c:
             c.execute(
                 f"UPDATE binder_jobs SET {', '.join(sets)} WHERE sub = ? AND id = ?",
@@ -195,9 +206,7 @@ class BulkJobs:
         self.store = ImportStore(service.decks.db)
         self.tasks: dict[str, asyncio.Task[Any]] = {}
         self.pause_poll: float | None = None  # None: collection.IMPORT_PAUSE_POLL
-        stopped = self.store.stop_all_running(
-            "the gateway restarted while it ran. The lines before it are in your binder"
-        )
+        stopped = self.store.stop_all_running("the gateway restarted while it ran")
         if stopped:
             logger.info("%d binder import(s) stopped by a restart; each can be resumed", stopped)
 
@@ -232,7 +241,7 @@ class BulkJobs:
         if have is None or have["state"] != "stopped" or self.running(sub):
             return have
         result = dict(have["result"])
-        result.pop("stopped", None)
+        result.pop("stopped", None)  # in_flight stays: the job reads that card back first
         self.store.update(sub, have["id"], state="running", result=result)
         self._spawn(sub, have["id"])
         return self.store.get(sub)
@@ -267,6 +276,7 @@ class BulkJobs:
         }
         done = int(job["done"])
         state = {"name": "running", "since_save": 0, "slow": 0}
+        unsure = job["result"].get("in_flight")
 
         def save(**kw: Any) -> None:
             self.store.update(sub, jid, **kw)
@@ -302,6 +312,18 @@ class BulkJobs:
         try:
             if kind == "restore":
                 items = await self._restore_tags(sub, items)
+            if isinstance(unsure, dict) and int(unsure.get("index", -1)) == done:
+                # the card whose write was out when the job stopped: read back before anything
+                # is sent for it, and counted when it landed
+                if await service.read_back(sub, unsure) is not None:
+                    result["added"].append(
+                        {"index": done, "went_to": "existing" if unsure["before"] else "new"}
+                    )
+                    done += 1
+                    save(done=done, result=_merged(result, out), in_flight=None)
+                else:
+                    save(in_flight=None)
+                unsure = None
             found = _Found()
             await self._prime(sub, found, items[done:])
             for start in range(done, len(items), CHUNK):
@@ -312,9 +334,12 @@ class BulkJobs:
                     state["since_save"] += 1
                     if state["since_save"] >= SAVE_EVERY:
                         state["since_save"] = 0
-                        save(done=start + n, result=_merged(result, out))
+                        save(done=start + n, result=_merged(result, out), in_flight=None)
                     else:
-                        save(done=start + n)
+                        save(done=start + n, in_flight=None)
+
+                def sending(card: dict[str, Any]) -> None:
+                    save(in_flight=card)
 
                 await service.add(
                     sub,
@@ -328,6 +353,7 @@ class BulkJobs:
                     limit=CHUNK,
                     trusted=kind == "restore",
                     first_index=start,
+                    before_write=sending,
                 )
                 save(done=start + len(chunk), result=_merged(result, out))
         except Exception as exc:  # anything: the job must end, and say what went in
@@ -341,6 +367,11 @@ class BulkJobs:
             )
             merged = _merged(result, out)
             merged["stopped"] = reason.rstrip(".")
+            card = getattr(exc, "in_flight", None)
+            if card is None and isinstance(unsure, dict) and int(unsure.get("index", -1)) == done:
+                card = unsure  # stopped reading back the card left out before: still unsure
+            if card is not None:
+                merged["in_flight"] = card  # it may have landed: Resume reads it back first
             save(state="stopped", result=merged)
             return
         save(state="done", result=_merged(result, out))
