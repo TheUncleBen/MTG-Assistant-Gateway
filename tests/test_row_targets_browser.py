@@ -75,7 +75,10 @@ def test_a_side_row_of_a_card_with_two_changes_on_its_own(server: Server) -> Non
             assert words in [" ".join(t.split()) for t in items], items
             page.keyboard.press("Escape")
 
-        # a printing for the Maybeboard row: that row only
+        # a printing for the Maybeboard row: that row only. Its id is read before the apply: a
+        # printing change removes the row and adds one, so the fake gives it a new id as soon as
+        # the request lands, which on a busy runner is before the request is looked at here
+        maybe_rel = _rel(server, "Maybeboard")
         _open_picker(page, maybe)
         page.locator(".printpick .pptile", has_text="SLD #1075").first.click()
         with page.expect_request(EDIT_URL) as req:
@@ -88,7 +91,7 @@ def test_a_side_row_of_a_card_with_two_changes_on_its_own(server: Server) -> Non
                 "set_code": "sld",
                 "collector_number": "1075",
                 "zone": "side",
-                "relation_id": _rel(server, "Maybeboard"),
+                "relation_id": maybe_rel,
             }
         ], sent
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)

@@ -248,12 +248,16 @@ def test_small_links_and_buttons_are_44px_targets_on_a_touch_screen(server: Serv
 
 def test_member_text_no_longer_says_verify(server: Server) -> None:  # noqa: F811
     """The proposal page's apply note said the gateway "verifies the result"; member text never
-    says verify. It says the deck is read back."""
+    says verify. The note is one line with a way to the Guide's "Apply a proposal", which says the
+    deck is read back."""
     sid, pending = _seed(server)
     h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}, timeout=30)
     body = h.get(f"/proposals/{pending}").text
     assert "verif" not in body.lower(), re.findall(r".{40}verif.{40}", body, re.I)
-    assert "reads the result back from Archidekt" in body
+    assert "href='/guide#how-approve'>How it works</a>" in body
+    guide = h.get("/guide/how-approve").text  # where static/guide.js takes /guide#how-approve
+    assert "verif" not in guide.lower(), re.findall(r".{40}verif.{40}", guide, re.I)
+    assert "then reads the deck back to confirm" in guide
 
 
 def test_the_commander_question_fits_a_phone_and_its_buttons_are_finger_sized(server: Server) -> None:  # noqa: F811
