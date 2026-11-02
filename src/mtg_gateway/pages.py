@@ -94,6 +94,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     secure = s.public_url.startswith("https://")
     fresh_cookie = cookie_name("mtg_fresh_login", s)
     session_cookie = cookie_name(SESSION_COOKIE, s)
+    leg_cookie = cookie_name(app_signin.LEG_COOKIE, s)
 
     def page(
         title: str,
@@ -107,6 +108,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         main_class: str = "",
         heading: bool = True,
         signin_link: bool = True,
+        form_action: tuple[str, ...] = (),
     ) -> Response:
         return render(
             title,
@@ -122,6 +124,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             main_class=main_class,
             heading=heading,
+            form_action=form_action,
         )
 
     def _is_admin(sub: str | None) -> bool:
@@ -148,9 +151,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub: str | None = None,
         sid: str | None = None,
         signin_link: bool = True,
+        form_action: tuple[str, ...] = (),
     ) -> Response:
         """One of the small pages (smallpage.py): the panel carries its own title. ``signin_link``
-        False leaves the top bar's Sign in out (the app sign-in's last page, which says Signed in)."""
+        False leaves the top bar's Sign in out (the app sign-in's last page, which says Signed in).
+        ``form_action``: origins a form's post may be redirected to (the identity provider's)."""
         return page(
             title,
             body,
@@ -160,6 +165,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             heading=False,
             head_extra=smallpage.HEAD,
             signin_link=signin_link,
+            form_action=form_action,
         )
 
     def login_failed(exc: LoginError, login_href: str) -> Response:
@@ -187,36 +193,36 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # app to its browser sign-in; it can only ever ask for more, never less.
         fresh = request.cookies.get(fresh_cookie) == "1" or q.get("fresh") == "1"
         params: dict[str, str] = {"next": nxt}
-        max_age: int | None = None
         challenge = q.get("app_challenge")
         if challenge is not None:
             # The Android app's sign-in, running in the phone's browser (app_signin.py). This
             # browser's own session, if any, is not handed over: the identity provider decides.
             if not app_signin.CHALLENGE.fullmatch(challenge):
                 return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
-            params["app_challenge"] = challenge
-            # when the leg started: a sign-in it asks for must be made after this (auth_time)
-            params["app_started"] = str(int(time.time()))
             back = q.get("app_return")
-            if back == app_signin.INTENT_RETURN:
-                # The app opened a Custom Tab, not an Auth Tab: after a sign-in made during the leg
-                # the callback can send the browser to the intent: link itself (finish_browser_login).
-                params["app_return"] = back
-            elif back is not None:
-                # The app's retry, when the verified https Auth Tab can't be used: an Auth Tab on the
-                # app's own scheme (app_signin.py). The identity provider is then asked for a
-                # sign-in of its own, never a silent pass-through: any app can start this leg, and
-                # only a person signing in may finish it. The callback checks auth_time against
-                # when the leg started, so it does not rely on the provider honouring prompt=login.
-                if back != app_signin.SCHEME_RETURN:
-                    return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
-                params["app_return"] = back
-                fresh = True
-            if fresh:
-                # a sign-in of its own, with max_age=0 as well: only a leg that asked for one can
-                # show it was made during the leg (the return page then opens the app by itself)
-                params["app_fresh"] = "1"
-                max_age = 0
+            if back is not None and back not in (app_signin.INTENT_RETURN, app_signin.SCHEME_RETURN):
+                return small("Sign-in failed", smallpage.signin_failed(f"/login?next={nxt}"), status=400)
+            # Any app on the phone can open this address: a page first, and only its Continue goes
+            # on to the identity provider (app_continue).
+            token = state.app_signins.start_leg(challenge, nxt, back, fresh)  # type: ignore[attr-defined]
+            resp = small(
+                "Sign in to the app?",
+                app_signin.confirm_body(s.server_name, token),
+                signin_link=False,
+                form_action=(await state.provider.idp_origin(),),
+            )
+            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Referrer-Policy"] = "no-referrer"
+            resp.set_cookie(
+                leg_cookie,
+                token,
+                max_age=app_signin.LEG_TTL,
+                path="/",
+                httponly=True,
+                secure=secure,
+                samesite="lax",  # a post from another site's page arrives without it
+            )
+            return resp
         else:
             sub, _sid = current(request)
             if sub:
@@ -237,12 +243,63 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 resp.headers["Cache-Control"] = "no-store"
                 return resp
         try:
+            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
+        except LoginError as exc:
+            return login_failed(exc, f"/login?next={nxt}")
+        resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+        if fresh:
+            resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
+
+    @server.custom_route(app_signin.CONTINUE_PATH, methods=["POST"], include_in_schema=False)
+    async def app_continue(request: Request) -> Response:
+        """Continue or Cancel on the page before the identity provider (app_signin.confirm_body).
+        The leg's token must be in both the form and this browser's cookie (SameSite=Lax, so
+        another site's page posting here arrives without it), and works once."""
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        leg = state.app_signins.take_leg(data.get("leg", ""), request.cookies.get(leg_cookie))  # type: ignore[attr-defined]
+        if leg is None or data.get("action") != "continue":
+            resp = small(
+                "Sign-in canceled",
+                app_signin.canceled_body(),
+                status=200 if leg is not None and data.get("action") == "cancel" else 400,
+                signin_link=False,
+            )
+            resp.headers["Cache-Control"] = "no-store"
+            resp.delete_cookie(leg_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+            return resp
+        params = {"next": leg.next_path, "app_challenge": leg.challenge}
+        # when the leg started: a sign-in it asks for must be made after this (auth_time)
+        params["app_started"] = str(int(time.time()))
+        fresh = leg.fresh
+        if leg.app_return == app_signin.INTENT_RETURN:
+            # The app opened a Custom Tab, not an Auth Tab: after a sign-in made during the leg
+            # the callback can send the browser to the intent: link itself (finish_browser_login).
+            params["app_return"] = leg.app_return
+        elif leg.app_return == app_signin.SCHEME_RETURN:
+            # The app's retry, when the verified https Auth Tab can't be used: an Auth Tab on the
+            # app's own scheme (app_signin.py). The identity provider is then asked for a
+            # sign-in of its own, never a silent pass-through: any app can start this leg, and
+            # only a person signing in may finish it. The callback checks auth_time against
+            # when the leg started, so it does not rely on the provider honouring prompt=login.
+            params["app_return"] = leg.app_return
+            fresh = True
+        max_age: int | None = None
+        if fresh:
+            # a sign-in of its own, with max_age=0 as well: only a leg that asked for one can
+            # show it was made during the leg (the return page then opens the app by itself)
+            params["app_fresh"] = "1"
+            max_age = 0
+        try:
             url = await state.provider.start_idp_login(
                 BROWSER_CLIENT_ID, params, force_login=fresh, max_age=max_age
             )
         except LoginError as exc:
-            return login_failed(exc, f"/login?next={nxt}")
-        resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+            return login_failed(exc, f"/login?next={leg.next_path}")
+        resp = RedirectResponse(url, status_code=303, headers={"Cache-Control": "no-store"})
+        resp.delete_cookie(leg_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         if fresh:
             resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         return resp

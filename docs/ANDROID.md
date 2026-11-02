@@ -302,7 +302,11 @@ else your gateway serves. A few things are native:
 - **Sign-in** happens in your phone's browser, shown over the app (a Custom
   Tab), not in the app's own web view: that is where passkeys, your password
   manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
-  work, exactly as they do on the website. When you are done there, the
+  work, exactly as they do on the website. The browser first shows a page
+  from your gateway: *An app asked to sign in to “your gateway's name”.*
+  Press **Continue** only if you just pressed Sign in in this app (any app
+  on the phone can open that page, and the one that did gets the sign-in);
+  **Cancel** ends it. When you are done at the sign-in service, the
   browser closes and you are back in the app, signed in. That needs a browser
   with Auth Tabs, such as Chrome: the app uses your default browser when it
   has them, else Chrome when it came with the phone (as a system app), and
@@ -315,7 +319,7 @@ else your gateway serves. A few things are native:
   that page where the browser allows it. Account › This app › **Sign-in**
   says which of the two your phone does, and My activity lists each time the
   page was shown. If the browser is already signed in to the sign-in service,
-  you may not be asked anything. Only when the browser can't confirm the app
+  you may not be asked anything after **Continue**. Only when the browser can't confirm the app
   belongs to the gateway does the app try once more in a way where the sign-in
   service asks you to sign in (your passkey, say). The browser itself stays
   signed out of the gateway.
@@ -449,7 +453,7 @@ The app talks only to pages and endpoints the gateway already serves:
 | Used for | Endpoint |
 |---|---|
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
-| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
+| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser; in the browser, the page whose Continue, `POST /login`, goes on to the sign-in service), then `GET /login/app-return` (where the browser hands the one-time code back) and `POST /login/app` with the code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`, and `noOutlineFrame` where the page has it) and its `scan:*` events; the page calls the app's `openCamera` and, from 0.7.46, `openCameraAuto` |
 | Sign-in return and App Links | `GET /.well-known/assetlinks.json`: the gateway vouches for the app it ships (its package ID and signing certificate), with no setting |
@@ -776,7 +780,12 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 - **Signing in through the browser** follows the usual pattern for native
   apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
   each sign-in, keeps it on the phone, and sends only its SHA-256 with the
-  browser's `/login`. After the sign-in service, the gateway sets no cookie in
+  browser's `/login`. That address does not go to the sign-in service by
+  itself: any app on the phone can open it, so it shows a page naming the
+  gateway, and only its **Continue** goes on. Continue posts a one-use token
+  that only this browser holds in a cookie (`SameSite=Lax`, ten minutes), so
+  neither a link nor another site's page can press it for you; **Cancel**
+  spends the token. After the sign-in service, the gateway sets no cookie in
   the browser and keeps a one-time code for two minutes, and sends the browser
   to `/login/app-return?code=...` on its own address. Where a browser on the
   phone has Auth Tabs, the app opened the sign-in in one that returns on that

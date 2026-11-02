@@ -334,7 +334,14 @@ async def test_the_app_only_finish_and_the_in_app_pages(gw: Harness) -> None:
     assert "id='app-signin' data-next='/decks'" in hand.text and orange(body) == 1
     # the browser's return page: the panel titled Signed in
     verifier = "v" * 50
-    start = await gw.http.get("/login", params={"next": "/decks", "app_challenge": challenge_of(verifier)})
+    ask = await gw.http.get("/login", params={"next": "/decks", "app_challenge": challenge_of(verifier)})
+    # first the page before the identity provider (security review A-04): Continue the orange one
+    body = panel(ask.text, "Sign in to the app?")
+    assert "class='primary'>Continue</button>" in body and "class='btn-plain'>Cancel</button>" in body
+    assert orange(body) == 1
+    leg = re.search(r"name='leg' value='([^']+)'", body)
+    assert leg
+    start = await gw.http.post("/login", data={"leg": leg.group(1), "action": "continue"}, headers=NAV)
     cb = await gw.idp_leg(start)
     handed = await gw.http.get(cb[len(GATEWAY) :], headers=NAV)
     assert handed.status_code == 303  # to the gateway's own return address (app_signin.RETURN_PATH)
