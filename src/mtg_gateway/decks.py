@@ -5801,9 +5801,6 @@ class DeckService:
                 else {}
             ),
             "board_no": row.get("board_no"),
-            # how many cards this app's chat has drawn for it: a card with a lower number of its
-            # own steps aside for the newest (approve.py)
-            **({"card_seq": seq} if (seq := _card_seq(row, current_client.get())) else {}),
             **status_info,
             "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
             + (

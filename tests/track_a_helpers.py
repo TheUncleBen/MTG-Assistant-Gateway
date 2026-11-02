@@ -27,7 +27,9 @@ async def card_read(h, token: str, pid: str, **args) -> dict:
     """The newest card's own read of its proposal: it names its card number, which the read says
     (a read naming none is a card from before card numbers, which gets no code once a card has one)."""
     res = await call(h, token, "get_proposal", {"proposal_id": pid, **args})
-    seq = (res.get("structuredContent") or {}).get("card_seq")
+    from mtg_gateway.approve import CARD_SEQ_META_KEY
+
+    seq = (res.get("_meta") or {}).get(CARD_SEQ_META_KEY)
     if seq and "card_seq" not in args:
         res = await call(h, token, "get_proposal", {"proposal_id": pid, "card_seq": seq, **args})
     return res

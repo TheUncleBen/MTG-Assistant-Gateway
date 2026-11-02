@@ -46,6 +46,10 @@ CARD_PATH = Path(__file__).parent / "static" / "cards" / "proposal-card.html"
 APPROVAL_META_KEY = "mtg/approval"  # tool-result _meta key the card reads the code from
 APPROVAL_SET_META_KEY = "mtg/approval_set"  # "Apply all": {"ids": [...], "code": ...} (0.7.29)
 APPROVALS_META_KEY = "mtg/approvals"  # the waiting-changes card: {proposal id: its code}
+# How many cards this app's chat has drawn for a proposal: a card with a lower number of its own
+# steps aside for the newest. The card's own bookkeeping, so in _meta, never the structured
+# content the model reads (0.7.46 re-audit).
+CARD_SEQ_META_KEY = "mtg/card_seq"
 # Hosts that render the card load each change's small card image straight from Scryfall.
 CARD_IMAGE_HOSTS = ["https://api.scryfall.com", "https://cards.scryfall.io"]
 APPROVE_DECISIONS = ("approve", "reject")
@@ -144,22 +148,28 @@ def proposal_tool_result(
 
     ``drawn``: the result draws a new card in the chat (a model's call of a card tool, not the
     card's own read), so the proposal's card number for this app goes up and the result carries
-    it (``card_seq``); older cards that read a higher number step aside. ``rows_limit``: how many
-    review rows the result carries (``rows_total`` says how many there are; the card loads the
-    rest when asked); None for all of them. ``reader_seq``: the number of the card that reads
-    (the card's own read), so an older card gets no code."""
+    it (``card_seq``, in ``_meta``); older cards that read a higher number step aside.
+    ``rows_limit``: how many review rows the result carries (``rows_total`` says how many there
+    are; the card loads the rest when asked); None for all of them. ``reader_seq``: the number
+    of the card that reads (the card's own read), so an older card gets no code."""
     from mcp_types import CallToolResult, TextContent
 
-    if drawn and data.get("proposal_id") and (data.get("ok") or data.get("error") == "browser_required"):
-        from .decks import current_client
+    from .decks import current_client
 
-        seq = decks.db.next_card_seq(str(data["proposal_id"]), sub, current_client.get())
-        if seq:
-            data = {**data, "card_seq": seq}
+    seq = 0
+    if data.get("proposal_id") and (data.get("ok") or data.get("error") == "browser_required"):
+        if drawn:
+            seq = decks.db.next_card_seq(str(data["proposal_id"]), sub, current_client.get())
+        else:  # the card's own read: the newest card's number, counting nothing
+            row = decks.db.get_proposal(str(data["proposal_id"]), sub)
+            seq = card_seq_of(row, current_client.get()) if row is not None else 0
+    data = {k: v for k, v in data.items() if k != "card_seq"}
     approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat, reader_seq=reader_seq)
     if other_app:
         data = {**data, "card_other_app": True}
     meta: dict[str, Any] | None = {APPROVAL_META_KEY: approval} if approval else None
+    if seq:
+        meta = {**(meta or {}), CARD_SEQ_META_KEY: seq}
     if in_chat and data.get("state") == "pending":
         info, apply_all = deck_waiting(data, decks=decks, sub=sub)
         if info:

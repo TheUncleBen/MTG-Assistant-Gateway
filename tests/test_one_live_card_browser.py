@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from mtg_gateway.approve import APPROVAL_META_KEY
+from mtg_gateway.approve import APPROVAL_META_KEY, CARD_SEQ_META_KEY
 
 from . import test_card_browser as tcb
 from .test_card_browser import PROPOSAL, _calls, _confirms, _open
@@ -106,6 +106,40 @@ def test_an_older_card_steps_aside_for_the_newest_and_stops_reading() -> None:
                 "card_seq": 1,
             }
             assert not errors, errors
+        finally:
+            browser.close()
+
+
+def test_the_card_number_comes_in_the_results_meta_and_steps_an_older_card_aside() -> None:
+    """Since 0.7.46 the card's number is in the result's _meta, not in the structured content the
+    model reads: the card takes its own number from there, names it in its read, and steps aside
+    when the read's _meta names a newer card."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    plain = {k: v for k, v in NEW_DECK.items() if k != "card_seq"}
+    with sync_playwright() as p:
+        browser = _browser(p, exe)
+        try:
+            page = browser.new_page()
+            newer = {**plain, "version": 2, "__meta": {CARD_SEQ_META_KEY: 2}}
+            card = _open(
+                page,
+                {"structuredContent": plain, "_meta": {APPROVAL_META_KEY: "c1", CARD_SEQ_META_KEY: 1}},
+                get_reply=newer,
+            )
+            card.locator("#card.stub").wait_for(timeout=5_000)
+            assert card.locator("#state").inner_text().lower() == "older card"
+            assert _reads(page)[0]["params"]["arguments"]["card_seq"] == 1
+            # the newest card (its own number in _meta is the read's) keeps Approve and Reject
+            same = {**plain, "__meta": {CARD_SEQ_META_KEY: 2, APPROVAL_META_KEY: "c2"}}
+            card = _open(
+                page,
+                {"structuredContent": plain, "_meta": {APPROVAL_META_KEY: "c2", CARD_SEQ_META_KEY: 2}},
+                get_reply=same,
+            )
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            assert "stub" not in (card.locator("#card").get_attribute("class") or "")
         finally:
             browser.close()
 

@@ -53,7 +53,8 @@ async def test_a_later_request_from_the_same_app_is_added_to_its_waiting_draft(s
     token = await linked_user(stack)
     await _mode(h, "manual")
     first = await _propose(h, token, [_add("Arcane Signet", category="Ramp")])
-    second = await _propose(h, token, [_add("Mind Stone")])
+    drawn = await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [_add("Mind Stone")]})
+    second = structured(drawn)
     assert second["ok"] and second["proposal_id"] == first["proposal_id"], second
     assert second["added_to"] == first["proposal_id"] and second["version"] == 2
     assert second["note"].startswith("Added to #1, this app's waiting change for this deck"), second
@@ -61,7 +62,9 @@ async def test_a_later_request_from_the_same_app_is_added_to_its_waiting_draft(s
     assert "now also adds Mind Stone" in second["what_changed"]
     assert h.db.count_pending_proposals("user-1") == 1
     # its card is the one live card: the result that drew the newer card names the higher number
-    assert second["card_seq"] == 2
+    from mtg_gateway.approve import CARD_SEQ_META_KEY
+
+    assert drawn["_meta"][CARD_SEQ_META_KEY] == 2 and "card_seq" not in second
     # a third request for a card the draft already changes takes that card's change's place
     third = await _propose(h, token, [_add("Arcane Signet", quantity=2, category="Ramp")])
     assert third["version"] == 3 and [r["qty"] for r in third["rows"] if r["name"] == "Arcane Signet"] == [2]
