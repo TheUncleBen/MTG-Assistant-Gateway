@@ -56,7 +56,7 @@
     var rows = [
       ["/", "Search cards and decks (Ctrl+K too)"],
       ["Esc", "Close the open menu or box"],
-      ["Enter", "Open the highlighted suggestion, or the card you typed"],
+      ["Enter", "Open the highlighted suggestion, or the card whose exact name you typed; other text searches decks"],
       ["Shift+F10", "Open a card's menu on a deck page (the Menu key too)"],
       ["Ctrl+Z, Ctrl+Shift+Z", "Undo and redo a deck change on a deck page"],
       ["?", "This list"]
