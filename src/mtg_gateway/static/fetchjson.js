@@ -315,7 +315,11 @@
     if (!probing) {
       probing = nativeFetch.call(window, "/api/v1/me", {
         credentials: "same-origin", redirect: "manual", cache: "no-store", headers: { Accept: "application/json" }
-      }).then(function (r) { return isSignedOut(r) ? "signed_out" : "answered"; }, function () { return "offline"; });
+      }).then(function (r) {
+        // only the status is wanted: the body is let go, or the answer stays open in the browser
+        if (r.body && r.body.cancel) r.body.cancel().catch(function () {});
+        return isSignedOut(r) ? "signed_out" : "answered";
+      }, function () { return "offline"; });
       probing.then(function () { probing = null; }, function () { probing = null; });
     }
     probing.then(function (seen) {
