@@ -66,9 +66,11 @@ def test_apply_is_on_the_first_screen_of_a_phone(server: Server, width: int, hei
             box = apply.bounding_box()
             assert box["y"] + box["height"] <= height and box["y"] >= 0, box
             # nothing hides behind it: the page's last line can be scrolled above the bar
-            hint = page.locator("form.guarded .guard-hint")
-            if hint.is_visible():
-                assert hint.bounding_box()["y"] + hint.bounding_box()["height"] <= box["y"] + 1
+            # (the guard's note goes once the guard has seen the page in use, which can happen
+            # between two looks at it: one look, and none needed when the note has gone)
+            hint_box = page.locator("form.guarded .guard-hint").bounding_box()
+            if hint_box:
+                assert hint_box["y"] + hint_box["height"] <= box["y"] + 1, (hint_box, box)
             last = page.locator(".apply").bounding_box()
             assert last["y"] + last["height"] <= box["y"] + 1, (last, box)
         finally:
