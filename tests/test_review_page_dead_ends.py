@@ -182,3 +182,36 @@ def test_an_older_database_gets_the_deck_after_column(tmp_path) -> None:
         assert "deck_after_json" in {r[1] for r in again._conn.execute("PRAGMA table_info(proposals)")}
     finally:
         again.close()
+
+
+async def test_a_failed_change_keeps_its_number_in_the_heading_while_no_other_holds_it(stack: Stack) -> None:
+    """0.7.46 polish A6: the review page of a change whose apply failed is headed "#1 +1 Opt", as
+    it was while it waited, and not "What will change" above it; once a new waiting change on the
+    deck takes #1, the failed one drops the number, so the board never shows #1 twice."""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    mark = current_client.set(BROWSER_CLIENT)
+    try:
+        p = await decks.propose(SUB, "42", [{"action": "add", "card_name": "Opt", "quantity": 1}])
+    finally:
+        current_client.reset(mark)
+    pid = p["proposal_id"]
+    assert h.db.get_proposal(pid, SUB)["board_no"] == 1
+    deck = ark.decks.pop(42)  # gone from Archidekt: the apply fails for good
+    out = await _browser_apply(h, pid)
+    assert out.get("error"), out
+    assert h.db.get_proposal(pid, SUB)["state"] == "failed"
+    page = await _page(h, f"/proposals/{pid}?err=failed")
+    assert "<h2><span class='no'>#1</span> +1 Opt</h2>" in page
+    assert "Proposal #1 for " in page
+    assert "What will change" not in page
+    ark.decks[42] = deck
+    mark = current_client.set(BROWSER_CLIENT)
+    try:
+        q = await decks.propose(SUB, "42", [{"action": "add", "card_name": "Ponder", "quantity": 1}])
+    finally:
+        current_client.reset(mark)
+    assert h.db.get_proposal(q["proposal_id"], SUB)["board_no"] == 1
+    page = await _page(h, f"/proposals/{pid}")
+    assert "<h2>+1 Opt</h2>" in page and "Proposal #1 for " not in page

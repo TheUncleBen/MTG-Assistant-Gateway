@@ -543,6 +543,9 @@ name per thing.
 ### Fixed
 - After an edit on the deck page (an add, a removal, a count, Undo), the banner's date and Salt sum
   read as they do after a reload. Salt sum shows one decimal.
+- A change whose apply failed keeps its number (“#1”) in its review page's heading while no other
+  waiting change on the deck has taken it, and its list is headed “What it asked for” instead of
+  “What will change”.
 - When Archidekt is busy or can't be reached, My decks tries once more, after the wait Archidekt
   asks for, to tell your card packages from your decks, and Load more on Binder › Lists says why
   instead of “No connection”. The boxes that read your templates, color tags and packages, and the

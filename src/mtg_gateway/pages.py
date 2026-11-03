@@ -1271,13 +1271,20 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             p["can_test"] = getattr(state.reports, "mf", None) is not None
         close = proposals_view.panel_close_href(query)
         full = request.query_params.get("full") == "1"
-        no = f"#{p['board_no']} " if p["state"] == "pending" and p.get("board_no") else ""
+        # a failed one keeps its number while no change waiting on the deck took it (heading_no)
+        live = (
+            state.db.pending_board(sub, str(p["deck_id"]))
+            if p["state"] == "failed" and p.get("board_no") and str(p.get("deck_id") or "").isdigit()
+            else others
+        )
+        number = heading_no(p, live)
+        no = f"#{number} " if number else ""
         where = p.get("deck_name") or "your account"
         # While it applies, static/applied-live.js asks for this page every 3 s and swaps in the
         # panel's body (and the list's row) once they change, so the outcome shows without a reload.
         live = " data-applied-live" if p["state"] == "applying" else ""
         panel = ui.side_panel(
-            proposal_heading(p),
+            proposal_heading(p, number),
             f"<div id='proposal-live' aria-live='polite'{live}>"
             + notice
             + _proposal_body(
@@ -3190,20 +3197,29 @@ def _lists_before(p: dict[str, Any]) -> str:
     )
 
 
-def proposal_heading(p: dict[str, Any]) -> str:
+def heading_no(p: dict[str, Any], live: list[dict[str, Any]] | None = None) -> int | None:
+    """The board number the panel's heading shows: a waiting change's, as on the list, and a
+    failed one's while no change waiting on the deck (``live``: pending_board) holds it, so the
+    member still sees which one they pressed Apply on and the board never shows a number twice."""
+    no = p.get("board_no")
+    if not no:
+        return None
+    if p.get("state") == "pending":
+        return int(no)
+    if p.get("state") == "failed" and not any(o.get("board_no") == no for o in live or []):
+        return int(no)
+    return None
+
+
+def proposal_heading(p: dict[str, Any], no: int | None = None) -> str:
     """The panel's heading: "#1 +1 Arcane Signet, −1 Counterspell" ("New deck: {name}" for a new
-    deck). The number shows while it waits, as on the list."""
+    deck), with ``no`` (heading_no) when given."""
     if p.get("kind") == "create_deck":
         return html.escape(f"{_new_what(p)}: {p['deck_name']}")
     lines = str(p.get("diff") or "").splitlines()
     text = ", ".join(lines[:4]) + (f" (+{len(lines) - 4} more)" if len(lines) > 4 else "")
     text = text[:300] or str(p.get("deck_name") or "Proposal")
-    no = (
-        f"<span class='no'>#{int(p['board_no'])}</span> "
-        if p.get("state") == "pending" and p.get("board_no")
-        else ""
-    )
-    return no + html.escape(text)
+    return (f"<span class='no'>#{int(no)}</span> " if no else "") + html.escape(text)
 
 
 def _also_waiting(p: dict[str, Any], others: list[dict[str, Any]] | None) -> str:
@@ -3587,7 +3603,8 @@ def _proposal_body(
         + ui.meta(meta_rows)
         + _proposal_paired(p)
         + stale
-        + f"<h3 class='ui-section'>{heading}</h3>"
+        # a failed change will change nothing: what it asked for
+        + f"<h3 class='ui-section'>{'What it asked for' if p.get('state') == 'failed' else heading}</h3>"
         f"<div class='pills summary-pills'>{''.join(summary)}</div>"
         + _deck_after_html(p)
         + f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
