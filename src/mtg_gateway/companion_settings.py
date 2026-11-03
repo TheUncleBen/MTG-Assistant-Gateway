@@ -184,7 +184,9 @@ SETTINGS_CSS = """
   .ds .ds-cover{grid-template-columns:1fr}.ds .ds-cover .pv{max-width:12rem}
   .ds .ds-inline{flex-wrap:wrap}.ds .ds-inline > *{flex:1 1 100%}
   .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
-  .ds .acts .btn,.ds .acts button{flex:1 1 auto}}
+  /* a button wider than the card (Add template… at large text on 320 px) wraps its words (final
+     audit F02) */
+  .ds .acts .btn,.ds .acts button{flex:1 1 auto;white-space:normal;height:auto;min-width:0}}
 /* the Package panel (packages.py): the budget row and the format pills are deck_extras.PACKAGE_FIELDS_CSS;
    their inputs keep their own size (the row's inputs are otherwise full width) */
 .ds .ds-pkg h2{display:flex;align-items:center;gap:.5rem}

@@ -1,9 +1,9 @@
-"""Large text. With the text at twice its size (the root font size at 200%, and
-every element's own font size doubled, as a phone's font scale or a browser's text-only zoom
-does it) the main pages at phone widths (320 and 360 px) and on a Fold's inner screen (673 px) must not
-scroll sideways, clip a control or let two controls overlap, and every dropdown menu still opens
-inside the window. The same checks as the overflow sweep (test_overflow_sweep_browser), on
-the same hostile data. Skipped without a Chromium build."""
+"""Large text. With the text at twice its size (the root font size at 200%, the browser's own
+default doubled, and every element's own font size doubled, as a phone's font scale or a
+browser's text-only zoom does it) the main pages at phone widths (320 and 360 px) and on a Fold's
+inner screen (673 px) must not scroll sideways, clip a control or let two controls overlap, and
+every dropdown menu still opens inside the window. The same checks as the overflow sweep
+(test_overflow_sweep_browser), on the same hostile data. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
@@ -119,6 +119,63 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
         browser.close()
     if os.environ.get("SWEEP_OUT"):
         Path(os.environ["SWEEP_OUT"]).write_text("\n".join(problems))
+    assert errors == []
+    more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
+    assert problems == [], "\n".join(problems[:80]) + more
+
+
+# The browser's own default (16px) doubled, as a browser's minimum font size or "very large" text
+# setting does it: a 32px root, bigger than the pages' own 14px doubled (ROOT_200). The final
+# audit (F02) found six pages scrolling sideways by 1-36 px at 320 px this way: the install
+# pages' Copy buttons, the Watchlist's Watch a card, the admin Settings' group label, Deck
+# settings' Add template…, Scan's Type and More and My decks' New package.
+BROWSER_200 = "() => { document.documentElement.style.setProperty('font-size', '200%', 'important'); }"
+NARROWEST = 320
+BROWSER_200_PAGES = [
+    *PAGES,
+    "/install?for=claude",
+    "/install?for=claude-code",
+    "/install?for=chatgpt",
+    "/install?for=codex",
+    "/watchlist?show=alert",
+    "/admin/settings",
+    "/admin/settings?locked=1",
+    "/decks/44/settings",
+    "/decks?view=list",
+]
+
+
+def test_pages_hold_together_at_320_with_the_browser_font_doubled(server: Server) -> None:  # noqa: F811
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, pending = _seed(server)
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(
+            viewport={"width": NARROWEST, "height": 800}, has_touch=True, is_mobile=True
+        )
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        for path in [*BROWSER_200_PAGES, f"/proposals/{pending}"]:
+            ctx.clear_cookies(name=re.compile(r"^mtg_view_"))
+            server.db.delete_prefs("user-1", prefixes=("view.",))
+            r = page.goto(f"{server.base}{path}", wait_until="networkidle")
+            assert r is not None and r.status == 200, (path, r and r.status)
+            page.evaluate(BROWSER_200)
+            page.wait_for_timeout(30)
+            found = page.evaluate(MEASURE) + page.evaluate(MENUS)
+            problems += [f"{path} @{NARROWEST}px browser 200%: {f}" for f in found]
+        browser.close()
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
     assert problems == [], "\n".join(problems[:80]) + more

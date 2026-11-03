@@ -48,7 +48,10 @@ ul.folderlist .folder > .kebab{position:absolute;right:.4rem;top:50%;transform:t
 .ui-head.hubhead{gap:12px}
 @media (max-width:599.98px){
   .ui-head.hubhead{display:grid;grid-template-columns:1fr}
-  .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  /* three a row where each keeps whole words; fewer a row (one at 320 px with the browser's font
+     doubled) rather than a word overflowing its button (final audit F02) */
+  .ui-head.hubhead .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5em),1fr));
+    gap:8px}
   .ui-head.hubhead .acts .btn,.ui-head.hubhead .acts button{width:100%;padding:0 .4rem;gap:.3rem;
     font-size:.93rem;white-space:normal;text-align:center;line-height:1.1}
   .ui-head.hubhead .acts svg{display:none} }

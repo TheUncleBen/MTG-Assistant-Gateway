@@ -814,8 +814,10 @@ INSTALL_CSS = (
     ".inst a.mdaddr{color:var(--text)} .inst a.mdaddr code{overflow-wrap:anywhere}"
     ".setup>li{margin:.7rem 0}"
     ".copyfield{margin:.5rem 0}.copyfield label{margin:.2rem 0 .3rem}"
-    ".copyline{display:flex;gap:.5rem;align-items:flex-start}"
-    ".copyline input,.copyline textarea{flex:1;min-width:0;margin:0;"
+    # the Copy button drops under the box when the two no longer share the row (a 320 px screen
+    # with the browser's font doubled: final audit F02)
+    ".copyline{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-start}"
+    ".copyline input,.copyline textarea{flex:1 1 8em;min-width:0;margin:0;"
     "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
     "font-size:.85rem}"
     ".copyline .btn{flex:none;margin:0}"

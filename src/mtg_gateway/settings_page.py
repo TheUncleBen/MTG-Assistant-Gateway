@@ -262,6 +262,10 @@ SETTINGS_CSS = """
 .set-group{padding:1rem 1rem .25rem;scroll-margin-top:4.5rem}
 .set-group .gh{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .15rem}
 .set-group .gh h2,.set-group .h2{margin:0;font-size:1.25rem;font-weight:700}
+/* the "set in your stack" label wraps on a narrow phone at large text instead of running out of
+   the page (final audit F02) */
+.set-group .gh .ui-lbl{white-space:normal;height:auto;min-height:24px;max-width:100%;line-height:1.2;
+  padding-top:.15rem;padding-bottom:.15rem}
 .set-group .intro{margin:0 0 .25rem}
 .set-group details > summary{list-style:none;display:flex;align-items:center;justify-content:space-between;
   gap:.75rem;min-height:44px;cursor:pointer;margin:-.25rem 0 .5rem}

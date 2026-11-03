@@ -1321,6 +1321,11 @@ WATCH_PAGE_CSS = (
    name, a list head's count and value go under the list's name, and each picker takes a whole
    line instead of showing "So…". */
 .watch-page .w-t,.watch-page .ui-tools.w-top{container-type:inline-size}
+/* a row narrower than "Watch a card" itself (320 px with the browser's font doubled: final
+   audit F02): the button takes the row and wraps its words instead of pushing the page sideways */
+@container (max-width:11em){
+  .watch-page .w-top > .btn,.watch-page .w-top > button.w-select{flex:1 1 100%;min-width:0;
+    white-space:normal;height:auto} }
 @container (max-width:20em){
   .watch-page .w-top .f{flex:1 1 100%}
   .watch-page .w-t .tr{grid-template-columns:32px minmax(0,1fr)}
