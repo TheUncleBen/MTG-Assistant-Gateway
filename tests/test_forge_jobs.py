@@ -447,3 +447,31 @@ def test_progress_names_the_step_the_games_and_the_time_so_far() -> None:
     )
     assert "<progress class='rv-bar' max='4' value='1'" in html and "2 min so far." in html
     assert "left" not in html.split("rv-time", 1)[1].split("</p>", 1)[0]
+
+
+async def test_the_forge_refresher_stops_before_the_database_closes(tmp_path: Path, idp: Any) -> None:
+    """The refresher reads the database every round. A gateway shutting down (a test's end too)
+    closed the database while it still ran, so its next round failed with "Cannot operate on a
+    closed database" in the log. The shutdown now stops it first."""
+    from .conftest import build_stack, run_stack
+
+    st = build_stack(tmp_path, idp, AUTO_PROXY.but(settings={"forge_url": "http://forge.test"}))
+    rounds: list[int] = []
+    async with run_stack(st):
+        reports = st.gw.reports
+        assert reports.forge is not None
+
+        async def rounds_forever() -> None:  # an unfinished run: a round, a pause, again
+            while True:
+                reports.db._one("SELECT COUNT(*) FROM reports", ())
+                rounds.append(1)
+                await asyncio.sleep(0.01)
+
+        reports._refresh_forge_runs_now = rounds_forever
+        reports._ensure_forge_refresher()
+        task = reports._forge_task
+        assert task is not None
+        await asyncio.sleep(0.05)
+        assert rounds and not task.done()
+    await asyncio.sleep(0.05)  # a round after the database closed would have ended it with an error
+    assert task.cancelled(), task.exception()

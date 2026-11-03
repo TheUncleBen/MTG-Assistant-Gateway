@@ -105,6 +105,11 @@ class TopicRedactor(logging.Filter):
 
 
 TIMEOUT = 10.0
+# A background message (nobody waits for it: a deck's waiting changes, a finished report, a price
+# or Archidekt alert) that ntfy could not take for a passing reason (no connection, a time-out, 429
+# or 5xx: the server restarting) is sent again after each of these pauses, then given up and logged.
+# A refusal (401, 403, 400) is not sent again. The bell keeps its alerts either way.
+PUSH_RETRY_DELAYS = (10.0, 60.0, 300.0)
 TEST_COOLDOWN = 60.0  # seconds between one member's Send test presses
 
 # The Android app's connection (notify.add_stream_route): the app sends the member's topic as its
@@ -374,6 +379,7 @@ class Notifier:
         self._dirty: dict[str, set[str]] = {}  # members to count again, with the decks touched
         self._dirty_lock = threading.Lock()
         self.recount_delay = RECOUNT_DELAY
+        self._no_retry = asyncio.Event()  # set by drain: messages waiting to be sent again are given up
 
     def test_allowed(self, sub: str) -> bool:
         """True (and the member's next test held back for TEST_COOLDOWN) unless they pressed
@@ -397,26 +403,74 @@ class Notifier:
 
     async def _request(self, method: str, url: str, **kw: Any) -> bool:
         """One request to ntfy; True when it took it. Never raises; logs the status alone."""
+        return await self._attempt(method, url, **kw) == "ok"
+
+    async def _attempt(self, method: str, url: str, **kw: Any) -> str:
+        """One request to ntfy: "ok" when it took it, "again" when it could not for a passing
+        reason (no connection, a time-out, 429 or 5xx), "refused" otherwise. Never raises; logs
+        the status alone."""
         http = self._http or httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False)
         try:
             r = await http.request(method, url, **kw)
         except httpx.HTTPError as exc:
             logger.warning("ntfy publish failed: %s", exc.__class__.__name__)
-            return False
+            return "again"
         finally:
             if self._http is None:
                 await http.aclose()
             await dbwait.settle()  # a background job's database work waits off the loop
         if r.status_code >= 300:
             logger.warning("ntfy publish refused: HTTP %d", r.status_code)
-            return False
-        return True
+            return "again" if r.status_code == 429 or r.status_code >= 500 else "refused"
+        return "ok"
+
+    async def _sent(
+        self, method: str, url: str, *, retry: bool, still: Callable[[], bool] | None, **kw: Any
+    ) -> bool:
+        """``_attempt``; with ``retry``, one that failed for a passing reason is sent again in the
+        background after each of PUSH_RETRY_DELAYS while ``still()`` (the message is still the one
+        to show) holds. Returns whether the first attempt was taken."""
+        outcome = await self._attempt(method, url, **kw)
+        if outcome == "again" and retry:
+            self._background(self._again(method, url, still, kw))
+        return outcome == "ok"
+
+    async def _again(
+        self, method: str, url: str, still: Callable[[], bool] | None, kw: dict[str, Any]
+    ) -> None:
+        for delay in PUSH_RETRY_DELAYS:
+            try:  # the gateway stopping (drain) ends the wait: the message is given up
+                await asyncio.wait_for(self._no_retry.wait(), delay)
+                return
+            except TimeoutError:
+                pass
+            if still is not None and not still():
+                return  # replaced or withdrawn meanwhile: the old message is not sent
+            outcome = await self._attempt(method, url, **kw)
+            if outcome == "ok":
+                if method == "POST":
+                    self.sent += 1
+                return
+            if outcome == "refused":
+                return
+        logger.warning("ntfy publish given up after %d tries", len(PUSH_RETRY_DELAYS) + 1)
 
     async def publish(
-        self, topic: str, title: str, message: str, path: str = "/", tags: str = "", group: str | None = None
+        self,
+        topic: str,
+        title: str,
+        message: str,
+        path: str = "/",
+        tags: str = "",
+        group: str | None = None,
+        *,
+        retry: bool = False,
+        still: Callable[[], bool] | None = None,
     ) -> bool:
         """One message to ``topic``; True when the server took it. Never raises. A ``group``
-        (:data:`GROUP_RE`) replaces the topic's earlier message of that group on the phone."""
+        (:data:`GROUP_RE`) replaces the topic's earlier message of that group on the phone.
+        ``retry``: nobody waits for this message, so one ntfy could not take for a passing reason
+        is sent again later (PUSH_RETRY_DELAYS) while ``still()`` holds."""
         if not self.enabled or not topic:
             return False
         body: dict[str, Any] = {
@@ -429,20 +483,35 @@ class Notifier:
             body["tags"] = [tags]
         if group is not None and GROUP_RE.fullmatch(group):
             body["sequence_id"] = group
-        ok = await self._request(
-            "POST", self.url + "/", json=body, headers={"Content-Type": "application/json", **self._headers()}
+        ok = await self._sent(
+            "POST",
+            self.url + "/",
+            retry=retry,
+            still=still,
+            json=body,
+            headers={"Content-Type": "application/json", **self._headers()},
         )
         if ok:
             self.sent += 1
         return ok
 
     async def send(
-        self, sub: str, event: str, title: str, message: str, path: str = "/", group: str | None = None
+        self,
+        sub: str,
+        event: str,
+        title: str,
+        message: str,
+        path: str = "/",
+        group: str | None = None,
+        *,
+        retry: bool = False,
+        still: Callable[[], bool] | None = None,
     ) -> bool:
         """Publish to the member's topic when they opted in and want this kind of event
         (``event``: proposals, reports, prices, summary or test). A price alert, a finished
         report and a summary are kept for the website's bell first (:func:`bell_rows`), push
-        or no push."""
+        or no push. ``retry``, ``still``: as for :meth:`publish` (a background message; never a
+        press that is answered with the outcome, such as Send test)."""
         await dbwait.before_side_effect()  # a notification sent can't be taken back
         p = prefs(self.db, sub)
         if event in BELL_EVENTS and p.get(f"on_{event}", True):
@@ -454,10 +523,17 @@ class Notifier:
         if event in EVENTS and not p[f"on_{event}"]:
             return False
         return await self.publish(
-            p["ntfy_topic"], title, message, path, tags=TAGS.get(event, ""), group=group
+            p["ntfy_topic"],
+            title,
+            message,
+            path,
+            tags=TAGS.get(event, ""),
+            group=group,
+            retry=retry,
+            still=still,
         )
 
-    async def withdraw(self, sub: str, group: str) -> bool:
+    async def withdraw(self, sub: str, group: str, *, still: Callable[[], bool] | None = None) -> bool:
         """Remove the member's message of ``group`` from their phone (nothing waits there any
         more). Sent whatever the member's event choices, so a message never outlives its cause."""
         if not self.enabled or not GROUP_RE.fullmatch(group):
@@ -465,7 +541,13 @@ class Notifier:
         p = prefs(self.db, sub)
         if not p["ntfy_on"] or not p["ntfy_topic"]:
             return False
-        return await self._request("DELETE", f"{self.url}/{p['ntfy_topic']}/{group}", headers=self._headers())
+        return await self._sent(
+            "DELETE",
+            f"{self.url}/{p['ntfy_topic']}/{group}",
+            retry=True,
+            still=still,
+            headers=self._headers(),
+        )
 
     def _background(self, work: Any) -> None:
         try:
@@ -477,17 +559,26 @@ class Notifier:
         task.add_done_callback(self._tasks.discard)
 
     def soon(
-        self, sub: str, event: str, title: str, message: str, path: str = "/", group: str | None = None
+        self,
+        sub: str,
+        event: str,
+        title: str,
+        message: str,
+        path: str = "/",
+        group: str | None = None,
+        *,
+        still: Callable[[], bool] | None = None,
     ) -> None:
-        """Send in the background: the caller (a proposal, a report) never waits for ntfy. An
-        alert the bell keeps is recorded even with no push server."""
+        """Send in the background: the caller (a proposal, a report) never waits for ntfy, and a
+        message ntfy could not take for a passing reason is sent again later. An alert the bell
+        keeps is recorded even with no push server."""
         if self.enabled or event in BELL_EVENTS:
-            self._background(self.send(sub, event, title, message, path, group))
+            self._background(self.send(sub, event, title, message, path, group, retry=True, still=still))
 
-    def withdraw_soon(self, sub: str, group: str) -> None:
+    def withdraw_soon(self, sub: str, group: str, *, still: Callable[[], bool] | None = None) -> None:
         """:meth:`withdraw` in the background."""
         if self.enabled:
-            self._background(self.withdraw(sub, group))
+            self._background(self.withdraw(sub, group, still=still))
 
     def deck_waiting(
         self, sub: str, deck_id: str, deck_name: str, count: int, path: str, *, touched: bool = False
@@ -509,11 +600,20 @@ class Notifier:
             self._waiting[key] = count
             self._cleared.discard(key)
             title = new_decks_title(count) if deck_id == NEW_DECKS else waiting_title(count, deck_name)
-            self.soon(sub, "proposals", title, WAITING_TEXT, path, group)
+            # sent again later only while the phone should still show this count
+            self.soon(
+                sub,
+                "proposals",
+                title,
+                WAITING_TEXT,
+                path,
+                group,
+                still=lambda: self._waiting.get(key) == count,
+            )
         else:
             self._waiting.pop(key, None)
             self._cleared.add(key)
-            self.withdraw_soon(sub, group)
+            self.withdraw_soon(sub, group, still=lambda: key not in self._waiting)
         if len(self._waiting) > 5000:  # a long-running gateway: forget the oldest decks
             for k in list(self._waiting)[:1000]:
                 self._waiting.pop(k, None)
@@ -589,8 +689,16 @@ class Notifier:
             self.deck_waiting(sub, deck_id, name, count, path, touched=deck_id in touched)
 
     async def drain(self) -> None:
-        """Wait for background sends, and for counts still to run (tests, shutdown)."""
+        """Wait for background sends, and for counts still to run (tests, shutdown). A message
+        waiting to be sent again (PUSH_RETRY_DELAYS) is given up rather than waited for."""
         deadline = time.monotonic() + self.recount_delay + 5
+        self._no_retry.set()
+        try:
+            await self._drain(deadline)
+        finally:
+            self._no_retry.clear()
+
+    async def _drain(self, deadline: float) -> None:
         while True:
             # A finished task leaves the set only in its done callback, which runs on a later turn
             # of the loop: drop finished ones here, or gathering them again would never yield.

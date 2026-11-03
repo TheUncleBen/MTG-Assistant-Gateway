@@ -598,6 +598,12 @@ name per thing.
   mark more reliably. A stray letter read from the title bar's edge no longer breaks the name.
 - A failed scan says whether the card's edges or its name were the problem; a HEIC photo says the
   browser can't open it and suggests JPEG or the camera.
+- When Scryfall's list of card names can't be downloaded, names that are no card are answered
+  in about half the time (six took 12 seconds): after two of them found nothing, the rest of the
+  list skips the extra spelling guesses and still gets its suggestions.
+- A push notification the notification server could not take because it was down or restarting
+  is sent again a few times over the next minutes instead of being lost. A deck's message that a
+  newer count replaced meanwhile is not sent again.
 - In the Android app, a photo from the camera reaches the scan page whichever way the phone's
   WebView sends it, and the app hands it over directly if that still fails. If it never arrives,
   the camera panel says “The app couldn’t hand the photo to the page. Tap Shoot to try again.”
@@ -662,7 +668,7 @@ name per thing.
   passes, the gateway reads the deck back. If the whole change is there, the proposal is marked
   applied with its snapshot, the changes waiting on it are released and Undo works as after any
   apply; if only part is there, it says so and offers Propose the rest; if none is there, it says
-  nothing was changed.
+  nothing was changed. This holds for a change left applying by 0.7.45 when you update, too.
 - Copying a deck or changing your binder is refused at once when no Archidekt account is linked,
   instead of waiting as a proposal that could never be applied.
 - A link opened while signed out (a shared forum thread, a folder of decks, the Binder's list

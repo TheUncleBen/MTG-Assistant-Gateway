@@ -17,7 +17,9 @@ Before a request goes on, this asks the database, without waiting, whether a wri
   answer is dropped and the request waits as below and then runs again from the start. Before
   anything that changes something outside the gateway (an Archidekt write or sign-in, the
   identity provider's tokens, a push notification: ``before_side_effect``) it goes back to
-  waiting, so that change is made once and what it gives back is kept.
+  waiting, so that change is made once and what it gives back is kept. A page that sends its
+  frame first and goes on after this request has ended (latepage.py) keeps a ReadThrough of its
+  own, so its writes don't wait on the loop either: it waits off the loop and runs again.
 - Any other request waits on a worker thread (Database.wait_write_free, one wait shared by every
   request that finds it locked), so the loop keeps serving, then goes on; after
   WAIT_LIMIT_SECONDS it is answered 503 with Retry-After, saying to try again: JSON for a program

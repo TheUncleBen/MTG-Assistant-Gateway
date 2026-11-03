@@ -10,8 +10,12 @@ MTG_PRIVATE_VALUES_FILE, with two lines:
   names = Alex, My Deck Name         names and phrases, matched as whole words in any case, with
                                      spaces, "-" or "_" between the words or nothing
 
-The maintainers run this test with that file before every push. Without it (CI, a contributor's
-clone) the generic checks below still run and this one has nothing private to look for.
+The owner's own values are checked locally only: a maintainer runs this test with that file before
+every push. CI and a contributor's clone don't have it, and must never be given it (no secret, no
+variable, no file in the repository). There the owner test runs the generic checks instead, which
+need no private value: no Archidekt deck id in a real-looking form (only made-up ids such as 42 or
+12345678 appear) and no host in the deployment examples that is not a reserved example name or a
+public service. It never skips.
 
 Card data from Scryfall or Archidekt may name a real artist who shares a first name with someone; a
 name followed by one of the artist surnames below is that artist, not private data."""
@@ -97,6 +101,21 @@ SERVICE_HOST = re.compile(
     r"\.(?:com|net|org|io|dev|app|co|uk|de|me|xyz|cloud|info|gg|eu|us|ca|nl|fr)(?![\w-])",
     re.IGNORECASE,
 )
+# A deck id written where it names a deck: a deck's address (Archidekt's or the gateway's), a
+# ?deck= query, or a deck_id / deckId value. Six digits or more is the form real Archidekt ids take.
+DECK_REFERENCE = re.compile(
+    r"(?:/decks/|[?&]deck=|(?<![A-Za-z])deck_?id[\"']?\s*[:=,(]\s*[\"']?)(\d+)(?!\d)", re.IGNORECASE
+)
+REAL_LOOKING_DIGITS = 6
+# The deployment examples: every host they name is an example name or a public service.
+DEPLOY_EXAMPLES = ("deploy/", "docs/DEPLOY")
+DEPLOY_HOST = re.compile(
+    r"(?:(?<=://)|(?<![\w.@/-]))([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|dev|app|co|uk|de|me|xyz|cloud|info|gg"
+    r"|eu|us|ca|nl|fr|sh|ai))(?![\w-])",
+    re.IGNORECASE,
+)
+# Where container images come from (an image name, not a gateway's address).
+REGISTRY_DOMAINS = {"ghcr.io", "gcr.io", "docker.io", "quay.io"}
 
 
 def _tracked_files() -> list[Path]:
@@ -215,7 +234,110 @@ def test_the_private_scan_finds_what_it_is_given() -> None:
         private_patterns(["12ab"], [])
 
 
+def made_up_deck_id(digits: str) -> bool:
+    """Whether a deck id is plainly made up: short (42, 500), a run of digits (123456, 1234567890123)
+    or built from three digits or fewer (11112222, 4242424, 99000000). Real Archidekt ids are six to
+    eight digits with no such pattern."""
+    if len(digits) < REAL_LOOKING_DIGITS or len(set(digits)) <= 3:
+        return True
+    runs = "0123456789" * 3
+    return digits in runs or digits in runs[::-1]
+
+
+def real_looking_deck_ids(lines) -> tuple[int, list[str]]:
+    """How many deck ids the lines name, and the places of the ones that look real. Only the
+    place is reported, never the id, so a CI log does not repeat it."""
+    seen = 0
+    found = []
+    for rel, n, line in lines:
+        for m in DECK_REFERENCE.finditer(line):
+            seen += 1
+            if not made_up_deck_id(m.group(1)):
+                found.append(f"{rel}:{n}")
+    return seen, found
+
+
+def deploy_example_hosts(lines, files: set[str]) -> tuple[int, list[str]]:
+    """How many hosts the deployment examples name, and the ones that are neither a reserved
+    example name, a public service nor an image registry (a file name such as make-secrets.sh is
+    not a host)."""
+    seen = 0
+    found = []
+    for rel, n, line in lines:
+        if not rel.startswith(DEPLOY_EXAMPLES):
+            continue
+        for m in DEPLOY_HOST.finditer(line):
+            host = m.group(1).lower()
+            if host in files:
+                continue
+            seen += 1
+            domain = ".".join(host.split(".")[-2:])
+            if not (_reserved(host) or domain in PUBLIC_DOMAINS or domain in REGISTRY_DOMAINS):
+                found.append(f"{rel}:{n}: {host}")
+    return seen, found
+
+
+def _tracked_names() -> set[str]:
+    return {p.name.lower() for p in _tracked_files()}
+
+
+def test_the_generic_scans_find_what_they_are_given() -> None:
+    """The made-up-id rule and the deploy host scan on made-up lines. A real-looking id is built
+    here from a formula, so this file itself names none."""
+    real = "".join(str((d * 7 + 3) % 10) for d in range(7))
+    lines = [
+        ("a", 1, f"https://archidekt.com/decks/{real}/my-deck"),
+        ("b", 1, f"see https://mtg.example.com/decks/{real}"),
+        ("c", 1, f'{{"deck_id": "{real}"}}'),
+        ("d", 1, f"deckId = {real}"),
+        ("e", 1, "https://archidekt.com/decks/12345678/x and /decks/42 and /decks/11112222"),
+        ("f", 1, 'deck_id="1234567890123", deck_id=99000000'),
+        ("g", 1, f"a card seen in {real} decks"),  # a count, not a deck
+        ("h", 1, f"/decks?deck={real}"),
+    ]
+    seen, found = real_looking_deck_ids(lines)
+    assert found == ["a:1", "b:1", "c:1", "d:1", "h:1"] and seen == 10, (seen, found)
+    home, own = "mtg." + "my-own-home.net", "gateway." + "someones.dev"  # in pieces: not a host here
+    deploy = [
+        ("deploy/x.env", 1, "MTG_PUBLIC_URL=https://mtg.example.com"),
+        ("deploy/x.env", 2, "image: ghcr.io/someone/gateway:1"),
+        ("deploy/x.yml", 3, f"rule: Host(`{home}`)"),
+        ("docs/DEPLOY.md", 4, f"server_name {own};"),
+        ("docs/OTHER.md", 5, f"{home} is not a deploy example"),
+        ("deploy/run.sh", 6, "run make-secrets.sh first"),
+    ]
+    seen, found = deploy_example_hosts(deploy, {"make-secrets.sh"})
+    assert seen == 4 and found == [f"deploy/x.yml:3: {home}", f"docs/DEPLOY.md:4: {own}"], (seen, found)
+
+
+def test_no_deck_id_in_a_real_looking_form_is_in_the_repository() -> None:
+    """Tests, docs and fixtures use made-up deck ids only (made_up_deck_id)."""
+    seen, found = real_looking_deck_ids(_text_lines())
+    assert seen > 50, seen  # the scan saw the deck ids the tests and docs use
+    assert not found, "a deck id that looks real (use a made-up one such as 12345678 or 42):\n" + "\n".join(
+        found
+    )
+
+
+def test_the_deployment_examples_name_only_example_hosts() -> None:
+    seen, found = deploy_example_hosts(_text_lines(), _tracked_names())
+    assert seen > 5, seen  # the examples were read
+    assert not found, "use mtg.example.com (or auth.example.com):\n" + "\n".join(found)
+
+
 def test_no_deck_id_or_name_of_the_owner_is_in_the_repository() -> None:
+    """The owner's deck ids and names are checked locally only, on a maintainer's machine with
+    MTG_PRIVATE_VALUES_FILE set: they are never put in the repository, CI or GitHub secrets.
+    Without the file (CI) this test still checks something real and never skips: it runs the
+    generic checks, which need no private value (no real-looking deck id anywhere, no host in the
+    deployment examples other than an example name or a public service)."""
     deck_ids, names = _private_values()
-    found = find_private(_text_lines(), private_patterns(deck_ids, names))
-    assert not found, "the owner's deck id or name is in these places:\n" + "\n".join(found)
+    lines = _text_lines()
+    if deck_ids or names:
+        found = find_private(lines, private_patterns(deck_ids, names))
+        assert not found, "the owner's deck id or name is in these places:\n" + "\n".join(found)
+    seen_ids, real_ids = real_looking_deck_ids(lines)
+    seen_hosts, hosts = deploy_example_hosts(lines, _tracked_names())
+    assert seen_ids > 50 and seen_hosts > 5, (seen_ids, seen_hosts)
+    assert not real_ids, "a deck id that looks real is in these places:\n" + "\n".join(real_ids)
+    assert not hosts, "a deployment example names a real host:\n" + "\n".join(hosts)

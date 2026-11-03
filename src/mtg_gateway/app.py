@@ -1037,6 +1037,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             for task in tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if state.reports is not None:
+                await state.reports.aclose()  # the Forge refresher stops before the database closes
             if state.folder_jobs is not None:
                 await state.folder_jobs.aclose()
             await state.decks.aclose()  # an apply still running is given a moment, then recorded

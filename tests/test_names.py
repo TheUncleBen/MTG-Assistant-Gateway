@@ -196,3 +196,31 @@ def test_token_names_are_suggested_beside_the_catalog() -> None:
     assert "Eldrazi Spawn" in cat.suggest("eldrazi sp")
     assert cat.known("Treasure") is True and cat.known("Not A Token") is False
     assert cat.size == len(NAMES) + 1 + len(set(TOKEN_NAMES) - {*NAMES, "Treasure Map"})
+
+
+def test_unknown_names_without_the_catalog_cost_about_two_lookups_each() -> None:
+    """The catalog's load failed: every recovery step is a paced Scryfall request. Six names that
+    are no card cost 38 requests in this fake (25 and 12 s in the final audit of 0.7.46), each
+    walking its misread variants and shorter prefixes. Once two walks found nothing, the call's
+    other names keep their own lookup and suggestions but skip the walk; and a name that skipped
+    it is not remembered as a miss, so it is tried in full once the catalog is there."""
+    from mtg_gateway.scan.service import MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG, CardInput
+
+    sf = FakeScryfall()  # no catalog: /catalog/card-names answers 404
+    names = ["Xqzv Plorth", "Blorf Gandu", "Qwmx Tarrel", "Zzyx Vombat", "Hrrk Pellum", "Fnord Quillip"]
+
+    async def run() -> tuple[list[str], ScanService]:
+        service = _service(sf)
+        out = await service.resolve([CardInput(n) for n in names])
+        return [r.status for r in out], service
+
+    statuses, service = asyncio.run(run())
+    assert statuses == ["not_found"] * 6
+    lookups = [u for _m, u in sf.requests if "/cards/named" in u or "/cards/autocomplete" in u]
+    walked = 2 * len(names) + MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG * 4  # a walk: up to 4 here
+    assert len(lookups) <= walked, (len(lookups), lookups)
+    for later in names[MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG:]:
+        assert sum(f"={later.replace(' ', '+')}" in u for u in lookups) == 2, later  # its own two
+    # the two that walked are remembered as misses; the ones that skipped the walk are not
+    remembered = [n for n in names if service._missed(CardInput(n)) is not None]
+    assert remembered == names[:MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG]

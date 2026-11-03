@@ -60,6 +60,13 @@ NOT_FOUND_TTL = 3600
 CATALOG_WAIT_SECONDS = 8.0
 MAX_CARD_CHECK_LOOKUPS = 5  # Scryfall lookups per proposal for added names the catalog lacks
 MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many names are garbage
+# Without the card-name catalog (its load failed), every recovery step is a paced Scryfall request
+# (0.5 s each): a misread variant's fuzzy lookup, a shorter prefix's autocomplete. A misread title
+# is placed within its first steps; a name that is no card walks them all and finds nothing. Once
+# this many names of one call walked them for nothing, the call's other names skip the walk (they
+# still get their own lookup and suggestions), so a list of unknown names costs about two requests
+# each (final audit of 0.7.46: six unknown names cost 25 requests and 12 s).
+MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG = 2
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
 # The printing picker's lookups wait this long for one of the account's places before "busy" (a
 # deck page opens several at once)
@@ -455,6 +462,9 @@ class _Budget:
     def __init__(self, lookups: int, deadline: float):
         self.lookups = lookups
         self.deadline = deadline
+        # what recovery (``ScanService._recover``) may still spend of ``lookups``; None: all of it
+        # (0 once MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG walks found nothing)
+        self.recovery: int | None = None
 
     @property
     def expired(self) -> bool:
@@ -464,6 +474,15 @@ class _Budget:
         if self.lookups <= 0 or self.expired:
             return False
         self.lookups -= 1
+        return True
+
+    def spend_recovery(self) -> bool:
+        if self.recovery is not None and self.recovery <= 0:
+            return False
+        if not self.spend():
+            return False
+        if self.recovery is not None:
+            self.recovery -= 1
         return True
 
 
@@ -646,6 +665,7 @@ class ScanService:
         if any(r is None and inp.name for r, inp in zip(results, inputs, strict=True)):
             await self.names.ready(min(CATALOG_WAIT_SECONDS, max(0.0, budget.deadline - time.monotonic())))
 
+        fruitless = 0  # names whose recovery walk found nothing, without the catalog
         # 2. Everything else: fuzzy, then suggestions. Recovery lookups share one budget per call.
         # A 429 from Scryfall pauses all lookups for its Retry-After window. Names already
         # resolved keep their matches; the rest come back as "deferred" with the wait time,
@@ -662,6 +682,7 @@ class ScanService:
                 break
             if i in checks:
                 inp = CardInput(inp.name, "", "", inp.quantity, inp.raw, inp.foil, inp.lang, inp.art_hash)
+            before = budget.lookups
             try:
                 async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
                     res = await self._resolve_one(inp, budget)
@@ -680,7 +701,14 @@ class ScanService:
             if i in checks:
                 res = self._settle_printing(inputs[i], checks[i], res)
             elif res.status == "not_found" and inp.name:
-                self.not_found.put(_miss_key(inp), res)
+                if budget.recovery != 0:
+                    # (a name that skipped the walk is not a miss to remember: asked again once the
+                    # catalog is there, it may be placed)
+                    self.not_found.put(_miss_key(inp), res)
+                if budget.lookups < before and not self.names.loaded:
+                    fruitless += 1
+                    if fruitless >= MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG:
+                        budget.recovery = 0
             results[i] = res
         # 2b. A card matched by name stands on Scryfall's default printing, its newest, which can be
         # a preview that is not out yet or a printing that is not on paper. Swap in the newest
@@ -931,7 +959,7 @@ class ScanService:
         a list full of garbage cannot run the gateway into Scryfall's rate limit or a timeout.
         """
         name = inp.name
-        spend = budget.spend
+        spend = budget.spend_recovery
         # The name as read, then without a stray letter the title bar's edge put in front of it
         # ("fSolRing", "l Sol Ring"). Every match is still guarded against the name as read.
         bases = [name, *trimmed_starts(name)]
@@ -973,7 +1001,7 @@ class ScanService:
     ) -> Resolution | None:
         """[_recover]'s second step on ``base`` (the read, or the read with its start trimmed)."""
         name = inp.name
-        spend = budget.spend
+        spend = budget.spend_recovery
         # 2. Autocomplete on a shorter and shorter prefix ("Sol R", "Cult").
         tried: set[str] = set()
         lookups = 0

@@ -250,3 +250,57 @@ async def test_a_new_deck_that_does_not_match_names_its_deck_id(stack: Stack, bi
     message = str(out.get("message") or out.get("detail") or row["result"])
     assert row["state"] == "failed", (row["state"], out)
     assert f"The deck was created (deck ID {row['deck_id']}) but these cards" in message, message
+
+
+async def test_a_429_while_a_new_deck_is_written_is_waited_out_and_the_write_resumes(
+    stack: Stack, big_list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An 82-card new deck (a ChatGPT run once failed with rate_limited at 42 of 82 cards):
+    Archidekt answers its second batch of cards with 429 and Retry-After. The apply waits the pause
+    out and sends that batch again; it does not start over: one deck is made, the first batch is
+    not sent twice, and every card is on the deck once."""
+    from mtg_gateway import archidekt as ark_mod
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    cards = big_list[:82]
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Big brew", "cards": cards}))
+    assert p["ok"], p
+    orig = ark.transport.handler
+    seen = {"writes": 0, "limited": 0}
+    waits: list[float] = []
+    real_sleep = ark_mod.asyncio.sleep
+
+    async def noted_sleep(seconds: float) -> None:
+        waits.append(seconds)
+        await real_sleep(seconds)
+
+    monkeypatch.setattr(ark_mod.asyncio, "sleep", noted_sleep)
+
+    def limit_the_second_batch(req: httpx.Request):  # noqa: ANN202
+        if req.url.path.endswith("/modifyCards/v2/") and req.method == "PATCH":
+            seen["writes"] += 1
+            if seen["writes"] == 2:
+                seen["limited"] += 1
+                ark.calls.append((req.method, req.url.path))
+                return httpx.Response(429, headers={"Retry-After": "1"}, json={"detail": "slow down"})
+        return orig(req)
+
+    ark.transport.handler = limit_the_second_batch
+    since = len(ark.calls)
+    out = await press_approve(h, token, p["proposal_id"])
+    assert out["ok"] and out["state"] == "applied", (out, seen, waits, ark.calls[since:])
+    assert seen["limited"] == 1 and seen["writes"] == 3, seen  # the refused batch went once more
+    assert any(w >= 1 for w in waits), waits  # Retry-After was honoured
+    creates = [c for c in ark.calls[since:] if c == ("POST", "/api/decks/v2/")]
+    assert len(creates) == 1, ark.calls[since:]  # one deck made, not a second one
+    assert [len(b["cards"]) for b in ark.patches] == [
+        decks_mod.CARD_WRITE_BATCH,
+        82 - decks_mod.CARD_WRITE_BATCH,
+    ]
+    made = ark.decks[int(out["result"]["deck_id"])]
+    assert sum(c["quantity"] for c in made["cards"]) == 82
+    names = Counter(
+        (c["card"]["oracleCard"]["name"], tuple(c.get("categories") or [])) for c in made["cards"]
+    )
+    assert max(names.values()) == 1, names  # no card twice

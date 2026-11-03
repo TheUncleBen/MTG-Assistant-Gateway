@@ -14,6 +14,7 @@ never made twice and what it gives back is always kept."""
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 import httpx
@@ -170,3 +171,45 @@ async def test_sign_in_steps_and_writes_never_go_ahead(stack: Stack) -> None:
     ):
         assert mw._may_read({"type": "http", "method": method, "path": path}), (method, path)
     assert not mw._reads_only({"path": "/mcp"}, b'{"jsonrpc":"2.0","id":1,"method":"initialize"}')
+
+
+async def test_a_late_deck_page_waits_for_the_lock_off_the_loop(stack: Stack) -> None:
+    """A deck page slower than latepage.LATE_AFTER, read while another process holds the lock:
+    the frame goes out, the page carries on after the read went ahead, and its write (the waiting
+    proposals' hold, db.hold_blocked) found the lock. It used to wait for it on the event loop, up
+    to db.BUSY_TIMEOUT_MS, so every other request stalled behind it (4 s measured in the final
+    audit of 0.7.46). The late page now waits off the loop like any other write and is then run
+    again; other requests are answered meanwhile and the finished page is the real one."""
+    from .test_db_lock_wait import _Ticker
+    from .test_late_pages import PAGE, _linked, _slow
+
+    h = stack.h
+    token = await linked_user(stack)
+    b = await _linked(stack)
+    try:
+        _slow(stack, 2.0)
+        holder = _hold(str(h.settings.db_path), 6.0)
+        try:
+            with _Ticker() as ticker:
+                started = time.monotonic()
+                frame = await b.http.get("/decks/42", headers=PAGE)
+                assert time.monotonic() - started < 1.5
+                assert "data-late=" in frame.text, frame.text[:400]
+                key = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", frame.text).group(1)
+                await asyncio.sleep(2.5)  # the page's Archidekt read is over; its write meets the lock
+                assert ticker.longest < 0.5, f"the loop stalled {ticker.longest:.2f} s behind a late page"
+                t0 = time.monotonic()
+                who = await call(h, token, "whoami", {})
+                assert time.monotonic() - t0 < 0.5, "a read waited behind the late page"
+                assert structured(who).get("ok") is not False, who
+                assert h.db.write_free() is False  # the lock really was held all along
+                longest = await ticker.done()
+        finally:
+            holder.wait(timeout=30)
+        assert longest < 0.5, f"the event loop stalled {longest:.2f} s"
+        ready = await b.http.get(key)
+        assert ready.status_code == 200 and ready.json()["ready"] is True, ready.text
+        page = await b.http.get("/decks/42", headers=PAGE)
+        assert page.status_code == 200 and "data-late" not in page.text, page.text[:400]
+    finally:
+        await b.aclose()
