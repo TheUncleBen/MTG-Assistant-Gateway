@@ -340,6 +340,12 @@ def updated_when(iso: str) -> str:
     return ui.when(ts)
 
 
+def salt_text(stats: dict[str, Any] | None) -> str:
+    """The banner's Salt sum, one decimal (the page's script draws an edit's answer the same)."""
+    salt = (stats or {}).get("salt_total")
+    return "–" if salt is None else f"{float(salt):.1f}"
+
+
 def banner_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -375,7 +381,7 @@ def banner_html(
         else ""
     )
     brackets = banner_bracket_html(deck, stats)  # bracket_view.py
-    salt = stats.get("salt_total") if stats.get("salt_total") is not None else "–"
+    salt = salt_text(stats)
     # the deck's tags; none: no "No deck tags" line (noise, as on the tiles)
     pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in deck.tags)
     tags = f"<div class='tags'>{icon('tag')} {pills}</div>" if deck.tags else ""

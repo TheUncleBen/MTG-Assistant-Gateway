@@ -541,6 +541,8 @@ name per thing.
   navigation.
 
 ### Fixed
+- After an edit on the deck page (an add, a removal, a count, Undo), the banner's date and Salt sum
+  read as they do after a reload. Salt sum shows one decimal.
 - Large text: the Binder and Assistant switches show their current page and fade the edge that
   has more.
 - A proposal marked Needs a look no longer offers Apply or Delete; a failed change says why.

@@ -293,6 +293,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             legal_problems,
             legality_chip_html,
             legality_panel_html,
+            salt_text,
+            updated_when,
         )
 
         if who.via != "browser":
@@ -363,9 +365,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     # no card priced: the page draws "–" for the cost, as it does on a load
                     "priced_cards": stats.get("priced_cards", 0),
                     "salt_total": stats.get("salt_total"),
+                    "salt_text": salt_text(stats),  # as the banner draws it
                     "format": deck.format,
                 },
                 "banner_html": legality_chip_html(deck, stats),
+                "updated_html": updated_when(deck.updated_at),  # the banner's date
                 "checks_html": checks_panel_html(deck, stats),
                 "legality_html": legality_panel_html(deck, stats),
             }
@@ -517,7 +521,14 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         the page sends ``confirmed: true`` or ``{proposal_id, version}``. Answers the deck's
         custom rows as they are now and the page fragments the edit endpoint answers. Browser
         session only: an assistant proposes through propose_custom_card_changes and waits."""
-        from .deckpage import checks_panel_html, legal_problems, legality_chip_html, legality_panel_html
+        from .deckpage import (
+            checks_panel_html,
+            legal_problems,
+            legality_chip_html,
+            legality_panel_html,
+            salt_text,
+            updated_when,
+        )
 
         if who.via != "browser":
             raise DeckError(
@@ -602,8 +613,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                     "land_count": stats.get("land_count", 0),
                     "price_total": stats.get("price_total"),
                     "salt_total": stats.get("salt_total"),
+                    "salt_text": salt_text(stats),
                 },
                 "banner_html": legality_chip_html(deck, stats),
+                "updated_html": updated_when(deck.updated_at),
                 "checks_html": checks_panel_html(deck, stats),
                 "legality_html": legality_panel_html(deck, stats),
             }

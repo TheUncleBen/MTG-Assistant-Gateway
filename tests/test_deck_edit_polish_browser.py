@@ -446,3 +446,40 @@ def test_quick_add_puts_one_copy_in_place_with_undo(
         assert page.url == url and box.input_value() == "Zzyzx"
         assert errors == []
         browser.close()
+
+
+_BANNER_FACTS = "() => document.querySelector('.banner .rows').innerText.replace(/\\s+/g, ' ').trim()"
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), [(390, 844, "dark"), (1280, 800, "light")])
+def test_an_edit_in_place_leaves_the_banner_as_a_reload_draws_it(
+    server: Server, width: int, height: int, scheme: str
+) -> None:
+    """0.7.46 polish A2: after a quick add (and its Undo) the banner's card count, its date and
+    its Salt read as the page draws them on a reload, in the same number format."""
+    from playwright.sync_api import sync_playwright
+
+    server.app.state.gateway.scan.names.set_names(["Arcane Signet"])
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        before = page.evaluate(_BANNER_FACTS)
+        box = page.locator("#quick")
+        box.fill("Arcane Signet")
+        box.press("Enter")
+        page.locator(".deck-toast .msg", has_text="Added Arcane Signet").wait_for(timeout=8000)
+        added = page.evaluate(_BANNER_FACTS)
+        assert added != before, added
+        page.reload(wait_until="networkidle")
+        assert page.evaluate(_BANNER_FACTS) == added
+        # and Undo of a second add (the fake stamps each card write with a later date)
+        page.locator("#quick").fill("Arcane Signet")
+        page.locator("#quick").press("Enter")
+        page.locator(".deck-toast .msg", has_text="Added Arcane Signet").wait_for(timeout=8000)
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        undone = page.evaluate(_BANNER_FACTS)
+        page.reload(wait_until="networkidle")
+        assert page.evaluate(_BANNER_FACTS) == undone
+        assert errors == []
+        browser.close()

@@ -1275,9 +1275,17 @@
       var t = sp.textContent;
       if (/^Size:/.test(t) && st.card_count !== undefined) sp.textContent = "Size: " + st.card_count;
       else if (/distinct cards?$/.test(t) && st.distinct !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.distinct, "distinct card") : st.distinct + " distinct cards";
+      // the phone's short count ("100 cards", deckpage.banner_html)
+      else if (/^[\d,]+ cards?$/.test(t) && sp.classList.contains("sm") && st.card_count !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.card_count, "card") : st.card_count + " cards";
       else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) b.textContent = costText(st); }
-      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = String(st.salt_total); }
+      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = st.salt_text || Number(st.salt_total).toFixed(1); }
     });
+    // the deck's date, as Archidekt stamped this save (deckpage.updated_when)
+    var when = $(".banner .row > span > time.ui-when");
+    if (when && d.updated_html) {
+      when.outerHTML = d.updated_html;
+      if (window.MtgText && window.MtgText.refreshTimes) window.MtgText.refreshTimes();
+    }
     var tiles = $$(".stats .tiles .tile");
     if (tiles[0] && st.card_count !== undefined) $("b", tiles[0]).textContent = String(st.card_count);
     if (tiles[1] && st.land_count !== undefined) $("b", tiles[1]).textContent = String(st.land_count);
