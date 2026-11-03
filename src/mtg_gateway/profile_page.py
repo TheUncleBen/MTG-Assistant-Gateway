@@ -151,9 +151,17 @@ CSS = """
   .acc .ui-row.sw .ctl{grid-column:2;grid-row:1 / span 2;justify-self:end;align-self:start}}
 """
 COLLECTION_CSS = """
-.col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:0 0 .9rem;padding:.6rem .8rem;
-  border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface)}
-.col-vis .t{flex:1 1 14rem;min-width:0;font-size:.95rem}
+/* one slim row: the words, the button at its end (under them only where the row is too narrow
+   for both: final audit N11) */
+.col-vis{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin:0 0 .75rem;
+  padding:.3rem .8rem;border:1px solid var(--card-border);border-radius:var(--radius-panel);
+  background:var(--surface)}
+.col-vis .t{flex:1 1 auto;min-width:0;font-size:.95rem}
+.col-vis .t .muted{white-space:nowrap}
+/* a row too narrow for the sentence and the button together (a 412 px phone): "Private" with its
+   icon says it, and the button keeps the row */
+.col-vis{container-type:inline-size}
+@container (max-width:28em){ .col-vis .t .muted{display:none} }
 .col-vis .t b{display:inline-flex;align-items:center;gap:.3rem;vertical-align:-3px}
 .col-vis .t b svg.i{width:16px;height:16px}
 .col-vis form{margin:0}

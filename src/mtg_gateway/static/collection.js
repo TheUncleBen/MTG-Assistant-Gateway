@@ -51,9 +51,20 @@
     var pr = Fetch.problem(d, what);
     strip(pr.signedOut || pr.noConnection ? pr.text : name + " was not changed. " + pr.text, "error", pr.actions);
   }
+  /* a strip marked data-remember stays closed on this browser once closed (the price-sort note,
+     which otherwise came back on every visit until the daily price check: re-audit N10) */
+  var REMEMBER = "mtg.binder.closed.";
   document.addEventListener("click", function (e) {
     var x = e.target.closest ? e.target.closest("#col-notes [data-dismiss]") : null;
-    if (x) { var n = x.closest(".notice"); if (n) n.remove(); }
+    if (!x) return;
+    var n = x.closest(".notice");
+    if (!n) return;
+    var key = n.getAttribute("data-remember");
+    if (key) { try { localStorage.setItem(REMEMBER + key, "1"); } catch (err) { /* no storage */ } }
+    n.remove();
+  });
+  $$("#col-notes .notice[data-remember]").forEach(function (n) {
+    try { if (localStorage.getItem(REMEMBER + n.getAttribute("data-remember"))) n.remove(); } catch (err) { /* no storage */ }
   });
   var Fetch = window.MtgFetch;
   // never rejects: a lost connection or an ended session comes back as {ok: false} with the words
@@ -443,6 +454,7 @@
     listform.addEventListener("submit", function (e) {
       /* Enter in the name box: the same search at once, no page load */
       if (!qbox || document.activeElement !== qbox) return;
+      if (window.MtgSearchPanel) window.MtgSearchPanel.closeSheet();
       e.preventDefault();
       clearTimeout(searchTimer);
       search();
