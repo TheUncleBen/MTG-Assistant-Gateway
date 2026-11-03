@@ -33,8 +33,13 @@ SUB = "user-1"
 HOLD = 3.0
 # A loop that waited for the lock on the loop would stand still for the whole hold (the gateway did,
 # measured at 4.5 s for a 4 s hold); a loop that waits off the loop turns every 10 ms, 300 times in
-# the hold. A loaded runner (four workers, browsers) slows the ticks, never to a third of them.
-TICKS_IN_HOLD = 100
+# the hold. A loaded runner slows the ticks a little (271 of them at the least in 42 holds with seven
+# copies of these tests running side by side), never to two thirds of them.
+TICKS_IN_HOLD = 200
+# The longest the loop may go without turning inside the hold: a loop that waited for the lock would
+# stand still for all of it. Measured at 0.065 s at the most in the same 42 holds, so a stall of half
+# a second, let alone the two seconds TICKS_IN_HOLD alone once let pass, fails.
+GAP_IN_HOLD = 0.5
 
 # The holder, started before the measured window so starting an interpreter (20 to 50 ms, more on
 # a loaded runner) never counts as a gap in the loop: it takes the lock when told, says "held",
@@ -80,6 +85,11 @@ class _Holder:
 
 class _TickCounter(_Ticker):
     """The loop's turns, each stamped, so the turns inside the hold can be counted."""
+
+    def longest_in(self, start: float, end: float) -> float:
+        """The longest the loop went without turning between ``start`` and ``end``."""
+        stamps = [start, *(t for t in self.ticks if start < t < end), end]
+        return max(b - a for a, b in zip(stamps, stamps[1:], strict=False))
 
     def __init__(self) -> None:
         super().__init__()
@@ -136,6 +146,8 @@ async def test_the_deck_sync_waits_off_the_loop_for_a_lock_taken_while_it_reads(
     assert ended - holder.taken_at >= HOLD - 0.1, (started, holder.taken_at, ended)
     in_hold = [t for t in ticker.ticks if holder.taken_at <= t <= holder.taken_at + HOLD]
     assert len(in_hold) >= TICKS_IN_HOLD, f"the loop turned {len(in_hold)} times in the {HOLD:.0f} s hold"
+    gap = ticker.longest_in(holder.taken_at, holder.taken_at + HOLD)
+    assert gap < GAP_IN_HOLD, f"the loop stood still {gap:.2f} s in the hold"
     got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
     assert got["status"] == "needs_look", got
 
@@ -169,5 +181,7 @@ async def test_a_job_in_a_worker_thread_waits_without_holding_up_the_loops_reads
     assert read_at[-1] >= end - 0.2, (holder.taken_at, read_at[-1])
     in_hold = [t for t in ticker.ticks if holder.taken_at <= t <= end]
     assert len(in_hold) >= TICKS_IN_HOLD, f"the loop turned {len(in_hold)} times in the {HOLD:.0f} s hold"
+    gap = ticker.longest_in(holder.taken_at, end)
+    assert gap < GAP_IN_HOLD, f"the loop stood still {gap:.2f} s in the hold"
     reads = [t for t in read_at if holder.taken_at + 0.2 <= t <= end]  # the purge is waiting by then
     assert len(reads) > 30, f"the loop read {len(reads)} times while the purge waited"

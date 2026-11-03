@@ -20,6 +20,12 @@ from .test_suggest_browser import Server
 
 pytest.importorskip("playwright")
 
+# The longest the first frame of a slow page may take: latepage.LATE_AFTER (0.8 s) plus a margin for
+# a loaded runner (0.86 s measured alone, see the stress runs in the 0.7.46 final audit fixes).
+FIRST_FRAME = 2.0
+# The longest a Reload of a deck page kept on show may take (under 0.1 s measured).
+RELOAD = 1.0
+
 
 @pytest.fixture
 def server(tmp_path: Path):
@@ -80,7 +86,9 @@ def test_a_slow_page_draws_its_frame_then_the_page(server: Server, width: int) -
         t0 = time.monotonic()
         page.goto(f"{server.base}/notifications", wait_until="domcontentloaded")
         first = time.monotonic() - t0
-        assert first < 6.0, first  # the frame, long before Archidekt's 10 s answer
+        # the frame, sent once the page has taken latepage.LATE_AFTER (0.8 s; 0.86 s measured),
+        # long before Archidekt's 10 s answer; the margin is for a loaded runner, not a slow page
+        assert first < FIRST_FRAME, first
         assert page.locator("[data-late] .late-note").inner_text() == "Reading this page from Archidekt…"
         assert page.locator("header.topbar").count() == 1
         _until(page, "document.readyState !== 'loading' && !document.querySelector('[data-late]')", 30)
@@ -143,6 +151,9 @@ def test_an_older_deck_page_on_reload_shows_at_once_and_loads_the_change(server:
         _slow(server, 8.0)
         t0 = time.monotonic()
         page.reload(wait_until="domcontentloaded")
-        assert time.monotonic() - t0 < 4.0  # the copy on show, not the slow read
+        took = time.monotonic() - t0
+        assert took < RELOAD, took  # the copy on show (under 0.1 s measured), not the 8 s read
+        # and the copy itself, not the frame a page still reading sends after latepage.LATE_AFTER
+        assert page.locator("[data-late]").count() == 0
         _until(page, "document.title.indexOf('Renamed on the site') === 0", 30)
         browser.close()
