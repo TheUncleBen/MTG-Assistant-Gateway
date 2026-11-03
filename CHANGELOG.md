@@ -536,6 +536,8 @@ name per thing.
   card's Remove box open, and only your press of Remove removes it (see the upgrade notes).
 - The Authentik guide's removed-member clean-up (docs/IDP-AUTHENTIK.md, section 12) reads start to
   finish; to turn the clean-up off, put the word `off` back in its secret.
+- The launcher shortcut to the decks (press and hold the app icon) is named Decks, as in the
+  navigation.
 
 ### Fixed
 - Large text: the Binder and Assistant switches show their current page and fade the edge that

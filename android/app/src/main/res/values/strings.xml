@@ -50,7 +50,7 @@
     <string name="notify_channel_connection_text">Android shows this quiet notification while the app listens for your push notifications.</string>
     <string name="notify_permission_denied">Push notifications are off for this app. Turn them on in Android\'s settings.</string>
     <!-- Launcher shortcuts, as the web manifest has them (companion_shell.py). -->
-    <string name="shortcut_decks">My decks</string>
+    <string name="shortcut_decks">Decks</string>
     <string name="shortcut_scan">Scan</string>
     <string name="shortcut_scan_long">Open the scan page</string>
     <string name="shortcut_proposals">Proposals</string>
