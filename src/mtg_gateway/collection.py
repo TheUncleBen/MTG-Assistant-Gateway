@@ -543,6 +543,51 @@ class CollectionService:
             if not _own_write.get():
                 self._writes[sub] = self._writes.get(sub, 0) + 1
 
+    def _wrote(
+        self, sub: str, rid: Any, row: dict[str, Any] | None, fields: tuple[str, ...] = ("quantity",)
+    ) -> None:
+        """A record the gateway just wrote: ``row`` as it is now (row_out shape), or None when it
+        was removed. The Binder as last read whole (binder_prices) keeps it, and so do the Binder
+        pages the member last read (decks.short_reads, shown while Archidekt can't be asked): a
+        row of theirs takes the ``fields`` the write set, a removed row goes. A new record is not
+        put into them: where it would sit in a held page isn't known."""
+        if row is None:
+            self.binder.drop(sub, rid)
+        else:
+            self.binder.put(sub, row)
+        if not isinstance(rid, int):
+            return
+        changed = {k: row[k] for k in fields if k in row} if row is not None else None
+
+        def amend(held: Any) -> None:
+            if not isinstance(held, dict):
+                return
+            got = held.get("got") if isinstance(held.get("got"), dict) else {}
+            out = got.get("out") if isinstance(got.get("out"), dict) else {}
+            whole = held.get("whole") if isinstance(held.get("whole"), dict) else {}
+            hit = False
+            for where in (got, out, whole):
+                rows = where.get("rows")
+                if not isinstance(rows, list):
+                    continue
+                mine = [r for r in rows if isinstance(r, dict) and r.get("id") == rid]
+                for r in mine:
+                    hit = True
+                    if changed is None:
+                        rows.remove(r)
+                    else:
+                        r.update(changed)
+                        if r.get("price") is not None:  # the row's value, for its copies now
+                            self.binder.with_prices([r])
+                if mine and changed is None and where is got:
+                    for k in ("total", "shown"):
+                        if isinstance(got.get(k), int):
+                            got[k] = max(0, got[k] - len(mine))
+            if hit:
+                held["amended"] = True
+
+        self.decks.short_reads.amend_last(sub, "binder", amend)
+
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
         if link is None:
@@ -932,7 +977,7 @@ class CollectionService:
             row["scryfall_id"] = spec["scryfall_id"]
             row["image_small"] = image_url(spec["scryfall_id"], "small")
             row["image"] = image_url(spec["scryfall_id"], "normal")
-        self.binder.put(sub, row)
+        self._wrote(sub, row.get("id"), row)
         out["added"].append(row)
 
     async def read_back(self, sub: str, card: dict[str, Any]) -> dict[str, Any] | None:
@@ -1054,12 +1099,12 @@ class CollectionService:
             quantity = min(MAX_QUANTITY, int(rec.get("quantity") or 0) + delta)
         if quantity <= 0:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
-            self.binder.drop(sub, rid)
+            self._wrote(sub, rid, None)
             self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid})
             return {"row": None, "removed": await self.removed_out(sub, rec)}
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, quantity=quantity))
         row = row_out({**rec, **out, "card": rec.get("card")})
-        self.binder.put(sub, row)
+        self._wrote(sub, rid, row)
         return {"row": row}
 
     async def update(
@@ -1123,7 +1168,7 @@ class CollectionService:
         merged = {**rec, **out, "card": rec.get("card")}
         row = row_out(merged)
         collection_tags.name_rows([row], [merged], tags)
-        self.binder.put(sub, row)
+        self._wrote(sub, rid, row, ("finish", "condition", "lang", "purchase_price", "tags"))
         read = {  # what Archidekt answered, in the gateway's terms (it keeps numbers for two)
             "purchasePrice": _price(out.get("purchasePrice")),
             "condition": condition_code(out.get("condition")) or None,
@@ -1159,7 +1204,7 @@ class CollectionService:
         have = int(rec.get("quantity") or 0)
         if quantity is None or quantity >= have:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]), progress=progress)
-            self.binder.drop(sub, rid)
+            self._wrote(sub, rid, None)
             left = None
         else:
             out = await self._run(
@@ -1168,7 +1213,7 @@ class CollectionService:
                 progress=progress,
             )
             left = row_out({**rec, **out, "card": rec.get("card")})
-            self.binder.put(sub, left)
+            self._wrote(sub, rid, left)
         self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
         return {"removed": await self.removed_out(sub, rec), "row": left}
 
@@ -3297,7 +3342,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             notes_html = f"<div id='col-notes'>{notes}</div>" if notes else ""
             if (plan := busy_plan(exc)) is not None and (held := state.decks.short_reads.last(sub, last_key)):
                 got, whole = held[1]["got"], held[1]["whole"]
-                notes = held_html(exc, held[0], "your binder", same_url(request)) + notes
+                # the member's own writes since it was read (CollectionService._wrote)
+                amended = bool(held[1].get("amended"))
+                notes = held_html(exc, held[0], "your binder", same_url(request), amended=amended) + notes
             elif plan is not None:
                 # the Binder keeps its title and notes; the busy strip sits where the list goes
                 busy = page(

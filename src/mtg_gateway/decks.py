@@ -791,6 +791,14 @@ class ShortReads:
             self._last.pop(oldest, None)
         self._last[k] = (time.time(), copy.deepcopy(value))
 
+    def amend_last(self, sub: str, kind: str, change: Callable[[Any], None]) -> None:
+        """The gateway itself just wrote something the member's last reads under keys that start
+        with ``kind`` hold: ``change`` brings each of those copies up to what was written (in
+        place), so a held copy never shows the member's own saved change undone. Each keeps the
+        time it was read."""
+        for k in [k for k in self._last if k[0] == sub and k[1][:1] == (kind,)]:
+            change(self._last[k][1])
+
     def last(self, sub: str, key: tuple[Any, ...]) -> tuple[float, Any] | None:
         """The member's last good read under ``key`` as ``(wall time read, a copy)``, when it is
         younger than PAGE_DECK_LAST; else None."""

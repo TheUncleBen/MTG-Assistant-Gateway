@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 
 import httpx
 
@@ -79,3 +80,47 @@ def test_a_page_never_read_keeps_its_frame_with_the_busy_strip_and_try_again(ser
         assert strip.group(1).startswith("Too many requests right now, so this page can't be read yet."), path
         assert f"<a class='btn' href='{html.escape(path)}'>Try again</a>" in strip.group(1), path
         assert "used up its Archidekt allowance" in r.text, path
+
+
+def _binder_row(text: str, name: str) -> str:
+    """The Binder list's row (or tile) of ``name``, as the page drew it."""
+    at = text.index(f">{name}<")
+    start = max(text.rfind("<tr", 0, at), text.rfind("<li", 0, at))
+    end = min(i for i in (text.find("</tr>", at), text.find("</li>", at)) if i > 0)
+    return text[start:end]
+
+
+def test_the_binders_held_copy_shows_what_the_member_just_saved_through_the_gateway(server: Server) -> None:  # noqa: F811
+    """0.7.46 polish A1: a stepper press saved 2 copies (1 before), then Archidekt stopped answering. The
+    Binder's held copy (read before the press) shows the 2 the gateway wrote, and says so; a row
+    the member removed meanwhile is not shown as still there."""
+    sid, _ = _seed(server)
+    h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid}, timeout=30)
+    page = h.get("/collection?view=list")
+    assert page.status_code == 200
+    csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)
+    recs = {r["card"]["oracleCard"]["name"]: r for r in server.ark.collections["alice"].values()}
+    signet, ring = recs["Arcane Signet"], recs["Sol Ring"]
+    assert signet["quantity"] == 1
+    r = h.post(
+        f"/collection/api/rows/{signet['id']}",
+        headers={"X-CSRF-Token": csrf},
+        json={"delta": 1, "name": "Arcane Signet"},
+    )
+    assert r.status_code == 200 and r.json()["row"]["quantity"] == 2, r.text
+    r = h.delete(f"/collection/api/rows/{ring['id']}?name=Sol+Ring", headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 200, r.text
+    # the first page the removal's Undo read afterwards has aged out, and Archidekt is down
+    server.app.state.gateway.collection.first_page_ttl = 0
+    server.app.state.gateway.decks.client.pacer._open_until = time.monotonic() + 120
+    try:
+        held = h.get("/collection?view=list")
+    finally:
+        server.app.state.gateway.decks.client.pacer._open_until = 0
+    assert held.status_code == 200, held.text[:300]
+    strip = re.search(r"<p class='notice warn held' role='status'>(.*?)</p>", held.text, re.S)
+    assert strip and "as it was read" in strip.group(1), held.text[:300]
+    row = _binder_row(held.text, "Arcane Signet")
+    assert re.findall(r"<output aria-label='Copies'>(\d+)</output>", row) == ["2"], row
+    assert ">Sol Ring<" not in held.text
+    assert "Cards you changed here since show what you saved." in strip.group(1), strip.group(1)

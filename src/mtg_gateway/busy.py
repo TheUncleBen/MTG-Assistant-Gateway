@@ -196,19 +196,24 @@ def age_words(read_at: float, now: float | None = None) -> str:
     return f"{n} {unit}{'' if n == 1 else 's'}"
 
 
-def held_text(exc: BaseException, read_at: float, what: str, *, now: float | None = None) -> str:
+def held_text(
+    exc: BaseException, read_at: float, what: str, *, now: float | None = None, amended: bool = False
+) -> str:
     """What a page says over a copy shown as last read because Archidekt can't be asked
-    (decks.ShortReads.get_held); ``what`` names it: "your binder", "this list"."""
+    (decks.ShortReads.get_held); ``what`` names it: "your binder", "this list". ``amended``: rows
+    of it the member changed through the gateway since show what was saved (ShortReads.amend_last)."""
     plan = busy_plan(exc)
     why = plan.title if plan else "Archidekt can't be asked"
-    return f"{why.rstrip('.')}, so this is {what} as it was read {age_words(read_at, now)} ago."
+    text = f"{why.rstrip('.')}, so this is {what} as it was read {age_words(read_at, now)} ago."
+    return text + (" Cards you changed here since show what you saved." if amended else "")
 
 
-def held_html(exc: BaseException, read_at: float, what: str, url: str) -> str:
+def held_html(exc: BaseException, read_at: float, what: str, url: str, *, amended: bool = False) -> str:
     """The strip over a page shown as last read, with Try again (a fresh read of the page): the
     deck page's (deckpage.deck_held_html) for the Binder, Lists, profiles and search."""
+    text = held_text(exc, read_at, what, amended=amended)
     return (
-        f"<p class='notice warn held' role='status'>{html.escape(held_text(exc, read_at, what))} "
+        f"<p class='notice warn held' role='status'>{html.escape(text)} "
         f"<a class='btn' href='{html.escape(url)}'>Try again</a></p>"
     )
 
