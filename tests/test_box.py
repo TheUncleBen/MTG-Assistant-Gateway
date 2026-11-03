@@ -217,7 +217,8 @@ def test_the_app_chip_shows_the_full_name_beside_the_connected_app_icon() -> Non
     assert ui.app_name(None) == "Unnamed app" and ui.app_name(" Claude ") == "Claude"
     for none in (None, "", "  "):
         out = ui.app_chip(none)
-        assert "class='ui-app none' title='No app'" in out and "—" in out
+        # nothing shown (a bare dash read as a stray mark: polish C2); a screen reader hears why
+        assert out == "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
     # the neutral icon is the gateway's own stroke, not a company's mark
     assert "app" in theme.ICONS and "<path" in theme.ICONS["app"] and "fill='#" not in theme.ICONS["app"]
     assert ".ui-app svg.i{width:16px;height:16px" in theme.UI_CSS and ".ui-app i{" not in theme.UI_CSS

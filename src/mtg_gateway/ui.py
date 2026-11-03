@@ -135,12 +135,9 @@ NO_RISK = "Risk not judged"
 
 
 def no_risk_label() -> str:
-    """A closed proposal whose risk could not be judged: a muted dash, never High for want of
-    evidence; a screen reader hears why."""
-    return (
-        f"<span class='ui-none' title='{NO_RISK}'><span aria-hidden='true'>—</span>"
-        f"<span class='sr-only'>{NO_RISK}</span></span>"
-    )
+    """A closed proposal whose risk could not be judged: nothing shown (a bare dash read as a
+    stray mark: polish C2), never High for want of evidence; a screen reader hears why."""
+    return f"<span class='ui-none'><span class='sr-only'>{NO_RISK}</span></span>"
 
 
 def risk_label(risk: str, *, title: str = "", cls: str = "") -> str:
@@ -295,14 +292,11 @@ def app_chip(name: str | None, *, unnamed: bool = False, client_id: str | None =
     Anthropic's or OpenAI's, ``client_brand``: the official marks, unmodified, only to tell the
     connected app apart) or the one neutral "connected app" icon for any other app or a row
     without its client id; never initials. A row with no app recorded shows a
-    grey dash with the tooltip "No app", never a guessed app; where the row *is* an app that gave
-    no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
+    nothing (a screen reader hears "No app"), never a guessed app; where the row *is* an app that
+    gave no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
     name = (name or "").strip()
     if not name and not unnamed:
-        return (
-            f"<span class='ui-app none' title='{NO_APP}'><span aria-hidden='true'>—</span>"
-            f"<span class='sr-only'>{NO_APP}</span></span>"
-        )
+        return f"<span class='ui-app none'><span class='sr-only'>{NO_APP}</span></span>"
     cls = "ui-app" if name else "ui-app unnamed"
     logo = app_logo(client_brand(client_id))
     return f"<span class='{cls}'>{logo}<span class='nm'>{esc(app_name(name))}</span></span>"

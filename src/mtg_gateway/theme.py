@@ -871,6 +871,15 @@ details.raw{margin:.5rem 0 0}
    and the red, not faded, not outlined (a dashed outline read as disabled, re-audit N16); the lock
    is said beside them (.guard-hint, with the lock icon) until it opens. */
 .apply form.guarded button[data-guard]:disabled{opacity:1;cursor:wait}
+/* a locked button wears a small lock (final audit F09, polish A7): it goes the moment the guard
+   opens, so the member sees that the next tap counts; the unlocking tap looks pressed meanwhile */
+form.guarded button[data-guard] .lk{display:inline-flex;align-items:center;margin-right:.1rem}
+form.guarded button[data-guard] .lk svg.i{width:14px;height:14px;flex:none}
+form.guarded button[data-guard]:not(:disabled):not([aria-disabled=true]) .lk{display:none}
+form.guarded.unlocking button[data-guard]{transform:scale(.97);filter:brightness(.9)}
+/* the hint says what opens the lock on this kind of screen: a tap, or the mouse */
+@media (hover:hover) and (pointer:fine){ .guard-hint .on-touch{display:none} }
+@media not ((hover:hover) and (pointer:fine)){ .guard-hint .on-mouse{display:none} }
 form.guarded .choice .guard-hint{display:flex;align-items:center;gap:.35rem;flex-basis:100%;width:100%;
   margin:0 0 .2rem}
 form.guarded .choice .guard-hint[hidden]{display:none}
@@ -1637,8 +1646,8 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
   /* the group's Open deck keeps its capsule inside the row (audit D10) */
   .ui-table.ui-rows .tr.group .act{margin-right:0}
-  .ui-table.ui-rows .tr.group .act > .ui-cap{padding:0 .6rem;min-height:36px}
-  .ui-table.ui-rows .tr.group .act > .ui-cap{min-height:44px}
+  .ui-table.ui-rows .tr.group .act > .ui-cap{display:inline-flex;align-items:center;padding:0 .6rem;
+    min-height:44px;margin:0}
   /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
      grows above and below the words without moving the lines around it (F14) */
   .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;

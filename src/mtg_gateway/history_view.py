@@ -501,10 +501,7 @@ def _row_html(e: dict[str, Any], query: dict[str, Any], *, now: float) -> str:
     href = e.get("href") or "/history" + query_string(query, open=e["key"])
     word = "Open report" if e.get("href") else "Details"
     who = (
-        _chip(e)
-        if e["who"]
-        else f"<span class='ui-when' title='{_esc(NO_WHO)}'>—"
-        f"<span class='sr-only'>{_esc(NO_WHO)}</span></span>"
+        _chip(e) if e["who"] else f"<span class='ui-when'><span class='sr-only'>{_esc(NO_WHO)}</span></span>"
     )
     when = ui.when(e["ts"], now=now)
     cls = "tr" + (" open" if query.get("open") == e["key"] else "")
@@ -642,7 +639,7 @@ def details_panel(
                 )
                 if e.get("deck_id")
                 else ("Deck", _esc(e["deck_name"])),
-                ("By", _chip(e) if e["who"] else "—"),
+                ("By", _chip(e) if e["who"] else "<span class='muted'>Not recorded</span>"),
                 ("When", time_html(e["ts"])),
             ]
         )

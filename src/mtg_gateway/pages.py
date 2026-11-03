@@ -3012,8 +3012,12 @@ def _page_step(p: dict[str, Any]) -> str:
         why = str(result.get("detail") or "").strip()
         if _DEVELOPER_WORDS.search(why):
             # a proposal whose own content failed the checks (an empty or malformed change list):
-            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21)
-            why = "the proposal is empty or damaged. Ask your assistant for a new one"
+            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21);
+            # said once, with what is left (final audit N09)
+            return (
+                "This change could not be applied: the proposal is empty or damaged. "
+                "Nothing was changed on Archidekt. Ask your assistant for a new one."
+            )
         lead = (
             f"This change could not be applied: {why.rstrip('.')}. "
             if why

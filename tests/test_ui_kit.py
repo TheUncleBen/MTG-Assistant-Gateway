@@ -137,8 +137,10 @@ def test_app_chip_names_the_app_and_never_guesses() -> None:
     assert "&lt;script&gt;" in ui.app_chip("<script>")
     for none in (None, "", "  "):
         out = ui.app_chip(none)
-        assert "class='ui-app none' title='No app'" in out and "—" in out
-        assert "<span class='sr-only'>No app</span>" in out
+        # nothing shown (a bare dash read as a stray mark: polish C2); a screen reader hears why
+        assert out == "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
+    risk = ui.no_risk_label()
+    assert "—" not in risk and "<span class='sr-only'>Risk not judged</span>" in risk
 
 
 @pytest.mark.parametrize(
