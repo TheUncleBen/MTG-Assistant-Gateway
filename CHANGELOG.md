@@ -663,7 +663,7 @@ name per thing.
   passes, the gateway reads the deck back. If the whole change is there, the proposal is marked
   applied with its snapshot, the changes waiting on it are released and Undo works as after any
   apply; if only part is there, it says so and offers Propose the rest; if none is there, it says
-  nothing was changed.
+  nothing was changed. This holds for a change left applying by 0.7.45 when you update, too.
 - Copying a deck or changing your binder is refused at once when no Archidekt account is linked,
   instead of waiting as a proposal that could never be applied.
 - A link opened while signed out (a shared forum thread, a folder of decks, the Binder's list

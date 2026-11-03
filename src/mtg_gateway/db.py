@@ -293,8 +293,14 @@ def _note_locked(exc: BaseException) -> None:
 # (apply_progress, note_apply_progress) and whether any write had begun (``writes_started``; an
 # apply cut off before its first write changed nothing), the snapshot taken before it and, for
 # a new deck, the deck made. The deck an edit was for is not a change, so it is not kept as
-# ``deck_id`` (which says a new deck was made).
-_STARTED_SQL = "COALESCE(json_extract(result_json, '$.apply_progress.writes_started'), 0)"
+# ``deck_id`` (which says a new deck was made). Every apply notes that no write has begun when it
+# starts (claim_proposal), so a row with no note at all was left by a version that kept none
+# (0.7.45): whether a write had begun is not known, so it counts as begun ("may", and the deck is
+# read back), never as "nothing was changed".
+_STARTED_SQL = (
+    "CASE WHEN json_type(result_json, '$.apply_progress') IS NULL THEN 1 "
+    "ELSE COALESCE(json_extract(result_json, '$.apply_progress.writes_started'), 0) END"
+)
 INTERRUPTED_SQL = (
     "json_patch(COALESCE(json_extract(result_json, '$.apply_progress'), '{}'), json_object("
     "'error', 'interrupted', "
@@ -3690,9 +3696,12 @@ class Database:
         with self.tx() as c:
             now = int(time.time())
             # applied_at marks when the apply started; finish_proposal overwrites it when it ends.
+            # The apply's note starts as "no write begun" (INTERRUPTED_SQL tells it from a row an
+            # older version left, which has none); the apply notes each write (note_apply_progress).
             sql = (
-                "UPDATE proposals SET state = 'applying', applied_at = ? WHERE id = ? AND owner_sub = ? "
-                "AND state = 'pending' AND expires_at >= ?"
+                "UPDATE proposals SET state = 'applying', applied_at = ?, result_json = json_set("
+                "COALESCE(result_json, '{}'), '$.apply_progress', json('{\"writes_started\": false}')) "
+                "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND expires_at >= ?"
             )
             args: tuple[Any, ...] = (now, proposal_id, owner_sub, now)
             if expect_version is not None:

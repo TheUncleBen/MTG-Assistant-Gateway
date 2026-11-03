@@ -239,3 +239,37 @@ async def test_an_apply_cut_off_before_any_write_says_nothing_was_changed(stack:
         assert ark.patches == []
     finally:
         await _end(stack, task, release, gone)
+
+
+async def test_an_apply_left_by_an_older_version_says_it_may_be_on_the_deck(stack: Stack) -> None:
+    """A change left "applying" by 0.7.45, which kept no note of its writes: whether one had begun
+    is not known, so it must not say "Nothing was changed" (it said so). It says the change may be
+    on the deck, and the deck is read back, which then says what landed."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    pid = await _propose(h, token, ONE)
+    out, release = _hang(ark, method="PATCH", path="/decks/42/modifyCards")
+    task = await _start_apply(stack, token, pid, out)
+    gone = _crash(stack)
+    try:
+        with h.db.tx() as c:  # as 0.7.45 left it: no note of the apply's progress
+            c.execute(
+                "UPDATE proposals SET result_json = json_remove(result_json, '$.apply_progress') "
+                "WHERE id = ?",
+                (pid,),
+            )
+        assert h.db.fail_interrupted_applies() == 1
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["state"] == "failed", got
+        assert "Nothing was changed" not in got["next_step"], got["next_step"]
+        assert got.get("may_have_changed") is True, got
+        assert "may" in got["next_step"], got["next_step"]
+        page = await _review_page(stack, pid)
+        assert "Nothing was changed" not in page and "may be on the deck" in page, page
+        assert _qty(ark, "Forest") == 3  # Archidekt took it
+        assert await stack.gw.decks.read_back_interrupted() == 1
+        read = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert read["state"] == "applied" and read["result"]["read_back"] == "all", read
+    finally:
+        await _end(stack, task, release, gone)
