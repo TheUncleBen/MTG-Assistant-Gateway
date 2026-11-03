@@ -599,6 +599,9 @@ name per thing.
 - When Scryfall's list of card names can't be downloaded, names that are no card are answered
   in about half the time (six took 12 seconds): after two of them found nothing, the rest of the
   list skips the extra spelling guesses and still gets its suggestions.
+- A push notification the notification server could not take because it was down or restarting
+  is sent again a few times over the next minutes instead of being lost. A deck's message that a
+  newer count replaced meanwhile is not sent again.
 - In the Android app, a photo from the camera reaches the scan page whichever way the phone's
   WebView sends it, and the app hands it over directly if that still fails. If it never arrives,
   the camera panel says “The app couldn’t hand the photo to the page. Tap Shoot to try again.”

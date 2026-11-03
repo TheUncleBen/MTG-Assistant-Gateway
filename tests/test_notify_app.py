@@ -757,3 +757,82 @@ async def test_drain_returns_when_a_send_finished_in_the_same_turn() -> None:
     assert n._tasks and all(t.done() for t in n._tasks)
     await asyncio.wait_for(n.drain(), 2)
     assert not n._tasks
+
+
+async def _until(check, seconds: float = 5.0) -> None:  # noqa: ANN001
+    end = asyncio.get_running_loop().time() + seconds
+    while not check():
+        assert asyncio.get_running_loop().time() < end, "never happened"
+        await asyncio.sleep(0.01)
+
+
+async def test_a_push_ntfy_could_not_take_is_sent_again_a_bounded_number_of_times(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ntfy was down (restarting: 503, or no connection): a background message used to be lost.
+    It is now sent again after each of PUSH_RETRY_DELAYS, so it arrives once ntfy is back; a server
+    that stays down is given up after the last try, and a refusal (403) is not sent again."""
+    monkeypatch.setattr(notify, "PUSH_RETRY_DELAYS", (0.05, 0.05, 0.05))
+    b, _key = await _member(stack)
+    try:
+        n, ntfy = stack.gw.notifier, stack.ntfy
+        # down for the first two tries, then back: the message arrives once
+        ntfy.status = 503
+        n.soon("user-1", "reports", "Deck report finished", "A deck report is ready to read.", "/history")
+        await asyncio.sleep(0.08)  # the first try and the first retry found it down
+        assert ntfy.published == []
+        ntfy.status = 200
+        await _until(lambda: len(ntfy.published) == 1)
+        assert ntfy.published[0]["title"] == "Deck report finished"
+        await asyncio.sleep(0.3)
+        assert len(ntfy.published) == 1  # once, not again after it was taken
+        # down for good: four tries in all, then given up and logged
+        tries = {"n": 0}
+        real = ntfy.handler
+
+        async def down(req: httpx.Request) -> httpx.Response:
+            tries["n"] += 1
+            raise httpx.ConnectError("down", request=req)
+
+        n._http = httpx.AsyncClient(transport=httpx.MockTransport(down))
+        n.soon("user-1", "reports", "Deck report finished", "Another one.", "/history")
+        await _until(lambda: "given up after 4 tries" in caplog.text)
+        await asyncio.sleep(0.2)
+        assert tries["n"] == 1 + len(notify.PUSH_RETRY_DELAYS)
+        # a refusal is not sent again
+        n._http = httpx.AsyncClient(transport=httpx.MockTransport(real))
+        ntfy.status = 403
+        n.soon("user-1", "reports", "Deck report finished", "Refused.", "/history")
+        await asyncio.sleep(0.3)
+        ntfy.status = 200
+        await asyncio.sleep(0.2)
+        assert [m["message"] for m in ntfy.published] == ["A deck report is ready to read."]
+    finally:
+        await b.aclose()
+
+
+async def test_a_deck_message_sent_again_is_only_the_one_still_to_show(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deck's message waiting to be sent again is dropped when a newer count replaced it or
+    nothing waits there any more, so the phone never shows an old count after ntfy is back."""
+    monkeypatch.setattr(notify, "PUSH_RETRY_DELAYS", (0.2, 0.2, 0.2))
+    b, key = await _member(stack)
+    try:
+        n, ntfy = stack.gw.notifier, stack.ntfy
+        ntfy.status = 503
+        n.deck_waiting("user-1", "42", "Atraxa", 1, "/decks/42")
+        await asyncio.sleep(0.05)
+        ntfy.status = 200
+        n.deck_waiting("user-1", "42", "Atraxa", 2, "/decks/42")  # taken at once
+        await _until(lambda: len(ntfy.published) == 1)
+        await asyncio.sleep(0.5)  # the first message's retry time has come and gone
+        assert [m["title"] for m in ntfy.published] == ["2 changes to Atraxa are waiting for you"]
+        # a withdraw ntfy could not take is sent again too
+        ntfy.status = 503
+        n.deck_waiting("user-1", "42", "Atraxa", 0, "/decks/42")
+        await asyncio.sleep(0.05)
+        ntfy.status = 200
+        await _until(lambda: ntfy.deleted == [f"/{key}/deck-42"])
+    finally:
+        await b.aclose()

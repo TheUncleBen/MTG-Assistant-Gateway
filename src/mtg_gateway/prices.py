@@ -1126,7 +1126,7 @@ class PriceService:
             alerts = self._alerts_due(day)
         for sub, title, message, path in alerts:
             if self.notifier is not None:
-                await self.notifier.send(sub, "prices", title, message, path)
+                await self.notifier.send(sub, "prices", title, message, path, retry=True)
         # each member's Watchlist rows worked out now, in the background, so the first view after
         # today's prices is as quick as the rest
         for row in self._rows("SELECT DISTINCT sub FROM watch_cards"):

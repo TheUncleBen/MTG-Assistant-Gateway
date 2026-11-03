@@ -259,8 +259,9 @@ class AlertWatch:
                 f"{len(fresh)} new on Archidekt",
                 "Comments, replies or follows are waiting in your Archidekt alerts.",
                 "/notifications",
+                retry=True,
             )
             return
         for item in reversed(fresh):  # oldest first, so the newest is on top on the phone
             text = str(item.get("text") or "").strip() or "Something new is in your Archidekt alerts."
-            await self.notifier.send(sub, "alerts", TITLE, text, path_for(item))
+            await self.notifier.send(sub, "alerts", TITLE, text, path_for(item), retry=True)
