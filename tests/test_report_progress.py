@@ -216,3 +216,51 @@ async def test_a_research_failure_reads_in_words_with_run_again(stack: Stack) ->
         assert "Error executing tool" not in md and RESEARCH_FAILED in md
     finally:
         await b.aclose()
+
+
+async def test_a_website_press_joining_an_assistants_refused_run_keeps_its_report(stack: Stack) -> None:
+    """The member presses Run full test while an assistant's run of the same deck goes on: the press
+    joins that run and opens its report. The research service then refuses the assistant's run.
+    The assistant still gets the refusal, but the report the member's page opened is kept and
+    says why, rather than taken back from under the open page."""
+    gw = stack.h.app.state.gateway
+    b = await linked_browser(stack)
+    token = await linked_user(stack)
+    sub = _sub(gw)
+    real = gw.reports.mf.call
+    reached, release = asyncio.Event(), asyncio.Event()
+
+    async def refuse(name, arguments, **kw):  # noqa: ANN001, ANN003, ANN202
+        if name == "goldfish_run":
+            reached.set()
+            await release.wait()
+            raise DeckError("rate_limited", "Research calls for your account are still running.")
+        return await real(name, arguments, **kw)
+
+    gw.reports.mf.call = refuse
+    try:
+        task = asyncio.create_task(call(stack.h, token, "run_deck_report", {"deck_ref": "42", "games": 20}))
+        await asyncio.wait_for(reached.wait(), 5)
+        csrf = await b.csrf("/account/details")
+        pressed = await asyncio.wait_for(b.http.post("/decks/42/report", data={"csrf": csrf}), 5)
+        assert pressed.status_code == 303, pressed.text
+        where = pressed.headers["location"]
+        assert where.startswith("/history/reports/rep_") and "reused=1" in where, where
+        release.set()
+        out = await asyncio.wait_for(task, 10)
+        await gw.reports.settle()
+        # the assistant's own answer is the refusal, as before
+        assert out.get("isError") or structured(out).get("ok") is False, out
+        assert "still running" in json.dumps(out), out
+        # the member's report is still there, and says why
+        rid = where.split("/history/reports/", 1)[1].split("?", 1)[0]
+        r = gw.reports.get(sub, rid)
+        assert r["research"] == "failed" and r["status"] == "failed", r
+        assert r["goldfish"]["note"] == "Research calls for your account are still running.", r
+        page = await b.http.get(where, headers=NAV)
+        assert page.status_code == 200 and "still running" in page.text, page.status_code
+        assert [x["report_id"] for x in gw.reports.list(sub, "42")] == [rid]
+    finally:
+        gw.reports.mf.call = real
+        release.set()
+        await b.aclose()

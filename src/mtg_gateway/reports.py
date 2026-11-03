@@ -192,6 +192,8 @@ class _Flight:
         self.report_id: str | None = None
         # the run holding the lock: its report's id once stored (None when it ended without one)
         self.stored: asyncio.Future[str | None] | None = None
+        # a website press opened that run's report (it joined): a refusal keeps the report
+        self.joined = False
 
 
 class PairHold:
@@ -342,7 +344,10 @@ class ReportService:
                 and pair_with is None
             ):
                 # The website's press while this deck runs: that run's report, once it is stored,
-                # instead of a wait for the whole run.
+                # instead of a wait for the whole run. The member's page then shows that report,
+                # so it is kept even if the run is refused (an assistant's run otherwise keeps
+                # nothing then).
+                flight.joined = True
                 rid = await asyncio.shield(going)
                 if rid is not None:
                     out = self.get(sub, rid)
@@ -383,6 +388,7 @@ class ReportService:
                         pair_hold=pair_hold,
                         on_stored=mark,
                         background=on_stored is not None,
+                        joined=lambda: flight.joined,
                     )
                 finally:
                     if not stored.done():
@@ -612,10 +618,13 @@ class ReportService:
         background: bool = False,
         paired_with: Deck | None = None,
         ab_with: tuple[str, str, tuple[str, str]] | None = None,
+        joined: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """``on_stored``: called with the report's id once it is stored. ``background``: nobody
         waits for this run's answer (the website's, ``start``), so a refusal by the research
-        service is kept on the report rather than raised. ``paired_with``: a proposal's deck as it
+        service is kept on the report rather than raised. ``joined``: whether a website press has
+        opened this run's report (``run``): a refusal is then kept on the report too, and still
+        raised to the one who waits for the answer. ``paired_with``: a proposal's deck as it
         is now, played against this one game for game (``_paired``)."""
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
@@ -769,14 +778,16 @@ class ReportService:
                         paired_with=paired_with,
                     )
             except BaseException as exc:
-                if not background:
+                kept = background or (joined is not None and joined() and isinstance(exc, Exception))
+                if not kept:
                     # An assistant's run (or a cancelled one) answers with the refusal and keeps
                     # nothing, as before the report was stored first.
                     self._drop(sub, rid)
                     raise
                 if not isinstance(exc, Exception):
                     raise  # the gateway stopping: the next start says the report was cut off
-                # The website's run: its page is open already, so the report stays and says why.
+                # The website's run, or one a website press joined: its page is open already, so
+                # the report stays and says why.
                 if not isinstance(exc, DeckError):
                     logger.exception("The research part of report %s failed", rid)
                 note = str(exc) if isinstance(exc, DeckError) else RESEARCH_FAILED
@@ -791,6 +802,8 @@ class ReportService:
                 failed = {"tool": tool, "ok": False, "error": True, "note": note}
                 self._research_done(sub, rid, failed if sim else None, None if sim else failed, None)
                 self._created(sub, rid, deck, source)
+                if not background:
+                    raise  # the assistant waiting for it gets the refusal, as before
                 return self.get(sub, rid)
         # the Forge solo test is marked as coming from the start, so the report is not finished
         # (nor its member notified) until it has played too
