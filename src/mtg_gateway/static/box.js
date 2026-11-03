@@ -58,8 +58,9 @@
   // (static/cardmenu.js, or the deck page's own card menu in static/deck.js); that popstate is not
   // a Back press on the box
   function menuBackPending() {
-    var M = window.MtgMenu, D = window.MtgDeckCardMenu;
-    return !!((M && M.backPending && M.backPending()) || (D && D.backPending && D.backPending()));
+    var M = window.MtgMenu, D = window.MtgDeckCardMenu, Dd = window.MtgDropdowns;
+    return !!((M && M.backPending && M.backPending()) || (D && D.backPending && D.backPending()) ||
+      (Dd && ((Dd.backPending && Dd.backPending()) || (Dd.backLanding && Dd.backLanding()))));
   }
   function push() {
     try { history.pushState({ mtgbox: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
@@ -311,7 +312,14 @@
     var node = document.getElementById(opener.getAttribute("data-box-open"));
     if (!node) return;  // not on this page: the link goes to the old address
     e.preventDefault();
-    openElement(node, { returnFocus: opener });
+    // an opener in a drop-down menu (a selection bar's ⋯): the menu closes first, giving back its
+    // history entry (static/feedback.js) before the box takes one of its own
+    var menu = opener.closest("details.dd[open]");
+    if (menu) {
+      if (window.MtgDropdowns && window.MtgDropdowns.close) window.MtgDropdowns.close(menu);
+      else menu.removeAttribute("open");
+    }
+    openElement(node, { returnFocus: menu ? menu.querySelector("summary") || opener : opener });
   });
   // an old address: the page comes with the box drawn open
   function openAddressed() {

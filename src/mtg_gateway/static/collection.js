@@ -572,8 +572,8 @@
     boxes().forEach(function (b) { var li = b.closest("li"); if (li) li.classList.toggle("sel", b.checked); });
     if (bar) {
       bar.hidden = !selecting();
-      var c = $(".count", bar);
-      if (c) c.textContent = n + " selected";
+      var c = $(".count", bar), num = c ? $(".n", c) : null;
+      if (num) num.textContent = n; else if (c) c.textContent = n + " selected";
       var on = shown(), all = $(".col-all", bar);
       if (all) all.textContent = n > 0 && on.length > 0 && on.every(function (b) { return b.checked; }) ? "Select none" : "Select all";
     }
@@ -610,6 +610,8 @@
     var opener = e.target.closest("a[data-box-open]");
     if (opener && ticked().length === 0) {
       e.preventDefault();
+      var dd = opener.closest("details.dd[open]");
+      if (dd) dd.removeAttribute("open");
       var Menu = window.MtgMenu;
       if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true }); else say("Tick a card first.");
     }

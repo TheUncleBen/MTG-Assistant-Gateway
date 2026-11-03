@@ -2221,16 +2221,21 @@ def bulk_html(csrf: str, back: str, tags: list[str], tag_colors: dict[str, str] 
         f"<form method='post' action='/collection' id='{BULK_FORM}' class='col-bulkform'>{csrf_in}"
         "<input type='hidden' name='action' value='bulk'></form>"
     )
-    actions = [
-        "<button type='button' class='btn col-all'>Select all</button>",
-        ui.box_opener("Condition…", "/collection", "col-bulk-cond"),
-        ui.box_opener("Finish…", "/collection", "col-bulk-finish"),
-        ui.box_opener("Tags…", "/collection", "col-bulk-tags"),
-        f"<button type='submit' class='btn btn-outline-danger' form='{BULK_FORM}' name='do' value='remove'>"
-        f"{icon('trash')}Remove</button>",
-        "<button type='button' class='btn col-clear'>Cancel</button>",
+    # one slim row (final audit F01): × Cancel, the count, Select all, ⋯ (Condition…, Finish…,
+    # Tags…), Remove
+    actions = ["<button type='button' class='btn col-all'>Select all</button>"]
+    more = [
+        ui.menu_opener("Condition…", "/collection", "col-bulk-cond", icon_name="check"),
+        ui.menu_opener("Finish…", "/collection", "col-bulk-finish", icon_name="sun"),
+        ui.menu_opener("Tags…", "/collection", "col-bulk-tags", icon_name="tag"),
     ]
-    bar = ui.selection_bar("0 selected", actions, label="Selected cards", hidden=True)
+    end = [
+        f"<button type='submit' class='btn btn-outline-danger' form='{BULK_FORM}' name='do' value='remove'"
+        f" aria-label='Remove' title='Remove'>{icon('trash')}<span class='lbl'>Remove</span></button>"
+    ]
+    bar = ui.selection_bar(
+        "0 selected", actions, label="Selected cards", hidden=True, cancel_cls="col-clear", more=more, end=end
+    )
     cond = ui.box(
         "col-bulk-cond",
         "Set the condition",

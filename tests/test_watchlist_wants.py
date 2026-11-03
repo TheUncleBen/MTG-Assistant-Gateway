@@ -294,7 +294,7 @@ async def test_the_bulk_bar_sets_alerts_moves_and_removes_many(stack: Stack, mon
             tick = f"name='watch_id' value='{wid}' aria-label='Select {name}' form='w-bulk'>"
             assert f"<input type='checkbox' {tick}" in page, name
         assert "<form method='post' id='w-bulk' class='w-bulkform'>" in page
-        assert "<div class='ui-bar' role='group' aria-label='Selected cards' hidden>" in page
+        assert "<div class='ui-bar slim' role='group' aria-label='Selected cards' hidden>" in page
         assert "name='do' value='alerts'" in page and "name='do' value='move'" in page
         stop = page.split("id='w-stop'")[1].split("</div></div>")[0]
         assert "name='do' value='remove'" in stop and "danger" in stop and "Keep them" in stop

@@ -27,6 +27,14 @@ def _shot(page, name: str) -> None:  # noqa: ANN001
         page.screenshot(path=str(Path(SHOTS) / f"{name}.png"), full_page=True)
 
 
+def _more(bar, box_id: str):  # noqa: ANN001
+    """The bar's ⋯ menu opened, and its item that opens the box ``box_id``."""
+    details = bar.locator("details.bar-more")
+    if not details.evaluate("d => d.open"):
+        details.locator("summary").click()
+    return details.locator(f".menu a[data-box-open='{box_id}']")
+
+
 @pytest.mark.parametrize("width,theme,view", [(390, "dark", "grid"), (1280, "light", "list")])
 def test_select_ticks_the_decks_and_the_bar_moves_them(
     server: Server,  # noqa: F811
@@ -59,8 +67,9 @@ def test_select_ticks_the_decks_and_the_bar_moves_them(
         assert select.get_attribute("aria-pressed") == "true"
         assert page.evaluate(MEASURE) == [], (view, width)
         _shot(page, f"decks-select-{view}-{width}-{theme}-mode")
-        bar.locator("a[data-box-open='decks-bulk-move']").click()
+        _more(bar, "decks-bulk-move").click()
         page.locator(".toast", has_text="Tick a deck first.").wait_for(timeout=3000)
+        assert not bar.locator("details.bar-more").evaluate("d => d.open")
         assert page.locator("#decks-bulk-move").get_attribute("hidden") is not None
         bar.locator(".decks-all").click()
         assert bar.locator(".count").inner_text() == "4 selected"
@@ -70,7 +79,7 @@ def test_select_ticks_the_decks_and_the_bar_moves_them(
         ticks.first.click()
         assert bar.locator(".count").inner_text() == "3 selected"
         # Move to folder…: the box names the count; Move sends the ticked decks, one write each
-        bar.locator("a[data-box-open='decks-bulk-move']").click()
+        _more(bar, "decks-bulk-move").click()
         page.wait_for_function("() => !document.getElementById('decks-bulk-move').hidden")
         box = page.locator("#decks-bulk-move")
         assert box.locator("[data-bulk-count]").inner_text() == "The 3 selected decks"
@@ -96,5 +105,51 @@ def test_select_ticks_the_decks_and_the_bar_moves_them(
         assert page.locator(".ui-bar[aria-label='Selected decks']").is_hidden()
         assert page.locator("#decks-list .chk input:checked").count() == 0
         assert not page.locator("#decks-list .deck .chk input[name=deck_id]").first.is_visible()
+        assert errors == [], errors
+        browser.close()
+
+
+def test_the_bar_is_one_slim_row_on_a_phone(server: Server) -> None:  # noqa: F811
+    """Final audit F01: the bar was two rows. Now one: × Cancel, the count, Select all and a ⋯
+    menu with Move to folder… and Visibility…, every control 44 px."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 412, "light", exe)
+        page.goto(f"{server.base}/decks?q=a", wait_until="networkidle")
+        page.wait_for_selector("section.fv-area", timeout=10_000)
+        page.locator(".decks-select").click()
+        bar = page.locator(".ui-bar[aria-label='Selected decks']")
+        bar.wait_for(state="visible", timeout=3000)
+        page.locator("#decks-list .deck .chk input[name=deck_id]").first.click()
+        assert bar.locator(".count").inner_text() == "1 selected"
+        box = bar.bounding_box()
+        assert box is not None and box["height"] <= 60, box
+        parts = bar.locator(":scope > *")
+        rects = [parts.nth(i).bounding_box() for i in range(parts.count())]
+        assert len(rects) == 4 and all(r is not None for r in rects), rects
+        assert max(r["y"] + r["height"] for r in rects) - min(r["y"] for r in rects) <= 48, rects
+        x, count, select_all, more = rects
+        assert x["x"] < count["x"] < select_all["x"] < more["x"], rects
+        assert x["width"] >= 44 and x["height"] >= 44 and more["width"] >= 44 and select_all["height"] >= 44
+        assert bar.locator("button.decks-clear").get_attribute("aria-label") == "Cancel"
+        assert page.evaluate(MEASURE) == []
+        _shot(page, "decks-select-slim-412")
+        bar.locator("details.bar-more > summary").click()
+        menu = bar.locator("details.bar-more .menu")
+        menu.wait_for(state="visible", timeout=3000)
+        assert menu.locator("a").all_inner_texts() == ["Move to folder…", "Visibility…"]
+        mbox = menu.bounding_box()
+        assert mbox["y"] + mbox["height"] <= more["y"] + 1, (mbox, more)  # above the bar
+        assert page.evaluate(MEASURE) == []
+        menu.locator("a[data-box-open='decks-bulk-vis']").click()
+        page.wait_for_function("() => !document.getElementById('decks-bulk-vis').hidden")
+        assert not bar.locator("details.bar-more").evaluate("d => d.open")
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => document.getElementById('decks-bulk-vis').hidden")
+        bar.locator("button.decks-clear").click()
+        assert bar.is_hidden()
         assert errors == [], errors
         browser.close()

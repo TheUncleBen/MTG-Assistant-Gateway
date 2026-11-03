@@ -1137,20 +1137,23 @@ def watchlist_page_html(
         showing = list_word("" if query.list == "-" else query.list)
         status += f"<p class='w-status'>Showing {esc(showing)} · {back}</p>"
     # the bulk bar and the form behind it (the rows' tick boxes and the boxes' fields belong to it)
+    # one slim row (final audit F01): × Cancel, the count, ⋯ (Price alert…, Move to list…), Stop
+    # watching
     bar = ui.selection_bar(
         "0 selected",
-        [
-            f"<a class='btn btn-plain' href='{esc(query.href(box='alerts'))}' {ui.box_open_attr('w-alerts')}>"
-            f"{icon('tag')}Price alert…</a>",
-            f"<a class='btn btn-plain' href='{esc(query.href(box='move'))}' {ui.box_open_attr('w-move')}>"
-            f"{icon('folder')}Move to list…</a>",
-            f"<a class='btn btn-outline-danger' href='{esc(query.href(box='stop'))}' "
-            f"{ui.box_open_attr('w-stop')}>"
-            f"{icon('x')}Stop watching</a>",
-            "<button type='button' class='btn-plain w-clear'>Cancel</button>",
-        ],
+        [],
         label="Selected cards",
         hidden=True,
+        cancel_cls="w-clear",
+        more=[
+            ui.menu_opener("Price alert…", query.href(box="alerts"), "w-alerts", icon_name="tag"),
+            ui.menu_opener("Move to list…", query.href(box="move"), "w-move", icon_name="folder"),
+        ],
+        end=[
+            f"<a class='btn btn-outline-danger' href='{esc(query.href(box='stop'))}' "
+            f"{ui.box_open_attr('w-stop')} aria-label='Stop watching' title='Stop watching'>"
+            f"{icon('x')}<span class='lbl'>Stop watching</span></a>"
+        ],
     )
     bulk_form = (
         f"<form method='post' id='{BULK_FORM}' class='w-bulkform'>{csrf_in}"

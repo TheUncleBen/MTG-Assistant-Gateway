@@ -1689,6 +1689,23 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-bar[hidden]{display:none}
 .ui-bar .count{font-weight:700;margin-right:auto}
 .ui-bar button,.ui-bar .btn{margin:0}
+/* the slim bar (final audit F01): × Cancel at the left, the count, Select all, a ⋯ menu with the
+   rest, then the one red action: one row on a phone. Its menu opens upward, above the bar. */
+.ui-bar.slim{gap:.3rem;padding:.35rem .5rem;container-type:inline-size}
+.ui-bar.slim .count{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.95rem}
+.ui-bar.slim > .btn,.ui-bar.slim > button{flex:0 0 auto;display:inline-flex;align-items:center;gap:.35rem;
+  padding:.35rem .6rem}
+.ui-bar.slim > .icon-only,.ui-bar.slim summary.icon-only{width:var(--ctl);min-width:var(--ctl);padding:0;
+  justify-content:center;gap:0}
+.ui-bar.slim details.dd .menu{top:auto;bottom:calc(100% + .25rem);right:0;min-width:12rem}
+.ui-bar.slim details.dd .menu a,.ui-bar.slim details.dd .menu button{min-height:44px}
+.ui-bar.slim > .btn{min-width:var(--ctl)}
+/* a narrow bar (a phone, or large text) keeps the red action's icon and drops its word; the
+   narrowest (a 360 px phone) keeps the count's number and leaves its word to screen readers
+   (zero-size text stays in the line and in the accessibility tree). The sizes are the bar's
+   content box. */
+@container (max-width:29em){ .ui-bar.slim > .btn .lbl{display:none} }
+@container (max-width:23.5em){ .ui-bar.slim .count .lbl{font-size:0} }
 /* it stays above the phone's bottom tab bar (--tab-room: its real height, static/topbar.js; 4rem
    without scripts covers it at 200% text) */
 .has-tabbar .ui-bar{bottom:calc(var(--tab-room,0px) + .75rem)}

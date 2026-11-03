@@ -160,14 +160,26 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         assert bar.is_visible() and bar.locator(".count").inner_text() == "3 selected"
         assert select.get_attribute("aria-pressed") == "true"
         assert page.locator(".w-t .tr.sel").count() == 3
-        for action in ("Price alert…", "Move to list…", "Stop watching"):
-            assert bar.locator("a", has_text=action).bounding_box()["height"] >= 44, action
-        assert "btn-outline-danger" in (
-            bar.locator("a", has_text="Stop watching").get_attribute("class") or ""
-        )
+        # one slim row (final audit F01): × Cancel, the count, ⋯ (Price alert…, Move to list…),
+        # Stop watching (its word folds away on a narrow bar; the icon and the name stay)
+        assert bar.bounding_box()["height"] <= 60
+        cancel = bar.locator("button.w-clear")
+        assert cancel.get_attribute("aria-label") == "Cancel" and cancel.bounding_box()["width"] >= 44
+        stop = bar.locator("a[data-box-open='w-stop']")
+        assert stop.get_attribute("aria-label") == "Stop watching"
+        assert stop.bounding_box()["height"] >= 44 and stop.bounding_box()["width"] >= 44
+        assert "btn-outline-danger" in (stop.get_attribute("class") or "")
+        bar.locator("details.bar-more > summary").click()
+        menu = bar.locator("details.bar-more .menu")
+        menu.wait_for(state="visible", timeout=3000)
+        assert menu.locator("a").all_inner_texts() == ["Price alert…", "Move to list…"]
+        for action in ("Price alert…", "Move to list…"):
+            assert menu.locator("a", has_text=action).bounding_box()["height"] >= 44, action
+        page.keyboard.press("Escape")
+        bar.locator("details.bar-more").evaluate("d => { d.open = false; }")
         # Stop watching goes at once (no box asks): the notice names the cards and offers Undo,
         # which brings them back as they were (0.7.46 audit QG-09)
-        bar.locator("a", has_text="Stop watching").click()
+        stop.click()
         page.wait_for_url("**/watchlist?ok=removed&*", timeout=8000)
         notice = page.locator(".notice.ok")
         assert "are no longer watched." in notice.inner_text()

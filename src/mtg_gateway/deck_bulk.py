@@ -76,13 +76,16 @@ def bulk_html(csrf: str, folders: dict[str, Any] | None, here: str) -> str:
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='next' value='{esc(here)}'></form>"
     )
-    actions = [
-        "<button type='button' class='btn decks-all'>Select all</button>",
-        ui.box_opener("Move to folder…", "/decks?bulk=move", "decks-bulk-move"),
-        ui.box_opener("Visibility…", "/decks?bulk=vis", "decks-bulk-vis"),
-        "<button type='button' class='btn decks-clear'>Cancel</button>",
+    # one slim row (final audit F01): × Cancel, the count, Select all, ⋯ (Move to folder…,
+    # Visibility…)
+    actions = ["<button type='button' class='btn decks-all'>Select all</button>"]
+    more = [
+        ui.menu_opener("Move to folder…", "/decks?bulk=move", "decks-bulk-move", icon_name="folder"),
+        ui.menu_opener("Visibility…", "/decks?bulk=vis", "decks-bulk-vis", icon_name="eye"),
     ]
-    bar = ui.selection_bar("0 selected", actions, label="Selected decks", hidden=True)
+    bar = ui.selection_bar(
+        "0 selected", actions, label="Selected decks", hidden=True, cancel_cls="decks-clear", more=more
+    )
     move = ui.box(
         "decks-bulk-move",
         "Move to a folder",

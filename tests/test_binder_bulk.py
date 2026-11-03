@@ -32,7 +32,7 @@ async def test_the_page_has_tick_boxes_the_bar_and_its_boxes(stack: Stack) -> No
                 )
                 assert tick in page, (view, name)
             assert "<form method='post' action='/collection' id='col-bulk' class='col-bulkform'>" in page
-            assert "<div class='ui-bar' role='group' aria-label='Selected cards' hidden>" in page
+            assert "<div class='ui-bar slim' role='group' aria-label='Selected cards' hidden>" in page
             assert "<button type='button' class='btn col-select' aria-pressed='false' hidden>" in page
             for box in ("col-bulk-cond", "col-bulk-finish", "col-bulk-tags"):
                 assert f"id='{box}'" in page, box

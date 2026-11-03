@@ -746,14 +746,53 @@ def load_more(
     )
 
 
-def selection_bar(count_text: str, actions: Sequence[str], *, label: str, hidden: bool = False) -> str:
+def selection_bar(
+    count_text: str,
+    actions: Sequence[str],
+    *,
+    label: str,
+    hidden: bool = False,
+    cancel_cls: str = "",
+    more: Sequence[str] = (),
+    end: Sequence[str] = (),
+) -> str:
     """The sticky action bar while a list has a selection: the count ("2 checked on 1 deck"), then
-    the actions (plain, then the red-outline one, then the one orange main button)."""
+    the actions (plain, then the red-outline one, then the one orange main button).
+
+    The slim form (final audit F01: one row on a phone): ``cancel_cls`` draws a × Cancel button
+    with that class at the left, ``more`` (menu items, see ``menu_opener``) goes into a ⋯ menu
+    after the actions, and ``end`` follows the menu (the one red action)."""
     h = " hidden" if hidden else ""
-    return (
-        f"<div class='ui-bar' role='group' aria-label='{esc(label)}'{h}>"
-        f"<span class='count' aria-live='polite'>{esc(count_text)}</span>{''.join(actions)}</div>"
+    slim = " slim" if (cancel_cls or more or end) else ""
+    count = esc(count_text)
+    if slim and count_text.endswith(" selected"):
+        # "12 selected": the word folds away on a narrow bar (the scripts update .n)
+        count = f"<span class='n'>{esc(count_text[:-9])}</span><span class='lbl'> selected</span>"
+    cancel = (
+        f"<button type='button' class='btn icon-only bar-x {esc(cancel_cls)}' aria-label='Cancel' "
+        f"title='Cancel'>{icon('x')}</button>"
+        if cancel_cls
+        else ""
     )
+    menu = (
+        "<details class='dd bar-more'><summary class='btn icon-only' aria-label='More actions' "
+        f"title='More actions' aria-haspopup='menu'>{icon('more')}</summary>"
+        f"<div class='menu'>{''.join(more)}</div></details>"
+        if more
+        else ""
+    )
+    return (
+        f"<div class='ui-bar{slim}' role='group' aria-label='{esc(label)}'{h}>{cancel}"
+        f"<span class='count' aria-live='polite'>{count}</span>{''.join(actions)}{menu}"
+        f"{''.join(end)}</div>"
+    )
+
+
+def menu_opener(text: str, href: str, box_id: str, *, icon_name: str = "") -> str:
+    """A menu item (for a ``details.dd`` menu) that opens the box ``box_id``, as ``box_opener``: a
+    real link to ``href`` without scripts."""
+    ic = f"{icon(icon_name)} " if icon_name else ""
+    return f"<a href='{esc(href)}' {box_open_attr(box_id)}>{ic}{esc(text)}</a>"
 
 
 def side_panel(
