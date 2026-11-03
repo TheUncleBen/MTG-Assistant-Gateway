@@ -80,7 +80,9 @@
   // Packages only) applies in place as it changes, never asking the gateway again. A package the
   // deck listing left out is drawn from this read at the top level. When the read fails, Show
   // stays usable for Decks and packages and one muted line says packages couldn't be told apart.
-  var pkgs = null, pkgFailed = false, pkgAsked = false, PKG_PAGES = 4;
+  // Archidekt busy or unreachable (429 or 503 with Retry-After): the read is sent once more after
+  // that wait, when the wait is short, before the line says so
+  var pkgs = null, pkgFailed = false, pkgAsked = false, pkgRetried = false, PKG_PAGES = 4, PKG_WAIT_MAX = 120;
   var NOT_TOLD = "Packages couldn't be told apart from decks just now; every deck is shown.";
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -115,13 +117,20 @@
     var found = {}, page = 1;
     function one() {
       return fetch("/decks/api/packages?whose=mine&page=" + page, { credentials: "same-origin", headers: { Accept: "application/json" } })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d || !d.ok) throw new Error("packages");
-          (d.packages || []).forEach(function (p) { found[String(p.id)] = p; });
-          if (d.more && page < PKG_PAGES) { page += 1; return one(); }
-          return null;
+        .then(function (r) {
+          var wait = parseInt(r.headers.get("Retry-After") || "", 10);
+          if ((r.status === 429 || r.status === 503) && !pkgRetried && wait > 0 && wait <= PKG_WAIT_MAX) {
+            pkgRetried = true;
+            return new Promise(function (go) { setTimeout(go, wait * 1000); }).then(one);
+          }
+          return r.json().then(answered);
         });
+    }
+    function answered(d) {
+      if (!d || !d.ok) throw new Error("packages");
+      (d.packages || []).forEach(function (p) { found[String(p.id)] = p; });
+      if (d.more && page < PKG_PAGES) { page += 1; return one(); }
+      return null;
     }
     one().then(function () { pkgs = found; window.MtgPackages = found; mark(); },
       function () { pkgFailed = true; mark(); });

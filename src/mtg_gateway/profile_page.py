@@ -26,6 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import alerts_push, notify, prefs, profile, ui
+from .busy import busy_json_response
 from .decks import DeckError, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -872,7 +873,10 @@ def add_profile_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 raise DeckError("invalid", "That is not something this page can do.")
         except DeckError as exc:
             if wants_json(request):
-                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+                # a switch: Archidekt busy or unreachable is 429 or 503 with Retry-After
+                return busy_json_response(exc) or JSONResponse(
+                    {"ok": False, "message": str(exc)}, status_code=400
+                )
             if back == "/collection":
                 _LAST_ERROR[sub] = str(exc)
                 return RedirectResponse("/collection#visibility", status_code=303)

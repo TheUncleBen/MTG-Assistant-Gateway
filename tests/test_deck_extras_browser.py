@@ -664,6 +664,52 @@ def test_my_decks_draws_a_package_the_deck_list_left_out_and_says_when_it_cannot
     assert errors == []
 
 
+def test_my_decks_reads_its_packages_once_more_after_archidekt_was_busy(server: Server) -> None:
+    """0.7.46 polish A4: the packages read answered 429 with Retry-After (Archidekt busy) is sent
+    once more after that wait; a second busy answer gives the muted line, never a third read."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    busy = json.dumps({"ok": False, "error": "rate_limited", "message": "Too many requests right now."})
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366, "light", exe)
+        sent: list[str] = []
+
+        def once_busy(route) -> None:
+            sent.append(route.request.url)
+            if len(sent) == 1:
+                route.fulfill(
+                    status=429, headers={"Retry-After": "1"}, content_type="application/json", body=busy
+                )
+            else:
+                route.continue_()
+
+        page.route("**/decks/api/packages**", once_busy)
+        page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
+        page.locator("li.deck.pkg[data-deck-id='50']").wait_for(state="visible", timeout=8000)
+        assert len(sent) == 2
+        assert page.locator("#pk-note").is_hidden()
+        page.unroute("**/decks/api/packages**")
+        sent.clear()
+
+        def always_busy(route) -> None:
+            sent.append(route.request.url)
+            route.fulfill(
+                status=503, headers={"Retry-After": "1"}, content_type="application/json", body=busy
+            )
+
+        page.route("**/decks/api/packages**", always_busy)
+        page.goto(f"{server.base}/decks?show=packages", wait_until="networkidle")
+        page.locator("#pk-note").wait_for(state="visible", timeout=8000)
+        page.wait_for_timeout(1500)
+        assert len(sent) == 2
+        browser.close()
+    assert errors == []
+
+
 @pytest.mark.parametrize("width,theme", [(390, "light"), (1366, "dark")])
 def test_the_new_deck_and_new_package_boxes_pick_a_folder(server: Server, width: int, theme: str) -> None:
     from playwright.sync_api import sync_playwright

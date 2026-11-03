@@ -32,7 +32,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import account_hub, account_lists, custom_pictures, modes, proposals_view, ui
 from .archidekt import no_retry
 from .archidekt_account import CUSTOM_CARD_FIELDS
-from .busy import busy_response, held_html, same_url
+from .busy import busy_json_response, busy_response, held_html, same_url
 from .companion import DECK_CSP
 from .deckpage import image_url
 from .decks import DeckError, current_client, own_snapshot, reloading
@@ -2054,7 +2054,10 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
             got = await read_tab(sub, tab, page_no=page_no, q=search, fresh=opens_box)
         except DeckError as exc:
             if wants_json(request):
-                return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+                # Load more: Archidekt busy or unreachable is 429 or 503 with Retry-After
+                return busy_json_response(exc) or JSONResponse(
+                    {"ok": False, "message": str(exc)}, status_code=400
+                )
             return problem(request, exc, sub, sid, tab)
         held = ""
         if got.get("held_at") is not None:  # the list as last read, dated, with Try again

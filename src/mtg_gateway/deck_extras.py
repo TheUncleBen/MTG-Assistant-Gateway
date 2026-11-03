@@ -26,7 +26,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import account_lists, actions, packages, registration, ui
 from .archidekt import FORMAT_NAMES, Deck, DeckCard, format_label
-from .busy import busy_response
+from .busy import busy_json_response, busy_response
 from .deckpage import deck_title, folder_options_html
 from .decks import DeckError, current_client, split_label
 from .pages import BROWSER_CLIENT_ID, browser_session, login_redirect_here, read_limited
@@ -1337,7 +1337,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             got = await account_lists.read(decks, sub, "templates")
         except DeckError as exc:
-            return JSONResponse(
+            # Archidekt busy or unreachable: 429 or 503 with Retry-After, as the pages answer
+            return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         return JSONResponse({"ok": True, "templates": got["items"]}, headers={"Cache-Control": "no-store"})
@@ -1354,7 +1355,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             got = await account_lists.read(decks, sub, "color_tags")
         except DeckError as exc:
-            return JSONResponse(
+            # Archidekt busy or unreachable: 429 or 503 with Retry-After, as the pages answer
+            return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         tags = [{"name": t["name"], "color": t["color"]} for t in got["items"] if t["name"]]
@@ -1391,7 +1393,8 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 page=page,
             )
         except DeckError as exc:
-            return JSONResponse(
+            # Archidekt busy or unreachable: 429 or 503 with Retry-After, as the pages answer
+            return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "message": str(exc)}, 400, headers={"Cache-Control": "no-store"}
             )
         rows = [

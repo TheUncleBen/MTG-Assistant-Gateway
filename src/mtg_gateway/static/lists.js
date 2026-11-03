@@ -456,7 +456,7 @@
     if (!table) return Promise.resolve();
     if (a) { a.setAttribute("aria-busy", "true"); a.setAttribute("aria-disabled", "true"); }
     return Menu.getJSON(href).then(function (d) {
-      if (!d.ok) throw new Error(d.message || "");
+      if (!d.ok) { var no = new Error(d.message || ""); no.answered = true; throw no; }
       if (replace) $$(".tr:not(.th)", table).forEach(function (tr) { tr.remove(); });
       var tmp = el("div");
       tmp.innerHTML = d.html;
@@ -479,9 +479,10 @@
       var count = $(".list-head .ui-sub");
       if (count && d.total != null) count.textContent = d.total.toLocaleString();
       if (!replace && first) { var k = $(".kebab", first); if (k) k.focus({ preventScroll: true }); }
-    }).catch(function () {
+    }).catch(function (err) {
       if (a) { a.removeAttribute("aria-busy"); a.removeAttribute("aria-disabled"); }
-      toast("No connection; the rows could not be read. Try again.", { error: true });
+      // the gateway's own words when it answered (Archidekt busy or unreachable, a refusal)
+      toast((err && err.answered && err.message) || "No connection; the rows could not be read. Try again.", { error: true });
     });
   }
   document.addEventListener("click", function (e) {
