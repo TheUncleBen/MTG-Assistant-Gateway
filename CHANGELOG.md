@@ -596,6 +596,9 @@ name per thing.
   mark more reliably. A stray letter read from the title bar's edge no longer breaks the name.
 - A failed scan says whether the card's edges or its name were the problem; a HEIC photo says the
   browser can't open it and suggests JPEG or the camera.
+- When Scryfall's list of card names can't be downloaded, names that are no card are answered
+  in about half the time (six took 12 seconds): after two of them found nothing, the rest of the
+  list skips the extra spelling guesses and still gets its suggestions.
 - In the Android app, a photo from the camera reaches the scan page whichever way the phone's
   WebView sends it, and the app hands it over directly if that still fails. If it never arrives,
   the camera panel says “The app couldn’t hand the photo to the page. Tap Shoot to try again.”
