@@ -28,6 +28,7 @@ import html
 import re
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .db import DatabaseBusy, ReadThrough, read_through
+from .dbwait import _busy as busy_answer
+from .dbwait import until_write_free
 from .timing import (
     PageTime,
     archidekt_failures,
@@ -192,18 +196,33 @@ class LatePageMiddleware:
             return {"type": "http.request", "body": b"", "more_body": False}
 
         started = time.perf_counter()
+        # its own copy of the request's context, so its Archidekt time is its own to count
+        context = contextvars.copy_context()
+        # Let through during a database lock (dbwait._read_through): the page gets a ReadThrough
+        # of its own, so a write of it never waits on the event loop, not even after the frame
+        # was sent and the request's own one has ended (see _late_run).
+        parent = context.run(read_through.get)
+        own = ReadThrough(parent.db, parent.deadline) if parent is not None and parent.active else None
+        if own is not None:
+            context.run(read_through.set, own)
+        framed = False
 
         async def run() -> list[Message] | None:
-            await self.app(scope, quiet_receive, capture)
-            return messages
+            if own is None:
+                await self.app(scope, quiet_receive, capture)
+                return messages
+            return await self._late_run(scope, quiet_receive, capture, messages, own, lambda: framed)
 
-        # its own copy of the request's context, so its Archidekt time is its own to count
-        task = asyncio.get_running_loop().create_task(run(), context=contextvars.copy_context())
+        task = asyncio.get_running_loop().create_task(run(), context=context)
         done, _pending = await asyncio.wait({task}, timeout=self.after)
         if done:
+            if own is not None and parent is not None:  # the request's own outcome, for dbwait
+                parent.busy = parent.busy or own.busy
+                parent.committed = parent.committed or own.committed
             for message in task.result() or []:
                 await send(message)
             return
+        framed = True
         key = secrets.token_urlsafe(16)
         late = _Late(owner, live, url, task)
         self.store.by_key[key] = late
@@ -234,6 +253,43 @@ class LatePageMiddleware:
         task.add_done_callback(finished)
         response = self.frame(scope, page, key)
         await response(scope, receive, send)
+
+    async def _late_run(
+        self,
+        scope: Scope,
+        receive: Receive,
+        capture: Send,
+        messages: list[Message],
+        own: ReadThrough,
+        framed: Callable[[], bool],
+    ) -> list[Message]:
+        """Run a page let through during a database lock with its own ReadThrough ``own``: a
+        write of it that finds the lock held fails at once (db.DatabaseBusy) rather than waiting
+        on the event loop. Ended so before its frame was sent, the request's ReadThrough takes the
+        outcome and dbwait runs the request again. Ended so after, the page does what dbwait does:
+        it waits for the lock off the loop and runs again once it is free (nothing of it was
+        written, and nothing outside the gateway was changed: dbwait.before_side_effect), or, when
+        part of it was written or the lock outlasts the request's limit, it is the busy answer."""
+        try:
+            await self.app(scope, receive, capture)
+        except Exception as exc:
+            if not (own.busy or isinstance(exc, DatabaseBusy)):
+                raise
+            own.busy = True
+        finally:
+            own.active = False
+        if not own.busy or not framed():
+            return messages
+        messages.clear()
+        if not own.committed and await until_write_free(own.db, max(0.0, own.deadline - time.monotonic())):
+            token = read_through.set(None)
+            try:
+                await self.app(scope, receive, capture)
+            finally:
+                read_through.reset(token)
+            return messages
+        await (await busy_answer(scope, receive))(scope, receive, capture)
+        return messages
 
     def frame(self, scope: Scope, page: tuple[str, str], key: str) -> Response:
         """The site's frame with a skeleton, while the page is read."""
