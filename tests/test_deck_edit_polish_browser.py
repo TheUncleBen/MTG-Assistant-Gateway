@@ -517,3 +517,39 @@ def test_an_edit_in_place_leaves_the_banner_as_a_reload_draws_it(
         assert page.evaluate(_BANNER_FACTS) == undone
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), [(390, 844, "dark"), (1280, 800, "light")])
+def test_quick_add_with_no_name_says_so_at_the_field_and_keeps_focus_there(
+    server: Server, width: int, height: int, scheme: str
+) -> None:
+    """0.7.46 polish A5: Add (or Enter) with the box empty sends nothing; the box takes the focus
+    and says "Type a card name." as a required field does, until something is typed."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        sent = []
+        page.on("request", lambda r: sent.append(r.url) if r.method == "POST" else None)
+        box = page.locator("#quick")
+        for press in ("button", "enter", "spaces"):
+            if press == "button":
+                page.locator("form.quick button[type=submit]").click()
+            elif press == "enter":
+                box.focus()
+                box.press("Enter")
+            else:
+                box.fill("   ")
+                page.locator("form.quick button[type=submit]").click()
+            focused = page.evaluate("() => document.activeElement && document.activeElement.id")
+            assert focused == "quick", press
+            assert box.evaluate("e => e.validationMessage") == "Type a card name.", press
+            assert box.get_attribute("aria-invalid") == "true", press
+            box.fill("")
+        box.type("C")
+        assert box.evaluate("e => e.validationMessage") == ""
+        assert box.get_attribute("aria-invalid") is None
+        assert sent == [] and server.ark.updates == []
+        assert errors == []
+        browser.close()

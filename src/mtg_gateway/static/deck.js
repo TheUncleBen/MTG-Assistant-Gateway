@@ -842,13 +842,29 @@
   // -- Quick add: one copy of the typed card, saved at once and drawn in place (owner decision
   // C4); its Undo takes the copy back out. An unknown name is refused in the red note; the page
   // never leaves. Without scripts the form opens the editor with the name filled in.
+  // With no name, the box keeps the focus and says so, as a required field does (the browser's
+  // own note at the field), until something is typed; the form itself is never held back by it.
   var quickForm = own ? $("form.quick") : null;
-  if (quickForm && $("#quick")) quickForm.addEventListener("submit", function (e) {
-    e.preventDefault();
-    var input = $("#quick"), name = (input.value || "").trim();
-    if (!name) { input.focus(); return; }
-    quickAdd(name, input);
-  });
+  var NEED_NAME = "Type a card name.";
+  function needName(input, need) {
+    input.setCustomValidity(need ? NEED_NAME : "");
+    if (need) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+  }
+  if (quickForm && $("#quick")) {
+    quickForm.noValidate = true;
+    $("#quick").addEventListener("input", function (e) { if (e.target.value.trim()) needName(e.target, false); });
+    quickForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var input = $("#quick"), name = (input.value || "").trim();
+      needName(input, !name);
+      if (!name) {
+        input.focus();
+        if (input.reportValidity) input.reportValidity();
+        return;
+      }
+      quickAdd(name, input);
+    });
+  }
   function quickAdd(name, input) {
     var face = frontFace(name);
     background({
