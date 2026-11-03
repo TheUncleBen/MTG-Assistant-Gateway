@@ -30,7 +30,16 @@ from .archidekt import (
 )
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, SETTINGS_OK_MESSAGES
-from .deckpage import SORTS, VIEWS, card_image, cards_html, deck_check_html, deck_title, delete_box_html
+from .deckpage import (
+    SORTS,
+    UNNAMED_DECK,
+    VIEWS,
+    card_image,
+    cards_html,
+    deck_check_html,
+    deck_title,
+    delete_box_html,
+)
 from .decks import (
     CATEGORY_FLAGS,
     CATEGORY_HAS_CARDS,
@@ -1769,8 +1778,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             was = posted_main_values(data)
             if details.get("edh_bracket", deck.edh_bracket) is None:
                 was["edh_bracket"] = ""  # cleared with the format, whatever the page sent
+            # the deck's name as the page's own labels say it (the back chip, the line under the
+            # heading): static/decksettings.js draws it there
+            named = (str(was["name"]).strip() if "name" in was else deck.name) or UNNAMED_DECK
             return JSONResponse(
-                {"ok": True, "message": SETTINGS_OK_MESSAGES["saved"], "was": was}, headers=NO_STORE
+                {"ok": True, "message": SETTINGS_OK_MESSAGES["saved"], "was": was, "title": named},
+                headers=NO_STORE,
             )
         done = await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
         # saved: back to the settings page with its note, not off to the deck (0.7.46 audit D-27)
