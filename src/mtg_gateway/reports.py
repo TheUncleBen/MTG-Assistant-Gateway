@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import dataclasses
 import functools
 import json
@@ -2147,6 +2148,17 @@ class ReportService:
             return await forge.has_copy(url) is False
 
         return gone
+
+    async def aclose(self) -> None:
+        """At shutdown, before the database closes: stop the Forge refresher and the starts being
+        handed to Forge, which read and write the database. A run cut off so is carried on at the
+        next start (resume_forge_runs; a start left "starting" waits its turn again)."""
+        tasks = [t for t in (self._forge_task, *self._launching.values()) if t is not None and not t.done()]
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
     def _ensure_forge_refresher(self) -> None:
         """Keep one background task refreshing unfinished Forge runs until none is left. Also
