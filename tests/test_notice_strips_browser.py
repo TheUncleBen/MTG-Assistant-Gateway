@@ -13,7 +13,7 @@ import time
 import pytest
 
 from .test_cardsearch_browser import _chromium, _page
-from .test_overflow_sweep_browser import _seed, server  # noqa: F401
+from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import ROOT_200, TEXT_200
 
@@ -232,6 +232,10 @@ def test_every_notice_keeps_its_x_its_words_and_its_buttons_in_the_strip(
             look("/collection?view=list&sort=edition&dir=desc", "held", name="held binder")
             look("/collection?view=list&sort=edition&dir=desc", "you added", name="added line")
             look("/decks/42", "held")
+            # the held deck page as a whole: a deck that is not the member's own (a held copy is
+            # read-only) had its view controls in the toolbar's first column, where at 1280 px and
+            # 200% text Group by, Sort by and the filter ran over each other
+            assert page.evaluate(MEASURE) == [], ("/decks/42", width, zoom)
             look("/lists/templates", "held")
             look("/users/alice", "held")
             look("/search?q=Sample", "held")
