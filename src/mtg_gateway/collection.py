@@ -2236,7 +2236,7 @@ def value_widget(
     if n and not priced and not value.get("day"):
         parts.append("Prices come with the daily price check.")
     return ui.widget(
-        "Value", "stats", big, big_html="" if priced else UNPRICED_HTML, detail=" · ".join(parts)
+        "Value", "stats", big, big_html="" if priced else UNPRICED_HTML, detail_html=ui.facts(parts)
     )
 
 

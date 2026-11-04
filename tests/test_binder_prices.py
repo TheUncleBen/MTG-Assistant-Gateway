@@ -755,3 +755,17 @@ def test_the_binder_value_says_it_is_in_us_dollars() -> None:
         now=now,
     )
     assert "dollars" not in none
+
+
+def test_the_value_tiles_facts_are_one_span_each() -> None:
+    """The Value tile's facts are a balanced facts line, one span a fact, so a narrow tile never
+    leaves a dot at the end of a line (re-check S5, as every other tile)."""
+    from mtg_gateway.collection import value_widget
+
+    out = value_widget(
+        {"usd": 0.0, "priced": 0, "unpriced": 3, "entries": 3, "complete": False, "day": None},
+        reading=False,
+        now=0.0,
+    )
+    assert "<span class='tx ui-dots balanced'><span>" in out, out
+    assert " · " not in out, out
