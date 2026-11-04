@@ -229,7 +229,9 @@ def filters_sheet(
         if size
         else ""
     )
-    cls = " folded" if folded else ""
+    # no groups (the Binder with no tags to filter by): a bottom sheet the height of its content,
+    # not a full screen for one card-size control (polish re-check Q5)
+    cls = (" folded" if folded else "") + ("" if inner_html else " lite")
     data = f" data-pref='{esc(pref)}'" if pref else ""
     noscript = (
         "<noscript><style>.spanel .sp-filters,.spanel .sp-filters.folded{display:contents;position:static;"

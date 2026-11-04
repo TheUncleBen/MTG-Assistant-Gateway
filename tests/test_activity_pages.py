@@ -225,6 +225,13 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
         assert _table(week).count("<div class='tr ev") == 4
         none = (await b.http.get("/admin/activity?app=none&sub=user-2", headers=NAVIGATE)).text
         assert _table(none).count("<div class='tr ev") == 1 and "title='setting_changed'" in none
+        # the filter's new value, and the old one in kept links, find the same rows (Q4)
+        other = (await b.http.get("/admin/activity?app=other&sub=user-2", headers=NAVIGATE)).text
+        assert _table(other).count("<div class='tr ev") == 1 and "title='setting_changed'" in other
+        assert "no app" not in page  # the bucket is "Other" on the tiles
+        for q in ("other", "Oth", "no app"):
+            found = (await b.http.get(f"/admin/activity?q={q}&sub=user-2", headers=NAVIGATE)).text
+            assert "title='setting_changed'" in _table(found), q
         claude = (await b.http.get("/admin/activity?app=app%3AClaude", headers=NAVIGATE)).text
         assert _table(claude).count("<div class='tr ev") == 4
         for q, event in (
@@ -239,11 +246,12 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
         nothing = (await b.http.get("/admin/activity?q=zzzz-nothing", headers=NAVIGATE)).text
         assert "<div class='tr ev" not in nothing and "Nothing matches these filters." in nothing
         opts = page.split("aria-label='App'>", 1)[1].split("</select>", 1)[0]
-        assert [t for _v, t in re.findall(r"<option value='([^']*)'[^>]*>([^<]*)</option>", opts)] == [
-            "Any app",
-            "Claude",
-            "Website",
-            "No app",
+        # the rows with no client id are "Other" (polish re-check Q4; "No app" here was the bug)
+        assert re.findall(r"<option value='([^']*)'[^>]*>([^<]*)</option>", opts) == [
+            ("", "Any app"),
+            ("app:Claude", "Claude"),
+            ("website", "Website"),
+            ("other", "Other"),
         ]
         # a setting change opens its setting from the row's details
         assert "href='/admin/settings#s-row-snapshots_per_deck'>Open this setting</a>" in page
@@ -407,3 +415,19 @@ def test_labels_follow_the_activity_definitions() -> None:
         assert "Failed" in lbl(e, {}), e
     assert lbl("admin_disable", {}) == "" and lbl("setting_changed", {}) == ""
     assert "Applied" in lbl("proposal_applied", {})
+
+
+def test_the_problem_widget_at_zero_shows_no_red_chips_and_no_button() -> None:
+    """Polish re-check Q3: with nothing refused or failed the tile said "Refused 0" and "Failed 0"
+    in red and offered "Show them" to an empty list. At 0 it says so in plain words and offers
+    nothing; with a problem the chips and the button are back."""
+    quiet = activity_view._problem_widget([], "/activity?kind=problems&time=7d")
+    assert "Refused or failed" in quiet and ">0<small>in 7 days</small>" in quiet
+    assert "Nothing refused or failed" in quiet
+    assert "ui-lbl" not in quiet and "Show them" not in quiet and "alert'" not in quiet.split(">", 1)[0]
+    busy = activity_view._problem_widget(
+        [{"event": "proposal_failed", "detail": {}}, {"event": "approval_refused", "detail": {}}],
+        "/activity?kind=problems&time=7d",
+    )
+    assert "Refused 1</span>" in busy and "Failed 1</span>" in busy and "Show them" in busy
+    assert busy.startswith("<div class='wdg alert'>")

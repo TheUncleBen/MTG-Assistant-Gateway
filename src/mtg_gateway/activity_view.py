@@ -46,6 +46,9 @@ REFUSED_EVENTS = (
     "not_in_group_refused",
     "cimd_rejected",
 )
+# The bucket of events with no client id on the pages' tiles and in the App filter ("Other";
+# it was "no app" / "No app" before, which the filter's text still finds: polish re-check Q4).
+OTHER_APP = "Other"
 FAILED_EVENTS = (
     "proposal_failed",
     "archidekt_link_failed",
@@ -424,7 +427,7 @@ class Log:
             # only a member's copy of an admin's action carries the administrator client; the admin
             # page lists the admin's own row instead (from the website), so it has no such option
             opts.append(("admin", self.admin_label))
-        return opts + [("none", "No app")]
+        return opts + [("other", OTHER_APP)]
 
     def _app_sql(self, app: str) -> tuple[str, list[Any]]:
         if app == "website":
@@ -433,7 +436,7 @@ class Log:
             # the admin page's Admin app: the administrator client (only member copies carry it,
             # so it lists nothing there) and the admin's own rows are the website's
             return "client_id = ?", [ADMIN_CLIENT]
-        if app == "none":
+        if app in ("none", "other"):  # "none": the value before 0.7.46's "Other" (kept links)
             return "client_id IS NULL", []
         if app.startswith("app:"):
             ids = [
@@ -817,19 +820,25 @@ def admin_detail_html(row: Mapping[str, Any], names: Names) -> str:
 
 
 def _counts(rows: Iterable[Any], log: Log) -> dict[str, int]:
-    """Events per app ("Claude 3", "no app 4"), in the order the widget lists them."""
+    """Events per app ("Claude 3", "Other 4": rows with no client id, polish re-check Q4), in the
+    order the widget lists them."""
     out: dict[str, int] = {}
     for r in rows:
-        name = log.app_name(r["client_id"]) or "no app"
+        name = log.app_name(r["client_id"]) or OTHER_APP
         out[name] = out.get(name, 0) + 1
-    order = sorted((n for n in out if n not in ("Website", log.admin_label, "no app")), key=str.casefold)
-    order += [n for n in ("Website", log.admin_label, "no app") if n in out]
+    order = sorted((n for n in out if n not in ("Website", log.admin_label, OTHER_APP)), key=str.casefold)
+    order += [n for n in ("Website", log.admin_label, OTHER_APP) if n in out]
     return {n: out[n] for n in order}
 
 
 def _problem_widget(rows: list[Any], href: str) -> str:
     refused = sum(1 for r in rows if is_refused(r["event"], _detail(r)))
     failed = sum(1 for r in rows if r["event"] in FAILED_EVENTS)
+    if not refused + failed:
+        # nothing to show: no red chips at 0 and no button to an empty list (polish re-check Q3)
+        return ui.widget(
+            "Refused or failed", "alert", 0, unit="in 7 days", detail="Nothing refused or failed"
+        )
     labels = refused_label(f"Refused {refused}") + ui.label_for("failed", word=f"Failed {failed}")
     return ui.widget(
         "Refused or failed",
@@ -838,7 +847,7 @@ def _problem_widget(rows: list[Any], href: str) -> str:
         unit="in 7 days",
         detail_html=labels,
         actions=[ui.button_link("Show them", href)],
-        tone="alert" if refused + failed else "",
+        tone="alert",
     )
 
 
@@ -945,7 +954,7 @@ def _search(
         if clients:
             parts.append(f"client_id IN ({_marks(clients)})")
             args += clients
-        if low == "no app" or (len(low) >= 2 and "no app".startswith(low)):
+        if any(low == w or (len(low) >= 2 and w.startswith(low)) for w in ("no app", OTHER_APP.casefold())):
             parts.append("client_id IS NULL")
         if admin_page:
             with log.db._lock:

@@ -1208,3 +1208,38 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             assert errors == [], errors
         finally:
             browser.close()
+
+
+def test_stats_card_treats_a_missing_or_unreadable_total_as_unknown() -> None:
+    """Audit A4: ``price_total`` 0 with no ``priced_cards`` (an older payload) and a missing or
+    non-numeric total with cards priced read "$0.00 …"; both are a price nobody knows. A real total
+    without a priced count, or a true 0 with cards priced, is still shown."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    base = {k: v for k, v in STATS["stats"].items() if k not in ("price_total", "priced_cards")}
+    cases = [
+        ({"price_total": 0}, "Price unknown"),
+        ({"price_total": 0.0, "priced_cards": 0}, "Price unknown"),
+        ({"price_total": None, "priced_cards": 48}, "Price unknown"),
+        ({"price_total": "n/a", "priced_cards": 48}, "Price unknown"),
+        ({"price_total": 412.5}, "Price $412.50"),
+        ({"price_total": 0, "priced_cards": 48}, "Price $0.00 (48 of 64 priced)"),
+    ]
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            _route(page)
+            for extra, said in cases:
+                card = _open(page, "stats-card", {"structuredContent": {**STATS, "stats": {**base, **extra}}})
+                card.locator("#curve .col").first.wait_for(timeout=10_000)
+                price = card.locator("#facts li", has_text="Price")
+                assert " ".join(price.inner_text().split()) == said, (extra, price.inner_text())
+                plain = price.locator("b").evaluate("e => getComputedStyle(e).fontWeight") == "400"
+                assert plain == (said == "Price unknown"), (extra, said)
+            assert errors == [], errors
+        finally:
+            browser.close()
