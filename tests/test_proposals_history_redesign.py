@@ -504,7 +504,8 @@ def test_applied_rows_close_with_the_date_and_undo() -> None:
 
 async def test_a_waiting_proposal_with_no_client_counts_as_other(stack: Stack) -> None:
     """Audit 43b8 (low): the Waiting widget's by-app line called proposals with no client at all
-    "No app" where Activity says "Other". The bucket is "Other" here too ("1 from other")."""
+    "No app" where Activity says "Other". The bucket is "Other" here too, and inside the sentence
+    it reads "1 from another app", not "1 from other" (audit a629 C6)."""
     b = await linked_browser(stack)
     try:
         gw = stack.h.app.state.gateway
@@ -527,7 +528,8 @@ async def test_a_waiting_proposal_with_no_client_counts_as_other(stack: Stack) -
             )
         body = (await b.http.get("/proposals", headers=NAV)).text.split("<main")[1]
         widgets = body.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
-        assert "1 from an unnamed assistant, 1 from other" in widgets, widgets
+        assert "1 from an unnamed assistant, 1 from another app" in widgets, widgets
+        assert "from other" not in widgets and "from Other" not in widgets
         assert "No app" not in widgets and "no app" not in widgets  # the row's own mark may say it
     finally:
         await b.aclose()
