@@ -894,7 +894,7 @@ def _overview_body(state: Any, now: float | None = None) -> str:
             "user",
             int(d["users"]),
             unit="signed in",
-            detail=f"{d['disabled']} disabled · {d['linked']} linked to Archidekt",
+            detail_html=ui.facts([f"{d['disabled']} disabled", f"{d['linked']} linked to Archidekt"]),
             actions=[ui.button_link("Users", "/admin/users")],
         ),
         ui.widget(

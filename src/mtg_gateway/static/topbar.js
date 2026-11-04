@@ -125,8 +125,8 @@
 (function () {
   "use strict";
   // the quick-filter chip rows (ui.chips) scroll the same way, with the same faded edges (N12)
-  var navs = document.querySelectorAll(".hubseg, .ui-chips");
-  if (!navs.length) return;
+  var SEL = ".hubseg, .ui-chips";
+  var navs = [];
   function edges(n) {
     var over = n.scrollWidth > n.clientWidth + 1;
     n.classList.toggle("more-start", over && n.scrollLeft > 1);
@@ -141,7 +141,9 @@
     }
     edges(n);
   }
-  Array.prototype.forEach.call(navs, function (n) {
+  function watch(n) {
+    if (navs.indexOf(n) >= 0) return;
+    navs.push(n);
     n.addEventListener("scroll", function () { edges(n); }, { passive: true });
     show(n);
     // the phone's text size can change after this runs: follow the parts' own size
@@ -150,9 +152,22 @@
       ro.observe(n);
       Array.prototype.forEach.call(n.children, function (k) { ro.observe(k); });
     }
-  });
-  window.addEventListener("resize", function () { Array.prototype.forEach.call(navs, show); });
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { Array.prototype.forEach.call(navs, show); });
+  }
+  function watchIn(root) {
+    if (!root || root.nodeType !== 1) return;
+    if (root.matches(SEL)) watch(root);
+    Array.prototype.forEach.call(root.querySelectorAll(SEL), watch);
+  }
+  watchIn(document.body);
+  // a switch drawn by a page's own script after this ran (the Scan page's tabs, a box's tabs)
+  // gets the same edges: watch what is added later
+  if (window.MutationObserver && document.body) {
+    new MutationObserver(function (muts) {
+      muts.forEach(function (m) { Array.prototype.forEach.call(m.addedNodes, watchIn); });
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  window.addEventListener("resize", function () { navs.forEach(show); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { navs.forEach(show); });
 })();
 
 /* Pull to refresh in the Android app (0.7.46, screen 9). The app's pull layer knows nothing of the

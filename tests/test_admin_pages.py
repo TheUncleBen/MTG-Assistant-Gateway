@@ -99,7 +99,9 @@ async def test_the_overview_is_six_widgets_then_system_updates_and_activity_by_d
             "Updates",
         ]
         assert "<span class='big'>4<small>signed in</small></span>" in text
-        assert "1 disabled · 1 linked to Archidekt" in text
+        # one span a fact (ui.facts, re-check S5), the dot drawn by the style; it was one text line
+        facts = "<span class='tx ui-dots balanced'><span>1 disabled</span><span>1 linked to Archidekt</span>"
+        assert facts in text
         assert "<span class='big'>86</span>" in text  # 84 + 2 tool calls
         assert "<span class='big'>3</span><span class='det'>3 today</span>" in text  # the errors
         assert "<div class='wdg alert'>" in text  # errors in the alert tone

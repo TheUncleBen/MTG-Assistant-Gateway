@@ -500,3 +500,34 @@ def test_applied_rows_close_with_the_date_and_undo() -> None:
     assert proposals_view._closing_html(old, csrf="tok", replaced_by=None, now=now) == (
         f"Applied {ui.when(now - 9 * 86400, now=now)}"
     )
+
+
+async def test_a_waiting_proposal_with_no_client_counts_as_other(stack: Stack) -> None:
+    """Audit 43b8 (low): the Waiting widget's by-app line called proposals with no client at all
+    "No app" where Activity says "Other". The bucket is "Other" here too ("1 from other")."""
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        now = int(time.time())
+        for pid, client in (("px1", "app-1"), ("px2", None)):
+            gw.db.save_proposal(
+                {
+                    "id": pid,
+                    "owner_sub": sub,
+                    "kind": "edit",
+                    "deck_id": "42",
+                    "deck_name": "Liesa Test Deck",
+                    "baseline_fingerprint": "f",
+                    "changes": [],
+                    "diff_text": "+1 Sol Ring",
+                    "expires_at": now + 3600,
+                    "created_by_client": client,
+                }
+            )
+        body = (await b.http.get("/proposals", headers=NAV)).text.split("<main")[1]
+        widgets = body.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
+        assert "1 from an unnamed assistant, 1 from other" in widgets, widgets
+        assert "No app" not in widgets and "no app" not in widgets  # the row's own mark may say it
+    finally:
+        await b.aclose()

@@ -85,11 +85,19 @@
     if (pref && window.MtgPrefs) window.MtgPrefs.set(pref, open ? "open" : "closed");
   }
   function sheetOpen() { return !!(sheet && sheet.classList.contains("open")); }
+  var sheetScrim = null;
   function openSheet() {
     if (!sheet) return;
     sheet.classList.add("open");
     document.documentElement.classList.add("sp-sheet-open");
     if (openBtn) openBtn.setAttribute("aria-expanded", "true");
+    // a real backdrop under the sheet (theme .sp-scrim): a tap on it closes the sheet and never
+    // reaches the page under it (audit B2); Escape and the focus return work as before
+    if (!sheetScrim) {
+      sheetScrim = el("div", "sp-scrim");
+      sheetScrim.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); closeSheet(); });
+      sheet.parentNode.insertBefore(sheetScrim, sheet);
+    }
     var c = $(".sp-sheet-head .close", sheet);
     if (c) c.focus();
   }
@@ -97,6 +105,7 @@
     if (!sheetOpen()) return;
     sheet.classList.remove("open");
     document.documentElement.classList.remove("sp-sheet-open");
+    if (sheetScrim) { sheetScrim.remove(); sheetScrim = null; }
     if (openBtn) { openBtn.setAttribute("aria-expanded", "false"); openBtn.focus(); }
   }
   // how many filters are in use: a group of boxes counts once, a text box when it has text, a

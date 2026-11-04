@@ -711,7 +711,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
   border-radius:0 var(--radius) var(--radius) 0;padding:.7rem .9rem;margin:0 0 1rem;font-weight:700;
-  overflow-wrap:anywhere}
+  overflow-wrap:anywhere;flex-wrap:wrap}
 .notice.error{border-left-color:var(--red);background:var(--red-tint);color:var(--red-text)}
 .notice.ok{border-left-color:var(--green);background:var(--green-tint);color:var(--green-text)}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
@@ -727,7 +727,10 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .notice a:not(.btn){color:inherit;text-decoration:underline}
 /* a button in a notice stays whole (the notice's overflow-wrap:anywhere broke "Try again" into
    "Try / agai / n" on a 412 px held Binder, polish re-check Q1) and goes under the words when they
-   leave it no room on their line */
+   leave it no room on their line. A notice laid out as a flex row (the Binder's strips) wraps
+   (flex-wrap above), so the words keep the row and the button drops under them, instead of the
+   words being squeezed into a column beside a button that would not give (audit B1: 73 px at
+   360 px with 200% text) */
 .notice .btn{flex:none;white-space:nowrap;overflow-wrap:normal}
 /* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
 .notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
@@ -1753,9 +1756,11 @@ main.wrap.ui-wide{max-width:1200px}
 /* .balanced: the same facts as running text, so the browser balances the lines (no fact left
    alone under a full line: polish C1). Each fact carries the gap before it as a margin; the line
    starts that far early and clips the strip, so a line's first fact sits on the edge and the dot
-   drawn before it falls in the clipped strip. */
+   drawn before it falls in the clipped strip. A fact is a block in the line (inline-block): whole
+   where it fits, and only one wider than the line itself (a long fact in a phone's half-width tile,
+   or at 200% text) wraps inside instead of being cut off at the edge (re-check S5). */
 .ui-dots.balanced{display:block;text-wrap:balance;margin-left:-.85rem;clip-path:inset(0 0 0 .85rem)}
-.ui-dots.balanced > *{display:inline-block;margin-left:.85rem;white-space:nowrap;vertical-align:top}
+.ui-dots.balanced > *{display:inline-block;margin-left:.85rem;white-space:normal;vertical-align:top}
 /* the sticky action bar while a list has a selection */
 .ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;
   align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.5rem 0 1rem;background:var(--surface);
@@ -2414,7 +2419,10 @@ SEARCH_PANEL_CSS = """
   /* a sheet holding only the card size (the Binder with no tags: "View") is a bottom sheet the
      height of its content over a scrim, not a full screen; its foot sits in it (polish re-check Q5) */
   .spanel .sp-filters.lite{top:auto;max-height:80vh;border-radius:var(--radius) var(--radius) 0 0;
-    box-shadow:0 0 0 100vmax rgba(0,0,0,.45);padding-bottom:0}
+    padding-bottom:0}
+  /* the backdrop static/searchpanel.js puts under an open sheet: a tap on it closes the sheet and
+     reaches nothing under it (audit B2: a box-shadow scrim let a tap through to Add cards) */
+  .sp-scrim{position:fixed;inset:0;z-index:79;background:var(--scrim)}
   .spanel .sp-filters.lite .sp-sheet-foot{position:sticky;left:auto;right:auto;margin:1rem -1rem 0}
   .spanel .sp-filters .fgrid{display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch}
   .spanel .sp-filters .fgrid > *{flex:none}
@@ -2423,7 +2431,7 @@ SEARCH_PANEL_CSS = """
     top:0;z-index:2;background:var(--bg);padding:.75rem 0;border-bottom:1px solid var(--border);margin:0
       0 .75rem}
   .spanel .sp-sheet-head h2{margin:0;font-size:1.2rem}
-  .spanel .sp-sheet-head .close{margin:0;width:2.75rem;min-height:2.75rem;height:2.75rem;padding:0;
+  .spanel .sp-sheet-head .close{margin:0;width:44px;min-height:44px;height:44px;padding:0;
     border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
   .spanel .sheet-size{display:block;margin:14px 0 0}
   .spanel .sheet-size .cardsize{display:flex;flex-direction:column;align-items:flex-start;gap:.35rem}

@@ -87,8 +87,9 @@
     if (!d || !d.from_local_copy) return "";
     var iso = d.as_of ? String(d.as_of) : "", t = iso ? Date.parse(iso) : NaN;
     if (isNaN(t)) return d.as_of_note ? String(d.as_of_note) : "";
-    var opts = { dateStyle: "medium" };
-    if (iso.indexOf("T") < 0) opts.timeZone = "UTC";  // a bare day: not shifted to the day before
+    // the day in UTC, as the tools' as_of_note gives it (as_of is a UTC stamp of the daily copy),
+    // so the picker and an assistant's answer always name the same day
+    var opts = { dateStyle: "medium", timeZone: "UTC" };
     return "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached";
   }
   function samePrint(p, ref) {

@@ -506,6 +506,19 @@ def widget(
     )
 
 
+def facts(parts: Iterable[str], *, html: bool = False) -> str:
+    """A widget's detail line of facts set apart by dots ("From 1 member · Website 1 · Other 2"), for
+    ``widget``'s ``detail_html``: one span per fact, so a fact is kept whole where it fits and the
+    dot drawn before it (theme .ui-dots.balanced) goes with it to the next line. As running text,
+    the dot stayed behind at the end of a line when the tile was narrow (re-check S5). Empty
+    facts are left out; no facts give "". ``html``: the facts are markup already."""
+    kept = [p for p in parts if p]
+    if not kept:
+        return ""
+    inner = "".join(f"<span>{p if html else esc(p)}</span>" for p in kept)
+    return f"<span class='tx ui-dots balanced'>{inner}</span>"
+
+
 def widgets(items: Iterable[str], *, label: str = "At a glance", line: str = "") -> str:
     """The row of 3 to 6 widgets (two a row on the open Fold). On a phone the row is folded
     behind one line (``line``, or the label) so the list comes first on the screen (re-audit

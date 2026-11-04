@@ -768,13 +768,11 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
         mine = seats[0]
         low, high = (mine.get("win_rate_95") or [None, None])[:2]
         precons = len(seats) - 1
-        det = " · ".join(
-            x
-            for x in (
+        det = ui.facts(
+            (
                 f"95% interval {_interval([low, high])}" if _interval([low, high]) else "",
                 f"against {precons} precon{'s' if precons != 1 else ''}" if precons else "",
             )
-            if x
         )
         out.append(
             ui.widget(
@@ -782,7 +780,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                 "play",
                 _pct(_float(mine.get("win_rate"))),
                 unit=f"of {games} game{'s' if games != 1 else ''}",
-                detail_html=_ci_bar(_float(low), _float(high)) + f"<span class='tx'>{_esc(det)}</span>",
+                detail_html=_ci_bar(_float(low), _float(high)) + det,
                 actions=[_go("Forge games", "#rv-forge")],
             )
         )

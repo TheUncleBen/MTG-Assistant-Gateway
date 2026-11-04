@@ -994,10 +994,6 @@ def _spark(values: list[int]) -> str:
     return f"<span class='spark' role='img' aria-label='Events per day, oldest first: {said}'>{bars}</span>"
 
 
-def _join(parts: Iterable[str]) -> str:
-    return " · ".join(parts)
-
-
 ACT_CSS = """
 .act-page .ui-chip svg.i{width:15px;height:15px;margin-right:.3rem;vertical-align:-2px}
 .act-page .wdg .det .ui-lbl{height:22px;font-size:.78rem}
@@ -1130,11 +1126,11 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
     by_kind: dict[str, int] = {}
     for r in admin_rows:
         by_kind[r["event"]] = by_kind.get(r["event"], 0) + 1
-    admin_line = _join(
+    admin_facts = [
         f"{n} {ADMIN_ACTION_WORDS[e][0 if n == 1 else 1]}"
         for e, n in by_kind.items()
         if e in ADMIN_ACTION_WORDS
-    )
+    ]
     members: dict[str, int] = {}
     for r in week:
         if r["sub"]:
@@ -1142,10 +1138,10 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
     with db._lock:
         everyone = int(db._conn.execute("SELECT COUNT(*) FROM users WHERE disabled_at IS NULL").fetchone()[0])
     day_members = len({r["sub"] for r in day if r["sub"]})
-    apps = _join(
-        [f"From {day_members} member{'' if day_members == 1 else 's'}"] * bool(day)
-        + [f"{n} {c}" for n, c in _counts(day, log).items()]
-    )
+    # one fact a span (ui.facts): a tile's narrow line never ends on a dot (re-check S5)
+    app_facts = [f"From {day_members} member{'' if day_members == 1 else 's'}"] * bool(day) + [
+        f"{n} {c}" for n, c in _counts(day, log).items()
+    ]
     top = max(members.items(), key=lambda kv: kv[1]) if members else None
     top_name = names.member(top[0]) if top else None
     fortnight = log.since(14 * 86400, now)
@@ -1162,7 +1158,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             "activity",
             len(day),
             unit="events",
-            detail=apps,
+            detail_html=ui.facts(app_facts),
             actions=[ui.button_link("Show them", query.href(path, time="24h", kind="all"))],
         ),
         ui.widget(
@@ -1170,11 +1166,12 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
             "shield",
             len(admin_rows),
             unit="in 7 days",
-            detail=admin_line,
-            actions=[
-                ui.button_link("Show them", query.href(path, kind="admin", time="7d")),
-                ui.button_link("Users", "/admin/users"),
-            ],
+            detail_html=ui.facts(admin_facts),
+            # at 0 no button to an empty list (as the problem tile, polish re-check Q3)
+            actions=(
+                [ui.button_link("Show them", query.href(path, kind="admin", time="7d"))] if admin_rows else []
+            )
+            + [ui.button_link("Users", "/admin/users")],
         ),
         ui.widget(
             "Members active",
@@ -1345,8 +1342,9 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
         when_html = ui.when(latest["at"], now=now)
         last_applied = f"Last: {esc(deck)}, {when_html}" if deck else f"Last: {when_html}"
     apps_now = db.user_clients(sub)
-    app_line = _join(
-        f"{esc(a['name'] or 'An assistant')} {ui.when(a['last_issued_at'], now=now)}" for a in apps_now[:3]
+    app_line = ui.facts(
+        (f"{esc(a['name'] or 'An assistant')} {ui.when(a['last_issued_at'], now=now)}" for a in apps_now[:3]),
+        html=True,
     )
     cards = [
         _problem_widget(week, query.href(path, kind="problems", time="7d", app="", event="", q="")),
@@ -1355,7 +1353,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             "activity",
             len(week),
             unit="events",
-            detail=_join(f"{n} {c}" for n, c in _counts(week, log).items()),
+            detail_html=ui.facts(f"{n} {c}" for n, c in _counts(week, log).items()),
             actions=[ui.button_link("Show them", query.href(path, time="7d", kind="all"))],
         ),
         ui.widget(

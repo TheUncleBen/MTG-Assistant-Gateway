@@ -179,10 +179,20 @@ window.__mselLog = [];
 
 
 def _page(
-    p, server: Server, sid: str, width: int, *, theme: str = "light", height: int = 900, touch: bool = False
+    p,
+    server: Server,
+    sid: str,
+    width: int,
+    *,
+    theme: str = "light",
+    height: int = 900,
+    touch: bool = False,
+    tz: str = "",
 ):
     browser = p.chromium.launch(executable_path=_EXE["path"], args=["--no-sandbox"])
     kw = {"has_touch": True, "is_mobile": True} if touch else {}
+    if tz:
+        kw["timezone_id"] = tz
     ctx = browser.new_context(viewport={"width": width, "height": height}, **kw)
     ctx.add_cookies(
         [
@@ -1425,7 +1435,8 @@ def test_the_printing_detail_offers_the_finishes_it_is_made_in(server: Server) -
         browser.close()
 
 
-AS_OF = "2026-11-03T06:00:00+00:00"
+AS_OF = "2026-11-03T22:00:00+00:00"  # late on 3 Nov in UTC: already 4 Nov east of UTC+2
+FAR_EAST = "Pacific/Kiritimati"  # UTC+14: the day after, so the picker must name the UTC day
 AS_OF_NOTE = as_of_line(AS_OF)  # the gateway's own line, as the tools say it (audit A2)
 
 
@@ -1454,7 +1465,7 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
     touch = width < 900
     with sync_playwright() as p:
         browser, page, errors = _page(
-            p, server, sid, width, theme=theme, touch=touch, height=800 if touch else 900
+            p, server, sid, width, theme=theme, touch=touch, height=800 if touch else 900, tz=FAR_EAST
         )
         page.route(prints, from_copy)
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
@@ -1464,9 +1475,16 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
         note.wait_for(state="visible", timeout=3000)
         # the day in the viewer's own locale, as the site writes dates (audit N14), never the
         # gateway's fixed "3 Nov"
+        # the UTC day, as the tools' note says it (audit 43b8 low), never the viewer's own day
         day = page.evaluate(
+            "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeZone: 'UTC'})"
+            ".format(new Date(iso))",
+            AS_OF,
+        )
+        local = page.evaluate(
             "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))", AS_OF
         )
+        assert local != day and local not in note.inner_text(), (local, day, note.inner_text())
         assert day and day in note.inner_text() and "3 Nov" not in note.inner_text(), (day, note.inner_text())
         # one short line, the same words as the chat's printings card (audit P8): the old wording,
         # "Printings and prices as of ... (Scryfall can't be reached right now)", took three lines

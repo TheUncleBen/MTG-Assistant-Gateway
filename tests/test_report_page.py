@@ -59,7 +59,9 @@ def test_six_widgets_from_the_report() -> None:
         "Deck",
     ], titles
     assert "40%<small>of 400 games</small>" in widgets and "class='ci-w'" in widgets
-    assert "95% interval 35% to 45% · against 3 precons" in widgets
+    # one span a fact (ui.facts, re-check S5), the dot drawn by the style; it was one text line
+    facts = "<span class='tx ui-dots balanced'><span>95% interval 35% to 45%</span>"
+    assert facts + "<span>against 3 precons</span>" in widgets
     # under 70% of the deck played with its effect: the orange warning edge
     assert "<div class='wdg accent'><span class='lab'>" in widgets and "50%<small>49 of 98 cards" in widgets
     assert (

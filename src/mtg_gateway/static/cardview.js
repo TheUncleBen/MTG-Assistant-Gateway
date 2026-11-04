@@ -470,7 +470,7 @@
     wrap.appendChild(h);
     var pts = (o.history || []).filter(function (h) { return h.price !== null && h.price !== undefined; });
     if (!pts.length) {
-      wrap.appendChild(el("p", "muted", "No price yet; it comes with the next daily price check."));
+      wrap.appendChild(noPriceLine());
       return wrap;
     }
     wrap.appendChild(el("p", null, titleCase(o.finish === "nonfoil" ? "normal" : o.finish) + ": " +
@@ -483,6 +483,14 @@
     det.appendChild(priceTable(pts.slice().reverse(), o.currency, name + ", newest first"));
     wrap.appendChild(det);
     return wrap;
+  }
+  // the one wording of a price nobody knows yet (audit A1, B7): the shared muted "unknown" and
+  // when it comes, on one line
+  function noPriceLine(lead) {
+    var p = el("p", "muted", lead || "");
+    p.appendChild(el("span", "muted unpriced", "unknown"));
+    p.appendChild(document.createTextNode(" \u00b7 comes with the next daily check"));
+    return p;
   }
   // a day with no price reads "unknown", as every missing price on the site does
   function money(v, cur) {
@@ -532,18 +540,13 @@
       watches.forEach(function (v) {
         var where = printLabel([(v.set || "").toUpperCase(), v.collector_number || ""].filter(Boolean).join(" ")) || "any printing";
         var unpriced = v.price === null || v.price === undefined;
-        var line = el("p", unpriced ? "muted" : null, where + " \u00b7 " + titleCase(v.finish || "nonfoil") + ": ");
-        if (unpriced) {
-          // no price yet: one muted line with the shared "unknown" (audit A1), never a second line
-          line.appendChild(el("span", "muted unpriced", "unknown"));
-          line.appendChild(document.createTextNode(" \u00b7 comes with the next daily check"));
-        } else {
-          line.appendChild(document.createTextNode(money(v.price, v.currency) + (v.day ? " on " + v.day : "")));
-        }
+        var lead = where + " \u00b7 " + titleCase(v.finish || "nonfoil") + ": ";
+        var line = unpriced ? noPriceLine(lead)  // no price yet: one muted line, never a second
+          : el("p", null, lead + money(v.price, v.currency) + (v.day ? " on " + v.day : ""));
         box.appendChild(line);
         var rows = (v.history || []).filter(function (h) { return h.price !== null; }).reverse().slice(0, 30);
         if (!rows.length) {
-          if (!unpriced) box.appendChild(el("p", "muted", "No price yet; it comes with the next daily check."));
+          if (!unpriced) box.appendChild(noPriceLine());
           return;
         }
         var table = el("table");

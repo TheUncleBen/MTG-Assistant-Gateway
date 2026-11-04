@@ -76,7 +76,13 @@ async def test_proposals_has_four_widgets_with_the_apps_folded_into_waiting(stac
         assert "Waiting by app" not in widgets and "Connected apps" not in widgets
         assert "bar-split" not in widgets and "wide-sm" not in widgets
         first = widgets.split("<div class='wdg")[1]
-        assert "15 on 1 deck · 10 from an unnamed assistant, 5 from you · oldest " in first
+        # one span a fact (ui.facts, re-check S5); the dots between them are drawn by the style.
+        # Before, the facts were one run of text with " · " in it, which a narrow tile broke
+        # right after a dot.
+        assert (
+            "<span class='tx ui-dots balanced'><span>15 on 1 deck</span>"
+            "<span>10 from an unnamed assistant, 5 from you</span><span>oldest " in first
+        )
         # the third tile keeps the approved words and says what it counts (C-FINDINGS F13)
         third = widgets.split("<div class='wdg")[3]
         assert "Only you can apply" in third and "in every approval mode" not in third
