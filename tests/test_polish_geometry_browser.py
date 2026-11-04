@@ -88,7 +88,11 @@ def test_the_deck_page_banner_list_and_tools_line_up(server: Server, width: int)
     exe = _exe()
     with sync_playwright() as p:
         browser, page, errors = _open(p, exe, server, sid, width, dark=width == 412)
-        page.goto(f"{server.base}/decks/42?view=list", wait_until="networkidle")
+        # "load", then the parts measured: a view load after the page's kept read has aged starts
+        # the /decks/{id}/check long-poll, which "networkidle" would wait out (audit, section 6)
+        page.goto(f"{server.base}/decks/42?view=list", wait_until="load")
+        page.locator("ul.rows .row .name").first.wait_for(timeout=10_000)
+        page.locator(".statctl[aria-label=Colors] button").first.wait_for(state="attached", timeout=10_000)
         assert page.evaluate(MEASURE) == []
         # B1: the Like count's centre is the heart's centre, inside the chip's
         soc = page.locator(".banner .social .soc[data-social=vote]")

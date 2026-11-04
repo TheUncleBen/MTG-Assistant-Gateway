@@ -383,6 +383,11 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
             re.compile(r"https://cards\.scryfall\.io/.*"),
             lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
         )
+        # a deck view loaded after the page's kept read has aged (20 s) starts the
+        # /decks/{id}/check long-poll (up to 25 s), which "networkidle" would wait out on a starved
+        # runner (audit, section 6); without an answer the strip hides, as it does for an
+        # unchanged deck, so every other request still settles before the measurement
+        ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda route: route.abort())
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -433,6 +438,11 @@ def test_follow_question_can_be_answered(server: Server, touch: bool) -> None:
             re.compile(r"https://cards\.scryfall\.io/.*"),
             lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
         )
+        # a deck view loaded after the page's kept read has aged (20 s) starts the
+        # /decks/{id}/check long-poll (up to 25 s), which "networkidle" would wait out on a starved
+        # runner (audit, section 6); without an answer the strip hides, as it does for an
+        # unchanged deck, so every other request still settles before the measurement
+        ctx.route(re.compile(r"/decks/[^/]+/check(\?|$)"), lambda route: route.abort())
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))

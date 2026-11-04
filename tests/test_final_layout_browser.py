@@ -134,7 +134,9 @@ def _context(p, base: str, sid: str, width: int, theme: str, touch: bool):
 
 
 def _deck_page(page, server: Server) -> None:
-    page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+    # "load", then the stacks themselves: a view load after the page's kept read has aged starts
+    # the /decks/{id}/check long-poll, which "networkidle" would wait out (audit, section 6)
+    page.goto(f"{server.base}/decks/42?view=text", wait_until="load")
     page.locator(".stackhead .kebab").first.wait_for(timeout=5000)
 
 

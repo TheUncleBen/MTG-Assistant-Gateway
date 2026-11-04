@@ -678,3 +678,61 @@ def test_save_to_binder_offers_undo_that_takes_the_copies_out_again(server: Serv
         assert server.ark.collections.get("alice", {}) == {}
         assert errors == []
         browser.close()
+
+
+CARD_2 = CARD.replace("Sol Ring", "Arcane Signet").replace("sol-ring", "arcane-signet").replace("472", "331")
+TWO_ITEMS = (
+    "() => { const s = window.__scan; s.state.items = ["
+    "  {quantity: 2, name: 'Sol Ring', status: 'exact', note: '', card: " + CARD + "},"
+    "  {quantity: 1, name: 'Arcane Signet', status: 'exact', note: '', card: " + CARD_2 + "}];"
+    " s.showTab('list'); }"
+)
+
+
+def test_a_failed_undo_retries_only_the_rows_still_in_the_binder(server: Server) -> None:  # noqa: F811
+    """Undo after a save of two cards, where the second row's undo fails once (the audit's N6): the
+    retry sends only that row again. Before, it ran every row again, so a row already out of the
+    binder was asked for twice (an error) and a reduced one lost its copies a second time."""
+    from playwright.sync_api import expect, sync_playwright
+
+    exe = _chromium()
+    calls: list[str] = []
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, _link(server), 390, False, "light")
+        page.evaluate(TWO_ITEMS)
+        page.get_by_role("button", name="Save to binder").click()
+        note = page.locator("#list-msg .notice.ok")
+        expect(note).to_contain_text("Saved 2 cards (3 copies) to your binder", timeout=10_000)
+        rows = server.ark.collections.get("alice", {})
+        assert len(rows) == 2, rows
+        signet = next(rid for rid, r in rows.items() if r["card"]["oracleCard"]["name"] == "Arcane Signet")
+        failures = {"left": 1}
+
+        def on_rows(route):  # the Arcane Signet row's first undo fails, as a busy gateway would
+            calls.append(route.request.method + " " + route.request.url.split("/rows/")[1].split("?")[0])
+            if route.request.url.split("/rows/")[1].split("?")[0] == str(signet) and failures["left"]:
+                failures["left"] -= 1
+                route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body='{"ok": false, "error": "busy", "message": "Archidekt is busy"}',
+                )
+                return
+            route.continue_()
+
+        page.route(re.compile(r"/collection/api/rows/"), on_rows)
+        undo = page.locator("#list-msg").get_by_role("button", name="Undo")
+        undo.click()
+        expect(page.locator("#list-msg .notice.error")).to_contain_text("Could not undo", timeout=10_000)
+        assert len(server.ark.collections.get("alice", {})) == 1  # Sol Ring is out, the Signet stays
+        # Undo stays on the page, in the notice that says what went wrong, for another go
+        assert undo.count() == 1 and undo.is_enabled() and undo.is_visible()
+        undo.click()
+        expect(page.locator("#list-msg .notice.ok")).to_contain_text(
+            "Taken out of your binder again", timeout=10_000
+        )
+        assert server.ark.collections.get("alice", {}) == {}
+        # two rows the first time, then the one that failed
+        assert len(calls) == 3 and calls[2].endswith(str(signet)) and calls.count(calls[2]) == 2, calls
+        assert errors == []
+        browser.close()

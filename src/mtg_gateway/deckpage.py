@@ -4381,6 +4381,11 @@ html.printpick-open{overflow:hidden}
   align-items:center;gap:.5rem}
 .printpick .ppstatus.error{color:var(--text)}
 .printpick .ppstatus .btn{margin:0}
+/* the as-of note of an answer from the gateway's copy of the printings: the notice strip, its
+   words muted and plain (a date, not a warning); hidden with a live answer */
+.printpick .ppasof{margin:0;flex:none;font-size:.93rem;font-weight:400;color:var(--text-muted);
+  padding:.5rem .75rem}
+.printpick .ppasof[hidden]{display:none}
 .printpick .ppmain{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 21rem;
   gap:1rem}
 .printpick .ppscroll{overflow:auto;min-height:0;overscroll-behavior:contain;padding:3px}
@@ -4456,7 +4461,8 @@ html.printpick-open{overflow:hidden}
   .printpick .pppreview{display:none;position:absolute;inset:0;z-index:2;background:var(--surface);
     border:0;border-radius:0;padding:.25rem .25rem env(safe-area-inset-bottom)}
   .printpick .ppbox.previewing .pppreview{display:flex}
-  .printpick .ppbox.previewing .pptools,.printpick .ppbox.previewing .ppstatus{display:none}
+  .printpick .ppbox.previewing .pptools,.printpick .ppbox.previewing .ppstatus,
+  .printpick .ppbox.previewing .ppasof{display:none}
   .printpick .pppreview .ppback{display:inline-flex}
   .pppreview .ppbig{max-width:min(20rem,72%)}
   .printpick .ppfilters{grid-template-columns:repeat(2,minmax(0,1fr))}

@@ -148,7 +148,11 @@ def test_the_deck_pages_view_boxes_never_overlap_at_desktop_width(server: Server
             ctx = _context(browser, server, sid, width, 900, touch=False)
             page = ctx.new_page()
             for view in ("grid", "stacks", "text"):
-                page.goto(f"{server.base}/decks/42?view={view}", wait_until="networkidle")
+                # "load", then the boxes themselves: once the page's kept read has aged (20 s), a
+                # view switch starts the /decks/{id}/check long-poll (up to 25 s), which
+                # "networkidle" would wait out on a starved runner (audit, section 6)
+                page.goto(f"{server.base}/decks/42?view={view}", wait_until="load")
+                page.locator(".toolbar form.views .field").first.wait_for(timeout=10_000)
                 if ZOOM[zoom]:
                     page.evaluate(ZOOM[zoom])
                 page.wait_for_timeout(30)
