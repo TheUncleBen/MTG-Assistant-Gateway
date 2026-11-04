@@ -2156,6 +2156,24 @@ def _added_within(row: dict[str, Any], since: float) -> bool:
         return False
 
 
+def added_this_week(rows: list[dict[str, Any]], total: int, since: float, *, large: bool) -> int | str:
+    """Added this week as the Binder knows it (0.7.46 audit C5), live and held alike: ``rows``
+    newest first (Archidekt's default order, as the first page comes; a held copy puts the cards
+    added since first), ``total`` the binder's entries. A binder of more than one page is counted
+    from its newest PAGE_SIZE entries only: when the oldest of those is from before ``since``,
+    every older entry is too, so the count is whole; when it isn't, how many more were added this
+    week isn't known and the count says so ("100+"), never a number the gateway doesn't have. A
+    held copy whose read entries were removed since knows fewer than PAGE_SIZE of the newest, and
+    says only those ("99+")."""
+    if not large and total <= PAGE_SIZE:
+        return sum(1 for r in rows if _added_within(r, since))
+    newest = rows[:PAGE_SIZE]
+    week = sum(1 for r in newest if _added_within(r, since))
+    if total <= len(newest) or (newest and not _added_within(newest[-1], since)):
+        return week
+    return f"{week:,}+"
+
+
 def _day_words(day: str | None, now: float) -> str:
     """A price day as the Binder says it: "today", "yesterday" or "Oct 12"."""
     if not day:
@@ -2253,7 +2271,8 @@ def widgets_html(
 ) -> str:
     """The widgets, from what Archidekt already sends with the first page: Entries (with the copies
     when known: a collection of 100 entries or fewer, or the Binder as last read whole), Value (with
-    prices on; ``value`` from binder_prices), Added this week (from the newest 100 entries) and
+    prices on; ``value`` from binder_prices), Added this week (from the newest 100 entries, "100+"
+    when all of those are this week's: added_this_week) and
     Foils (counted only when the whole collection fits one page of 100)."""
     now = time.time() if now is None else now
     rows = whole["rows"]
@@ -2261,7 +2280,9 @@ def widgets_html(
     large = int(whole.get("total_pages") or 1) > 1 or bool(whole.get("has_next"))
     open_link = [_archidekt_link(arch_user)] if arch_user else []
     since = now - 7 * 86400
-    week = sum(1 for r in rows if _added_within(r, since))
+    # from the newest PAGE_SIZE entries past one page, live and held alike (added_this_week)
+    windowed = large or total > PAGE_SIZE
+    week = added_this_week(rows, total, since, large=large)
     import datetime as dt
 
     since_day = dt.datetime.fromtimestamp(since, dt.UTC).strftime("%b %d").replace(" 0", " ")
@@ -2284,7 +2305,7 @@ def widgets_html(
             "Added this week",
             "clock",
             week,
-            detail="Counted from your newest 100 entries" if large else f"Since {since_day}",
+            detail=f"Counted from your newest {PAGE_SIZE:,} entries" if windowed else f"Since {since_day}",
             actions=[
                 ui.button_link("Scan cards", "/scan", icon_name="camera"),
                 ui.box_opener(
