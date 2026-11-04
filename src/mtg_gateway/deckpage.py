@@ -3437,7 +3437,11 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* toolbar panel (filterBar) */
 .toolbar{padding:.5rem 1rem 1rem;position:relative;z-index:1}
 .toolbar .controls{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,2fr);gap:1rem;align-items:end}
-.toolbar .controls > form.views:only-child{grid-column:1 / -1}
+/* a deck that is not the member's own has no Quick add, so the view controls take the whole row:
+   the first child, not the only one, because static/deck.js adds the phone's View and More
+   buttons after the form (with :only-child the form sat in the 1.2fr column at 1280 px and at
+   200% text Group by, Sort by and the filter ran over each other; final polish item 3) */
+.toolbar .controls > form.views:first-child{grid-column:1 / -1}
 .toolbar form.quick{margin:0} .toolbar .quickrow{display:flex;gap:.5rem}
 .toolbar .quickrow input{min-width:0;flex:1}
 .toolbar .quickrow button{margin:0;flex:none}

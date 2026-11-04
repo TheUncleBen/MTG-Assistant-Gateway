@@ -2600,7 +2600,12 @@ ul.colllist .cardc .tagrow{margin-top:.25rem}
 #col-notes .notice .nx:focus-visible{outline:2px solid var(--focus)}
 #col-notes .notice .nx svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;
   stroke-linecap:round}
+#col-notes .notice .nt{flex:1 1 0;min-width:0}
 #col-notes .notice p{margin:0}
+/* a link in a strip ("Show them first" on the added-cards line) is a 44 px target that still reads
+   as part of its line: an inline box's padding widens what a finger hits without moving the words
+   or the lines around it (audit C4: 108×19 px) */
+#col-notes .notice a:not(.btn){padding:max(.8rem,calc((44px - 1.15em) / 2)) .25rem;margin:0 -.25rem}
 #col-notes .notice ul{margin:.45rem 0 0;padding-left:1.2rem;font-weight:400;line-height:1.45}
 #col-notes .notice li+li{margin-top:.3rem}
 .collection .ui-widgets{margin:0 0 1rem}
@@ -3239,13 +3244,19 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     def strip(text: str, kind: str, *, html: bool = False, remember: str = "") -> str:
         """A notice strip at the top of the page, with a × to close (the page's script hides it).
         ``remember``: a name the script keeps the close under on this browser, so the strip stays
-        closed on later visits (the price-sort note, re-audit N10)."""
+        closed on later visits (the price-sort note, re-audit N10). The strip is a flex row of two:
+        the × and the body (``.nt``: the words, with an import result's list or a bulk Undo), so the
+        body takes the room beside the × whatever it holds (audit C1: as loose text and a list it
+        was two items, the × on a row of its own or the list beside the words)."""
         x = (
             "<button type='button' class='nx' aria-label='Close' title='Close' data-dismiss>"
             f"{icon('x')}</button>"
         )
         out = ui.notice(
-            x + (text if html else _esc(text)), kind, html=True, role="alert" if kind == "error" else "status"
+            f"{x}<div class='nt'>{text if html else _esc(text)}</div>",
+            kind,
+            html=True,
+            role="alert" if kind == "error" else "status",
         )
         if remember:
             out = out.replace("<div class='notice", f"<div data-remember='{_esc(remember)}' class='notice", 1)

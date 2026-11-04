@@ -67,13 +67,14 @@ WHENS = (("", "Any time"), ("today", "Today"), ("7d", "Last 7 days"), ("30d", "L
 YOU, ADMIN = "you", "admin"
 FROM_YOU, FROM_ADMIN = "You", "The administrator"
 NO_APP_NAME = "An assistant"  # an app with no registered name: never its client id
-# the stand-in names as they read inside a sentence ("10 from an unnamed assistant, 5 from you")
+# the stand-in names as they read inside a sentence ("10 from an unnamed assistant, 5 from you,
+# 1 from another app"); "Other" stays the bucket's label where it stands alone (audit C6)
 OTHER_APP = "Other"  # proposals with no client at all: the bucket Activity calls "Other" too
 _MID = {
     NO_APP_NAME: "an unnamed assistant",
     FROM_YOU: "you",
     FROM_ADMIN: "the administrator",
-    OTHER_APP: "other",
+    OTHER_APP: "another app",
 }
 # A failed apply's stored error when Archidekt answered and said no (ArchidektError kinds, and the
 # gateway's own refusals of what it was about to send); anything else (the gateway restarted, a

@@ -711,7 +711,12 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
   border-radius:0 var(--radius) var(--radius) 0;padding:.7rem .9rem;margin:0 0 1rem;font-weight:700;
-  overflow-wrap:anywhere;flex-wrap:wrap}
+  overflow-wrap:anywhere}
+/* a notice laid out as a flex row with a button of its own (the held strips in the Binder's
+   #col-notes) wraps, so the words keep the row and the button drops under them (audit B1). Only
+   those: with wrap on every notice, the Binder's × strips (× first, then the words, as one flex
+   item each) put the × alone on a row above the words (audit C1) */
+.notice:has(> .btn){flex-wrap:wrap}
 .notice.error{border-left-color:var(--red);background:var(--red-tint);color:var(--red-text)}
 .notice.ok{border-left-color:var(--green);background:var(--green-tint);color:var(--green-text)}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
@@ -725,13 +730,14 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* a link in a notice reads as one; a button in one (Try again on a held page, Show the changes on
    the deck check strip) keeps the button's own look (polish re-check P1) */
 .notice a:not(.btn){color:inherit;text-decoration:underline}
-/* a button in a notice stays whole (the notice's overflow-wrap:anywhere broke "Try again" into
-   "Try / agai / n" on a 412 px held Binder, polish re-check Q1) and goes under the words when they
-   leave it no room on their line. A notice laid out as a flex row (the Binder's strips) wraps
-   (flex-wrap above), so the words keep the row and the button drops under them, instead of the
-   words being squeezed into a column beside a button that would not give (audit B1: 73 px at
-   360 px with 200% text) */
-.notice .btn{flex:none;white-space:nowrap;overflow-wrap:normal}
+/* a button in a notice never breaks a word (the notice's overflow-wrap:anywhere broke "Try again"
+   into "Try / agai / n" on a 412 px held Binder, polish re-check Q1) and goes under the words when
+   they leave it no room on their line (the flex-wrap above), instead of the words being squeezed
+   into a column beside a button that would not give (audit B1: 73 px at 360 px with 200% text).
+   A label wider than the strip wraps at its spaces inside the strip, never out of it: nowrap put
+   "Stop here and show what went in" 508 px wide at 200% text and the Binder scrolled sideways
+   (audit C2); a short label such as Try again is narrower than any strip, so it stays one line */
+.notice .btn{flex:none;max-width:100%;white-space:normal;overflow-wrap:normal}
 /* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
 .notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
   gap:.35rem .6rem}
@@ -1119,11 +1125,21 @@ body .tabbar:has(details.more[open]){z-index:25}
 .tabbar details.more .menu.sheet a svg{width:20px;height:20px}
 .tabbar details.more .menu.sheet .head{padding:.6rem 1rem .2rem}
 /* the counts on the tabs (proposals waiting, the bell's unseen) sit on the icon's top right */
-.tabbar > a .nb,.tabbar > a.bell .n{position:absolute;top:6px;left:calc(50% + 3px);z-index:2}
+.tabbar > a .nb,.tabbar > a.bell .n{position:absolute;top:4px;left:calc(50% + 5px);z-index:2}
 .tabbar > a.bell .n{min-width:18px;height:18px;border-radius:9px;background:var(--orange);
   color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:18px;text-align:center;padding:0 4px;
   font-style:normal;box-sizing:border-box}
 .tabbar > a.bell .n[hidden]{display:none}
+/* the bar's counts are sized in px like its icons (22 px) and labels (capped at 15 px): in rem
+   alone, at 200% text the Assistant count grew over its icon while its 18 px box stayed (final
+   polish W2); .72rem is 10 px at the pages' 14 px root, so the cap changes nothing at 100%. The
+   box follows its digits' own line from 18 px up: under a text-only zoom (Android's font scale
+   doubles px text too) a 20 px count makes it about 23 px tall and it still holds its words (a
+   fixed 18 px box, or a line of 1, left the glyphs' area pushing out of it), and sitting 4 px
+   from the tab's top and 5 px right of its middle it covers the icon's top-right corner only,
+   never its centre; the bell's count is laid out the same way */
+.tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem,11px);display:inline-grid;place-items:center;
+  line-height:normal;height:auto;min-height:18px}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}

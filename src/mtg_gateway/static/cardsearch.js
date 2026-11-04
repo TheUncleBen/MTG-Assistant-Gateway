@@ -476,7 +476,9 @@
       else if (e.key === "Escape") { if (!list.hidden) { e.stopPropagation(); close(); } }
       else if (e.key === "Backspace" && !box.value) { var last = $(".chips li:last-child", pk); if (last) { last.remove(); run(true); } }
     });
-    box.addEventListener("blur", function () { setTimeout(function () { if (!pk.contains(document.activeElement)) close(); }, 150); });
+    // the list goes when the focus leaves the picker, from the box or from a chip's button: left
+    // open behind the focus it swallowed the Escape meant for the Filters sheet (audit C3)
+    pk.addEventListener("focusout", function () { setTimeout(function () { if (!pk.contains(document.activeElement)) close(); }, 150); });
     list.addEventListener("mousedown", function (e) { e.preventDefault(); });
     list.addEventListener("click", function (e) { var li = e.target.closest("li.opt"); if (li) pick(+li.getAttribute("data-i")); });
     pk.addEventListener("click", function (e) {
