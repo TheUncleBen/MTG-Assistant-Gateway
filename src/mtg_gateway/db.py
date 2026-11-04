@@ -8,6 +8,7 @@ it where ownership matters.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import hashlib
 import json
@@ -248,6 +249,18 @@ class DatabaseBusy(sqlite3.OperationalError):
 
     def __init__(self) -> None:
         super().__init__("database is locked (the request went ahead without waiting)")
+
+
+def _worker_thread() -> bool:
+    """Whether this thread is a worker (a job run with asyncio.to_thread): no event loop runs in
+    it, and it is not the main thread (a command run without a loop). A thread that runs an event
+    loop takes the loop's path in Database.tx() whichever thread it is (uvicorn's loop runs in a
+    thread of its own in the browser tests), so it never waits for the lock with the loop held."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return threading.current_thread() is not threading.main_thread()
+    return False
 
 
 class ReadThrough:
@@ -1379,7 +1392,7 @@ class Database:
                 else:
                     self._conn.execute("RELEASE tx")
             return
-        if threading.current_thread() is not threading.main_thread():
+        if _worker_thread():
             self._begin_off_loop()  # holds self._lock on return, the transaction begun
         else:
             self._lock.acquire()
