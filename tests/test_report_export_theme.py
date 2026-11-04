@@ -145,3 +145,35 @@ def test_the_html_file_reads_in_both_schemes_at_every_width(scheme: str, width: 
                 assert wide <= 0, (text, wide)
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_an_unknown_price_in_the_html_file_reads_as_on_the_site(scheme: str) -> None:
+    """A deck with no prices says "unknown" in the exported file as the site does: muted, normal
+    weight, quieter than a value and larger than the tile's label (0.7.46 polish N3, audit N7)."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_report_export_outline import _html, _report
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900}, color_scheme=scheme)
+            page.set_content(_html(_report(taken_at=1_761_652_800)))
+            word = page.locator(".tile .unpriced")
+            assert word.count() == 1
+            got = word.evaluate(
+                """e => { const s = getComputedStyle(e), tile = e.closest('.tile');
+                  return {text: e.textContent, weight: s.fontWeight, size: parseFloat(s.fontSize),
+                    label: parseFloat(getComputedStyle(tile.querySelector(':scope > span')).fontSize),
+                    value: parseFloat(getComputedStyle(tile.querySelector(':scope > b')).fontSize)} }"""
+            )
+            assert got["text"] == "unknown" and got["weight"] == "400", got
+            assert got["label"] < got["size"] <= got["value"], got
+            for name, ratio in page.evaluate(CONTRAST_JS):
+                assert ratio >= 4.5, (name, round(ratio, 2))
+        finally:
+            browser.close()

@@ -2455,6 +2455,8 @@ h1{font-size:2rem;margin:.25rem 0 .75rem;overflow-wrap:anywhere} h2{font-size:1.
 h3{font-size:1.1rem;margin:.75rem 0 .4rem} h4{font-size:1rem;margin:.6rem 0 .2rem} p{margin:.5rem 0}
 h3 small,h4 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700}
+/* a price nobody knows: the site's muted word, normal weight, between the label and a value */
+.tile b .unpriced{font-weight:400;font-size:1rem}
 .card{background:var(--surface);border:1px solid var(--card-border);border-radius:var(--radius-panel);
   padding:1rem;margin:0 0 1rem;min-width:0}
 .card > :first-child{margin-top:0} .card > :last-child{margin-bottom:0}
