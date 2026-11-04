@@ -74,6 +74,10 @@ def test_stats_toggles_and_focus(server: Server, width: int, scheme: str) -> Non
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        # each choice is saved to the account one after another (prefs.js); the reload below must
+        # wait for them, or on a slow runner the last save is still queued and the reload drops it
+        saves: list = []
+        page.on("request", lambda r: saves.append(r) if r.url.endswith("/api/v1/prefs") else None)
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         stats = page.locator("#stats")
         stats.scroll_into_view_if_needed()
@@ -141,7 +145,14 @@ def test_stats_toggles_and_focus(server: Server, width: int, scheme: str) -> Non
         assert page.locator(".statfocus").count() == 0
         assert _visible(page, "#cards [data-name]") > 40
 
-        # the choices are kept for the next visit
+        # the choices are kept for the next visit, once their saves have answered
+        assert saves, "no choice was saved"
+        page.wait_for_function(
+            "n => performance.getEntriesByType('resource')"
+            ".filter(e => e.name.endsWith('/api/v1/prefs') && e.responseEnd > 0).length >= n",
+            arg=len(saves),
+            timeout=20_000,
+        )
         page.reload(wait_until="networkidle")
         assert page.locator("#stats [data-curve=category]").is_visible()
         assert page.locator("#stats [data-src=lands] [data-chart=pie]").is_visible()
