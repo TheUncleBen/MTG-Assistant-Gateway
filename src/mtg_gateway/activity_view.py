@@ -1007,8 +1007,13 @@ ACT_CSS = """
 @media (max-width:599.98px){
   /* two widgets a row on a phone, one when the text is large */
   .act-page .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}}
-/* below 900 px the rows stack their cells in two lines, so the column headings no longer fit */
-@media (max-width:899.98px){.act-table .tr.th{display:none}}
+/* the rows' layout follows the table's own width in its text (a container, as the lists' toolbars
+   do): the lined-up columns while they fit, the two-line rows under 61em (a 900 px viewport at
+   the pages' 14 px text) and the stacked rows under 40em (600 px). So at 200% text the When and
+   Actions columns fold instead of spilling past the page (audit N9/P2: 1200 px wide at 900 and
+   1024 px). Below 61em the column headings no longer fit */
+.act-table{container-type:inline-size}
+@container (max-width:61em){.act-table .tr.th{display:none}}
 .act-table .c-who{font-weight:700;min-width:0;overflow-wrap:anywhere}
 .act-table .c-det{display:flex;flex-wrap:wrap;gap:.2rem .6rem;font-size:.9rem;align-items:baseline;
   overflow-wrap:anywhere}
@@ -1035,7 +1040,7 @@ ADMIN_CSS = (
     + """
 .act-admin .act-table .tr{grid-template-columns:15rem 6.5rem minmax(0,1fr) 7rem 6.5rem 88px}
 .act-admin .act-table .tr.th > span:last-child{text-align:right}
-@media (max-width:899.98px){
+@container (max-width:61em){
   .act-admin .act-table .tr.ev{grid-template-columns:auto minmax(0,1fr) auto 88px;
     grid-template-areas:"ev who when more" "det det app more";row-gap:.3rem}
   .act-admin .act-table .c-ev{grid-area:ev} .act-admin .act-table .c-who{grid-area:who}
@@ -1043,7 +1048,7 @@ ADMIN_CSS = (
   .act-admin .act-table .c-app{grid-area:app;justify-self:end} .act-admin .act-table .c-btns{grid-area:more}
   .act-admin .act-table .more-body{grid-area:auto;grid-column:1 / -1}
 }
-@media (max-width:599.98px){
+@container (max-width:40em){
   .act-admin .act-table .tr.ev{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;
     position:relative;padding-right:92px}
   .act-admin .act-table .c-ev{flex:0 0 calc(100% - 6.5rem);order:1}
@@ -1063,14 +1068,14 @@ MEMBER_CSS = (
     + """
 .act-member .act-table .tr{grid-template-columns:17rem minmax(0,1fr) 8rem 6.5rem}
 .act-member .act-table .c-det{display:block;font-size:.92rem}
-@media (max-width:899.98px){
+@container (max-width:61em){
   .act-member .act-table .tr.ev{grid-template-columns:minmax(0,1fr) auto;
     grid-template-areas:"ev when" "det app";
     row-gap:.3rem}
   .act-member .act-table .c-ev{grid-area:ev} .act-member .act-table .c-when{grid-area:when;justify-self:end}
   .act-member .act-table .c-det{grid-area:det} .act-member .act-table .c-app{grid-area:app;justify-self:end}
 }
-@media (max-width:599.98px){
+@container (max-width:40em){
   .act-member .act-table .tr.ev{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .5rem}
   .act-member .act-table .c-ev{flex:1 1 100%;order:1}
   .act-member .act-table .c-app{order:2;font-size:.86rem;align-self:center}

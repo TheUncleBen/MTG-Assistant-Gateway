@@ -388,3 +388,183 @@ def test_historys_three_filters_never_leave_one_stretched_alone(
             assert tools["rows"][-1] == ["filter"] * 3, tools  # all three share a row at 100%
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()
+
+
+# every cell of the activity tables' rows: its right edge against the page's and its row's
+ACT_CELLS = """() => {
+  const page = document.documentElement.clientWidth;
+  return [...document.querySelectorAll('.act-table .tr.ev')].flatMap(row => {
+    const r = row.getBoundingClientRect();
+    return [...row.children].filter(c => !c.hidden && c.getClientRects().length).map(c => {
+      const b = c.getBoundingClientRect();
+      return {cell: c.className, right: Math.round(b.right), page, row: Math.round(r.right),
+        inside: b.right <= page + 1 && b.right <= r.right + 1 && b.left >= r.left - 1};
+    });
+  });
+}"""
+
+
+@pytest.mark.parametrize("width", [900, 1024, 1280])
+def test_the_activity_tables_fold_their_columns_at_200_percent_text(
+    server: Server,  # noqa: F811
+    width: int,
+) -> None:
+    """Audit N9/P2: at 200% text (a 28 px root) /admin/activity was 1200 px wide at 900 and
+    1024 px viewports and /activity 972 px at 900: the When and Actions columns spilled past
+    the page. The rows now follow the table's own width in its text: nothing scrolls sideways
+    and every cell stays inside its row and the page."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+        for path in ("/admin/activity", "/activity"):
+            page.goto(f"{server.base}{path}", wait_until="networkidle")
+            page.evaluate(ROOT_200)
+            page.wait_for_timeout(150)
+            assert page.locator(".act-table .tr.ev").count() >= 1, path
+            assert page.evaluate(MEASURE) == [], (path, width)
+            width_now = page.evaluate("() => document.documentElement.scrollWidth")
+            assert width_now <= width, (path, width_now)
+            cells = page.evaluate(ACT_CELLS)
+            spilt = [c for c in cells if not c["inside"]]
+            assert cells and not spilt, (path, width, spilt)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width,theme", [(360, "light"), (360, "dark"), (1280, "light"), (1280, "dark")])
+def test_try_again_in_the_held_strip_is_a_button_not_an_underlined_link(
+    server: Server,  # noqa: F811
+    width: int,
+    theme: str,
+) -> None:
+    """Reviewer's P1 on 5625c3b: the held strip's Try again (busy.held_html, an a.btn in a
+    .notice) was underlined in the notice's orange, because .notice a{color:inherit;
+    text-decoration:underline} beat the button's own look. A button in a notice keeps its colour
+    and no underline, at 44 px, at a phone and a desktop in both themes."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/collection", wait_until="networkidle")  # read and kept
+        server.ark.fail_collection_reads = True
+        try:
+            page.goto(f"{server.base}/collection", wait_until="networkidle")
+            again = page.locator(".notice.held a.btn", has_text="Try again")
+            assert again.count() == 1
+            got = again.evaluate(
+                "e => { const cs = getComputedStyle(e); const probe = document.createElement('a');"
+                " probe.className = 'btn'; probe.textContent = 'x'; document.body.appendChild(probe);"
+                " const own = getComputedStyle(probe); const out = {deco: cs.textDecorationLine,"
+                " color: cs.color, own: own.color, strip: getComputedStyle(e.parentElement).color,"
+                " height: e.getBoundingClientRect().height}; probe.remove(); return out; }"
+            )
+            assert got["deco"] == "none", got
+            assert got["color"] == got["own"] and got["color"] != got["strip"], got
+            assert got["height"] >= 44, got
+            assert page.evaluate(CONTRAST, ".notice.held, .notice.held a.btn") == []
+            assert page.evaluate(MEASURE) == []
+            # a plain link in a notice keeps its underline and the notice's colour
+            plain = page.evaluate(
+                "() => { const n = document.querySelector('.notice.held');"
+                " const a = document.createElement('a'); a.href = '/'; a.textContent = 'x'; n.appendChild(a);"
+                " const cs = getComputedStyle(a); const out = {deco: cs.textDecorationLine, color: cs.color,"
+                " strip: getComputedStyle(n).color}; a.remove(); return out; }"
+            )
+            assert plain["deco"] == "underline" and plain["color"] == plain["strip"], plain
+        finally:
+            server.ark.fail_collection_reads = False
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width,theme", [(360, "light"), (360, "dark")])
+def test_the_binders_phone_sheet_is_titled_by_what_it_holds(
+    server: Server,  # noqa: F811
+    width: int,
+    theme: str,
+) -> None:
+    """Audit: the Binder's phone sheet was titled "Filters" when it held only the card size.
+    With no filter groups (no tags) the button and the sheet say "View"; with a tag list to
+    filter by they say "Filters", as the Search and Precons sheets do."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        for tags, word in ((False, "View"), (True, "Filters")):
+            server.ark.collection_tag_lists["alice"] = (
+                {21: {"id": 21, "name": "trade binder page 12", "color": "#d33"}} if tags else {}
+            )
+            page.goto(f"{server.base}/collection", wait_until="networkidle")
+            opener = page.locator(".spanel .sp-open")
+            assert opener.inner_text().strip() == word, (tags, opener.inner_text())
+            opener.click()
+            page.locator("#sp-filters.open").wait_for()
+            assert page.locator("#sp-filters .sp-sheet-head h2").inner_text() == word
+            assert page.locator("#sp-filters .sp-sheet-head .close").get_attribute("aria-label") == (
+                f"Close {word.lower()}"
+            )
+            assert (page.locator("#sp-filters select[name=tag]").count() == 1) == tags
+            assert page.locator("#sp-filters .sheet-size").count() == 1  # the card size is in it either way
+            assert page.evaluate(CONTRAST, "#sp-filters .sp-sheet-head h2") == []
+            assert page.evaluate(MEASURE) == []
+            page.locator("#sp-filters .sp-sheet-head .close").click()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width,theme", [(360, "light"), (360, "dark"), (1280, "light"), (1280, "dark")])
+def test_a_price_nobody_knows_reads_unknown_on_the_report_and_in_the_card_viewer(
+    server: Server,  # noqa: F811
+    width: int,
+    theme: str,
+) -> None:
+    """Audit N7/N12 (the reviewer's P2 on 5625c3b): a deck with no priced cards still read "No
+    price" on the report's Deck tile and on the companion's deck card (the report's statistics
+    tiles, companion.stats_strip), and the card viewer's price line said "no price". All three say
+    the shared muted "unknown": normal weight, no larger than the text around it, 4.5:1."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_history_page import store_report
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    store_report(
+        server.db, "user-1", "r2", deck_name="Nothing priced", stats={"price_total": 0.0, "priced_cards": 0}
+    )
+    with server.db.tx() as c:  # a watch of Sol Ring with no price recorded yet
+        c.execute(
+            "INSERT INTO watch_cards (id, sub, name, set_code, collector_number, finish, scryfall_id, "
+            "alert_pct, created_at) VALUES ('w9', 'user-1', 'Sol Ring', 'cmm', '1234', 'nonfoil', 'id-9', "
+            "12.5, 0)"
+        )
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/history/reports/r2", wait_until="networkidle")
+        deck = page.locator(".rv-page .wdg", has_text="Deck").first
+        assert "Price unknown" in deck.inner_text() and "$0" not in deck.inner_text(), deck.inner_text()
+        _one_treatment(page, ".rv-page .wdg .ui-dots .unpriced")
+        tile = page.locator(".rv-dstats .tile", has_text="Price")
+        # the label keeps its capitals (CSS); the word never takes them
+        assert tile.inner_text().split() == ["unknown", "PRICE"], tile.inner_text()
+        _one_treatment(page, ".rv-dstats .tile .unpriced")
+        assert "No price" not in page.content() and "$0.00" not in page.content()
+        assert page.evaluate(MEASURE) == []
+        # the card viewer's Price history: a watch with no price yet
+        page.goto(f"{server.base}/cards?q=Sol Ring", wait_until="networkidle")
+        page.locator(".cardgrid .pic[data-card='Sol Ring']").first.click()
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        page.get_by_role("button", name="Price history").click()
+        box = page.locator("#cardview-prices")
+        box.locator("p", has_text="Nonfoil: unknown").wait_for(timeout=5000)
+        said = box.inner_text()
+        assert "no price" not in said.lower().replace("no price yet", ""), said
+        assert page.evaluate(MEASURE) == [] and errors == []
+        browser.close()

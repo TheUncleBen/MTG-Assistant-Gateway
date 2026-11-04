@@ -1467,9 +1467,17 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
             "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))", AS_OF
         )
         assert day and day in note.inner_text() and "3 Nov" not in note.inner_text(), (day, note.inner_text())
-        said = f"Printings and prices as of {day} (Scryfall can't be reached right now)"
+        # one short line, the same words as the chat's printings card (audit P8): the old wording,
+        # "Printings and prices as of ... (Scryfall can't be reached right now)", took three lines
+        # on a phone
+        said = f"As of {day} \u00b7 Scryfall can't be reached"
         assert note.inner_text().strip() == said
         assert note.get_attribute("role") == "status" and "notice" in (note.get_attribute("class") or "")
+        lines = note.evaluate(
+            "e => { const r = document.createRange(); r.selectNodeContents(e);"
+            " return r.getClientRects().length; }"
+        )
+        assert 1 <= lines <= 2, (width, lines, note.inner_text())
         box, grid, n = (
             page.locator(".printpick .ppbox").bounding_box(),
             page.locator(".printpick .ppgrid").bounding_box(),

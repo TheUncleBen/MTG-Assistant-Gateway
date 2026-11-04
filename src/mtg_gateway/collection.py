@@ -2440,8 +2440,12 @@ def panel_html(
                 cls="tagg",
             )
         )
+    # The phone sheet is titled by what it holds: "Filters" with filter groups, "View" when
+    # only the card-size choice is in it (0.7.46 audit).
+    sheet_word = "Filters" if groups else "View"
     sheet = sp.filters_sheet(
         sp.filter_grid(groups) if groups else "",
+        title=sheet_word,
         show_html="<button type='submit' class='btn-primary sp-show'>Show cards</button>",
         clear_html="<a class='btn sp-clear' href='/collection'>Clear filters</a>",
     )
@@ -2467,6 +2471,7 @@ def panel_html(
             placeholder="Name",
             input_id="col-q",
             search_label="Filter",
+            filters_word=sheet_word,
         )
         + sheet
         + bar

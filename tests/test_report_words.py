@@ -17,6 +17,7 @@ from mtg_gateway.decks import current_client
 from mtg_gateway.report_page import forge_solo_section_html, widgets_html
 from mtg_gateway.report_view import forge_lines, parse_goldfish, report_sections
 from mtg_gateway.reports_page import run_text, status_label
+from mtg_gateway.theme import UNPRICED_HTML
 
 from .conftest import Stack, stack_with
 from .test_companion import COMPANION, NAV, linked_browser
@@ -208,12 +209,17 @@ async def test_history_names_the_backup_folder_in_curly_quotes(stack: Stack) -> 
         await b.aclose()
 
 
-def test_a_deck_with_no_prices_reads_no_price() -> None:
+def test_a_deck_with_no_prices_reads_unknown_as_the_site_does() -> None:
+    """The companion deck card's Price tile and the report's deck tile say "unknown" (muted, as
+    theme.UNPRICED_HTML, the one treatment of a price nobody knows) when no card is priced: the
+    old expectation here, "No price", was the bug (0.7.46 audit N7/N12)."""
     stats = {"card_count": 100, "land_count": 36, "price_total": 0.0, "priced_cards": 0}
-    assert ">$0<" not in stats_strip(stats) and "No price" in stats_strip(stats)
+    strip = stats_strip(stats)
+    assert ">$0<" not in strip and "No price" not in strip and UNPRICED_HTML in strip, strip
     r = {"report_id": "rep_x", "stats": stats}
     widgets = widgets_html(r, report_sections(r))
-    assert "$0.00" not in widgets and "No price" in widgets, widgets
+    assert "$0.00" not in widgets and "No price" not in widgets, widgets
+    assert f"Price {UNPRICED_HTML}" in widgets, widgets
     assert "$310.00" in widgets_html(
         {"stats": {**stats, "price_total": 310.0, "priced_cards": 90}}, report_sections({})
     )

@@ -80,16 +80,16 @@
   function money(n) { return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   // The line over an answer from the gateway's own copy of Scryfall's printings (from_local_copy,
   // while Scryfall isn't answering): its day (as_of, an ISO date-time) in the viewer's own locale,
-  // as the site writes dates (audit N14); the gateway's own line (as_of_note) when the day can't
-  // be read. "" for a live answer.
+  // as the site writes dates (audit N14), short enough for two lines on a phone (audit P8) and
+  // the same words as the printings card in the chat; the gateway's own line (as_of_note) when
+  // the day can't be read. "" for a live answer.
   function asOfLine(d) {
     if (!d || !d.from_local_copy) return "";
     var iso = d.as_of ? String(d.as_of) : "", t = iso ? Date.parse(iso) : NaN;
     if (isNaN(t)) return d.as_of_note ? String(d.as_of_note) : "";
     var opts = { dateStyle: "medium" };
     if (iso.indexOf("T") < 0) opts.timeZone = "UTC";  // a bare day: not shifted to the day before
-    return "Printings and prices as of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) +
-      " (Scryfall can't be reached right now)";
+    return "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached";
   }
   function samePrint(p, ref) {
     return !!(ref && p && String(p.set || "").toLowerCase() === String(ref.set || "").toLowerCase() &&

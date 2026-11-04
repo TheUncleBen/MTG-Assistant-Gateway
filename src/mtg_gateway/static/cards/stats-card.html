@@ -27,6 +27,7 @@ ul.facts li:first-child{border-top:0}
 ul.facts li > span:first-child{color:var(--muted);min-width:0}
 /* a value stays whole ("2 · 0 · 0"); on a narrow card the label wraps instead */
 ul.facts li b{font-weight:600;text-align:right;white-space:nowrap;flex:none}
+ul.facts li b.unpriced{font-weight:400;color:var(--muted)}
 .verdict{margin:10px 0 0;padding:9px 11px;border-radius:var(--radius);font-size:13px;overflow-wrap:anywhere}
 .verdict.ok{background:var(--green-bg);color:var(--green)} .verdict.bad{background:var(--red-bg);color:var(--red)}
 .verdict.info{background:var(--bg2);color:var(--text)}
@@ -60,7 +61,7 @@ ul.facts li b{font-weight:600;text-align:right;white-space:nowrap;flex:none}
   function bracketName(b) { return BRACKETS[b] || String(b); }
 
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
-  function fact(list, k, v) { var li = el("li"); li.appendChild(el("span", "", k)); li.appendChild(el("b", "", v)); list.appendChild(li); }
+  function fact(list, k, v, cls) { var li = el("li"); li.appendChild(el("span", "", k)); li.appendChild(el("b", cls || "", v)); list.appendChild(li); }
   function link(text, url) {
     var a = el("a", "link", text); a.href = "#";
     a.onclick = function (e) { e.preventDefault(); B.openLink(url, function (m) { B.setStatus(m, ""); }); };
@@ -157,7 +158,10 @@ ul.facts li b{font-weight:600;text-align:right;white-space:nowrap;flex:none}
       drawColours(st.color_pips || st.colour_pips || {}, st.mana_sources || {}, st.color_identity || st.colour_identity);
       fact(facts, "Lands / nonlands", num(st.land_count) + " / " + num(st.nonland_count));
       if (st.average_mana_value != null) fact(facts, "Average mana value", String(st.average_mana_value));
-      fact(facts, "Price", "$" + num(st.price_total).toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
+      // no card priced: "unknown", muted and plain, as the site says it (never "$0.00"); a partly
+      // priced deck keeps its sum and "(n of m priced)"
+      if (st.priced_cards === 0 || (st.price_total == null && !num(st.priced_cards))) fact(facts, "Price", "unknown", "unpriced");
+      else fact(facts, "Price", "$" + num(st.price_total).toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
       if (st.game_changers) fact(facts, "Game changers", String(st.game_changers.length));
       fact(facts, "Tutors · extra turns · land denial", num(st.tutors) + " · " + num(st.extra_turns) + " · " + num(st.mass_land_denial));
       if (st.salt_total) fact(facts, "Salt", String(st.salt_total));
