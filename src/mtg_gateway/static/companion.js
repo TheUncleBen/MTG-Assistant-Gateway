@@ -586,8 +586,20 @@
     hidePrints();
     input.focus();
   }
+  // With nothing typed, the box keeps the focus and says "Type a card name." in the browser's own
+  // note at the field (static/suggest.js's needName, shared with the deck page's quick add), in
+  // place of the browser's generic words for a required field (polish batch 3 N4)
+  addForm.noValidate = true;
+  input.addEventListener("input", function () { if (input.value.trim()) window.MtgSuggest.needName(input, false); });
   addForm.addEventListener("submit", function (ev) {
     ev.preventDefault();
+    var empty = !splitQty(input.value).name;
+    window.MtgSuggest.needName(input, empty);
+    if (empty) {
+      input.focus();
+      if (input.reportValidity) input.reportValidity();
+      return;
+    }
     addTyped(input.value, pendingPrint());
   });
   // the card menu on a suggestion (static/cardmenu.js): Art variants… adds the printing picked

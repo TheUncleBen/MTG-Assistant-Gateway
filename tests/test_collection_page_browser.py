@@ -90,12 +90,18 @@ def test_the_page_fits_and_its_controls_are_44px_at_every_width(
                 page.locator(".spanel .sp-open").click()
                 page.locator("#sp-filters.open").wait_for()
                 assert page.locator("#sp-filters .sheet-size .sizeseg").is_visible()
-                assert page.locator("#sp-filters .sp-sheet-foot .sp-clear").is_visible()
+                # the sheet's Clear filters hides too while nothing is set (audit N11: the old
+                # expectation, visible on a fresh page, was the bug)
+                assert not page.locator("#sp-filters .sp-sheet-foot .sp-clear").is_visible()
                 page.locator("#sp-filters .sp-sheet-head .close").click()
                 page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
             assert page.locator("#cards > li[data-id]").count() == 24
         page.goto(f"{server.base}/collection?q=Sol", wait_until="networkidle")
         assert page.locator(".rbar .clr").is_visible() == (width >= 600)
+        if width < 600:
+            page.locator(".spanel .sp-open").click()
+            page.locator("#sp-filters.open").wait_for()
+            assert page.locator("#sp-filters .sp-sheet-foot .sp-clear").is_visible()
         assert errors == []
         browser.close()
 
@@ -317,12 +323,19 @@ def test_the_first_card_is_on_the_first_phone_screen_and_every_control_still_rea
         page.locator(".spanel .sp-open").click()
         page.locator("#sp-filters.open").wait_for()
         assert page.locator("#sp-filters .sheet-size .sizeseg").is_visible()
-        assert page.locator("#sp-filters .sp-sheet-foot .sp-clear").is_visible()
+        # Clear filters waits for a filter (audit N11: it showed on a fresh page, which the old
+        # expectation here asserted); the tag picked below brings it
+        assert not page.locator("#sp-filters .sp-sheet-foot .sp-clear").is_visible()
         tagf = page.locator("#sp-filters #col-tag")
         assert tagf.is_visible()
         tagf.select_option("trade")
         page.wait_for_url(lambda u: "tag=trade" in u)
         page.wait_for_load_state("networkidle")
+        page.locator(".spanel .sp-open").click()
+        page.locator("#sp-filters.open").wait_for()
+        assert page.locator("#sp-filters .sp-sheet-foot .sp-clear").is_visible()
+        page.locator("#sp-filters .sp-sheet-head .close").click()
+        page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
         assert page.locator("#cards > li[data-id]").count() == 4
         assert "4 entries" in page.locator("#col-count").inner_text()
         assert page.locator(".spanel .sp-open .n").inner_text() == "1"  # one filter in use

@@ -995,22 +995,12 @@ ACT_CSS = """
 .act-page .spark{flex:1 1 100%;display:flex;align-items:flex-end;gap:3px;height:36px;margin:.1rem 0 0}
 .act-page .spark i{flex:1;display:block;min-height:2px;background:var(--text-muted);border-radius:2px 2px 0 0}
 .act-page .spark i:last-child{background:var(--text)}
-.act-page form.ui-tools{display:grid;grid-template-columns:minmax(0,1fr) repeat(var(--nf),minmax(0,10rem));
-  gap:.5rem}
-.act-page form.ui-tools .f{min-width:0}
+/* the toolbar wraps as every list's does (theme.py's ui-tools rules, by the toolbar's own width):
+   its own grid of 10rem filter columns left the search 0 px wide and the page 1395 px wide at
+   1280 px with 200% text (audit N9) */
 .act-page form.ui-tools .search input{-webkit-appearance:none;appearance:none;width:100%;
   border:1px solid var(--control-border);border-radius:var(--radius)}
 .act-page form.ui-tools .f select:not(.msel-native),.act-page form.ui-tools .f .msel-btn{width:100%}
-@media (max-width:899.98px){.act-page form.ui-tools{grid-template-columns:repeat(var(--nf),minmax(0,1fr))}
-  .act-page form.ui-tools .search{grid-column:1 / -1}}
-@media (max-width:599.98px){.act-page form.ui-tools{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .act-page form.ui-tools .f:last-of-type:nth-of-type(odd){grid-column:1 / -1}
-  /* My activity's three filters share one row, as the other pages' do (re-audit D31) */
-  .act-page form.ui-tools.n3{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .act-page form.ui-tools.n3 .f:last-of-type:nth-of-type(odd){grid-column:auto}}
-/* large text: one filter a row, as theme.py's rule for every toolbar */
-@container (max-width:20em){.act-page form.ui-tools.n3 .f,
-  .act-page form.ui-tools.n3 .f:last-of-type:nth-of-type(odd){grid-column:1 / -1}}
 .act-table .tr{column-gap:.75rem}
 /* with large text a widget's word can be wider than its half of a phone's row */
 .act-page .wdg .big,.act-page .wdg .lab,.act-page .wdg .det{overflow-wrap:anywhere}
@@ -1251,7 +1241,7 @@ def admin_body(state: Any, params: Mapping[str, str], *, nav: str, now: float | 
         "What members, their apps and admins did on this gateway, newest first. Kept for a year.",
     )
     return (
-        f"<div class='act-page act-admin' style='--nf:4'>{head}{nav}"
+        f"<div class='act-page act-admin'>{head}{nav}"
         f"{ui.widgets(cards)}{top_html}"
         f"{table}{_pager(path, query, total)}</div>"
     )
@@ -1410,7 +1400,7 @@ def member_body(state: Any, sub: str, params: Mapping[str, str], *, now: float |
             + "</div>"
         )
     return (
-        "<div class='act-page act-member' style='--nf:3'>"
+        "<div class='act-page act-member'>"
         + ui.page_head(
             "My activity",
             "Everything done in your name on this gateway: sign-ins, which assistant proposed and applied "

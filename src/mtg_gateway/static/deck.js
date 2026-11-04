@@ -843,13 +843,10 @@
   // C4); its Undo takes the copy back out. An unknown name is refused in the red note; the page
   // never leaves. Without scripts the form opens the editor with the name filled in.
   // With no name, the box keeps the focus and says so, as a required field does (the browser's
-  // own note at the field), until something is typed; the form itself is never held back by it.
+  // own note at the field, static/suggest.js's needName, shared with the editor's Add), until
+  // something is typed; the form itself is never held back by it.
   var quickForm = own ? $("form.quick") : null;
-  var NEED_NAME = "Type a card name.";
-  function needName(input, need) {
-    input.setCustomValidity(need ? NEED_NAME : "");
-    if (need) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
-  }
+  function needName(input, need) { window.MtgSuggest.needName(input, need); }
   if (quickForm && $("#quick")) {
     quickForm.noValidate = true;
     $("#quick").addEventListener("input", function (e) { if (e.target.value.trim()) needName(e.target, false); });
