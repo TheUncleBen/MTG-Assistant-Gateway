@@ -1559,8 +1559,10 @@ main.wrap.ui-wide{max-width:1200px}
 @container (max-width:40em){ .ui-tools.n2 .search{flex-basis:100%} }
 @container (max-width:39.5em){ .ui-tools.n4 .f{flex-basis:calc(50% - .25rem)} }
 /* large text on a phone (the row under 20 em of its own text): one filter a row, so no choice is
-   cut to "All…" (0.7.46 audit D31) */
-@container (max-width:20em){ .ui-tools .f,.ui-tools .search{flex-basis:100%;grid-column:1 / -1} }
+   cut to "All…" (0.7.46 audit D31); it names .n3 and .n4 too, so the rules above for so many
+   filters never keep two a row here */
+@container (max-width:20em){ .ui-tools .f,.ui-tools.n3 .f,.ui-tools.n4 .f,.ui-tools .search{flex-basis:100%;
+  grid-column:1 / -1} }
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
 
 /* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
