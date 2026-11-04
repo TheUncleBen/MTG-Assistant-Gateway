@@ -50,10 +50,13 @@ def test_a_validators_refusal_is_said_in_the_members_words() -> None:
         "state": "failed",
         "result": {"detail": "changes must be a non-empty list"},
         "created_by": "assistant",
+        "created_by_client": "app-1",
         "actor": "app-1",
     }
     text = _page_step(p)
     assert "empty or damaged" in text and "Ask your assistant for a new one" in text
     assert "non-empty" not in text and "must be" not in text
+    # said once (final audit N09: "Ask your assistant…" came twice), with what is left
+    assert text.count("Ask your assistant") == 1 and "Nothing was changed on Archidekt." in text
     p["result"] = {"detail": "Archidekt refused the change: the deck is locked"}
     assert "the deck is locked" in _page_step(p)

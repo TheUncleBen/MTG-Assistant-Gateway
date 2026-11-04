@@ -469,6 +469,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 view=view,
                 folder=folder,
                 total=None if unreadable and not total else total,
+                in_folders=0 if level.searching else sum(int(f.get("decks") or 0) for f in level.folders),
                 pending=pending,
                 direction=filters["direction"],
                 colors=filters["colors"],

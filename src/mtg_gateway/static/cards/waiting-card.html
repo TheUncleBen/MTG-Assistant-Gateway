@@ -27,10 +27,9 @@
 .res li{margin:3px 0;overflow-wrap:anywhere}
 .res li .undo{margin-left:8px;vertical-align:middle}
 h2.dh{font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 4px}
-/* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads
-   (as the proposal card) */
-button:disabled{opacity:1;background:transparent;border:1px dashed currentColor;color:var(--text)}
-button.danger:disabled{color:var(--red)}
+/* Locked (the 700 ms after drawing, and while a press is out), a button keeps its own look, not
+   faded and not outlined (as the proposal card and the review page: final audit D25) */
+button:disabled{opacity:1;cursor:wait}
 @media (max-width:480px){.wl .btns{flex:1 1 100%}.wl .btns button{flex:1 1 0}}
 </style>
 </head>

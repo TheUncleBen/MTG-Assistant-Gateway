@@ -364,3 +364,20 @@ async def test_the_owner_can_flip_the_sections_to_fold_open_on_the_list(gw: Harn
         assert "href='/account/details/" not in page and "data-section-pages='{}'" in page
     finally:
         await b.aclose()
+
+
+async def test_assistants_way_back_names_where_the_member_came_from(gw: Harness) -> None:
+    """Account's own Assistants row opens the page with "Account" as the way back; from Account
+    details the way back is "Account details" (final audit F06)."""
+    b = Browser(gw)
+    try:
+        await b.login()
+        hub = (await b.http.get("/account")).text
+        assert "href='/account/assistants?from=account'" in hub
+        page = (await b.http.get("/account/assistants?from=account")).text
+        assert "<a class='yback' href='/account'>" in page and "Account</a><h1>Assistants</h1>" in page
+        assert "Account details</a>" not in page
+        page = (await b.http.get("/account/assistants")).text
+        assert "<a class='yback' href='/account/details'>" in page and "Account details</a>" in page
+    finally:
+        await b.aclose()

@@ -1553,7 +1553,7 @@ CONDITION_WORDS = {
     "HP": "Heavily Played",
     "DMG": "Damaged",
 }
-PURPOSE = "The cards you own, kept in your Archidekt account (your Archidekt collection)."
+PURPOSE = "The cards you own, in your Archidekt collection."
 TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 7.5rem 8.5rem var(--ctl)"
 TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
 TABLE_SM = "minmax(0,1fr) var(--ctl)"
@@ -1747,7 +1747,10 @@ def tag_chip(name: str, colors: dict[str, str] | None) -> str:
     reads in both themes whatever the colour."""
     color = _tag_color(name, colors)
     style = f" style='--tagc:{color}'" if color else ""
-    return f"<span class='pill tag'{style}><i class='sw' aria-hidden='true'></i>{_esc(name)}</span>"
+    return (
+        f"<span class='pill tag'{style} title='{_esc(name)}'><i class='sw' aria-hidden='true'></i>"
+        f"<span class='t'>{_esc(name)}</span></span>"
+    )
 
 
 def tag_chips(names: list[str], colors: dict[str, str] | None) -> str:
@@ -2266,16 +2269,21 @@ def bulk_html(csrf: str, back: str, tags: list[str], tag_colors: dict[str, str] 
         f"<form method='post' action='/collection' id='{BULK_FORM}' class='col-bulkform'>{csrf_in}"
         "<input type='hidden' name='action' value='bulk'></form>"
     )
-    actions = [
-        "<button type='button' class='btn col-all'>Select all</button>",
-        ui.box_opener("Condition…", "/collection", "col-bulk-cond"),
-        ui.box_opener("Finish…", "/collection", "col-bulk-finish"),
-        ui.box_opener("Tags…", "/collection", "col-bulk-tags"),
-        f"<button type='submit' class='btn btn-outline-danger' form='{BULK_FORM}' name='do' value='remove'>"
-        f"{icon('trash')}Remove</button>",
-        "<button type='button' class='btn col-clear'>Cancel</button>",
+    # one slim row (final audit F01): × Cancel, the count, Select all, ⋯ (Condition…, Finish…,
+    # Tags…), Remove
+    actions = ["<button type='button' class='btn col-all'>Select all</button>"]
+    more = [
+        ui.menu_opener("Condition…", "/collection", "col-bulk-cond", icon_name="check"),
+        ui.menu_opener("Finish…", "/collection", "col-bulk-finish", icon_name="sun"),
+        ui.menu_opener("Tags…", "/collection", "col-bulk-tags", icon_name="tag"),
     ]
-    bar = ui.selection_bar("0 selected", actions, label="Selected cards", hidden=True)
+    end = [
+        f"<button type='submit' class='btn btn-outline-danger' form='{BULK_FORM}' name='do' value='remove'"
+        f" aria-label='Remove' title='Remove'>{icon('trash')}<span class='lbl'>Remove</span></button>"
+    ]
+    bar = ui.selection_bar(
+        "0 selected", actions, label="Selected cards", hidden=True, cancel_cls="col-clear", more=more, end=end
+    )
     cond = ui.box(
         "col-bulk-cond",
         "Set the condition",
@@ -2378,9 +2386,12 @@ def panel_html(
     tags: list[str] | None = None,
     tag: str = "",
 ) -> str:
-    """The shared search panel: the name box, then the results bar (count, Sort with a direction
-    for Set release and Price, Grid or List, the card size, Clear filters). ``priced``: Price is
-    offered (prices on). ``tags``: the member's binder tags, a Tag drop-down (``tag`` chosen)."""
+    """The shared search panel: the name box with the Filters button, the filter groups (the Tag
+    drop-down, ``tags``: the member's binder tags, ``tag`` chosen), then the results bar (count,
+    Sort with a direction for Set release and Price, Grid or List, the card size, Clear filters).
+    On a phone the groups, the card size and Clear filters wait in the Filters sheet (as My decks
+    and card search), so the bar is two rows and the first card is on the first screen (final
+    audit N11). ``priced``: Price is offered (prices on)."""
     sorts = {k: v for k, v in SORTS.items() if priced or k != "price"}
     sort_opts = "".join(
         f"<option value='{k}'{' selected' if k == sort else ''}>{v}</option>" for k, v in sorts.items()
@@ -2411,16 +2422,24 @@ def panel_html(
         f"<select class='sortf' id='col-sort' name='sort'>{sort_opts}</select></span>{dir_html}"
         f"<span class='sortcw'><select class='sortc' aria-label='Sort by'>{sortc}</select></span></span>"
     )
+    groups = []
     if tags:
-        tag_opts = "<option value=''>All cards</option>" + "".join(
-            f"<option value='{_esc(t)}'{' selected' if collection_tags.same_name(t, tag) else ''}>{_esc(t)}"
-            "</option>"
-            for t in tags
+        chosen = next((t for t in tags if collection_tags.same_name(t, tag)), "")
+        groups.append(
+            sp.select_group(
+                label="Tag",
+                name="tag",
+                options=[("", "All cards"), *((t, t) for t in tags)],
+                value=chosen,
+                input_id="col-tag",
+                cls="tagg",
+            )
         )
-        sort_html = (
-            "<span class='g tagg'><label class='lbl' for='col-tag'>Tag</label>"
-            f"<select id='col-tag' name='tag'>{tag_opts}</select></span>" + sort_html
-        )
+    sheet = sp.filters_sheet(
+        sp.filter_grid(groups) if groups else "",
+        show_html="<button type='submit' class='btn-primary sp-show'>Show cards</button>",
+        clear_html="<a class='btn sp-clear' href='/collection'>Clear filters</a>",
+    )
     count_text = f"{count:,} {'entry' if count == 1 else 'entries'}"
     # Select (the page's script shows it): opens the select mode, nothing ticked (re-audit N03)
     select = (
@@ -2442,8 +2461,8 @@ def panel_html(
             placeholder="Name",
             input_id="col-q",
             search_label="Filter",
-            filters_button=False,
         )
+        + sheet
         + bar
         + "<noscript><button type='submit' class='btn apply'>Apply</button></noscript></form></section>"
     )
@@ -2464,16 +2483,20 @@ COLLECTION_CSS = """
 .collection .ui-head .acts details.colmore form.clearf button{width:100%}
 .mtgbox .body fieldset.tags{border:0;padding:0;margin:0;grid-column:1/-1;min-width:0}
 .collection .ui-head.phead{align-items:center}
-@media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%}
-  .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center}
-  .collection .ui-head .acts details.colmore{flex:1 1 auto}
-  .collection .ui-head .acts details.colmore > summary.btn{width:100%;box-sizing:border-box} }
+/* on a phone Add cards takes the row and More ends it (one row above the list, as the other
+   tabs: final audit N11, F10) */
+@media (max-width:599.98px){ .collection .ui-head .acts{margin-left:0;width:100%;flex-wrap:nowrap}
+  .collection .ui-head .acts .btn{flex:1 1 auto;justify-content:center;min-width:0}
+  .collection .ui-head .acts details.colmore{flex:0 0 auto;order:2}
+  .collection .ui-head .acts details.colmore > summary.btn{width:auto;box-sizing:border-box} }
 /* a tag as a chip: the tag's colour as a dot (--tagc) beside its name in the page's own text colour,
    so it reads in both themes whatever colour the member picked */
-.pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem .1rem .35rem;
+.pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem;
   border-radius:999px;border-color:var(--border-soft);background:var(--surface-2);color:var(--text);
   font-weight:600;font-size:.8rem;line-height:1.5;max-width:100%;min-width:0}
-.pill.tag > span,.pill.tag{overflow-wrap:anywhere}
+/* one line: a long name ends in an ellipsis (the whole name is the hover text and the Details
+   box's), never three lines inside a pill (polish B6) */
+.pill.tag > .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pill.tag .sw,.tagck .sw{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;flex:none;
   background:var(--tagc,var(--text-muted));box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
 .pill.tag.more{padding:.1rem .5rem}
@@ -2509,7 +2532,7 @@ ul.colllist .cardc .tagrow{margin-top:.25rem}
 #col-notes .notice li+li{margin-top:.3rem}
 .collection .ui-widgets{margin:0 0 1rem}
 .collection .ui-widgets a.ext{display:inline-flex;align-items:center}
-/* the results bar: the card size and Clear filters stay on phones (no Filters sheet holds them) */
+/* the results bar: Set release's direction button beside the sort */
 .collection .spanel .rbar .dirbtn{margin:0;width:var(--ctl);height:var(--ctl);padding:0;display:inline-flex;
   align-items:center;justify-content:center;border:1px solid var(--control-border);
   border-radius:var(--radius);
@@ -2519,10 +2542,8 @@ ul.colllist .cardc .tagrow{margin-top:.25rem}
 .collection .spanel .rbar .sortcw select{min-width:0}
 .collection .spanel .apply{margin:.5rem 0 0}
 @media (max-width:599.98px){
-  .collection .spanel .rbar .size,.collection .spanel .rbar .clr{display:inline-flex}
   .collection .spanel .rbar .brka{display:block}
-  .collection .spanel .rbar .sort:has(.sortcw) .dirbtn{display:none}
-  .collection .spanel .rbar .clr{margin-left:auto} }
+  .collection .spanel .rbar .sort:has(.sortcw) .dirbtn{display:none} }
 /* the tiles: card search's, with the stepper under the name; the finish and condition on the
    picture; no mana row, so the name block is one row */
 ul.collgrid{margin:0 0 1rem}
@@ -2534,6 +2555,11 @@ ul.collgrid .pic .fin,ul.collgrid .pic .cond{position:absolute;bottom:6px;font-s
   line-height:1.5;padding:0 .4rem;border-radius:4px;background:rgba(0,0,0,.72);color:#fff}
 ul.collgrid .pic .fin{right:6px} ul.collgrid .pic .cond{left:6px}
 ul.collgrid .act{display:flex;align-items:center;min-width:0}
+/* the tiles of a row share a height (the grid's), and the stepper sits at every tile's foot, so
+   steppers line up across a row whatever a tile's tags (polish B7) */
+ul.collgrid > li.cc{display:flex;flex-direction:column}
+ul.collgrid > li.cc > .meta{flex:1 1 auto}
+ul.collgrid > li.cc > .act{margin-top:auto}
 /* two tiles a row on a narrow phone at S and M (one at L); with larger text (the columns are
    sized in rem) one tile a row, so a card's name is never broken inside a word */
 @media (max-width:420px){
@@ -2555,11 +2581,14 @@ ul.collgrid .nm .kebab{grid-column:3;grid-row:1}
    44 px targets), breaking "Bannerkeeper": the name takes the first row whole and the tick box
    and the ⋮ share the row under it */
 @media (max-width:420px){
-  html:not([data-card-size=l]) ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;
-    grid-template-rows:auto auto}
-  html:not([data-card-size=l]) ul.collgrid .nm .name{grid-column:1 / -1;grid-row:1}
-  html:not([data-card-size=l]) ul.collgrid .nm .chk{grid-column:1;grid-row:2}
-  html:not([data-card-size=l]) ul.collgrid .nm .kebab{grid-column:3;grid-row:2} }
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm{
+    grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto}
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .name{
+    grid-column:1 / -1;grid-row:1}
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .chk{
+    grid-column:1;grid-row:2}
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .kebab{
+    grid-column:3;grid-row:2} }
 #col-notes .notice form.inline{display:inline-flex;margin:0 0 0 .5rem;vertical-align:middle}
 #col-notes .notice form.inline .btn{margin:0}
 ul.collgrid .cc.sel .pic,ul.colllist li.sel{outline:3px solid var(--orange-ctl);outline-offset:-3px}
@@ -2732,6 +2761,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             head_extra=f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}{COLLECTION_CSS}{VISIBILITY_CSS}</style>"
             + (
                 "<script src='/static/cardview.js' defer></script>"
+                "<script src='/static/searchpanel.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "
                 "src='/static/collection.js' defer></script>"
                 "<script src='/static/filepick.js' defer></script>"
@@ -3052,15 +3082,20 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             got["restore"] = True
         return got
 
-    def strip(text: str, kind: str, *, html: bool = False) -> str:
-        """A notice strip at the top of the page, with a × to close (the page's script hides it)."""
+    def strip(text: str, kind: str, *, html: bool = False, remember: str = "") -> str:
+        """A notice strip at the top of the page, with a × to close (the page's script hides it).
+        ``remember``: a name the script keeps the close under on this browser, so the strip stays
+        closed on later visits (the price-sort note, re-audit N10)."""
         x = (
             "<button type='button' class='nx' aria-label='Close' title='Close' data-dismiss>"
             f"{icon('x')}</button>"
         )
-        return ui.notice(
+        out = ui.notice(
             x + (text if html else _esc(text)), kind, html=True, role="alert" if kind == "error" else "status"
         )
+        if remember:
+            out = out.replace("<div class='notice", f"<div data-remember='{_esc(remember)}' class='notice", 1)
+        return out
 
     def notice(code: str | None, *, sub: str = "", token: str | None = None, csrf: str = "") -> str:
         if code == "bulk" and token:
@@ -3300,9 +3335,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             reading = sub in first_reads
             if lq["sort"] == "price" and value is None:
                 notes += strip(
-                    "Sorting by price needs your binder's value, worked out with the daily price "
-                    "check. Until then, cards are shown in the order you added them.",
+                    "Price sort starts after the daily price check; until then, newest first.",
                     "ok",
+                    remember="price-sort",
                 )
         else:
             value, reading = None, False

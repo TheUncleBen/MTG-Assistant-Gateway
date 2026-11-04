@@ -73,6 +73,15 @@ async def test_the_forum_page_lists_the_groups_and_their_sections(member: Browse
     assert "1,200" in page and ">300<" in page
     # no section chips above the tables: the rows name every section once (0.7.44 L13)
     assert "ui-chip" not in page
+    # a name box narrows the sections as you type (static/forum.js), and on submit without scripts
+    # (0.7.46 audit QG-25)
+    assert "role='search' method='get' action='/forum'" in page and "placeholder='Section name'" in page
+    assert "data-q='general talk about anything" in page.lower() or "data-q='general" in page.lower()
+    narrowed = (await member.http.get("/forum?q=deck")).text
+    assert "Ask for help with a deck" in narrowed and "Talk about anything" not in narrowed
+    assert "value='deck'" in narrowed
+    none = (await member.http.get("/forum?q=zzz")).text
+    assert "No section matches." in none
     # starting a thread stays on Archidekt, with the one line why
     assert "href='https://archidekt.com/forum/thread/new'" in page and "New thread on Archidekt" in page
     assert esc("Archidekt asks you to prove you're human before starting a thread") in page

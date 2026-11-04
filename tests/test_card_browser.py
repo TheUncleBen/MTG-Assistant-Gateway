@@ -733,8 +733,8 @@ LOCKED = """() => {
   return ["approve", "reject"].map(id => {
     const b = document.getElementById(id), s = getComputedStyle(b);
     const a = lum(rgb(s.color)), z = lum(bg(b));
-    return {id, disabled: b.disabled, opacity: s.opacity, border: s.borderTopStyle,
-            borderColour: s.borderTopColor, colour: s.color,
+    return {id, disabled: b.disabled, opacity: s.opacity, border: s.borderTopStyle, cursor: s.cursor,
+            borderColour: s.borderTopColor, colour: s.color, bg: s.backgroundColor,
             ratio: (Math.max(a, z) + 0.05) / (Math.min(a, z) + 0.05)};
   });
 }"""
@@ -743,8 +743,9 @@ LOCKED = """() => {
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_locked_buttons_read_at_full_strength(theme: str) -> None:
     """As on the review page, while Approve and Reject are locked (the 700 ms after
-    drawing, and while a press is out) they are not faded: full-strength text with a dashed outline
-    in each button's own colour, at least 4.5:1 against the card, at 344, 390, 673 and 1280 px."""
+    drawing, and while a press is out) they are not faded and not outlined (final audit D25: a
+    dashed outline read as disabled): each keeps its own look, full-strength, at least 4.5:1
+    against what is behind its text, at 344, 390, 673 and 1280 px."""
     from playwright.sync_api import sync_playwright
 
     from .test_cards_browser import _shot
@@ -773,10 +774,14 @@ def test_locked_buttons_read_at_full_strength(theme: str) -> None:
                 card.locator("#approve:enabled").wait_for(timeout=5_000)
                 card.locator("#reject:enabled").wait_for(timeout=5_000)
                 frame = page.frames[1]
+                ready = {b["id"]: b for b in frame.evaluate(LOCKED)}
                 frame.evaluate("() => { approve.disabled = true; reject.disabled = true; }")
                 for b in frame.evaluate(LOCKED):
-                    assert b["disabled"] and b["opacity"] == "1", (width, b)
-                    assert b["border"] == "dashed" and b["borderColour"] == b["colour"], (width, b)
+                    assert b["disabled"] and b["opacity"] == "1" and b["cursor"] == "wait", (width, b)
+                    was = ready[b["id"]]
+                    assert not was["disabled"] and b["border"] != "dashed", (width, b)
+                    for k in ("border", "borderColour", "colour", "bg"):
+                        assert b[k] == was[k], (width, k, b, was)
                     assert b["ratio"] >= 4.5, (width, b)
                 page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
                 _shot(page, f"l8-chatcard-locked-{width}-{theme}")

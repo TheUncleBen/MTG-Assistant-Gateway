@@ -49,11 +49,11 @@ async def test_the_page_is_a_dashboard_with_the_shared_panel_and_card_search_til
         # page and counts the cards; the h1 is for screen readers
         assert "<h1 class='sr-only'>Binder: Cards</h1>" in page
         assert "<a href='/collection' aria-current=page>Cards<span class='cn'>3</span>" in page
-        assert (
-            "<p class='ui-sub'>The cards you own, kept in your Archidekt account "
-            "(your Archidekt collection).</p>"
-        ) in page
-        assert page.count("btn-primary") == 1
+        assert "<p class='ui-sub'>The cards you own, in your Archidekt collection.</p>" in page
+        # two orange buttons: + Add cards in the head, and Show cards at the foot of the phone's
+        # Filters sheet (the sheet is hidden on wider screens)
+        assert page.count("btn-primary") == 2
+        assert page.count("<button type='submit' class='btn-primary sp-show'>Show cards</button>") == 1
         assert re.search(
             r"<a class='btn btn-primary' href='/collection\?add=1' data-box-open='col-add'>", page
         )

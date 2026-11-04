@@ -111,6 +111,12 @@
       else if (f.type !== "hidden" && f.value.trim()) n += 1;
     });
     badgeEl.textContent = n ? String(n) : "";
+    clearShown(n > 0);
+  }
+  // Clear filters (the bar's and the sheet's) shows once a filter is set: a button that would do
+  // nothing looked unintentional (polish C4)
+  function clearShown(on) {
+    $$(".sp-clear", panel).forEach(function (c) { c.hidden = !on; });
   }
   panel.addEventListener("click", function (e) {
     if (e.target.closest(".sp-open")) { if (inPlace()) setFold(sheet.classList.contains("folded")); else openSheet(); return; }

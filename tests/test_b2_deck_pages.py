@@ -288,7 +288,12 @@ async def test_goldfish_intro_and_forge_solo_line(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
         page = (await b.http.get(f"{DECK}/goldfish", headers=NAV)).text
-        assert "Commander: first mulligan free · on the play · Nothing is saved or sent to Archidekt" in page
+        # the facts line's dots are drawn by CSS, so none dangles at a wrapped line's end (polish C1)
+        assert (
+            "<p class='muted small gf-intro ui-dots'><span>100 cards</span>"
+            "<span>Commander: first mulligan free</span><span>on the play</span>"
+            "<span>Nothing is saved or sent to Archidekt" in page
+        )
         assert "class='gf-size'" in page and "data-card-size-set='m'" in page
         assert "Keep this hand, or take a mulligan" not in page
         # no newest_forge_solo on the report service: the plain "No solo test yet." line

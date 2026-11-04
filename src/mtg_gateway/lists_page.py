@@ -397,31 +397,44 @@ def hub_html(
     ungrouped: int = 0,
     csrf: str = "",
     open_box: str = "",
+    q: str = "",
 ) -> str:
     """The hub's two blocks, in the Account page's grouped-list style (account_hub.HUB_CSS): the
     six Archidekt lists with the counts known so far (static/lists.js fills the rest from
     COUNTS_API), and the watchlist lists (None while watchlists are off) with their counts, a ⋮
-    (Rename list…, Delete list…) and New list…, a box posting to the Watchlist."""
+    (Rename list…, Delete list…) and New list…, a box posting to the Watchlist. A name box above
+    narrows the rows as you type (static/lists.js; ``q`` is the box submitted without scripts:
+    0.7.46 audit QG-25)."""
+    needle = q.strip().casefold()
     rows = []
     for t in TABS:
+        if needle and needle not in t.label.casefold():
+            continue
         n = counts.get(t.kind)
         val = f"<span class='val'>{n:,}</span>" if n is not None else "<span class='val'></span>"
         rows.append(
-            f"<a class='yrow' href='{tab_page_of(t)}'>{icon(TAB_ICONS[t.slug])}"
+            f"<a class='yrow' href='{tab_page_of(t)}' data-q='{esc(t.label.casefold())}'>"
+            f"{icon(TAB_ICONS[t.slug])}"
             f"<span class='lbl'>{esc(t.label)}"
             f"</span>{val}<span class='ch'>{icon('chev')}</span></a>"
         )
     missing = any(counts.get(t.kind) is None for t in TABS)
     fill = f" data-counts='{COUNTS_API}'" if missing else ""
+    tools = ui.toolbar(HUB, search_label="Find a list", placeholder="List name", q=q)
+    tools += "<p class='muted small lp-count' data-filter-count aria-live='polite'></p>"
     arch = (
-        f"<section class='ygrp'><h2>Your Archidekt lists</h2><div class='rows lp-hubrows'{fill}>"
-        f"{''.join(rows)}</div></section>"
+        f"<section class='ygrp'{' hidden' if not rows else ''}><h2>Your Archidekt lists</h2>"
+        f"<div class='rows lp-hubrows'{fill}>{''.join(rows)}</div></section>"
     )
     if watch_lists is None:
-        return f"<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div></div></div>"
+        return (
+            f"{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div></div></div>"
+        )
     wrows = []
     for wl in watch_lists:
         name = wl["name"]
+        if needle and needle not in name.casefold():
+            continue
         href = f"/watchlist?{urlencode({'list': name})}"
         items = "".join(
             f"<a href='/watchlist?{esc(urlencode({'box': box, 'list': name}))}' data-icon='{ic}'{extra}>"
@@ -432,7 +445,8 @@ def hub_html(
             )
         )
         wrows.append(
-            f"<div class='yrow wlrow'><a class='lbl' href='{esc(href)}'>{icon('folder')}"
+            f"<div class='yrow wlrow' data-q='{esc(name.casefold())}'><a class='lbl' href='{esc(href)}'>"
+            f"{icon('folder')}"
             f"<span>{esc(name)}</span></a>"
             f"<span class='val'>{wl['count']:,}</span>"
             "<details class='dd rowmenu lp-dd'><summary class='kebab' "
@@ -440,9 +454,9 @@ def hub_html(
             f"title='Menu' aria-haspopup='menu'>{icon('more')}</summary>"
             f"<div class='menu'><div class='head'>{esc(name)}</div>{items}</div></details></div>"
         )
-    if ungrouped:
+    if ungrouped and (not needle or needle in "not in a list"):
         wrows.append(
-            "<a class='yrow' href='/watchlist?list=-'>"
+            "<a class='yrow' href='/watchlist?list=-' data-q='not in a list'>"
             f"{icon('folder')}<span class='lbl'>Not in a list</span><span class='val'>{ungrouped:,}</span>"
             f"<span class='ch'>{icon('chev')}</span></a>"
         )
@@ -471,13 +485,17 @@ def hub_html(
         close_href=HUB,
     )
     return (
-        f"<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div>"
+        f"{tools}<div class='yhub lp-hub'><div class='ycols'><div class='ycol'>{arch}</div>"
         f"<div class='ycol'>{watch}</div></div></div>{box}"
     )
 
 
 HUB_CSS = """
 .lp-hub{max-width:62rem;margin:0 auto}
+/* the name box narrows the rows (QG-25): a hidden row or group is gone, the count line only shows
+   with words */
+.lp-hub .ygrp[hidden],.lp-hub .yrow[hidden]{display:none}
+.lp-count{margin:-.25rem 0 .5rem}.lp-count:empty{display:none}
 .lp-hub .ygrp .yrow .val:empty{display:none}
 .lp-hub .yrow.wlrow{padding-right:.25rem}
 .lp-hub .yrow.wlrow a.lbl{display:inline-flex;align-items:center;gap:.8rem;flex:1 1 auto;min-height:44px;
@@ -1994,6 +2012,7 @@ def add_lists_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
                 ungrouped=ungrouped,
                 csrf=_csrf(s, sid) or "",
                 open_box=box if box in ("newlist",) else "",
+                q=(q.get("q") or "")[:80],
             )
         )
         return page(

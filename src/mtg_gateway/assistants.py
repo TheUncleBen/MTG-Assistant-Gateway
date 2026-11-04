@@ -295,7 +295,9 @@ def _app_row(a: Assistant, default: str) -> str:
     )
 
 
-def list_html(db: Any, sub: str, default: str, csrf_in: str, *, open_box: bool = False) -> str:
+def list_html(
+    db: Any, sub: str, default: str, csrf_in: str, *, open_box: bool = False, back: str = "details"
+) -> str:
     """The Assistants page: "Default for new assistants" on top, then one row per connected
     assistant with its mark, name, host and last use, and its mode as the value."""
     apps = connected(db, sub)
@@ -343,8 +345,13 @@ def list_html(db: Any, sub: str, default: str, csrf_in: str, *, open_box: bool =
             "your default.",
         )
         foot = f"<div class='ydisc'>{ui.button_link('Guided setup', '/install', icon_name='download')}</div>"
+    # the way back names where the member came from: Account's own Assistants row, or Account
+    # details' (final audit F06)
+    back_href, back_text = (
+        ("/account", "Account") if back == "account" else ("/account/details", "Account details")
+    )
     return (
-        f"<a class='yback' href='/account/details'>{icon('chev')}Account details</a><h1>Assistants</h1>"
+        f"<a class='yback' href='{back_href}'>{icon('chev')}{back_text}</a><h1>Assistants</h1>"
         f"<div class='yhub ylone'><div class='ycols'><div class='ycol'>{g1}</div>"
         f"<div class='ycol'>{g2}{foot}</div></div></div>"
     )

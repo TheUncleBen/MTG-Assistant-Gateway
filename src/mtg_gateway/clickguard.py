@@ -71,6 +71,11 @@ def submitted_too_soon(secret: str, scope: str, value: str | None, now: float | 
 
 
 GUARD_HINT = "Locked for a moment: on a phone, tap once to unlock, then tap your choice."
+# the same, said for the screen in use (theme.py shows one of the two: final audit F09)
+GUARD_HINT_HTML = (
+    "Locked for a moment: <span class='on-touch'>tap once to unlock, then tap your choice.</span>"
+    "<span class='on-mouse'>it opens once you move the mouse or press a key.</span>"
+)
 
 
 def guarded_form(
@@ -104,17 +109,19 @@ def guarded_form(
     def row(disabled: bool) -> str:
         locked = " aria-disabled='true'" if tab_reachable else " disabled"
         attrs = f"{locked} data-guard" if disabled else ""
+        # the small lock a guarded button wears while locked (theme.py hides it once it opens)
+        lk = f"<span class='lk' aria-hidden='true'>{icon('lock')}</span>" if disabled else ""
         out = []
         for value, label, cls in buttons:
             if disabled and opens and value in opens:
                 out.append(
                     f"<button type='button' class='{html.escape(cls)}' "
-                    f"data-box-open='{html.escape(opens[value])}'{attrs}>{html.escape(label)}…</button>"
+                    f"data-box-open='{html.escape(opens[value])}'{attrs}>{lk}{html.escape(label)}…</button>"
                 )
             else:
                 out.append(
                     f"<button type='submit' name='action' value='{html.escape(value)}' "
-                    f"class='{html.escape(cls)}'{attrs}>{html.escape(label)}</button>"
+                    f"class='{html.escape(cls)}'{attrs}>{lk}{html.escape(label)}</button>"
                 )
         return "".join(out)
 
@@ -123,7 +130,7 @@ def guarded_form(
         f"data-dwell='{GUARD_DWELL_MS}' "
         f"data-settle='{GUARD_SETTLE_MS}'>{fields}"
         # the lock's note sits in the buttons' row, above them, so it is in the pinned bar on a phone
-        f"<div class='choice'><p class='muted small guard-hint'>{icon('lock')} {GUARD_HINT}</p>"
+        f"<div class='choice'><p class='muted small guard-hint'>{icon('lock')} {GUARD_HINT_HTML}</p>"
         f"{row(True)}{extra}</div></form>"
         "<noscript><style>form.guarded{display:none}</style>"
         f"<form method='post'{act}>{fields}<div class='choice'>{row(False)}{extra}</div></form></noscript>"

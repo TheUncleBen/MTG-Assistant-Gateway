@@ -145,9 +145,10 @@ def money(value: float | None) -> str:
 
 
 def est_cost_html(stats: dict[str, Any]) -> str:
-    """The deck's estimated cost: a dash with an explanation while no card has a price."""
+    """The deck's estimated cost: "unknown", muted, while no card has a price (an orange dash read
+    as a broken value: polish C7)."""
     if not stats.get("priced_cards"):
-        return "<span title='No prices from Archidekt yet'>–</span>"
+        return "<span class='muted unpriced' title='No prices from Archidekt yet'>unknown</span>"
     return money(stats.get("price_total"))
 
 
@@ -1019,15 +1020,7 @@ def toolbar_html(
         f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Find in deck' "
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
-        "</span></div>"
-        + (
-            # the hint is the grip icon's hover text (show, not tell); the grip itself is deck.js's
-            f"<span class='hint' title='{DRAG_HINT}' aria-label='{DRAG_HINT}' role='img'>"
-            f"{icon('drag')}</span>"
-            if own and view in PICTURE_VIEWS
-            else ""
-        )
-        + "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
+        "</span></div><noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></div></section>"
     )
 
@@ -2005,9 +1998,10 @@ def colours_html(deck: Deck, stats: dict[str, Any]) -> str:
         )
     ctl = (
         "<div class='statctl' role='group' aria-label='Colors' hidden><span>Colors</span>"
+        "<span class='seg2' role='group' aria-label='Chart'>"
         + _toggle("chart", "bar", "Bar", True)
         + _toggle("chart", "pie", "Pie", False)
-        + "<button type='button' data-set='lands' aria-pressed='false'>Lands only</button></div>"
+        + "</span><button type='button' data-set='lands' aria-pressed='false'>Lands only</button></div>"
     )
     return f"<div class='colourbox statbox'>{ctl}{''.join(variants)}{_identity_html(deck, stats)}</div>"
 
@@ -2783,7 +2777,9 @@ def goldfish_page_html(
         "<nav class='crumbs gf-crumbs' aria-label='Back'>"
         f"{ui.cap_link('← Back to the deck', f'/decks/{did}')}</nav>"
         f"<h1>Goldfish <span class='gf-deck'>{name}</span></h1>"
-        f"<p class='muted small gf-intro'>{esc(goldfish_intro(size, commander=commander))}</p>"
+        "<p class='muted small gf-intro ui-dots'>"
+        + "".join(f"<span>{esc(x)}</span>" for x in goldfish_intro(size, commander=commander).split(" · "))
+        + "</p>"
         + solo
         + extra_head
         + "<p class='gf-status' id='gf-status'></p>"
@@ -2950,7 +2946,7 @@ def deck_card_html(
     # the deck's tags, when it has any (no "No deck tags" line: noise on a list that is the
     # member's own, 0.7.46 audit D-24); the owner's picture only on other people's decks
     tags = d.get("tags") or []
-    pills = "".join(f"<span class='pill'>{esc(t)}</span>" for t in tags[:6])
+    pills = "".join(f"<span class='pill' title='{esc(t)}'>{esc(t)}</span>" for t in tags[:6])
     tags_html = f"<span class='tags'>{pills}</span>" if pills and not plain else ""
     initial = esc((d.get("name") or "?")[:1].upper())
     size = d.get("size")
@@ -3140,11 +3136,14 @@ def deck_saving_html(deck_id: str, changes: int) -> str:
     )
 
 
-def deck_count_text(total: int | None, *, pending: bool = False) -> str:
-    """The count in the deck list's results bar ("3 decks"); blank while the list is being read."""
+def deck_count_text(total: int | None, *, pending: bool = False, in_folders: int = 0) -> str:
+    """The count in the deck list's results bar ("5 decks · 2 in folders": every deck, as Home
+    counts them, and how many sit in folders at this level: polish C5); blank while the list is
+    being read."""
     if pending or total is None:
         return "Decks"
-    return f"{total} deck{'' if total == 1 else 's'}"
+    text = f"{total} deck{'' if total == 1 else 's'}"
+    return f"{text} · {in_folders} in folders" if in_folders else text
 
 
 def deck_list_controls_html(
@@ -3161,6 +3160,7 @@ def deck_list_controls_html(
     fmt: str = "",
     show: str = "",
     count_extra: str = "",
+    in_folders: int = 0,
 ) -> str:
     """The filter panel over the deck list (searchpanel.py, the panel the search pages share):
     the name box, Colors and Format
@@ -3200,7 +3200,9 @@ def deck_list_controls_html(
         ]
     )
     bar = sp.results_bar(
-        count_html=sp.count_html(deck_count_text(total, pending=pending), count_id="decks-total")
+        count_html=sp.count_html(
+            deck_count_text(total, pending=pending, in_folders=in_folders), count_id="decks-total"
+        )
         + count_extra,
         sort_html=sp.sort_group(
             order_name="order",
@@ -3291,7 +3293,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
   .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
   .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
-    clip:rect(0 0 0 0);white-space:nowrap}
+    clip:rect(0 0 0 0);white-space:nowrap;padding:0;margin:0;line-height:1}
   .banner .social .confirm{flex-basis:100%} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
@@ -3572,6 +3574,8 @@ ul.rows .row:hover{background:var(--surface-2)}
 ul.rows .row.side .name,ul.rows .row.side .ty{color:var(--text-muted)}
 ul.rows .q{color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
 ul.rows .n{display:flex;align-items:center;gap:.35rem;min-width:0}
+/* the category and owned dots follow the name, so every name starts at the same x (polish B2) */
+ul.rows .n > .tagdot,ul.rows .n > .owned{order:1}
 ul.rows .n .name{font-weight:700;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto;min-width:0}
 ul.rows .mc{min-width:0}
 ul.rows .set{font-size:.78rem;color:var(--text-muted);text-align:center}
@@ -3644,7 +3648,7 @@ ul.rows{container-type:inline-size}
 .bulkbar select:not(.msel-native){width:auto;max-width:100%;min-width:0;min-height:36px}
 .bulkbar .msel-btn{max-width:100%;min-width:0}
 .bulkbar .count{font-weight:600}
-.bulkbar .histtools{display:inline-flex;gap:.25rem}
+.bulkbar .histtools{display:inline-flex;gap:.5rem}
 .bulkbar .tagform{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex-basis:100%}
 .bulkbar .tagform[hidden]{display:none}
 .bulkbar .tagform input[type=text]{width:auto;flex:1 1 10rem;min-width:0;max-width:18rem}
@@ -3685,7 +3689,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .row.brew .art{width:56px;aspect-ratio:63/88;border-radius:4px;object-fit:cover;flex:none;
   background:var(--surface-2)}
 .row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1}
-.row.brew .n .q{min-width:1.2rem}
+.row.brew .n .q{min-width:1.6rem;text-align:right}
 .row.brew .n .mc{margin-left:auto;flex:none}
 .row.brew .ty{font-size:.82rem;color:var(--text-muted)}
 .row.brew .tx{font-size:.82rem;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;
@@ -3976,6 +3980,11 @@ html.cardview-open{overflow:hidden}
 .statctl button{min-height:32px;padding:0 .7rem;font-size:.9rem}
 .statctl button[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange);
   font-weight:700}
+/* Bar and Pie are one joined switch; Lands only is a toggle of its own, a gap apart (polish B5) */
+.statctl .seg2{display:inline-flex}
+.statctl .seg2 button{margin:0;border-radius:0}
+.statctl .seg2 button:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+.statctl .seg2 button:last-child{border-radius:0 var(--radius) var(--radius) 0;margin-left:-1px}
 .statctl button[data-set=lands]{margin-left:.5rem}
 .sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
 .k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
@@ -4128,6 +4137,10 @@ ul.decklist{container-type:inline-size}
 ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;
   border-top:1px solid var(--border-soft);
   font-size:.86rem;color:var(--text-muted);min-height:2rem;align-items:center}
+/* a tag longer than the row ends in an ellipsis (its name is the hover text), never cut at the
+   row's edge (final audit N13) */
+ul.decklist .tags .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  display:inline-block;vertical-align:middle}
 ul.decklist.list .deck a{flex-direction:row;align-items:center}
 ul.decklist.list .thumb{width:90px;height:60px;flex:none}
 ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
@@ -4175,18 +4188,21 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:var(--on-orange);border-radius:10px;
   padding:0 .5rem}
+.pendingbox summary b.zero{background:var(--surface-3);color:var(--text)}  /* nothing pending (C3) */
 /* add a card: one search bar. Chips above it say where the card goes; the name box leads with the
    Add button and the Foil tick beside it; on wide screens the second column also leaves room for
    the printings that float beside the suggestion list. Never a stray button. */
 .addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;grid-template-columns:minmax(0,1fr) auto}
 .addbox form.addcard .field{margin:0}
 .addbox form.addcard .targets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
-.addbox .tchip{margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;border-radius:999px;
+/* a chip is a block (not a flex box), so a long name ends in an ellipsis (audit D05); the
+   Maybeboard chip flows after the others, left-aligned like them (polish B10) */
+.addbox .tchip{display:inline-block;margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;
+  border-radius:999px;line-height:1.5rem;
   font-size:.86rem;font-weight:600;background:var(--surface);border:1px solid var(--border);
   color:var(--text-muted);max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap;text-align:left;justify-content:flex-start}
+  white-space:nowrap;text-align:left;vertical-align:middle}
 .addbox .tchip.on{background:var(--orange-tint);border-color:var(--orange);color:var(--text)}
-.addbox .tchip.side{margin-left:auto}
 .addbox form.addcard .grow{position:relative}
 .addbox form.addcard .go{display:flex;flex-direction:row;align-items:center;gap:.75rem}
 .addbox form.addcard .go button{margin:0;height:var(--ctl);white-space:nowrap}

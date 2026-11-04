@@ -51,9 +51,20 @@
     var pr = Fetch.problem(d, what);
     strip(pr.signedOut || pr.noConnection ? pr.text : name + " was not changed. " + pr.text, "error", pr.actions);
   }
+  /* a strip marked data-remember stays closed on this browser once closed (the price-sort note,
+     which otherwise came back on every visit until the daily price check: re-audit N10) */
+  var REMEMBER = "mtg.binder.closed.";
   document.addEventListener("click", function (e) {
     var x = e.target.closest ? e.target.closest("#col-notes [data-dismiss]") : null;
-    if (x) { var n = x.closest(".notice"); if (n) n.remove(); }
+    if (!x) return;
+    var n = x.closest(".notice");
+    if (!n) return;
+    var key = n.getAttribute("data-remember");
+    if (key) { try { localStorage.setItem(REMEMBER + key, "1"); } catch (err) { /* no storage */ } }
+    n.remove();
+  });
+  $$("#col-notes .notice[data-remember]").forEach(function (n) {
+    try { if (localStorage.getItem(REMEMBER + n.getAttribute("data-remember"))) n.remove(); } catch (err) { /* no storage */ }
   });
   var Fetch = window.MtgFetch;
   // never rejects: a lost connection or an ended session comes back as {ok: false} with the words
@@ -443,6 +454,7 @@
     listform.addEventListener("submit", function (e) {
       /* Enter in the name box: the same search at once, no page load */
       if (!qbox || document.activeElement !== qbox) return;
+      if (window.MtgSearchPanel) window.MtgSearchPanel.closeSheet();
       e.preventDefault();
       clearTimeout(searchTimer);
       search();
@@ -560,8 +572,8 @@
     boxes().forEach(function (b) { var li = b.closest("li"); if (li) li.classList.toggle("sel", b.checked); });
     if (bar) {
       bar.hidden = !selecting();
-      var c = $(".count", bar);
-      if (c) c.textContent = n + " selected";
+      var c = $(".count", bar), num = c ? $(".n", c) : null;
+      if (num) num.textContent = n; else if (c) c.textContent = n + " selected";
       var on = shown(), all = $(".col-all", bar);
       if (all) all.textContent = n > 0 && on.length > 0 && on.every(function (b) { return b.checked; }) ? "Select none" : "Select all";
     }
@@ -598,6 +610,8 @@
     var opener = e.target.closest("a[data-box-open]");
     if (opener && ticked().length === 0) {
       e.preventDefault();
+      var dd = opener.closest("details.dd[open]");
+      if (dd) dd.removeAttribute("open");
       var Menu = window.MtgMenu;
       if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true }); else say("Tick a card first.");
     }

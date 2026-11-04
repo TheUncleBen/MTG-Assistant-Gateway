@@ -137,8 +137,10 @@ def test_app_chip_names_the_app_and_never_guesses() -> None:
     assert "&lt;script&gt;" in ui.app_chip("<script>")
     for none in (None, "", "  "):
         out = ui.app_chip(none)
-        assert "class='ui-app none' title='No app'" in out and "—" in out
-        assert "<span class='sr-only'>No app</span>" in out
+        # nothing shown (a bare dash read as a stray mark: polish C2); a screen reader hears why
+        assert out == "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
+    risk = ui.no_risk_label()
+    assert "—" not in risk and "<span class='sr-only'>Risk not judged</span>" in risk
 
 
 @pytest.mark.parametrize(
@@ -312,6 +314,30 @@ def test_selection_bar_and_side_panel() -> None:
     assert bar.startswith("<div class='ui-bar' role='group' aria-label='Checked changes'>")
     assert "<span class='count' aria-live='polite'>2 checked</span><button>" in bar
     assert " hidden>" in ui.selection_bar("", [], label="x", hidden=True)
+    # the slim form (final audit F01): × Cancel first, the count with its word folding away, the
+    # actions, the ⋯ menu of the rest, then the one red action
+    slim = ui.selection_bar(
+        "0 selected",
+        ["<button class='all'>Select all</button>"],
+        label="Selected cards",
+        hidden=True,
+        cancel_cls="col-clear",
+        more=[ui.menu_opener("Tags…", "/collection", "col-bulk-tags", icon_name="tag")],
+        end=["<button class='rm'>Remove</button>"],
+    )
+    assert slim.startswith("<div class='ui-bar slim' role='group' aria-label='Selected cards' hidden>")
+    cancel = "<button type='button' class='btn icon-only bar-x col-clear' aria-label='Cancel' title='Cancel'>"
+    assert cancel in slim
+    count = (
+        "<span class='count' aria-live='polite'><span class='n'>0</span>"
+        "<span class='lbl'> selected</span></span>"
+    )
+    assert count in slim
+    assert slim.index("col-clear") < slim.index("class='count'") < slim.index("class='all'")
+    assert slim.index("class='all'") < slim.index("<details class='dd bar-more'>") < slim.index("class='rm'")
+    menu = slim.split("<div class='menu'>")[1].split("</div></details>")[0]
+    assert menu == f"<a href='/collection' data-box-open='col-bulk-tags'>{ui.icon('tag')} Tags…</a>"
+    assert "aria-label='More actions'" in slim and "aria-haspopup='menu'" in slim
     panel = ui.side_panel(
         "#1 Sol Ring", "<p>body</p>", label="Proposal #1", close_href="/p", back_text="Back"
     )

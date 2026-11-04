@@ -49,11 +49,18 @@
       }
     }
     for (var j = 0; j < hints.length; j++) hints[j].hidden = enabled;
+    if (enabled) unlocking(false);
+  }
+  // the unlocking tap on a phone looks pressed until the guard opens (final audit F09, A7)
+  function unlocking(on) {
+    var f = document.querySelectorAll("form.guarded");
+    for (var i = 0; i < f.length; i++) f[i].classList.toggle("unlocking", on);
   }
 
   function lock() {
     since = null;
     touched = null;
+    unlocking(false);
     set(false);
   }
 
@@ -73,6 +80,7 @@
     if (touched === null) {
       touched = performance.now();
       unlockPending = e.type === "touchstart" || (e.type === "pointerdown" && e.pointerType === "touch");
+      if (unlockPending) unlocking(true);
     }
     if (e.type === "touchstart") {
       touchSeq += 1;

@@ -62,7 +62,10 @@ def test_six_widgets_from_the_report() -> None:
     assert "95% interval 35% to 45% · against 3 precons" in widgets
     # under 70% of the deck played with its effect: the orange warning edge
     assert "<div class='wdg accent'><span class='lab'>" in widgets and "50%<small>49 of 98 cards" in widgets
-    assert "32 played without their effect · 17 need opponents" in widgets
+    assert (
+        "<span class='tx ui-dots'><span>32 played without their effect</span><span>17 need opponents</span>"
+        in widgets
+    )
     # issues found: a red edge and the count
     assert "<div class='wdg alert'>" in widgets and "2<small>issues found</small>" in widgets
     assert "$344.00<small>100 cards</small>" in widgets and "34 lands · Avg MV 3.2" in widgets

@@ -51,7 +51,15 @@ def test_the_tag_filter_and_the_details_tags_fit(server: Server, width: int, the
         browser, page, errors = _page(p, server, sid, width, theme=theme, touch=width < 900)
         page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
         assert page.evaluate(MEASURE) == [], width
-        assert page.locator("#col-tag").is_visible()
+        if width < 600:
+            # on a phone the tag filter lives in the Filters sheet, with the size and Clear filters
+            page.locator(".spanel .sp-open").click()
+            page.locator("#sp-filters.open").wait_for()
+            assert page.locator("#sp-filters #col-tag").is_visible()
+            page.locator("#sp-filters .sp-sheet-head .close").click()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        else:
+            assert page.locator("#col-tag").is_visible()
         # Clear binder… lives in the head's More menu (test_polish3_0746_browser has the menu)
         page.locator(".ui-head .acts details.colmore > summary").click()
         clear = page.locator("details.colmore button[value=clear]")
@@ -89,8 +97,10 @@ def test_the_details_box_ticks_and_saves_tags_and_the_filter_applies_on_change(s
             " && document.querySelector('#col-notes .notice.ok').textContent.includes('saved')"
         )
         assert server.ark.collections["alice"][rid]["tags"] == [tags["Keep"]]
-        # the drop-down applies on change: only the entry tagged Keep
-        page.select_option("#col-tag", "Keep")
+        # the drop-down (in the phone's Filters sheet) applies on change: only the entry tagged Keep
+        page.locator(".spanel .sp-open").click()
+        page.locator("#sp-filters.open").wait_for()
+        page.select_option("#sp-filters #col-tag", "Keep")
         page.wait_for_url("**/collection?**tag=Keep**")
         page.wait_for_load_state("networkidle")
         assert page.locator("#cards > li[data-id]").count() == 1

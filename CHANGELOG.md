@@ -539,6 +539,34 @@ name per thing.
   finish; to turn the clean-up off, put the word `off` back in its secret.
 - The launcher shortcut to the decks (press and hold the app icon) is named Decks, as in the
   navigation.
+- On a 320 px phone with the browser's text doubled, button rows wrap instead of pushing the page
+  sideways, and the Binder's first phone screen shows a card.
+- Select on the Binder, My decks and the Watchlist is one slim row: Cancel, the count, Select all
+  and a ⋯ menu with the rest. On Proposals the group's Open deck sits in its row, and the bar
+  appears once a change is ticked.
+- A button locked for a moment keeps its full look with a small lock, says “hold, then tap” on a
+  phone and “click and hold” with a mouse, and visibly changes when it is ready.
+- A proposal with no risk judgement and a snapshot with no recorded author show nothing instead
+  of a dash, and a failed apply says “Ask your assistant for a new one” once.
+- The deck page lines up: the Like count sits on the heart, every list name starts at the same
+  place, Undo and Redo are buttons, Bar and Pie are one switch with Lands only apart, a deck with
+  no prices says “Est unknown” in grey, and the editor's category chips flow left to right with
+  long names ending in “…”. Nothing pending or scanned is a grey badge, not an orange one.
+- Binder: a long tag is one line with its full name on hover or press and hold; the grid's
+  steppers line up across a row with the ⋮ beside the name; Clear filters shows only when a filter
+  is set (Binder, Card search and My decks). My decks says “5 decks · 2 in folders”, the
+  same count as Home.
+- Watchlist: each alert is its own one-line pill (“±12.5%”, the words on hover); both totals read
+  “Together … today”. Deck settings' category rows share one grid, and a narrow phone stacks the
+  three switches. A report's way-back capsules sit apart, and facts lines never leave a “·”
+  dangling at a line end.
+- Scan: “Type the card name instead” and the Type tab put the cursor in the name field, and
+  Save to binder offers Undo.
+- The `/` and `?` keys work from a ticked box, and `/` waits while a card is open in the viewer.
+- Forum and Binder › Lists have a name box that narrows the rows as you type.
+- The app's guide says press and hold where a browser would right-click; Assistants opened from
+  Account goes back to Account; the admin switch keeps “Card models” on one line; a chip row with
+  more chips fades its edge instead of cutting a chip.
 
 ### Fixed
 - After an edit on the deck page (an add, a removal, a count, Undo), the banner's date and Salt sum

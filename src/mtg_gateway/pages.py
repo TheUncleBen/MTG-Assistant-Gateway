@@ -784,7 +784,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             notice = _ok("Every assistant was disconnected.")
         csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
         body = assistants.list_html(
-            state.db, sub, state.decks.mode_of(sub), csrf_in, open_box="disconnect_all" in q
+            state.db,
+            sub,
+            state.decks.mode_of(sub),
+            csrf_in,
+            open_box="disconnect_all" in q,
+            back="account" if q.get("from") == "account" else "details",
         )
         return assistants_page("Assistants", notice + body, sub, sid)
 
@@ -3019,8 +3024,12 @@ def _page_step(p: dict[str, Any]) -> str:
         why = str(result.get("detail") or "").strip()
         if _DEVELOPER_WORDS.search(why):
             # a proposal whose own content failed the checks (an empty or malformed change list):
-            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21)
-            why = "the proposal is empty or damaged. Ask your assistant for a new one"
+            # the validator's words are for the assistant, not the member (0.7.46 audit QG-21);
+            # said once, with what is left (final audit N09)
+            return (
+                "This change could not be applied: the proposal is empty or damaged. "
+                "Nothing was changed on Archidekt. Ask your assistant for a new one."
+            )
         lead = (
             f"This change could not be applied: {why.rstrip('.')}. "
             if why

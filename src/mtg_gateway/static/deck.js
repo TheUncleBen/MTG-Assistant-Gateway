@@ -2498,11 +2498,11 @@
     var hist = el("span", "histtools");
     hist.setAttribute("role", "group");
     hist.setAttribute("aria-label", "Undo and Redo");
-    undoBtnEl = el("button", "btn-ghost small", "Undo");
+    undoBtnEl = el("button", "btn", "Undo");
     undoBtnEl.type = "button";
     undoBtnEl.title = "Undo the last change saved on this page (Ctrl+Z)";
     undoBtnEl.addEventListener("click", undoLast);
-    redoBtnEl = el("button", "btn-ghost small", "Redo");
+    redoBtnEl = el("button", "btn", "Redo");
     redoBtnEl.type = "button";
     redoBtnEl.title = "Redo the change you undid (Ctrl+Shift+Z or Ctrl+Y)";
     redoBtnEl.addEventListener("click", redoLast);

@@ -294,7 +294,8 @@ def folder_tile_html(t: dict[str, Any], *, order: str) -> str:
     )
     backup = " data-backup" if t.get("backup") else ""
     return (
-        f"<li class='folder' data-folder-id='{esc(str(t['id']))}' data-folder-name='{esc(t['name'])}'"
+        f"<li class='folder' data-folder-id='{esc(str(t['id']))}' data-folder-name='{esc(t['name'])}' "
+        f"data-decks='{int(t.get('decks') or 0)}'"
         f"{backup}>"
         f"<a href='{esc(level_href(t['id'], order=order))}'>{ic}"
         f"<span class='text'><span class='name' title='{esc(t['name'])}'>{esc(t['name'])}</span>"

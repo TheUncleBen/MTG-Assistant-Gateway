@@ -141,8 +141,10 @@ SETTINGS_CSS = """
    other on a phone; a row without a record stays read-only pills with its reason */
 /* one grid per row at every width (UI review 0.7.42, M5): the name, the count and Delete on the
    first line, the switches under them, so every Delete lines up and no row leaves a near-empty line */
-.ds ul.ds-cats li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.25rem .75rem;
-  align-items:center;padding:.35rem 0}
+/* the count and the Delete slot have fixed widths, so a row without Delete (Sideboard) keeps its
+   name field in line with the others (polish B9) */
+.ds ul.ds-cats li{display:grid;grid-template-columns:minmax(0,1fr) 4.5em 44px;gap:.25rem .75rem;
+  align-items:center;padding:.35rem 0;container-type:inline-size}
 .ds ul.ds-cats li .nm{grid-column:1;grid-row:1;min-width:0}
 .ds .ds-cats .nm input{width:100%;min-height:44px;font-weight:700}
 .ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
@@ -168,6 +170,9 @@ SETTINGS_CSS = """
 @media (max-width:599.98px){.ds .ds-cats .ds-sw{width:100%;gap:0 .75rem}
   .ds form.catnew .ds-sw{width:100%;gap:0 .75rem}
   .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{margin:-6px 0}}
+/* a row too narrow for the three switches on one line (a phone) has them one under the other,
+   never two and one (polish B9) */
+@container (max-width:26.5em){ .ds .ds-cats .ds-sw{flex-direction:column;align-items:flex-start;gap:0} }
 .ds form.catnew .row .btn{max-width:100%;white-space:normal}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
@@ -193,7 +198,9 @@ SETTINGS_CSS = """
   .ds .ds-cover{grid-template-columns:1fr}.ds .ds-cover .pv{max-width:12rem}
   .ds .ds-inline{flex-wrap:wrap}.ds .ds-inline > *{flex:1 1 100%}
   .ds .ds-inline > .btn,.ds .ds-inline > button{flex:1 1 100%;width:100%}
-  .ds .acts .btn,.ds .acts button{flex:1 1 auto}}
+  /* a button wider than the card (Add template… at large text on 320 px) wraps its words (final
+     audit F02) */
+  .ds .acts .btn,.ds .acts button{flex:1 1 auto;white-space:normal;height:auto;min-width:0}}
 /* the Package panel (packages.py): the budget row and the format pills are deck_extras.PACKAGE_FIELDS_CSS;
    their inputs keep their own size (the row's inputs are otherwise full width) */
 .ds .ds-pkg h2{display:flex;align-items:center;gap:.5rem}

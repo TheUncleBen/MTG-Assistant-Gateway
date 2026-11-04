@@ -27,8 +27,8 @@
     all.forEach(function (x) { var li = x.closest("li"); if (li) li.classList.toggle("sel", x.checked); });
     if (b) {
       b.hidden = !selecting();
-      var c = $(".count", b);
-      if (c) c.textContent = n + " selected";
+      var c = $(".count", b), num = c ? $(".n", c) : null;
+      if (num) num.textContent = n; else if (c) c.textContent = n + " selected";
       var everyOne = $(".decks-all", b);
       if (everyOne) everyOne.textContent = n > 0 && n === all.length ? "Select none" : "Select all";
     }
@@ -67,7 +67,12 @@
     if (e.target.closest(".decks-clear")) { mode(false); if (selectBtn) selectBtn.focus(); return; }
     if (e.target.closest(".decks-all")) { var all = boxes(); setAll(!(all.length && all.every(function (x) { return x.checked; }))); return; }
     var opener = e.target.closest("a[data-box-open]");
-    if (opener && ticked().length === 0) { e.preventDefault(); say("Tick a deck first."); }
+    if (opener && ticked().length === 0) {
+      e.preventDefault();
+      var dd = opener.closest("details.dd[open]");
+      if (dd) dd.removeAttribute("open");
+      say("Tick a deck first.");
+    }
   }, true);
   form.addEventListener("submit", function (e) {
     if (ticked().length === 0) { e.preventDefault(); say("Tick a deck first."); return; }

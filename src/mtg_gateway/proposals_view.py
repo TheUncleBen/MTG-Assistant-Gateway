@@ -1027,6 +1027,9 @@ PROPOSALS_CSS = (
 .pr-undo{display:inline;margin:0}
 .ui-bar button[disabled]{opacity:.55}
 .ui-bar [hidden]{display:none}
+/* the bar shows once a change is ticked (static/proposals.js marks it data-none meanwhile): a
+   pinned bar with a faded Apply and nothing ticked took a tenth of the phone (final audit F04) */
+.ui-bar[data-none]{display:none}
 @media (max-width:599.98px){
   /* two rows: the count beside Clear, then Reject and Apply side by side; at large text sizes
      the words wrap inside the buttons rather than out of them */

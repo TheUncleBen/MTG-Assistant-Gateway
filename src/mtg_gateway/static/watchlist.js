@@ -193,7 +193,8 @@
     });
     if (bar) {
       bar.hidden = n === 0;
-      bar.querySelector(".count").textContent = n + " selected";
+      var c = bar.querySelector(".count"), num = c.querySelector(".n");
+      if (num) num.textContent = n; else c.textContent = n + " selected";
     }
     var sel = document.querySelector(".watch-page .w-select");
     if (sel) sel.setAttribute("aria-pressed", n > 0 && n === boxes().length ? "true" : "false");
@@ -321,6 +322,8 @@
     var bulk = e.target.closest(".watch-page .ui-bar a[data-box-open]");
     if (bulk && ticked().length === 0) {
       e.preventDefault();
+      var dd = bulk.closest("details.dd[open]");
+      if (dd) dd.removeAttribute("open");
       var Menu = window.MtgMenu;
       if (Menu && Menu.toast) Menu.toast("Tick a card first.", { error: true });
       return;

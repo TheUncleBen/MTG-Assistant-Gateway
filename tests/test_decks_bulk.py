@@ -33,7 +33,7 @@ async def test_my_decks_has_tick_boxes_the_bar_and_its_boxes(stack: Stack) -> No
                 )
                 assert tick in page, (view, name)
             assert "<form method='post' action='/decks/bulk' id='decks-bulk' class='decks-bulkform'>" in page
-            assert "<div class='ui-bar' role='group' aria-label='Selected decks' hidden>" in page
+            assert "<div class='ui-bar slim' role='group' aria-label='Selected decks' hidden>" in page
             assert "<button type='button' class='btn decks-select' aria-pressed='false' hidden>" in page
             assert "id='decks-bulk-move'" in page and "id='decks-bulk-vis'" in page
             assert f"<option value='{ids['archive']}'>Archive</option>" in page

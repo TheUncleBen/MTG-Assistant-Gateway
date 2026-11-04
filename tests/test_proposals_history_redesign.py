@@ -429,11 +429,15 @@ async def test_history_has_no_proposals(stack: Stack) -> None:
         snaps = (await b.http.get("/history?type=snapshots", headers=NAV)).text.split("<main")[1]
         rows = snaps.count("action='/history/restore'")
         assert rows == 15 and snaps.count("href='/history?type=snapshots&amp;open=s-") >= 30
-        assert "title='Snapshots do not record who made them'>—" in body
+        # no bare dash for the unrecorded "who" (polish C2): a screen reader hears why
+        none = "<span class='ui-when'><span class='sr-only'>Snapshots do not record who made them</span>"
+        assert none in body
+        assert ">—<" not in body
         assert "Snapshots kept</span>" in body and "Backup copies</span>" in body
         details = (await b.http.get("/history?open=s-s00", headers=NAV)).text.split("<main")[1]
         drawer = details.split("<aside class='ui-drawer'")[1]
-        assert "← Back to History" in drawer and "Restore (review first)" in drawer and "<dd>—</dd>" in drawer
+        assert "← Back to History" in drawer and "Restore (review first)" in drawer
+        assert "<dd><span class='muted'>Not recorded</span></dd>" in drawer and "<dd>—</dd>" not in drawer
         # the back link is a grey capsule, not bare blue text (style only: it stays where it was)
         assert "<p class='page-only'><a class='ui-cap' href='/history'>← Back to History</a></p>" in drawer
     finally:

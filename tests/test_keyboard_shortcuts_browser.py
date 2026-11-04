@@ -62,3 +62,45 @@ def test_slash_and_ctrl_k_focus_the_search_and_question_mark_lists_the_keys(serv
             assert errors == [], errors
         finally:
             browser.close()
+
+
+def test_the_keys_wait_behind_the_card_viewer_and_work_from_a_ticked_box(server: Server) -> None:
+    """/ does not open the header's search behind an open card viewer (the keys belong to the
+    viewer), and a focused tick box is not "typing": / and ? still work from it (final audit)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        try:
+            page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+            card = page.locator(".deckview .c").first
+            card.scroll_into_view_if_needed()
+            card.click()
+            page.wait_for_selector(".cardview.open", timeout=3000)
+            page.keyboard.press("/")
+            page.wait_for_timeout(250)
+            assert page.evaluate("() => document.activeElement && document.activeElement.id") != "site-q"
+            assert page.locator(".cardview.open").count() == 1
+            page.keyboard.press("Escape")
+            page.wait_for_function("() => !document.querySelector('.cardview.open')")
+            # a ticked box on My decks (Select) has the focus; the keys still work from it
+            page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
+            page.locator(".decks-select").click()
+            tick = page.locator("#decks-list .deck .chk input[name=deck_id]").first
+            tick.click()
+            assert tick.is_checked() and page.evaluate("() => document.activeElement.type") == "checkbox"
+            page.keyboard.press("/")
+            page.wait_for_function(
+                "() => document.activeElement && document.activeElement.id === 'site-q'", timeout=3000
+            )
+            page.keyboard.press("Escape")
+            tick.focus()
+            page.keyboard.press("?")
+            box = page.locator(".mtgbox[role=dialog]:visible")
+            box.wait_for(timeout=3000)
+            assert box.locator("h2").inner_text() == "Keyboard shortcuts"
+            assert errors == [], errors
+        finally:
+            browser.close()

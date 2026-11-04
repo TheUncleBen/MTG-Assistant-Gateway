@@ -871,6 +871,15 @@ details.raw{margin:.5rem 0 0}
    and the red, not faded, not outlined (a dashed outline read as disabled, re-audit N16); the lock
    is said beside them (.guard-hint, with the lock icon) until it opens. */
 .apply form.guarded button[data-guard]:disabled{opacity:1;cursor:wait}
+/* a locked button wears a small lock (final audit F09, polish A7): it goes the moment the guard
+   opens, so the member sees that the next tap counts; the unlocking tap looks pressed meanwhile */
+form.guarded button[data-guard] .lk{display:inline-flex;align-items:center;margin-right:.1rem}
+form.guarded button[data-guard] .lk svg.i{width:14px;height:14px;flex:none}
+form.guarded button[data-guard]:not(:disabled):not([aria-disabled=true]) .lk{display:none}
+form.guarded.unlocking button[data-guard]{transform:scale(.97);filter:brightness(.9)}
+/* the hint says what opens the lock on this kind of screen: a tap, or the mouse */
+@media (hover:hover) and (pointer:fine){ .guard-hint .on-touch{display:none} }
+@media not ((hover:hover) and (pointer:fine)){ .guard-hint .on-mouse{display:none} }
 form.guarded .choice .guard-hint{display:flex;align-items:center;gap:.35rem;flex-basis:100%;width:100%;
   margin:0 0 .2rem}
 form.guarded .choice .guard-hint[hidden]{display:none}
@@ -939,7 +948,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   /* on a phone the brand is its 25 px mark alone: the link Home stays 44 px wide (review F12);
      .topbar raises it over the later .brand{min-width:0} */
   .topbar .brand{min-width:44px}
-  .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
+  .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a:not(.ui-cap),li > a.name{display:inline-block;
     padding:.6rem 0;min-height:44px;box-sizing:border-box}
   .banner .social a.soc,.banner .social button.soc{height:44px;min-height:44px;border-radius:22px}
   /* :not(._) only raises specificity: the pages' own rules (same selectors, loaded later) set
@@ -1417,7 +1426,10 @@ main.wrap.ui-wide{max-width:1200px}
   .hubbar{display:block}
   /* large text on a narrow phone: a part's name wraps between words, and a word longer than its
      part scrolls the switch sideways instead of the page */
-  .hubseg a,.hubseg > button{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15} }
+  .hubseg a,.hubseg > button{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15}
+  /* the admin switch's parts stay on one line ("Card models"); the strip scrolls with faded edges
+     instead (final audit D11) */
+  .hubseg.adm-nav a{white-space:nowrap} }
 .ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
 .ui-head h1{margin:0;min-width:0}
 /* enlarged text on a phone: the heading shrinks with the screen so a short word stays whole
@@ -1487,6 +1499,15 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
+/* more chips that way (static/topbar.js): the edge fades out instead of cutting a chip (N12) */
+.ui-chips.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
+.ui-chips.more-start{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent)}
+.ui-chips.more-start.more-end{
+  -webkit-mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent)}
+.spanel .sp-clear[hidden]{display:none}
 .ui-chip{flex:none;white-space:nowrap}
 .ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;padding:0 .8rem;
   border-radius:999px;
@@ -1637,8 +1658,8 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
   /* the group's Open deck keeps its capsule inside the row (audit D10) */
   .ui-table.ui-rows .tr.group .act{margin-right:0}
-  .ui-table.ui-rows .tr.group .act > .ui-cap{padding:0 .6rem;min-height:36px}
-  .ui-table.ui-rows .tr.group .act > .ui-cap{min-height:44px}
+  .ui-table.ui-rows .tr.group .act > .ui-cap{display:inline-flex;align-items:center;padding:0 .6rem;
+    min-height:44px;margin:0}
   /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
      grows above and below the words without moving the lines around it (F14) */
   .ui-table.ui-rows .title .t a,.ui-table.ui-rows .title a.t{display:inline-block;padding:13px 0;
@@ -1682,6 +1703,12 @@ main.wrap.ui-wide{max-width:1200px}
 .trend .tdata th a:focus-visible{
   color:var(--text);text-decoration:underline}
 
+/* a line of short facts with a dot between them ("Last check today · Prices from Scryfall"): the
+   dot is drawn before each item but the line's first, in the gap, and a wrapped line's first item
+   loses its dot at the clipped edge, so no dot is ever left dangling at a line end (polish C1) */
+.ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;overflow:hidden}
+.ui-dots > *{position:relative;min-width:0}
+.ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
 /* the sticky action bar while a list has a selection */
 .ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;
   align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.5rem 0 1rem;background:var(--surface);
@@ -1689,6 +1716,23 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-bar[hidden]{display:none}
 .ui-bar .count{font-weight:700;margin-right:auto}
 .ui-bar button,.ui-bar .btn{margin:0}
+/* the slim bar (final audit F01): × Cancel at the left, the count, Select all, a ⋯ menu with the
+   rest, then the one red action: one row on a phone. Its menu opens upward, above the bar. */
+.ui-bar.slim{gap:.3rem;padding:.35rem .5rem;container-type:inline-size}
+.ui-bar.slim .count{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.95rem}
+.ui-bar.slim > .btn,.ui-bar.slim > button{flex:0 0 auto;display:inline-flex;align-items:center;gap:.35rem;
+  padding:.35rem .6rem}
+.ui-bar.slim > .icon-only,.ui-bar.slim summary.icon-only{width:var(--ctl);min-width:var(--ctl);padding:0;
+  justify-content:center;gap:0}
+.ui-bar.slim details.dd .menu{top:auto;bottom:calc(100% + .25rem);right:0;min-width:12rem}
+.ui-bar.slim details.dd .menu a,.ui-bar.slim details.dd .menu button{min-height:44px}
+.ui-bar.slim > .btn{min-width:var(--ctl)}
+/* a narrow bar (a phone, or large text) keeps the red action's icon and drops its word; the
+   narrowest (a 360 px phone) keeps the count's number and leaves its word to screen readers
+   (zero-size text stays in the line and in the accessibility tree). The sizes are the bar's
+   content box. */
+@container (max-width:29em){ .ui-bar.slim > .btn .lbl{display:none} }
+@container (max-width:23.5em){ .ui-bar.slim .count .lbl{font-size:0} }
 /* it stays above the phone's bottom tab bar (--tab-room: its real height, static/topbar.js; 4rem
    without scripts covers it at 200% text) */
 .has-tabbar .ui-bar{bottom:calc(var(--tab-room,0px) + .75rem)}
@@ -1815,6 +1859,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
   align-items:center}
 .wdg .det .tx{display:inline}
+.wdg .det .tx.ui-dots{display:flex}
 .wdg .det a{font-weight:700}
 .wdg .det .ui-lbl{height:22px;font-size:.78rem}
 .wdg .go{margin-top:auto;padding-top:.35rem;display:flex;flex-wrap:wrap;gap:.4rem}
@@ -1989,6 +2034,7 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .body label.reason{display:flex;flex-direction:column;gap:.3rem;margin:.75rem 0 0;font-weight:700}
 .mtgbox .body label.reason textarea{width:100%;margin:0;font-weight:400;resize:vertical}
 .mtgbox .body .field + .field{margin-top:.75rem}
+.mtgbox .body p + .field{margin-top:.75rem}  /* a sentence, then "Move them to" (audit D02) */
 .mtgbox .body textarea{width:100%;min-height:16rem;resize:vertical;font-family:ui-monospace,SFMono-Regular,
   Menlo,Consolas,monospace;font-size:.9rem;line-height:1.4}
 .mtgbox .body .files{display:flex;flex-wrap:wrap;gap:.5rem;margin:0}

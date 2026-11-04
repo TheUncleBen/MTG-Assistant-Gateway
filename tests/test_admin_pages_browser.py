@@ -73,6 +73,15 @@ def test_every_admin_page_fits_and_reads(server: Server, width: int, theme: str)
                 ".filter(h => h > 0)"
             )
             assert not kebabs or min(kebabs) >= 43.5, (path, kebabs)
+            # every part of the admin switch stays on one line ("Card models"): the strip scrolls
+            # instead (final audit D11)
+            if path.startswith("/admin"):
+                lines = page.evaluate(
+                    "() => [...document.querySelectorAll('.adm-nav a')].map(a => {"
+                    " const r = document.createRange(); r.selectNodeContents(a);"
+                    " return [a.textContent.trim(), r.getClientRects().length]; })"
+                )
+                assert len(lines) == 6 and all(n == 1 for _, n in lines), (path, lines)
             _shot(page, f"admin-{path.strip('/').replace('/', '-') or 'overview'}-{width}-{theme}.png")
         # the six admin tabs sit in the same place on every tab (the 1200 px width)
         lefts = set()

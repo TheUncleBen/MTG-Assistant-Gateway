@@ -107,7 +107,7 @@
   // person has already opened another menu, the entry is pushed again for that menu (never
   // before it lands, so two entries or two backs can never be in flight), so Back never leaves
   // the page while a menu is open and never goes back twice.
-  var pushed = false, popping = false, wantsEntry = false;
+  var pushed = false, popping = false, wantsEntry = false, landing = false;
   // the shared menu (static/cardmenu.js) owns an entry of its own: while its back() is still
   // landing, a drop-down opened meanwhile takes the entry once it has landed (the popstate,
   // which the shared menu's own handler has seen first)
@@ -154,8 +154,12 @@
   }, true);
   window.addEventListener("popstate", function () {
     if (popping) {
-      // the page's own back() landed; a menu opened meanwhile needs the entry again
+      // the page's own back() landed; a menu opened meanwhile needs the entry again. A box
+      // opened from a menu item (static/box.js) may hear this popstate after this handler:
+      // "landing" tells it the popstate was this back(), not a Back press on the box.
       popping = false;
+      landing = true;
+      setTimeout(function () { landing = false; }, 0);
       if (openMenus().length) takeEntry();
       return;
     }
@@ -397,7 +401,17 @@
   }
   function navEnd() { document.documentElement.classList.remove("navigating"); }
   // true while a drop-down's own history.back() has not landed yet (static/cardmenu.js asks)
-  window.MtgDropdowns = { backPending: function () { return popping; } };
+  window.MtgDropdowns = {
+    backPending: function () { return popping; },
+    backLanding: function () { return landing; },
+    // a menu item that opens a box (static/box.js) closes its menu first, at once: the menu's
+    // history entry goes back now, so the box knows to wait for that before taking its own
+    close: function (d) {
+      if (!d || !d.open) return;
+      d.removeAttribute("open");
+      if (!openMenus().length) { wantsEntry = false; giveEntryBack(); }
+    }
+  };
   window.MtgNavStart = navStart;  // a menu link that waits for the menu's Back (static/cardmenu.js)
   document.addEventListener("click", function (e) {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

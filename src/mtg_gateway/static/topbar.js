@@ -124,7 +124,8 @@
    edge (.more-start, .more-end) shows that more parts lie that way. */
 (function () {
   "use strict";
-  var navs = document.querySelectorAll(".hubseg");
+  // the quick-filter chip rows (ui.chips) scroll the same way, with the same faded edges (N12)
+  var navs = document.querySelectorAll(".hubseg, .ui-chips");
   if (!navs.length) return;
   function edges(n) {
     var over = n.scrollWidth > n.clientWidth + 1;

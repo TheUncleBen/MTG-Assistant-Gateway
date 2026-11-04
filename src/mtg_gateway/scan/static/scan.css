@@ -24,6 +24,7 @@
 
 /* tabs: the site's one switch (site.css .hubseg), full width; sticky on phones */
 .scan .tabs{display:flex;width:100%;margin:0 0 .5rem}
+.scan .tabs .badge.zero{background:var(--surface-3);color:var(--text)}  /* an empty list: no alarm */
 .scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--orange);
   color:var(--on-orange);border-color:var(--orange)}
 @media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;box-shadow:0 0 0 4px var(--bg)} }
@@ -203,6 +204,9 @@ body.picker-open{overflow:hidden}
 .scan .controls .ctl,.scan .controls label.ctl{width:100%;max-width:104px;min-height:var(--ctl);height:auto;padding:0 .5rem;
   margin:0;min-width:0;display:inline-flex;align-items:center;justify-content:center;font-weight:700;
   border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);cursor:pointer}
+/* a label wider than its button (large text on a 320 px screen) breaks inside the button rather
+   than pushing the page sideways (final audit F02) */
+.scan .controls .ctl > span{min-width:0;overflow-wrap:anywhere}
 .scan .controls .ctl:hover{background:var(--surface-2)}
 /* a yes/no question in place of the browser's confirm box */
 .scan .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0;padding:.5rem .75rem;

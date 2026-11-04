@@ -135,12 +135,9 @@ NO_RISK = "Risk not judged"
 
 
 def no_risk_label() -> str:
-    """A closed proposal whose risk could not be judged: a muted dash, never High for want of
-    evidence; a screen reader hears why."""
-    return (
-        f"<span class='ui-none' title='{NO_RISK}'><span aria-hidden='true'>—</span>"
-        f"<span class='sr-only'>{NO_RISK}</span></span>"
-    )
+    """A closed proposal whose risk could not be judged: nothing shown (a bare dash read as a
+    stray mark: polish C2), never High for want of evidence; a screen reader hears why."""
+    return f"<span class='ui-none'><span class='sr-only'>{NO_RISK}</span></span>"
 
 
 def risk_label(risk: str, *, title: str = "", cls: str = "") -> str:
@@ -295,14 +292,11 @@ def app_chip(name: str | None, *, unnamed: bool = False, client_id: str | None =
     Anthropic's or OpenAI's, ``client_brand``: the official marks, unmodified, only to tell the
     connected app apart) or the one neutral "connected app" icon for any other app or a row
     without its client id; never initials. A row with no app recorded shows a
-    grey dash with the tooltip "No app", never a guessed app; where the row *is* an app that gave
-    no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
+    nothing (a screen reader hears "No app"), never a guessed app; where the row *is* an app that
+    gave no name (the Users page's connected apps), ``unnamed=True`` reads "Unnamed app" instead."""
     name = (name or "").strip()
     if not name and not unnamed:
-        return (
-            f"<span class='ui-app none' title='{NO_APP}'><span aria-hidden='true'>—</span>"
-            f"<span class='sr-only'>{NO_APP}</span></span>"
-        )
+        return f"<span class='ui-app none'><span class='sr-only'>{NO_APP}</span></span>"
     cls = "ui-app" if name else "ui-app unnamed"
     logo = app_logo(client_brand(client_id))
     return f"<span class='{cls}'>{logo}<span class='nm'>{esc(app_name(name))}</span></span>"
@@ -746,14 +740,53 @@ def load_more(
     )
 
 
-def selection_bar(count_text: str, actions: Sequence[str], *, label: str, hidden: bool = False) -> str:
+def selection_bar(
+    count_text: str,
+    actions: Sequence[str],
+    *,
+    label: str,
+    hidden: bool = False,
+    cancel_cls: str = "",
+    more: Sequence[str] = (),
+    end: Sequence[str] = (),
+) -> str:
     """The sticky action bar while a list has a selection: the count ("2 checked on 1 deck"), then
-    the actions (plain, then the red-outline one, then the one orange main button)."""
+    the actions (plain, then the red-outline one, then the one orange main button).
+
+    The slim form (final audit F01: one row on a phone): ``cancel_cls`` draws a × Cancel button
+    with that class at the left, ``more`` (menu items, see ``menu_opener``) goes into a ⋯ menu
+    after the actions, and ``end`` follows the menu (the one red action)."""
     h = " hidden" if hidden else ""
-    return (
-        f"<div class='ui-bar' role='group' aria-label='{esc(label)}'{h}>"
-        f"<span class='count' aria-live='polite'>{esc(count_text)}</span>{''.join(actions)}</div>"
+    slim = " slim" if (cancel_cls or more or end) else ""
+    count = esc(count_text)
+    if slim and count_text.endswith(" selected"):
+        # "12 selected": the word folds away on a narrow bar (the scripts update .n)
+        count = f"<span class='n'>{esc(count_text[:-9])}</span><span class='lbl'> selected</span>"
+    cancel = (
+        f"<button type='button' class='btn icon-only bar-x {esc(cancel_cls)}' aria-label='Cancel' "
+        f"title='Cancel'>{icon('x')}</button>"
+        if cancel_cls
+        else ""
     )
+    menu = (
+        "<details class='dd bar-more'><summary class='btn icon-only' aria-label='More actions' "
+        f"title='More actions' aria-haspopup='menu'>{icon('more')}</summary>"
+        f"<div class='menu'>{''.join(more)}</div></details>"
+        if more
+        else ""
+    )
+    return (
+        f"<div class='ui-bar{slim}' role='group' aria-label='{esc(label)}'{h}>{cancel}"
+        f"<span class='count' aria-live='polite'>{count}</span>{''.join(actions)}{menu}"
+        f"{''.join(end)}</div>"
+    )
+
+
+def menu_opener(text: str, href: str, box_id: str, *, icon_name: str = "") -> str:
+    """A menu item (for a ``details.dd`` menu) that opens the box ``box_id``, as ``box_opener``: a
+    real link to ``href`` without scripts."""
+    ic = f"{icon(icon_name)} " if icon_name else ""
+    return f"<a href='{esc(href)}' {box_open_attr(box_id)}>{ic}{esc(text)}</a>"
 
 
 def side_panel(
