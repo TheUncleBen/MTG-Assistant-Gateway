@@ -145,9 +145,11 @@ recents_headers() {
   adb shell dumpsys activity recents 2>/dev/null | tr -d '\r' | tee "$OUT/recents.txt" | grep '\* Recent #' | sed 's/^ *//' | tr '\n' ';'
 }
 connected() { [ "$(state connections)" -ge 1 ]; }
+# Wait for the emulator, a bounded time: adb wait-for-device alone waits for ever, so an emulator
+# that never comes back from a reboot hung the CI step until its 30 minutes ran out.
 boot() {
-  adb wait-for-device
-  until_ok '[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]' 300
+  timeout "${PUSH_TEST_BOOT_WAIT:-240}" adb wait-for-device || return 1
+  until_ok '[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]' 300 || return 1
   adb reverse "tcp:$PORT" "tcp:$PORT"
 }
 
@@ -156,7 +158,7 @@ PUSH_TEST_KEY="$KEY" PUSH_TEST_KEEPALIVE=5 PUSH_TEST_STATIC="$ROOT/../src/mtg_ga
 GW=$!
 trap 'kill $GW 2>/dev/null; adb logcat -d > "$OUT/logcat.txt" 2>/dev/null' EXIT
 sleep 1
-boot
+boot || { echo "FAIL  start: the emulator did not start"; exit 1; }
 
 # -- for the card: the launcher name and the long-press shortcuts at phone and Fold widths (dp at 420 dpi)
 adb install -r "$APK" >/dev/null
@@ -335,7 +337,10 @@ if until_ok 'shows "After update"' 30; then result "message after an update" ok;
 # -- a restart of the phone
 before=$(state connects)
 adb reboot
-boot
+if ! boot; then
+  result "after a reboot" no "the emulator did not come back from the reboot"
+  exit 1
+fi
 if until_ok '[ "$(state connects)" -gt '"$before"' ] && connected' 180; then result "after a reboot" ok; else result "after a reboot" no "no connection after boot"; fi
 send m008AbCdEf "After reboot" "Still here"
 if until_ok 'shows "After reboot"' 30; then result "message after a reboot" ok; else result "message after a reboot" no "missing"; fi

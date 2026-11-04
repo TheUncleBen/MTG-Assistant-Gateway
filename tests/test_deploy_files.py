@@ -341,3 +341,32 @@ def test_the_stacks_pass_no_variable_that_nothing_reads() -> None:
         assert "DISABLE_IPV6" not in (ROOT / name).read_text(), name
     code = list((ROOT / "src").rglob("*.py")) + [p for p in (ROOT / "docker").rglob("*") if p.is_file()]
     assert not any("DISABLE_IPV6" in p.read_text(errors="ignore") for p in code)
+
+
+def test_the_push_test_gives_up_on_an_emulator_that_never_comes_back(tmp_path: Path):
+    """push-test.sh's boot() waits for the emulator a bounded time and then fails, so a reboot the
+    emulator never returns from is one FAIL line instead of the CI step hanging until its 30 minutes
+    run out (CI on a0bc0e23 hung after "message after an update", at the reboot)."""
+    import re
+    import subprocess
+    import time
+
+    script = (ROOT / "android/scripts/push-test.sh").read_text(encoding="utf-8")
+    boot = re.search(r"(?ms)^boot\(\) \{\n.*?^\}\n", script)
+    helpers = re.search(r"(?m)^until_ok\(\) .*$", script)
+    assert boot is not None and helpers is not None
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "adb").write_text('#!/usr/bin/env bash\n[ "$1" = wait-for-device ] && exec sleep 600\nexit 0\n')
+    (fake / "adb").chmod(0o755)
+    body = f'{helpers.group(0)}\n{boot.group(0)}\nPORT=1\nboot; echo "boot=$?"\n'
+    started = time.monotonic()
+    r = subprocess.run(
+        ["bash", "-c", body],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={"PATH": f"{fake}:/usr/bin:/bin", "PUSH_TEST_BOOT_WAIT": "2"},
+    )
+    assert "boot=1" in r.stdout, (r.stdout, r.stderr)
+    assert time.monotonic() - started < 30
