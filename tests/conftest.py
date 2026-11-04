@@ -592,6 +592,69 @@ if BrowserType is not None and not ONLINE:
     BrowserType.launch = _offline_launch  # type: ignore[method-assign]
 
 
+# The deck page asks /decks/{id}/check, a long-poll held up to 25 s, when it shows a deck as last
+# read while it reads it again (static/feedback.js). A "networkidle" load counts that request, so
+# a deck page load on a starved runner, or with an aged copy, waited out the long-poll (the 0.7.46
+# audits' flake: 195 such loads in 41 browser files). Every browser context the tests make gets
+# that request refused at once, as a failed fetch, which the page takes as "nothing to say" (it
+# hides the strip). It is refused in the page, not through context.route, which would also turn
+# off the browser's HTTP cache in every test. A test of the check itself opts out with
+# ``@pytest.mark.deck_check_live``.
+DECK_CHECK_REFUSED = """(() => {
+  const real = window.fetch;
+  if (!real) return;
+  window.fetch = function (input, init) {
+    let path = "";
+    try { path = new URL(typeof input === "string" ? input : input.url, location.href).pathname; }
+    catch (e) {}
+    if (/^\\/decks\\/[^/]+\\/check$/.test(path)) {
+      return Promise.reject(new TypeError("the tests refuse the deck check long-poll"));
+    }
+    return real.apply(this, arguments);
+  };
+})();"""
+DECK_CHECK_LIVE = [False]  # this test opted out (deck_check_live)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "deck_check_live: the deck page's /decks/{id}/check long-poll is not refused in its browser",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _deck_check_default(request: pytest.FixtureRequest):
+    DECK_CHECK_LIVE[0] = request.node.get_closest_marker("deck_check_live") is not None
+    yield
+    DECK_CHECK_LIVE[0] = False
+
+
+try:
+    from playwright.sync_api import Browser as _Browser
+except ImportError:  # the browser tests skip
+    _Browser = None
+
+if _Browser is not None and not E2E:
+    _real_new_context = _Browser.new_context
+    _real_new_page = _Browser.new_page
+
+    def _context_refusing_check(self, *args, **kwargs):
+        ctx = _real_new_context(self, *args, **kwargs)
+        if not DECK_CHECK_LIVE[0]:
+            ctx.add_init_script(DECK_CHECK_REFUSED)
+        return ctx
+
+    def _page_refusing_check(self, *args, **kwargs):
+        page = _real_new_page(self, *args, **kwargs)
+        if not DECK_CHECK_LIVE[0]:
+            page.context.add_init_script(DECK_CHECK_REFUSED)
+        return page
+
+    _Browser.new_context = _context_refusing_check  # type: ignore[method-assign]
+    _Browser.new_page = _page_refusing_check  # type: ignore[method-assign]
+
+
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch: pytest.MonkeyPatch):
     if E2E:

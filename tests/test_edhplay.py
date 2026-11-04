@@ -670,6 +670,7 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
         browser.close()
 
 
+@pytest.mark.deck_check_live  # its Reload loads the change through the /check answer
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
 def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme: str) -> None:
     """EDHPlay's import never sets a companion, and with no commander marked it sets none: the

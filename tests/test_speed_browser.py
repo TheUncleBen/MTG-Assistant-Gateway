@@ -126,6 +126,7 @@ def test_the_bell_and_watched_names_are_asked_once_across_pages(server: Server) 
         browser.close()
 
 
+@pytest.mark.deck_check_live  # it loads the change through the page's /check answer
 def test_an_older_deck_page_on_reload_shows_at_once_and_loads_the_change(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
