@@ -92,6 +92,10 @@ MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
 WHOLE_READ_SIZE = 200
 FILTERED_PAGES = 5
 PAGE_SIZE = COLLECTION_PAGE_SIZE
+# the newest records added since a held Binder page was read that it keeps to show (held_added);
+# every one is counted
+HELD_ADDED_ROWS = COLLECTION_PAGE_SIZE
+_ADD_ONLY = ("previous_quantity", "added_quantity", "went_to", "index")  # what an add said, not the row
 FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
 WHOLE_TTL = 60.0  # and the Binder read whole for a tag filter (CollectionService.whole)
 IMPORT_PAUSE_POLL = 5.0  # seconds a paused import or restore waits before looking at the allowance again
@@ -544,13 +548,23 @@ class CollectionService:
                 self._writes[sub] = self._writes.get(sub, 0) + 1
 
     def _wrote(
-        self, sub: str, rid: Any, row: dict[str, Any] | None, fields: tuple[str, ...] = ("quantity",)
+        self,
+        sub: str,
+        rid: Any,
+        row: dict[str, Any] | None,
+        fields: tuple[str, ...] = ("quantity",),
+        *,
+        new: bool = False,
     ) -> None:
         """A record the gateway just wrote: ``row`` as it is now (row_out shape), or None when it
         was removed. The Binder as last read whole (binder_prices) keeps it, and so do the Binder
         pages the member last read (decks.short_reads, shown while Archidekt can't be asked): a
-        row of theirs takes the ``fields`` the write set, a removed row goes. A new record is not
-        put into them: where it would sit in a held page isn't known."""
+        row of theirs takes the ``fields`` the write set, a removed row goes. A ``new`` record (an
+        add made it) is not put among their rows, since where it would sit in a held page isn't
+        known (a sort, a filter, a later page): it is kept beside them (held_added), for the page
+        to put first in Recently added or count as not shown, once and with the gateway's own
+        price. A record that isn't new but isn't on a held page (further down, filtered out) is
+        left out of it, as before."""
         if row is None:
             self.binder.drop(sub, rid)
         else:
@@ -583,6 +597,19 @@ class CollectionService:
                     for k in ("total", "shown"):
                         if isinstance(got.get(k), int):
                             got[k] = max(0, got[k] - len(mine))
+            added = held.get("added") if isinstance(held.get("added"), dict) else None
+            if added is not None and rid in added["ids"]:  # one added since: kept as it is now
+                if changed is None:
+                    added["ids"].remove(rid)
+                    added["rows"].pop(str(rid), None)
+                elif str(rid) in added["rows"]:
+                    added["rows"][str(rid)].update(changed)
+            elif new and row is not None and not hit:
+                added = held.setdefault("added", {"ids": [], "rows": {}})
+                added["ids"].append(rid)
+                added["rows"][str(rid)] = {k: v for k, v in row.items() if k not in _ADD_ONLY}
+                while len(added["rows"]) > HELD_ADDED_ROWS:  # the newest are the ones shown
+                    added["rows"].pop(next(iter(added["rows"])))
             if hit:
                 held["amended"] = True
 
@@ -977,7 +1004,7 @@ class CollectionService:
             row["scryfall_id"] = spec["scryfall_id"]
             row["image_small"] = image_url(spec["scryfall_id"], "small")
             row["image"] = image_url(spec["scryfall_id"], "normal")
-        self._wrote(sub, row.get("id"), row)
+        self._wrote(sub, row.get("id"), row, new=have is None)
         out["added"].append(row)
 
     async def read_back(self, sub: str, card: dict[str, Any]) -> dict[str, Any] | None:
@@ -1768,6 +1795,11 @@ def tag_chips(names: list[str], colors: dict[str, str] | None) -> str:
 TAG_CHIPS = 4  # chips a tile or row shows before "+N"
 
 
+def _added_mark(r: dict[str, Any]) -> str:
+    """A held Binder's mark on a card added through the gateway since it was read (held_added)."""
+    return " · Added since" if r.get("held_added") else ""
+
+
 def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, str] | None = None) -> str:
     """One entry: card search's tile with the stepper and ⋮ (grid), or one table row (list).
     ``tag_colors``: the member's tag colours by name (tag_colors_of), for the row's tag chips."""
@@ -1797,7 +1829,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
             if img
             else f"<span class='ph'>{name}</span>"
         )
-        sub = set_line + (f" · {_esc(_language_name(lang))}" if lang != "EN" else "")
+        sub = set_line + (f" · {_esc(_language_name(lang))}" if lang != "EN" else "") + _added_mark(r)
         price = price_text(r)
         chips = tag_chips([str(t) for t in (r.get("tags") or [])], tag_colors)
         return (
@@ -1822,8 +1854,10 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
     # under 900 px the Price column is hidden: the price goes on the card's own lines; a price
     # nobody knows says so there too, as the column does (audit N7, N12)
     price = _esc(price_text(r)) or UNPRICED_HTML
-    sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x)
-    sub_sm = " · ".join(x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x)
+    sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x) + _added_mark(r)
+    sub_sm = " · ".join(
+        x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x
+    ) + _added_mark(r)
     sub_md += f"<span class='pr lgh'>{price}</span>"
     sub_sm += f" · <span class='pr'>{price}</span>"
     return (
@@ -3094,6 +3128,48 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             got["restore"] = True
         return got
 
+    def held_added(
+        held: dict[str, Any], lq: dict[str, Any], priced_now: bool
+    ) -> tuple[list[dict[str, Any]], int]:
+        """The cards added through the gateway since a held Binder page was read (_wrote keeps
+        them beside it): the rows to put first, newest first and marked, and how many it can't
+        show. Only Recently added, newest first, unfiltered, first page, shows them, as Archidekt
+        would; in any other order or filter where they would sit isn't known, so they are counted
+        instead. Never a row the page already holds; a price only from the gateway's own."""
+        added = held.get("added") if isinstance(held.get("added"), dict) else None
+        if not added:
+            return [], 0
+        have = {r.get("id") for r in (held.get("got") or {}).get("rows") or [] if isinstance(r, dict)}
+        ids = [i for i in added.get("ids") or [] if i not in have]
+        if not ids:
+            return [], 0
+        top = (
+            lq["sort"] == "added"
+            and lq["dir"] == "desc"
+            and not lq["q"]
+            and not lq["tag"]
+            and not lq["offset"]
+        )
+        if not top:
+            return [], len(ids)
+        kept = added.get("rows") or {}
+        rows = [dict(kept[str(i)], held_added=True) for i in reversed(ids) if str(i) in kept]
+        for r in rows:
+            r.pop("price", None)
+        if priced_now:
+            service.binder.with_prices(rows)
+        return rows, len(ids) - len(rows)
+
+    def added_not_shown(n: int, lq: dict[str, Any], *, top: bool) -> str:
+        """The line under the held strip for the cards added since that the page can't show."""
+        cards = f"{n:,} {'card' if n == 1 else 'cards'} you added"
+        verb = "isn\u2019t" if n == 1 else "aren\u2019t"
+        if top:
+            return f"{cards} since {verb} shown here: the newest {HELD_ADDED_ROWS:,} are."
+        if lq["q"] or lq["tag"] or lq["offset"]:
+            return f"{cards} {verb} shown here."
+        return f"{cards} {verb} shown in this order."
+
     def strip(text: str, kind: str, *, html: bool = False, remember: str = "") -> str:
         """A notice strip at the top of the page, with a × to close (the page's script hides it).
         ``remember``: a name the script keeps the close under on this browser, so the strip stays
@@ -3375,6 +3451,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         # while Archidekt can't be asked (decks.short_reads.last), as the deck page shows a deck
         last_key = ("binder", json.dumps(lq, sort_keys=True, default=str))
         held: tuple[float, Any] | None = None
+        added_rows: list[dict[str, Any]] = []  # cards added since the held copy was read, shown first
+        added_out = 0  # and how many of those it can't show
         try:
             got = await listing(sub, lq)
             whole = (
@@ -3391,7 +3469,24 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 got, whole = held[1]["got"], held[1]["whole"]
                 # the member's own writes since it was read (CollectionService._wrote)
                 amended = bool(held[1].get("amended"))
-                notes = held_html(exc, held[0], "your binder", same_url(request), amended=amended) + notes
+                added_rows, added_out = held_added(held[1], lq, priced())
+                if added_rows:
+                    got["rows"] = added_rows + list(got.get("rows") or [])
+                    for k in ("total", "shown"):
+                        if isinstance(got.get(k), int):
+                            got[k] += len(added_rows)
+                notes = (
+                    held_html(
+                        exc,
+                        held[0],
+                        "your binder",
+                        same_url(request),
+                        amended=amended,
+                        added=bool(added_rows),
+                    )
+                    + (strip(added_not_shown(added_out, lq, top=bool(added_rows)), "ok") if added_out else "")
+                    + notes
+                )
             elif plan is not None:
                 # the Binder keeps its title and notes; the busy strip sits where the list goes
                 busy = page(
@@ -3465,7 +3560,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             open_box=bool(qp.get("visibility")),
             ok=qp.get("ok") or "",
         )
-        if not rows and not lq["q"] and not lq["offset"] and not lq["tag"]:
+        if not rows and not lq["q"] and not lq["offset"] and not lq["tag"] and not added_out:
             body = (
                 head(sub=sub, total=0)
                 + vis
@@ -3511,7 +3606,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
             )
             body = (
-                head(acts, sub=sub, total=int(whole["count"]))
+                head(acts, sub=sub, total=int(whole["count"]) + len(added_rows) + added_out)
                 + vis
                 + f"<div id='col-notes'>{notes}</div>"
                 + widgets_html(
@@ -3535,7 +3630,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
                 + live
                 + cards
-                + f"<p class='muted col-nomatch'{' hidden' if rows else ''}>No cards match that filter.</p>"
+                + f"<p class='muted col-nomatch'{' hidden' if rows or added_out else ''}>"
+                "No cards match that filter.</p>"
                 + more_html(lq, view_in_link, got)
                 + bulk_html(csrf, same_url(request), tag_names, tag_colors)
                 + export_help_html()

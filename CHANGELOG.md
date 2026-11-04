@@ -287,7 +287,9 @@ name per thing.
   switching between My Decks and Packages happens in place.
 - While Archidekt is busy the Binder, Binder › Lists, profiles and search show the last good copy
   with the deck page's banner and Try again, instead of the busy page. In the Binder's copy, the
-  cards you changed or removed here since show what you saved.
+  cards you changed or removed here since show what you saved. Cards you added since come first
+  in Recently added, marked “Added since”; in another order a line says how many aren't shown,
+  and the Binder never says “No cards yet” while it knows of cards you added.
 - Large text: the filter rows on Proposals, Activity and Admin stack one a row, and Sort on a
   results bar takes a row of its own only then.
 - Holding a finger on a Binder tile's picture opens its menu; a tap still opens the card viewer.

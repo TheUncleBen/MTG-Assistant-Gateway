@@ -207,3 +207,116 @@ async def test_the_add_box_takes_up_to_9999_copies(stack: Stack) -> None:
         assert list(_slime(stack).values()) == [1503]
     finally:
         await b.aclose()
+
+
+# -- the held Binder after adds (0.7.46 final polish Q2) -------------------------------------------
+
+# ten new records: five cards the binder doesn't have, each in two conditions
+ADDED = [
+    {"name": n, "condition": c}
+    for n in ("Forest", "Island", "Opt", "Swamp", "Aesi, Tyrant of Gyre Strait")
+    for c in ("NM", "LP")
+]
+
+
+def _held(stack: Stack, b, path: str):
+    """``path`` read while Archidekt doesn't answer (the caller opens it again): the Binder as it
+    was last read."""
+    import time
+
+    stack.gw.collection.first_page_ttl = 0
+    stack.gw.decks.client.pacer._open_until = time.monotonic() + 120
+    return b.http.get(path)
+
+
+def _rows(text: str) -> list[tuple[int, str]]:
+    """The Binder list's rows, top to bottom: (record id, the row as drawn)."""
+    import re
+
+    return [
+        (int(m.group(1)), m.group(0))
+        for m in re.finditer(
+            r"<li class='tr row' role='row' data-name='[^']*' data-id='(\d+)'.*?</li>", text, re.S
+        )
+    ]
+
+
+async def _add_ten_then_go_down(stack: Stack, reads: tuple[str, ...]):
+    """Read each of ``reads``, add ADDED one card at a time (as a scan does), then a second copy of
+    the last one (a card added since) and Sol Ring (a card the binder had, if it has: its record
+    takes it). Returns the browser and the new records' ids, in the order added."""
+    b = await linked(stack)
+    csrf = await b.csrf("/collection")
+    for path in reads:
+        assert (await b.http.get(path)).status_code == 200, path
+    ids = []
+    for item in [*ADDED, ADDED[-1], {"name": "Sol Ring"}]:
+        r = await api(b, "POST", "/collection/api/add", {"items": [item], "source": "scan"}, csrf=csrf)
+        assert r.status_code == 200 and len(r.json().get("added") or []) == 1, (item, r.text[:400])
+        row = r.json()["added"][0]
+        if row["went_to"] == "new":
+            ids.append(int(row["id"]))
+    return b, ids
+
+
+async def test_the_held_binder_shows_the_cards_added_since_first_in_recently_added(stack: Stack) -> None:
+    """The member read the Binder, added 10 cards, then Archidekt went down. In Recently added (the
+    default sort) the held Binder shows the 10 first, newest first, each marked as added since and
+    each once (the second copy is its row's 2 copies), then the cards it read (Sol Ring, added to,
+    in its place with its 2 copies, not marked); the strip says so; no price the gateway doesn't
+    have."""
+    import re
+
+    _seed(stack, 3)
+    newest_first = "/collection?view=list&sort=added&dir=desc"
+    b, ids = await _add_ten_then_go_down(stack, (newest_first,))
+    try:
+        assert len(ids) == 10, ids
+        read = sorted(stack.ark.collections["alice"], reverse=True)
+        read = [i for i in read if i not in ids]
+        held = await _held(stack, b, newest_first)
+        assert held.status_code == 200, held.text[:300]
+        strip = re.search(r"<p class='notice warn held' role='status'>(.*?)</p>", held.text, re.S)
+        assert strip and "as it was read" in strip.group(1), held.text[:400]
+        assert "Cards you added since are at the top." in strip.group(1), strip.group(1)
+        rows = _rows(held.text)
+        assert [i for i, _ in rows] == ids[::-1] + read, ([i for i, _ in rows], ids, read)
+        assert all("Added since" in r for _, r in rows[:10]), rows[0][1][:600]
+        assert not any("Added since" in r for _, r in rows[10:])
+        copies = re.compile(r"<output aria-label='Copies'>(\d+)</output>")
+        assert copies.findall(rows[0][1]) == ["2"], rows[0][1][:800]  # the last one, twice
+        ring = next(r for _, r in rows if ">Sol Ring<" in r)
+        assert copies.findall(ring) == ["2"] and "Added since" not in ring, ring[:800]
+        # a price only when the gateway has one: none is known for these, so none shows
+        for _, r in rows[:10]:
+            assert "$" not in r, r[:800]
+        assert "No cards yet" not in held.text
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()
+
+
+async def test_the_held_binder_in_another_sort_says_how_many_added_cards_it_leaves_out(stack: Stack) -> None:
+    """In any other order (Set release here; the Binder has no name sort) the place of a card added
+    since isn't known: the held Binder shows the cards it read and one line saying how many added
+    cards aren't shown in this order. An empty binder read before the adds never says "No cards
+    yet" while the gateway knows of added cards."""
+    stack.ark.collections["alice"] = {}
+    by_set = "/collection?view=list&sort=edition&dir=desc"
+    newest_first = "/collection?view=list&sort=added&dir=desc"
+    b, ids = await _add_ten_then_go_down(stack, (by_set, newest_first))
+    try:
+        assert len(ids) == 11, ids  # Sol Ring is new to an empty binder too
+        held = await _held(stack, b, by_set)
+        assert held.status_code == 200, held.text[:300]
+        assert "No cards yet" not in held.text
+        assert "11 cards you added aren\u2019t shown in this order." in held.text, held.text[-3000:]
+        assert _rows(held.text) == []
+        assert "<p class='muted col-nomatch' hidden>" in held.text
+        # the default sort shows them, so it isn't empty either
+        held = await _held(stack, b, newest_first)
+        assert "No cards yet" not in held.text
+        assert [i for i, _ in _rows(held.text)] == ids[::-1]
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()

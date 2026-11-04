@@ -197,21 +197,34 @@ def age_words(read_at: float, now: float | None = None) -> str:
 
 
 def held_text(
-    exc: BaseException, read_at: float, what: str, *, now: float | None = None, amended: bool = False
+    exc: BaseException,
+    read_at: float,
+    what: str,
+    *,
+    now: float | None = None,
+    amended: bool = False,
+    added: bool = False,
 ) -> str:
     """What a page says over a copy shown as last read because Archidekt can't be asked
     (decks.ShortReads.get_held); ``what`` names it: "your binder", "this list". ``amended``: rows
-    of it the member changed through the gateway since show what was saved (ShortReads.amend_last)."""
+    of it the member changed through the gateway since show what was saved (ShortReads.amend_last).
+    ``added``: cards the member added through the gateway since are shown first (the Binder)."""
     plan = busy_plan(exc)
     why = plan.title if plan else "Archidekt can't be asked"
     text = f"{why.rstrip('.')}, so this is {what} as it was read {age_words(read_at, now)} ago."
-    return text + (" Cards you changed here since show what you saved." if amended else "")
+    return (
+        text
+        + (" Cards you changed here since show what you saved." if amended else "")
+        + (" Cards you added since are at the top." if added else "")
+    )
 
 
-def held_html(exc: BaseException, read_at: float, what: str, url: str, *, amended: bool = False) -> str:
+def held_html(
+    exc: BaseException, read_at: float, what: str, url: str, *, amended: bool = False, added: bool = False
+) -> str:
     """The strip over a page shown as last read, with Try again (a fresh read of the page): the
     deck page's (deckpage.deck_held_html) for the Binder, Lists, profiles and search."""
-    text = held_text(exc, read_at, what, amended=amended)
+    text = held_text(exc, read_at, what, amended=amended, added=added)
     return (
         f"<p class='notice warn held' role='status'>{html.escape(text)} "
         f"<a class='btn' href='{html.escape(url)}'>Try again</a></p>"
