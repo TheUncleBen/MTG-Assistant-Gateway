@@ -277,6 +277,8 @@ class ReadThrough:
         self.active = True
         self.busy = False
         self.committed = False
+        # a handled DatabaseBusy of this request was logged (decks.say_busy): one line per lock event
+        self.said_busy = False
 
 
 read_through: ContextVar[ReadThrough | None] = ContextVar("db_read_through", default=None)

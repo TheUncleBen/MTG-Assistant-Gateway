@@ -96,6 +96,7 @@ from .db import (
     Database,
     DatabaseBusy,
     ProposalVersionsFull,
+    read_through,
 )
 from .decklist import (
     DecklistError,
@@ -479,6 +480,18 @@ def scopes_allow_writes(scopes: list[str] | tuple[str, ...] | None) -> bool:
     were checked, so existing connections are unaffected."""
     have = set(scopes or ())
     return not have or not have <= READ_ONLY_SCOPES
+
+
+def say_busy(what: str) -> None:
+    """Log a handled DatabaseBusy (the request runs again once the lock is free, dbwait) at
+    WARNING, once per request let through (db.ReadThrough): a deck page's re-check and its read
+    hooks meet the same lock, and that is one event, one line (N8 of the 0.7.46 audit)."""
+    through = read_through.get()
+    if through is not None:
+        if through.said_busy:
+            return
+        through.said_busy = True
+    logger.warning("%s found the database locked; the request runs again once it is free", what)
 
 
 class RateBudget:
@@ -4752,7 +4765,7 @@ class DeckService:
                 try:
                     hook(sub, deck)
                 except DatabaseBusy:  # handled: the page runs again once the lock is free (dbwait)
-                    logger.warning("a deck read hook found the database locked; the page runs again")
+                    say_busy("a deck read hook")
                 except Exception:  # a hook never stops the page
                     logger.exception("a deck read hook failed")
         self._keep_page_deck(key, deck, gen, started)
@@ -7572,7 +7585,7 @@ class DeckService:
         try:
             board = self.db.pending_board(sub, deck.id)
         except DatabaseBusy:  # handled: the request runs again once the lock is free (dbwait)
-            logger.warning("re-check of waiting proposals found the database locked; it runs again")
+            say_busy("the re-check of waiting proposals")
             return out
         except Exception:  # a check must never break the page or apply that triggered it
             logger.exception("re-check of waiting proposals failed")

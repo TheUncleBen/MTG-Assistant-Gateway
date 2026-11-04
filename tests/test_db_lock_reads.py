@@ -248,6 +248,9 @@ async def test_a_late_deck_page_during_a_lock_logs_no_error(
         await b.aclose()
     errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert not errors, [f"{r.name}: {r.getMessage()}" for r in errors]
+    # one lock event, one line (round 2 of N8): the re-check and the read hook met the same lock
+    locked = [r for r in caplog.records if r.levelno == logging.WARNING and "locked" in r.getMessage()]
+    assert len(locked) == 1, [f"{r.name}: {r.getMessage()}" for r in locked]
 
 
 async def test_an_unexpected_failure_of_a_check_or_hook_still_logs_an_error(
