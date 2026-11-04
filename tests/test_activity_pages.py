@@ -212,6 +212,8 @@ async def test_admin_activity_chips_filters_search_and_widgets(gw: Harness) -> N
             "Refused or failed" in widgets and "Refused 1</span>" in widgets and "Failed 1</span>" in widgets
         )
         assert "1 setting changed" in widgets and "Most active: bram" in widgets
+        admin_tile = widgets.split("Admin actions</span>", 1)[1].split("</div>", 1)[0]
+        assert "Show them" in admin_tile and "href='/admin/users'" in admin_tile
         assert "Show bram only" in widgets
         refused = (await b.http.get("/admin/activity?kind=refused", headers=NAVIGATE)).text
         assert _table(refused).count("<div class='tr ev") == 1 and "title='approval_refused'" in refused
@@ -431,3 +433,21 @@ def test_the_problem_widget_at_zero_shows_no_red_chips_and_no_button() -> None:
     )
     assert "Refused 1</span>" in busy and "Failed 1</span>" in busy and "Show them" in busy
     assert busy.startswith("<div class='wdg alert'>")
+
+
+async def test_the_admin_actions_tile_at_zero_offers_no_show_them(gw: Harness) -> None:
+    """Audit 43b8 (low): with no admin action in 7 days the tile still offered "Show them" to an
+    empty list. At 0 it keeps only Users (a page, not a list); the problem tile is quiet too."""
+    b = await admin_browser(gw)
+    _members(gw)
+    _rows(gw, [(400, "user-2", "claude-app", "proposal_created", {"proposal_id": "p9", "deck_id": "45"})])
+    try:
+        page = (await b.http.get("/admin/activity", headers=NAVIGATE)).text
+        widgets = page.split("<section class='ui-widgets'", 1)[1].split("</section>", 1)[0]
+        admin_tile = widgets.split("Admin actions</span>", 1)[1].split("</div>", 1)[0]
+        assert ">0<small>in 7 days</small>" in admin_tile
+        assert "Show them" not in admin_tile and "href='/admin/users'" in admin_tile, admin_tile
+        problems = widgets.split("Refused or failed</span>", 1)[1].split("</div>", 1)[0]
+        assert "Show them" not in problems and "Nothing refused or failed" in problems
+    finally:
+        await b.aclose()

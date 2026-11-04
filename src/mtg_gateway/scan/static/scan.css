@@ -24,6 +24,12 @@
 
 /* tabs: the site's one switch (site.css .hubseg), full width; sticky on phones */
 .scan .tabs{display:flex;width:100%;margin:0 0 .5rem}
+/* a tab never shrinks under its name: `.scan button{min-width:var(--ctl)}` above took away the
+   min-content floor a flex item has by default, so at 200% text on a phone the four tabs shared
+   the width and "Camera", "Sessions" and the List badge spilled onto their neighbours (re-check
+   S3). Each keeps its name on one line; four that don't fit scroll the switch sideways, with the
+   faded edges and the chosen tab in view that static/topbar.js gives every .hubseg */
+.scan .tabs > button{min-width:max-content;padding-inline:.5rem}
 .scan .tabs .badge.zero{background:var(--surface-3);color:var(--text)}  /* an empty list: no alarm */
 .scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--orange);
   color:var(--on-orange);border-color:var(--orange)}

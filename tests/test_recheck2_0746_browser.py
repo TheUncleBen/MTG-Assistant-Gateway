@@ -482,6 +482,15 @@ def test_try_again_in_the_held_strip_is_a_button_not_an_underlined_link(
         browser.close()
 
 
+def _icon_path(name: str) -> str:
+    """The first path of a theme icon, as Chromium reads its ``d`` back."""
+    import re
+
+    from mtg_gateway.theme import ICONS
+
+    return re.search(r"d='([^']+)'", ICONS[name]).group(1)
+
+
 @pytest.mark.parametrize("width,theme", [(360, "light"), (360, "dark")])
 def test_the_binders_phone_sheet_is_titled_by_what_it_holds(
     server: Server,  # noqa: F811
@@ -504,9 +513,14 @@ def test_the_binders_phone_sheet_is_titled_by_what_it_holds(
             page.goto(f"{server.base}/collection", wait_until="networkidle")
             opener = page.locator(".spanel .sp-open")
             assert opener.inner_text().strip() == word, (tags, opener.inner_text())
+            # the View button is no filter: it carries the eye, not the funnel (re-check S4)
+            drawn = opener.locator("svg path").first.get_attribute("d")
+            assert drawn == _icon_path("eye" if word == "View" else "filter"), (word, drawn)
             opener.click()
             page.locator("#sp-filters.open").wait_for()
             assert page.locator("#sp-filters .sp-sheet-head h2").inner_text() == word
+            close = page.locator("#sp-filters .sp-sheet-head .close").bounding_box()
+            assert close["width"] >= 44 and close["height"] >= 44, close  # a 44 px tap target (B5)
             assert page.locator("#sp-filters .sp-sheet-head .close").get_attribute("aria-label") == (
                 f"Close {word.lower()}"
             )
@@ -644,5 +658,207 @@ def test_a_button_in_a_notice_stays_whole_and_goes_under_the_words(
         finally:
             server.ark.fail_collection_reads = False
             server.ark.fail_deck_reads = False
+        assert errors == []
+        browser.close()
+
+
+# a notice with a button: its content width, its words' line boxes and the button's box
+NOTICE_ROOM = """sel => [...document.querySelectorAll(sel)].map(n => {
+  const cs = getComputedStyle(n), nb = n.getBoundingClientRect();
+  const content = n.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const words = [...n.childNodes].filter(x => x.nodeType === 3 && x.textContent.trim()).flatMap(t => {
+    const q = document.createRange(); q.selectNodeContents(t);
+    return [...q.getClientRects()].map(r => [Math.round(r.left), Math.round(r.right), Math.round(r.top),
+      Math.round(r.bottom)]); });
+  const b = n.querySelector('.btn'), bb = b.getBoundingClientRect();
+  const r = document.createRange(); r.selectNodeContents(b);
+  return {content: Math.round(content), words, height: Math.round(nb.height),
+    btn: {left: Math.round(bb.left), right: Math.round(bb.right), top: Math.round(bb.top),
+      bottom: Math.round(bb.bottom), lines: r.getClientRects().length}};
+})"""
+
+
+def _room_kept(got: list[dict]) -> None:
+    """The notice's words keep at least 60% of its width as a block, never a column (at most one
+    line but the last narrower than 40%), the button's words stay on one line, and the button
+    sits after the words on their last line or under them, never over them."""
+    for n in got:
+        assert n["words"] and n["btn"]["lines"] == 1, n
+        block = max(w[1] for w in n["words"]) - min(w[0] for w in n["words"])
+        assert block >= 0.6 * n["content"], n
+        narrow = [w for w in n["words"][:-1] if w[1] - w[0] < 0.4 * n["content"]]
+        assert len(narrow) <= 1, n
+        beside = [w for w in n["words"] if min(w[3], n["btn"]["bottom"]) - max(w[2], n["btn"]["top"]) > 0]
+        for w in beside:
+            assert w[1] <= n["btn"]["left"] + 1, n  # on its line, after the words
+        if not beside:
+            assert n["btn"]["top"] >= max(w[3] for w in n["words"]) - 1, n
+
+
+@pytest.mark.parametrize(
+    "width,zoom", [(320, "none"), (360, "none"), (412, "none"), (320, "root"), (360, "root"), (412, "root")]
+)
+def test_a_notices_words_keep_their_room_beside_or_above_its_button(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Audit B1: at 200% text (a 28 px root) the held Binder's strip, a flex row, squeezed its
+    words into a 73 px column at 360 px (34 px at 320) beside a button that would not give. The
+    words keep their row (at least 60% of the notice, the whole of it when the button drops
+    under them) and the button stays whole: the busy strip of a page never read, the held Binder
+    and the held deck page, at 320, 360 and 412 px, at 100% and 200% text."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    decks = server.app.state.gateway.decks
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+
+        def strips(path: str) -> list[dict]:
+            page.goto(f"{server.base}{path}", wait_until="networkidle")
+            if zoom == "root":
+                page.evaluate(ROOT_200)
+                page.wait_for_timeout(150)
+            got = page.evaluate(NOTICE_ROOM, ".notice.held")
+            assert len(got) == 1, (path, got)
+            assert page.evaluate(MEASURE) == [], (path, width, zoom)
+            return got
+
+        try:
+            server.ark.fail_collection_reads = True
+            busy = strips("/collection")  # never read: the busy strip (busy.busy_body)
+            server.ark.fail_collection_reads = False
+            page.goto(f"{server.base}/collection", wait_until="networkidle")  # read and kept
+            page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+            server.ark.fail_collection_reads = True
+            server.ark.fail_deck_reads = True
+            decks._page_decks = {k: (v[0] - 7 * 3600, v[1]) for k, v in decks._page_decks.items()}
+            held = strips("/collection") + strips("/decks/42")
+        finally:
+            server.ark.fail_collection_reads = False
+            server.ark.fail_deck_reads = False
+        _room_kept(busy + held)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width,theme", [(360, "light"), (360, "dark")])
+def test_a_tap_on_the_sheets_backdrop_closes_it_and_reaches_nothing_under_it(
+    server: Server,  # noqa: F711, F811
+    width: int,
+    theme: str,
+) -> None:
+    """Audit B2: the View sheet's dim backdrop was a box-shadow, so a tap on it went through to the
+    page (it opened Add cards) and left the sheet open. A real backdrop takes the tap, closes the
+    sheet and gives the focus back to the View button; Escape still closes it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    server.ark.collection_tag_lists["alice"] = {}
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/collection", wait_until="networkidle")
+        url = page.url
+        add = page.locator("a.btn-primary, .btn-primary", has_text="Add cards").first
+        target = add.bounding_box()
+        opener = page.locator(".spanel .sp-open")
+        opener.click()
+        page.locator("#sp-filters.open").wait_for()
+        scrim = page.locator(".sp-scrim")
+        assert scrim.count() == 1 and scrim.is_visible()
+        assert (
+            page.evaluate(CONTRAST, "#sp-filters .sp-sheet-head h2, #sp-filters .sp-sheet-foot .sp-show")
+            == []
+        )
+        # a tap over Add cards lands on the backdrop
+        page.mouse.click(target["x"] + target["width"] / 2, target["y"] + target["height"] / 2)
+        page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        page.wait_for_timeout(300)
+        assert page.url == url, page.url  # Add cards (a link to ?add=1) was not followed...
+        assert page.locator(".mtgbox[role=dialog]:not([hidden])").count() == 0  # ...nor its box opened
+        assert page.locator(".sp-scrim").count() == 0
+        assert page.evaluate(
+            "() => document.activeElement && document.activeElement.className"
+        ) and opener.evaluate("e => e === document.activeElement")
+        # Escape closes it too, with the focus back on the button
+        opener.click()
+        page.locator("#sp-filters.open").wait_for()
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        assert page.locator(".sp-scrim").count() == 0 and opener.evaluate("e => e === document.activeElement")
+        assert page.evaluate(MEASURE) == [] and errors == []
+        browser.close()
+
+
+# every tile detail line on the page: its text nodes' own words (a dot drawn as text would be
+# here) and, when it is a facts line, each fact's rectangle against the line's box
+TILE_FACTS = """() => [...document.querySelectorAll('.wdg .det')].map((d) => {
+  const own = [...d.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('');
+  const line = d.querySelector('.tx.ui-dots.balanced');
+  const box = (line || d).getBoundingClientRect();
+  return {tile: d.parentElement.querySelector('.lab').textContent.trim(), own, text: d.textContent.trim(),
+    facts: line ? [...line.children].map((c) => {
+      const r = c.getBoundingClientRect(), b = getComputedStyle(c, '::before');
+      return {text: c.textContent.trim(), left: Math.round(r.left), right: Math.round(r.right),
+        lines: c.getClientRects().length, dot: b.content.includes('·')};
+    }) : null,
+    left: Math.round(box.left), right: Math.round(box.right)};
+})"""
+
+# pages with a tile whose detail is facts set apart by dots, and a tile each that has them
+DOTTED_TILES = [
+    ("/admin/activity", "Last 24 hours"),
+    ("/activity", "Last 7 days"),
+    ("/proposals", "Waiting for you"),
+    ("/proposals", "Last 7 days"),
+    ("/history", "Snapshots kept"),
+    ("/admin", "Members"),
+]
+
+
+@pytest.mark.parametrize("width,zoom", [(1280, "none"), (360, "none"), (360, "root")])
+def test_a_tiles_facts_never_leave_a_dot_at_the_end_of_a_line(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Re-check S5: /admin/activity's "Last 24 hours" tile at 1280 broke "From 1 member · Website
+    1 · / Other 2" with the dot left at the line's end. A tile's facts are one span each (ui.facts)
+    and the dots are drawn by the style before a fact, so a dot goes with its fact to the next
+    line; no tile's detail holds a dot as text. At 200% text on a phone a fact can be wider than
+    the tile: it wraps inside its span rather than being cut off."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_recheck_0746_browser import _balanced_facts
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+        for path, tile in DOTTED_TILES:
+            page.goto(f"{server.base}{path}", wait_until="networkidle")
+            fold = page.locator("label.glance-lbl").first  # the tiles fold on a phone
+            if fold.count() and fold.is_visible():
+                fold.click()
+            if zoom == "root":
+                page.evaluate(ROOT_200)
+                page.wait_for_timeout(200)
+            dets = page.evaluate(TILE_FACTS)
+            assert all(d["right"] > d["left"] for d in dets), (path, dets)  # shown, with a size
+            assert all("·" not in d["own"] for d in dets), (path, [d for d in dets if "·" in d["own"]])
+            mine = [d for d in dets if d["tile"] == tile]
+            assert len(mine) == 1 and mine[0]["facts"] and len(mine[0]["facts"]) >= 2, (path, tile, dets)
+            got = mine[0]
+            assert not got["facts"][0]["dot"] and all(f["dot"] for f in got["facts"][1:]), got
+            for f in got["facts"]:  # whole where it fits, never cut off at the tile's edge
+                assert f["left"] >= got["left"] - 1 and f["right"] <= got["right"] + 1, (path, f, got)
+                if f["lines"] > 1:  # wrapped inside only because it is wider than the line
+                    assert f["right"] - f["left"] >= got["right"] - got["left"] - 2, (path, f, got)
+            if width == 1280:  # every fact fits: the dots sit between the facts, the lines balanced
+                i = [d["tile"] for d in dets].index(tile)
+                _balanced_facts(page, f".wdg .det >> nth={i} >> .tx.ui-dots.balanced")
         assert errors == []
         browser.close()

@@ -1158,7 +1158,8 @@ def test_deck_card_curve_labels_read_against_their_background(theme: str) -> Non
             browser.close()
 
 
-AS_OF = "2026-11-03T06:00:00+00:00"
+AS_OF = "2026-11-03T22:00:00+00:00"  # late on 3 Nov in UTC: already 4 Nov east of UTC+2
+FAR_EAST = "Pacific/Kiritimati"  # UTC+14: the day after, so the page must name the UTC day
 # the gateway's own line when the day can't be read: no "and prices" (audit A2)
 AS_OF_NOTE = as_of_line("soon")
 
@@ -1176,7 +1177,7 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
     with sync_playwright() as p:
         browser = _launch(p, exe)
         try:
-            page = browser.new_page()
+            page = browser.new_page(timezone_id=FAR_EAST)
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             # the tool result says it: the day, formatted on the card
@@ -1184,10 +1185,17 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             copy = {**summary, "from_local_copy": True, "as_of": AS_OF}
             card = _open(page, "printings-card", {"structuredContent": copy, **meta})
             card.locator(".tile").nth(2).wait_for()
+            # the UTC day, as the tools say it (audit 43b8 low): never the viewer's own day
             day = page.evaluate(
+                "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeZone: 'UTC'})"
+                ".format(new Date(iso))",
+                AS_OF,
+            )
+            local = page.evaluate(
                 "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))",
                 AS_OF,
             )
+            assert local != day  # the browser sits a day ahead of UTC here
             note = card.locator("#asof")
             assert note.is_visible() and note.get_attribute("role") == "status"
             # the picker's short line, word for word (audit P8); the card never says "and prices"
@@ -1228,6 +1236,12 @@ def test_stats_card_treats_a_missing_or_unreadable_total_as_unknown() -> None:
         ({"price_total": "n/a", "priced_cards": 48}, "Price unknown"),
         ({"price_total": 412.5}, "Price $412.50"),
         ({"price_total": 0, "priced_cards": 48}, "Price $0.00 (48 of 64 priced)"),
+        # only a finite number or a string that is wholly a number counts (audit 43b8 low)
+        ({"price_total": True, "priced_cards": 48}, "Price unknown"),
+        ({"price_total": [5], "priced_cards": 48}, "Price unknown"),
+        ({"price_total": "12abc", "priced_cards": 48}, "Price unknown"),
+        ({"price_total": "0", "priced_cards": 48}, "Price $0.00 (48 of 64 priced)"),
+        ({"price_total": "412.5", "priced_cards": 48}, "Price $412.50 (48 of 64 priced)"),
     ]
     with sync_playwright() as p:
         browser = _launch(p, exe)

@@ -7,6 +7,7 @@ go to MTG_SIZE_SHOTS (a folder) when set. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -450,5 +451,60 @@ def test_the_deck_tiles_menu_button_sits_below_the_colour_bar_at_every_size(
             for tile in tiles:
                 assert tile["gap"] >= 0, (size, tile)
                 assert tile["below"] >= 0, (size, tile)
+        browser.close()
+    assert errors == []
+
+
+def test_a_save_still_waiting_when_the_page_is_left_reaches_the_account(server: Server) -> None:
+    """Two quick changes (L, then S) and the page loaded again at once while the first save has
+    not been answered: the first save was cut off by the navigation (no keepalive) and the second,
+    waiting its turn behind it, was never sent, so the account kept neither. Leaving the page
+    (beforeunload, pagehide, the page going hidden) sends what still waits, merged into one body
+    with keepalive, and cancels the save on the wire so an older value can't land after the newer
+    one (static/prefs.js). The first save is held by a route: never answered, never continued."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    # the account has a size for the page already: the device's copy (the "copy" save a page
+    # without one makes) can't be what stores the new one
+    server.db.set_pref("user-1", "card.size.deck", "m")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        posts: list[str] = []
+        held = []
+
+        def hold_first(route) -> None:
+            if route.request.method != "POST":
+                route.continue_()
+                return
+            posts.append(route.request.post_data or "")
+            held.append(route)  # never answered, never continued: it stays on the wire
+
+        # one request only: a request the harness intercepts while the page is being left is
+        # dropped now and then by the interception itself; the flush goes past it, to the gateway
+        page.route(SAVED, hold_first, times=1)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.locator(".toolbar [data-card-size-set=l]").click()
+        page.locator(".toolbar [data-card-size-set=s]").click()
+        assert page.get_attribute("html", "data-card-size") == "s"
+        assert len(posts) == 1 and len(held) == 1, posts  # L on the wire, S waiting behind it
+        page.reload(wait_until="load")
+        for _ in range(100):
+            if server.db.get_pref("user-1", "card.size.deck") == "s":
+                break
+            page.wait_for_timeout(50)
+        assert server.db.get_pref("user-1", "card.size.deck") == "s"
+        # the page loaded while the flush was on its way may still show the old size; the next shows it
+        page.reload(wait_until="load")
+        assert page.get_attribute("html", "data-card-size") == "s"
+        # the second change never went the usual way: only the held first save went through the route
+        assert [json.loads(b) for b in posts] == [{"set": {"card.size.deck": "l"}}], posts
+        for route in held:  # let the harness drop the held one tidily
+            try:
+                route.abort()
+            except Exception:  # noqa: BLE001  (the page that sent it is gone already)
+                pass
         browser.close()
     assert errors == []

@@ -808,3 +808,78 @@ def test_the_folded_intro_has_no_boxes_and_got_it_never_meets_how_it_works(
         assert got_it.bounding_box()["height"] >= 44 and page.evaluate(INTRO_OVERLAPS) == []
         assert errors == []
         browser.close()
+
+
+# the switch's four tabs: each tab's box, the rectangle of its name and of the List badge
+TAB_RECTS = """() => {
+  const seg = document.querySelector('.scan .tabs');
+  const rd = (r) => ({l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height});
+  const tabs = [...seg.querySelectorAll('[role=tab]')].map((b) => {
+    const text = [...b.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+    const rg = document.createRange(); rg.selectNodeContents(text);
+    const badge = b.querySelector('.badge');
+    return {name: text.textContent.trim(), box: rd(b.getBoundingClientRect()),
+            words: rd(rg.getBoundingClientRect()), lines: rg.getClientRects().length,
+            badge: badge ? rd(badge.getBoundingClientRect()) : null,
+            chosen: b.getAttribute('aria-selected') === 'true'};
+  });
+  return {tabs, seg: rd(seg.getBoundingClientRect()), over: seg.scrollWidth > seg.clientWidth + 1,
+          start: seg.classList.contains('more-start'), end: seg.classList.contains('more-end'),
+          page: document.documentElement.scrollWidth};
+}"""
+
+
+def _inside(inner: dict, outer: dict) -> bool:
+    return inner["l"] >= outer["l"] - 1 and inner["r"] <= outer["r"] + 1
+
+
+def _apart(a: dict, b: dict) -> bool:
+    """Two rectangles that share no point (half a pixel of rounding allowed)."""
+    gap = 0.5
+    sideways = a["r"] <= b["l"] + gap or b["r"] <= a["l"] + gap
+    return sideways or a["b"] <= b["t"] + gap or b["b"] <= a["t"] + gap
+
+
+@pytest.mark.parametrize("zoom", ["none", "root"])
+@pytest.mark.parametrize("width", [360, 412])
+def test_the_tabs_keep_their_names_whole_and_apart_at_200_percent_text(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Re-check S3: at 200% text on a phone the four tabs shared the width (79 px each at 360),
+    "Camera" and "Sessions" ran over their neighbours and the List badge sat on "Sessions". A tab
+    is never narrower than its name: each name sits on one line inside its own tab, the badge
+    beside it, no name over another tab; four that don't fit scroll the switch (a faded edge
+    says so, the chosen tab in view), never the page; every tab is a 44 px target."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
+        if zoom == "root":
+            page.evaluate("() => { document.documentElement.style.fontSize = '200%'; }")
+            page.wait_for_timeout(200)
+        got = page.evaluate(TAB_RECTS)
+        tabs = got["tabs"]
+        assert [t["name"] for t in tabs] == ["Camera", "Type", "List", "Sessions"]
+        for t in tabs:
+            assert t["box"]["w"] >= 44 and t["box"]["h"] >= 44, t
+            assert t["lines"] == 1 and _inside(t["words"], t["box"]), t
+            if t["badge"]:
+                assert _inside(t["badge"], t["box"]) and _apart(t["badge"], t["words"]), t
+        for i, a in enumerate(tabs):
+            for j, b in enumerate(tabs):
+                if i != j:
+                    assert _apart(a["words"], b["box"]), (a, b)
+                    if a["badge"]:
+                        assert _apart(a["badge"], b["box"]), (a, b)
+        assert got["page"] <= width, got
+        if got["over"]:
+            assert got["start"] or got["end"], got  # the edge says the switch scrolls
+            chosen = next(t for t in tabs if t["chosen"])
+            assert _inside(chosen["box"], got["seg"]), (chosen, got["seg"])
+        else:
+            assert not got["start"] and not got["end"], got
+        assert errors == []
+        browser.close()

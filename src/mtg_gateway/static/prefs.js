@@ -23,12 +23,16 @@
   // SAVE_WAIT_MS), so one bad save never holds up the ones after it.
   var SAVE_WAIT_MS = 15000;
   var queue = Promise.resolve();
-  function send(body) {
-    var stop = window.AbortController ? new AbortController() : null;
+  var waiting = [];     // saves made but not sent yet, in order: {body, sent}
+  var inflight = null;  // the save on the wire: {body, stop}
+  function send(body, stop) {
     var timer = stop ? setTimeout(function () { stop.abort(); }, SAVE_WAIT_MS) : null;
+    // keepalive: a save on its way when the member leaves the page (a tap on a link right after
+    // a size change) still reaches the gateway
     return fetch("/api/v1/prefs", {
       method: "POST",
       credentials: "same-origin",
+      keepalive: true,
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
       body: JSON.stringify(body),
       signal: stop ? stop.signal : undefined
@@ -39,9 +43,52 @@
   }
   function post(body) {
     if (!window.fetch) return Promise.resolve(null);
-    queue = queue.then(function () { return send(body); });
+    var item = { body: body, sent: false };
+    waiting.push(item);
+    queue = queue.then(function () {
+      var at = waiting.indexOf(item);
+      if (at >= 0) waiting.splice(at, 1);
+      if (item.sent) return null;  // went with the flush below
+      item.sent = true;
+      var stop = window.AbortController ? new AbortController() : null;
+      inflight = { body: body, stop: stop };
+      return send(body, stop).then(function (answer) {
+        if (inflight && inflight.body === body) inflight = null;
+        return answer;
+      });
+    });
     return queue;
   }
+  // Leaving the page: the saves still waiting would never be sent (scripts stop with the page).
+  // They go now, merged into one body in the order they were made (the last change to a name
+  // wins), with keepalive. The save on the wire is cancelled and its names go in the same body
+  // first, so the newest value of a name is never overtaken by an older save that was slow to
+  // arrive; a save that already reached the gateway is simply saved again. Flushing twice is
+  // harmless (nothing waits the second time): beforeunload for a link, a reload or a closed tab,
+  // pagehide and the page going hidden for the phone, where a page in the background can be
+  // thrown away without either of the others.
+  function flush() {
+    var bodies = [];
+    if (inflight) {
+      bodies.push(inflight.body);
+      if (inflight.stop) inflight.stop.abort();
+      inflight = null;
+    }
+    waiting.forEach(function (item) { if (!item.sent) { item.sent = true; bodies.push(item.body); } });
+    waiting = [];
+    if (!bodies.length) return;
+    var merged = {};
+    bodies.forEach(function (b) {
+      Object.keys(b).forEach(function (part) {  // "set", "copy"
+        if (!merged[part]) merged[part] = {};
+        Object.keys(b[part]).forEach(function (name) { merged[part][name] = b[part][name]; });
+      });
+    });
+    send(merged, null);
+  }
+  window.addEventListener("beforeunload", flush);
+  window.addEventListener("pagehide", flush);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flush(); });
   function has(name) { return Object.prototype.hasOwnProperty.call(values, name); }
 
   window.MtgPrefs = {

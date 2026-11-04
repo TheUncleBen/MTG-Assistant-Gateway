@@ -239,8 +239,8 @@
     if (d && d.from_local_copy) {
       var iso = d.as_of ? String(d.as_of) : "", t = iso ? Date.parse(iso) : NaN;
       if (!isNaN(t)) {
-        var opts = { dateStyle: "medium" };
-        if (iso.indexOf("T") < 0) opts.timeZone = "UTC";
+        // the day in UTC, as the tools' as_of_note gives it: the card and the answer name one day
+        var opts = { dateStyle: "medium", timeZone: "UTC" };
         text = "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached";
       } else if (d.as_of_note) text = String(d.as_of_note);
       else text = "From the gateway's own copy · Scryfall can't be reached";

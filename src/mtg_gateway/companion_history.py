@@ -328,7 +328,7 @@ def add_history_routes(
     ) -> str:
         """Snapshots kept, the last restore, reports this month and the backup copies."""
         st = state.db.snapshot_stats(sub, deck_id)
-        newest = f" · newest {ui.when_text(st['newest'], now=now)}" if st["newest"] else ""
+        newest = f"newest {ui.when_text(st['newest'], now=now)}" if st["newest"] else ""
         # a copy of the Binder kept before a clear is not a deck: it is named apart
         decks_unit = f"on {st['decks']} deck{'' if st['decks'] == 1 else 's'}"
         if st["binder"] and st["decks"]:
@@ -348,7 +348,7 @@ def add_history_routes(
             "bookmark",
             st["count"],
             unit=unit,
-            detail=f"Up to {state.db.snapshots_keep()} per deck{newest}",
+            detail_html=ui.facts([f"Up to {state.db.snapshots_keep()} per deck", newest]),
             actions=restore,
         )
         last = decks.list_proposals(sub, deck_id=deck_id, kinds=["restore"], states=["applied"], limit=1)

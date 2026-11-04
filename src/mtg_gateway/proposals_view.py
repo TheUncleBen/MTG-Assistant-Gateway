@@ -68,7 +68,13 @@ YOU, ADMIN = "you", "admin"
 FROM_YOU, FROM_ADMIN = "You", "The administrator"
 NO_APP_NAME = "An assistant"  # an app with no registered name: never its client id
 # the stand-in names as they read inside a sentence ("10 from an unnamed assistant, 5 from you")
-_MID = {NO_APP_NAME: "an unnamed assistant", FROM_YOU: "you", FROM_ADMIN: "the administrator"}
+OTHER_APP = "Other"  # proposals with no client at all: the bucket Activity calls "Other" too
+_MID = {
+    NO_APP_NAME: "an unnamed assistant",
+    FROM_YOU: "you",
+    FROM_ADMIN: "the administrator",
+    OTHER_APP: "other",
+}
 # A failed apply's stored error when Archidekt answered and said no (ArchidektError kinds, and the
 # gateway's own refusals of what it was about to send); anything else (the gateway restarted, a
 # network error or a timeout, the backup copy) is "could not be applied", not a refusal.
@@ -349,22 +355,24 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
             bits.append(f"{len(tied)} on {decks_n} deck{'' if decks_n == 1 else 's'}")
         if untied_n:
             bits.append(f"{untied_n} not tied to a deck")
-        det = ", ".join(bits)
+        # one fact a span (ui.facts): a narrow tile's line never ends on a dot (re-check S5)
+        facts = [", ".join(bits)]
         if not BY_APP_WIDGET:
             by_app: dict[str, int] = {}
             for it in waiting:
-                name = it["app"] or "No app"
+                name = it["app"] or OTHER_APP
                 by_app[name] = by_app.get(name, 0) + 1
             if len(by_app) > 1:  # which apps they came from, when it is more than one
                 order = sorted(by_app.items(), key=lambda kv: (-kv[1], kv[0]))
                 # mid-sentence, the stand-in names lose their capital (independent review 2, L6)
-                det += " · " + ", ".join(f"{n} from {_MID.get(name, name)}" for name, n in order)
-        det += f" · oldest {_span(now - min(it['created_at'] for it in waiting))}"
+                facts.append(", ".join(f"{n} from {_MID.get(name, name)}" for name, n in order))
+        facts.append(f"oldest {_span(now - min(it['created_at'] for it in waiting))}")
         soon = [it["expires_at"] for it in waiting if it["expires_at"] > now]
         if soon:
-            det += f" · next expires in {_span(min(soon) - now)}"
+            facts.append(f"next expires in {_span(min(soon) - now)}")
+        det_html = ui.facts(facts)
     else:
-        det = "Nothing is waiting."
+        det_html = esc("Nothing is waiting.")
     low = sum(1 for it in waiting if _low_checkable(it))
     acts = (
         [
@@ -381,7 +389,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
         "clock",
         len(waiting),
         unit="waiting",
-        detail=det,
+        detail_html=det_html,
         actions=acts,
         tone="accent" if waiting else "",
     )
@@ -425,13 +433,15 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     applied = [it for it in items if it["state"] == "applied" and closed_at(it) >= week]
     rejected = sum(1 for it in items if it["state"] == "rejected" and closed_at(it) >= week)
     failed = sum(1 for it in items if it["state"] == "failed" and closed_at(it) >= week)
-    det4 = f"{rejected} rejected · {failed} failed"
+    facts4 = [f"{rejected} rejected", f"{failed} failed"]
     if applied:
         last = max(applied, key=closed_at)
-        det4 += f" · last applied {ui.when_text(closed_at(last), now=now)} to {last['deck_name']}"
+        facts4.append(f"last applied {ui.when_text(closed_at(last), now=now)} to {last['deck_name']}")
     undo = [it for it in sorted(applied, key=closed_at, reverse=True) if _undoable(it, csrf)]
     acts4 = [_undo_form(undo[0], csrf, "Undo last apply", "btn-plain")] if undo else []
-    w4 = ui.widget("Last 7 days", "check", len(applied), unit="applied", detail=det4, actions=acts4)
+    w4 = ui.widget(
+        "Last 7 days", "check", len(applied), unit="applied", detail_html=ui.facts(facts4), actions=acts4
+    )
     # the phone's one line over the folded widgets
     line = f"{len(waiting)} waiting" + (
         f" · {len(look)} need{'s' if len(look) == 1 else ''} a look" if look else ""
@@ -442,7 +452,7 @@ def widgets_html(data: dict[str, Any], query: dict[str, Any], csrf: str | None, 
     # 5. Waiting by app
     by_app = {}
     for it in waiting:
-        name = it["app"] or "No app"
+        name = it["app"] or OTHER_APP
         by_app[name] = by_app.get(name, 0) + 1
     order = sorted(by_app.items(), key=lambda kv: (-kv[1], kv[0]))
     if order:

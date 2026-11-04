@@ -78,10 +78,12 @@ def name_row(
     place on a Fold or desktop (``filters_sheet`` with ``folded``); True when they start open.
     ``filters_word`` names the button by what the sheet holds (``filters_sheet``'s ``title``)."""
     expanded = "true" if fold else "false"
+    # the lite "View" sheet (the card size alone) is no filter: the eye, not the funnel (re-check S4)
+    fic = icon("eye" if filters_word == "View" else "filter")
     fbtn = (
         f"<button type='button' class='btn sp-open fbtn{' fold' if fold is not None else ''}' "
         f"aria-controls='sp-filters' aria-expanded='{expanded}'>"
-        f"{icon('filter')} {esc(filters_word)} <span class='n'></span></button>"
+        f"{fic} {esc(filters_word)} <span class='n'></span></button>"
         if filters_button
         else ""
     )
