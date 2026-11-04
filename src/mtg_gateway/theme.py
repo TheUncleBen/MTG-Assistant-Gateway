@@ -1130,6 +1130,10 @@ body .tabbar:has(details.more[open]){z-index:25}
   color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:18px;text-align:center;padding:0 4px;
   font-style:normal;box-sizing:border-box}
 .tabbar > a.bell .n[hidden]{display:none}
+/* the bar's counts are sized in px like its icons (22 px) and labels (capped at 15 px): in rem
+   alone, at 200% text the Assistant count grew over its icon while its 18 px box stayed (final
+   polish W2); .72rem is 10 px at the pages' 14 px root, so the cap changes nothing at 100% */
+.tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem,11px)}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
