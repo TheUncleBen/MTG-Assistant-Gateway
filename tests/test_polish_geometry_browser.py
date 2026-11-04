@@ -305,7 +305,18 @@ def test_the_admin_overview_facts_line_at_desktop_width(server: Server) -> None:
         browser, page, errors = _open(p, exe, server, sid, 1280)
         page.goto(f"{server.base}/admin", wait_until="networkidle")
         _no_dangling_dot(page, ".wdg .det .ui-dots")
-        # N13: a long listing tag on the Decks list ends in an ellipsis inside its row
+        # N13: a long listing tag on the Decks list ends in an ellipsis inside its row. The seed's
+        # longest tag (56 characters) fits its box with a narrower font (CI's), so one far too long
+        # for it at any font is added: the test needs a tag that cannot fit.
+        listing_row = server.ark._listing_row
+
+        def row(d):
+            r = listing_row(d)
+            if d["id"] != 42:
+                r["tags"] = [*r["tags"], {"id": 99, "name": "a tag far too long for its box " * 6}]
+            return r
+
+        server.ark._listing_row = row
         page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
         pills = page.locator("ul.decklist .tags .pill")
         assert pills.count() >= 2
