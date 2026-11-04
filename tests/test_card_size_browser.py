@@ -347,7 +347,11 @@ def test_collection_my_decks_and_card_search_show_the_switch_in_every_view(
             assert page.evaluate(CONTRAST, f"{bar} .sizeseg button, {bar} .cardsize .lbl") == []
             _shot(page, f"{path[1:].split('?')[0]}-{width}-{theme}.png")
             if sheet:
+                # Show sends the Binder's form (a submit button there): let that finish before the
+                # next page, or the two navigations race
                 page.locator(".sp-show").click()
+                page.locator("#sp-filters.open").wait_for(state="detached", timeout=5000)
+                page.wait_for_load_state("networkidle")
         # R-175 (2026-10-21): the switch stays in the list views too, and sizes the row pictures
         if width >= 600:  # on phones the switch waits in the Filters sheet, as above
             page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")

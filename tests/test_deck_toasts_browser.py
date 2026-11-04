@@ -3,7 +3,7 @@ Chromium at 390, 840 and 1280 px, light and dark, and at 200 % text:
 
 - a Quick add that breaks the format's rules (a second copy in a Commander deck) says so in its
   note, with Undo, as the same change made as a proposal is marked high risk;
-- the deck's cost stays "–" after a save while no card has a price (never "$0.00");
+- the deck's cost stays a muted "unknown" after a save while no card has a price (never "$0.00");
 - a name that is no card is refused without a Try again that can only fail the same way, and
   offers a card search instead;
 - the Pin card note says "Open Wants" as a button, and two notes never cover each other."""
@@ -108,8 +108,9 @@ def test_deck_page_notes_after_instant_saves(
         assert "breaks its format's rules" in text and "more than one copy" in text, text
         assert "warn" in (page.locator(".deck-toast").get_attribute("class") or "")
         assert page.locator(".deck-toast button", has_text="Undo").count() == 1
-        # no card has a price: the cost stays a dash after the save, in the banner and the tile
-        assert "$0.00" not in cost.inner_text() and "–" in cost.inner_text()
+        # no card has a price: the cost stays "unknown" after the save, in the banner and the tile
+        assert "$0.00" not in cost.inner_text() and "unknown" in cost.inner_text()
+        assert "–" not in cost.inner_text() and cost.locator(".unpriced").count() == 1
         assert "$0.00" not in page.locator(".stats .tiles").inner_text()
         # no such card: refused, no Try again (it would fail the same way), a search instead
         box.fill("Zzyzx")
