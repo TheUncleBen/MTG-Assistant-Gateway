@@ -1022,6 +1022,39 @@ def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
     _display_card("stats-card", {"structuredContent": STATS}, "#curve .col", check)
 
 
+def test_stats_card_says_unknown_for_a_deck_nobody_priced_and_keeps_a_part_sum() -> None:
+    """A deck with no prices at all read "Price $0.00 (0 of 64 priced)" on the chat's stats card
+    (audit P4): it says "unknown", muted and plain as the site does, at 4.5:1 in both themes. A
+    partly priced deck keeps its sum and "(n of m priced)"."""
+    from .test_card_search_filters_browser import CONTRAST
+
+    def unpriced(page, card) -> None:
+        facts = card.locator("#facts").inner_text()
+        assert "$0.00" not in facts and "0 of 64" not in facts, facts
+        price = card.locator("#facts li", has_text="Price")
+        assert price.count() == 1 and price.inner_text().split() == ["Price", "unknown"], facts
+        got = price.locator("b").evaluate(
+            "e => { const cs = getComputedStyle(e), ps = getComputedStyle(e.parentElement);"
+            " return {weight: cs.fontWeight, size: parseFloat(cs.fontSize), around: parseFloat(ps.fontSize),"
+            " color: cs.color, muted: getComputedStyle(e.parentElement.firstElementChild).color}; }"
+        )
+        assert got["weight"] == "400" and got["size"] <= got["around"] + 0.01, got
+        assert got["color"] == got["muted"], got  # the label's muted grey, not the value's black
+        assert page.frames[1].evaluate(CONTRAST, "#facts li b") == []
+
+    none = {**STATS["stats"], "price_total": 0.0, "priced_cards": 0}
+    _display_card("stats-card", {"structuredContent": {**STATS, "stats": none}}, "#curve .col", unpriced)
+
+    def part(page, card) -> None:
+        price = card.locator("#facts li", has_text="Price")
+        words = price.inner_text().split()
+        assert words == ["Price", "$412.50", "(48", "of", "64", "priced)"], words
+        assert price.locator("b").evaluate("e => getComputedStyle(e).fontWeight") != "400"
+
+    some = {**STATS["stats"], "priced_cards": 48}
+    _display_card("stats-card", {"structuredContent": {**STATS, "stats": some}}, "#curve .col", part)
+
+
 def test_deck_list_card_lists_decks_with_covers_and_links_at_320px() -> None:
     def check(page, card) -> None:
         rows = card.locator("#list .row.deck")
@@ -1155,7 +1188,8 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             )
             note = card.locator("#asof")
             assert note.is_visible() and note.get_attribute("role") == "status"
-            said = f"Printings and prices as of {day} (Scryfall can't be reached right now)"
+            # the picker's short line, word for word (audit P8); the card never says "and prices"
+            said = f"As of {day} \u00b7 Scryfall can't be reached"
             assert note.inner_text().strip() == said
             assert note.bounding_box()["y"] < card.locator("#grid").bounding_box()["y"]  # over the list
             # the day can't be read: the gateway's own line, from the link's JSON

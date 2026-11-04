@@ -727,7 +727,15 @@ def test_a_failed_undo_retries_only_the_rows_still_in_the_binder(server: Server)
         expect(page.locator("#list-msg .notice.error")).to_contain_text(
             "Took 2 of 3 copies out of your binder; the rest could not be taken out", timeout=10_000
         )
-        assert "Press Undo again for the rest" in page.locator("#list-msg .notice.error").inner_text()
+        # the whole note, as sentences: why() ends with a full stop, so "Press Undo again" does not run
+        # on from the reason (audit P3: "...is busy Press Undo again...")
+        words = page.locator("#list-msg .notice.error").evaluate(
+            "e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim()"
+        )
+        assert words == (
+            "Took 2 of 3 copies out of your binder; the rest could not be taken out: Archidekt is busy. "
+            "Press Undo again for the rest."
+        ), words
         assert len(server.ark.collections.get("alice", {})) == 1  # Sol Ring is out, the Signet stays
         # Undo stays on the page, in the notice that says what went wrong, for another go
         assert undo.count() == 1 and undo.is_enabled() and undo.is_visible()

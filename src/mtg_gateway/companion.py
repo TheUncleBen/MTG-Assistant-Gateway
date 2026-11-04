@@ -39,6 +39,7 @@ from .pages import (
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
+    UNPRICED_HTML,
     icon,
     render,
     stylesheet_link,
@@ -131,12 +132,13 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Cards", _num(stats.get("card_count"), 0)),
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
-        # no card priced (or a total of 0 from a report made before priced_cards): "No price", never $0
+        # no card priced (or a total of 0 from a report made before priced_cards): the shared muted
+        # "unknown" (theme.UNPRICED_HTML, as the deck page and the Binder say it), never $0
         (
             "Price",
-            money(stats.get("price_total"))
+            _esc(money(stats.get("price_total")))
             if stats.get("price_total") and stats.get("priced_cards") != 0
-            else "No price",
+            else UNPRICED_HTML,
         ),
         # the bracket set on the deck is the deck's bracket; else Archidekt's estimate
         (
@@ -147,7 +149,10 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ),
         ("Game changers", _num(len(stats.get("game_changers") or []), 0)),
     ]
-    tile_html = "".join(f"<div class='tile'><b>{_esc(v)}</b><span>{_esc(k)}</span></div>" for k, v in tiles)
+    tile_html = "".join(
+        f"<div class='tile'><b>{v if k == 'Price' else _esc(v)}</b><span>{_esc(k)}</span></div>"
+        for k, v in tiles
+    )
     curve = stats.get("mana_curve") or {}
     out = [f"<div class='tiles'>{tile_html}</div>"]
     if curve:

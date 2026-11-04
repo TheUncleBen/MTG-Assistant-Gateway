@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from .test_deck_menu_browser import Server, _chromium, _page
+from .test_deck_menu_browser import _EXE, Server, _chromium, _page
 
 pytest.importorskip("playwright")
 
@@ -96,6 +96,145 @@ def test_a_test_of_the_check_itself_opts_out_and_gets_the_answer(server: Server)
         assert answer.value.status == 200
         assert time.monotonic() - started >= SLOW_REREAD - 0.5  # it was held for the re-read
         expect(page.locator("main")).to_contain_text("Renamed on Archidekt", timeout=10_000)
+        assert reads == ["42"], reads
+        assert not errors, errors
+        browser.close()
+
+
+# The strip's layout at a phone and a desktop, in both themes (0.7.46 audit P6): the two feedback.js
+# branches a test never drove before.
+STRIP_CASES = [(360, "light"), (360, "dark"), (1280, "light"), (1280, "dark")]
+
+
+def _themed_page(p, server: Server, sid: str, width: int, theme: str, *, routes: bool = True):  # noqa: ANN001, ANN202
+    """A page in the member's theme. ``routes=False``: a context without test_deck_menu_browser's
+    picture route, because Chromium under Playwright's request interception caches nothing and so
+    sends Pragma and Cache-Control: no-cache with every navigation, which the gateway reads as the
+    browser's Reload (decks.is_reload); a view picked in the page must count as the plain link or
+    form navigation it is."""
+    if routes:
+        browser, page, errors = _page(p, server, sid, width)
+    else:
+        browser = p.chromium.launch(executable_path=_EXE["path"], args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900 if width > 500 else 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+    page.context.add_cookies([{"name": "mtg_theme", "value": theme, "url": server.base}])
+    return browser, page, errors
+
+
+def _pick_view(page, label: str, *, phone: bool) -> None:  # noqa: ANN001
+    """Pick a view as a member does: the toolbar's View sheet on a phone (deck.js mirrors the
+    select into it), the custom drop-down (static/select.js) on a wider screen."""
+    if phone:
+        page.locator(".toolbar .viewbtn").click()
+        sheet = page.locator(".mtgbox[role=dialog]:not([hidden]) .viewsheet")
+        sheet.wait_for(timeout=3000)
+        sheet.locator("select#vs-view").select_option(label=label)
+        return
+    page.locator("#f-view-btn").click()
+    listbox = page.locator("#msel-list[role=listbox]")
+    listbox.wait_for(state="visible", timeout=3000)
+    listbox.locator("[role=option]", has_text=label).click()
+
+
+def _strip_fits(page, strip) -> None:  # noqa: ANN001
+    from .test_card_search_filters_browser import CONTRAST
+    from .test_overflow_sweep_browser import MEASURE
+
+    assert strip.is_visible() and strip.get_attribute("role") == "status"
+    assert page.evaluate(MEASURE) == []  # nothing scrolls sideways
+    box, main = strip.bounding_box(), page.locator("main").bounding_box()
+    assert box["x"] >= main["x"] - 1 and box["x"] + box["width"] <= main["x"] + main["width"] + 1, (box, main)
+    assert strip.evaluate("e => e.scrollWidth <= e.clientWidth + 1")
+    assert page.evaluate(CONTRAST, "[data-check], [data-check] *") == []
+
+
+@pytest.mark.deck_check_live
+@pytest.mark.parametrize(("width", "theme"), STRIP_CASES)
+def test_a_deck_that_changed_offers_the_changes_in_a_strip_with_a_button(
+    server: Server, width: int, theme: str
+) -> None:
+    """On a view switch (not a Reload) of a kept copy, the background re-read finds the deck changed
+    on Archidekt: the strip says so with "Show the changes", a real button (44 px, not underlined,
+    in the button's own colour) that loads the page again with the new deck. It fits the page at
+    4.5:1 at a phone and a desktop, in both themes (audit P6)."""
+    from playwright.sync_api import expect, sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _themed_page(p, server, sid, width, theme, routes=False)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="load")  # reads and keeps it
+        reads = _age_and_slow(server)
+        server.ark.decks[42]["name"] = "Renamed on Archidekt"  # what the re-read will find
+        # another view, picked in the page (a GET form, no reload header): the copy is shown as
+        # last read and the strip waits for the re-read
+        with page.expect_response(
+            lambda r: r.url == f"{server.base}/decks/42/check", timeout=(SLOW_REREAD + 10) * 1000
+        ) as answer:
+            _pick_view(page, "Table", phone=width < 600)
+            page.wait_for_load_state("load")
+            strip = page.locator("[data-check]")
+            assert strip.get_attribute("data-reload") == "0" and "view=table" in page.url
+            assert "Renamed on Archidekt" not in page.content()
+        assert answer.value.status == 200 and answer.value.json() == {"changed": True, "failed": False}
+        strip.wait_for(state="visible", timeout=5000)
+        assert strip.inner_text().startswith("This deck changed on Archidekt.")
+        assert "warn" not in (strip.get_attribute("class") or "")
+        button = strip.locator("a.btn", has_text="Show the changes")
+        assert button.count() == 1
+        box = button.bounding_box()
+        assert box["height"] >= 44, box
+        style = button.evaluate(
+            "e => { const cs = getComputedStyle(e); const probe = document.createElement('a');"
+            " probe.className = 'btn'; probe.textContent = 'x'; document.body.appendChild(probe);"
+            " const own = getComputedStyle(probe); const out = {deco: cs.textDecorationLine, color: cs.color,"
+            " own: own.color, within: e.getBoundingClientRect().right <="
+            " e.parentElement.getBoundingClientRect().right + 1};"
+            " probe.remove(); return out; }"
+        )
+        assert style["deco"] == "none" and style["color"] == style["own"] and style["within"], style
+        _strip_fits(page, strip)
+        button.click()
+        expect(page.locator("main")).to_contain_text("Renamed on Archidekt", timeout=10_000)
+        assert reads == ["42"], reads
+        assert not errors, errors
+        browser.close()
+
+
+@pytest.mark.deck_check_live
+@pytest.mark.parametrize(("width", "theme"), STRIP_CASES)
+def test_a_deck_archidekt_could_not_reread_says_how_old_the_copy_is(
+    server: Server, width: int, theme: str
+) -> None:
+    """When the background re-read finds Archidekt unavailable, the strip turns to the warning
+    look and says how old the copy on show is (deck_check_html's data-failed words), fitting the
+    page at 4.5:1 at a phone and a desktop, in both themes (audit P6)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _themed_page(p, server, sid, width, theme)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        reads = _age_and_slow(server)
+        server.ark.fail_deck_reads = True  # Archidekt answers 503 to the re-read
+        with page.expect_response(
+            lambda r: r.url == f"{server.base}/decks/42/check", timeout=(SLOW_REREAD + 10) * 1000
+        ) as answer:
+            page.goto(f"{server.base}/decks/42?view=table", wait_until="load")
+        assert answer.value.status == 200 and answer.value.json() == {"changed": False, "failed": True}
+        strip = page.locator("[data-check]")
+        strip.wait_for(state="visible", timeout=5000)
+        assert "warn" in (strip.get_attribute("class") or "")
+        said = strip.get_attribute("data-failed")
+        assert said.startswith("Archidekt can't be reached right now, so this is the deck as it was read ")
+        assert strip.inner_text().strip() == said
+        assert strip.locator("a").count() == 0  # nothing to press: the page's Reload reads again
+        _strip_fits(page, strip)
         assert reads == ["42"], reads
         assert not errors, errors
         browser.close()

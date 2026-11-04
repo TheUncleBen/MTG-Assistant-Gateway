@@ -484,8 +484,9 @@
     wrap.appendChild(det);
     return wrap;
   }
+  // a day with no price reads "unknown", as every missing price on the site does
   function money(v, cur) {
-    if (v === null || v === undefined) return "no price";
+    if (v === null || v === undefined) return "unknown";
     return (cur === "eur" ? "€" : "$") + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function priceButton(card) {

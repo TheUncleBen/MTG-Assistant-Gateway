@@ -231,8 +231,9 @@
   }
   // The list came from the gateway's own copy of Scryfall's printings (from_local_copy, while
   // Scryfall isn't answering): say so over the list, with the copy's day (as_of, an ISO date-time)
-  // in the viewer's own locale, or the gateway's own line (as_of_note) when the day can't be read
-  // (audit N15). A live list shows nothing here.
+  // in the viewer's own locale, in the site's picker's words (audit N15, P8: short, and no "prices",
+  // which the card does not show), or the gateway's own line (as_of_note) when the day can't be
+  // read. A live list shows nothing here.
   function showAsOf(d) {
     var p = $("asof"), text = "";
     if (d && d.from_local_copy) {
@@ -240,10 +241,9 @@
       if (!isNaN(t)) {
         var opts = { dateStyle: "medium" };
         if (iso.indexOf("T") < 0) opts.timeZone = "UTC";
-        text = "Printings and prices as of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) +
-          " (Scryfall can't be reached right now)";
+        text = "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached";
       } else if (d.as_of_note) text = String(d.as_of_note);
-      else text = "From the gateway's own copy of the printings (Scryfall can't be reached right now)";
+      else text = "From the gateway's own copy · Scryfall can't be reached";
     }
     p.textContent = text; p.className = text ? "note" : "note hidden";
   }

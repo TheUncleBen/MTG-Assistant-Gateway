@@ -69,17 +69,19 @@ def name_row(
     attrs: str = "",
     filters_button: bool = True,
     fold: bool | None = None,
+    filters_word: str = "Filters",
 ) -> str:
     """The panel's first row: the name box with its search button (``attrs`` adds attributes to
     the box), ``under_html`` right under the box (deck search's "Open this deck"), the Filters
     button phones open the sheet with, and ``cross_html`` (the cross-link) at the end of the row,
     hidden on phones. ``fold``: the button shows at every width and folds the filter groups in
-    place on a Fold or desktop (``filters_sheet`` with ``folded``); True when they start open."""
+    place on a Fold or desktop (``filters_sheet`` with ``folded``); True when they start open.
+    ``filters_word`` names the button by what the sheet holds (``filters_sheet``'s ``title``)."""
     expanded = "true" if fold else "false"
     fbtn = (
         f"<button type='button' class='btn sp-open fbtn{' fold' if fold is not None else ''}' "
         f"aria-controls='sp-filters' aria-expanded='{expanded}'>"
-        f"{icon('filter')} Filters <span class='n'></span></button>"
+        f"{icon('filter')} {esc(filters_word)} <span class='n'></span></button>"
         if filters_button
         else ""
     )
@@ -208,10 +210,13 @@ def filters_sheet(
     size: bool = True,
     folded: bool | None = None,
     pref: str = "",
+    title: str = "Filters",
 ) -> str:
     """The filter groups, which phones open as a full-screen sheet (the Filters button in the
-    name row): a head with Filters and ×, the groups, the card size (phones only, where the
-    results bar hides it), then Clear filters and ``show_html`` (the button that closes it).
+    name row): a head with its ``title`` (what the sheet holds: "Filters", or "View" when it holds
+    only the card size; ``name_row``'s ``filters_word`` names the button the same) and ×, the
+    groups, the card size (phones only, where the results bar hides it), then Clear filters and
+    ``show_html`` (the button that closes it).
     ``folded``: on a Fold or desktop the groups fold in place behind the same button (mockup
     screen 5): True draws them folded, False open, None (other panels) always open. ``pref``: the
     account choice static/searchpanel.js keeps the last state in. Without scripts nothing can
@@ -232,8 +237,9 @@ def filters_sheet(
         ".spanel .fbtn.sp-open,.spanel .sp-sheet-head,.spanel .sp-sheet-foot{display:none}</style></noscript>"
     )
     return (
-        f"<div id='sp-filters' class='sp-filters{cls}'{data}><div class='sp-sheet-head'><h2>Filters</h2>"
-        f"<button type='button' class='close' aria-label='Close filters'>{icon('x')}</button></div>"
+        f"<div id='sp-filters' class='sp-filters{cls}'{data}><div class='sp-sheet-head'><h2>{esc(title)}</h2>"
+        f"<button type='button' class='close' aria-label='Close {esc(title.lower())}'>{icon('x')}</button>"
+        "</div>"
         f"{inner_html}{size_html}<div class='sp-sheet-foot'>{clear_html}{show_html}</div></div>{noscript}"
     )
 

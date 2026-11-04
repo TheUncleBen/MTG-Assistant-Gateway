@@ -722,7 +722,9 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* why a page can't be read yet (busy.busy_body), under its strip, with the area's own page */
 .busy-why{color:var(--text-muted);display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
 .busy-why .btn{margin:0}
-.notice a{color:inherit;text-decoration:underline}
+/* a link in a notice reads as one; a button in one (Try again on a held page, Show the changes on
+   the deck check strip) keeps the button's own look (polish re-check P1) */
+.notice a:not(.btn){color:inherit;text-decoration:underline}
 /* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
 .notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
   gap:.35rem .6rem}

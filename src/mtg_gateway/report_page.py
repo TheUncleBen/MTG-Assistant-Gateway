@@ -66,7 +66,7 @@ from .report_view import (
     validation_html,
 )
 from .reports_page import PHONE_WIDGETS_CSS, STATUS_LABEL, source_label_html, status_label
-from .theme import SPINNER, icon
+from .theme import SPINNER, UNPRICED_HTML, icon
 
 # The "Played with their effect" widget takes the orange edge below this share of the deck.
 COVERAGE_WARN = 70
@@ -871,7 +871,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
         # one span a fact, balanced over the lines with the dots in the gaps (ui-dots): a fact
         # never breaks inside ("0" at a line's end, "game changers" on the next: polish batch 3 N1)
         facts = [
-            x
+            _esc(x)
             for x in (
                 f"{_int(stats.get('land_count'))} lands" if _int(stats.get("land_count")) is not None else "",
                 f"Avg MV {mv:.1f}" if mv is not None else "",
@@ -880,8 +880,9 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
             if x
         ]
         if not price or stats.get("priced_cards") == 0:
-            price = None  # no card had a price: "No price", never a $0 deck
-            facts.append("No price")
+            # no card had a price: "Price unknown" in the shared muted word, never a $0 deck
+            price = None
+            facts.append(f"Price {UNPRICED_HTML}")
         out.append(
             ui.widget(
                 "Deck",
@@ -893,7 +894,7 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                     else ("cards" if cards else "")
                 ),
                 detail_html="<span class='tx ui-dots balanced'>"
-                + "".join(f"<span>{_esc(x)}</span>" for x in facts)
+                + "".join(f"<span>{x}</span>" for x in facts)
                 + "</span>",
                 actions=[_go("Deck statistics", "#rv-stats")] if stats_section else [],
             )
@@ -2061,8 +2062,12 @@ REPORT_PAGE_CSS = (
   border:0;
   border-radius:0;border-left:1px solid var(--border-soft);padding:.6rem .8rem}
 .rv-page .rv-dstats .tile:first-child{border-left:0}
-.rv-page .rv-dstats .tile span{font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.rv-page .rv-dstats .tile > span{font-size:.82rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.03em}
 .rv-page .rv-dstats .tile b{font-size:1.35rem;font-weight:900}
+/* a price nobody knows: the shared muted "unknown" (theme.UNPRICED_HTML), quieter than a value and
+   never the label's capitals (audit N7/N12) */
+.rv-page .rv-dstats .tile b .unpriced{font-size:1.1rem}
 @media (max-width:599.98px){.rv-page .rv-dstats .tiles{grid-template-columns:1fr 1fr}
   .rv-page .rv-dstats .tile{border-left:0;border-top:1px solid var(--border-soft)}
   .rv-page .rv-dstats .tile:nth-child(-n+2){border-top:0}

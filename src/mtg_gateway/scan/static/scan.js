@@ -61,10 +61,14 @@
   };
 
   // ---------------------------------------------------------------- helpers
-  // Plain words for a failed request: fetch() rejects with a TypeError when there is no connection.
-  const why = (err) => (err instanceof TypeError || !navigator.onLine)
-    ? 'no connection to the gateway. Check your connection and try again'
-    : (err && err.message) || String(err);
+  // Plain words for a failed request, as a sentence with its full stop (so a note can go on after
+  // it: audit P3): fetch() rejects with a TypeError when there is no connection.
+  const why = (err) => {
+    const said = (err instanceof TypeError || !navigator.onLine)
+      ? 'no connection to the gateway. Check your connection and try again'
+      : (err && err.message) || String(err);
+    return /[.!?…]$/.test(said) ? said : said + '.';
+  };
   const text = window.MtgText || {
     plural: (n, w) => n + ' ' + (Number(n) === 1 ? w : w + 's'),
     when: (v) => new Date(v).toLocaleString()
