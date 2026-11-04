@@ -213,3 +213,76 @@ async def test_a_late_deck_page_waits_for_the_lock_off_the_loop(stack: Stack) ->
         assert page.status_code == 200 and "data-late" not in page.text, page.text[:400]
     finally:
         await b.aclose()
+
+
+async def test_a_late_deck_page_during_a_lock_logs_no_error(
+    stack: Stack, caplog: pytest.LogCaptureFixture
+) -> None:
+    """N8 of the 0.7.46 audit: the late deck page's writes that find the lock (the waiting
+    proposals' re-check, the prices read hook) are handled (the page runs again once the lock is
+    free), so they log below ERROR. They used to log two ERROR lines with a traceback each."""
+    import logging
+
+    from .test_late_pages import PAGE, _linked, _slow
+
+    h = stack.h
+    await linked_user(stack)
+    b = await _linked(stack)
+    try:
+        # a waiting proposal on the deck, so the page's re-check has something to look at
+        await call(h, await linked_user(stack), "propose_deck_changes", {"deck_id": "42", "changes": ONE})
+        _slow(stack, 2.0)
+        caplog.set_level(logging.INFO)
+        holder = _hold(str(h.settings.db_path), 4.0)
+        try:
+            frame = await b.http.get("/decks/42", headers=PAGE)
+            assert "data-late=" in frame.text, frame.text[:400]
+            key = re.search(r"data-late='(/late/[A-Za-z0-9_-]+)'", frame.text).group(1)
+            await asyncio.sleep(2.5)  # the page's Archidekt read is over; its writes meet the lock
+            assert h.db.write_free() is False  # the lock really was held all along
+        finally:
+            holder.wait(timeout=30)
+        ready = await b.http.get(key)
+        assert ready.status_code == 200 and ready.json()["ready"] is True, ready.text
+    finally:
+        await b.aclose()
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert not errors, [f"{r.name}: {r.getMessage()}" for r in errors]
+
+
+async def test_an_unexpected_failure_of_a_check_or_hook_still_logs_an_error(
+    stack: Stack, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Only the handled DatabaseBusy is below ERROR: anything else a re-check or a read hook
+    raises is still an ERROR with its traceback."""
+    import logging
+
+    from mtg_gateway.archidekt import Deck
+
+    decks = stack.gw.decks
+    deck = Deck(id="42", name="d", owner="alice", updated_at="", cards=[], categories=[], raw={})
+
+    async def read(*_a, **_k):
+        return deck
+
+    real_board, real_read, real_hooks = decks.db.pending_board, decks.get_any_deck, decks.read_hooks
+    for raised, level in ((DatabaseBusy(), logging.WARNING), (RuntimeError("boom"), logging.ERROR)):
+        caplog.clear()
+
+        def fails(*_a, _e=raised, **_k):
+            raise _e
+
+        decks.db.pending_board = fails
+        decks.get_any_deck = read
+        decks.read_hooks = [fails]
+        try:
+            await decks._read_page_deck("alice", "42", ("alice", "42"), fresh=False)
+        finally:
+            decks.db.pending_board, decks.get_any_deck, decks.read_hooks = real_board, real_read, real_hooks
+        for words in ("re-check of waiting proposals", "a deck read hook"):
+            logged = [r for r in caplog.records if words in r.getMessage()]
+            assert [r.levelno for r in logged] == [level], (
+                words,
+                [(r.levelno, r.getMessage()) for r in logged],
+            )
+            assert (logged[0].exc_info is not None) is (level == logging.ERROR)

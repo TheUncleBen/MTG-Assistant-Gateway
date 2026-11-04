@@ -94,6 +94,7 @@ from .db import (
     PAGE_SESSION_KINDS,
     RISK_REASON_KEY,
     Database,
+    DatabaseBusy,
     ProposalVersionsFull,
 )
 from .decklist import (
@@ -4750,6 +4751,8 @@ class DeckService:
             for hook in self.read_hooks:
                 try:
                     hook(sub, deck)
+                except DatabaseBusy:  # handled: the page runs again once the lock is free (dbwait)
+                    logger.warning("a deck read hook found the database locked; the page runs again")
                 except Exception:  # a hook never stops the page
                     logger.exception("a deck read hook failed")
         self._keep_page_deck(key, deck, gen, started)
@@ -7568,6 +7571,9 @@ class DeckService:
         out: dict[str, str] = {}
         try:
             board = self.db.pending_board(sub, deck.id)
+        except DatabaseBusy:  # handled: the request runs again once the lock is free (dbwait)
+            logger.warning("re-check of waiting proposals found the database locked; it runs again")
+            return out
         except Exception:  # a check must never break the page or apply that triggered it
             logger.exception("re-check of waiting proposals failed")
             return out
