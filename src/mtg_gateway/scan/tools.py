@@ -248,14 +248,25 @@ def add_scan_tools(
             if not oracle_id:
                 if not name:
                     raise ScanError("invalid", "give oracle_id or name")
-                results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
-                if results and results[0].status == "deferred":
-                    raise not_looked_up(name, service.scryfall.retry_in())
-                card = results[0].card if results else None
-                if not card or not card.get("oracle_id"):
-                    raise ScanError("not_found", f"no card found for '{name}'")
-                oracle_id = str(card["oracle_id"])
-                name = str(card.get("name") or name)
+                try:
+                    results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
+                    if results and results[0].status == "deferred":
+                        raise not_looked_up(name, service.scryfall.retry_in())
+                except ScanError as exc:
+                    # Scryfall can't place the name now: the local copy knows the card's names
+                    kept = None
+                    if exc.kind in ("unavailable", "rate_limited", "busy"):
+                        kept = await service.oracle_from_copy(name)
+                    if kept is None:
+                        raise
+                    results = []
+                    oracle_id, name = kept
+                if not oracle_id:
+                    card = results[0].card if results else None
+                    if not card or not card.get("oracle_id"):
+                        raise ScanError("not_found", f"no card found for '{name}'")
+                    oracle_id = str(card["oracle_id"])
+                    name = str(card.get("name") or name)
             out = await service.printings(oracle_id, owner=_sub())
         except ScanError as exc:
             return with_card(_err(exc), None)
@@ -288,6 +299,11 @@ def add_scan_tools(
             "sets_scope": "the sets the card was printed in, not narrowed by set_code or finish",
             "note": PRINTINGS_NOTE,
         }
+        if out.get("from_local_copy"):
+            # Scryfall can't answer now: the gateway's local copy did, as of its day
+            data["from_local_copy"] = True
+            data["as_of"] = out.get("as_of")
+            data["note"] = f"{out.get('as_of_note')}. {PRINTINGS_NOTE}"
         card = None
         if links is not None:
             card = {

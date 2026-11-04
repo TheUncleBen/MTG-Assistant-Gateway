@@ -1109,7 +1109,9 @@ own assistant's scheduled task with the read-only `get_summary` tool
 ## Looking at proposals, snapshots, links and the audit log
 
 Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite` (profile pictures are
-separate files under `<MTG_DATA_DIR>/avatars`, fetched again when missing). The container has
+separate files under `<MTG_DATA_DIR>/avatars`, fetched again when missing; the daily copy of
+Scryfall's printings, about 55 MB, is `<MTG_DATA_DIR>/scryfall-printings.sqlite`, made again
+from Scryfall when missing, see [SCANNING.md](SCANNING.md#operator-notes)). The container has
 Python but no `sqlite3` command, so run queries through Python on the
 gateway's node. For example, the latest proposals:
 

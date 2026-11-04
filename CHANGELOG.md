@@ -105,6 +105,11 @@ name per thing.
     default one.
 
 ### Added
+- **Printings still show when Scryfall is down.** Once a day the gateway downloads Scryfall's
+  list of every printing and keeps a copy beside its database (about 55 MB). When Scryfall can't
+  be reached, the printing picker and `card_printings` answer from that copy and say how old it
+  is, for example “Printings and prices as of 3 Nov (Scryfall can't be reached right now)”. The
+  daily price check never uses it: it records today's prices only.
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a
   “Default for new assistants” on top. Claude and ChatGPT are one assistant each across your
   devices, known by the exact address each sends you back to after sign-in; Claude Code and other

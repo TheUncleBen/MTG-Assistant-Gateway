@@ -17,6 +17,7 @@ from typing import Any
 from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
+from .bulk import PrintingsCopy
 from .names import NameCatalog, fold
 from .scryfall import (
     PRINT_BORDERS,
@@ -511,6 +512,9 @@ class ScanService:
         self.down_misses = _Cache(ttl=MISS_TTL_WITHOUT_CATALOG, max_items=2000)
         self.t = thresholds or ScanThresholds()
         self.art_matcher = art_matcher
+        # the local copy of every printing, for when Scryfall can't answer (bulk.py); set by
+        # add_scan beside the database, None without one
+        self.copy: PrintingsCopy | None = None
         self.store = ScanStore(db)
         self._in_flight: set[str] = set()
         self.queue_wait = RESOLVE_WAIT_SECONDS
@@ -1148,7 +1152,15 @@ class ScanService:
         await self._free_slot(owner)
         try:
             with self._lookup_slot(owner):
-                out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
+                try:
+                    out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
+                except ScryfallError as exc:
+                    # Scryfall can't be reached, is slowing the gateway down or answered 5xx: the
+                    # local copy answers, saying how old it is (as_of, from_local_copy)
+                    kept = await self._from_copy(exc, oid, page=int(num), order=sort, **picks)
+                    if kept is None:
+                        raise
+                    out = kept
                 if sort != "newest":
                     return out
                 return {**out, "cards": sorted(out["cards"], key=lambda c: not good_default(c))}
@@ -1156,6 +1168,28 @@ class ScanService:
             if exc.kind in ("unavailable", "rate_limited", "not_found"):
                 raise ScanError(exc.kind, str(exc)) from exc
             raise ScanError("unavailable", str(exc)) from exc
+
+    async def _from_copy(self, exc: ScryfallError, oracle_id: str, **kw: Any) -> dict[str, Any] | None:
+        """The printings page from the local copy (bulk.py) when ``exc`` says Scryfall can't
+        answer now; None when it said something else (no such card), or the copy has no answer."""
+        if self.copy is None or exc.kind not in ("unavailable", "rate_limited"):
+            return None
+        try:
+            return await self.copy.prints(oracle_id, **kw)
+        except Exception:  # noqa: BLE001 - a copy that can't be read: Scryfall's own answer stands
+            logger.warning("the local copy of Scryfall's printings could not be read", exc_info=True)
+            return None
+
+    async def oracle_from_copy(self, name: str) -> tuple[str, str] | None:
+        """The oracle id and full name of the card called ``name`` from the local copy, for when
+        Scryfall can't place a name now; None without a copy or such a card."""
+        if self.copy is None:
+            return None
+        try:
+            return await self.copy.oracle_of(name)
+        except Exception:  # noqa: BLE001
+            logger.warning("the local copy of Scryfall's printings could not be read", exc_info=True)
+            return None
 
     async def printing(self, set_code: str, number: str, *, owner: str | None = None) -> dict[str, Any]:
         """One printing by set code and collector number, as a card summary: how the printing
@@ -1325,6 +1359,8 @@ class ScanService:
     def close(self) -> None:
         """Cancel the background reads still running (called when the gateway shuts down)."""
         self.names.close()
+        if self.copy is not None:
+            self.copy.close()
         if self._options_task is not None and not self._options_task.done():
             self._options_task.cancel()
         self._options_task = None

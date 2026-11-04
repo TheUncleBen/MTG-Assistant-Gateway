@@ -837,7 +837,7 @@ without touching the stack.
 | --- | --- | --- |
 | `MTG_NODE` | none, required (Swarm) | Hostname of the node the gateway runs on (`docker node ls`) |
 | `FORGE_NODE` | none, required (Swarm) | Hostname of the node Forge runs on. Required even with Forge off. For Forge copies on several machines, place them by a node label instead (see "More than one machine" in the Forge section above) |
-| `MTG_DATA_DIR` | none, required | Host folder for the SQLite database, mounted at `/data` |
+| `MTG_DATA_DIR` | none, required | Host folder for the SQLite database, mounted at `/data`. It also holds the daily copy of Scryfall's printings, about 55 MB (up to about 190 MB while a new one is built) |
 | `MTG_BACKUP_DIR` | none, required | Host folder for nightly backups and the copies saved before database upgrades (its `before-upgrade` folder), mounted at `/backups` |
 | `PUID`, `PGID` | none, required | User and group the process runs as; they must own both folders |
 | `MTG_NETWORK_NAME` | `mtg-gateway` | The network your reverse proxy is on (Swarm: the overlay network from step 1). Must exist before you deploy and match its name exactly |

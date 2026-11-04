@@ -162,6 +162,13 @@ class FakeScryfall:
                 "digital": False,
             },
         ]
+        # Scryfall's bulk data (scan/bulk.py): the index's entries (None answers 404, so a gateway
+        # under test downloads nothing unless a test gives it some), the files by URL path, and the
+        # requests for them, kept apart from ``requests`` so the counts other tests make stay as
+        # they are.
+        self.bulk_index: list[dict[str, Any]] | None = None
+        self.bulk_files: dict[str, bytes] = {}
+        self.bulk_requests: list[str] = []
         self.catalogs: dict[str, list[str]] = {
             "card-types": ["Artifact", "Creature", "Instant", "Land", "Sorcery"],
             "supertypes": ["Basic", "Legendary"],
@@ -333,8 +340,23 @@ class FakeScryfall:
             404, json={"object": "error", "code": "not_found", "status": 404, "details": detail}
         )
 
+    def bulk(self, request: httpx.Request) -> httpx.Response:
+        self.bulk_requests.append(str(request.url))
+        assert request.headers.get("user-agent"), "Scryfall requires a User-Agent"
+        assert request.headers.get("accept") == "application/json"
+        if request.url.path == "/bulk-data":
+            if self.bulk_index is None:
+                return self.not_found("no bulk data in this fake")
+            return httpx.Response(200, json={"object": "list", "has_more": False, "data": self.bulk_index})
+        body = self.bulk_files.get(request.url.path)
+        if body is None:
+            return self.not_found("no such bulk file")
+        return httpx.Response(200, content=body, headers={"content-type": "application/gzip"})
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path == "/bulk-data" or path in self.bulk_files:
+            return self.bulk(request)
         self.requests.append((request.method, str(request.url)))
         assert request.headers.get("user-agent"), "Scryfall requires a User-Agent"
         assert request.headers.get("accept") == "application/json"
