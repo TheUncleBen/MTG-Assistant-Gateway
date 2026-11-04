@@ -609,8 +609,10 @@ def test_the_switches_sit_as_close_under_the_name_as_beside_each_other(server: S
         assert _overflow(page) == 0
         m = page.evaluate(SWITCH_TRACKS, "Ramp")
         assert len(m["tracks"]) == 3 and all(h >= (44 if touch else 36) for h in m["labels"]), m
+        # a phone row too narrow for the three on one line has them one under the other, never
+        # two and one (polish B9)
         lines = sorted({round(t[0]) for t in m["tracks"]})
-        assert len(lines) == (2 if touch else 1), (width, lines)
+        assert len(lines) == (3 if touch else 1), (width, lines)
         first_top = min(t[0] for t in m["tracks"])
         last_bottom = max(t[1] for t in m["tracks"])
         # name box to the first track, and the last track to the row's end: 10 and 12 px on a phone
@@ -619,10 +621,11 @@ def test_the_switches_sit_as_close_under_the_name_as_beside_each_other(server: S
         assert first_top - (m["input"]["y"] + m["input"]["height"]) <= near, (width, m)
         assert m["row"]["y"] + m["row"]["height"] - last_bottom <= near, (width, m)
         if touch:
-            # the wrapped switch's track sits 12 px under the first line's tracks (the column gap)
-            below = min(t[0] for t in m["tracks"] if round(t[0]) == lines[1])
-            above = max(t[1] for t in m["tracks"] if round(t[0]) == lines[0])
-            assert 8 <= below - above <= 14, (width, below - above, m)
+            # each switch's track sits 12 px under the one above (the column gap)
+            for upper, lower in zip(lines, lines[1:], strict=False):
+                below = min(t[0] for t in m["tracks"] if round(t[0]) == lower)
+                above = max(t[1] for t in m["tracks"] if round(t[0]) == upper)
+                assert 8 <= below - above <= 14, (width, below - above, m)
         assert not errors, errors
         browser.close()
 

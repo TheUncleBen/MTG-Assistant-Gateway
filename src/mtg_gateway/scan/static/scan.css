@@ -24,6 +24,7 @@
 
 /* tabs: the site's one switch (site.css .hubseg), full width; sticky on phones */
 .scan .tabs{display:flex;width:100%;margin:0 0 .5rem}
+.scan .tabs .badge.zero{background:var(--surface-3);color:var(--text)}  /* an empty list: no alarm */
 .scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--orange);
   color:var(--on-orange);border-color:var(--orange)}
 @media (max-width:599.98px){ .scan .tabs{position:sticky;top:0;z-index:4;box-shadow:0 0 0 4px var(--bg)} }

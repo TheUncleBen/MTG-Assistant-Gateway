@@ -85,7 +85,7 @@ def test_link_preview_image_is_absolute() -> None:
 def test_est_cost_delta_and_csv_types() -> None:
     assert (
         deckpage.est_cost_html({"price_total": 0, "priced_cards": 0})
-        == "<span title='No prices from Archidekt yet'>–</span>"
+        == "<span class='muted unpriced' title='No prices from Archidekt yet'>unknown</span>"
     )
     assert deckpage.est_cost_html({"price_total": 12.5, "priced_cards": 3}) == "$12.50"
     assert (

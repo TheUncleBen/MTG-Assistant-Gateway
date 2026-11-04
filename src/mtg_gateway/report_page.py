@@ -829,7 +829,8 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                 f"{cov['pct']}%",
                 unit=f"{cov['modeled']} of {size} cards",
                 detail_html=_coverage_bar(cov["modeled"], aside, blanks, size)
-                + f"<span class='tx'>{blanks} played without their effect · {aside} need opponents</span>",
+                + f"<span class='tx ui-dots'><span>{blanks} played without their effect</span>"
+                f"<span>{aside} need opponents</span></span>",
                 actions=[_go("See the cards", "#rv-model")],
                 tone="accent" if cov["pct"] < COVERAGE_WARN else "",
             )
@@ -1844,10 +1845,11 @@ REPORT_PAGE_CSS = (
     PHONE_WIDGETS_CSS
     + """
 /* one report */
-.rv-page .rv-crumbs{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:center;margin:0 0 .25rem;
+/* the way-back capsules sit 8 px apart like any chip row, never touching (polish B11): the
+   capsule's own -4px tap-area margin is dropped here, the gap gives the room */
+.rv-page .rv-crumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 .25rem;
   font-size:.93rem}
-.rv-page .rv-crumbs a{display:inline-flex;align-items:center;min-height:32px}
-.rv-page .rv-crumbs a{min-height:44px}
+.rv-page .rv-crumbs a{display:inline-flex;align-items:center;min-height:44px;margin:0}
 .rv-page .rv-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 1rem}
 .rv-page .rv-title{min-width:0;flex:1 1 24rem}

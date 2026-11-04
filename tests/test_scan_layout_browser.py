@@ -626,3 +626,29 @@ def test_at_200_percent_text_the_hint_leaves_the_name_box_clear(server: Server, 
         assert h["x"] >= 0 and h["x"] + h["width"] <= width, h
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("app", [False, True], ids=["browser", "app"])
+def test_type_puts_the_cursor_in_the_name_field(server: Server, app: bool) -> None:  # noqa: F811
+    """ "Type the card name instead" under the viewfinder, and the Type tab itself, both move focus
+    into the name field, so the phone keyboard opens at once and nothing needs a second tap."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), 390, app, "light")
+        page.locator(".controls button[title='Type the card name instead']").click()
+        page.locator("#type-input").wait_for()
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "type-input"
+        page.locator("[role=tab][data-tab=camera]").click()
+        page.locator("#shutter").wait_for()
+        page.locator("[role=tab][data-tab=type]").click()
+        page.locator("#type-input").wait_for()
+        assert page.evaluate("() => document.activeElement && document.activeElement.id") == "type-input"
+        # a reload that lands on the Type tab does not grab the keyboard on its own
+        page.reload()
+        page.wait_for_function("() => window.__scan && window.__scan.showTab")
+        if page.locator("#type-input").count():
+            assert page.evaluate("() => document.activeElement && document.activeElement.id") != "type-input"
+        assert errors == []
+        browser.close()

@@ -1702,7 +1702,10 @@ def tag_chip(name: str, colors: dict[str, str] | None) -> str:
     reads in both themes whatever the colour."""
     color = _tag_color(name, colors)
     style = f" style='--tagc:{color}'" if color else ""
-    return f"<span class='pill tag'{style}><i class='sw' aria-hidden='true'></i>{_esc(name)}</span>"
+    return (
+        f"<span class='pill tag'{style} title='{_esc(name)}'><i class='sw' aria-hidden='true'></i>"
+        f"<span class='t'>{_esc(name)}</span></span>"
+    )
 
 
 def tag_chips(names: list[str], colors: dict[str, str] | None) -> str:
@@ -2443,10 +2446,12 @@ COLLECTION_CSS = """
   .collection .ui-head .acts details.colmore > summary.btn{width:auto;box-sizing:border-box} }
 /* a tag as a chip: the tag's colour as a dot (--tagc) beside its name in the page's own text colour,
    so it reads in both themes whatever colour the member picked */
-.pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem .1rem .35rem;
+.pill.tag{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .5rem;
   border-radius:999px;border-color:var(--border-soft);background:var(--surface-2);color:var(--text);
   font-weight:600;font-size:.8rem;line-height:1.5;max-width:100%;min-width:0}
-.pill.tag > span,.pill.tag{overflow-wrap:anywhere}
+/* one line: a long name ends in an ellipsis (the whole name is the hover text and the Details
+   box's), never three lines inside a pill (polish B6) */
+.pill.tag > .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pill.tag .sw,.tagck .sw{display:inline-block;width:.65rem;height:.65rem;border-radius:50%;flex:none;
   background:var(--tagc,var(--text-muted));box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
 .pill.tag.more{padding:.1rem .5rem}
@@ -2505,6 +2510,11 @@ ul.collgrid .pic .fin,ul.collgrid .pic .cond{position:absolute;bottom:6px;font-s
   line-height:1.5;padding:0 .4rem;border-radius:4px;background:rgba(0,0,0,.72);color:#fff}
 ul.collgrid .pic .fin{right:6px} ul.collgrid .pic .cond{left:6px}
 ul.collgrid .act{display:flex;align-items:center;min-width:0}
+/* the tiles of a row share a height (the grid's), and the stepper sits at every tile's foot, so
+   steppers line up across a row whatever a tile's tags (polish B7) */
+ul.collgrid > li.cc{display:flex;flex-direction:column}
+ul.collgrid > li.cc > .meta{flex:1 1 auto}
+ul.collgrid > li.cc > .act{margin-top:auto}
 /* two tiles a row on a narrow phone at S and M (one at L); with larger text (the columns are
    sized in rem) one tile a row, so a card's name is never broken inside a word */
 @media (max-width:420px){
@@ -2526,11 +2536,14 @@ ul.collgrid .nm .kebab{grid-column:3;grid-row:1}
    44 px targets), breaking "Bannerkeeper": the name takes the first row whole and the tick box
    and the ⋮ share the row under it */
 @media (max-width:420px){
-  html:not([data-card-size=l]) ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;
-    grid-template-rows:auto auto}
-  html:not([data-card-size=l]) ul.collgrid .nm .name{grid-column:1 / -1;grid-row:1}
-  html:not([data-card-size=l]) ul.collgrid .nm .chk{grid-column:1;grid-row:2}
-  html:not([data-card-size=l]) ul.collgrid .nm .kebab{grid-column:3;grid-row:2} }
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm{
+    grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto}
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .name{
+    grid-column:1 / -1;grid-row:1}
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .chk{
+    grid-column:1;grid-row:2}
+  html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .kebab{
+    grid-column:3;grid-row:2} }
 #col-notes .notice form.inline{display:inline-flex;margin:0 0 0 .5rem;vertical-align:middle}
 #col-notes .notice form.inline .btn{margin:0}
 ul.collgrid .cc.sel .pic,ul.colllist li.sel{outline:3px solid var(--orange-ctl);outline-offset:-3px}

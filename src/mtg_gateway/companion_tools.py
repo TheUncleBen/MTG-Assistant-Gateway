@@ -251,7 +251,7 @@ def add_deck_tool_routes(
             # the card size every view with card pictures shares (R-175): the rows' thumbnails
             + card_size_control(cls="field cardsize")
             + "<p class='status' role='status'></p></div>"
-            "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
+            "<details class='panel pendingbox'><summary>Pending changes <b class='n zero'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
             # One search bar that adds (the "Search bar" option): chips pick where a card goes,
             # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show

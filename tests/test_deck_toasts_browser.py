@@ -85,7 +85,19 @@ def test_deck_page_notes_after_instant_saves(
         # the cost's part of the facts: "Est cost: " on a wide screen and "Est " on a phone, then
         # the value (the redesigned banner, mockup screen 5)
         cost = page.locator(".banner .row > span", has=page.locator("span.lg", has_text="Est cost:"))
-        assert "–" in cost.inner_text() and "$0.00" not in cost.inner_text()
+        # no price yet: a muted "unknown", not an orange dash (polish C7)
+        assert (
+            "unknown" in cost.inner_text()
+            and "–" not in cost.inner_text()
+            and "$0.00" not in cost.inner_text()
+        )
+        unpriced = cost.locator(".unpriced")
+        assert unpriced.evaluate("e => getComputedStyle(e).color") == page.evaluate(
+            "() => getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()"
+        ) or unpriced.evaluate("e => getComputedStyle(e).color") == unpriced.evaluate(
+            "e => { const p = document.createElement('span'); p.className = 'muted'; document.body.append(p);"
+            " const c = getComputedStyle(p).color; p.remove(); return c; }"
+        )
         box = page.locator("#quick")
         # a second copy in a singleton format: saved, and the note says which rule it breaks
         box.fill("Cultivate")

@@ -346,7 +346,9 @@
       pending.appendChild(ul);
     }
     var n = list.length;
-    root.querySelector(".pendingbox .n").textContent = String(n);
+    var pn = root.querySelector(".pendingbox .n");
+    pn.textContent = String(n);
+    pn.classList.toggle("zero", !n);
     root.querySelector(".count").textContent = n ? n + " change" + (n === 1 ? "" : "s") + " pending" : "No changes yet";
     root.querySelector("button.review .label").textContent = n ? "Save " + n + " change" + (n === 1 ? "" : "s") : "Save changes";
     root.querySelector("button.review").disabled = !n || n > MAX;

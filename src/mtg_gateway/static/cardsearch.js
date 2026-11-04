@@ -130,6 +130,7 @@
     if (!badge) return;
     var n = chosenCount(p);
     badge.textContent = n ? String(n) : "";
+    $$(".sp-clear", form).forEach(function (c) { c.hidden = !n; });  // nothing to clear: no button (C4)
     var show = $(".sp-show", form);
     if (show) show.textContent = countEl && /\d/.test(countEl.textContent) ? "Show " + countEl.textContent : "Show cards";
   }

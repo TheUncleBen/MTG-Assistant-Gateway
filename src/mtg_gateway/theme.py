@@ -948,7 +948,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   /* on a phone the brand is its 25 px mark alone: the link Home stays 44 px wide (review F12);
      .topbar raises it over the later .brand{min-width:0} */
   .topbar .brand{min-width:44px}
-  .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
+  .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a:not(.ui-cap),li > a.name{display:inline-block;
     padding:.6rem 0;min-height:44px;box-sizing:border-box}
   .banner .social a.soc,.banner .social button.soc{height:44px;min-height:44px;border-radius:22px}
   /* :not(._) only raises specificity: the pages' own rules (same selectors, loaded later) set
@@ -1496,6 +1496,7 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
+.spanel .sp-clear[hidden]{display:none}
 .ui-chip{flex:none;white-space:nowrap}
 .ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;padding:0 .8rem;
   border-radius:999px;
@@ -1691,6 +1692,12 @@ main.wrap.ui-wide{max-width:1200px}
 .trend .tdata th a:focus-visible{
   color:var(--text);text-decoration:underline}
 
+/* a line of short facts with a dot between them ("Last check today · Prices from Scryfall"): the
+   dot is drawn before each item but the line's first, in the gap, and a wrapped line's first item
+   loses its dot at the clipped edge, so no dot is ever left dangling at a line end (polish C1) */
+.ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;overflow:hidden}
+.ui-dots > *{position:relative;min-width:0}
+.ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
 /* the sticky action bar while a list has a selection */
 .ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;
   align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.5rem 0 1rem;background:var(--surface);
@@ -1841,6 +1848,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
   align-items:center}
 .wdg .det .tx{display:inline}
+.wdg .det .tx.ui-dots{display:flex}
 .wdg .det a{font-weight:700}
 .wdg .det .ui-lbl{height:22px;font-size:.78rem}
 .wdg .go{margin-top:auto;padding-top:.35rem;display:flex;flex-wrap:wrap;gap:.4rem}
@@ -2015,6 +2023,7 @@ html.mtgbox-open,html.mtgbox-open body{overflow:hidden}
 .mtgbox .body label.reason{display:flex;flex-direction:column;gap:.3rem;margin:.75rem 0 0;font-weight:700}
 .mtgbox .body label.reason textarea{width:100%;margin:0;font-weight:400;resize:vertical}
 .mtgbox .body .field + .field{margin-top:.75rem}
+.mtgbox .body p + .field{margin-top:.75rem}  /* a sentence, then "Move them to" (audit D02) */
 .mtgbox .body textarea{width:100%;min-height:16rem;resize:vertical;font-family:ui-monospace,SFMono-Regular,
   Menlo,Consolas,monospace;font-size:.9rem;line-height:1.4}
 .mtgbox .body .files{display:flex;flex-wrap:wrap;gap:.5rem;margin:0}

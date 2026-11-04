@@ -227,7 +227,12 @@
       if (total) total.textContent = plural(shownPk, "package");
       if (head) head.textContent = "Packages";  // the results bar carries the count
     } else if (mode === "decks") {
-      if (total) total.textContent = plural(shownDk, "deck");
+      // every deck, as Home counts them, and how many sit in this level's folders (polish C5)
+      var inFolders = 0;
+      Array.prototype.forEach.call(list.querySelectorAll("li.folder[data-decks]"), function (f) {
+        inFolders += parseInt(f.getAttribute("data-decks"), 10) || 0;
+      });
+      if (total) total.textContent = plural(shownDk + inFolders, "deck") + (inFolders ? " · " + inFolders + " in folders" : "");
       if (head) head.textContent = "Decks";
     }
     list.dispatchEvent(new CustomEvent("decks:marked", { bubbles: true }));

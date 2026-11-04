@@ -925,11 +925,16 @@ def _overview_body(state: Any, now: float | None = None) -> str:
             "box",
             working if counted else "Gateway only",
             unit=f"of {len(counted)} services working" if counted else "",
-            detail_html=(
-                f"{backup_line} · {copies_line}"
-                if counted
-                else f"Mystic Forge, Forge and member clean-up are not set up · {backup_line} · {copies_line}"
-            ),
+            detail_html="<span class='ui-dots'>"
+            + "".join(
+                f"<span>{part}</span>"
+                for part in (
+                    *(() if counted else ("Mystic Forge, Forge and member clean-up are not set up",)),
+                    backup_line,
+                    copies_line,
+                )
+            )
+            + "</span>",
             actions=[ui.button_link("System details", "#system")],
             tone="alert" if system_bad else "",
         ),

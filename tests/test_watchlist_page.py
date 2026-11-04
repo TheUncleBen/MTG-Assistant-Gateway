@@ -11,8 +11,16 @@ import json
 import re
 import time
 
-from mtg_gateway import prices
-from mtg_gateway.watchlist_page import Query, alert_text, change_html, day_text, watchlist_page_html
+from mtg_gateway import prices, ui
+from mtg_gateway.watchlist_page import (
+    Query,
+    alert_label,
+    alert_pills,
+    alert_text,
+    change_html,
+    day_text,
+    watchlist_page_html,
+)
 
 from .conftest import Stack, stack_with
 from .test_watchlist import Clock, _browser, _options, _watch
@@ -89,6 +97,19 @@ def test_words_for_changes_alerts_and_days() -> None:
     assert alert_text({"pct": 10.0}, "usd") == "Moves more than 10%"
     assert alert_text({"below": 150.0}, "usd") == "Below $150.00"
     assert alert_text({"above": 45.0, "below": 30.0}, "usd") == "Above $45.00 · below $30.00"
+    # a row's pills: the short form with the full words as its tooltip (polish B8)
+    assert alert_pills({"pct": 12.5}, "usd") == [("±12.5%", "Moves more than 12.5%")]
+    assert alert_pills({"above": 45.0, "below": 30.0}, "usd") == [
+        ("Above $45.00", "Above $45.00"),
+        ("Below $30.00", "Below $30.00"),
+    ]
+    assert alert_pills({"drop": 10.0}, "usd", 2.0) == [("−10% below $2.00", "Drops 10% below $2.00")]
+    assert alert_pills({"rise": 5.0}, "usd") == [
+        ("+5% above added price", "Rises 5% above the price when added")
+    ]
+    assert alert_label({"alerts": {"pct": 12.5}}) == (
+        "<span class='ui-lbl blue' title='Moves more than 12.5%'>" + ui.icon("tag") + "±12.5%</span>"
+    )
     assert day_text(TODAY, TODAY) == "today" and day_text("2026-10-11", TODAY) == "Oct 11"
     assert day_text("2025-10-11", TODAY) == "Oct 11, 2025"
 
@@ -96,8 +117,9 @@ def test_words_for_changes_alerts_and_days() -> None:
 def test_status_line_list_heads_and_the_watch_a_card_box() -> None:
     page = _page()
     # the status line carries what the old widgets said, in one line of text
-    status = page.split("<p class='w-status'>")[1].split("</p>")[0]
-    assert status.startswith("Last check today at 06:00 UTC · ")
+    # its facts are spans whose dots are drawn by CSS, so none dangles at a line end (polish C1)
+    status = page.split("<p class='w-status ui-dots'>")[1].split("</p>")[0]
+    assert status.startswith("<span>Last check today at 06:00 UTC</span><span>") and " · " not in status
     assert (
         "Biggest move, 7 days: Smothering Tithe <span class='dl up'><span aria-hidden='true'>↑</span>9.3%"
         in status
@@ -110,7 +132,7 @@ def test_status_line_list_heads_and_the_watch_a_card_box() -> None:
     cards = page.split("id='w-cards'")[1].split("<div class='tbl")[0]
     assert "<h2>Cards <span class='ui-sub'>4</span></h2>" in cards and "Together $180.14 today" in cards
     decks = page.split("id='w-decks'")[1].split("<div class='tbl")[0]
-    assert "<h2>Decks <span class='ui-sub'>1</span></h2>" in decks and "Together $444.14" in decks
+    assert "<h2>Decks <span class='ui-sub'>1</span></h2>" in decks and "Together $444.14 today" in decks
     assert "Meren Graveyard Value" in page and "up 4%" in page
     # the "Watch a card" box opens from the toolbar; its primary button is Watch card
     assert "data-box-open='w-add'" in page and "<h2 id='w-add-title'>Watch a card</h2>" in page
@@ -135,7 +157,9 @@ def test_rows_show_picture_finish_changes_and_alerts() -> None:
     assert "<span class='thumb' aria-hidden='true'><span>Mana Crypt</span></span>" in page  # none: a name box
     assert "MH2 12 · Normal" in page and "Cheapest printing · Foil" in page and "Non-foil" not in page
     assert "<span class='none'>No price alert</span>" in page
-    assert "class='ui-lbl blue'" in page and "Above $45.00 · below $30.00</span>" in page
+    # one pill per condition, each one line in a phone row (polish B8)
+    assert "class='ui-lbl blue'" in page and "Above $45.00</span>" in page and "Below $30.00</span>" in page
+    assert "Above $45.00 · below $30.00" not in page
     assert "7 days <span class='dl down'>" in page and "<span class='kv'>in 7 days</span>" in page
     assert len(re.findall(r"<div class='wx' id='wx-[\w]+' hidden>", page)) == 5  # every panel closed
     assert page.count(">Details</a>") == 5

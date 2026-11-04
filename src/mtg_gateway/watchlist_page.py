@@ -212,11 +212,34 @@ def alert_text(alerts: dict[str, Any], currency: str, added: float | None = None
     return text[:1].upper() + text[1:]
 
 
+def alert_pills(alerts: dict[str, Any], currency: str, added: float | None = None) -> list[tuple[str, str]]:
+    """Each alert condition in its short form with its full words: ("±10%", "Moves more than 10%"),
+    ("Below $150.00", "Below $150.00"), ("−10% below $2.00", "Drops 10% below $2.00"). One pill per
+    condition, each one line in a phone row's facts line (polish B8)."""
+    at = money(added, currency) if added is not None else "the price when added"
+    short_at = money(added, currency) if added is not None else "added price"
+    out: list[tuple[str, str]] = []
+    if alerts.get("drop") is not None:
+        out.append((f"−{alerts['drop']:g}% below {short_at}", f"Drops {alerts['drop']:g}% below {at}"))
+    if alerts.get("rise") is not None:
+        out.append((f"+{alerts['rise']:g}% above {short_at}", f"Rises {alerts['rise']:g}% above {at}"))
+    if alerts.get("pct") is not None:
+        out.append((f"±{alerts['pct']:g}%", f"Moves more than {alerts['pct']:g}%"))
+    if alerts.get("above") is not None:
+        out.append((f"Above {money(alerts['above'], currency)}",) * 2)
+    if alerts.get("below") is not None:
+        out.append((f"Below {money(alerts['below'], currency)}",) * 2)
+    return out
+
+
 def alert_label(v: dict[str, Any]) -> str:
     alerts = v.get("alerts") or {}
     if not alerts:
         return "<span class='none'>No price alert</span>"
-    return ui.label(alert_text(alerts, v.get("currency") or "usd", v.get("added_price")), "blue", "tag")
+    return "".join(
+        ui.label(short, "blue", "tag", title="" if short == full else full)
+        for short, full in alert_pills(alerts, v.get("currency") or "usd", v.get("added_price"))
+    )
 
 
 def owned_label(v: dict[str, Any]) -> str:
@@ -649,7 +672,7 @@ def status_line(data: dict[str, Any], *, checked: str, defaults_html: str = "") 
     parts.append("Prices from Scryfall")
     if defaults_html:
         parts.append(defaults_html)
-    return f"<p class='w-status'>{' · '.join(parts)}</p>"
+    return "<p class='w-status ui-dots'>" + "".join(f"<span>{p}</span>" for p in parts) + "</p>"
 
 
 # -- the rows on screen, and Load more -------------------------------------------------------------
@@ -1206,7 +1229,7 @@ def watchlist_page_html(
     )
     deck_list = (
         "<div id='w-decks' class='w-sec'>"
-        + ui.list_head(DECKS_WORD, len(decks), f"Together {money(sum(usd))}" if usd else "")
+        + ui.list_head(DECKS_WORD, len(decks), f"Together {money(sum(usd))} today" if usd else "")
         + f"<span class='w-secacts'>{watch_deck}</span></div>"
         + ui.table_open(TABLE_COLS, TABLE_MD, TABLE_SM, cls="w-t", label="Watched decks")
         + deck_head
@@ -1242,7 +1265,8 @@ WATCH_PAGE_CSS = (
 .watch-page .w-top .w-select[aria-pressed=true]{background:var(--orange-tint);color:var(--orange-text);
   border-color:var(--orange-text)}
 .watch-page .w-top .w-select:not([hidden]){display:inline-flex;align-items:center}
-.watch-page .w-status{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .4rem;margin:0 0 .75rem;
+/* the ui-dots gap holds the dot between two facts (polish C1) */
+.watch-page .w-status{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;margin:0 0 .75rem;
   color:var(--text-muted);font-size:.9rem}
 .watch-page .w-status .dl{font-size:inherit}
 .watch-page .w-sec{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
@@ -1346,6 +1370,8 @@ WATCH_PAGE_CSS = (
 .watch-page .w-size .sizeseg{max-width:100%}
 .watch-page .w-size .lbl{color:var(--text-muted);font-size:.9rem}
 .watch-page .w-bulkform{display:none}
+/* a card's alert label is one line ("Moves more than 12.5%"), never two inside its pill (polish B8) */
+.watch-page .w-t .sub .ui-lbl{white-space:nowrap;max-width:100%}
 .watch-page .ui-bar .btn,.watch-page .ui-bar button{display:inline-flex;align-items:center;gap:.35rem}
 .watch-page .wx{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:.75rem 1.5rem;
   padding:.75rem 1rem 1rem;border-bottom:1px solid var(--border-soft)}
