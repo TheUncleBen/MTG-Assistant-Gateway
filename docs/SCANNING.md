@@ -267,7 +267,10 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   when Scryfall can't be reached, is slowing the gateway down or has a problem answering: the
   printing picker and `card_printings` then answer from it and say how old it is ("Printings and
   prices as of 3 Nov"). It is not part of the backup: Scryfall gives it again. Deleting it is
-  safe; the next daily download makes a new one.
+  safe; the next daily download makes a new one. To do without it, turn off **Keep a local copy
+  of card printings** on the Settings page (General, no stack variable): the copy and anything
+  it left are deleted at once, no more is downloaded, and printings answers fail while Scryfall
+  is down, as before 0.7.46. On again, the next hourly check downloads a new copy.
 - Nothing new to deploy: no extra container, no new secrets. Text
   recognition runs on the phone. The artwork check keeps 768 bytes per
   printing in the database (table `scan_art_hashes`, part of the backup) and

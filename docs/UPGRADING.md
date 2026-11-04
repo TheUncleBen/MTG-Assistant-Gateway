@@ -219,6 +219,14 @@ reach past the stack, so if your old version is older than the one named, also:
 - **0.7.45 or older:** delete the `MTG_REAUTH_INTERVAL` line from your variables; it does nothing
   now. Assistants connect again when the Settings page's **Assistant refresh** time (30 days by
   default) has passed since they signed in, not after a week. To keep a week, set that row to 7 days.
+- **0.7.45 or older:** the data folder (`MTG_DATA_DIR`) grows by about 55 MB: once a day the
+  gateway downloads Scryfall's printings file and keeps a copy of it,
+  `scryfall-printings.sqlite`, for when Scryfall can't answer. While a new copy is built the
+  folder holds about 190 MB more for a short while (the download, the new copy and the old one).
+  If you restrict the gateway's outbound traffic, also allow `data.scryfall.io`, where Scryfall
+  serves that file. Not wanted? Turn off **Keep a local copy of card printings** on the Settings
+  page (General): the copy is deleted at once and nothing more is downloaded
+  ([SCANNING.md](SCANNING.md#operator-notes)).
 - **0.7.45 or older:** a few steps for your members, which you may want to pass on:
   - **Update the Android app** from inside the app (it offers the update) after the gateway
     update. Auto opening the phone's camera already scanning, pull to refresh, push notifications

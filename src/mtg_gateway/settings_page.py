@@ -172,6 +172,10 @@ TEXT: dict[str, tuple[str, str]] = {
         "Check for new versions",
         "Twice a day, one anonymous request to GitHub. Admins see a notice when a new version is out.",
     ),
+    "printings_copy": (
+        "Keep a local copy of card printings",
+        "Used only when Scryfall can't answer. About 55 MB, refreshed daily.",
+    ),
     "log_level": ("Log detail", "How much the gateway writes to its log. INFO suits most servers."),
     "archidekt_calls_per_10_min": (
         "Archidekt work per member per 10 minutes",

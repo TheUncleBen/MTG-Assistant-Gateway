@@ -30,6 +30,8 @@ stack_options = stack_with(StackOptions(settings={}, archidekt=None, scryfall=Tr
 
 AESI = "6511f317-bd38-46d0-b800-7125a3f420da"
 DAY_A = "2026-11-03T22:06:49.499+00:00"
+AS_OF = "2026-11-03T22:06:49+00:00"  # DAY_A as the answers carry it: ISO 8601, UTC, to the second
+AS_OF_B = "2026-11-04T10:06:49+00:00"
 DAY_B = "2026-11-04T10:06:49.499+00:00"
 FILE = "/default-cards/default-cards-20261103220649.jsonl.gz"
 
@@ -91,7 +93,7 @@ async def test_the_copy_builds_from_scryfalls_bulk_file(tmp_path: Path) -> None:
         "https://scryfall.test/bulk-data",
         f"https://data.scryfall.io{FILE}",
     ]
-    assert copy.as_of == DAY_A
+    assert copy.as_of == AS_OF
     assert (tmp_path / COPY_FILE).is_file()
     assert sorted(p.name for p in tmp_path.iterdir()) == [COPY_FILE]  # no download or half-built file left
     # every printing answer matches Scryfall's own, field for field
@@ -150,7 +152,7 @@ async def test_a_live_failure_serves_printings_from_the_copy_with_its_date(tmp_p
         )
         out = await service.printings(AESI)
         assert out["from_local_copy"] is True, handler
-        assert out["as_of"] == DAY_A and out["prices_as_of"] == DAY_A
+        assert out["as_of"] == AS_OF and out["prices_as_of"] == AS_OF
         assert out["as_of_note"] == "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
         assert "verif" not in out["as_of_note"].lower()
         assert _by_id(out["cards"]) == _by_id(live["cards"])
@@ -196,7 +198,7 @@ async def test_the_tool_and_the_picker_say_the_printings_are_from_the_copy(stack
     for args in ({"oracle_id": AESI}, {"name": "Aesi, Tyrant of Gyre Strait"}):
         out = (await call(stack.h, token, "card_printings", args))["structuredContent"]
         assert out["ok"] is True, out
-        assert out["from_local_copy"] is True and out["as_of"] == DAY_A, out
+        assert out["from_local_copy"] is True and out["as_of"] == AS_OF, out
         assert out["note"].startswith(line), out
         assert [c["set"] for c in out["cards"]] == ["sld", "dsc", "plst", "cmr"], out
         if "name" in args:  # the card's own name, as the copy knows it (by id: its first printing's)
@@ -207,7 +209,7 @@ async def test_the_tool_and_the_picker_say_the_printings_are_from_the_copy(stack
         r = await b.http.get("/scan/api/prints", params={"oracle_id": AESI})
         assert r.status_code == 200, r.text
         data = r.json()
-        assert data["from_local_copy"] is True and data["as_of"] == DAY_A and data["as_of_note"] == line
+        assert data["from_local_copy"] is True and data["as_of"] == AS_OF and data["as_of_note"] == line
         assert r.headers["cache-control"] == "no-store"
     finally:
         await b.aclose()
@@ -235,15 +237,16 @@ async def test_a_damaged_or_cut_off_download_keeps_the_old_copy(
         _offer(sf, body, updated_at=DAY_B)
         copy._next_try = 0.0
         assert await copy.refresh() is False, why
-        assert copy.as_of == DAY_A, why  # the old copy is the one in use
+        assert copy.as_of == AS_OF, why  # the old copy is the one in use
         assert await copy.prints(AESI) == before, why
-        assert sorted(p.name for p in tmp_path.iterdir()) == [COPY_FILE], why  # nothing half-built left
+        # nothing half-built left: the copy, and the kept wait before the next try (N16)
+        assert sorted(p.name for p in tmp_path.iterdir()) == [COPY_FILE, COPY_FILE + ".next"], why
     # a failed download is tried again only after RETRY_AFTER_FAILURE, never at once
     _offer(sf, good, updated_at=DAY_B)
     n = len(sf.bulk_requests)
     assert await copy.refresh() is False and len(sf.bulk_requests) == n
     copy._next_try = 0.0
-    assert await copy.refresh() is True and copy.as_of == DAY_B
+    assert await copy.refresh() is True and copy.as_of == AS_OF_B
 
 
 async def test_the_refresh_is_skipped_while_the_copy_is_younger_than_a_day(
@@ -302,3 +305,188 @@ async def test_a_gateway_under_test_downloads_nothing(stack: Stack) -> None:
     assert stack.sf.bulk_requests == ["https://scryfall.test/bulk-data"]  # answered 404 by the fake
     assert not copy.path.exists()
     assert stack.sf.requests == []  # the other tests' request counts are not touched
+
+
+# -- round 2 of the 0.7.46 audit: the Settings row, as_of, the kept wait, a damaged copy -------------
+
+
+def _switchable(sf: FakeScryfall, folder: Path) -> tuple[ScanService, dict[str, bool]]:
+    """A service whose copy follows ``state["on"]``, as it follows the Settings row."""
+    state = {"on": True}
+    service = _service(sf, folder)
+    service.copy = PrintingsCopy(folder, lambda: service.scryfall, lambda: state["on"])
+    service.copy.min_printings = 1
+    return service, state
+
+
+def _down() -> httpx.AsyncClient:
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route", request=request)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(down))
+
+
+async def test_turned_off_the_copy_is_deleted_and_never_downloaded(tmp_path: Path) -> None:
+    """The Settings row "Keep a local copy of card printings" off: the copy and every file it left
+    (a half-built .new, a download, the next-try file) are deleted at once, the daily download
+    stops, and a live failure gives the error it gave before there was a copy."""
+    sf = FakeScryfall()
+    _offer(sf, _gz(sf.cards))
+    service, state = _switchable(sf, tmp_path)
+    copy = service.copy
+    assert await copy.refresh() and copy.path.exists()
+    for leftover in (COPY_FILE + ".new", COPY_FILE + ".download.gz", COPY_FILE + ".next"):
+        (tmp_path / leftover).write_bytes(b"left over")
+    assert (await copy.prints(AESI)) is not None  # the reader has the file open
+
+    state["on"] = False
+    copy.setting_changed("printings_copy")
+    assert sorted(p.name for p in tmp_path.iterdir()) == [], "turned off, the copy's files are deleted"
+    n = len(sf.bulk_requests)
+    assert not copy.due() and await copy.refresh() is False
+    assert len(sf.bulk_requests) == n, "turned off, it downloaded"
+    # a file appearing while off (a build that ended meanwhile) is deleted at the next check
+    (tmp_path / COPY_FILE).write_bytes(b"x")
+    assert await copy.refresh() is False and not (tmp_path / COPY_FILE).exists()
+
+    # Scryfall down while off: the old error, not the copy
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=_down())
+    with pytest.raises(ScanError) as err:
+        await service.printings(AESI)
+    assert err.value.kind == "unavailable"
+    assert await copy.prints(AESI) is None and await copy.oracle_of("Sol Ring") is None
+
+    # on again: the next check downloads
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=sf.client())
+    state["on"] = True
+    copy.setting_changed("printings_copy")
+    assert copy.due()
+    assert await copy.refresh() is True and copy.as_of == AS_OF
+    assert len(sf.bulk_requests) == n + 2  # the index and the file
+
+
+async def test_the_settings_row_turns_the_copy_off_and_on(stack: Stack) -> None:
+    """The row is on the admin Settings page (General), on by default with no stack variable, and
+    a change there applies at once (LiveSettings.on_change)."""
+    from mtg_gateway import settings_page
+    from mtg_gateway.config import MANAGED_SETTINGS
+
+    spec = MANAGED_SETTINGS["printings_copy"]
+    assert spec.kind == "bool" and spec.default is True and spec.env == "" and not spec.restart
+    assert settings_page.TEXT["printings_copy"] == (
+        "Keep a local copy of card printings",
+        "Used only when Scryfall can't answer. About 55 MB, refreshed daily.",
+    )
+    live = stack.gw.decks.live
+    copy = stack.gw.scan.copy
+    assert copy.enabled is True
+    _offer(stack.sf, _gz(stack.sf.cards))
+    copy.min_printings = 1
+    assert await copy.refresh() and copy.path.exists()
+    live.set("printings_copy", False, by="admin-1")
+    assert copy.enabled is False and not copy.path.exists()
+    live.set("printings_copy", True, by="admin-1")
+    assert copy.enabled is True and copy.due()
+    assert await copy.refresh() and copy.path.exists()
+
+
+async def test_as_of_is_an_iso_date_time_with_one_wording(tmp_path: Path) -> None:
+    """N14: ``as_of`` is an ISO 8601 date-time (the page writes it in the viewer's own way), and
+    the tools' ``as_of_note`` says the same words for a 429, a 5xx and no answer at all."""
+    from datetime import datetime
+
+    sf = FakeScryfall()
+    _offer(sf, _gz(sf.cards))
+    service = _service(sf, tmp_path)
+    assert await service.copy.refresh()
+
+    def limited(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "12"}, json={"object": "error"})
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, json={"object": "error"})
+
+    notes = set()
+    for http in (
+        _down(),
+        httpx.AsyncClient(transport=httpx.MockTransport(limited)),
+        httpx.AsyncClient(transport=httpx.MockTransport(failing)),
+    ):
+        service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=http)
+        out = await service.printings(AESI)
+        when = datetime.fromisoformat(out["as_of"])
+        assert when.tzinfo is not None and when.isoformat() == out["as_of"] == AS_OF
+        notes.add(out["as_of_note"])
+    assert notes == {"Printings and prices as of 3 Nov (Scryfall can't be reached right now)"}
+
+
+async def test_a_restart_waits_for_the_next_try(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """N16: the wait after a failure, or after an index with nothing newer, is kept beside the
+    copy, so a restart does not download the 80 MB file again before it is due; a file that came
+    down damaged waits a day."""
+    sf = FakeScryfall()
+    sf.bulk_index = None  # the index fails (404)
+    service = _service(sf, tmp_path)
+    assert await service.copy.refresh() is False
+    for _restart in range(3):
+        again = PrintingsCopy(tmp_path, lambda: service.scryfall)
+        assert not again.due() and await again.refresh() is False
+    assert len(sf.bulk_requests) == 1, sf.bulk_requests
+
+    # a file that comes down damaged: no copy at all, yet a restart waits a whole day
+    other = tmp_path / "bad"
+    sf2 = FakeScryfall()
+    _offer(sf2, b"<html>not the file</html>")
+    service2 = _service(sf2, other)
+    assert await service2.copy.refresh() is False and not service2.copy.path.exists()
+    restarted = PrintingsCopy(other, lambda: service2.scryfall)
+    assert restarted._next_try - time.time() > bulk.RETRY_AFTER_BAD_FILE - 60
+    for _restart in range(3):
+        assert await PrintingsCopy(other, lambda: service2.scryfall).refresh() is False
+    assert [u for u in sf2.bulk_requests if u.endswith(".gz")] == [f"https://data.scryfall.io{FILE}"]
+
+    # an index with nothing newer than the copy: the wait holds across a restart too
+    third = tmp_path / "same"
+    sf3 = FakeScryfall()
+    _offer(sf3, _gz(sf3.cards))
+    service3 = _service(sf3, third)
+    assert await service3.copy.refresh()
+    assert not (third / (COPY_FILE + ".next")).exists()  # a good copy leaves no wait behind
+    monkeypatch.setattr(bulk, "COPY_TTL", 0)  # the copy is a day old
+    assert await service3.copy.refresh() is False  # unchanged: one index request
+    n = len(sf3.bulk_requests)
+    assert await PrintingsCopy(third, lambda: service3.scryfall).refresh() is False
+    assert len(sf3.bulk_requests) == n
+
+
+async def test_a_damaged_copy_is_logged_once_without_a_traceback(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """N17: a copy on disk that can't be read gives the old error, and says so in the log once
+    per file, as a WARNING without a traceback, however often the picker is opened."""
+    import logging
+
+    sf = FakeScryfall()
+    _offer(sf, _gz(sf.cards))
+    service = _service(sf, tmp_path)
+    assert await service.copy.refresh()
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=_down())
+    data = service.copy.path.read_bytes()
+    service.copy.path.write_bytes(data[:4096] + b"\0" * (len(data) - 4096))  # zero-tailed
+    caplog.set_level(logging.INFO)
+    for _open in range(4):
+        with pytest.raises(ScanError) as err:
+            await service.printings(AESI)
+        assert err.value.kind == "unavailable"
+    said = [r for r in caplog.records if "copy of Scryfall's printings" in r.getMessage()]
+    assert len(said) == 1, [r.getMessage() for r in said]
+    assert said[0].levelno == logging.WARNING and said[0].exc_info is None
+    assert service.copy.due()  # a copy that can't be read is replaced at the next download
+    # another damaged file: said once more
+    time.sleep(0.01)
+    service.copy.path.write_bytes(b"not a database at all")
+    for _open in range(3):
+        with pytest.raises(ScanError):
+            await service.printings(AESI)
+    said = [r for r in caplog.records if "copy of Scryfall's printings" in r.getMessage()]
+    assert len(said) == 2 and all(r.exc_info is None for r in said), [r.getMessage() for r in said]

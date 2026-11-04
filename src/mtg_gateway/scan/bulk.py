@@ -5,26 +5,36 @@ Once a day the gateway reads Scryfall's bulk-data index (``GET /bulk-data``) and
 ``default_cards`` file (every printing, in English or else its printed language; a gzipped JSON
 Lines file of about 80 MB, 120,000 cards on 2026-11-04) is newer than the copy, downloads the file
 at the index's ``jsonl_download_uri`` with the client's own User-Agent and Accept headers. Scryfall
-updates the bulk files about every 12 hours and asks for them to be downloaded no more than that;
-the gateway does it at most once a day (COPY_TTL). The file is read line by line (``gzip.open``),
+says its bulk data is collected once every 12 to 24 hours; the gateway downloads it at most once a
+day (COPY_TTL). A failed look waits RETRY_AFTER_FAILURE, a file that came down damaged waits a day
+(RETRY_AFTER_BAD_FILE), and that wait is kept in a small file beside the copy (``.next``), so a
+restart never downloads the file again before it is due. The file is read line by line (``gzip.open``),
 never whole, in a worker thread, and cut down to what the printings answers show (``browse_row``,
 the printing picker's row, which has everything ``card_printings`` and ``printings_of`` return
 too). Each row is kept zlib-compressed with a dictionary taken from the file's own first rows, so
-the copy takes about 40 MB on disk, beside the database in the data folder.
+the copy takes about 55 MB on disk, beside the database in the data folder (about 190 MB at most
+while a new one is built: the download, the new copy and the old one).
 
 Why a separate SQLite file and not a table of the database: the copy is replaced whole every day.
-As a table, that is a 40 MB write holding the database's write lock (every member's write waits
-behind it), and every nightly backup and upgrade copy would carry 40 MB that Scryfall can give
+As a table, that is a 55 MB write holding the database's write lock (every member's write waits
+behind it), and every nightly backup and upgrade copy would carry 55 MB that Scryfall can give
 again. As a file of its own it is built under another name and moved into place with one rename
 (``os.replace``): a failed, cut-off or damaged download never touches the copy in use, which stays
 until a good one replaces it. Readers open it read-only and see either the old file or the new.
 
 The copy is used only when a live printings request fails because Scryfall can't be reached, is
 rate-limiting the gateway, or answers 5xx (ScanService.printings). The answer then says how old it
-is: ``as_of`` (when Scryfall made the file) and ``from_local_copy``, and a plain line such as
-"Printings and prices as of 3 Nov (Scryfall can't be reached right now)". Its prices are that
+is: ``as_of`` (when Scryfall made the file, an ISO 8601 date-time the page writes in the viewer's
+own way), ``from_local_copy``, and for the tools a plain line, ``as_of_note``, such as "Printings
+and prices as of 3 Nov (Scryfall can't be reached right now)", the same words for a 429, a 5xx and
+no answer at all. A copy that can't be read is said once per file in the log. Its prices are that
 day's. The daily price check (prices.py) never uses the copy: it records today's prices, and a
 day-old price recorded as today's would be wrong; a card it can't price waits for the next check.
+
+The admin Settings row "Keep a local copy of card printings" (``printings_copy``, on by default,
+no stack variable) turns it off: the daily download stops, the copy and every file it left are
+deleted at once, and printings answers fail as they did before there was a copy. On again, the
+next hourly check downloads a new copy.
 
 The download goes through the scan service's Scryfall client (its address and HTTP client), the
 same way the card-name catalog's does (names.py, through ``NameCatalog._scryfall``). The tests
@@ -60,7 +70,11 @@ logger = logging.getLogger(__name__)
 COPY_FILE = "scryfall-printings.sqlite"
 BULK_TYPE = "default_cards"
 COPY_TTL = 24 * 3600  # the copy is downloaded again once it is a day old, never sooner
-RETRY_AFTER_FAILURE = 6 * 3600  # a failed download (or an index with nothing newer) waits this long
+RETRY_AFTER_FAILURE = 6 * 3600  # an index that failed or had nothing newer: the next look waits this long
+# a file downloaded and found cut off or damaged: the next download waits a day, so a file that
+# keeps failing costs at most one 80 MB download a day
+RETRY_AFTER_BAD_FILE = COPY_TTL
+SETTING = "printings_copy"  # the admin Settings row "Keep a local copy of card printings"
 START_DELAY = 60.0  # the first look after a start waits this long, out of the start's way
 CHECK_EVERY = 3600.0  # how often the background loop asks whether the copy is due
 MIN_PRINTINGS = 50_000  # fewer printings than this is a damaged file, never a copy (120,024 today)
@@ -99,10 +113,22 @@ class CopyBroken(Exception):
     """The downloaded file is cut off or damaged: the copy in use is kept."""
 
 
-def as_of_line(as_of: str) -> str:
+def _iso(value: Any) -> str | None:
+    """Scryfall's ``updated_at`` as an ISO 8601 date-time in UTC (``2026-11-03T22:06:49+00:00``),
+    the ``as_of`` the answers carry and the page formats in the viewer's own way; None when there
+    is none or it can't be read."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).astimezone(UTC).isoformat(timespec="seconds")
+    except ValueError:
+        return None
+
+
+def as_of_line(as_of: str | None) -> str:
     """The plain line the printings answers carry when they come from the copy."""
     try:
-        day = datetime.fromisoformat(as_of).astimezone(UTC)
+        day = datetime.fromisoformat(str(as_of)).astimezone(UTC)
         when = f"{day.day} {day:%b}"
     except ValueError:
         when = "an earlier day"
@@ -230,6 +256,8 @@ def build(
         )
         conn.commit()
         conn.close()
+        if stop.is_set():  # turned off or shut down while it was built: never put in place
+            raise CopyBroken("stopped")
         os.replace(tmp, out)  # the one step that swaps copies: the old one stays until here
     except BaseException:
         conn.close()
@@ -240,49 +268,119 @@ def build(
 
 class PrintingsCopy:
     """The local copy of every printing (see the module docstring): kept fresh in the background,
-    read only when Scryfall can't answer."""
+    read only when Scryfall can't answer, and gone while the admin Settings row "Keep a local copy
+    of card printings" (``printings_copy``) is off."""
 
-    def __init__(self, folder: Path, scryfall: Callable[[], Any]):
+    def __init__(self, folder: Path, scryfall: Callable[[], Any], enabled: Callable[[], bool] | None = None):
         # A getter, as NameCatalog's: the scan service's client is replaced in tests.
         self._scryfall = scryfall
+        self._enabled = enabled or (lambda: True)
         self.path = Path(folder) / COPY_FILE
+        # when the next download may be tried (wall clock), kept beside the copy so a restart
+        # waits for it too (N16 of the 0.7.46 audit): after a failure, or an index with nothing newer
+        self.next_path = self.path.with_name(COPY_FILE + ".next")
         self.min_printings = MIN_PRINTINGS
-        self._next_try = 0.0
-        self._stop = threading.Event()
+        self._next_try = self._read_next_try()
+        self._closed = threading.Event()
+        self._halt = threading.Event()  # set to stop the build under way (closed or turned off)
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
-        self._opened: tuple[int, int] | None = None
+        self._opened: tuple[int, int, int] | None = None
         self._meta: dict[str, Any] = {}
+        self._damaged_stamp: tuple[int, int, int] | None = None
         self._task: asyncio.Task[None] | None = None
 
+    @property
+    def enabled(self) -> bool:
+        try:
+            return bool(self._enabled())
+        except Exception:  # noqa: BLE001 - a setting that can't be read: the default, on
+            return True
+
+    def _files(self) -> list[Path]:
+        """Every file the copy may leave in the data folder."""
+        return [
+            self.path,
+            self.path.with_name(COPY_FILE + ".new"),
+            self.path.with_name(COPY_FILE + ".download.gz"),
+            self.next_path,
+        ]
+
+    # -- the next try, kept across restarts -------------------------------------------------------
+    def _read_next_try(self) -> float:
+        try:
+            return float(json.loads(self.next_path.read_text())["next_try"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return 0.0
+
+    def _wait_until(self, when: float, why: str) -> None:
+        self._next_try = when
+        try:
+            tmp = self.next_path.with_name(self.next_path.name + ".tmp")
+            tmp.write_text(json.dumps({"next_try": when, "why": why}))
+            os.replace(tmp, self.next_path)
+        except OSError as exc:  # the wait still holds until the next restart
+            logger.warning("could not keep when to download Scryfall's printings next (%s)", exc)
+
+    def _clear_wait(self) -> None:
+        self._next_try = 0.0
+        with contextlib.suppress(OSError):
+            self.next_path.unlink()
+
     # -- the copy on disk ----------------------------------------------------------------------
+    @staticmethod
+    def _stamp_of(st: os.stat_result) -> tuple[int, int, int]:
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
+
     def _open(self) -> sqlite3.Connection | None:
         """The copy's read-only connection, opened again when a new copy replaced the file."""
         try:
-            st = self.path.stat()
+            stamp = self._stamp_of(self.path.stat())
         except OSError:
             return None
-        stamp = (st.st_ino, st.st_mtime_ns)
         if self._conn is None or self._opened != stamp:
             if self._conn is not None:
                 self._conn.close()
-            self._conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
-            self._meta = dict(self._conn.execute("SELECT key, value FROM meta"))
+                self._conn = None
+            self._meta = {}
+            conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
+            try:
+                self._meta = dict(conn.execute("SELECT key, value FROM meta"))
+            except BaseException:
+                conn.close()
+                raise
+            self._conn = conn
             self._opened = stamp
         return self._conn
+
+    def _damaged(self, exc: BaseException) -> None:
+        """A copy that can't be read: said once per file (N17), as a WARNING without a traceback.
+        The next download replaces it (a copy that can't be read is due at once)."""
+        try:
+            stamp: tuple[int, int, int] | None = self._stamp_of(self.path.stat())
+        except OSError:
+            stamp = None
+        if stamp != self._damaged_stamp:
+            self._damaged_stamp = stamp
+            logger.warning(
+                "the local copy of Scryfall's printings can't be read (%s: %s); the next download "
+                "replaces it",
+                exc.__class__.__name__,
+                exc,
+            )
 
     def meta(self) -> dict[str, Any]:
         with self._lock:
             try:
                 return dict(self._meta) if self._open() is not None else {}
-            except sqlite3.Error:
+            except (sqlite3.Error, ValueError) as exc:
+                self._damaged(exc)
                 return {}
 
     @property
     def as_of(self) -> str | None:
-        """When Scryfall made the file the copy was built from (its ``updated_at``), or None."""
-        value = self.meta().get("updated_at")
-        return str(value) if value else None
+        """When Scryfall made the file the copy was built from, as an ISO date-time, or None."""
+        return _iso(self.meta().get("updated_at"))
 
     def age(self) -> float:
         """Seconds since the copy was downloaded (inf without one)."""
@@ -292,40 +390,85 @@ class PrintingsCopy:
             return float("inf")
 
     def due(self) -> bool:
-        return self.age() >= COPY_TTL and time.monotonic() >= self._next_try
+        return self.enabled and self.age() >= COPY_TTL and time.time() >= self._next_try
+
+    # -- turning it off and on ---------------------------------------------------------------------
+    def remove(self) -> None:
+        """Turned off: stop a build under way and delete the copy and every file it left (the
+        copy, a half-built ``.new``, a download, the next-try file)."""
+        self._halt.set()
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+            self._opened = None
+            self._meta = {}
+            removed = []
+            for f in self._files():
+                with contextlib.suppress(FileNotFoundError):
+                    f.unlink()
+                    removed.append(f.name)
+        self._next_try = 0.0
+        if removed:
+            logger.info("local copy of Scryfall's printings turned off: %s deleted", ", ".join(removed))
+
+    def setting_changed(self, key: str) -> None:
+        """LiveSettings.on_change: off deletes the copy at once; on again downloads at the next
+        check (no wait left from before)."""
+        if key != SETTING:
+            return
+        if self.enabled:
+            self._halt = threading.Event()
+            self._clear_wait()
+        else:
+            self.remove()
 
     # -- refreshing ----------------------------------------------------------------------------
     async def loop(self) -> None:
         """The daily refresh, in the background: never in a request's way."""
         await asyncio.sleep(START_DELAY)
         while True:
-            if self.due():
-                await self.refresh()
+            await self.refresh()
             await asyncio.sleep(CHECK_EVERY)
 
     async def refresh(self) -> bool:
         """Download and build a new copy when it is due and Scryfall has a newer file. Returns
-        whether a new copy is in place. Never raises: a failure keeps the copy and is retried
-        after RETRY_AFTER_FAILURE."""
+        whether a new copy is in place. Never raises: a failure keeps the copy and waits
+        RETRY_AFTER_FAILURE (RETRY_AFTER_BAD_FILE once the file itself was downloaded), a wait kept
+        across restarts. Turned off, it deletes what is left of the copy instead."""
+        if not self.enabled:
+            if any(f.exists() for f in self._files()):
+                await asyncio.to_thread(self.remove)
+            return False
         if not self.due():
             return False
-        self._next_try = time.monotonic() + RETRY_AFTER_FAILURE
         client = self._scryfall()
         if client is None:
             return False
+        self._halt = threading.Event()
+        downloaded = False
         try:
             entry = await self._index(client)
             if entry["updated_at"] == str(self.meta().get("updated_at") or "-"):
                 logger.info("Scryfall's printings file is unchanged since %s", entry["updated_at"])
+                self._wait_until(time.time() + RETRY_AFTER_FAILURE, "nothing newer")
                 return False
             started = time.monotonic()
+            downloaded = True
             count = await self._download_and_build(client, entry)
         except asyncio.CancelledError:
-            self._stop.set()
+            self._halt.set()
             raise
         except Exception as exc:  # keep the copy in use, try again later
-            logger.warning("local copy of Scryfall's printings not updated (%s); the old one stays", exc)
+            wait = RETRY_AFTER_BAD_FILE if downloaded else RETRY_AFTER_FAILURE
+            self._wait_until(time.time() + wait, str(exc)[:200])
+            if self.enabled:
+                logger.warning("local copy of Scryfall's printings not updated (%s); the old one stays", exc)
             return False
+        if not self.enabled:  # turned off while it was being built
+            await asyncio.to_thread(self.remove)
+            return False
+        self._clear_wait()
         logger.info(
             "local copy of Scryfall's printings updated: %d printings as of %s, %.1f MB, %.0f s",
             count,
@@ -390,7 +533,7 @@ class PrintingsCopy:
                 raise CopyBroken(f"the download was cut off ({got} of {expected} bytes)")
             meta = {"updated_at": entry["updated_at"], "downloaded_at": str(time.time()), "uri": entry["uri"]}
             return await asyncio.to_thread(
-                build, gz, self.path, meta, stop=self._stop, min_printings=self.min_printings
+                build, gz, self.path, meta, stop=self._halt, min_printings=self.min_printings
             )
         finally:
             with contextlib.suppress(OSError):
@@ -398,7 +541,8 @@ class PrintingsCopy:
 
     def close(self) -> None:
         """Stop a build under way (the gateway shuts down) and close the reader."""
-        self._stop.set()
+        self._closed.set()
+        self._halt.set()
         if self._task is not None and not self._task.done():
             self._task.cancel()
         with self._lock:
@@ -431,7 +575,7 @@ class PrintingsCopy:
             return int(conn.execute(sql, args).fetchone()[0]) if conn is not None else 0
 
     def _labelled(self, out: dict[str, Any]) -> dict[str, Any]:
-        as_of = str(self._meta.get("updated_at") or "")
+        as_of = _iso(self._meta.get("updated_at"))
         return {
             **out,
             "from_local_copy": True,
@@ -440,7 +584,26 @@ class PrintingsCopy:
             "as_of_note": as_of_line(as_of),
         }
 
-    def prints_now(
+    def _reading(self, read: Callable[[], Any], empty: Any) -> Any:
+        """``read()`` from the copy: ``empty`` while the copy is turned off, and for a copy that
+        can't be read (said once per file)."""
+        if not self.enabled:
+            return empty
+        try:
+            return read()
+        except (sqlite3.Error, zlib.error, ValueError, KeyError) as exc:
+            with self._lock:
+                self._damaged(exc)
+            return empty
+
+    def prints_now(self, oracle_id: str, **kw: Any) -> dict[str, Any] | None:
+        """One page of the card's printings as ``ScryfallClient.prints`` gives it, from the copy,
+        with ``from_local_copy``, ``as_of`` and ``as_of_note``; None when the copy has no such card,
+        there is no copy, it is turned off or it can't be read. Blocking: call it through
+        ``prints``."""
+        return self._reading(lambda: self._prints(oracle_id, **kw), None)
+
+    def _prints(
         self,
         oracle_id: str,
         *,
@@ -452,9 +615,6 @@ class PrintingsCopy:
         set_code: str | None = None,
         number: str | None = None,
     ) -> dict[str, Any] | None:
-        """One page of the card's printings as ``ScryfallClient.prints`` gives it, from the copy,
-        with ``from_local_copy``, ``as_of`` and ``as_of_note``; None when the copy has no such card
-        (or there is no copy). Blocking: call it through ``prints``."""
         oid = oracle_id.strip().lower()
         where, args = ["oracle_id = ?"], [oid]
         if not self._count("SELECT count(*) FROM printings WHERE oracle_id = ?", (oid,)):
@@ -492,6 +652,9 @@ class PrintingsCopy:
         """Every printing of each card, as ``ScryfallClient.printings_of`` gives them, prices as
         Scryfall gave them on the copy's day. Not used by the daily price check, which records
         today's prices only (see the module docstring)."""
+        return self._reading(lambda: self._printings_of(oracle_ids), {})
+
+    def _printings_of(self, oracle_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         out: dict[str, list[dict[str, Any]]] = {}
         for oid in sorted({o.strip().lower() for o in oracle_ids}):
             for row in self._rows(
@@ -512,6 +675,9 @@ class PrintingsCopy:
 
     def oracle_of_now(self, name: str) -> tuple[str, str] | None:
         """The oracle id and full name of the card called ``name`` (or one of its faces)."""
+        return self._reading(lambda: self._oracle_of(name), None)
+
+    def _oracle_of(self, name: str) -> tuple[str, str] | None:
         with self._lock:
             conn = self._open()
             if conn is None:

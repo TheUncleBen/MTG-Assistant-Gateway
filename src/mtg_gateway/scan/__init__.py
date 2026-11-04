@@ -78,7 +78,12 @@ def add_scan(server: MCPServer, state: AppState, *, scryfall: ScryfallClient | N
     # the service's own Scryfall client, as the card-name catalog is
     data_dir = getattr(st, "data_dir", None)
     if data_dir is not None:
-        service.copy = PrintingsCopy(data_dir, lambda: service.scryfall)
+        # the admin Settings row "Keep a local copy of card printings" turns it off (and on) at once
+        live = getattr(getattr(state, "decks", None), "live", None)
+        enabled = (lambda: bool(live.get("printings_copy"))) if live is not None else None
+        service.copy = PrintingsCopy(data_dir, lambda: service.scryfall, enabled)
+        if live is not None:
+            live.on_change.append(service.copy.setting_changed)
     state.scan = service  # type: ignore[attr-defined]
     # proposals that add a card a scan matched from a misread name say so (decks._save_proposal)
     state.decks.guessed_names = service.guessed_names  # type: ignore[attr-defined]

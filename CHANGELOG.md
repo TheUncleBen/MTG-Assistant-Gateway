@@ -32,6 +32,10 @@ name per thing.
   default price alert goes on cards you watch from now on. A card watched by name alone starts a
   new price history from the first daily price check; a watch limit already saved on the Settings
   page stays as saved.
+- **The data folder grows by about 55 MB** (about 190 MB for a short while each time a new copy
+  is built): the gateway keeps a daily copy of Scryfall's printings, `scryfall-printings.sqlite`.
+  If you restrict outbound traffic, also allow `data.scryfall.io`. **Keep a local copy of card
+  printings** on the Settings page (General) turns it off.
 - **Sign-ins now last 7 days unused** and renew as you use them, up to 30 days after you signed
   in. `MTG_BROWSER_SESSION_TTL` is now that unused time (default `604800`, at most `2592000`). If
   your variables still set `MTG_BROWSER_SESSION_TTL=7200` from an older example file, remove the
@@ -109,7 +113,8 @@ name per thing.
   list of every printing and keeps a copy beside its database (about 55 MB). When Scryfall can't
   be reached, the printing picker and `card_printings` answer from that copy and say how old it
   is, for example “Printings and prices as of 3 Nov (Scryfall can't be reached right now)”. The
-  daily price check never uses it: it records today's prices only.
+  daily price check never uses it: it records today's prices only. **Keep a local copy of card
+  printings** on the Settings page turns it off and deletes the copy.
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a
   “Default for new assistants” on top. Claude and ChatGPT are one assistant each across your
   devices, known by the exact address each sends you back to after sign-in; Claude Code and other

@@ -233,6 +233,9 @@ class Settings:
     # Look up the newest release on GitHub twice a day and tell admins when it is newer than this
     # gateway (update_check.py). Notice only: nothing is downloaded or changed.
     update_check: bool = True
+    # The daily local copy of Scryfall's printings (scan/bulk.py), used only when Scryfall can't
+    # answer: an admin Settings row ("Keep a local copy of card printings"), no stack variable.
+    printings_copy: bool = True
     # Approval modes (modes.py): the mode of a member who has not chosen one on their Account
     # page, the highest mode members may choose (auto = no cap), and how many review rows an
     # edit may have and still count as low risk in semi mode.
@@ -799,6 +802,8 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             env="MTG_SERVER_NAME",
         ),
         _spec("update_check", "bool", True, "general", "B", restart=True, env="MTG_UPDATE_CHECK"),
+        # off deletes the copy at once and stops the daily download (scan/bulk.py); no stack variable
+        _spec("printings_copy", "bool", True, "general", "B"),
         _spec("log_level", "choice", "INFO", "general", "B", choices=_LOG_LEVELS, restart=True),
         # sign-in times (read per sign-in and per token: no restart). The stack ranges stay as they
         # were (load_settings); the page's sit inside them, in days and hours.
