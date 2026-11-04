@@ -204,7 +204,10 @@ def test_the_proposal_card_uses_the_shared_card_template() -> None:
     assert "/*@BASE@*/" not in html and "/*@BRIDGE@*/" not in html
     assert "var Bridge" in html or "Bridge =" in html
     assert "Use the review page in your browser." in html
-    assert html.index("button:disabled{opacity:.55") < html.index("border:1px dashed currentColor")
+    # the card's own rule for a locked button (full strength, a waiting cursor: audit D25) comes
+    # after the shared base's, and no dashed outline is left
+    assert html.index("button:disabled{opacity:.55") < html.index("button:disabled{opacity:1;cursor:wait}")
+    assert "border:1px dashed currentColor" not in html
 
 
 def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -> None:

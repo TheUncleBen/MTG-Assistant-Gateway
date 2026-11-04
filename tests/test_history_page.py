@@ -269,7 +269,11 @@ async def test_history_page_filters_groups_and_pages(stack: Stack, monkeypatch: 
             and ">Test</span>" in tests[0]
             and "<a class='ui-cap' href='/history/reports/rep_a' aria-label='Open report'>" in tests[0]
         )
-        assert "title='Snapshots do not record who made them'>—" in snaps[0]
+        assert (
+            "<span class='ui-when'><span class='sr-only'>Snapshots do not record who made them</span></span>"
+            in snaps[0]
+        )
+        assert "—" not in snaps[0]
         # chips with counts, a deck name search and the three filters
         assert "Everything <span class='n'>52</span>" in body and "Tests <span class='n'>2</span>" in body
         assert "Changes <span class='n'>15</span>" in body and "Snapshots <span class='n'>35</span>" in body

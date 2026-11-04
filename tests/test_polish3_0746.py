@@ -62,7 +62,7 @@ async def test_binder_tiles_and_rows_carry_the_tags_as_colour_chips(stack: Stack
             assert len(chips) == 2, view  # one tag on each of the two entries
             assert all("Trade" in c and "--tagc:#336699" in c for c in chips), chips
             # the chip has the colour as a dot beside the name, never as the text's colour
-            assert "<i class='sw' aria-hidden='true'></i>Trade" in chips[0], chips[0]
+            assert "<i class='sw' aria-hidden='true'></i><span class='t'>Trade</span>" in chips[0], chips[0]
             # the page's script redraws a row's chips after a save: the colours are on the list
             assert "data-tag-colors='" in page and "Keep" in page.split("data-tag-colors='", 1)[1][:200]
     finally:

@@ -1553,7 +1553,7 @@ CONDITION_WORDS = {
     "HP": "Heavily Played",
     "DMG": "Damaged",
 }
-PURPOSE = "The cards you own, in your Archidekt collection."
+PURPOSE = "The cards you own (your Archidekt collection)."
 TABLE_COLS = "minmax(0,1fr) 9rem 5.5rem 10.5rem 6.5rem 7.5rem 8.5rem var(--ctl)"
 TABLE_MD = "minmax(0,1fr) 8.5rem var(--ctl)"
 TABLE_SM = "minmax(0,1fr) var(--ctl)"
@@ -2558,6 +2558,7 @@ ul.collgrid .act{display:flex;align-items:center;min-width:0}
 /* the tiles of a row share a height (the grid's), and the stepper sits at every tile's foot, so
    steppers line up across a row whatever a tile's tags (polish B7) */
 ul.collgrid > li.cc{display:flex;flex-direction:column}
+ul.collgrid > li.cc[hidden]{display:none}  /* the name box narrows the tiles (collection.js narrow) */
 ul.collgrid > li.cc > .meta{flex:1 1 auto}
 ul.collgrid > li.cc > .act{margin-top:auto}
 /* two tiles a row on a narrow phone at S and M (one at L); with larger text (the columns are

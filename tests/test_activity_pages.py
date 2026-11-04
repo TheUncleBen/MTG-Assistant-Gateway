@@ -150,7 +150,10 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
         assert "ui-lbl red" in denies[0] and "ui-lbl grey" in denies[1]  # newest first
         assert "ui-lbl green" in _row(page, "proposal_applied")
         report = _row(page, "report_created")
-        assert "<span class='ui-app none' title='No app'>" in report and "ui-lbl" not in report
+        assert (
+            "<span class='ui-app none'><span class='sr-only'>No app</span></span>" in report
+            and "ui-lbl" not in report
+        )
         assert "No app <span class='muted'>(no client id stored)</span>" in report
         # an admin action: the shield, no label, written once (the admin's row, from the website)
         assert _table(page).count("title='admin_disable'") == 1
@@ -288,7 +291,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "An administrator revoked your assistants' access and your sign-ins" in words
         assert "By an administrator" in words and "<span class='nm'>Administrator</span></span>" in table
         assert "During deck sync" in words and "1 card row" in words
-        assert "<span class='ui-app none' title='No app'>" in table
+        assert "<span class='ui-app none'><span class='sr-only'>No app</span></span>" in table
         assert "claude-app" not in page and "__browser__" not in page and "client id" not in page
         assert "Rejected</span>" in table and "ui-lbl grey" in table
         assert "Refused</span>" in table and "Failed</span>" in table
@@ -308,9 +311,10 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         for q in ("no+a", "No+app"):
             rows_no_app = _table((await b.http.get(f"/activity?q={q}", headers=NAVIGATE)).text)
             n = rows_no_app.count("<div class='tr ev")
-            assert n >= 2 and n == rows_no_app.count("title='No app'"), q  # the seeded two and the sign-in
+            no_app = "<span class='ui-app none'><span class='sr-only'>No app</span></span>"
+            assert n >= 2 and n == rows_no_app.count(no_app), q  # the seeded two and the sign-in
         pp = _table((await b.http.get("/activity?q=pp", headers=NAVIGATE)).text)
-        assert pp.count("<div class='tr ev") >= 1 and "title='No app'" not in pp  # the letters of "no app"
+        assert pp.count("<div class='tr ev") >= 1 and no_app not in pp  # the letters of "no app"
         assert "<span class='evt' title=" not in page  # no technical names on the member's page
     finally:
         await b.aclose()

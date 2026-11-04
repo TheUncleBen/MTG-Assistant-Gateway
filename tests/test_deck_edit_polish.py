@@ -83,7 +83,10 @@ def test_my_decks_tiles_say_nothing_about_missing_tags_or_the_owner() -> None:
     assert "No deck tags" not in mine and "class='notags'" not in mine
     assert "class='avatar" not in mine and "class='tags'" not in mine
     tagged = deck_card_html({**d, "tags": ["budget", "fun"]}, cover=None, selected=False, own=True)
-    assert "<span class='tags'><span class='pill'>budget</span><span class='pill'>fun</span></span>" in tagged
+    assert (
+        "<span class='tags'><span class='pill' title='budget'>budget</span>"
+        "<span class='pill' title='fun'>fun</span></span>" in tagged
+    )
     theirs = deck_card_html({**d, "owner": "bob"}, cover=None, selected=False, show_owner=True)
     assert "class='avatar sm'" in theirs and "by bob" in theirs and "No deck tags" not in theirs
 

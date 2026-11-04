@@ -194,9 +194,22 @@ def test_scan_page_asks_with_a_themed_bar(server: Server) -> None:
         browser, page, dialogs, errors = _open(p, exe, server, sid, width=390)
         server.db.set_pref("user-1", "scan.intro", True)  # the intro dismissed (on the account)
         page.goto(f"{server.base}/scan", wait_until="networkidle")
-        # the step numbers and the list badge use dark text on orange
+        # an empty list is a grey badge (polish C3); with a card in, dark text on orange
         page.locator("[data-tab=list]").click()
         badge = page.locator("#list-badge")
+        assert badge.inner_text() == "0" and "zero" in (badge.get_attribute("class") or "")
+        assert badge.evaluate("e => getComputedStyle(e).color") == page.evaluate(
+            "() => { const s = document.createElement('span'); document.body.append(s);"
+            " const c = getComputedStyle(s).color; s.remove(); return c; }"
+        )
+        page.evaluate(
+            "() => window.__scan.addItem({status: 'exact', input: {name: 'Sol Ring'}, card: {"
+            " name: 'Sol Ring',"
+            " set: 'cmr', collector_number: '472', scryfall_id: 'sol-ring-cmr', oracle_id: 'sol-ring',"
+            " image_small: '', finishes: ['nonfoil']}}, 1)"
+        )
+        page.wait_for_function("() => document.querySelector('#list-badge').textContent === '1'")
+        assert "zero" not in (badge.get_attribute("class") or "")
         assert badge.evaluate("e => getComputedStyle(e).color") == "rgb(17, 17, 17)"  # --on-orange
         # a themed confirm bar, never the browser's confirm box
         page.evaluate("() => { const b = document.querySelector('#session-name'); if (b) b.value = 'x'; }")

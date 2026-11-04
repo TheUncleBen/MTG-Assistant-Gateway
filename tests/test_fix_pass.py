@@ -177,9 +177,10 @@ def test_a_private_folders_lock_takes_the_icons_place() -> None:
 
 def test_the_backup_folders_tile_is_marked_for_its_menu() -> None:
     assert "data-backup" not in folder_tile_html(_tile(), order="name")
-    assert "<li class='folder' data-folder-id='9' data-folder-name='MTG Assistant backups' data-backup>" in (
-        folder_tile_html(_tile(id=9, name="MTG Assistant backups", backup=True), order="name")
-    )
+    assert (
+        "<li class='folder' data-folder-id='9' data-folder-name='MTG Assistant backups' data-decks='2' "
+        "data-backup>"
+    ) in (folder_tile_html(_tile(id=9, name="MTG Assistant backups", backup=True), order="name"))
 
 
 # -- C3: the guide ------------------------------------------------------------------------------------

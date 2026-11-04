@@ -19,6 +19,9 @@ from .test_deck_custom_cards import _seed as seed_customs
 from .test_decks_and_proxy import Browser, call, linked_user, structured
 from .test_lists_page import _seed as seed_lists
 
+# the small lock a guarded button wears while locked (clickguard.py; final audit F09)
+LOCK = f"<span class='lk' aria-hidden='true'>{theme.icon('lock')}</span>"
+
 stack_options = stack_with(SHIPPED)
 
 STATIC = Path(__file__).parents[1] / "src" / "mtg_gateway" / "static"
@@ -50,7 +53,7 @@ async def test_deleting_a_deck_asks_in_the_shared_box_from_one_outline_button(st
     assert "Delete this deck on Archidekt</button>" not in form
     assert re.search(
         r"<button type='button' class='btn-outline-danger' data-box-open='confirm-delete' disabled "
-        r"data-guard>Delete this deck on Archidekt…</button>",
+        r"data-guard>" + re.escape(LOCK) + r"Delete this deck on Archidekt…</button>",
         form,
     ), form[-1500:]
     assert "pr-ask" not in page and "pr-sure" not in page
@@ -184,7 +187,7 @@ async def test_taking_custom_cards_out_asks_in_the_same_box(stack: Stack) -> Non
     form = _scripted_form(page)
     assert (
         "<button type='button' class='btn-outline-danger' data-box-open='confirm-delete' disabled "
-        "data-guard>Take them out on Archidekt…</button>" in form
+        f"data-guard>{LOCK}Take them out on Archidekt…</button>" in form
     )
     assert "<h2 id='confirm-delete-title'>Take 1 custom card out of “Sample Commander Deck”?</h2>" in page
     assert "This takes <strong>“Grizzled Mentor”</strong> out of the deck on Archidekt" in page
@@ -217,7 +220,7 @@ async def test_a_list_change_that_deletes_asks_in_the_box_and_one_that_does_not_
     form = _scripted_form(page)
     assert (
         "<button type='button' class='primary btn-primary' data-box-open='confirm-delete' disabled "
-        "data-guard>Apply to my Archidekt lists…</button>" in form
+        f"data-guard>{LOCK}Apply to my Archidekt lists…</button>" in form
     )
     assert "<h2 id='confirm-delete-title'>Delete from your Archidekt lists?</h2>" in page
     assert "<li>Delete the category template “Ramp”</li>" in page

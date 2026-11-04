@@ -336,7 +336,7 @@ def test_collection_my_decks_and_card_search_show_the_switch_in_every_view(
             ("/cards?q=sol&view=grid", ".rbar.cards"),
         ):
             page.goto(f"{server.base}{path}", wait_until="networkidle")
-            sheet = width < 600 and bar.startswith(".rbar")  # phones: the switch is in the Filters sheet
+            sheet = width < 600 and ".rbar" in bar  # phones: the switch is in the Filters sheet
             if sheet:
                 page.locator(".sp-open").click()
                 page.locator("#sp-filters.open").wait_for(timeout=3000)

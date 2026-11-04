@@ -107,7 +107,8 @@ async def test_a_new_watch_gets_the_default_alert_and_the_price_it_was_added_at(
         assert w["alert_drop_pct"] == 10 and w["alert_pct"] is None
         assert w["added_price"] == 1.28 and w["added_currency"] == "usd"
         page = (await b.http.get("/watchlist")).text
-        assert "Drops 10% below $1.28</span>" in page  # the row's alert label
+        # the row's alert pill: the short form, the full words as its tooltip (polish B8)
+        assert "title='Drops 10% below $1.28'>" in page and "−10% below $1.28</span>" in page
         assert "With a price alert <span class='n'>1</span>" in page
         api = (await b.http.get("/watchlist/api/card", params={"name": "Sol Ring"})).json()
         assert api["watches"][0]["alerts"] == {"drop": 10.0} and api["watches"][0]["added_price"] == 1.28

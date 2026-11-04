@@ -129,7 +129,9 @@ async def test_the_details_box_sets_an_entrys_tags_and_the_filter_shows_them(sta
     try:
         page = (await b.http.get("/collection", headers=NAV)).text
         # the Tag drop-down in the results bar, and a box to tick per tag in the Details box
-        assert "<select id='col-tag' name='tag'><option value=''>All cards</option>" in page
+        assert "<select id='col-tag' name='tag'><option value='' selected>All cards</option>" in page or (
+            "<select id='col-tag' name='tag'><option value=''>All cards</option>" in page
+        )
         assert "name='tag:Trade' value='1' data-tag='Trade'" in page
         assert "href='/lists/btags'>Manage tags</a>" in page
         csrf = await b.csrf("/collection")

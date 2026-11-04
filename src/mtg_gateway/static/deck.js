@@ -1293,7 +1293,7 @@
       else if (/distinct cards?$/.test(t) && st.distinct !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.distinct, "distinct card") : st.distinct + " distinct cards";
       // the phone's short count ("100 cards", deckpage.banner_html)
       else if (/^[\d,]+ cards?$/.test(t) && sp.classList.contains("sm") && st.card_count !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.card_count, "card") : st.card_count + " cards";
-      else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) b.textContent = costText(st); }
+      else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) setCost(b, st); }
       else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = st.salt_text || Number(st.salt_total).toFixed(1); }
     });
     // the deck's date, as Archidekt stamped this save (deckpage.updated_when)
@@ -1305,11 +1305,20 @@
     var tiles = $$(".stats .tiles .tile");
     if (tiles[0] && st.card_count !== undefined) $("b", tiles[0]).textContent = String(st.card_count);
     if (tiles[1] && st.land_count !== undefined) $("b", tiles[1]).textContent = String(st.land_count);
-    if (tiles[2] && st.price_total !== undefined && st.price_total !== null) $("b", tiles[2]).textContent = costText(st);
+    if (tiles[2] && st.price_total !== undefined && st.price_total !== null) setCost($("b", tiles[2]), st);
   }
   // the deck's cost as the page draws it on a load (deckpage.est_cost_html): a dash while no card
   // has a price, never "$0.00"
-  function costText(st) { return st.priced_cards === 0 ? "–" : money(st.price_total); }
+  // no card priced: a muted "unknown" with its tooltip, as deckpage.est_cost_html draws it (polish C7)
+  function setCost(b, st) {
+    if (!b) return;
+    b.textContent = "";
+    if (st.priced_cards === 0) {
+      var u = document.createElement("span");
+      u.className = "muted unpriced"; u.title = "No prices from Archidekt yet"; u.textContent = "unknown";
+      b.appendChild(u);
+    } else b.textContent = money(st.price_total);
+  }
   // adds: the names this save added (a quick add): a row of one of them with no card on the page
   // is drawn from its markup; any other such row is a card a pending edit holds off the page
   function drawRows(rows, names, adds) {

@@ -368,8 +368,8 @@ def test_the_account_page_has_an_assistants_row_so_a_mode_change_is_three_taps(s
     h = _client(server)
     hub = h.get("/account").text
     group = hub.split("<h2>Assistants and apps</h2>", 1)[1].split("</section>", 1)[0]
-    assert "<a class='yrow' href='/account/assistants'>" in group
-    assert group.index("href='/account/assistants'") < group.index("href='/guide'")
+    assert "<a class='yrow' href='/account/assistants?from=account'>" in group
+    assert group.index("href='/account/assistants?from=account'") < group.index("href='/guide'")
     assert "<span class='lbl'>Assistants</span>" in group
     assistants = h.get("/account/assistants").text
     assert "<h1>Assistants</h1>" in assistants
