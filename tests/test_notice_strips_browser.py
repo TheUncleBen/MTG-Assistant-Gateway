@@ -8,6 +8,7 @@ line was a 108×19 px inline link on a touch screen."""
 
 from __future__ import annotations
 
+import re
 import time
 
 import pytest
@@ -197,7 +198,12 @@ def test_every_notice_keeps_its_x_its_words_and_its_buttons_in_the_strip(
         gw.collection_jobs.store.update(
             SUB, "job2", state="done", done=130, result={"added": [], "skipped": []}
         )
-        page.goto(f"{server.base}/collection", wait_until="networkidle")  # takes the result away
+        # the job ends: the page's own poll (static/collection.js, every 1.5 s) sees it done and
+        # opens the result's address, which shows the result once. A goto of ours here raced that
+        # navigation and was aborted under load (net::ERR_ABORTED), so the page's own move is the
+        # condition to wait for
+        page.wait_for_url(re.compile(r"ok=imported|err=nothingimported"))
+        page.wait_for_load_state("networkidle")
         # a draft put back: Discard beside the words
         page.goto(f"{server.base}/decks/new", wait_until="networkidle")
         page.locator("#newdeck #name").fill("Old idea")
