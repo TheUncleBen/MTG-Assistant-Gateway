@@ -17,16 +17,34 @@
     var input = document.querySelector("input[name=csrf]");
     return input ? input.value : "";
   }
-  // Saves go one after another, in the order they were made: two quick changes (L, then S) must
-  // never reach the gateway the other way round and leave the account with the first one. Each
-  // save ends one way or another (an answer cut off or unreadable, no network, or no answer within
-  // SAVE_WAIT_MS), so one bad save never holds up the ones after it.
+  // What is guaranteed (0.7.46 audit C7): once the gateway has stored this page's newest save of a
+  // name, no older save of that name from this page replaces it, whatever order the requests
+  // arrive in. Each save carries this page's id and a number (seq: 1, 2, 3... in the order the
+  // choices were made), and the gateway drops a save of a name from this page numbered no higher
+  // than the last one it stored (prefs.py; it keeps the numbers in memory, for its newest
+  // SEQ_KEPT names, so not across its own restart). Saves go one at a time, in order, each after
+  // the one before it ended; only a flush (leaving or hiding the page, below) sends at once, beside
+  // the save on the wire. Not guaranteed: a save that never reaches the gateway (no network, or no
+  // answer within SAVE_WAIT_MS) is lost, not tried again; and between two pages (another tab, or
+  // this page loaded again) the save that reaches the gateway last is the one kept.
   var SAVE_WAIT_MS = 15000;
+  var PAGE = (function () {  // this page's id, new each time it loads
+    try {
+      var a = new Uint32Array(2);
+      window.crypto.getRandomValues(a);
+      return a[0].toString(36) + a[1].toString(36);
+    } catch (e) {
+      return Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36);
+    }
+  })();
+  var seq = 0;
   var queue = Promise.resolve();
-  var waiting = [];     // saves made but not sent yet, in order: {body, sent}
-  var inflight = null;  // the save on the wire: {body, stop}
-  function send(body, stop) {
+  var waiting = [];  // saves made but not sent yet, in order: {body, seq, sent}
+  function send(body, n) {
+    var stop = window.AbortController ? new AbortController() : null;
     var timer = stop ? setTimeout(function () { stop.abort(); }, SAVE_WAIT_MS) : null;
+    var out = { page: PAGE, seq: n };
+    Object.keys(body).forEach(function (part) { out[part] = body[part]; });  // "set", "copy"
     // keepalive: a save on its way when the member leaves the page (a tap on a link right after
     // a size change) still reaches the gateway
     return fetch("/api/v1/prefs", {
@@ -34,7 +52,7 @@
       credentials: "same-origin",
       keepalive: true,
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-      body: JSON.stringify(body),
+      body: JSON.stringify(out),
       signal: stop ? stop.signal : undefined
     })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -43,48 +61,42 @@
   }
   function post(body) {
     if (!window.fetch) return Promise.resolve(null);
-    var item = { body: body, sent: false };
+    var item = { body: body, seq: ++seq, sent: false };
     waiting.push(item);
+    // each save waits for the one before it to end (answered, refused, cut off or timed out), so
+    // one bad save never holds up the ones after it
     queue = queue.then(function () {
       var at = waiting.indexOf(item);
       if (at >= 0) waiting.splice(at, 1);
-      if (item.sent) return null;  // went with the flush below
+      if (item.sent) return null;  // went with a flush (below)
       item.sent = true;
-      var stop = window.AbortController ? new AbortController() : null;
-      inflight = { body: body, stop: stop };
-      return send(body, stop).then(function (answer) {
-        if (inflight && inflight.body === body) inflight = null;
-        return answer;
-      });
+      return send(body, item.seq);
     });
     return queue;
   }
   // Leaving the page: the saves still waiting would never be sent (scripts stop with the page).
-  // They go now, merged into one body in the order they were made (the last change to a name
-  // wins), with keepalive. The save on the wire is cancelled and its names go in the same body
-  // first, so the newest value of a name is never overtaken by an older save that was slow to
-  // arrive; a save that already reached the gateway is simply saved again. Flushing twice is
-  // harmless (nothing waits the second time): beforeunload for a link, a reload or a closed tab,
-  // pagehide and the page going hidden for the phone, where a page in the background can be
-  // thrown away without either of the others.
+  // They go now, merged into one body (the last change to a name wins) numbered as the newest of
+  // them, with keepalive, beside the save on the wire if there is one: it isn't cancelled (a
+  // cancel can't recall a request the gateway already has), and if it lands after the flush, the
+  // gateway drops its names the flush saved (older number) and keeps the others. The saves made
+  // after a flush wait for it like any other. Nothing waiting, nothing sent, so flushing twice
+  // (beforeunload for a link, a reload or a closed tab; pagehide; the page going hidden for the
+  // phone, where a page in the background can be thrown away without either of the others) never
+  // sends a save twice.
   function flush() {
-    var bodies = [];
-    if (inflight) {
-      bodies.push(inflight.body);
-      if (inflight.stop) inflight.stop.abort();
-      inflight = null;
-    }
-    waiting.forEach(function (item) { if (!item.sent) { item.sent = true; bodies.push(item.body); } });
+    var items = waiting.filter(function (item) { return !item.sent; });
     waiting = [];
-    if (!bodies.length) return;
+    if (!items.length) return;
     var merged = {};
-    bodies.forEach(function (b) {
-      Object.keys(b).forEach(function (part) {  // "set", "copy"
+    items.forEach(function (item) {
+      item.sent = true;
+      Object.keys(item.body).forEach(function (part) {  // "set", "copy"
         if (!merged[part]) merged[part] = {};
-        Object.keys(b[part]).forEach(function (name) { merged[part][name] = b[part][name]; });
+        Object.keys(item.body[part]).forEach(function (name) { merged[part][name] = item.body[part][name]; });
       });
     });
-    send(merged, null);
+    var going = send(merged, items[items.length - 1].seq);
+    queue = Promise.all([queue, going]).then(function () { return null; });
   }
   window.addEventListener("beforeunload", flush);
   window.addEventListener("pagehide", flush);

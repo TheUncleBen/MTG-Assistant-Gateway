@@ -460,8 +460,9 @@ def test_a_save_still_waiting_when_the_page_is_left_reaches_the_account(server: 
     not been answered: the first save was cut off by the navigation (no keepalive) and the second,
     waiting its turn behind it, was never sent, so the account kept neither. Leaving the page
     (beforeunload, pagehide, the page going hidden) sends what still waits, merged into one body
-    with keepalive, and cancels the save on the wire so an older value can't land after the newer
-    one (static/prefs.js). The first save is held by a route: never answered, never continued."""
+    with keepalive and numbered after the save on the wire, so the older value can't land over
+    the newer one (static/prefs.js, prefs.py). The first save is held by a route: never answered,
+    never continued."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -500,11 +501,88 @@ def test_a_save_still_waiting_when_the_page_is_left_reaches_the_account(server: 
         page.reload(wait_until="load")
         assert page.get_attribute("html", "data-card-size") == "s"
         # the second change never went the usual way: only the held first save went through the route
-        assert [json.loads(b) for b in posts] == [{"set": {"card.size.deck": "l"}}], posts
+        # (numbered: this page's first save, so a late L can't land over S; prefs.py drops it)
+        sent = [{k: v for k, v in json.loads(b).items() if k != "page"} for b in posts]
+        assert sent == [{"seq": 1, "set": {"card.size.deck": "l"}}], posts
         for route in held:  # let the harness drop the held one tidily
             try:
                 route.abort()
             except Exception:  # noqa: BLE001  (the page that sent it is gone already)
                 pass
+        browser.close()
+    assert errors == []
+
+
+# the page going hidden and back, as on a phone's app switch (the test says when)
+HIDE_AND_SHOW = """
+(() => {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true, get: () => (window.__mtgHidden ? 'hidden' : 'visible')
+  });
+})();
+"""
+TURN = "h => { window.__mtgHidden = h; document.dispatchEvent(new Event('visibilitychange')); }"
+
+
+def test_two_flushes_with_a_slow_first_one_end_on_the_newest_value(server: Server) -> None:
+    """0.7.46 audit C7: L is on the wire (slow), M waits; the page goes hidden (a flush: M goes at
+    once, and is slow too) and comes back; S, then hidden again (a second flush: S goes and
+    lands). Then the slow ones land, M and then L, after S. The account keeps S: each save
+    carries the page's number for it and the gateway drops the older ones (static/prefs.js,
+    prefs.py). Each choice is sent once."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    server.db.set_pref("user-1", "card.size.deck", "m")  # no device copy: the page has a size
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        posts: list[dict] = []
+        held: list = []
+
+        def slow_l_and_m(route) -> None:
+            if route.request.method != "POST":
+                route.continue_()
+                return
+            body = json.loads(route.request.post_data or "{}")
+            posts.append(body)
+            if (body.get("set") or {}).get("card.size.deck") in ("l", "m"):
+                held.append(route)  # answered later, after S
+            else:
+                route.continue_()
+
+        answered: list = []
+        page.on("response", lambda r: answered.append(r) if "/api/v1/prefs" in r.url else None)
+        page.add_init_script(HIDE_AND_SHOW)
+        page.route(SAVED, slow_l_and_m)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.locator(".toolbar [data-card-size-set=l]").click()
+        page.locator(".toolbar [data-card-size-set=m]").click()
+        page.evaluate(TURN, True)  # the first flush: M
+        page.evaluate(TURN, False)
+        page.locator(".toolbar [data-card-size-set=s]").click()
+        assert page.get_attribute("html", "data-card-size") == "s"
+        page.evaluate(TURN, True)  # the second flush: S
+        for _ in range(100):
+            if server.db.get_pref("user-1", "card.size.deck") == "s" and len(held) == 2:
+                break
+            page.wait_for_timeout(50)
+        assert server.db.get_pref("user-1", "card.size.deck") == "s", posts
+        assert len(held) == 2, posts
+        for route in held:  # M, then L, reach the gateway after S
+            try:
+                route.continue_()
+            except Exception:  # noqa: BLE001  (a save the page cancelled: nothing to let through)
+                pass
+            page.wait_for_timeout(300)
+        for _ in range(100):
+            if len(answered) >= 3:
+                break
+            page.wait_for_timeout(50)
+        assert server.db.get_pref("user-1", "card.size.deck") == "s", posts
+        sizes = [(b.get("set") or {}).get("card.size.deck") for b in posts]
+        assert sizes == ["l", "m", "s"], posts  # each once, no merged repeat of L
+        assert len({b.get("page") for b in posts}) == 1 and [b.get("seq") for b in posts] == [1, 2, 3], posts
         browser.close()
     assert errors == []

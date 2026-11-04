@@ -96,7 +96,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
 | `GET /api/v1/prefs` | Browser session only: the choices kept on the member's account for the pages (views, each page's card size as `card.size.<page>`, deck stats toggles, dismissed tips; a stack order an older version saved is still listed, though no page uses it now) as `prefs`. A bearer token gets `403 browser_required` |
-| `POST /api/v1/prefs` | Browser session only (CSRF header): `{"set": {name: value or null}}` saves each choice (null forgets it); `{"copy": {...}}` saves only the names the account doesn't have yet. Answers `saved` and `refused` |
+| `POST /api/v1/prefs` | Browser session only (CSRF header): `{"set": {name: value or null}}` saves each choice (null forgets it); `{"copy": {...}}` saves only the names the account doesn't have yet. Optional `"page"` (an id, 1 to 64 letters, digits, `-` or `_`) and `"seq"` (a whole number from 1), both or neither, number the page's saves: a name a save from the same page with a higher or equal `seq` already stored is left as it is. Answers `saved`, `refused` and `superseded` |
 
 The printings card an AI app shows in the chat loads a card's printings from `GET /cards/data/{token}`,
 outside `/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to

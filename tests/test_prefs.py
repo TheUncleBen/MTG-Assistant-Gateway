@@ -355,3 +355,70 @@ async def test_the_sort_picked_on_a_list_is_the_sort_the_next_visit_opens_with(s
         assert "<option value='updated' selected>" in page
     finally:
         await b.aclose()
+
+
+async def test_an_older_save_from_a_page_that_arrives_after_a_newer_one_is_ignored(stack: Stack) -> None:
+    """0.7.46 audit C7: static/prefs.js numbers a page's saves (``page``, ``seq``). A save the
+    gateway gets after a newer one from the same page (a slow request, or one the page cancelled
+    after it reached the gateway) is dropped for each name the newer one saved, and kept for the
+    others. Another page's save and a save without a number still go as they come."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        db = stack.h.db
+
+        async def post(body: dict) -> dict:
+            r = await api(b, "POST", "/api/v1/prefs", body, csrf=csrf)
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        got = await post({"page": "p1", "seq": 3, "set": {"card.size.deck": "s"}})
+        assert got["saved"] == ["card.size.deck"] and got["superseded"] == []
+        # seq 2 arrives late: its card size is older than the one kept; its view is news
+        got = await post({"page": "p1", "seq": 2, "set": {"card.size.deck": "l", "view.deck": "grid"}})
+        assert got["saved"] == ["view.deck"] and got["superseded"] == ["card.size.deck"], got
+        assert db.get_pref(SUB, "card.size.deck") == "s" and db.get_pref(SUB, "view.deck") == "grid"
+        got = await post({"page": "p1", "seq": 3, "set": {"card.size.deck": "m"}})  # the same one again
+        assert got["superseded"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "s"
+        # a forget (null) is a save like any other
+        got = await post({"page": "p1", "seq": 1, "set": {"card.size.deck": None}})
+        assert got["superseded"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "s"
+        # a newer one from the page goes
+        got = await post({"page": "p1", "seq": 4, "set": {"card.size.deck": "m"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "m"
+        # another page (another tab, or the page loaded again) counts from 1
+        got = await post({"page": "p2", "seq": 1, "set": {"card.size.deck": "l"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "l"
+        # a save without a number (an older page's script) still goes
+        got = await post({"set": {"card.size.deck": "s"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "s"
+        # a refused value keeps no number: the older valid one after it still goes
+        got = await post({"page": "p3", "seq": 9, "set": {"card.size.deck": "xl"}})
+        assert got["refused"] == ["card.size.deck"]
+        got = await post({"page": "p3", "seq": 8, "set": {"card.size.deck": "m"}})
+        assert got["saved"] == ["card.size.deck"] and db.get_pref(SUB, "card.size.deck") == "m"
+        # one save with a name in both its copy and its set is one save of it, not two rivals
+        got = await post(
+            {"page": "p5", "seq": 1, "copy": {"edhplay.steps": True}, "set": {"edhplay.steps": None}}
+        )
+        assert got["saved"] == ["edhplay.steps", "edhplay.steps"] and got["superseded"] == [], got
+        assert db.get_pref(SUB, "edhplay.steps") is None
+        # the copy from a device keeps the order too
+        got = await post({"page": "p4", "seq": 2, "set": {"scan.intro": "seen"}})
+        got = await post({"page": "p4", "seq": 1, "copy": {"scan.intro": True}})
+        assert db.get_pref(SUB, "scan.intro") == "seen"
+        # a number that isn't one is refused whole
+        for bad in (
+            {"page": "p1", "seq": "4"},
+            {"page": "p1", "seq": True},
+            {"page": "p1", "seq": 0},
+            {"page": "p1"},
+            {"seq": 5},
+            {"page": "x" * 65, "seq": 5},
+            {"page": 7, "seq": 5},
+        ):
+            r = await api(b, "POST", "/api/v1/prefs", {**bad, "set": {"card.size.deck": "s"}}, csrf=csrf)
+            assert r.status_code == 400, (bad, r.text)
+        assert db.get_pref(SUB, "card.size.deck") == "m"
+    finally:
+        await b.aclose()

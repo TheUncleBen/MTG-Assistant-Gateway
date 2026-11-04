@@ -331,10 +331,27 @@ def page_prefs(db: Database, sub: str | None, *names: str) -> str:
     return f"<script id='mtg-prefs' type='application/json'>{blob}</script>"
 
 
+# A page's saves are numbered (static/prefs.js: ``page``, a random id the page picks when it
+# loads, and ``seq``, 1, 2, 3... in the order its choices were made). For each member and name the
+# gateway keeps the page and number of the last save it stored, and drops a save of that name from
+# the same page with a number no higher (0.7.46 audit C7): a request the page cancelled after it
+# reached the gateway, or one that was slow, never lands over a newer choice. Kept in memory for
+# the newest SEQ_KEPT names (a save older than that, or from before a restart, goes as it comes);
+# a save without a number goes as it comes too.
+SEQ_KEPT = 20_000
+_PAGE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_MAX_SEQ = 2**53 - 1  # the largest whole number a page's script counts to exactly
+
+
 def add_prefs_routes(server: MCPServer, state: AppState) -> None:
     """GET /api/v1/prefs and POST /api/v1/prefs for the pages' scripts. The member's own browser
     only: an assistant or an app with a token has no business with how the pages look."""
+    from collections import OrderedDict
+
     from .api import caller_for, json_body
+
+    # (sub, name) -> (page, seq) of the last numbered save stored, newest last (SEQ_KEPT)
+    last_seq: OrderedDict[tuple[str, str], tuple[str, int]] = OrderedDict()
 
     async def who(request: Request, *, write: bool) -> str | Response:
         caller = await caller_for(state, request, write=write)
@@ -359,7 +376,9 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
     async def set_prefs(request: Request) -> Response:
         """``{"set": {name: value or null}}`` saves each (null forgets it); ``{"copy": {...}}``
         saves only the names the account doesn't have yet (the one-time copy from this device).
-        Answers which names were saved and which were refused."""
+        ``page`` and ``seq`` (both or neither) number the save: a name a newer save from the same
+        page already stored is left as it is (SEQ_KEPT). Answers which names were saved, which
+        were refused and which were superseded by a newer save."""
         sub = await who(request, write=True)
         if isinstance(sub, Response):
             return sub
@@ -369,12 +388,42 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
         changes, copy = data.get("set") or {}, data.get("copy") or {}
         if not isinstance(changes, dict) or not isinstance(copy, dict) or len(changes) + len(copy) > 400:
             return JSONResponse({"ok": False, "error": "invalid", "message": "set and copy are objects"}, 400)
+        page, seq = data.get("page"), data.get("seq")
+        if (page, seq) != (None, None) and not (
+            isinstance(page, str) and _PAGE_ID.match(page) and type(seq) is int and 0 < seq <= _MAX_SEQ
+        ):
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "page is an id and seq a whole number from 1"},
+                400,
+            )
         have = state.db.get_prefs(sub) if copy else {}
         if copy and have.get(FORGOTTEN) is True:
             copy = {}  # forgotten: this device's old choices are dropped, not copied
-        saved, refused = [], []
+        # the names a save from this page numbered as high or higher stored already: decided
+        # before any is saved, so a name in both "copy" and "set" of this one isn't its own rival
+        stale = {
+            n
+            for n in {*map(str, copy), *map(str, changes)}
+            if seq is not None and (kept := last_seq.get((sub, n))) and kept[0] == page and kept[1] >= seq
+        }
+        saved, refused, superseded = [], [], []
         for name, value in [*((n, v) for n, v in copy.items() if n not in have), *changes.items()]:
-            (saved if save(state.db, sub, str(name), value) else refused).append(str(name))
+            name = str(name)
+            key = (sub, name)
+            if name in stale:
+                if name not in superseded:
+                    superseded.append(name)  # a newer choice from this page is stored already
+                continue
+            if not save(state.db, sub, name, value):
+                refused.append(name)  # keeps no number: an older valid save of it still goes
+                continue
+            saved.append(name)
+            if seq is not None:
+                last_seq[key] = (page, seq)
+                last_seq.move_to_end(key)
+                while len(last_seq) > SEQ_KEPT:
+                    last_seq.popitem(last=False)
         return JSONResponse(
-            {"ok": True, "saved": saved, "refused": refused}, headers={"Cache-Control": "no-store"}
+            {"ok": True, "saved": saved, "refused": refused, "superseded": superseded},
+            headers={"Cache-Control": "no-store"},
         )
