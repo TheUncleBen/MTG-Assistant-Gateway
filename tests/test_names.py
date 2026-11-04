@@ -224,3 +224,67 @@ def test_unknown_names_without_the_catalog_cost_about_two_lookups_each() -> None
     # the two that walked are remembered as misses; the ones that skipped the walk are not
     remembered = [n for n in names if service._missed(CardInput(n)) is not None]
     assert remembered == names[:MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG]
+
+
+def test_misses_without_the_catalog_are_remembered_until_it_loads() -> None:
+    """10a of the 0.7.46 audit: without the catalog, six unknown names cost 20 requests and 9.6 s,
+    and the same six again cost 7 requests and 3.1 s, since the names that skipped the walk were
+    not remembered. They are now remembered for MISS_TTL_WITHOUT_CATALOG (about ten minutes) while
+    the catalog is not loaded: a repeat within that time asks Scryfall nothing. Once the catalog
+    loads, that memory is dropped and those names are asked again, so the catalog can place them."""
+    from mtg_gateway.scan import service as svc
+    from mtg_gateway.scan.service import MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG, CardInput
+
+    assert 300 <= svc.MISS_TTL_WITHOUT_CATALOG <= 900  # about ten minutes
+    sf = FakeScryfall()  # no catalog: /catalog/card-names answers 404
+    names = ["Xqzv Plorth", "Blorf Gandu", "Qwmx Tarrel", "Zzyx Vombat", "Hrrk Pellum", "Fnord Quillip"]
+    skipped = names[MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG:]
+
+    async def run() -> tuple[list[str], int, list[str]]:
+        service = _service(sf)
+        first = await service.resolve([CardInput(n) for n in names])
+        assert [r.status for r in first] == ["not_found"] * 6
+        n0 = len(sf.requests)
+        again = await service.resolve([CardInput(n) for n in names])
+        repeat = len(sf.requests) - n0
+        # the catalog loads (its daily load, or a retry after a failed one)
+        service.names.set_names(sf.names_catalog())
+        n1 = len(sf.requests)
+        await service.resolve([CardInput(n) for n in names])
+        asked = [u for _m, u in sf.requests[n1:]]
+        return [r.status for r in again], repeat, asked
+
+    statuses, repeat, asked = asyncio.run(run())
+    assert statuses == ["not_found"] * 6
+    assert repeat == 0, f"a repeat within ten minutes made {repeat} Scryfall requests"
+    for name in skipped:  # forgotten once the catalog loaded: asked again
+        assert any(name.replace(" ", "+") in u for u in asked), (name, asked)
+
+
+def test_a_miss_without_the_catalog_is_forgotten_after_its_time() -> None:
+    """A name that skipped the walk is asked again once its MISS_TTL_WITHOUT_CATALOG is over, even
+    with the catalog still not loaded."""
+    import time
+
+    from mtg_gateway.scan import service as svc
+    from mtg_gateway.scan.service import MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG, CardInput
+
+    sf = FakeScryfall()
+    names = ["Xqzv Plorth", "Blorf Gandu", "Qwmx Tarrel", "Zzyx Vombat"]
+    skipped = names[MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG:]
+
+    async def run() -> list[str]:
+        service = _service(sf)
+        assert service.down_misses.ttl == svc.MISS_TTL_WITHOUT_CATALOG
+        await service.resolve([CardInput(n) for n in names])
+        assert len(service.down_misses) == len(skipped)
+        # their time is over
+        past = time.monotonic() - 1
+        service.down_misses._items = {k: (past, v) for k, (_t, v) in service.down_misses._items.items()}
+        n0 = len(sf.requests)
+        await service.resolve([CardInput(n) for n in names])
+        return [u for _m, u in sf.requests[n0:]]
+
+    asked = asyncio.run(run())
+    for name in skipped:
+        assert any(name.replace(" ", "+") in u for u in asked), (name, asked)

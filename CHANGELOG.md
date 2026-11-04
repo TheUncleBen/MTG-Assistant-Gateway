@@ -105,6 +105,11 @@ name per thing.
     default one.
 
 ### Added
+- **Printings still show when Scryfall is down.** Once a day the gateway downloads Scryfall's
+  list of every printing and keeps a copy beside its database (about 55 MB). When Scryfall can't
+  be reached, the printing picker and `card_printings` answer from that copy and say how old it
+  is, for example “Printings and prices as of 3 Nov (Scryfall can't be reached right now)”. The
+  daily price check never uses it: it records today's prices only.
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a
   “Default for new assistants” on top. Claude and ChatGPT are one assistant each across your
   devices, known by the exact address each sends you back to after sign-in; Claude Code and other
@@ -638,7 +643,9 @@ name per thing.
   browser can't open it and suggests JPEG or the camera.
 - When Scryfall's list of card names can't be downloaded, names that are no card are answered
   in about half the time (six took 12 seconds): after two of them found nothing, the rest of the
-  list skips the extra spelling guesses and still gets its suggestions.
+  list skips the extra spelling guesses and still gets its suggestions. The same names asked
+  again within ten minutes are answered at once, without asking Scryfall; once the list of card
+  names is there, they are looked up again.
 - A push notification the notification server could not take because it was down or restarting
   is sent again a few times over the next minutes instead of being lost. A deck's message that a
   newer count replaced meanwhile is not sent again.

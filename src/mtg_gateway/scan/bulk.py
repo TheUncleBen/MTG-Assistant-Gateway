@@ -1,0 +1,525 @@
+"""A local copy of every card printing, from Scryfall's own bulk data, for when Scryfall's API
+can't be reached (10g of the 0.7.46 audit).
+
+Once a day the gateway reads Scryfall's bulk-data index (``GET /bulk-data``) and, when its
+``default_cards`` file (every printing, in English or else its printed language; a gzipped JSON
+Lines file of about 80 MB, 120,000 cards on 2026-11-04) is newer than the copy, downloads the file
+at the index's ``jsonl_download_uri`` with the client's own User-Agent and Accept headers. Scryfall
+updates the bulk files about every 12 hours and asks for them to be downloaded no more than that;
+the gateway does it at most once a day (COPY_TTL). The file is read line by line (``gzip.open``),
+never whole, in a worker thread, and cut down to what the printings answers show (``browse_row``,
+the printing picker's row, which has everything ``card_printings`` and ``printings_of`` return
+too). Each row is kept zlib-compressed with a dictionary taken from the file's own first rows, so
+the copy takes about 40 MB on disk, beside the database in the data folder.
+
+Why a separate SQLite file and not a table of the database: the copy is replaced whole every day.
+As a table, that is a 40 MB write holding the database's write lock (every member's write waits
+behind it), and every nightly backup and upgrade copy would carry 40 MB that Scryfall can give
+again. As a file of its own it is built under another name and moved into place with one rename
+(``os.replace``): a failed, cut-off or damaged download never touches the copy in use, which stays
+until a good one replaces it. Readers open it read-only and see either the old file or the new.
+
+The copy is used only when a live printings request fails because Scryfall can't be reached, is
+rate-limiting the gateway, or answers 5xx (ScanService.printings). The answer then says how old it
+is: ``as_of`` (when Scryfall made the file) and ``from_local_copy``, and a plain line such as
+"Printings and prices as of 3 Nov (Scryfall can't be reached right now)". Its prices are that
+day's. The daily price check (prices.py) never uses the copy: it records today's prices, and a
+day-old price recorded as today's would be wrong; a card it can't price waits for the next check.
+
+The download goes through the scan service's Scryfall client (its address and HTTP client), the
+same way the card-name catalog's does (names.py, through ``NameCatalog._scryfall``). The tests
+replace that client with one answering from recorded fixtures (tests/conftest.py, ``_offline``),
+which has no bulk data unless a test gives it some, so no test downloads anything.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import gzip
+import json
+import logging
+import os
+import sqlite3
+import threading
+import time
+import zlib
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import httpx
+
+from .names import fold
+from .scryfall import PRINT_ORDERS, PRINT_PAGES, ScryfallError, browse_row
+
+logger = logging.getLogger(__name__)
+
+COPY_FILE = "scryfall-printings.sqlite"
+BULK_TYPE = "default_cards"
+COPY_TTL = 24 * 3600  # the copy is downloaded again once it is a day old, never sooner
+RETRY_AFTER_FAILURE = 6 * 3600  # a failed download (or an index with nothing newer) waits this long
+START_DELAY = 60.0  # the first look after a start waits this long, out of the start's way
+CHECK_EVERY = 3600.0  # how often the background loop asks whether the copy is due
+MIN_PRINTINGS = 50_000  # fewer printings than this is a damaged file, never a copy (120,024 today)
+PAGE = 175  # Scryfall's page of printings
+BATCH = 2000  # rows written at a time
+ZDICT_ROWS = 200  # the first rows of the file make the compression dictionary
+ZDICT_MAX = 32 * 1024
+CHUNK = 1 << 20  # downloaded bytes written to disk a megabyte at a time, in a worker thread
+# hosts the index may send the download to (besides the client's own, a test's fake)
+DOWNLOAD_HOSTS = ("data.scryfall.io", "api.scryfall.com")
+PRICE_KEYS = ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
+# printings that are no card to look a name up by (an art card is "Name // Name" with its own id)
+NAMELESS_LAYOUTS = ("art_series",)
+
+SCHEMA = """
+CREATE TABLE printings (
+    oracle_id TEXT NOT NULL,
+    released TEXT NOT NULL,
+    usd REAL,
+    finishes TEXT NOT NULL,
+    frame TEXT NOT NULL,
+    border TEXT NOT NULL,
+    set_code TEXT NOT NULL,
+    cn TEXT NOT NULL,
+    row BLOB NOT NULL
+);
+CREATE TABLE names (
+    name TEXT PRIMARY KEY, oracle_id TEXT NOT NULL, card_name TEXT NOT NULL, whole INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE meta (key TEXT PRIMARY KEY, value BLOB) WITHOUT ROWID;
+"""
+INDEXES = "CREATE INDEX printings_oracle ON printings (oracle_id, released);"
+
+
+class CopyBroken(Exception):
+    """The downloaded file is cut off or damaged: the copy in use is kept."""
+
+
+def as_of_line(as_of: str) -> str:
+    """The plain line the printings answers carry when they come from the copy."""
+    try:
+        day = datetime.fromisoformat(as_of).astimezone(UTC)
+        when = f"{day.day} {day:%b}"
+    except ValueError:
+        when = "an earlier day"
+    return f"Printings and prices as of {when} (Scryfall can't be reached right now)"
+
+
+def _oracle(card: dict[str, Any]) -> str | None:
+    faces = card.get("card_faces") if isinstance(card.get("card_faces"), list) else []
+    oid = card.get("oracle_id") or (
+        faces[0].get("oracle_id") if faces and isinstance(faces[0], dict) else None
+    )
+    return oid.lower() if isinstance(oid, str) and oid else None
+
+
+def _cards(gz_path: Path, stop: threading.Event) -> Any:
+    """Every card object of the gzipped JSON Lines file, one line at a time. A cut-off or damaged
+    file raises CopyBroken."""
+    try:
+        with gzip.open(gz_path, "rt", encoding="utf-8") as f:
+            for n, line in enumerate(f, 1):
+                if stop.is_set():
+                    raise CopyBroken("stopped")
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    card = json.loads(text)
+                except ValueError as exc:
+                    raise CopyBroken(f"line {n} is not JSON") from exc
+                if isinstance(card, dict) and card.get("object") == "card":
+                    yield card
+    except (OSError, EOFError, zlib.error, UnicodeDecodeError) as exc:  # BadGzipFile is an OSError
+        raise CopyBroken(f"the file is cut off or damaged ({exc.__class__.__name__})") from exc
+
+
+def _row(card: dict[str, Any]) -> dict[str, Any]:
+    """What the copy keeps of a printing: the picker's row (``browse_row``, everything
+    ``prints`` and ``card_printings`` show), and under ``_prices`` Scryfall's prices as it gives
+    them (``printings_of`` hands them on as they are)."""
+    row = browse_row(card)
+    row["_prices"] = card.get("prices") if isinstance(card.get("prices"), dict) else {}
+    return row
+
+
+def build(
+    gz_path: Path,
+    out: Path,
+    meta: dict[str, str],
+    *,
+    stop: threading.Event | None = None,
+    min_printings: int = MIN_PRINTINGS,
+) -> int:
+    """Build the copy from the downloaded file ``gz_path`` into ``out``, replacing it only once the
+    whole file was read and checked. Runs in a worker thread. Returns how many printings it holds;
+    raises CopyBroken (the old copy kept) for a file cut off, damaged or too short."""
+    stop = stop or threading.Event()
+    tmp = out.with_name(out.name + ".new")
+    tmp.unlink(missing_ok=True)
+    conn = sqlite3.connect(tmp)
+    count = 0
+    try:
+        conn.executescript("PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;" + SCHEMA)
+        # only the trimmed rows are held, never the whole cards (a card is up to 20 KB)
+        rows = ((oid, _row(card)) for card in _cards(gz_path, stop) if (oid := _oracle(card)) is not None)
+        first = [r for _n, r in zip(range(ZDICT_ROWS), rows, strict=False)]
+        zdict = "".join(json.dumps(r, separators=(",", ":")) for _o, r in first).encode()[-ZDICT_MAX:]
+        primed = zlib.compressobj(6, zdict=zdict)  # copied for each row: priming costs more
+
+        def put(batch: list[tuple[str, dict[str, Any]]]) -> int:
+            values = []
+            full: list[tuple[str, str, str]] = []
+            faces: list[tuple[str, str, str]] = []
+            for oid, row in batch:
+                row["oracle_id"] = oid
+                z = primed.copy()
+                blob = z.compress(json.dumps(row, separators=(",", ":")).encode()) + z.flush()
+                usd = (row.get("prices") or {}).get("usd")
+                try:
+                    price = float(usd) if usd else None
+                except ValueError:
+                    price = None
+                values.append(
+                    (
+                        oid,
+                        str(row.get("released_at") or ""),
+                        price,
+                        "," + ",".join(row.get("finishes") or []) + ",",
+                        row.get("frame") or "",
+                        row.get("border") or "",
+                        str(row.get("set") or "").lower(),
+                        str(row.get("collector_number") or "").lower(),
+                        blob,
+                    )
+                )
+                name = str(row.get("name") or "")
+                if name and row.get("layout") not in NAMELESS_LAYOUTS:
+                    full.append((fold(name), oid, name))
+                    faces.extend((fold(p), oid, name) for p in name.split(" // ") if " // " in name)
+            conn.executemany("INSERT INTO printings VALUES (?,?,?,?,?,?,?,?,?)", values)
+            # A card's own full name wins over a face of another card's that reads the same
+            # (a reversible card is listed as "Name // Name"; "Fire" is a face of "Fire // Ice").
+            conn.executemany("INSERT OR IGNORE INTO names VALUES (?,?,?,0)", faces)
+            conn.executemany(
+                "INSERT INTO names VALUES (?,?,?,1) ON CONFLICT (name) DO UPDATE SET "
+                "oracle_id = excluded.oracle_id, card_name = excluded.card_name, whole = 1 "
+                "WHERE names.whole = 0",
+                full,
+            )
+            return len(values)
+
+        count += put(first)
+        batch: list[tuple[str, dict[str, Any]]] = []
+        for item in rows:
+            batch.append(item)
+            if len(batch) >= BATCH:
+                count += put(batch)
+                batch = []
+        count += put(batch)
+        if count < min_printings:
+            raise CopyBroken(f"only {count} printings (at least {min_printings} expected)")
+        conn.execute(INDEXES)
+        conn.executemany(
+            "INSERT INTO meta VALUES (?,?)",
+            [*({**meta, "count": str(count)}.items()), ("zdict", zdict)],
+        )
+        conn.commit()
+        conn.close()
+        os.replace(tmp, out)  # the one step that swaps copies: the old one stays until here
+    except BaseException:
+        conn.close()
+        tmp.unlink(missing_ok=True)
+        raise
+    return count
+
+
+class PrintingsCopy:
+    """The local copy of every printing (see the module docstring): kept fresh in the background,
+    read only when Scryfall can't answer."""
+
+    def __init__(self, folder: Path, scryfall: Callable[[], Any]):
+        # A getter, as NameCatalog's: the scan service's client is replaced in tests.
+        self._scryfall = scryfall
+        self.path = Path(folder) / COPY_FILE
+        self.min_printings = MIN_PRINTINGS
+        self._next_try = 0.0
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        self._opened: tuple[int, int] | None = None
+        self._meta: dict[str, Any] = {}
+        self._task: asyncio.Task[None] | None = None
+
+    # -- the copy on disk ----------------------------------------------------------------------
+    def _open(self) -> sqlite3.Connection | None:
+        """The copy's read-only connection, opened again when a new copy replaced the file."""
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        stamp = (st.st_ino, st.st_mtime_ns)
+        if self._conn is None or self._opened != stamp:
+            if self._conn is not None:
+                self._conn.close()
+            self._conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
+            self._meta = dict(self._conn.execute("SELECT key, value FROM meta"))
+            self._opened = stamp
+        return self._conn
+
+    def meta(self) -> dict[str, Any]:
+        with self._lock:
+            try:
+                return dict(self._meta) if self._open() is not None else {}
+            except sqlite3.Error:
+                return {}
+
+    @property
+    def as_of(self) -> str | None:
+        """When Scryfall made the file the copy was built from (its ``updated_at``), or None."""
+        value = self.meta().get("updated_at")
+        return str(value) if value else None
+
+    def age(self) -> float:
+        """Seconds since the copy was downloaded (inf without one)."""
+        try:
+            return time.time() - float(self.meta().get("downloaded_at") or "")
+        except ValueError:
+            return float("inf")
+
+    def due(self) -> bool:
+        return self.age() >= COPY_TTL and time.monotonic() >= self._next_try
+
+    # -- refreshing ----------------------------------------------------------------------------
+    async def loop(self) -> None:
+        """The daily refresh, in the background: never in a request's way."""
+        await asyncio.sleep(START_DELAY)
+        while True:
+            if self.due():
+                await self.refresh()
+            await asyncio.sleep(CHECK_EVERY)
+
+    async def refresh(self) -> bool:
+        """Download and build a new copy when it is due and Scryfall has a newer file. Returns
+        whether a new copy is in place. Never raises: a failure keeps the copy and is retried
+        after RETRY_AFTER_FAILURE."""
+        if not self.due():
+            return False
+        self._next_try = time.monotonic() + RETRY_AFTER_FAILURE
+        client = self._scryfall()
+        if client is None:
+            return False
+        try:
+            entry = await self._index(client)
+            if entry["updated_at"] == str(self.meta().get("updated_at") or "-"):
+                logger.info("Scryfall's printings file is unchanged since %s", entry["updated_at"])
+                return False
+            started = time.monotonic()
+            count = await self._download_and_build(client, entry)
+        except asyncio.CancelledError:
+            self._stop.set()
+            raise
+        except Exception as exc:  # keep the copy in use, try again later
+            logger.warning("local copy of Scryfall's printings not updated (%s); the old one stays", exc)
+            return False
+        logger.info(
+            "local copy of Scryfall's printings updated: %d printings as of %s, %.1f MB, %.0f s",
+            count,
+            entry["updated_at"],
+            self.path.stat().st_size / 1e6,
+            time.monotonic() - started,
+        )
+        return True
+
+    async def _index(self, client: Any) -> dict[str, str]:
+        """``default_cards`` in Scryfall's bulk-data index: its ``updated_at`` and download address."""
+        if client.retry_in() > 0:
+            raise ScryfallError("rate_limited", "Scryfall asked the gateway to slow down")
+        try:
+            resp = await client.http.get(f"{client.base}/bulk-data", headers=client.headers)
+        except httpx.HTTPError as exc:
+            raise ScryfallError("unavailable", f"bulk-data index: {exc.__class__.__name__}") from exc
+        if resp.status_code != 200:
+            raise ScryfallError("unavailable", f"bulk-data index answered {resp.status_code}")
+        try:
+            rows = resp.json().get("data")
+        except (ValueError, AttributeError) as exc:
+            raise ScryfallError("contract", "bulk-data index is not JSON") from exc
+        entry = next((r for r in rows or [] if isinstance(r, dict) and r.get("type") == BULK_TYPE), None)
+        if entry is None:
+            raise ScryfallError("contract", f"bulk-data index has no {BULK_TYPE}")
+        uri = entry.get("jsonl_download_uri")
+        updated = entry.get("updated_at")
+        if not isinstance(uri, str) or not isinstance(updated, str) or not updated:
+            raise ScryfallError("contract", f"{BULK_TYPE} has no jsonl_download_uri or updated_at")
+        where = urlsplit(uri)
+        if where.scheme != "https" or where.hostname not in (*DOWNLOAD_HOSTS, urlsplit(client.base).hostname):
+            raise ScryfallError("contract", f"{BULK_TYPE} is offered from an unexpected address")
+        size = entry.get("compressed_size")
+        return {"uri": uri, "updated_at": updated, "size": str(size) if isinstance(size, int) else ""}
+
+    async def _download_and_build(self, client: Any, entry: dict[str, str]) -> int:
+        gz = self.path.with_name(self.path.name + ".download.gz")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        got = 0
+        try:
+            out = await asyncio.to_thread(open, gz, "wb")
+            try:
+                async with client.http.stream("GET", entry["uri"], headers=client.headers) as resp:
+                    if resp.status_code != 200:
+                        raise ScryfallError("unavailable", f"bulk file answered {resp.status_code}")
+                    # the file as sent (Scryfall sends it as application/gzip, with no
+                    # content-encoding): its length is the one to check against
+                    encoded = bool(resp.headers.get("content-encoding"))
+                    expected = "" if encoded else resp.headers.get("content-length") or entry["size"]
+                    pending = bytearray()
+                    async for chunk in resp.aiter_bytes():
+                        pending += chunk
+                        got += len(chunk)
+                        if len(pending) >= CHUNK:
+                            await asyncio.to_thread(out.write, bytes(pending))
+                            pending.clear()
+                    await asyncio.to_thread(out.write, bytes(pending))
+            finally:
+                await asyncio.to_thread(out.close)
+            if expected and expected.isdigit() and int(expected) != got:
+                raise CopyBroken(f"the download was cut off ({got} of {expected} bytes)")
+            meta = {"updated_at": entry["updated_at"], "downloaded_at": str(time.time()), "uri": entry["uri"]}
+            return await asyncio.to_thread(
+                build, gz, self.path, meta, stop=self._stop, min_printings=self.min_printings
+            )
+        finally:
+            with contextlib.suppress(OSError):
+                gz.unlink()
+
+    def close(self) -> None:
+        """Stop a build under way (the gateway shuts down) and close the reader."""
+        self._stop.set()
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    # -- reading ---------------------------------------------------------------------------------
+    def _rows(self, sql: str, args: tuple[Any, ...]) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._open()
+            if conn is None:
+                return []
+            zdict = self._meta.get("zdict") or b""
+            out = []
+            for (blob,) in conn.execute(sql, args):
+                z = zlib.decompressobj(zdict=zdict)
+                out.append(json.loads(z.decompress(blob) + z.flush()))
+            return out
+
+    def _picker_rows(self, sql: str, args: tuple[Any, ...]) -> list[dict[str, Any]]:
+        rows = self._rows(sql, args)
+        for row in rows:
+            row.pop("_prices", None)
+        return rows
+
+    def _count(self, sql: str, args: tuple[Any, ...]) -> int:
+        with self._lock:
+            conn = self._open()
+            return int(conn.execute(sql, args).fetchone()[0]) if conn is not None else 0
+
+    def _labelled(self, out: dict[str, Any]) -> dict[str, Any]:
+        as_of = str(self._meta.get("updated_at") or "")
+        return {
+            **out,
+            "from_local_copy": True,
+            "as_of": as_of,
+            "prices_as_of": as_of,
+            "as_of_note": as_of_line(as_of),
+        }
+
+    def prints_now(
+        self,
+        oracle_id: str,
+        *,
+        page: int = 1,
+        finish: str | None = None,
+        frame: str | None = None,
+        border: str | None = None,
+        order: str = "newest",
+        set_code: str | None = None,
+        number: str | None = None,
+    ) -> dict[str, Any] | None:
+        """One page of the card's printings as ``ScryfallClient.prints`` gives it, from the copy,
+        with ``from_local_copy``, ``as_of`` and ``as_of_note``; None when the copy has no such card
+        (or there is no copy). Blocking: call it through ``prints``."""
+        oid = oracle_id.strip().lower()
+        where, args = ["oracle_id = ?"], [oid]
+        if not self._count("SELECT count(*) FROM printings WHERE oracle_id = ?", (oid,)):
+            return None
+        if finish:
+            where.append("finishes LIKE ?")
+            args.append(f"%,{finish},%")
+        if frame:
+            where.append("frame = ?")
+            args.append(frame)
+        if border:
+            where.append("border = ?")
+            args.append(border)
+        if set_code and number:
+            where += ["set_code = ?", "cn = ?"]
+            args += [set_code.lower(), number.lower()]
+        cond = " AND ".join(where)
+        sort, direction = PRINT_ORDERS.get(order, PRINT_ORDERS["newest"])
+        if sort == "usd":  # as Scryfall: a printing with no price comes last
+            by = "usd IS NULL, usd ASC, released DESC"
+        else:
+            by = f"released {'DESC' if direction == 'desc' else 'ASC'}"
+        total = self._count(f"SELECT count(*) FROM printings WHERE {cond}", tuple(args))  # noqa: S608
+        cards = self._picker_rows(
+            f"SELECT row FROM printings WHERE {cond} ORDER BY {by} LIMIT ? OFFSET ?",  # noqa: S608
+            (*args, PAGE, (page - 1) * PAGE),
+        )
+        has_more = total > page * PAGE and page < PRINT_PAGES
+        return self._labelled({"cards": cards, "has_more": has_more, "total_cards": total, "page": page})
+
+    async def prints(self, oracle_id: str, **kw: Any) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self.prints_now, oracle_id, **kw)
+
+    def printings_of_now(self, oracle_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Every printing of each card, as ``ScryfallClient.printings_of`` gives them, prices as
+        Scryfall gave them on the copy's day. Not used by the daily price check, which records
+        today's prices only (see the module docstring)."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        for oid in sorted({o.strip().lower() for o in oracle_ids}):
+            for row in self._rows(
+                "SELECT row FROM printings WHERE oracle_id = ? ORDER BY released DESC", (oid,)
+            ):
+                out.setdefault(oid, []).append(
+                    {
+                        "id": row.get("scryfall_id"),
+                        "oracle_id": oid,
+                        "name": row.get("name"),
+                        "set": row.get("set"),
+                        "collector_number": row.get("collector_number"),
+                        "finishes": list(row.get("finishes") or []),
+                        "prices": row.get("_prices") or {},
+                    }
+                )
+        return out
+
+    def oracle_of_now(self, name: str) -> tuple[str, str] | None:
+        """The oracle id and full name of the card called ``name`` (or one of its faces)."""
+        with self._lock:
+            conn = self._open()
+            if conn is None:
+                return None
+            hit = conn.execute(
+                "SELECT oracle_id, card_name FROM names WHERE name = ?", (fold(name),)
+            ).fetchone()
+            return (str(hit[0]), str(hit[1])) if hit else None
+
+    async def oracle_of(self, name: str) -> tuple[str, str] | None:
+        return await asyncio.to_thread(self.oracle_of_now, name)

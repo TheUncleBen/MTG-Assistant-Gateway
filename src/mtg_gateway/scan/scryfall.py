@@ -312,6 +312,12 @@ class _Cache:
                 self._items.pop(k, None)
         self._items[key] = (time.monotonic() + self.ttl, value)
 
+    def clear(self) -> None:
+        self._items.clear()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
 
 class ScryfallClient:
     def __init__(

@@ -993,6 +993,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             state.reports.resume_forge_runs()  # Forge runs left unfinished by the last shutdown
         if state.scan is not None:
             state.scan.names.ensure()  # card-name catalog for typed suggestions, in the background
+            if state.scan.copy is not None:
+                # the local copy of Scryfall's printings, refreshed daily (scan/bulk.py)
+                tasks.append(asyncio.create_task(state.scan.copy.loop(), context=contextvars.Context()))
         if state.sweep is None:
             state.sweep = AuthentikSweep(s, state.db, state.decks)
         if state.sweep.enabled:

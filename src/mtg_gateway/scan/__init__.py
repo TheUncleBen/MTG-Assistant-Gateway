@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .art import ArtIndex, ArtSettings
+from .bulk import PrintingsCopy
 from .routes import add_scan_routes
 from .scryfall import ScryfallClient
 from .service import ScanService, ScanThresholds
@@ -73,6 +74,11 @@ def add_scan(server: MCPServer, state: AppState, *, scryfall: ScryfallClient | N
         ),
     )
     service.art = art  # type: ignore[attr-defined]
+    # the local copy of Scryfall's printings, beside the database (bulk.py): downloaded through
+    # the service's own Scryfall client, as the card-name catalog is
+    data_dir = getattr(st, "data_dir", None)
+    if data_dir is not None:
+        service.copy = PrintingsCopy(data_dir, lambda: service.scryfall)
     state.scan = service  # type: ignore[attr-defined]
     # proposals that add a card a scan matched from a misread name say so (decks._save_proposal)
     state.decks.guessed_names = service.guessed_names  # type: ignore[attr-defined]

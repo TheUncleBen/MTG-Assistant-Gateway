@@ -24,7 +24,7 @@ and 2 cores), which 4 GB holds with room; 8 GB and more cores leave room to play
 
 | Part | Measured | Where | Its limit in the stack files |
 | --- | --- | --- | --- |
-| Gateway | about 82 MB, after the whole end-to-end test suite | GitHub's x86 build machines, 0.7.46, two runs | 256 MB |
+| Gateway | about 82 MB, after the whole end-to-end test suite; about 17 MB more while the daily printings copy is built (an x86 machine, 0.7.46) | GitHub's x86 build machines, 0.7.46, two runs | 256 MB |
 | Research service (Mystic Forge) | about 91 MB after the same suite; about 115 MB in an earlier measurement | GitHub's x86 build machines; an x86 machine | 512 MB |
 | Notification server (ntfy) | not measured | | 128 MB |
 | Forge, one game | peak about 600 MB; about 740 MB | GitHub's build machines (x86 and arm64); a Raspberry Pi 5 | 1.5 GB and 2 cores |

@@ -467,6 +467,8 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
             kind = str(exc.kind)
             return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
         data = {"oracle_id": link["ref"], **out}
+        if out.get("from_local_copy"):  # the local copy, while Scryfall can't answer: never kept
+            return JSONResponse({"ok": True, **data}, headers={**headers, "Cache-Control": "no-store"})
         links.remember(token, data)
         return JSONResponse({"ok": True, **data}, headers=headers)
 

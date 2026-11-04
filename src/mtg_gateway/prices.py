@@ -1358,7 +1358,9 @@ class PriceService:
     async def _price_cheapest(self, day: str) -> int:
         """Every printing of each card watched by name alone (twenty cards a Scryfall search, at the
         single-lookup pace), for the lowest price of each finish that day and the printing that had
-        it. Returns how many cards were priced."""
+        it. Returns how many cards were priced. Never from the local copy of Scryfall's printings
+        (scan/bulk.py): its prices are its own day's, and this records today's; a card Scryfall
+        can't price now waits for the next check."""
         watches = self._rows("SELECT * FROM watch_cards WHERE set_code = '' AND oracle_id IS NOT NULL")
         if not watches:
             return 0
