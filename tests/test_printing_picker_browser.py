@@ -30,6 +30,7 @@ from mtg_gateway.app import create_app
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.db import Database
 from mtg_gateway.oidc import OIDCClient
+from mtg_gateway.scan.bulk import as_of_line
 from mtg_gateway.scan.scryfall import ScryfallClient
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, IDP, make_settings
@@ -1425,7 +1426,7 @@ def test_the_printing_detail_offers_the_finishes_it_is_made_in(server: Server) -
 
 
 AS_OF = "2026-11-03T06:00:00+00:00"
-AS_OF_NOTE = "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
+AS_OF_NOTE = as_of_line(AS_OF)  # the gateway's own line, as the tools say it (audit A2)
 
 
 @pytest.mark.parametrize(("width", "theme"), [(360, "light"), (360, "dark"), (720, "dark"), (1280, "light")])
@@ -1469,7 +1470,8 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
         assert day and day in note.inner_text() and "3 Nov" not in note.inner_text(), (day, note.inner_text())
         # one short line, the same words as the chat's printings card (audit P8): the old wording,
         # "Printings and prices as of ... (Scryfall can't be reached right now)", took three lines
-        # on a phone
+        # on a phone; the gateway's own line has the same form, its day in English (audit A2)
+        assert AS_OF_NOTE == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
         said = f"As of {day} \u00b7 Scryfall can't be reached"
         assert note.inner_text().strip() == said
         assert note.get_attribute("role") == "status" and "notice" in (note.get_attribute("class") or "")

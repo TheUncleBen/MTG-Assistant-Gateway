@@ -154,7 +154,7 @@ async def test_a_live_failure_serves_printings_from_the_copy_with_its_date(tmp_p
         out = await service.printings(AESI)
         assert out["from_local_copy"] is True, handler
         assert out["as_of"] == AS_OF and out["prices_as_of"] == AS_OF
-        assert out["as_of_note"] == "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
+        assert out["as_of_note"] == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
         assert "verif" not in out["as_of_note"].lower()
         assert _by_id(out["cards"]) == _by_id(live["cards"])
         assert [c["scryfall_id"] for c in out["cards"]] == [c["scryfall_id"] for c in live["cards"]]
@@ -195,12 +195,14 @@ async def test_the_tool_and_the_picker_say_the_printings_are_from_the_copy(stack
         "https://scryfall.test", min_interval=0.0, http=httpx.AsyncClient(transport=httpx.MockTransport(down))
     )
     token = await mcp_token(stack.h)
-    line = "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
+    line = "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
     for args in ({"oracle_id": AESI}, {"name": "Aesi, Tyrant of Gyre Strait"}):
         out = (await call(stack.h, token, "card_printings", args))["structuredContent"]
         assert out["ok"] is True, out
         assert out["from_local_copy"] is True and out["as_of"] == AS_OF, out
-        assert out["note"].startswith(line), out
+        # the tools add the prices' day on a line of their own; the line is the route's word for word
+        assert out["note"].split("\n")[:2] == [line, "Prices are from that day, not today."], out
+        assert out["note"].split("\n")[0] == bulk.as_of_line(out["as_of"]), out
         assert [c["set"] for c in out["cards"]] == ["sld", "dsc", "plst", "cmr"], out
         if "name" in args:  # the card's own name, as the copy knows it (by id: its first printing's)
             assert out["name"] == "Aesi, Tyrant of Gyre Strait", out
@@ -211,6 +213,7 @@ async def test_the_tool_and_the_picker_say_the_printings_are_from_the_copy(stack
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["from_local_copy"] is True and data["as_of"] == AS_OF and data["as_of_note"] == line
+        assert data["as_of_note"] == bulk.as_of_line(data["as_of"])
         assert r.headers["cache-control"] == "no-store"
     finally:
         await b.aclose()
@@ -419,7 +422,7 @@ async def test_as_of_is_an_iso_date_time_with_one_wording(tmp_path: Path) -> Non
         when = datetime.fromisoformat(out["as_of"])
         assert when.tzinfo is not None and when.isoformat() == out["as_of"] == AS_OF
         notes.add(out["as_of_note"])
-    assert notes == {"Printings and prices as of 3 Nov (Scryfall can't be reached right now)"}
+    assert notes == {"As of 3 Nov 2026 \u00b7 Scryfall can't be reached"}
 
 
 async def test_a_restart_waits_for_the_next_try(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -612,3 +615,61 @@ async def test_only_a_file_received_whole_and_found_damaged_waits_a_day(tmp_path
         assert wait - 60 < waits(folder) <= wait, (why, waits(folder) / 3600)
         assert sorted(p.name for p in folder.iterdir()) == [COPY_FILE + ".next"], why
     assert bulk.RETRY_AFTER_FAILURE == 6 * 3600 and bulk.RETRY_AFTER_BAD_FILE == 24 * 3600
+
+
+def test_one_wording_for_the_copys_day_on_the_tools_and_the_pages() -> None:
+    """A2: one function says how old the copy is, for the tools and the pages alike: the day in
+    English whatever the locale, and with no readable day the copy itself; never "and prices"
+    (the pages show no prices from the copy). The tools' separate prices line says the same day."""
+    assert bulk.as_of_line(AS_OF) == "As of 3 Nov 2026 \u00b7 Scryfall can't be reached"
+    late = "2026-01-21T23:30:00-05:00"  # the day in UTC, as Scryfall dates its file
+    assert bulk.as_of_line(late) == "As of 22 Jan 2026 \u00b7 Scryfall can't be reached"
+    for unread in (None, "", "soon"):
+        assert bulk.as_of_line(unread) == "From the gateway's own copy \u00b7 Scryfall can't be reached"
+        assert bulk.prices_line(unread) == "Prices are from that copy, not today."
+    assert bulk.prices_line(AS_OF) == "Prices are from that day, not today."
+    for line in (bulk.as_of_line(AS_OF), bulk.as_of_line(None)):
+        assert "price" not in line.lower()
+
+
+async def test_a_stopped_download_says_why_it_stopped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A3: a download stopped by Off says the copy was turned off; one stopped by the gateway
+    shutting down says that instead, never that the copy was turned off."""
+    import logging
+
+    sf = FakeScryfall()
+    body = _gz(_many(sf, 3000))
+    _offer(sf, body)
+    caplog.set_level(logging.INFO, logger="mtg_gateway.scan.bulk")
+
+    service, state = _switchable(sf, tmp_path / "off")
+    copy = service.copy
+
+    def off_at(n: int) -> None:
+        if n == 3:
+            state["on"] = False
+            copy.setting_changed("printings_copy")
+
+    client, _ = _streaming(sf, body, 2048, on_chunk=off_at)
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=client)
+    assert await copy.refresh() is False
+    said = [r.getMessage() for r in caplog.records if "stopped" in r.getMessage()]
+    assert said == ["download of Scryfall's printings stopped: the local copy was turned off"], said
+
+    caplog.clear()
+    service, _ = _switchable(sf, tmp_path / "shutdown")
+    closing = service.copy
+
+    def shut_at(n: int) -> None:
+        if n == 3:
+            closing.close()
+
+    client, served = _streaming(sf, body, 2048, on_chunk=shut_at)
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=client)
+    assert await closing.refresh() is False and served["chunks"] <= 5
+    said = [r.getMessage() for r in caplog.records if "stopped" in r.getMessage()]
+    assert said == ["download of Scryfall's printings stopped: the gateway is shutting down"], said
+    warned = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warned == [], [r.getMessage() for r in warned]

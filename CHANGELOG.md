@@ -112,7 +112,8 @@ name per thing.
 - **Printings still show when Scryfall is down.** Once a day the gateway downloads Scryfall's
   list of every printing and keeps a copy beside its database (about 55 MB). When Scryfall can't
   be reached, the printing picker and `card_printings` answer from that copy and say how old it
-  is, for example “As of 3 Nov 2026 · Scryfall can't be reached”. The
+  is, in the same words: “As of 3 Nov 2026 · Scryfall can't be reached” (the pages write the day
+  in your own way). `card_printings` adds “Prices are from that day, not today.” The
   daily price check never uses it: it records today's prices only. **Keep a local copy of card
   printings** on the Settings page turns it off and deletes the copy.
 - **An approval mode for each assistant**, on Account › Account details › Assistants, with a

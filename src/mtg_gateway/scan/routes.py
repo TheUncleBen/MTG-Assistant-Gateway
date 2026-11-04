@@ -337,7 +337,7 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             )
         except ScanError as exc:
             return fail(exc)
-        # from the local copy while Scryfall can't answer (out["as_of_note"] says so): never kept,
+        # from the local copy while Scryfall can't be reached (out["as_of_note"] says so): never kept,
         # so Scryfall's own answer is shown again as soon as it is back
         keep = "no-store" if out.get("from_local_copy") else "private, max-age=3600"
         return JSONResponse(

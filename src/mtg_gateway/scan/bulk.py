@@ -26,11 +26,12 @@ until a good one replaces it. Readers open it read-only and see either the old f
 The copy is used only when a live printings request fails because Scryfall can't be reached, is
 rate-limiting the gateway, or answers 5xx (ScanService.printings). The answer then says how old it
 is: ``as_of`` (when Scryfall made the file, an ISO 8601 date-time the page writes in the viewer's
-own way), ``from_local_copy``, and for the tools a plain line, ``as_of_note``, such as "Printings
-and prices as of 3 Nov (Scryfall can't be reached right now)", the same words for a 429, a 5xx and
-no answer at all. A copy that can't be read is said once per file in the log. Its prices are that
-day's. The daily price check (prices.py) never uses the copy: it records today's prices, and a
-day-old price recorded as today's would be wrong; a card it can't price waits for the next check.
+own way), ``from_local_copy``, and a plain line, ``as_of_note`` (as_of_line), such as "As of 3 Nov
+2026 · Scryfall can't be reached", the same words for a 429, a 5xx and no answer at all; the tools
+add "Prices are from that day, not today." (prices_line). A copy that can't be read is said once
+per file in the log. Its prices are that day's. The daily price check (prices.py) never uses the
+copy: it records today's prices, and a day-old price recorded as today's would be wrong; a card it
+can't price waits for the next check.
 
 The admin Settings row "Keep a local copy of card printings" (``printings_copy``, on by default,
 no stack variable) turns it off: the daily download stops, the copy and every file it left are
@@ -133,14 +134,30 @@ def _iso(value: Any) -> str | None:
         return None
 
 
-def as_of_line(as_of: str | None) -> str:
-    """The plain line the printings answers carry when they come from the copy."""
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _day(as_of: str | None) -> str | None:
+    """The copy's day in English whatever the locale ("3 Nov 2026"), None when it can't be read."""
     try:
         day = datetime.fromisoformat(str(as_of)).astimezone(UTC)
-        when = f"{day.day} {day:%b}"
     except ValueError:
-        when = "an earlier day"
-    return f"Printings and prices as of {when} (Scryfall can't be reached right now)"
+        return None
+    return f"{day.day} {_MONTHS[day.month - 1]} {day.year}"
+
+
+def as_of_line(as_of: str | None) -> str:
+    """The one line that says an answer came from the copy, for the tools and the pages alike
+    (``as_of_note``): "As of 3 Nov 2026 · Scryfall can't be reached", or the copy itself when its
+    day can't be read. Never "and prices": the pages show no prices from the copy."""
+    day = _day(as_of)
+    where = f"As of {day}" if day else "From the gateway's own copy"
+    return f"{where} \u00b7 Scryfall can't be reached"
+
+
+def prices_line(as_of: str | None) -> str:
+    """The tools' own line under as_of_line: the prices in an answer from the copy are its day's."""
+    return "Prices are from that day, not today." if _day(as_of) else "Prices are from that copy, not today."
 
 
 def _oracle(card: dict[str, Any]) -> str | None:
@@ -470,7 +487,8 @@ class PrintingsCopy:
             halt.set()
             raise
         except Stopped:  # turned off (or shutting down) meanwhile: nothing failed
-            logger.info("download of Scryfall's printings stopped: the local copy was turned off")
+            why = "the gateway is shutting down" if self._closed.is_set() else "the local copy was turned off"
+            logger.info("download of Scryfall's printings stopped: %s", why)
             if not self.enabled:
                 await asyncio.to_thread(self.remove)
             return False

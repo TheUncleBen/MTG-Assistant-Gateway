@@ -16,6 +16,7 @@ import pytest
 
 from mtg_gateway.cards import card_html
 from mtg_gateway.modes import MODE_LABELS
+from mtg_gateway.scan.bulk import as_of_line
 
 from .test_consent_browser import _chromium_or_skip, _launch
 
@@ -1158,7 +1159,8 @@ def test_deck_card_curve_labels_read_against_their_background(theme: str) -> Non
 
 
 AS_OF = "2026-11-03T06:00:00+00:00"
-AS_OF_NOTE = "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
+# the gateway's own line when the day can't be read: no "and prices" (audit A2)
+AS_OF_NOTE = as_of_line("soon")
 
 
 def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None:
@@ -1199,6 +1201,7 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             card = _open(page, "printings-card", {"structuredContent": summary, **meta})
             card.locator(".tile").nth(2).wait_for()
             assert card.locator("#asof").inner_text().strip() == AS_OF_NOTE
+            assert AS_OF_NOTE == "From the gateway's own copy \u00b7 Scryfall can't be reached"
             # a live list: nothing there
             page.unroute("https://mtg.test/cards/data/*")
             _route(page, printings=PRINTINGS)

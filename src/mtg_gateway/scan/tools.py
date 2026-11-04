@@ -12,6 +12,7 @@ from pydantic import Field
 
 from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, ask_choices, tool_meta, with_card
 from ..schemas import change_for_assistant
+from . import bulk
 from .service import SUGGESTED_WAIT_SECONDS, ScanError, ScanService, parse_cards, parse_text
 
 if TYPE_CHECKING:
@@ -303,7 +304,8 @@ def add_scan_tools(
             # Scryfall can't answer now: the gateway's local copy did, as of its day
             data["from_local_copy"] = True
             data["as_of"] = out.get("as_of")
-            data["note"] = f"{out.get('as_of_note')}. {PRINTINGS_NOTE}"
+            as_of = out.get("as_of")
+            data["note"] = "\n".join([bulk.as_of_line(as_of), bulk.prices_line(as_of), PRINTINGS_NOTE])
         card = None
         if links is not None:
             card = {

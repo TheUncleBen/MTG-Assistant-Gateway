@@ -265,8 +265,10 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   35 seconds on an x86 machine, longer on a Raspberry Pi) the folder holds the download and the
   new copy beside the old one (up to about 172 MB in all), and the build adds about 17 MB to the gateway's memory. The copy is used only
   when Scryfall can't be reached, is slowing the gateway down or has a problem answering: the
-  printing picker and `card_printings` then answer from it and say how old it is ("Printings and
-  prices as of 3 Nov"). It is not part of the backup: Scryfall gives it again. Deleting it is
+  printing picker and `card_printings` then answer from it and say how old it is ("As of 3 Nov
+  2026 · Scryfall can't be reached", or "From the gateway's own copy · Scryfall can't be reached"
+  when the copy's day can't be read); `card_printings` adds "Prices are from that day, not
+  today." It is not part of the backup: Scryfall gives it again. Deleting it is
   safe; the next daily download makes a new one. To do without it, turn off **Keep a local copy
   of card printings** on the Settings page (General, no stack variable): the copy and anything
   it left are deleted at once, no more is downloaded, and printings answers fail while Scryfall
