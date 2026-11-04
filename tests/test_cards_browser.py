@@ -1155,7 +1155,7 @@ def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None
             )
             note = card.locator("#asof")
             assert note.is_visible() and note.get_attribute("role") == "status"
-            said = f"Printings and prices as of {day} (Scryfall isn't answering right now)"
+            said = f"Printings and prices as of {day} (Scryfall can't be reached right now)"
             assert note.inner_text().strip() == said
             assert note.bounding_box()["y"] < card.locator("#grid").bounding_box()["y"]  # over the list
             # the day can't be read: the gateway's own line, from the link's JSON

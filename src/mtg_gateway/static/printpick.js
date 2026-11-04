@@ -89,7 +89,7 @@
     var opts = { dateStyle: "medium" };
     if (iso.indexOf("T") < 0) opts.timeZone = "UTC";  // a bare day: not shifted to the day before
     return "Printings and prices as of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) +
-      " (Scryfall isn't answering right now)";
+      " (Scryfall can't be reached right now)";
   }
   function samePrint(p, ref) {
     return !!(ref && p && String(p.set || "").toLowerCase() === String(ref.set || "").toLowerCase() &&

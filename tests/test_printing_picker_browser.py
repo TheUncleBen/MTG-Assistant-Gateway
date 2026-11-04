@@ -1467,7 +1467,7 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
             "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))", AS_OF
         )
         assert day and day in note.inner_text() and "3 Nov" not in note.inner_text(), (day, note.inner_text())
-        said = f"Printings and prices as of {day} (Scryfall isn't answering right now)"
+        said = f"Printings and prices as of {day} (Scryfall can't be reached right now)"
         assert note.inner_text().strip() == said
         assert note.get_attribute("role") == "status" and "notice" in (note.get_attribute("class") or "")
         box, grid, n = (

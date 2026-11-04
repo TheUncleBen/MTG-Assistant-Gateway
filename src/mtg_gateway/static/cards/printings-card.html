@@ -241,9 +241,9 @@
         var opts = { dateStyle: "medium" };
         if (iso.indexOf("T") < 0) opts.timeZone = "UTC";
         text = "Printings and prices as of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) +
-          " (Scryfall isn't answering right now)";
+          " (Scryfall can't be reached right now)";
       } else if (d.as_of_note) text = String(d.as_of_note);
-      else text = "From the gateway's own copy of the printings (Scryfall isn't answering right now)";
+      else text = "From the gateway's own copy of the printings (Scryfall can't be reached right now)";
     }
     p.textContent = text; p.className = text ? "note" : "note hidden";
   }
