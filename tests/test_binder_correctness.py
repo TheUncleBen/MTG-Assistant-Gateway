@@ -512,3 +512,101 @@ def test_an_added_rows_mark_is_in_the_name_cell_at_every_width() -> None:
     for rule in re.findall(r"([^{}]*\.s\b[^{}]*)\{([^}]*)\}", css):
         if "colllist" in rule[0] and "display:none" in rule[1].replace(" ", ""):
             assert not re.search(r"\.cardc \.s\b|colllist \.s\b", rule[0]), rule
+
+
+# -- Added this week past the newest 100 (0.7.46 audit C5) ----------------------------------------
+
+
+def _week_text(text: str) -> tuple[str, str, str]:
+    """Added this week as drawn: the tile's number, its detail line and the At a glance line's
+    count."""
+    import re
+
+    tile = re.search(
+        r"Added this week</span><span class='big'>([^<]*)</span><span class='det'>([^<]*)</span>", text
+    )
+    line = re.search(r"entries · ([^ <]+) added this week</span>", text)
+    assert tile and line, text[:400]
+    return tile.group(1), tile.group(2), line.group(1)
+
+
+async def test_added_this_week_past_the_newest_100_reads_the_same_live_and_in_every_held_view(
+    stack: Stack,
+) -> None:
+    """C5: 151 entries, all added this week, then 4 cards added and 3 records removed (the oldest,
+    the newest read and one of the 4). The gateway reads only the newest
+    100 for the tile, so it can't know how many were added this week beyond them: live, it says
+    "100+" (all 100 it read are this week's), never a number it doesn't know, and every held view
+    (Recently added, Set release, Price both ways) says just what the live page says."""
+    _seed(stack, 150)
+    newest = "/collection?view=list&sort=added&dir=desc"
+    by_set = "/collection?view=list&sort=edition&dir=desc"
+    high = "/collection?view=list&sort=price&dir=desc"
+    low = "/collection?view=list&sort=price&dir=asc"
+    views = (newest, by_set, high, low)
+    top = max(stack.ark.collections["alice"])  # the newest record read, on screen
+    # the audit's repro, every view read first: 4 added, then the oldest record (far off screen),
+    # the newest one read (on screen) and one of the 4 removed
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        for path in views:
+            assert (await b.http.get(path)).status_code == 200, path
+        ids = []
+        for item in [*THREE, ADDED[8]]:
+            r = await api(b, "POST", "/collection/api/add", {"items": [item], "source": "scan"}, csrf=csrf)
+            assert r.status_code == 200 and len(r.json().get("added") or []) == 1, (item, r.text[:400])
+            ids.append(int(r.json()["added"][0]["id"]))
+        for rid in (1, top, ids[0]):
+            name = stack.ark.collections["alice"][rid]["card"]["oracleCard"]["name"]
+            r = await b.http.delete(f"/collection/api/rows/{rid}?name={name}", headers={"X-CSRF-Token": csrf})
+            assert r.status_code == 200, r.text
+        assert len(stack.ark.collections["alice"]) == 152
+        held = {}
+        for path in views:  # Archidekt down: each view as it was read, with the 3 added since
+            page = await _held(stack, b, path)
+            assert page.status_code == 200 and "as it was read" in page.text, path
+            held[path] = _week_text(page.text)
+        stack.gw.decks.client.pacer._open_until = 0
+        live = {}
+        for path in views:  # Archidekt answering again: read whole, the new cards with it
+            page = await b.http.get(path)
+            assert page.status_code == 200 and "as it was read" not in page.text, path
+            live[path] = _week_text(page.text)
+        assert set(live.values()) == {("100+", "Counted from your newest 100 entries", "100+")}, live
+        assert held == live, held
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()
+
+
+async def test_added_this_week_is_exact_when_the_newest_100_reach_past_the_week(stack: Stack) -> None:
+    """C5: 151 entries of which only the newest 40 were added this week, then 3 cards added. The
+    newest 100 reach past the week, so the count is known whole: 43, live and in every held
+    view."""
+    import time
+
+    _seed(stack, 150)
+    old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 30 * 86400))
+    for rid in sorted(stack.ark.collections["alice"])[:-40]:
+        stack.ark.collections["alice"][rid]["createdAt"] = old
+    newest = "/collection?view=list&sort=added&dir=desc"
+    by_set = "/collection?view=list&sort=edition&dir=desc"
+    high = "/collection?view=list&sort=price&dir=desc"
+    views = (newest, by_set, high)
+    b, ids = await _then_down(stack, views, THREE)
+    try:
+        held = {}
+        for path in views:
+            page = await _held(stack, b, path)
+            assert "as it was read" in page.text, path
+            held[path] = _week_text(page.text)
+        stack.gw.decks.client.pacer._open_until = 0
+        page = await b.http.get(newest)
+        assert "as it was read" not in page.text
+        live = _week_text(page.text)
+        assert live[0] == "43" and live[2] == "43", live
+        assert set(held.values()) == {live}, held
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()
