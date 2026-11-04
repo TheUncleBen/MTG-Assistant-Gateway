@@ -5,7 +5,9 @@
      outside it, and when another opens; its button shows what is picked ("Rare, Mythic rare");
      under 600 px or with a coarse pointer the list is a bottom sheet with a dimmed page behind it;
    - on phones the Filters button opens the filter groups as a full-screen sheet, which × , Esc
-     and the sheet's own button close; the button counts the filters in use;
+     and the sheet's own button close; the button counts the filters in use; while it is open it
+     is a modal dialog: the page behind it is inert, Tab stays inside it, and the focus goes back
+     to the button when it closes (audit C3);
    - on a Fold or desktop a panel whose button is marked "fold" (card search) folds the groups in
      place behind that button instead, and keeps the last state on the account (data-pref);
    - on phones Sort and its direction fold into one drop-down ("Name ↑", "Name ↓");
@@ -85,7 +87,36 @@
     if (pref && window.MtgPrefs) window.MtgPrefs.set(pref, open ? "open" : "closed");
   }
   function sheetOpen() { return !!(sheet && sheet.classList.contains("open")); }
-  var sheetScrim = null;
+  var sheetScrim = null, madeInert = [];
+  // the page behind the open sheet is inert (a Tab, a screen reader and a tap reach only the
+  // sheet and its backdrop): everything beside the sheet and its ancestors, put back on close
+  function pageInert(on) {
+    if (!on) { madeInert.forEach(function (k) { k.inert = false; }); madeInert = []; return; }
+    for (var node = sheet; node && node.parentNode && node !== document.body; node = node.parentNode) {
+      var kids = node.parentNode.children;
+      for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (k === node || k === sheetScrim || k.tagName === "SCRIPT" || k.tagName === "STYLE" || k.inert) continue;
+        k.inert = true;
+        madeInert.push(k);
+      }
+    }
+  }
+  // what the keyboard can reach in the sheet, in order: not a hidden Clear filters (no box), and
+  // not what a closed fold holds (More filters, a pick-several list: Chromium keeps a box for it
+  // but refuses it the focus), only the fold's own summary
+  function inClosedFold(f) {
+    for (var d = f.parentElement && f.parentElement.closest("details:not([open])"); d;
+         d = d.parentElement && d.parentElement.closest("details:not([open])")) {
+      var sm = $(":scope > summary", d);
+      if (!(sm && sm.contains(f))) return true;
+    }
+    return false;
+  }
+  function sheetStops() {
+    return $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])", sheet)
+      .filter(function (f) { return f.getClientRects().length > 0 && !inClosedFold(f); });
+  }
   function openSheet() {
     if (!sheet) return;
     sheet.classList.add("open");
@@ -98,6 +129,11 @@
       sheetScrim.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); closeSheet(); });
       sheet.parentNode.insertBefore(sheetScrim, sheet);
     }
+    // a modal dialog named by its title (the markup's aria-labelledby) only while it is open: on
+    // a Fold or desktop the same groups sit in the page and are no dialog
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    pageInert(true);
     var c = $(".sp-sheet-head .close", sheet);
     if (c) c.focus();
   }
@@ -105,6 +141,9 @@
     if (!sheetOpen()) return;
     sheet.classList.remove("open");
     document.documentElement.classList.remove("sp-sheet-open");
+    sheet.removeAttribute("role");
+    sheet.removeAttribute("aria-modal");
+    pageInert(false);
     if (sheetScrim) { sheetScrim.remove(); sheetScrim = null; }
     if (openBtn) { openBtn.setAttribute("aria-expanded", "false"); openBtn.focus(); }
   }
@@ -137,11 +176,23 @@
     if (show && show.type === "button") { closeSheet(); return; }
   });
   document.addEventListener("keydown", function (e) {
-    // an Escape a dropdown already used (to close its list or sheet) leaves the panel open
-    if (e.defaultPrevented || e.key !== "Escape" || !sheetOpen()) return;
-    if (window.MtgSelect && window.MtgSelect.isOpen()) return;
-    if ($(".cs .opts:not([hidden])")) return;
-    closeSheet();
+    if (e.defaultPrevented || !sheetOpen()) return;
+    if (window.MtgSelect && window.MtgSelect.isOpen()) return;  // the themed list handles its own keys
+    if (e.key === "Tab") {
+      // Tab stays in the sheet: past its last control it goes to the first, and back; from the
+      // page (a browser without inert) it comes into the sheet
+      var stops = sheetStops();
+      if (!stops.length) return;
+      var a = document.activeElement, first = stops[0], last = stops[stops.length - 1];
+      if (e.shiftKey && (a === first || !sheet.contains(a))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (a === last || !sheet.contains(a))) { e.preventDefault(); first.focus(); }
+      return;
+    }
+    // an Escape a dropdown already used (to close its list or sheet) leaves the panel open: such
+    // a handler stops the event (a pick-several list above, a card search picker's open list in
+    // static/cardsearch.js), so an Escape that reaches here closes the sheet, wherever the focus
+    // is in it (audit C3: a picker's list left open behind the focus kept the sheet open)
+    if (e.key === "Escape") closeSheet();
   });
   if (form) {
     form.addEventListener("input", badge);

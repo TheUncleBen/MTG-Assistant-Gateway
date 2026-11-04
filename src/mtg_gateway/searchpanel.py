@@ -241,7 +241,8 @@ def filters_sheet(
         ".spanel .fbtn.sp-open,.spanel .sp-sheet-head,.spanel .sp-sheet-foot{display:none}</style></noscript>"
     )
     return (
-        f"<div id='sp-filters' class='sp-filters{cls}'{data}><div class='sp-sheet-head'><h2>{esc(title)}</h2>"
+        f"<div id='sp-filters' class='sp-filters{cls}'{data} aria-labelledby='sp-filters-title'>"
+        f"<div class='sp-sheet-head'><h2 id='sp-filters-title'>{esc(title)}</h2>"
         f"<button type='button' class='close' aria-label='Close {esc(title.lower())}'>{icon('x')}</button>"
         "</div>"
         f"{inner_html}{size_html}<div class='sp-sheet-foot'>{clear_html}{show_html}</div></div>{noscript}"
