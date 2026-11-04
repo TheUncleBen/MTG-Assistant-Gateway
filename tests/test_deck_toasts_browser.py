@@ -92,9 +92,10 @@ def test_deck_page_notes_after_instant_saves(
             and "$0.00" not in cost.inner_text()
         )
         unpriced = cost.locator(".unpriced")
-        assert unpriced.evaluate("e => getComputedStyle(e).color") == page.evaluate(
-            "() => getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()"
-        ) or unpriced.evaluate("e => getComputedStyle(e).color") == unpriced.evaluate(
+        # the banner's own muted shade (white at 72 %), not the page's --text-muted, which read
+        # at 1.5:1 on the dark-grey banner (polish R2 / audit N1: the old expectation was the bug)
+        assert unpriced.evaluate("e => getComputedStyle(e).color") == "rgba(255, 255, 255, 0.72)"
+        assert unpriced.evaluate("e => getComputedStyle(e).color") != unpriced.evaluate(
             "e => { const p = document.createElement('span'); p.className = 'muted'; document.body.append(p);"
             " const c = getComputedStyle(p).color; p.remove(); return c; }"
         )

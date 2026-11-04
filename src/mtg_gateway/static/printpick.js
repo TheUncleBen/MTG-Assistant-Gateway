@@ -406,6 +406,13 @@
     status.setAttribute("aria-live", "polite");
     box.appendChild(status);
     st.status = status;
+    // an answer from the gateway's own copy of Scryfall's printings (while Scryfall can't be
+    // reached): its as_of_note, a muted notice above the list; a live answer shows nothing here
+    var asof = el("p", "ppasof notice");
+    asof.setAttribute("role", "status");
+    asof.hidden = true;
+    box.appendChild(asof);
+    st.asof = asof;
     var main = el("div", "ppmain");
     var scroll = el("div", "ppscroll");
     var grid = el("ul", "ppgrid");
@@ -477,6 +484,11 @@
       var plain = !st.params.finish && !st.params.frame && !st.params.border && st.params.order === "newest";
       if (page === 1 && !st.hasMore && plain) st.complete = true;
       if (page === 1 && !st.pinned) st.pinned = startPick();
+      if (page === 1) {
+        var note = d.from_local_copy && d.as_of_note ? String(d.as_of_note) : "";
+        st.asof.textContent = note;
+        st.asof.hidden = !note;
+      }
       draw();
       if (page === 1 && st.hasMore) askMine();
     }).catch(function (err) {

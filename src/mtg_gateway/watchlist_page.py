@@ -1184,7 +1184,9 @@ def watchlist_page_html(
         end=[
             f"<a class='btn btn-outline-danger' href='{esc(query.href(box='stop'))}' "
             f"{ui.box_open_attr('w-stop')} aria-label='Stop watching' title='Stop watching'>"
-            f"{icon('x')}<span class='lbl'>Stop watching</span></a>"
+            # its own icon: with the word folded away, an × beside Cancel's × read as a second
+            # Cancel (audit N4)
+            f"{icon('eye-off')}<span class='lbl'>Stop watching</span></a>"
         ],
     )
     bulk_form = (

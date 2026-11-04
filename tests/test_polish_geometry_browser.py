@@ -88,7 +88,11 @@ def test_the_deck_page_banner_list_and_tools_line_up(server: Server, width: int)
     exe = _exe()
     with sync_playwright() as p:
         browser, page, errors = _open(p, exe, server, sid, width, dark=width == 412)
-        page.goto(f"{server.base}/decks/42?view=list", wait_until="networkidle")
+        # "load", then the parts measured: a view load after the page's kept read has aged starts
+        # the /decks/{id}/check long-poll, which "networkidle" would wait out (audit, section 6)
+        page.goto(f"{server.base}/decks/42?view=list", wait_until="load")
+        page.locator("ul.rows .row .name").first.wait_for(timeout=10_000)
+        page.locator(".statctl[aria-label=Colors] button").first.wait_for(state="attached", timeout=10_000)
         assert page.evaluate(MEASURE) == []
         # B1: the Like count's centre is the heart's centre, inside the chip's
         soc = page.locator(".banner .social .soc[data-social=vote]")
@@ -99,11 +103,12 @@ def test_the_deck_page_banner_list_and_tools_line_up(server: Server, width: int)
         )
         mid = lambda r: (r[1] + r[3]) / 2  # noqa: E731
         assert abs(mid(n) - mid(heart)) <= 1 and abs(mid(n) - mid(chip)) <= 1.5, (n, heart, chip)
-        # C7: no price yet reads "unknown" in muted text, never an orange dash
+        # C7: no price yet reads "unknown" in muted text, never an orange dash. The banner's own
+        # muted colour, not the page's: that grey was 1.5:1 on the shade (polish R2,
+        # test_recheck_0746_browser measures the contrast)
         est = page.locator(".banner .unpriced")
-        assert est.inner_text() == "unknown" and est.evaluate("e => getComputedStyle(e).color") == _muted(
-            page
-        )
+        assert est.inner_text() == "unknown"
+        assert est.evaluate("e => getComputedStyle(e).color") == "rgba(255, 255, 255, 0.72)" != _muted(page)
         assert "–" not in est.locator("xpath=..").inner_text()
         # B2: every name in the list starts at the same x, owned dot and two-digit quantity or not
         xs = page.evaluate(

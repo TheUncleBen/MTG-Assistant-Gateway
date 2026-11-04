@@ -562,8 +562,9 @@ def toolbar(
     hidden = "".join(
         f"<input type='hidden' name='{esc(k)}' value='{esc(v)}'>" for k, v in (keep or {}).items() if v
     )
-    # three filters share one row on a phone (n3), as two do; one alone was full width (audit D31)
-    cls = "ui-tools n3" if len(filters) == 3 else "ui-tools"
+    # .nN says how many filters there are: three share one row on a phone, as two do (audit D31),
+    # and the row the search takes follows the toolbar's width and that count (theme.py, polish R5)
+    cls = f"ui-tools n{len(filters)}" if len(filters) >= 2 else "ui-tools"
     return (
         f"<form class='{cls}' role='search' method='get' action='{esc(action)}'>{hidden}"
         f"<label class='search'><span class='sr-only'>{esc(search_label)}</span>{icon('search')}"

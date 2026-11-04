@@ -1608,11 +1608,17 @@ def price_text(r: dict[str, Any]) -> str:
     return unit if qty <= 1 else f"{money(p['value'], p['currency'])} · {qty} × {unit}"
 
 
+# a price nobody knows, in words and muted, as the deck banner says it (audit N7): a bare dash read
+# as a broken value
+UNPRICED_HTML = "<span class='muted unpriced'>unknown</span>"
+
+
 def price_cell(r: dict[str, Any]) -> str:
-    """The list's Price column: the row's value, and under it the copies times the unit price."""
+    """The list's Price column: the row's value, and under it the copies times the unit price;
+    "unknown" when Scryfall has no price for its finish."""
     p = r.get("price")
     if not p:
-        return "–"
+        return UNPRICED_HTML
     qty = int(r.get("quantity") or 0)
     unit = money(p["unit"], p["currency"])
     if qty <= 1:
@@ -2162,7 +2168,8 @@ def value_widget(
         return ui.widget(
             "Value",
             "stats",
-            "–",
+            "",
+            big_html=UNPRICED_HTML,
             detail=(
                 "Archidekt could not be asked for your whole binder just now. Try again later; the "
                 "daily price check tries again too."
@@ -2188,10 +2195,12 @@ def value_widget(
         parts.append(f"your first {value['entries']:,} entries")
     # read whole but no price came yet (Scryfall was not answering, or none of the printings is
     # priced): say so
-    big = (money(value["usd"]) or "$0.00") if priced else "–"
+    big = (money(value["usd"]) or "$0.00") if priced else ""
     if n and not priced and not value.get("day"):
         parts.append("Prices come with the daily price check.")
-    return ui.widget("Value", "stats", big, detail=" · ".join(parts))
+    return ui.widget(
+        "Value", "stats", big, big_html="" if priced else UNPRICED_HTML, detail=" · ".join(parts)
+    )
 
 
 def widgets_html(
@@ -2450,7 +2459,8 @@ def panel_html(
         count_html=sp.count_html(count_text, count_id="col-count") + select,
         sort_html=sort_html,
         view_html=sp.view_group(view),
-        clear_html="<a class='btn clr' href='/collection'>Clear filters</a>",
+        # sp-clear: the panel's script hides it until a filter is set (polish C4)
+        clear_html="<a class='btn sp-clear clr' href='/collection'>Clear filters</a>",
     )
     return (
         "<section class='panel spanel'><form id='listform' method='get' action='/collection'>"

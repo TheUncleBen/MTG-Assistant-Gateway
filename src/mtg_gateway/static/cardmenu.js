@@ -49,6 +49,8 @@
     bookmark: "<path d='M6 3h12v18l-6-4-6 4z'/>",
     check: "<path d='M5 12l4 4L19 6'/>",
     eye: "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z'/><circle cx='12' cy='12' r='3'/>",
+    "eye-off": "<path d='M3 3l18 18'/><path d='M10.6 6.2A10 10 0 0 1 12 6c6.5 0 10 6 10 6a16 16 0 0 1-3.1 3.7"
+      + "M6.6 6.6A16 16 0 0 0 2 12s3.5 6 10 6a9.7 9.7 0 0 0 4-.8'/>",  // Stop watching (theme.py's eye-off)
     image: "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
     "vote-up": "<path d='M6 15l6-6 6 6'/>",
     "image-off": "<path d='M4 5h16v14H4z'/><path d='M4 17l5-5 4 4 3-3 4 4'/><path d='M3 3l18 18'/>",

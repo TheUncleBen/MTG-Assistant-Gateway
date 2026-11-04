@@ -1812,17 +1812,26 @@
         msg.textContent = '';
         // Undo takes the copies out again: a new entry is removed, an existing one loses what
         // this save added (final audit, Scan: undo where something changes)
+        // Each row leaves `rows` as its undo lands, so when one fails the next press redoes only
+        // the rows still in the binder (audit N6: a retry took a reduced row's copies twice and
+        // asked for a removed row again), and Undo stays on the page for that press.
         const rows = added.filter((r) => r && r.id != null);
         const undo = rows.length ? h('button', { type: 'button', class: 'btn small', onclick: async () => {
           undo.disabled = true;
           try {
-            for (const r of rows) {
+            while (rows.length) {
+              const r = rows[0];
               const q = r.name ? '?name=' + encodeURIComponent(r.name) : '';
               if (r.went_to === 'new') await api('/collection/api/rows/' + encodeURIComponent(r.id) + q, 'DELETE');
               else await api('/collection/api/rows/' + encodeURIComponent(r.id), 'POST', { delta: -(r.added_quantity || 0), name: r.name || undefined });
+              rows.shift();
             }
             note('ok', 'Taken out of your binder again.');
-          } catch (err) { undo.disabled = false; note('error', 'Could not undo: ' + why(err)); }
+          } catch (err) {
+            undo.disabled = false;
+            msg.textContent = '';
+            msg.append(h('div', { class: 'notice error' }, 'Could not undo: ' + why(err) + ' ', undo));
+          }
         } }, 'Undo') : null;
         msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural(added.length, 'card') + ' (' + n + ' copies) to your binder. ', h('a', { href: '/collection' }, 'Open the binder'),
           (out.skipped || []).length || resolved.length < state.items.length ? ' Cards Archidekt could not match were left out.' : '', ...(undo ? [' ', undo] : [])));

@@ -880,10 +880,15 @@ form.guarded.unlocking button[data-guard]{transform:scale(.97);filter:brightness
 /* the hint says what opens the lock on this kind of screen: a tap, or the mouse */
 @media (hover:hover) and (pointer:fine){ .guard-hint .on-touch{display:none} }
 @media not ((hover:hover) and (pointer:fine)){ .guard-hint .on-mouse{display:none} }
-form.guarded .choice .guard-hint{display:flex;align-items:center;gap:.35rem;flex-basis:100%;width:100%;
+/* the lock icon, then the whole sentence as one text (clickguard.py wraps it in a span: as two
+   flex items the words split into columns on a phone, polish R1); the icon centres on the first
+   line, where the sentence starts */
+form.guarded .choice .guard-hint{display:flex;align-items:flex-start;gap:.35rem;flex-basis:100%;width:100%;
   margin:0 0 .2rem}
 form.guarded .choice .guard-hint[hidden]{display:none}
-form.guarded .choice .guard-hint svg.i{width:16px;height:16px;flex:none;color:var(--orange-text)}
+form.guarded .choice .guard-hint svg.i{width:16px;height:16px;flex:none;color:var(--orange-text);
+  margin-top:calc((1lh - 16px) / 2)}
+form.guarded .choice .guard-hint .t{min-width:0}
 /* A tap on a locked button lands on its row instead (a disabled button takes no events, so the
    browser would move focus to the nearest focusable ancestor, <main tabindex=-1>, and scroll the
    page to it); static/clickguard.js then keeps focus where it was. */
@@ -1545,6 +1550,14 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-tools select{margin:0}
 @media (max-width:599.98px){ .ui-tools .f{flex:1 1 calc(50% - .5rem)}
   .ui-tools.n3 .f{flex:1 1 calc(33.333% - .34rem)} }
+/* Balanced rows, by the toolbar's own width (an open side panel narrows it as a Fold does,
+   polish R5; C-FINDINGS F13): while the search (20em) and all the filters (9.5em each, .5em
+   between) do not share one row, the search takes a row of its own and the filters the next;
+   while even the filters do not fit one row, they go two a row. .nN says how many filters. */
+@container (max-width:60em){ .ui-tools.n4 .search{flex-basis:100%} }
+@container (max-width:50em){ .ui-tools.n3 .search{flex-basis:100%} }
+@container (max-width:40em){ .ui-tools.n2 .search{flex-basis:100%} }
+@container (max-width:39.5em){ .ui-tools.n4 .f{flex-basis:calc(50% - .25rem)} }
 /* large text on a phone (the row under 20 em of its own text): one filter a row, so no choice is
    cut to "All…" (0.7.46 audit D31) */
 @container (max-width:20em){ .ui-tools .f,.ui-tools .search{flex-basis:100%;grid-column:1 / -1} }
@@ -1613,8 +1626,12 @@ main.wrap.ui-wide{max-width:1200px}
    then the row's one main action as a capsule and its ⋮ together at the end, never on a line of
    their own. The columns a wide table lined up are the facts line here, so there is no header to
    fold away (the waiting list keeps its check-every row). */
-/* the gaps and side padding in px: larger text widens the words, not the space between them */
-.ui-table.ui-rows .tr{grid-template-columns:var(--cols);gap:0 8px;padding:.5rem 10px}
+/* the gaps and side padding in px: larger text widens the words, not the space between them.
+   --row-pad is the row's side padding; --row-edge is where the row's marks sit in from its edge:
+   the ⋮ icon (a 44 px box, 12 px of air, pulled 8 px into the padding) and the tick box (its 44 px
+   cell overhangs the padding by 6 px) */
+.ui-table.ui-rows .tr{--row-pad:10px;--row-edge:14px;grid-template-columns:var(--cols);gap:0 8px;
+  padding:.5rem var(--row-pad)}
 .ui-table.ui-rows .tr.th{grid-template-columns:var(--cols)}
 .ui-table.ui-rows .title .t{font-weight:600}
 .ui-table.ui-rows .title .t a{font-weight:600}
@@ -1648,16 +1665,21 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-table.ui-rows .group .meta{white-space:normal}
 /* a capsule on the group row's darker ground stays visible */
 .ui-table.ui-rows .tr.group .ui-cap{background:var(--surface-3) padding-box}
+/* the group's Open deck has no ⋮ beside it: its drawn edge (inside the capsule's transparent
+   border) sits at --row-edge, where the ⋮ icon and the tick box do, not pulled into the padding
+   as the actions cell is for the ⋮ (polish R4) */
+.ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad) - 4px)}
 @media (max-width:599.98px){
-  .ui-table.ui-rows .tr{padding:.5rem 8px}
+  .ui-table.ui-rows .tr{--row-pad:8px}
   .ui-table.ui-rows .tr .act{margin-right:-6px}
   /* the main action is its chevron: the title keeps its line at any text size */
   .ui-table.ui-rows .act > .ui-cap{padding:0;margin:0;border:0;background:none}
   .ui-table.ui-rows .act > .ui-cap:hover{background:var(--surface-2)}
   .ui-table.ui-rows .tr.group{grid-template-columns:32px minmax(0,1fr) auto}
   .ui-table.ui-rows .tr.group.nochk{grid-template-columns:minmax(0,1fr) auto}
-  /* the group's Open deck keeps its capsule inside the row (audit D10) */
-  .ui-table.ui-rows .tr.group .act{margin-right:0}
+  /* the group's Open deck keeps its capsule inside the row (audit D10), its edge at --row-edge
+     (the capsule has no transparent border here) */
+  .ui-table.ui-rows .tr.group .act{margin-right:calc(var(--row-edge) - var(--row-pad))}
   .ui-table.ui-rows .tr.group .act > .ui-cap{display:inline-flex;align-items:center;padding:0 .6rem;
     min-height:44px;margin:0}
   /* a title's own link (a History deck name, a report's) is a finger-sized target: its tap area
@@ -1683,8 +1705,13 @@ main.wrap.ui-wide{max-width:1200px}
 /* No bare blue text for an action or a way to go (0.7.46). A small one inside a line or a row (Why,
    Group by deck, Open as a full page, Undo, a row's Open) is a grey capsule like .disc, without the
    chevron: 36px drawn inside a 44px tap area. */
-.ui-cap{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;
-  min-height:44px;margin:0 -4px;padding:4px 12px;border:4px solid transparent;border-radius:22px;
+.ui-cap{--hang:4px;display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;
+  /* the transparent border hangs over the capsule's sides (the negative margins), so the width it
+     may take is its cell's plus that hang: 100% alone squeezed a capsule whose cell was sized to
+     it (the Watchlist's Price alert defaults wrapped inside its pill, polish R3) */
+  max-width:calc(100% + 2 * var(--hang));
+  min-height:44px;margin:0 calc(-1 * var(--hang));padding:4px 12px;border:var(--hang) solid transparent;
+  border-radius:22px;
   background:var(--surface-2) padding-box;color:var(--text);font:inherit;font-weight:600;
   font-size:.86rem;line-height:1.2;text-decoration:none;vertical-align:middle;cursor:pointer}
 .ui-cap:hover{background:var(--surface-3) padding-box;color:var(--text)}
@@ -1709,6 +1736,12 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;overflow:hidden}
 .ui-dots > *{position:relative;min-width:0}
 .ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
+/* .balanced: the same facts as running text, so the browser balances the lines (no fact left
+   alone under a full line: polish C1). Each fact carries the gap before it as a margin; the line
+   starts that far early and clips the strip, so a line's first fact sits on the edge and the dot
+   drawn before it falls in the clipped strip. */
+.ui-dots.balanced{display:block;text-wrap:balance;margin-left:-.85rem;clip-path:inset(0 0 0 .85rem)}
+.ui-dots.balanced > *{display:inline-block;margin-left:.85rem;white-space:nowrap;vertical-align:top}
 /* the sticky action bar while a list has a selection */
 .ui-bar{position:sticky;bottom:.75rem;z-index:20;display:flex;flex-wrap:wrap;
   align-items:center;gap:.5rem;padding:.6rem .75rem;margin:.5rem 0 1rem;background:var(--surface);
@@ -1856,6 +1889,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;min-width:0;
   overflow-wrap:anywhere}
 .wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted);margin-left:.35rem}
+/* a value nobody knows: the word, muted, at the unit's size rather than the number's (audit N7) */
+.wdg .big .unpriced{font-size:1.25rem;font-weight:700}
 .wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
   align-items:center}
 .wdg .det .tx{display:inline}
@@ -1907,15 +1942,6 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .act-table .evt .en svg.i{width:16px;height:16px;margin-top:.1rem;color:var(--text-muted)}
 """
 CSS += UI_CSS
-
-# The Assistant pages' toolbar on the open Fold (600 to 999 px): the search on a line of its own
-# and the filters sharing the next, so no filter is left alone and stretched across a whole line
-# (C-FINDINGS F13). Each of those pages appends it to its own styles.
-BALANCED_TOOLS_CSS = """
-@media (min-width:600px) and (max-width:999.98px){
-  .ui-tools .search{flex-basis:100%}
-}
-"""
 
 
 # The card menu and the Watch button (static/cardmenu.js): Card search's results, the deck page,

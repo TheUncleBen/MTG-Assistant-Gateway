@@ -1422,3 +1422,62 @@ def test_the_printing_detail_offers_the_finishes_it_is_made_in(server: Server) -
         assert server.sol_ring() == [("sld", "1075", "Etched")]
         assert not errors, errors
         browser.close()
+
+
+AS_OF_NOTE = "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
+
+
+@pytest.mark.parametrize(("width", "theme"), [(360, "light"), (360, "dark"), (720, "dark"), (1280, "light")])
+def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
+    server: Server, width: int, theme: str
+) -> None:
+    """While Scryfall can't be reached the gateway answers from its daily copy, and the answer
+    carries ``from_local_copy``, ``as_of`` and ``as_of_note``: the picker shows the note as a
+    muted notice (role=status) above the printings, at 4.5:1, fitting the dialog; a live answer
+    shows nothing extra."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    prints = re.compile(r"/scan/api/prints\?")
+
+    def from_copy(route) -> None:
+        answer = route.fetch()
+        data = answer.json()
+        data.update({"from_local_copy": True, "as_of": "2026-11-03", "as_of_note": AS_OF_NOTE})
+        route.fulfill(status=answer.status, content_type="application/json", body=json.dumps(data))
+
+    touch = width < 900
+    with sync_playwright() as p:
+        browser, page, errors = _page(
+            p, server, sid, width, theme=theme, touch=touch, height=800 if touch else 900
+        )
+        page.route(prints, from_copy)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        card = page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']")
+        _open_picker(page, card)
+        note = page.locator(".printpick .ppasof")
+        note.wait_for(state="visible", timeout=3000)
+        assert note.inner_text().strip() == AS_OF_NOTE
+        assert note.get_attribute("role") == "status" and "notice" in (note.get_attribute("class") or "")
+        box, grid, n = (
+            page.locator(".printpick .ppbox").bounding_box(),
+            page.locator(".printpick .ppgrid").bounding_box(),
+            note.bounding_box(),
+        )
+        assert n["y"] + n["height"] <= grid["y"] + 1, (n, grid)  # above the list
+        assert n["x"] >= box["x"] - 1 and n["x"] + n["width"] <= box["x"] + box["width"] + 1, (n, box)
+        assert note.evaluate("e => e.scrollWidth <= e.clientWidth + 1")
+        assert page.evaluate(CONTRAST, ".printpick .ppasof") == []
+        assert page.evaluate(MEASURE) == []
+        # the tiles are listed under it as ever
+        assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        # a live answer (a fresh page: the picker keeps the lists it read): nothing extra
+        page.unroute(prints)
+        page.reload(wait_until="networkidle")
+        _open_picker(page, card)
+        assert page.locator(".printpick .ppasof:visible").count() == 0
+        assert not errors, errors
+        browser.close()

@@ -24,7 +24,7 @@ from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, UNDO_KINDS
 from .history_view import when_since
 from .modes import NO_ROWS_REASON, UNJUDGED
-from .theme import BALANCED_TOOLS_CSS, esc
+from .theme import esc
 from .waiting_strip import line_for
 
 # -- the redesign's defaults (mockup screen 6, 0.7.46), each one line to flip --------------------
@@ -1010,8 +1010,7 @@ __all__ = [
 
 # The Proposals page's own styles (pages.py puts them in the page's head; the shared pieces are
 # theme.UI_CSS). Theme tokens only.
-PROPOSALS_CSS = (
-    """
+PROPOSALS_CSS = """
 /* a waiting row's cells are labels of its tick box: the whole row is the tap target */
 .pr-table label{margin:0;font-weight:inherit;cursor:pointer}
 .pr-table label.title{display:block}
@@ -1069,5 +1068,3 @@ PROPOSALS_CSS = (
 .wdg .big{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem}
 .wdg .big small{margin-left:0}
 """
-    + BALANCED_TOOLS_CSS
-)

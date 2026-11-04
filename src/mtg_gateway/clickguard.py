@@ -130,7 +130,9 @@ def guarded_form(
         f"data-dwell='{GUARD_DWELL_MS}' "
         f"data-settle='{GUARD_SETTLE_MS}'>{fields}"
         # the lock's note sits in the buttons' row, above them, so it is in the pinned bar on a phone
-        f"<div class='choice'><p class='muted small guard-hint'>{icon('lock')} {GUARD_HINT_HTML}</p>"
+        # (the sentence is one span, so the note's flex row holds the icon and one text)
+        f"<div class='choice'><p class='muted small guard-hint'>{icon('lock')}"
+        f"<span class='t'>{GUARD_HINT_HTML}</span></p>"
         f"{row(True)}{extra}</div></form>"
         "<noscript><style>form.guarded{display:none}</style>"
         f"<form method='post'{act}>{fields}<div class='choice'>{row(False)}{extra}</div></form></noscript>"
