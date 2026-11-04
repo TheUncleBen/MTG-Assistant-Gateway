@@ -14,7 +14,7 @@ import pytest
 from .test_cardsearch_browser import _chromium, _page
 from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
-from .test_text_zoom_browser import BROWSER_200, ROOT_200
+from .test_text_zoom_browser import BROWSER_200, ROOT_200, TEXT_200
 
 pytest.importorskip("playwright")
 
@@ -91,7 +91,9 @@ TAB_BADGE = """() => {
   const ox = Math.max(0, Math.min(br.right, ir.right) - Math.max(br.left, ir.left));
   const oy = Math.max(0, Math.min(br.bottom, ir.bottom) - Math.max(br.top, ir.top));
   const hit = document.elementFromPoint(ir.left + ir.width / 2, ir.top + ir.height / 2);
+  const ar = a.getBoundingClientRect();
   return {text: b.textContent.trim(), width: Math.round(br.width), height: Math.round(br.height),
+    inside: br.left >= ar.left - 1 && br.right <= ar.right + 1 && br.top >= ar.top - 1,
     icon: {width: Math.round(ir.width), height: Math.round(ir.height)},
     fits: b.scrollWidth <= b.clientWidth + 1 && b.scrollHeight <= b.clientHeight + 1,
     covered: ox * oy / (ir.width * ir.height), centreOnBadge: !!(hit && hit.closest('.nb')),
@@ -99,12 +101,14 @@ TAB_BADGE = """() => {
 }"""
 
 
-@pytest.mark.parametrize("zoom", ["none", "browser", "root"])
+@pytest.mark.parametrize("zoom", ["none", "browser", "root", "text"])
 def test_the_tab_bars_assistant_count_never_covers_its_icon(server: Server, zoom: str) -> None:  # noqa: F811
     """W2: on a 412 px phone the Assistant tab's count (a two-digit one) sits on the icon's top
-    right at 100% text and at 200% (the browser's root at 200%, a 28 px root): its words fit its
-    box, it is no taller than the bar's 18 px count, it covers at most a corner of the icon, and
-    the icon's centre is not under it."""
+    right at 100% text and at 200% (the browser's root at 200%, a 28 px root, and every font
+    doubled as Android's font scale does): its words fit its box, it is no taller than the bar's
+    18 px count (a few px taller under the text-only zoom, when its box follows its digits' own
+    line), it stays inside its tab, it covers at most a corner of the icon, and the icon's centre
+    is not under it."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -129,12 +133,13 @@ def test_the_tab_bars_assistant_count_never_covers_its_icon(server: Server, zoom
         browser, page, errors = _page(p, server, sid, 412, "light", exe)
         page.goto(f"{server.base}/collection", wait_until="networkidle")
         if zoom != "none":
-            page.evaluate(BROWSER_200 if zoom == "browser" else ROOT_200)
+            page.evaluate({"browser": BROWSER_200, "root": ROOT_200, "text": TEXT_200}[zoom])
             page.wait_for_timeout(200)
         got = page.evaluate(TAB_BADGE)
         assert got and len(got["text"]) == 2, got
         assert got["fits"], got
-        assert got["height"] <= 18 and got["width"] <= 30, got
+        # the bar's 18 px count; under the text-only zoom its box follows its 20 px digits' own line
+        assert got["height"] <= max(18, got["font"] * 1.25) and got["inside"], got
         assert got["covered"] <= 0.3 and not got["centreOnBadge"], got
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()

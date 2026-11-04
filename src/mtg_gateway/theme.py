@@ -1125,15 +1125,21 @@ body .tabbar:has(details.more[open]){z-index:25}
 .tabbar details.more .menu.sheet a svg{width:20px;height:20px}
 .tabbar details.more .menu.sheet .head{padding:.6rem 1rem .2rem}
 /* the counts on the tabs (proposals waiting, the bell's unseen) sit on the icon's top right */
-.tabbar > a .nb,.tabbar > a.bell .n{position:absolute;top:6px;left:calc(50% + 3px);z-index:2}
+.tabbar > a .nb,.tabbar > a.bell .n{position:absolute;top:4px;left:calc(50% + 5px);z-index:2}
 .tabbar > a.bell .n{min-width:18px;height:18px;border-radius:9px;background:var(--orange);
   color:var(--on-orange);font-size:.72rem;font-weight:900;line-height:18px;text-align:center;padding:0 4px;
   font-style:normal;box-sizing:border-box}
 .tabbar > a.bell .n[hidden]{display:none}
 /* the bar's counts are sized in px like its icons (22 px) and labels (capped at 15 px): in rem
    alone, at 200% text the Assistant count grew over its icon while its 18 px box stayed (final
-   polish W2); .72rem is 10 px at the pages' 14 px root, so the cap changes nothing at 100% */
-.tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem,11px)}
+   polish W2); .72rem is 10 px at the pages' 14 px root, so the cap changes nothing at 100%. The
+   box follows its digits' own line from 18 px up: under a text-only zoom (Android's font scale
+   doubles px text too) a 20 px count makes it about 23 px tall and it still holds its words (a
+   fixed 18 px box, or a line of 1, left the glyphs' area pushing out of it), and sitting 4 px
+   from the tab's top and 5 px right of its middle it covers the icon's top-right corner only,
+   never its centre; the bell's count is laid out the same way */
+.tabbar > a .nb,.tabbar > a.bell .n{font-size:min(.72rem,11px);display:inline-grid;place-items:center;
+  line-height:normal;height:auto;min-height:18px}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
