@@ -1801,7 +1801,8 @@ TAG_CHIPS = 4  # chips a tile or row shows before "+N"
 
 
 def _added_mark(r: dict[str, Any]) -> str:
-    """A held Binder's mark on a card added through the gateway since it was read (held_added)."""
+    """A held Binder tile's mark on a card added through the gateway since it was read
+    (held_view); the list puts it in the name cell (row_html)."""
     return " · Added since" if r.get("held_added") else ""
 
 
@@ -1859,10 +1860,8 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
     # under 900 px the Price column is hidden: the price goes on the card's own lines; a price
     # nobody knows says so there too, as the column does (audit N7, N12)
     price = _esc(price_text(r)) or UNPRICED_HTML
-    sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x) + _added_mark(r)
-    sub_sm = " · ".join(
-        x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x
-    ) + _added_mark(r)
+    sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x)
+    sub_sm = " · ".join(x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x)
     sub_md += f"<span class='pr lgh'>{price}</span>"
     sub_sm += f" · <span class='pr'>{price}</span>"
     return (
@@ -1871,6 +1870,9 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
         f"aria-label='Show {name}' "
         f"title='Show the card'>{thumb}</button><span class='tx'><span class='name' title='{name}'>{name}"
         "</span>"
+        # the held Binder's mark, in the name cell's muted small line: shown at every width, where
+        # the lines under it (.sub, .smline, .lg) each show at some widths only
+        + ("<span class='s'>Added since</span>" if r.get("held_added") else "")
         + (f"<span class='s lg'>{_esc(r['type_line'])}</span>" if r.get("type_line") else "")
         + f"<span class='sub'>{sub_md}</span><span class='s smline'>{sub_sm}</span>"
         + tag_chips([str(t) for t in (r.get("tags") or [])], tag_colors)

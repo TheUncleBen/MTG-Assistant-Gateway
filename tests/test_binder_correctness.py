@@ -450,3 +450,65 @@ async def test_the_held_price_sort_before_any_price_puts_added_cards_where_they_
     finally:
         stack.gw.decks.client.pacer._open_until = 0
         await b.aclose()
+
+
+# -- the held Binder read empty, then added to (final polish S1, S2) -----------------------------
+
+
+async def test_a_held_binder_read_empty_counts_the_cards_added_since_in_every_tile(stack: Stack) -> None:
+    """S1, the reviewer's repro: the Binder read empty, 10 cards added, Archidekt down. The tiles
+    (Entries with its copies, Added this week, Foils) and the phone's At a glance line count the
+    10, as the tab and the list do; nothing says 0."""
+    import re
+
+    stack.ark.collections["alice"] = {}
+    newest = "/collection?view=list&sort=added&dir=desc"
+    b, ids = await _then_down(stack, (newest,), ADDED)
+    try:
+        held = await _held(stack, b, newest)
+        assert held.status_code == 200 and "as it was read" in held.text
+        assert set(_counts(held.text).values()) == {10}, _counts(held.text)
+        assert _week(held.text) == (10, 10)
+        assert "<span>10 entries · 10 added this week</span>" in held.text
+        copies = re.search(
+            r"Entries</span><span class='big'>10</span><span class='det'>([^<]*)</span>", held.text
+        )
+        assert copies and copies.group(1) == "10 copies", copies and copies.group(1)
+        foils = re.search(r"Foils</span><span class='big'>(\d+)</span>", held.text)
+        assert foils and foils.group(1) == "0"  # all ten added as Normal
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()
+
+
+def test_an_added_rows_mark_is_in_the_name_cell_at_every_width() -> None:
+    """S2: the list's added rows say "Added since" in the name cell, in the cell's own muted small
+    line (.s), never only in the lines the table hides at one width or another (.sub over 64rem,
+    .smline over phone width, .lg under 64rem, .md-hide columns); the page's CSS hides no .s there."""
+    import re
+
+    from mtg_gateway import collection
+
+    row = {
+        "id": 7,
+        "name": "Forest",
+        "finish": "nonfoil",
+        "condition": "NM",
+        "lang": "EN",
+        "quantity": 1,
+        "set_code": "m21",
+        "collector_number": "1",
+        "type_line": "Basic Land",
+        "held_added": True,
+    }
+    html = collection.row_html(row, "c", view="list")
+    cell = re.search(r"<span class='tx'>(.*?)<span class='sub'>", html, re.S)
+    assert cell, html
+    assert cell.group(1).count("<span class='s'>Added since</span>") == 1, cell.group(1)
+    assert html.count("Added since") == 1, html  # not again in the lines that come and go
+    plain = collection.row_html({**row, "held_added": False}, "c", view="list")
+    assert "Added since" not in plain
+    css = collection.COLLECTION_CSS
+    for rule in re.findall(r"([^{}]*\.s\b[^{}]*)\{([^}]*)\}", css):
+        if "colllist" in rule[0] and "display:none" in rule[1].replace(" ", ""):
+            assert not re.search(r"\.cardc \.s\b|colllist \.s\b", rule[0]), rule
