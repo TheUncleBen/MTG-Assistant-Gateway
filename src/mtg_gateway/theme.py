@@ -711,7 +711,12 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
    ok (green), warn (orange) and error (red), the words in the strip's colour where that reads */
 .notice{border:0;border-left:4px solid var(--blue);background:var(--blue-tint);color:var(--text);
   border-radius:0 var(--radius) var(--radius) 0;padding:.7rem .9rem;margin:0 0 1rem;font-weight:700;
-  overflow-wrap:anywhere;flex-wrap:wrap}
+  overflow-wrap:anywhere}
+/* a notice laid out as a flex row with a button of its own (the held strips in the Binder's
+   #col-notes) wraps, so the words keep the row and the button drops under them (audit B1). Only
+   those: with wrap on every notice, the Binder's × strips (× first, then the words, as one flex
+   item each) put the × alone on a row above the words (audit C1) */
+.notice:has(> .btn){flex-wrap:wrap}
 .notice.error{border-left-color:var(--red);background:var(--red-tint);color:var(--red-text)}
 .notice.ok{border-left-color:var(--green);background:var(--green-tint);color:var(--green-text)}
 .notice.warn{border-left-color:var(--orange);background:var(--orange-tint);color:var(--orange-text)}
@@ -725,13 +730,14 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* a link in a notice reads as one; a button in one (Try again on a held page, Show the changes on
    the deck check strip) keeps the button's own look (polish re-check P1) */
 .notice a:not(.btn){color:inherit;text-decoration:underline}
-/* a button in a notice stays whole (the notice's overflow-wrap:anywhere broke "Try again" into
-   "Try / agai / n" on a 412 px held Binder, polish re-check Q1) and goes under the words when they
-   leave it no room on their line. A notice laid out as a flex row (the Binder's strips) wraps
-   (flex-wrap above), so the words keep the row and the button drops under them, instead of the
-   words being squeezed into a column beside a button that would not give (audit B1: 73 px at
-   360 px with 200% text) */
-.notice .btn{flex:none;white-space:nowrap;overflow-wrap:normal}
+/* a button in a notice never breaks a word (the notice's overflow-wrap:anywhere broke "Try again"
+   into "Try / agai / n" on a 412 px held Binder, polish re-check Q1) and goes under the words when
+   they leave it no room on their line (the flex-wrap above), instead of the words being squeezed
+   into a column beside a button that would not give (audit B1: 73 px at 360 px with 200% text).
+   A label wider than the strip wraps at its spaces inside the strip, never out of it: nowrap put
+   "Stop here and show what went in" 508 px wide at 200% text and the Binder scrolled sideways
+   (audit C2); a short label such as Try again is narrower than any strip, so it stays one line */
+.notice .btn{flex:none;max-width:100%;white-space:normal;overflow-wrap:normal}
 /* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
 .notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
   gap:.35rem .6rem}
