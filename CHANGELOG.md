@@ -638,7 +638,9 @@ name per thing.
   browser can't open it and suggests JPEG or the camera.
 - When Scryfall's list of card names can't be downloaded, names that are no card are answered
   in about half the time (six took 12 seconds): after two of them found nothing, the rest of the
-  list skips the extra spelling guesses and still gets its suggestions.
+  list skips the extra spelling guesses and still gets its suggestions. The same names asked
+  again within ten minutes are answered at once, without asking Scryfall; once the list of card
+  names is there, they are looked up again.
 - A push notification the notification server could not take because it was down or restarting
   is sent again a few times over the next minutes instead of being lost. A deck's message that a
   newer count replaced meanwhile is not sent again.

@@ -67,6 +67,11 @@ MAX_RECOVERY_LOOKUPS_PER_CALL = 40  # recovery lookups per call, however many na
 # still get their own lookup and suggestions), so a list of unknown names costs about two requests
 # each (final audit of 0.7.46: six unknown names cost 25 requests and 12 s).
 MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG = 2
+# A name that skipped that walk is no miss to keep for NOT_FOUND_TTL (once the catalog is there it
+# may be placed), but asking Scryfall for it again on every call cost 7 requests and 3 s for the
+# same six names (re-audit of 0.7.46, 10a). So it is remembered for this long while the catalog is
+# not loaded, and forgotten as soon as the catalog loads (ScanService._missed_while_down).
+MISS_TTL_WITHOUT_CATALOG = 600
 MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per account; more is "busy"
 # The printing picker's lookups wait this long for one of the account's places before "busy" (a
 # deck page opens several at once)
@@ -502,6 +507,8 @@ class ScanService:
         self.names = NameCatalog(lambda: self.scryfall)
         # names that resolved to nothing, by their folded spelling (NOT_FOUND_TTL)
         self.not_found = _Cache(ttl=NOT_FOUND_TTL, max_items=2000)
+        # names that skipped the recovery walk without the catalog (MISS_TTL_WITHOUT_CATALOG)
+        self.down_misses = _Cache(ttl=MISS_TTL_WITHOUT_CATALOG, max_items=2000)
         self.t = thresholds or ScanThresholds()
         self.art_matcher = art_matcher
         self.store = ScanStore(db)
@@ -606,7 +613,7 @@ class ScanService:
         results: list[Resolution | None] = [None] * len(inputs)
         # 0. A name that found nothing a short while ago finds nothing now: no lookup at all.
         for i, inp in enumerate(inputs):
-            if (missed := self._missed(inp)) is not None:
+            if (missed := self._missed(inp) or self._missed_while_down(inp)) is not None:
                 results[i] = missed
 
         # 1. One batched exact pass for everything that has a name or a printing.
@@ -702,9 +709,11 @@ class ScanService:
                 res = self._settle_printing(inputs[i], checks[i], res)
             elif res.status == "not_found" and inp.name:
                 if budget.recovery != 0:
-                    # (a name that skipped the walk is not a miss to remember: asked again once the
-                    # catalog is there, it may be placed)
                     self.not_found.put(_miss_key(inp), res)
+                elif not self.names.loaded:
+                    # a name that skipped the walk: kept only until the catalog is there, which
+                    # may place it (MISS_TTL_WITHOUT_CATALOG)
+                    self.down_misses.put(_miss_key(inp), res)
                 if budget.lookups < before and not self.names.loaded:
                     fruitless += 1
                     if fruitless >= MAX_FRUITLESS_RECOVERIES_WITHOUT_CATALOG:
@@ -1053,6 +1062,18 @@ class ScanService:
         if not inp.name:
             return None
         kept = self.not_found.get(_miss_key(inp))
+        return replace(kept, input=inp) if kept is not None else None
+
+    def _missed_while_down(self, inp: CardInput) -> Resolution | None:
+        """The "not found" remembered for a name that skipped the recovery walk without the
+        catalog (MISS_TTL_WITHOUT_CATALOG); none at all once the catalog has loaded, when that
+        memory is dropped so the catalog can place them."""
+        if not inp.name or not len(self.down_misses):
+            return None
+        if self.names.loaded:
+            self.down_misses.clear()
+            return None
+        kept = self.down_misses.get(_miss_key(inp))
         return replace(kept, input=inp) if kept is not None else None
 
     async def _complete(self, text: str) -> list[str]:
