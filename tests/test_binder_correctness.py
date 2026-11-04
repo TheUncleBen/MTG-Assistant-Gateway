@@ -320,3 +320,133 @@ async def test_the_held_binder_in_another_sort_says_how_many_added_cards_it_leav
     finally:
         stack.gw.decks.client.pacer._open_until = 0
         await b.aclose()
+
+
+# -- the held Binder's counts, its line and the price sort (0.7.46 audit B3, B4, B6) ---------------
+
+
+# three new records whatever _seed made (it has no Forest and no Opt)
+THREE = [ADDED[0], ADDED[1], ADDED[4]]
+
+
+def _counts(text: str) -> dict[str, int]:
+    """Every count the Binder page shows of its entries: the Cards tab, the At a glance line, the
+    Entries tile, the results bar and the Load more line."""
+    import re
+
+    def one(pattern: str) -> int:
+        m = re.search(pattern, text, re.S)
+        assert m, pattern
+        return int(next(g for g in m.groups() if g is not None).replace(",", ""))
+
+    return {
+        "tab": one(r"<a href='/collection' aria-current=page>Cards<span class='cn'>([\d,]+)</span>"),
+        "glance": one(r"<span>([\d,]+) entries · \d+ added this week</span>"),
+        "tile": one(r"Entries</span><span class='big'>([\d,]+)</span>"),
+        "bar": one(r"id='col-count' aria-live='polite'>([\d,]+) entries</h2>"),
+        "more": one(r"<p class='muted'>\d+ of ([\d,]+)</p>|All ([\d,]+) entries shown"),
+    }
+
+
+def _week(text: str) -> tuple[int, int]:
+    """Added this week: the tile and the At a glance line."""
+    import re
+
+    tile = re.search(r"Added this week</span><span class='big'>(\d+)</span>", text)
+    line = re.search(r"entries · (\d+) added this week</span>", text)
+    assert tile and line
+    return int(tile.group(1)), int(line.group(1))
+
+
+async def _then_down(stack: Stack, reads: tuple[str, ...], items: list[dict], remove: tuple[int, ...] = ()):
+    """Read each of ``reads``, add ``items`` one at a time and remove the records ``remove``; the
+    caller then reads the pages while Archidekt is down (_held). Returns the browser and the new
+    records' ids."""
+    b = await linked(stack)
+    csrf = await b.csrf("/collection")
+    for path in reads:
+        assert (await b.http.get(path)).status_code == 200, path
+    ids = []
+    for item in items:
+        r = await api(b, "POST", "/collection/api/add", {"items": [item], "source": "scan"}, csrf=csrf)
+        assert r.status_code == 200 and len(r.json().get("added") or []) == 1, (item, r.text[:400])
+        ids.append(int(r.json()["added"][0]["id"]))
+    for rid in remove:
+        name = stack.ark.collections["alice"][rid]["card"]["oracleCard"]["name"]
+        r = await b.http.delete(f"/collection/api/rows/{rid}?name={name}", headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 200, r.text
+    return b, ids
+
+
+async def test_every_count_on_the_held_binder_agrees_after_adds_and_an_off_page_removal(stack: Stack) -> None:
+    """B3: 70 entries read; 3 added and the oldest (far off the screen) removed, then Archidekt is
+    down. The Cards tab, the At a glance line, the Entries tile, the results bar and Load more all
+    say 72 in Recently added and in Set release alike; Added this week counts the 3 too."""
+    _seed(stack, 69)
+    newest = "/collection?view=list&sort=added&dir=desc"
+    by_set = "/collection?view=list&sort=edition&dir=desc"
+    b, ids = await _then_down(stack, (by_set, newest), THREE, remove=(1,))
+    try:
+        assert len(stack.ark.collections["alice"]) == 72
+        for path in (newest, by_set):
+            held = await _held(stack, b, path)
+            assert held.status_code == 200 and "as it was read" in held.text, path
+            counts = _counts(held.text)
+            assert set(counts.values()) == {72}, (path, counts)
+            assert _week(held.text) == (72, 72), (path, _week(held.text))
+        held = await _held(stack, b, newest)
+        assert [i for i, _ in _rows(held.text)][:3] == ids[::-1]
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()
+
+
+async def test_the_not_shown_line_is_an_info_notice_that_links_to_recently_added(stack: Stack) -> None:
+    """B4: in Set release, the line about added cards is an info notice (not the green success
+    one) and ends with "Show them first", to the same view in Recently added, filters kept; there
+    the added cards that match the name filter come first."""
+    import html
+    import re
+
+    _seed(stack, 3)
+    by_set = "/collection?view=list&sort=edition&dir=desc&q=Forest"
+    newest = "/collection?q=Forest&sort=added&dir=desc&view=list"
+    b, ids = await _then_down(stack, (by_set, newest), THREE)  # Forest NM, Forest LP, Opt NM
+    try:
+        held = await _held(stack, b, by_set)
+        line = re.search(
+            r"<div class='([^']*)'[^>]*>(?:(?!</div>).)*?you added(?:(?!</div>).)*?</div>", held.text, re.S
+        )
+        assert line, held.text[-3000:]
+        assert line.group(1) == "notice", line.group(0)
+        assert "2 cards you added aren’t shown in this order." in line.group(0), line.group(0)
+        link = re.search(r"<a href='([^']*)'>Show them first</a>", line.group(0))
+        assert link and html.unescape(link.group(1)) == newest, line.group(0)
+        held = await _held(stack, b, html.unescape(link.group(1)))
+        rows = _rows(held.text)
+        assert [i for i, _ in rows][:2] == ids[1::-1], rows  # the two Forests, newest first
+        assert ids[2] not in [i for i, _ in rows]  # Opt isn't in a Forest filter
+        assert "you added aren" not in held.text
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()
+
+
+async def test_the_held_price_sort_before_any_price_puts_added_cards_where_they_are(stack: Stack) -> None:
+    """B6: before the daily price check the Price sort is Recently added (listing falls back to
+    newest first, highest first; oldest first, lowest first), so the held copy shows the cards
+    added since first in Price, highest first, and says it can't place them in lowest first."""
+    _seed(stack, 3)
+    high = "/collection?view=list&sort=price&dir=desc"
+    low = "/collection?view=list&sort=price&dir=asc"
+    b, ids = await _then_down(stack, (low, high), THREE)
+    try:
+        held = await _held(stack, b, high)
+        assert [i for i, _ in _rows(held.text)][:3] == ids[::-1], _rows(held.text)
+        assert "you added aren" not in held.text and "Cards you added since are at the top." in held.text
+        held = await _held(stack, b, low)
+        assert ids[0] not in [i for i, _ in _rows(held.text)]
+        assert "3 cards you added aren’t shown in this order." in held.text
+    finally:
+        stack.gw.decks.client.pacer._open_until = 0
+        await b.aclose()

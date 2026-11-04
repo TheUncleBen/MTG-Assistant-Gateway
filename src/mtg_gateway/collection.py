@@ -598,6 +598,11 @@ class CollectionService:
                         if isinstance(got.get(k), int):
                             got[k] = max(0, got[k] - len(mine))
             added = held.get("added") if isinstance(held.get("added"), dict) else None
+            if changed is None and not (added is not None and rid in added["ids"]):
+                # a record the read held (on this page or not) is gone: held_view counts it out
+                gone = held.setdefault("removed", [])
+                if rid not in gone:
+                    gone.append(rid)
             if added is not None and rid in added["ids"]:  # one added since: kept as it is now
                 if changed is None:
                     added["ids"].remove(rid)
@@ -3128,47 +3133,85 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             got["restore"] = True
         return got
 
-    def held_added(
-        held: dict[str, Any], lq: dict[str, Any], priced_now: bool
-    ) -> tuple[list[dict[str, Any]], int]:
-        """The cards added through the gateway since a held Binder page was read (_wrote keeps
-        them beside it): the rows to put first, newest first and marked, and how many it can't
-        show. Only Recently added, newest first, unfiltered, first page, shows them, as Archidekt
-        would; in any other order or filter where they would sit isn't known, so they are counted
-        instead. Never a row the page already holds; a price only from the gateway's own."""
-        added = held.get("added") if isinstance(held.get("added"), dict) else None
-        if not added:
-            return [], 0
-        have = {r.get("id") for r in (held.get("got") or {}).get("rows") or [] if isinstance(r, dict)}
-        ids = [i for i in added.get("ids") or [] if i not in have]
-        if not ids:
-            return [], 0
-        top = (
-            lq["sort"] == "added"
-            and lq["dir"] == "desc"
-            and not lq["q"]
-            and not lq["tag"]
-            and not lq["offset"]
-        )
-        if not top:
-            return [], len(ids)
-        kept = added.get("rows") or {}
-        rows = [dict(kept[str(i)], held_added=True) for i in reversed(ids) if str(i) in kept]
-        for r in rows:
-            r.pop("price", None)
-        if priced_now:
-            service.binder.with_prices(rows)
-        return rows, len(ids) - len(rows)
+    def held_view(held: dict[str, Any], lq: dict[str, Any], view: str | None) -> dict[str, Any]:
+        """A held Binder page brought up to the member's own writes since it was read, with every
+        count the page shows from one place: ``got`` and ``whole`` as the page draws them (the
+        listing's rows and total; the widgets' count and rows), the cards added since to put
+        first (``added``: newest first, marked) and the line about the ones it can't place.
 
-    def added_not_shown(n: int, lq: dict[str, Any], *, top: bool) -> str:
-        """The line under the held strip for the cards added since that the page can't show."""
-        cards = f"{n:,} {'card' if n == 1 else 'cards'} you added"
-        verb = "isn\u2019t" if n == 1 else "aren\u2019t"
-        if top:
-            return f"{cards} since {verb} shown here: the newest {HELD_ADDED_ROWS:,} are."
-        if lq["q"] or lq["tag"] or lq["offset"]:
-            return f"{cards} {verb} shown here."
-        return f"{cards} {verb} shown in this order."
+        The binder holds the entries read, less the ones removed since (on this page or not), plus
+        the ones added since. An unfiltered listing is the whole binder, so its total is that
+        number in any order; a filtered one keeps its own total as read (less the removals it
+        showed), plus the added cards it shows. The added cards go first only where the listing
+        is newest first from its first entry: Recently added newest first, the price sort before
+        the first daily price check (listing falls back to Recently added, highest first meaning
+        newest first), and a tag filter (always newest first). A name or tag filter shows the
+        added cards that match it, as CollectionService.tagged matches. Never a row the page
+        already holds; a price only from the gateway's own."""
+        got, whole = dict(held["got"]), dict(held["whole"])
+        added = held.get("added") if isinstance(held.get("added"), dict) else {}
+        have = {r.get("id") for r in got.get("rows") or [] if isinstance(r, dict)}
+        ids = [i for i in added.get("ids") or [] if i not in have]
+        kept = added.get("rows") or {}
+        removed = len(held.get("removed") or [])
+        binder = max(0, int(whole.get("count") or 0) - removed + len(ids))
+        filtered = bool(lq["q"] or lq["tag"])
+        needle = lq["q"].casefold()
+
+        def fits(r: dict[str, Any]) -> bool:
+            if needle and needle not in str(r.get("name") or "").casefold():
+                return False
+            return not lq["tag"] or any(
+                collection_tags.same_name(str(t), lq["tag"]) for t in r.get("tags") or []
+            )
+
+        # newest first from the top: the order Archidekt would put a new record first in
+        fallback = lq["sort"] == "price" and got.get("out") is not None and not lq["tag"]
+        newest_order = bool(lq["tag"]) or (lq["dir"] == "desc" and (lq["sort"] == "added" or fallback))
+        newest = newest_order and not lq["offset"]
+        rows_kept = [kept[str(i)] for i in reversed(ids) if str(i) in kept]
+        matching = [r for r in rows_kept if fits(r)]
+        unknown = len(ids) - len(rows_kept)  # beyond what is kept: counted, never shown
+        shown_rows: list[dict[str, Any]] = []
+        if newest:
+            shown_rows = [{**r, "held_added": True} for r in matching]
+            for r in shown_rows:
+                r.pop("price", None)
+            if priced():
+                service.binder.with_prices(shown_rows)
+            out_n = unknown
+        else:
+            out_n = len(matching) + unknown
+        got["rows"] = shown_rows + list(got.get("rows") or [])
+        if isinstance(got.get("shown"), int):
+            got["shown"] += len(shown_rows)
+        got["total"] = int(got.get("total") or 0) + len(shown_rows) if filtered else binder
+        # the widgets: the binder's count, and the rows they count from with the added ones first
+        rows_now = [{**r, "held_added": True} for r in rows_kept] + list(whole.get("rows") or [])
+        whole["count"] = binder
+        whole["rows"] = rows_now
+        if len(rows_now) < binder:  # some it can't see: copies and foils aren't counted
+            whole["has_next"] = True
+        line = ""
+        if out_n:
+            cards = f"{out_n:,} {'card' if out_n == 1 else 'cards'} you added"
+            verb = "isn\u2019t" if out_n == 1 else "aren\u2019t"
+            if newest:
+                text = f"{cards} since {verb} shown here: the newest {HELD_ADDED_ROWS:,} are."
+                line = strip(text, "info")
+            else:
+                where = "on this page" if newest_order else "in this order"  # a later page of it
+                # the sort named outright: an address without one opens in the remembered sort
+                from urllib.parse import urlencode
+
+                qs = {k: lq[k] for k in ("q", "tag") if lq[k]} | {"sort": "added", "dir": "desc"}
+                first = "/collection?" + urlencode(qs | ({"view": view} if view else {}))
+                line = strip(
+                    f"{_esc(cards)} {verb} shown {where}. <a href='{_esc(first)}'>Show them first</a>",
+                    "info",
+                    html=True,
+                )
+        return {"got": got, "whole": whole, "added": shown_rows, "line": line, "binder": binder}
 
     def strip(text: str, kind: str, *, html: bool = False, remember: str = "") -> str:
         """A notice strip at the top of the page, with a × to close (the page's script hides it).
@@ -3452,7 +3495,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         last_key = ("binder", json.dumps(lq, sort_keys=True, default=str))
         held: tuple[float, Any] | None = None
         added_rows: list[dict[str, Any]] = []  # cards added since the held copy was read, shown first
-        added_out = 0  # and how many of those it can't show
+        added_line = ""  # and the line about the ones it can't place
         try:
             got = await listing(sub, lq)
             whole = (
@@ -3469,12 +3512,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 got, whole = held[1]["got"], held[1]["whole"]
                 # the member's own writes since it was read (CollectionService._wrote)
                 amended = bool(held[1].get("amended"))
-                added_rows, added_out = held_added(held[1], lq, priced())
-                if added_rows:
-                    got["rows"] = added_rows + list(got.get("rows") or [])
-                    for k in ("total", "shown"):
-                        if isinstance(got.get(k), int):
-                            got[k] += len(added_rows)
+                seen = held_view(held[1], lq, view_in_link)
+                got, whole = seen["got"], seen["whole"]
+                added_rows, added_line = seen["added"], seen["line"]
                 notes = (
                     held_html(
                         exc,
@@ -3484,7 +3524,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                         amended=amended,
                         added=bool(added_rows),
                     )
-                    + (strip(added_not_shown(added_out, lq, top=bool(added_rows)), "ok") if added_out else "")
+                    + added_line
                     + notes
                 )
             elif plan is not None:
@@ -3560,7 +3600,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             open_box=bool(qp.get("visibility")),
             ok=qp.get("ok") or "",
         )
-        if not rows and not lq["q"] and not lq["offset"] and not lq["tag"] and not added_out:
+        if not rows and not lq["q"] and not lq["offset"] and not lq["tag"] and not added_line:
             body = (
                 head(sub=sub, total=0)
                 + vis
@@ -3606,7 +3646,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
             )
             body = (
-                head(acts, sub=sub, total=int(whole["count"]) + len(added_rows) + added_out)
+                head(acts, sub=sub, total=int(whole["count"]))
                 + vis
                 + f"<div id='col-notes'>{notes}</div>"
                 + widgets_html(
@@ -3630,7 +3670,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
                 + live
                 + cards
-                + f"<p class='muted col-nomatch'{' hidden' if rows or added_out else ''}>"
+                + f"<p class='muted col-nomatch'{' hidden' if rows or added_line else ''}>"
                 "No cards match that filter.</p>"
                 + more_html(lq, view_in_link, got)
                 + bulk_html(csrf, same_url(request), tag_names, tag_colors)
