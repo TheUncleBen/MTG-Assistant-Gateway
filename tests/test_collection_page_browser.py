@@ -79,7 +79,10 @@ def test_the_page_fits_and_its_controls_are_44px_at_every_width(
             # the card size and Clear filters: in the bar from 600 px, in the Filters sheet on phones
             # (as My decks and card search; final audit N11)
             assert page.locator(".rbar .size .sizeseg").is_visible() == (width >= 600)
-            assert page.locator(".rbar .clr").is_visible() == (width >= 600)
+            # Clear filters is hidden while no filter is set (polish C4 / audit N2: the old
+            # expectation, "shown from 600 px on a fresh page", was the bug); with a name typed
+            # it shows in the bar from 600 px and in the sheet on phones
+            assert not page.locator(".rbar .clr").is_visible()
             assert page.locator(".spanel .sp-open").is_visible() == (width < 600)
             if width < 600:
                 assert page.locator(".rbar .sortcw select").is_visible()
@@ -91,6 +94,8 @@ def test_the_page_fits_and_its_controls_are_44px_at_every_width(
                 page.locator("#sp-filters .sp-sheet-head .close").click()
                 page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
             assert page.locator("#cards > li[data-id]").count() == 24
+        page.goto(f"{server.base}/collection?q=Sol", wait_until="networkidle")
+        assert page.locator(".rbar .clr").is_visible() == (width >= 600)
         assert errors == []
         browser.close()
 

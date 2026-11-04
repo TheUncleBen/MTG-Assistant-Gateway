@@ -22,8 +22,8 @@ from urllib.parse import urlencode
 from . import ui
 from .decks import actor_label, without_tabs_note
 from .reports_page import source_label_html
-from .theme import BALANCED_TOOLS_CSS, icon, time_html
 from .theme import esc as _esc
+from .theme import icon, time_html
 
 PAGE = ui.PER_PAGE
 MAX_OFFSET = 2000
@@ -1004,7 +1004,6 @@ h2.hy-backups{font-size:1.2rem}
 """
     + HISTORY_CSS_A
     + HISTORY_CSS_C
-    + BALANCED_TOOLS_CSS
 )
 
 __all__ = [

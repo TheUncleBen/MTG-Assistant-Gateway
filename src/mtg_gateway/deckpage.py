@@ -2782,7 +2782,8 @@ def goldfish_page_html(
         + "</p>"
         + solo
         + extra_head
-        + "<p class='gf-status' id='gf-status'></p>"
+        # the game's facts line (static/goldfish.js fills it): balanced lines, the dots in the gaps
+        + "<p class='gf-status ui-dots balanced' id='gf-status'></p>"
         "<p class='gf-hint' id='gf-hint'></p>"
         "<div class='gf-controls' role='group' aria-label='Game'>"
         "<button type='button' class='btn-primary' data-act='keep' hidden>Keep hand</button>"
@@ -3269,6 +3270,10 @@ DECK_CSS = (
 .banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
 .banner .row b.orange{color:#ffa94d;font-weight:700}  /* 4.5:1 on the banner's grey (audit D14) */
+/* muted words on the banner ("unknown" for a price nobody knows): the page's muted grey is 1.5:1
+   on the shade in the light theme (polish R2), so the banner's white at reduced opacity, which
+   follows the shade and keeps 4.5:1 across the whole gradient as the row's #d6d6d6 does */
+.banner .row .muted{color:rgba(255,255,255,.72)}
 .banner .row .ui-when{color:inherit;font-size:inherit}  /* the list date's muted grey: faint here */
 .banner .legal{display:inline-flex;align-items:center;gap:.3rem}
 .banner .legal.ok svg{color:#1ebb6c} .banner .legal.bad svg{color:#f21b3f}
@@ -3294,6 +3299,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
   .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0);white-space:nowrap;padding:0;margin:0;line-height:1}
+  /* the count stands alone beside the heart here: its box is trimmed to the digit's cap height, so
+     centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
+  .banner .social .soc .n{text-box:trim-both cap alphabetic}
   .banner .social .confirm{flex-basis:100%} }
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;

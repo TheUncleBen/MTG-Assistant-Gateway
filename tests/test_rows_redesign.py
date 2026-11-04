@@ -10,7 +10,7 @@ import re
 import time
 from pathlib import Path
 
-from mtg_gateway import history_view, proposals_view, reports_page, ui
+from mtg_gateway import history_view, proposals_view, reports_page, theme, ui
 from mtg_gateway.theme import esc
 
 from .conftest import Stack, stack_with
@@ -202,13 +202,22 @@ def test_the_row_menu_button_and_the_balanced_toolbar() -> None:
     assert k.startswith("<a class='kebab' href='/proposals/p1' aria-label='Menu for +1 Sol Ring' ")
     assert "aria-haspopup='menu'" in k
     assert "title='Menu'" in k and "<svg" in k
-    # the Fold (600 to 999 px): the search on its own line, the filters sharing the next (F13)
-    from mtg_gateway.theme import BALANCED_TOOLS_CSS, UI_CSS
+    # a toolbar too narrow for the search and all its filters (the Fold, F13; the list beside an
+    # open side panel, polish R5): the search on its own line, the filters sharing the next. The
+    # rule follows the toolbar's own width and its filter count (a window-width rule missed the
+    # panel), so it is in the shared styles, not appended by each page.
+    from mtg_gateway.theme import UI_CSS
 
-    assert "@media (min-width:600px) and (max-width:999.98px)" in BALANCED_TOOLS_CSS
-    assert ".ui-tools .search{flex-basis:100%}" in BALANCED_TOOLS_CSS
-    for css in (proposals_view.PROPOSALS_CSS, history_view.HISTORY_CSS, reports_page.REPORTS_PAGE_CSS):
-        assert BALANCED_TOOLS_CSS in css
+    assert not hasattr(theme, "BALANCED_TOOLS_CSS")
+    assert "@container (max-width:60em){ .ui-tools.n4 .search{flex-basis:100%} }" in UI_CSS
+    assert "@container (max-width:50em){ .ui-tools.n3 .search{flex-basis:100%} }" in UI_CSS
+    assert "@container (max-width:39.5em){ .ui-tools.n4 .f{flex-basis:calc(50% - .25rem)} }" in UI_CSS
+    assert "@media (min-width:600px) and (max-width:999.98px)" not in (
+        proposals_view.PROPOSALS_CSS + history_view.HISTORY_CSS + reports_page.REPORTS_PAGE_CSS
+    )
+    four = ui.toolbar("/proposals", search_label="s", filters=["<span class='f'></span>"] * 4)
+    assert four.startswith("<form class='ui-tools n4' ")
+    assert ui.toolbar("/x", search_label="s").startswith("<form class='ui-tools' ")
     assert ".ui-table.ui-rows" in UI_CSS
 
 

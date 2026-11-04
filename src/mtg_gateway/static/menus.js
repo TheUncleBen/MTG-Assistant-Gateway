@@ -749,7 +749,7 @@
       if (f) f.focus();
     });
     var rmBtn = wx ? $("form.rm button, button[form^='rm-']", wx) : null;
-    var remove = rmBtn ? item("Stop watching", "x", function () { rmBtn.click(); }, { danger: true }) : null;
+    var remove = rmBtn ? item("Stop watching", "eye-off", function () { rmBtn.click(); }, { danger: true }) : null;
     var card = $(".wcard[data-card]", tr);
     if (card) {
       var name = card.getAttribute("data-card");

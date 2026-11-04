@@ -111,7 +111,10 @@
       else if (f.type !== "hidden" && f.value.trim()) n += 1;
     });
     badgeEl.textContent = n ? String(n) : "";
-    clearShown(n > 0);
+    // the name box sits outside the sheet (so it is not in the badge's count), but it is a filter
+    // Clear filters clears
+    var named = $$(".sp-name input", form).some(function (f) { return f.type !== "hidden" && f.value.trim(); });
+    clearShown(n > 0 || named);
   }
   // Clear filters (the bar's and the sheet's) shows once a filter is set: a button that would do
   // nothing looked unintentional (polish C4)

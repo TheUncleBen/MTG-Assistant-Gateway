@@ -677,7 +677,8 @@ async def test_the_value_being_worked_out_updates_by_itself_and_promises_no_time
 
 
 def test_a_binder_with_no_priced_entry_shows_no_value_not_zero() -> None:
-    """Every entry unpriced: the Value is "–" (as Scan's list value), never "$0.00"."""
+    """Every entry unpriced: the Value is "unknown", muted (as the deck banner says it, audit N7;
+    a bare dash read as a broken value), never "$0.00"."""
     from mtg_gateway.collection import value_widget
 
     out = value_widget(
@@ -685,7 +686,8 @@ def test_a_binder_with_no_priced_entry_shows_no_value_not_zero() -> None:
         reading=False,
         now=0.0,
     )
-    assert "$0.00" not in out and "<span class='big'>–</span>" in out
+    assert "$0.00" not in out and "–" not in out
+    assert "<span class='big'><span class='muted unpriced'>unknown</span></span>" in out
     assert "1 entry has no price" in out
     one = value_widget(
         {"usd": 0.0, "priced": 1, "unpriced": 0, "entries": 1, "complete": True, "day": None},
@@ -715,7 +717,8 @@ def test_a_binder_read_whole_with_no_prices_yet_says_so(tmp_path) -> None:
     value = store.value(SUB)
     assert value and value["entries"] == 3 and value["unpriced"] == 3 and value["day"] is None
     out = value_widget(value, reading=False, now=1_700_000_000.0)
-    assert "$0.00" not in out and "<span class='big'>–</span>" in out
+    assert "$0.00" not in out and "–" not in out
+    assert "<span class='big'><span class='muted unpriced'>unknown</span></span>" in out
     assert "3 entries have no price" in out
     assert "Prices come with the daily price check." in out
     # one priced entry: its value, the others counted as without a price, no hint

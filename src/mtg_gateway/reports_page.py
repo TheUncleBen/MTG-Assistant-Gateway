@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 from . import ui
 from .bracket_view import ESTIMATE_LABEL, bracket_name
-from .theme import BALANCED_TOOLS_CSS, esc, icon
+from .theme import esc, icon
 
 PAGE = ui.PER_PAGE
 BROWSER_CLIENT = "__browser__"  # decks.BROWSER_CLIENT: the member's own browser
@@ -624,5 +624,4 @@ REPORTS_PAGE_CSS = (
 .reports-page .rp-t .rp-empty{grid-template-columns:1fr}
 .reports-page .rp-t .rp-empty p{margin:.25rem 0}
 """
-    + BALANCED_TOOLS_CSS
 )

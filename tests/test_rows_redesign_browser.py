@@ -72,20 +72,25 @@ def test_the_menu_button_shares_the_title_line_and_a_phone_gets_44px_targets(
                         assert b["tap"]["h"] >= 44, (where, b["tap"])
                 assert page.evaluate(NO_SIDEWAYS), f"{path} @{width}px"
             if width == 840:
-                # the Fold (F13): the search takes its own line, every filter shares the next
+                # the Fold (F13): the toolbar wraps by its own width, not the viewport's (polish
+                # R5): either everything shares one row, or the search takes its own line and
+                # every filter shares the next; the old "search always full width at 840" rule
+                # was the viewport media query the fix replaced
                 for path in ROWS:
                     page.goto(f"{server.base}{path}", wait_until="networkidle")
                     tools = page.evaluate(
                         """() => { const f = document.querySelector('.ui-tools'); if (!f) return null;
                         const r = (el) => el.getBoundingClientRect();
                         return {w: r(f).width, search: r(f.querySelector('.search')).width,
+                          stop: Math.round(r(f.querySelector('.search')).top),
                           tops: [...f.children].filter(el => !el.classList.contains('search') &&
                             el.tagName !== 'INPUT' && r(el).height > 0)
                             .map(el => Math.round(r(el).top))}; }"""
                     )
                     assert tools, path
-                    assert tools["search"] >= tools["w"] - 2, (path, tools)
                     assert len(set(tools["tops"])) == 1, (path, tools)
+                    if tools["tops"][0] != tools["stop"]:
+                        assert tools["search"] >= tools["w"] - 2, (path, tools)
             assert errors == [], errors
             browser.close()
     finally:
