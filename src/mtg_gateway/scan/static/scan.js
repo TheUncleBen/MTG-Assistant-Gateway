@@ -1816,6 +1816,8 @@
         // the rows still in the binder (audit N6: a retry took a reduced row's copies twice and
         // asked for a removed row again), and Undo stays on the page for that press.
         const rows = added.filter((r) => r && r.id != null);
+        const copiesOf = (r) => r.added_quantity != null ? r.added_quantity : (r.quantity || 0);
+        let taken = 0;  // the copies taken out so far, over every press of Undo
         const undo = rows.length ? h('button', { type: 'button', class: 'btn small', onclick: async () => {
           undo.disabled = true;
           try {
@@ -1824,13 +1826,17 @@
               const q = r.name ? '?name=' + encodeURIComponent(r.name) : '';
               if (r.went_to === 'new') await api('/collection/api/rows/' + encodeURIComponent(r.id) + q, 'DELETE');
               else await api('/collection/api/rows/' + encodeURIComponent(r.id), 'POST', { delta: -(r.added_quantity || 0), name: r.name || undefined });
+              taken += copiesOf(r);
               rows.shift();
             }
             note('ok', 'Taken out of your binder again.');
           } catch (err) {
+            // a partial undo says what came out and that Undo takes out the rest (audit N13)
             undo.disabled = false;
             msg.textContent = '';
-            msg.append(h('div', { class: 'notice error' }, 'Could not undo: ' + why(err) + ' ', undo));
+            const said = taken ? 'Took ' + taken + ' of ' + n + ' copies out of your binder; the rest could not be taken out: ' + why(err) + ' Press Undo again for the rest. '
+              : 'Could not undo: ' + why(err) + ' ';
+            msg.append(h('div', { class: 'notice error' }, said, undo));
           }
         } }, 'Undo') : null;
         msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural(added.length, 'card') + ' (' + n + ' copies) to your binder. ', h('a', { href: '/collection' }, 'Open the binder'),

@@ -38,7 +38,7 @@ from .deckpage import image_url
 from .history_view import _trend_svg
 from .prices import ALERT_KINDS, MAX_LIST_NAME, NO_LIST, money
 from .reports_page import PHONE_WIDGETS_CSS
-from .theme import esc, icon, in_app, natural_key, plural
+from .theme import UNPRICED_HTML, esc, icon, in_app, natural_key, plural
 
 PAGE = ui.PER_PAGE
 FINISH_WORDS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
@@ -184,9 +184,11 @@ def day_text(day: str | None, today: str) -> str:
 
 
 def change_html(v: float | None) -> str:
-    """A change as an arrow and a word (colour never alone): green up, red down."""
+    """A change as an arrow and a word (colour never alone): green up, red down; "unknown", muted
+    and plain, with too little history for one (the one treatment of a price nobody knows, with
+    the Binder's and the deck banner's: polish batch 3 N3)."""
     if v is None:
-        return "<span class='dl'>–</span>"
+        return UNPRICED_HTML
     if not v:
         return "<span class='dl'>no change</span>"
     up = v > 0
@@ -393,13 +395,13 @@ def _row(
 ) -> str:
     cur = view.get("currency") or "usd"
     price = view.get("price")
-    px = money(price, cur) if price is not None else "–"
+    px = esc(money(price, cur)) if price is not None else UNPRICED_HTML
     when = day_text(view.get("day"), today) if price is not None else "No price yet"
     seven = view.get("change_7d_pct")
     row_hist = view.get("history") or []
     short = row_hist[-SHORT_DAYS:]
     sub = (
-        f"<b class='px'>{esc(px)}</b>"
+        f"<b class='px'>{px}</b>"
         + (f"{change_html(seven)}<span class='kv'>in 7 days</span>" if seven is not None else "")
         + alert
     )
@@ -410,7 +412,7 @@ def _row(
         f"<div class='tr{' open' if is_open else ''}' id='wr-{esc(key)}'{attrs}>{check}{thumb}"
         f"<span class='title'><span class='t'>{title}</span><span class='deck'>{esc(line)}</span>"
         f"<span class='sub'>{sub}</span></span>"
-        f"<span class='px md-hide'>{esc(px)}<small>{esc(when)}</small></span>"
+        f"<span class='px md-hide'>{px}<small>{esc(when)}</small></span>"
         f"<span class='md-hide chgs'>{changes_html(view)}</span>"
         f"<span class='md-hide spark'>{spark_html(short, cur, what)}</span>"
         f"<span class='md-hide lbls'>{alert}</span>"

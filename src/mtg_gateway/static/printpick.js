@@ -78,6 +78,19 @@
     return isNaN(n) ? null : n;
   }
   function money(n) { return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  // The line over an answer from the gateway's own copy of Scryfall's printings (from_local_copy,
+  // while Scryfall isn't answering): its day (as_of, an ISO date-time) in the viewer's own locale,
+  // as the site writes dates (audit N14); the gateway's own line (as_of_note) when the day can't
+  // be read. "" for a live answer.
+  function asOfLine(d) {
+    if (!d || !d.from_local_copy) return "";
+    var iso = d.as_of ? String(d.as_of) : "", t = iso ? Date.parse(iso) : NaN;
+    if (isNaN(t)) return d.as_of_note ? String(d.as_of_note) : "";
+    var opts = { dateStyle: "medium" };
+    if (iso.indexOf("T") < 0) opts.timeZone = "UTC";  // a bare day: not shifted to the day before
+    return "Printings and prices as of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) +
+      " (Scryfall isn't answering right now)";
+  }
   function samePrint(p, ref) {
     return !!(ref && p && String(p.set || "").toLowerCase() === String(ref.set || "").toLowerCase() &&
       String(p.collector_number) === String(ref.number));
@@ -184,7 +197,8 @@
     if (!o.compact) {
       cap.appendChild(chips(p));
       var price = priceOf(p, o.finish || "nonfoil");
-      cap.appendChild(el("span", "ppprice" + (price === null ? " none" : ""), price === null ? "No price" : money(price)));
+      // a price nobody knows: "unknown", muted and plain, as the Binder and the banner say it
+      cap.appendChild(el("span", "ppprice" + (price === null ? " none unpriced" : ""), price === null ? "unknown" : money(price)));
     }
     b.appendChild(cap);
     var words = [p.set_name || "", code(p), year(p)];
@@ -485,7 +499,7 @@
       if (page === 1 && !st.hasMore && plain) st.complete = true;
       if (page === 1 && !st.pinned) st.pinned = startPick();
       if (page === 1) {
-        var note = d.from_local_copy && d.as_of_note ? String(d.as_of_note) : "";
+        var note = asOfLine(d);
         st.asof.textContent = note;
         st.asof.hidden = !note;
       }
@@ -846,7 +860,7 @@
     (p.finishes && p.finishes.length ? p.finishes : ["nonfoil"]).forEach(function (f) {
       prices.appendChild(el("dt", "", FINISH_NAMES[f] || f));
       var v = priceOf(p, f);
-      prices.appendChild(el("dd", "", v === null ? "No price" : money(v)));
+      prices.appendChild(el("dd", v === null ? "muted unpriced" : "", v === null ? "unknown" : money(v)));
     });
     info.appendChild(prices);
     var same = samePrint(p, o.pending || o.current);

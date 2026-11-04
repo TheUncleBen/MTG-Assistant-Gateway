@@ -868,7 +868,9 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
         price = _float(stats.get("price_total"))
         cards = _int(stats.get("card_count"))
         mv = _float(stats.get("average_mana_value"))
-        det = " · ".join(
+        # one span a fact, balanced over the lines with the dots in the gaps (ui-dots): a fact
+        # never breaks inside ("0" at a line's end, "game changers" on the next: polish batch 3 N1)
+        facts = [
             x
             for x in (
                 f"{_int(stats.get('land_count'))} lands" if _int(stats.get("land_count")) is not None else "",
@@ -876,10 +878,10 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                 f"{len(stats.get('game_changers') or [])} game changers",
             )
             if x
-        )
+        ]
         if not price or stats.get("priced_cards") == 0:
             price = None  # no card had a price: "No price", never a $0 deck
-            det = " · ".join(x for x in (det, "No price") if x)
+            facts.append("No price")
         out.append(
             ui.widget(
                 "Deck",
@@ -890,7 +892,9 @@ def widgets_html(r: dict[str, Any], s: dict[str, Any], *, stats_section: bool = 
                     if price is not None and cards is not None
                     else ("cards" if cards else "")
                 ),
-                detail=det,
+                detail_html="<span class='tx ui-dots balanced'>"
+                + "".join(f"<span>{_esc(x)}</span>" for x in facts)
+                + "</span>",
                 actions=[_go("Deck statistics", "#rv-stats")] if stats_section else [],
             )
         )

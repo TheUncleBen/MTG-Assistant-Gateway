@@ -9,7 +9,8 @@
 /*@BASE@*/
 /* the detail (one printing, big, with Use this printing) is drawn in the card's flow and takes the
    list's place, so the host's frame follows its height instead of covering a frame sized for the list */
-.card.viewing .toolbar,.card.viewing .scroll,.card.viewing #note,.card.viewing #actions{display:none}
+.card.viewing .toolbar,.card.viewing .scroll,.card.viewing #note,.card.viewing #asof,.card.viewing #actions{display:none}
+#asof{margin:0 0 8px}
 .detail.flow{position:static;padding:0;overflow:visible;z-index:auto}
 .detail .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px}
 #detail .cap{font-size:.8125rem;color:var(--muted);overflow-wrap:anywhere}
@@ -39,6 +40,7 @@
     <button type="button" class="small" id="bigger" aria-pressed="false">Bigger pictures</button>
     <button type="button" class="small hidden" id="expand">Expand</button>
   </div>
+  <p class="note hidden" id="asof" role="status"></p>
   <div class="scroll"><div class="grid" id="grid" role="list"></div><div id="morebox"></div></div>
   <div class="detail flow hidden" id="detail" role="region" aria-label="One printing">
     <div class="top"><span class="cap" id="dcap"></span><button type="button" class="small" id="back">Back to the list</button></div>
@@ -227,6 +229,24 @@
     }
     B.reportSize();
   }
+  // The list came from the gateway's own copy of Scryfall's printings (from_local_copy, while
+  // Scryfall isn't answering): say so over the list, with the copy's day (as_of, an ISO date-time)
+  // in the viewer's own locale, or the gateway's own line (as_of_note) when the day can't be read
+  // (audit N15). A live list shows nothing here.
+  function showAsOf(d) {
+    var p = $("asof"), text = "";
+    if (d && d.from_local_copy) {
+      var iso = d.as_of ? String(d.as_of) : "", t = iso ? Date.parse(iso) : NaN;
+      if (!isNaN(t)) {
+        var opts = { dateStyle: "medium" };
+        if (iso.indexOf("T") < 0) opts.timeZone = "UTC";
+        text = "Printings and prices as of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) +
+          " (Scryfall isn't answering right now)";
+      } else if (d.as_of_note) text = String(d.as_of_note);
+      else text = "From the gateway's own copy of the printings (Scryfall isn't answering right now)";
+    }
+    p.textContent = text; p.className = text ? "note" : "note hidden";
+  }
   function load(result) {
     var sc = result.structuredContent || {}, meta = (result._meta || {})["mtg/card"] || {};
     cardName = String(sc.name || meta.name || "");
@@ -241,6 +261,7 @@
     var total = Number(sc.total_cards || meta.total || 0);
     $("count").textContent = total ? total + " printing" + (total === 1 ? "" : "s") : "";
     $("summary").textContent = "Tap a printing to see it bigger, then press Use this printing; your assistant will use it.";
+    showAsOf(sc);
     if (!link) { B.setStatus("The list is in the assistant's message.", ""); return; }
     fetch(link, { credentials: "omit", headers: { Accept: "application/json" } })
       .then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
@@ -248,6 +269,7 @@
         var j = pair[1] || {};
         if (pair[0] !== 200 || j.ok === false) { B.setStatus(String(j.message || "The printings could not be loaded; ask again."), "err"); return; }
         all = Array.isArray(j.cards) ? j.cards : [];
+        if (j.from_local_copy) showAsOf(j);
         if (j.has_more) { $("summary").textContent = "The newest " + all.length + " of " + (j.total_cards || "many") + " printings. Tap one to see it bigger, then press Use this printing."; }
         draw();
       })

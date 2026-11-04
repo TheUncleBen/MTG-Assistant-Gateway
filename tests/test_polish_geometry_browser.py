@@ -28,8 +28,12 @@ RECT = (
 # each child of a facts line: its rect, whether a dot is drawn before it, and the line's left edge
 DOTS = """e => [...e.children].map(c => { const r = c.getBoundingClientRect(), p = e.getBoundingClientRect();
   const b = getComputedStyle(c, '::before'), dl = r.left + (parseFloat(b.left) || 0);
+  // a .balanced line starts a gap early and clips that strip: its edge is past the clip
+  const clip = (getComputedStyle(e).clipPath.match(/inset\\(.*?([\\d.]+)(px|rem)?\\)/) || [])[1];
+  const CHIP = '.ui-cap, .ui-chip, .ui-lbl, .btn, .btn-plain';
   return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top),
-    line: Math.round(p.left), dot: b.content.includes('·'),
+    line: Math.round(p.left + (clip ? parseFloat(clip) : 0)), dot: b.content.includes('·'),
+    chip: c.matches(CHIP) || [...c.children].some(k => k.matches(CHIP)),
     dotLeft: Math.round(dl), dotRight: Math.round(dl + (parseFloat(b.width) || 0)) }; })"""
 
 
@@ -66,12 +70,15 @@ def _muted(page) -> str:  # noqa: ANN001
 
 def _no_dangling_dot(page, sel: str) -> None:  # noqa: ANN001
     """A facts line (.ui-dots): every item but the first carries its dot, and an item that starts
-    a new line sits at the line's left edge (its dot is drawn outside, where the line clips it)."""
+    a new line sits at the line's left edge (its dot is drawn outside, where the line clips it).
+    A chip takes no dot: drawn at the top of the taller item, it floated above the words (polish
+    batch 3 N2; the old expectation, a dot before every item, was the bug)."""
     lines = page.locator(sel)
     assert lines.count() >= 1, sel
     for i in range(lines.count()):
         kids = lines.nth(i).evaluate(DOTS)
-        assert len(kids) >= 2 and all(k["dot"] for k in kids[1:]) and not kids[0]["dot"], (sel, kids)
+        assert len(kids) >= 2 and not kids[0]["dot"], (sel, kids)
+        assert all(k["dot"] == (not k["chip"]) for k in kids[1:]), (sel, kids)
         for prev, k in zip(kids, kids[1:], strict=False):
             if k["top"] > prev["top"]:
                 assert abs(k["left"] - k["line"]) <= 1, (sel, kids)

@@ -798,7 +798,7 @@ details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);pa
 .summary .add{color:var(--green-text);border-color:var(--green);background:var(--green-tint)}
 .summary .del{color:var(--red-text);border-color:var(--red);background:var(--red-tint)}
 .summary .chg{color:var(--orange-text);border-color:var(--orange);background:var(--orange-tint)}
-/* the labels share one column as wide as the longest (two words such as COMMANDER BRACKET stay on
+/* the labels share one column as wide as the longest (two words such as Commander bracket stay on
    one line beside the change), at least 6.8rem; each row takes it as a subgrid */
 ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--border);
   border-radius:var(--radius-panel);overflow:hidden;container-type:inline-size;display:grid;
@@ -806,9 +806,10 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 .changes li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;gap:.6rem;
   padding:.5rem .75rem;border-bottom:1px solid var(--border-soft);border-left:5px solid var(--border)}
 .changes li:last-child{border-bottom:0}
-.changes .act{font-size:.78rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;
-  text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid;min-width:0;
-  hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}
+/* the label reads as written ("Add", "Remove", "Change"), at every width: the phone undid an
+   uppercase transform here, so the case changed with the screen (polish batch 3 N5) */
+.changes .act{font-size:.78rem;font-weight:900;text-align:center;padding:.2rem .3rem;border-radius:3px;
+  border:1px solid;min-width:0;hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}
 .changes .name{font-weight:700;font-size:1.05rem;overflow-wrap:anywhere}
 /* long text there (a new deck's or package's settings) wraps in its own column, never wider
    than about half the row: the name beside it keeps its width */
@@ -830,8 +831,6 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 @media (max-width:420px){
   ul.changes{grid-template-columns:minmax(6.8rem,max-content) minmax(0,1fr)}
   .changes li{gap:.35rem .6rem}
-  /* capitals spaced out make a two-word label (COMMANDER BRACKET) take half a phone's row */
-  .changes .act{text-transform:capitalize;letter-spacing:0}
   .changes .qty{grid-column:2;text-align:left}
   /* an add or remove count (+1, -1) is short: it stays on the card's line, one line a row */
   .changes li.add,.changes li.del:not(.action){
@@ -842,8 +841,7 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
    above it, and the change has the whole row */
 @container (max-width:22em){
   .changes li,.changes li.add,.changes li.del:not(.action){grid-template-columns:minmax(0,1fr) auto}
-  /* capitals spaced out don't fit a word like DESCRIPTION across a 320 px phone at 200% text */
-  .changes .act{grid-column:1/-1;justify-self:start;text-transform:capitalize;letter-spacing:0}
+  .changes .act{grid-column:1/-1;justify-self:start}
   .changes .name{grid-column:1}
   .changes .qty{grid-column:2;text-align:right}
   .changes li.action .qty,.changes li.chg .qty{grid-column:1/-1;text-align:left}
@@ -1563,6 +1561,10 @@ main.wrap.ui-wide{max-width:1200px}
    filters never keep two a row here */
 @container (max-width:20em){ .ui-tools .f,.ui-tools.n3 .f,.ui-tools.n4 .f,.ui-tools .search{flex-basis:100%;
   grid-column:1 / -1} }
+/* three filters that do not fit one row (3 × 9.5em and the gaps) would fall two and one, the last
+   stretched alone across the row (audit N10: History at 717 px with 200% text): one a row instead.
+   From 600 px only, since a phone keeps three a row at a third each (the media rule above) */
+@media (min-width:600px){ @container (max-width:29.5em){ .ui-tools.n3 .f{flex-basis:100%} } }
 .ui-note{color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem}
 
 /* the table: lined-up columns from 900 px (--cols); 600-899 px the low-priority columns
@@ -1738,6 +1740,10 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-dots{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .85rem;overflow:hidden}
 .ui-dots > *{position:relative;min-width:0}
 .ui-dots > * + *::before{content:"·";position:absolute;left:-.55rem;top:0;color:var(--text-muted)}
+/* no dot before a chip, a label or a button (or the item that wraps one): drawn at the top of a
+   taller item, the dot floated above the words' line (polish batch 3 N2); the gap alone sets it off */
+.ui-dots > * + :is(.ui-cap,.ui-chip,.ui-lbl,.btn,.btn-plain,
+  :has(> .ui-cap,> .ui-chip,> .ui-lbl,> .btn,> .btn-plain))::before{content:none}
 /* .balanced: the same facts as running text, so the browser balances the lines (no fact left
    alone under a full line: polish C1). Each fact carries the gap before it as a margin; the line
    starts that far early and clips the strip, so a line's first fact sits on the edge and the dot
@@ -1891,12 +1897,17 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;min-width:0;
   overflow-wrap:anywhere}
 .wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted);margin-left:.35rem}
-/* a value nobody knows: the word, muted, at the unit's size rather than the number's (audit N7) */
-.wdg .big .unpriced{font-size:1.25rem;font-weight:700}
+/* a price nobody knows, wherever one shows (the Binder's Value tile and Price column, the
+   Watchlist's change cells, the card search, the deck banner): the word "unknown", muted, in
+   normal weight, never louder than a real price, whatever its parent's weight (audit N7, polish
+   batch 3 N3); the banner gives it its own colour (deckpage.py) */
+.unpriced{font-weight:400}
+.wdg .big .unpriced{font-size:1.25rem}
 .wdg .det{color:var(--text-muted);font-size:.88rem;display:flex;flex-wrap:wrap;gap:.3rem .5rem;
   align-items:center}
 .wdg .det .tx{display:inline}
 .wdg .det .tx.ui-dots{display:flex}
+.wdg .det .tx.ui-dots.balanced{display:block}
 .wdg .det a{font-weight:700}
 .wdg .det .ui-lbl{height:22px;font-size:.78rem}
 .wdg .go{margin-top:auto;padding-top:.35rem;display:flex;flex-wrap:wrap;gap:.4rem}
@@ -2412,6 +2423,9 @@ SEARCH_PANEL_CSS = """
   .spanel .sp-sheet-foot button,.spanel .sp-sheet-foot .btn{margin:0;flex:1 1 auto;min-height:2.9rem;
     display:inline-flex;align-items:center;justify-content:center}
   .spanel .sp-sheet-foot .btn-primary{flex:2 1 auto}
+  /* Clear filters stays hidden while nothing is set, in the sheet too: the rule above gave every
+     button of the foot inline-flex, which beat .sp-clear[hidden] (polish C4, audit N11) */
+  .spanel .sp-sheet-foot .sp-clear[hidden]{display:none}
   .spanel .fmtrow .in button .tx{display:none}
   .spanel .fmtrow .in button{width:var(--ctl);padding:0} }
 /* the narrowest phones (a 344 px screen leaves the panel 286 px; a 390 px one 332): a long count
@@ -2614,6 +2628,11 @@ def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
 
 # The one progress spinner (styled in CSS above); ui.label draws it for the "spinner" icon.
 SPINNER = "<span class='ui-spin' aria-hidden='true'></span>"
+
+# A price nobody knows, wherever one shows (the Binder, the Watchlist, the card search; the deck
+# banner adds its tooltip): the word, muted, in normal weight (.unpriced in the CSS above). A bare
+# dash read as a broken value (audit N7, polish batch 3 N3).
+UNPRICED_HTML = "<span class='muted unpriced'>unknown</span>"
 
 
 def icon(name: str, *, cls: str = "i") -> str:

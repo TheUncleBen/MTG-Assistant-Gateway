@@ -70,8 +70,8 @@ from .pages import (
 from .profile_page import COLLECTION_CSS as VISIBILITY_CSS
 from .profile_page import collection_visibility, profile_or_none
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
+from .theme import UNPRICED_HTML, icon, render, stylesheet_link
 from .theme import esc as _esc
-from .theme import icon, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -1608,11 +1608,6 @@ def price_text(r: dict[str, Any]) -> str:
     return unit if qty <= 1 else f"{money(p['value'], p['currency'])} · {qty} × {unit}"
 
 
-# a price nobody knows, in words and muted, as the deck banner says it (audit N7): a bare dash read
-# as a broken value
-UNPRICED_HTML = "<span class='muted unpriced'>unknown</span>"
-
-
 def price_cell(r: dict[str, Any]) -> str:
     """The list's Price column: the row's value, and under it the copies times the unit price;
     "unknown" when Scryfall has no price for its finish."""
@@ -1811,7 +1806,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
             f"{body}{badges}</button>"
             f"<div class='meta'><span class='nm'>{_tick(r)}<span class='name' title='{name}'>{name}</span>"
             f"{_kebab(r['name'], rid)}</span><span class='ty'>{sub}</span>"
-            + (f"<span class='pr'>{_esc(price)}</span>" if price else "")
+            + f"<span class='pr'>{_esc(price) if price else UNPRICED_HTML}</span>"
             + chips
             + f"</div><div class='act'>{stepper}</div>{shims}</li>"
         )
@@ -1824,12 +1819,13 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str, tag_colors: dict[str, s
         if img
         else "<span class='thumb'></span>"
     )
-    price = _esc(price_text(r))
+    # under 900 px the Price column is hidden: the price goes on the card's own lines; a price
+    # nobody knows says so there too, as the column does (audit N7, N12)
+    price = _esc(price_text(r)) or UNPRICED_HTML
     sub_md = " · ".join(x for x in (set_line, set_name, fin_word, cond_word, lang_word) if x)
     sub_sm = " · ".join(x for x in (set_line, fin_word, _esc(cond or "Not set"), lang_word) if x)
-    if price:  # under 900 px the Price column is hidden: the price goes on the card's own lines
-        sub_md += f"<span class='pr lgh'>{price}</span>"
-        sub_sm += f" · <span class='pr'>{price}</span>"
+    sub_md += f"<span class='pr lgh'>{price}</span>"
+    sub_sm += f" · <span class='pr'>{price}</span>"
     return (
         f"<li class='tr row' role='row' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
         f"<span class='cardc' role='cell'>{_tick(r)}<button type='button' class='thumbbtn' "

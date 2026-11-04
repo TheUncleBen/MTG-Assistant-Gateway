@@ -1424,6 +1424,7 @@ def test_the_printing_detail_offers_the_finishes_it_is_made_in(server: Server) -
         browser.close()
 
 
+AS_OF = "2026-11-03T06:00:00+00:00"
 AS_OF_NOTE = "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
 
 
@@ -1441,10 +1442,12 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
     sid = server.sign_in_and_link()
     prints = re.compile(r"/scan/api/prints\?")
 
+    as_of = {"as_of": AS_OF}
+
     def from_copy(route) -> None:
         answer = route.fetch()
         data = answer.json()
-        data.update({"from_local_copy": True, "as_of": "2026-11-03", "as_of_note": AS_OF_NOTE})
+        data.update({"from_local_copy": True, "as_of_note": AS_OF_NOTE, **as_of})
         route.fulfill(status=answer.status, content_type="application/json", body=json.dumps(data))
 
     touch = width < 900
@@ -1458,7 +1461,14 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
         _open_picker(page, card)
         note = page.locator(".printpick .ppasof")
         note.wait_for(state="visible", timeout=3000)
-        assert note.inner_text().strip() == AS_OF_NOTE
+        # the day in the viewer's own locale, as the site writes dates (audit N14), never the
+        # gateway's fixed "3 Nov"
+        day = page.evaluate(
+            "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))", AS_OF
+        )
+        assert day and day in note.inner_text() and "3 Nov" not in note.inner_text(), (day, note.inner_text())
+        said = f"Printings and prices as of {day} (Scryfall isn't answering right now)"
+        assert note.inner_text().strip() == said
         assert note.get_attribute("role") == "status" and "notice" in (note.get_attribute("class") or "")
         box, grid, n = (
             page.locator(".printpick .ppbox").bounding_box(),
@@ -1472,6 +1482,14 @@ def test_an_answer_from_the_local_copy_says_how_old_it_is_above_the_list(
         assert page.evaluate(MEASURE) == []
         # the tiles are listed under it as ever
         assert any(t.startswith("CMR #472") for t in _tiles(page)), _tiles(page)
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('.printpick.open')")
+        # a day the page can't read: the gateway's own line
+        as_of["as_of"] = "soon"
+        page.reload(wait_until="networkidle")
+        _open_picker(page, card)
+        note.wait_for(state="visible", timeout=3000)
+        assert note.inner_text().strip() == AS_OF_NOTE
         page.keyboard.press("Escape")
         page.wait_for_function("() => !document.querySelector('.printpick.open')")
         # a live answer (a fresh page: the picker keeps the lists it read): nothing extra

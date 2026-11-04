@@ -1122,3 +1122,55 @@ def test_deck_card_curve_labels_read_against_their_background(theme: str) -> Non
                 page.close()
         finally:
             browser.close()
+
+
+AS_OF = "2026-11-03T06:00:00+00:00"
+AS_OF_NOTE = "Printings and prices as of 3 Nov (Scryfall can't be reached right now)"
+
+
+def test_printings_card_says_when_the_list_came_from_the_gateways_copy() -> None:
+    """While Scryfall isn't answering, card_printings answers from the gateway's daily copy
+    (``from_local_copy`` and ``as_of`` on the tool result, and on the link's JSON): the card says so
+    over the list, with the copy's day in the viewer's locale, or the gateway's own line when the
+    day can't be read; a live list shows nothing there (audit N15)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    summary = {"ok": True, "oracle_id": "o-1", "name": "Sol Ring", "total_cards": 3, "has_more": False}
+    meta = {"_meta": {"mtg/card": {"link": LINK, "name": "Sol Ring", "oracle_id": "o-1", "total": 3}}}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            # the tool result says it: the day, formatted on the card
+            _route(page, printings=PRINTINGS)
+            copy = {**summary, "from_local_copy": True, "as_of": AS_OF}
+            card = _open(page, "printings-card", {"structuredContent": copy, **meta})
+            card.locator(".tile").nth(2).wait_for()
+            day = page.evaluate(
+                "iso => new Intl.DateTimeFormat(undefined, {dateStyle: 'medium'}).format(new Date(iso))",
+                AS_OF,
+            )
+            note = card.locator("#asof")
+            assert note.is_visible() and note.get_attribute("role") == "status"
+            said = f"Printings and prices as of {day} (Scryfall isn't answering right now)"
+            assert note.inner_text().strip() == said
+            assert note.bounding_box()["y"] < card.locator("#grid").bounding_box()["y"]  # over the list
+            # the day can't be read: the gateway's own line, from the link's JSON
+            page.unroute("https://mtg.test/cards/data/*")
+            unread = {**PRINTINGS, "from_local_copy": True, "as_of": "soon", "as_of_note": AS_OF_NOTE}
+            _route(page, printings=unread)
+            card = _open(page, "printings-card", {"structuredContent": summary, **meta})
+            card.locator(".tile").nth(2).wait_for()
+            assert card.locator("#asof").inner_text().strip() == AS_OF_NOTE
+            # a live list: nothing there
+            page.unroute("https://mtg.test/cards/data/*")
+            _route(page, printings=PRINTINGS)
+            card = _open(page, "printings-card", {"structuredContent": summary, **meta})
+            card.locator(".tile").nth(2).wait_for()
+            assert not card.locator("#asof").is_visible()
+            assert errors == [], errors
+        finally:
+            browser.close()

@@ -68,7 +68,13 @@ def test_six_widgets_from_the_report() -> None:
     )
     # issues found: a red edge and the count
     assert "<div class='wdg alert'>" in widgets and "2<small>issues found</small>" in widgets
-    assert "$344.00<small>100 cards</small>" in widgets and "34 lands · Avg MV 3.2" in widgets
+    assert "$344.00<small>100 cards</small>" in widgets
+    # one span a fact, balanced with the dots in the gaps, so no fact breaks inside (polish batch 3
+    # N1; the facts were one text with " · " between them)
+    assert (
+        "<span class='tx ui-dots balanced'><span>34 lands</span><span>Avg MV 3.2</span>"
+        "<span>0 game changers</span></span>"
+    ) in widgets
     for href in ("#rv-forge", "#rv-solo", "#rv-model", "#rv-valid", "#rv-stats"):
         assert f"href='{href}'" in widgets and f"id='{href[1:]}'" in html
 

@@ -723,7 +723,11 @@ def test_a_failed_undo_retries_only_the_rows_still_in_the_binder(server: Server)
         page.route(re.compile(r"/collection/api/rows/"), on_rows)
         undo = page.locator("#list-msg").get_by_role("button", name="Undo")
         undo.click()
-        expect(page.locator("#list-msg .notice.error")).to_contain_text("Could not undo", timeout=10_000)
+        # the note says what came out and that Undo takes out the rest (audit N13)
+        expect(page.locator("#list-msg .notice.error")).to_contain_text(
+            "Took 2 of 3 copies out of your binder; the rest could not be taken out", timeout=10_000
+        )
+        assert "Press Undo again for the rest" in page.locator("#list-msg .notice.error").inner_text()
         assert len(server.ark.collections.get("alice", {})) == 1  # Sol Ring is out, the Signet stays
         # Undo stays on the page, in the notice that says what went wrong, for another go
         assert undo.count() == 1 and undo.is_enabled() and undo.is_visible()
