@@ -158,10 +158,13 @@ ul.facts li b.unpriced{font-weight:400;color:var(--muted)}
       drawColours(st.color_pips || st.colour_pips || {}, st.mana_sources || {}, st.color_identity || st.colour_identity);
       fact(facts, "Lands / nonlands", num(st.land_count) + " / " + num(st.nonland_count));
       if (st.average_mana_value != null) fact(facts, "Average mana value", String(st.average_mana_value));
-      // no card priced: "unknown", muted and plain, as the site says it (never "$0.00"); a partly
-      // priced deck keeps its sum and "(n of m priced)"
-      if (st.priced_cards === 0 || (st.price_total == null && !num(st.priced_cards))) fact(facts, "Price", "unknown", "unpriced");
-      else fact(facts, "Price", "$" + num(st.price_total).toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
+      // no card priced, no total, or a total that is not a number: "unknown", muted and plain, as the
+      // site says it (never "$0.00"; audit P4, A4). A total of 0 with no priced count (an older
+      // payload) is no price either; a partly priced deck keeps its sum and "(n of m priced)"
+      var total = st.price_total == null || st.price_total === "" ? NaN : Number(st.price_total);
+      var noPrice = st.priced_cards === 0 || !isFinite(total) || (st.priced_cards == null && total === 0);
+      if (noPrice) fact(facts, "Price", "unknown", "unpriced");
+      else fact(facts, "Price", "$" + total.toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
       if (st.game_changers) fact(facts, "Game changers", String(st.game_changers.length));
       fact(facts, "Tutors · extra turns · land denial", num(st.tutors) + " · " + num(st.extra_turns) + " · " + num(st.mass_land_denial));
       if (st.salt_total) fact(facts, "Salt", String(st.salt_total));

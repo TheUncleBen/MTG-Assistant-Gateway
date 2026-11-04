@@ -369,6 +369,10 @@ body.picker-open{overflow:hidden}
 .scan details.intro > summary h2{margin:0;font-size:1.05rem;font-weight:700}
 .scan details.intro[open] > summary{margin-bottom:.6rem}
 .scan details.intro[open]{padding-bottom:.9rem}
+/* folded, the intro's steps and Got it have no boxes at all: Chromium only skips a closed
+   details' content (content-visibility), keeping its last layout, so a folded intro's Got it still
+   reported a rectangle near the page's foot (over "How it works" at 200% text, audit A5) */
+.scan details.intro:not([open]) > :not(summary){display:none}
 .scan .intro .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
 .scan .intro .steps li{display:flex;gap:.6rem;align-items:flex-start;line-height:1.4}
 .scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--orange);color:var(--on-orange);

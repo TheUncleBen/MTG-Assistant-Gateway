@@ -725,6 +725,10 @@ button.thumbbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* a link in a notice reads as one; a button in one (Try again on a held page, Show the changes on
    the deck check strip) keeps the button's own look (polish re-check P1) */
 .notice a:not(.btn){color:inherit;text-decoration:underline}
+/* a button in a notice stays whole (the notice's overflow-wrap:anywhere broke "Try again" into
+   "Try / agai / n" on a 412 px held Binder, polish re-check Q1) and goes under the words when they
+   leave it no room on their line */
+.notice .btn{flex:none;white-space:nowrap;overflow-wrap:normal}
 /* a run still going (a deck's test): the spinner, the words and the capsule to its report in one row */
 .notice.testing{border-left-color:var(--orange);display:flex;flex-wrap:wrap;align-items:center;
   gap:.35rem .6rem}
@@ -2407,6 +2411,11 @@ SEARCH_PANEL_CSS = """
     overflow:auto;
     overscroll-behavior:contain;padding:0 1rem calc(5.5rem + env(safe-area-inset-bottom))}
   .spanel .sp-filters.open{display:block}
+  /* a sheet holding only the card size (the Binder with no tags: "View") is a bottom sheet the
+     height of its content over a scrim, not a full screen; its foot sits in it (polish re-check Q5) */
+  .spanel .sp-filters.lite{top:auto;max-height:80vh;border-radius:var(--radius) var(--radius) 0 0;
+    box-shadow:0 0 0 100vmax rgba(0,0,0,.45);padding-bottom:0}
+  .spanel .sp-filters.lite .sp-sheet-foot{position:sticky;left:auto;right:auto;margin:1rem -1rem 0}
   .spanel .sp-filters .fgrid{display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch}
   .spanel .sp-filters .fgrid > *{flex:none}
   .spanel .sp-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;
@@ -2422,7 +2431,8 @@ SEARCH_PANEL_CSS = """
   .spanel .sp-sheet-foot{display:flex;gap:.5rem;position:fixed;left:0;right:0;bottom:0;z-index:3;
     background:var(--bg);
     border-top:1px solid var(--border);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
-  .spanel .sp-sheet-foot button,.spanel .sp-sheet-foot .btn{margin:0;flex:1 1 auto;min-height:2.9rem;
+  /* the foot's buttons are phone tap targets: 44 px, not 2.9rem (40.6 px) */
+  .spanel .sp-sheet-foot button,.spanel .sp-sheet-foot .btn{margin:0;flex:1 1 auto;min-height:44px;
     display:inline-flex;align-items:center;justify-content:center}
   .spanel .sp-sheet-foot .btn-primary{flex:2 1 auto}
   /* Clear filters stays hidden while nothing is set, in the sheet too: the rule above gave every

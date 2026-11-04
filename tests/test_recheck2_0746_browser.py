@@ -512,6 +512,19 @@ def test_the_binders_phone_sheet_is_titled_by_what_it_holds(
             )
             assert (page.locator("#sp-filters select[name=tag]").count() == 1) == tags
             assert page.locator("#sp-filters .sheet-size").count() == 1  # the card size is in it either way
+            # with only the card size in it, a bottom sheet the height of its content, its foot
+            # inside it; with groups the full screen (polish re-check Q5)
+            sheet, tall = page.locator("#sp-filters").bounding_box(), page.evaluate("innerHeight")
+            foot = page.locator("#sp-filters .sp-sheet-foot").bounding_box()
+            show = page.locator("#sp-filters .sp-sheet-foot .sp-show")
+            assert show.is_visible() and show.bounding_box()["height"] >= 44
+            assert abs(sheet["y"] + sheet["height"] - tall) <= 1, (sheet, tall)
+            if tags:
+                assert sheet["y"] <= 1 and sheet["height"] >= tall - 1, (sheet, tall)
+            else:
+                assert sheet["height"] <= tall * 0.5, (sheet, tall)
+                assert foot["y"] + foot["height"] <= sheet["y"] + sheet["height"] + 1, (foot, sheet)
+                assert page.locator("#sp-filters").evaluate("e => e.scrollHeight <= e.clientHeight + 1")
             assert page.evaluate(CONTRAST, "#sp-filters .sp-sheet-head h2") == []
             assert page.evaluate(MEASURE) == []
             page.locator("#sp-filters .sp-sheet-head .close").click()
@@ -563,8 +576,73 @@ def test_a_price_nobody_knows_reads_unknown_on_the_report_and_in_the_card_viewer
         page.wait_for_selector(".cardview.open", timeout=3000)
         page.get_by_role("button", name="Price history").click()
         box = page.locator("#cardview-prices")
-        box.locator("p", has_text="Nonfoil: unknown").wait_for(timeout=5000)
+        line = box.locator("p", has_text="Nonfoil: unknown")
+        line.wait_for(timeout=5000)
+        # one muted line, the word in the shared treatment, and no second line repeating it (A1)
+        assert line.inner_text() == "CMM #1234 \u00b7 Nonfoil: unknown \u00b7 comes with the next daily check"
+        assert "muted" in (line.get_attribute("class") or "").split()
+        assert line.evaluate("e => getComputedStyle(e).color") == line.evaluate(
+            "e => getComputedStyle(e.querySelector('.unpriced')).color"
+        )
+        _one_treatment(page, "#cardview-prices .unpriced")
+        assert page.evaluate(CONTRAST, "#cardview-prices p") == []
         said = box.inner_text()
-        assert "no price" not in said.lower().replace("no price yet", ""), said
+        assert "No price yet" not in said and "no price" not in said.lower(), said
         assert page.evaluate(MEASURE) == [] and errors == []
+        browser.close()
+
+
+# a button in a notice: its words on one line, the box inside the notice, never over the notice's
+# own words (it goes under them when they leave it no room)
+NOTICE_BUTTONS = """sel => [...document.querySelectorAll(sel)].map(b => {
+  const r = document.createRange(); r.selectNodeContents(b);
+  const n = b.closest('.notice'), nb = n.getBoundingClientRect(), bb = b.getBoundingClientRect();
+  const words = [...n.childNodes].filter(x => x.nodeType === 3 && x.textContent.trim()).flatMap(t => {
+    const q = document.createRange(); q.selectNodeContents(t); return [...q.getClientRects()]; });
+  const meets = words.some(t => Math.min(t.right, bb.right) - Math.max(t.left, bb.left) > 0
+    && Math.min(t.bottom, bb.bottom) - Math.max(t.top, bb.top) > 0);
+  return {text: b.textContent.trim(), lines: r.getClientRects().length, height: bb.height, meets,
+    inside: bb.left >= nb.left - 1 && bb.right <= nb.right + 1};
+})"""
+
+
+@pytest.mark.parametrize("width,zoom", [(360, "none"), (412, "none"), (360, "text"), (412, "text")])
+def test_a_button_in_a_notice_stays_whole_and_goes_under_the_words(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Polish re-check Q1: on the held Binder at 412 px "Try again" broke mid-word into
+    "Try / agai / n" (the notice's overflow-wrap:anywhere reached into the button). A button in a
+    notice keeps its words on one line, inside the notice and never over its words, at 360 and
+    412 px and with 200% text, on the held Binder and the held deck page."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    decks = server.app.state.gateway.decks
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+        page.goto(f"{server.base}/collection", wait_until="networkidle")  # read and kept
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        server.ark.fail_collection_reads = True
+        server.ark.fail_deck_reads = True
+        # the deck's kept copy, too old to show: the read fails and the last read is held
+        decks._page_decks = {k: (v[0] - 7 * 3600, v[1]) for k, v in decks._page_decks.items()}
+        try:
+            for path in ("/collection", "/decks/42"):
+                page.goto(f"{server.base}{path}", wait_until="networkidle")
+                if zoom == "text":
+                    page.evaluate(TEXT_200)
+                    page.wait_for_timeout(150)
+                got = page.evaluate(NOTICE_BUTTONS, ".notice.held .btn")
+                assert [g["text"] for g in got] == ["Try again"], (path, got)
+                for g in got:
+                    assert g["lines"] == 1 and g["inside"] and not g["meets"], (path, width, zoom, g)
+                    assert g["height"] >= 44, (path, g)
+                assert page.evaluate(MEASURE) == [], (path, width, zoom)
+        finally:
+            server.ark.fail_collection_reads = False
+            server.ark.fail_deck_reads = False
+        assert errors == []
         browser.close()

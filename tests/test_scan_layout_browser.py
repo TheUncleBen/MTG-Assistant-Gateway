@@ -748,3 +748,63 @@ def test_a_failed_undo_retries_only_the_rows_still_in_the_binder(server: Server)
         assert len(calls) == 3 and calls[2].endswith(str(signet)) and calls.count(calls[2]) == 2, calls
         assert errors == []
         browser.close()
+
+
+# the intro's own parts and the controls near it: any two that share a point on the page
+INTRO_OVERLAPS = """() => {
+  const sel = '#intro summary, #intro summary h2, #intro .list-actions button, #how-it-works,'
+    + ' .hubseg.tabs button';
+  const els = [...document.querySelectorAll(sel)].filter(e => e.getClientRects().length);
+  const out = [];
+  for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+    if (els[i].contains(els[j]) || els[j].contains(els[i])) continue;
+    const a = els[i].getBoundingClientRect(), b = els[j].getBoundingClientRect();
+    const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (w > 0 && h > 0) {
+      out.push([els[i].textContent.trim(), els[j].textContent.trim(), Math.round(w), Math.round(h)]);
+    }
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("zoom", ["none", "text"])
+@pytest.mark.parametrize("width", [360, 412])
+def test_the_folded_intro_has_no_boxes_and_got_it_never_meets_how_it_works(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """Audit A5: at 360 px with 200% text the folded intro's "Got it" still had a rectangle (Chromium
+    keeps a closed details' last layout) that fell over "How it works" at the page's foot, 183×17.
+    Folded, the intro's content has no boxes at all; open, Got it is a 44 px button that meets
+    nothing, and nothing scrolls sideways either way."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_text_zoom_browser import TEXT_200
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, server.sign_in(), width, False, "light")
+        if zoom == "text":
+            page.evaluate(TEXT_200)
+            page.wait_for_timeout(200)
+        page.locator("#how-it-works").click()  # open, whatever the visit
+        got_it = page.locator("#intro .list-actions button", has_text="Got it")
+        assert page.locator("#intro").evaluate("e => e.open") is True
+        box = got_it.bounding_box()
+        assert box and box["height"] >= 44, box
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width, box
+        assert page.evaluate(INTRO_OVERLAPS) == []
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        page.locator("#intro summary").click()  # fold it
+        assert page.locator("#intro").evaluate("e => e.open") is False
+        assert got_it.evaluate("e => e.getClientRects().length") == 0
+        assert got_it.evaluate("e => e.checkVisibility()") is False
+        assert page.evaluate(INTRO_OVERLAPS) == [], (width, zoom)
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        page.locator("#intro summary").click()  # and open again: the button is back
+        assert got_it.bounding_box()["height"] >= 44 and page.evaluate(INTRO_OVERLAPS) == []
+        assert errors == []
+        browser.close()
