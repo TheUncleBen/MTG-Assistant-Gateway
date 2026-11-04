@@ -6,6 +6,7 @@ event loop. The bulk index and file here are fakes built in the test: nothing is
 from __future__ import annotations
 
 import asyncio
+import gc
 import gzip
 import json
 import time
@@ -297,6 +298,32 @@ async def test_the_event_loop_keeps_turning_while_the_copy_builds(tmp_path: Path
     assert took > 0.5, f"the build took {took:.2f} s: too short to say anything about the loop"
     assert longest < 0.25, f"the event loop stalled {longest:.2f} s while the copy was built ({took:.1f} s)"
     assert service.copy.meta()["count"] == "8000"
+
+
+def test_the_build_leaves_the_garbage_collector_nothing_to_walk(tmp_path: Path) -> None:
+    """Why the loop kept turning only most of the time: the rows held a batch at a time outlived
+    the young collections, piled into the oldest generation and set off full collections, which
+    hold every thread for as long as the gateway's whole memory takes to walk (0.30 s on CI, while
+    the build took 1.2 s). Each row is turned into plain values at once now, so the oldest
+    generation hardly grows while the copy is built, whatever the size of the file."""
+    sf = FakeScryfall()
+    gz = tmp_path / "default-cards.jsonl.gz"
+    gz.write_bytes(_gz(_many(sf, 8000)))
+    gc.collect()
+    base = len(gc.get_objects(2))
+    grew = [0]
+
+    def watch(phase: str, info: dict[str, Any]) -> None:
+        if phase == "stop":
+            grew[0] = max(grew[0], len(gc.get_objects(2)) - base)
+
+    gc.callbacks.append(watch)
+    try:
+        count = bulk.build(gz, tmp_path / COPY_FILE, {"updated_at": DAY_A}, min_printings=1)
+    finally:
+        gc.callbacks.remove(watch)
+    assert count == 8000
+    assert grew[0] < 1000, f"the oldest generation grew by {grew[0]} objects while the copy was built"
 
 
 async def test_a_gateway_under_test_downloads_nothing(stack: Stack) -> None:

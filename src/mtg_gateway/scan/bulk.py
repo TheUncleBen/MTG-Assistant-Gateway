@@ -222,36 +222,44 @@ def build(
         zdict = "".join(json.dumps(r, separators=(",", ":")) for _o, r in first).encode()[-ZDICT_MAX:]
         primed = zlib.compressobj(6, zdict=zdict)  # copied for each row: priming costs more
 
-        def put(batch: list[tuple[str, dict[str, Any]]]) -> int:
-            values = []
-            full: list[tuple[str, str, str]] = []
-            faces: list[tuple[str, str, str]] = []
-            for oid, row in batch:
-                row["oracle_id"] = oid
-                z = primed.copy()
-                blob = z.compress(json.dumps(row, separators=(",", ":")).encode()) + z.flush()
-                usd = (row.get("prices") or {}).get("usd")
-                try:
-                    price = float(usd) if usd else None
-                except ValueError:
-                    price = None
-                values.append(
-                    (
-                        oid,
-                        str(row.get("released_at") or ""),
-                        price,
-                        "," + ",".join(row.get("finishes") or []) + ",",
-                        row.get("frame") or "",
-                        row.get("border") or "",
-                        str(row.get("set") or "").lower(),
-                        str(row.get("collector_number") or "").lower(),
-                        blob,
-                    )
+        # Each row is turned into plain values (text, a number, the compressed blob) as soon as it
+        # is read, and its dicts are freed at once. Holding a batch of row dicts let thousands of
+        # tracked objects outlive the young collections, and that set off full garbage
+        # collections, which hold every thread (the event loop too) for as long as the whole
+        # gateway's memory takes to walk: 0.1 to 0.3 s each. Tuples of plain values are dropped
+        # from the collector's tracking at its first look, so the build hands it nearly nothing.
+        values: list[tuple[Any, ...]] = []
+        full: list[tuple[str, str, str]] = []
+        faces: list[tuple[str, str, str]] = []
+
+        def add(oid: str, row: dict[str, Any]) -> None:
+            row["oracle_id"] = oid
+            z = primed.copy()
+            blob = z.compress(json.dumps(row, separators=(",", ":")).encode()) + z.flush()
+            usd = (row.get("prices") or {}).get("usd")
+            try:
+                price = float(usd) if usd else None
+            except ValueError:
+                price = None
+            values.append(
+                (
+                    oid,
+                    str(row.get("released_at") or ""),
+                    price,
+                    "," + ",".join(row.get("finishes") or []) + ",",
+                    row.get("frame") or "",
+                    row.get("border") or "",
+                    str(row.get("set") or "").lower(),
+                    str(row.get("collector_number") or "").lower(),
+                    blob,
                 )
-                name = str(row.get("name") or "")
-                if name and row.get("layout") not in NAMELESS_LAYOUTS:
-                    full.append((fold(name), oid, name))
-                    faces.extend((fold(p), oid, name) for p in name.split(" // ") if " // " in name)
+            )
+            name = str(row.get("name") or "")
+            if name and row.get("layout") not in NAMELESS_LAYOUTS:
+                full.append((fold(name), oid, name))
+                faces.extend((fold(p), oid, name) for p in name.split(" // ") if " // " in name)
+
+        def put() -> int:
             conn.executemany("INSERT INTO printings VALUES (?,?,?,?,?,?,?,?,?)", values)
             # A card's own full name wins over a face of another card's that reads the same
             # (a reversible card is listed as "Name // Name"; "Fire" is a face of "Fire // Ice").
@@ -262,16 +270,20 @@ def build(
                 "WHERE names.whole = 0",
                 full,
             )
-            return len(values)
+            n = len(values)
+            values.clear()
+            full.clear()
+            faces.clear()
+            return n
 
-        count += put(first)
-        batch: list[tuple[str, dict[str, Any]]] = []
-        for item in rows:
-            batch.append(item)
-            if len(batch) >= BATCH:
-                count += put(batch)
-                batch = []
-        count += put(batch)
+        for oid, row in first:
+            add(oid, row)
+        del first
+        for oid, row in rows:
+            add(oid, row)
+            if len(values) >= BATCH:
+                count += put()
+        count += put()
         if count < min_printings:
             raise CopyBroken(f"only {count} printings (at least {min_printings} expected)")
         conn.execute(INDEXES)
