@@ -32,8 +32,8 @@ name per thing.
   default price alert goes on cards you watch from now on. A card watched by name alone starts a
   new price history from the first daily price check; a watch limit already saved on the Settings
   page stays as saved.
-- **The data folder grows by about 55 MB** (about 190 MB for a short while each time a new copy
-  is built): the gateway keeps a daily copy of Scryfall's printings, `scryfall-printings.sqlite`.
+- **The data folder grows by about 55 MB** (up to about 172 MB in all for a short while each time
+  a new copy is built): the gateway keeps a daily copy of Scryfall's printings, `scryfall-printings.sqlite`.
   If you restrict outbound traffic, also allow `data.scryfall.io`. **Keep a local copy of card
   printings** on the Settings page (General) turns it off.
 - **Sign-ins now last 7 days unused** and renew as you use them, up to 30 days after you signed

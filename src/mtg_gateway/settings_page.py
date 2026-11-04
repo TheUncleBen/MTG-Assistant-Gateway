@@ -174,7 +174,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "printings_copy": (
         "Keep a local copy of card printings",
-        "Used only when Scryfall can't answer. About 55 MB, refreshed daily.",
+        "Used only when Scryfall can't be reached. About 55 MB, refreshed daily. Turning it off "
+        "deletes the copy.",
     ),
     "log_level": ("Log detail", "How much the gateway writes to its log. INFO suits most servers."),
     "archidekt_calls_per_10_min": (

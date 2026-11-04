@@ -221,8 +221,9 @@ reach past the stack, so if your old version is older than the one named, also:
   default) has passed since they signed in, not after a week. To keep a week, set that row to 7 days.
 - **0.7.45 or older:** the data folder (`MTG_DATA_DIR`) grows by about 55 MB: once a day the
   gateway downloads Scryfall's printings file and keeps a copy of it,
-  `scryfall-printings.sqlite`, for when Scryfall can't answer. While a new copy is built the
-  folder holds about 190 MB more for a short while (the download, the new copy and the old one).
+  `scryfall-printings.sqlite`, for when Scryfall can't be reached. While a new copy is built the
+  copy's files take up to about 172 MB in all for a short while (the download, the new copy and
+  the old one).
   If you restrict the gateway's outbound traffic, also allow `data.scryfall.io`, where Scryfall
   serves that file. Not wanted? Turn off **Keep a local copy of card printings** on the Settings
   page (General): the copy is deleted at once and nothing more is downloaded

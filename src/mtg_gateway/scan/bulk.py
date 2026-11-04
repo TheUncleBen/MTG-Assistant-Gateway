@@ -12,8 +12,9 @@ restart never downloads the file again before it is due. The file is read line b
 never whole, in a worker thread, and cut down to what the printings answers show (``browse_row``,
 the printing picker's row, which has everything ``card_printings`` and ``printings_of`` return
 too). Each row is kept zlib-compressed with a dictionary taken from the file's own first rows, so
-the copy takes about 55 MB on disk, beside the database in the data folder (about 190 MB at most
-while a new one is built: the download, the new copy and the old one).
+the copy takes about 55 MB on disk, beside the database in the data folder (up to about 172 MB
+in all while a new one is built: the download, the new copy and the old one; measured in the
+0.7.46 audit with a full-size file).
 
 Why a separate SQLite file and not a table of the database: the copy is replaced whole every day.
 As a table, that is a 55 MB write holding the database's write lock (every member's write waits
@@ -70,8 +71,10 @@ logger = logging.getLogger(__name__)
 COPY_FILE = "scryfall-printings.sqlite"
 BULK_TYPE = "default_cards"
 COPY_TTL = 24 * 3600  # the copy is downloaded again once it is a day old, never sooner
-RETRY_AFTER_FAILURE = 6 * 3600  # an index that failed or had nothing newer: the next look waits this long
-# a file downloaded and found cut off or damaged: the next download waits a day, so a file that
+# any HTTP or transport failure (the index or the file: an error answer, a dropped or cut-off
+# transfer), or an index with nothing newer: the next look waits this long
+RETRY_AFTER_FAILURE = 6 * 3600
+# a file received whole and then found damaged: the next download waits a day, so a file that
 # keeps failing costs at most one 80 MB download a day
 RETRY_AFTER_BAD_FILE = COPY_TTL
 SETTING = "printings_copy"  # the admin Settings row "Keep a local copy of card printings"
@@ -113,6 +116,11 @@ class CopyBroken(Exception):
     """The downloaded file is cut off or damaged: the copy in use is kept."""
 
 
+class Stopped(Exception):
+    """The copy was turned off, or the gateway is shutting down, while it was downloaded or built:
+    nothing is wrong, so no warning and no wait before the next try."""
+
+
 def _iso(value: Any) -> str | None:
     """Scryfall's ``updated_at`` as an ISO 8601 date-time in UTC (``2026-11-03T22:06:49+00:00``),
     the ``as_of`` the answers carry and the page formats in the viewer's own way; None when there
@@ -150,7 +158,7 @@ def _cards(gz_path: Path, stop: threading.Event) -> Any:
         with gzip.open(gz_path, "rt", encoding="utf-8") as f:
             for n, line in enumerate(f, 1):
                 if stop.is_set():
-                    raise CopyBroken("stopped")
+                    raise Stopped()
                 text = line.strip()
                 if not text:
                     continue
@@ -257,7 +265,7 @@ def build(
         conn.commit()
         conn.close()
         if stop.is_set():  # turned off or shut down while it was built: never put in place
-            raise CopyBroken("stopped")
+            raise Stopped()
         os.replace(tmp, out)  # the one step that swaps copies: the old one stays until here
     except BaseException:
         conn.close()
@@ -434,8 +442,9 @@ class PrintingsCopy:
     async def refresh(self) -> bool:
         """Download and build a new copy when it is due and Scryfall has a newer file. Returns
         whether a new copy is in place. Never raises: a failure keeps the copy and waits
-        RETRY_AFTER_FAILURE (RETRY_AFTER_BAD_FILE once the file itself was downloaded), a wait kept
-        across restarts. Turned off, it deletes what is left of the copy instead."""
+        RETRY_AFTER_FAILURE (RETRY_AFTER_BAD_FILE for a file received whole and found damaged), kept
+        across restarts. Turned off, it deletes what is left of the copy instead; turned off while
+        it downloads, the transfer stops at its next piece, with no warning and no wait."""
         if not self.enabled:
             if any(f.exists() for f in self._files()):
                 await asyncio.to_thread(self.remove)
@@ -445,8 +454,10 @@ class PrintingsCopy:
         client = self._scryfall()
         if client is None:
             return False
-        self._halt = threading.Event()
-        downloaded = False
+        # this download's own stop: Off (remove) and close set it; On again makes a new one for the
+        # next download, so it never restarts this one
+        halt = self._halt = threading.Event()
+        received = {"whole": False}  # the file came down whole (only then is a failure its content's)
         try:
             entry = await self._index(client)
             if entry["updated_at"] == str(self.meta().get("updated_at") or "-"):
@@ -454,18 +465,22 @@ class PrintingsCopy:
                 self._wait_until(time.time() + RETRY_AFTER_FAILURE, "nothing newer")
                 return False
             started = time.monotonic()
-            downloaded = True
-            count = await self._download_and_build(client, entry)
+            count = await self._download_and_build(client, entry, halt, received)
         except asyncio.CancelledError:
-            self._halt.set()
+            halt.set()
             raise
-        except Exception as exc:  # keep the copy in use, try again later
-            wait = RETRY_AFTER_BAD_FILE if downloaded else RETRY_AFTER_FAILURE
-            self._wait_until(time.time() + wait, str(exc)[:200])
-            if self.enabled:
-                logger.warning("local copy of Scryfall's printings not updated (%s); the old one stays", exc)
+        except Stopped:  # turned off (or shutting down) meanwhile: nothing failed
+            logger.info("download of Scryfall's printings stopped: the local copy was turned off")
+            if not self.enabled:
+                await asyncio.to_thread(self.remove)
             return False
-        if not self.enabled:  # turned off while it was being built
+        except Exception as exc:  # keep the copy in use, try again later
+            bad_file = received["whole"] and isinstance(exc, CopyBroken)
+            wait = RETRY_AFTER_BAD_FILE if bad_file else RETRY_AFTER_FAILURE
+            self._wait_until(time.time() + wait, str(exc)[:200])
+            logger.warning("local copy of Scryfall's printings not updated (%s); the old one stays", exc)
+            return False
+        if not self.enabled or halt.is_set():  # turned off while it was being built
             await asyncio.to_thread(self.remove)
             return False
         self._clear_wait()
@@ -505,7 +520,12 @@ class PrintingsCopy:
         size = entry.get("compressed_size")
         return {"uri": uri, "updated_at": updated, "size": str(size) if isinstance(size, int) else ""}
 
-    async def _download_and_build(self, client: Any, entry: dict[str, str]) -> int:
+    async def _download_and_build(
+        self, client: Any, entry: dict[str, str], halt: threading.Event, received: dict[str, bool]
+    ) -> int:
+        """Download the file to a temp file and build the copy from it. ``halt`` set (turned off)
+        stops the transfer at the next piece (Stopped); ``received["whole"]`` turns True once the
+        whole file is on disk, before it is read."""
         gz = self.path.with_name(self.path.name + ".download.gz")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         got = 0
@@ -521,6 +541,8 @@ class PrintingsCopy:
                     expected = "" if encoded else resp.headers.get("content-length") or entry["size"]
                     pending = bytearray()
                     async for chunk in resp.aiter_bytes():
+                        if halt.is_set():  # turned off: leaving the block closes the transfer
+                            raise Stopped()
                         pending += chunk
                         got += len(chunk)
                         if len(pending) >= CHUNK:
@@ -530,10 +552,14 @@ class PrintingsCopy:
             finally:
                 await asyncio.to_thread(out.close)
             if expected and expected.isdigit() and int(expected) != got:
-                raise CopyBroken(f"the download was cut off ({got} of {expected} bytes)")
+                # a transfer cut short is a transport failure, not a damaged file
+                raise ScryfallError("unavailable", f"the download was cut off ({got} of {expected} bytes)")
+            if halt.is_set():
+                raise Stopped()
+            received["whole"] = True
             meta = {"updated_at": entry["updated_at"], "downloaded_at": str(time.time()), "uri": entry["uri"]}
             return await asyncio.to_thread(
-                build, gz, self.path, meta, stop=self._halt, min_printings=self.min_printings
+                build, gz, self.path, meta, stop=halt, min_printings=self.min_printings
             )
         finally:
             with contextlib.suppress(OSError):

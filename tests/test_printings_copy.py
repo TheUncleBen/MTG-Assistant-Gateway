@@ -5,6 +5,7 @@ event loop. The bulk index and file here are fakes built in the test: nothing is
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import time
@@ -375,7 +376,8 @@ async def test_the_settings_row_turns_the_copy_off_and_on(stack: Stack) -> None:
     assert spec.kind == "bool" and spec.default is True and spec.env == "" and not spec.restart
     assert settings_page.TEXT["printings_copy"] == (
         "Keep a local copy of card printings",
-        "Used only when Scryfall can't answer. About 55 MB, refreshed daily.",
+        "Used only when Scryfall can't be reached. About 55 MB, refreshed daily. Turning it off "
+        "deletes the copy.",
     )
     live = stack.gw.decks.live
     copy = stack.gw.scan.copy
@@ -490,3 +492,123 @@ async def test_a_damaged_copy_is_logged_once_without_a_traceback(
             await service.printings(AESI)
     said = [r for r in caplog.records if "copy of Scryfall's printings" in r.getMessage()]
     assert len(said) == 2 and all(r.exc_info is None for r in said), [r.getMessage() for r in said]
+
+
+# -- round 3 of the 0.7.46 audit: Off during a download, and which failures wait a day -------------
+
+
+def _streaming(sf: FakeScryfall, body: bytes, chunk: int, on_chunk=None, fail_after: int | None = None):
+    """A client for ``sf`` whose bulk file comes in ``chunk``-byte pieces (``on_chunk(n)`` after the
+    n-th); ``fail_after``: the connection drops after that many pieces. Returns (client, served)."""
+    served = {"chunks": 0}
+
+    async def pieces():
+        for n, i in enumerate(range(0, len(body), chunk), 1):
+            if fail_after is not None and n > fail_after:
+                raise httpx.ReadError("connection reset")
+            served["chunks"] = n
+            yield body[i : i + chunk]
+            if on_chunk is not None:
+                on_chunk(n)
+            await asyncio.sleep(0)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == FILE:
+            sf.bulk_requests.append(str(request.url))
+            return httpx.Response(
+                200,
+                content=pieces(),
+                headers={"content-type": "application/gzip", "content-length": str(len(body))},
+            )
+        return sf.handle(request)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handle)), served
+
+
+async def test_turning_it_off_during_a_download_stops_the_transfer_at_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """P1: Off while the 80 MB file comes down stops reading it within a piece or two, says nothing
+    is damaged, leaves no file and no wait; On again downloads at the next check."""
+    import logging
+
+    sf = FakeScryfall()
+    body = _gz(_many(sf, 3000))
+    _offer(sf, body)
+    service, state = _switchable(sf, tmp_path)
+    copy = service.copy
+    pieces = len(body) // 2048 + 1
+
+    def off_at(n: int) -> None:
+        if n == 3:
+            state["on"] = False
+            copy.setting_changed("printings_copy")
+
+    client, served = _streaming(sf, body, 2048, on_chunk=off_at)
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=client)
+    caplog.set_level(logging.INFO)
+    assert pieces > 20
+    assert await copy.refresh() is False
+    assert served["chunks"] <= 5, f"{served['chunks']} of {pieces} pieces read after Off at the 3rd"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [], "Off left files behind"
+    warned = [r for r in caplog.records if r.levelno >= logging.WARNING and "bulk" in r.name]
+    assert warned == [], [r.getMessage() for r in warned]
+
+    # Off then On during a download: the next check downloads, with no wait left from it
+    state["on"] = True
+    copy.setting_changed("printings_copy")
+
+    def off_and_on_at(n: int) -> None:
+        if n == 3:
+            state["on"] = False
+            copy.setting_changed("printings_copy")
+            state["on"] = True
+            copy.setting_changed("printings_copy")
+
+    client, served = _streaming(sf, body, 2048, on_chunk=off_and_on_at)
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=client)
+    assert await copy.refresh() is False and served["chunks"] <= 5
+    assert copy.due(), "Off then On left a wait before the next download"
+    assert not copy.next_path.exists()
+    warned = [r for r in caplog.records if r.levelno >= logging.WARNING and "bulk" in r.name]
+    assert warned == [], [r.getMessage() for r in warned]
+    client, served = _streaming(sf, body, 1 << 16)
+    service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=client)
+    assert await copy.refresh() is True and copy.as_of == AS_OF
+
+
+async def test_only_a_file_received_whole_and_found_damaged_waits_a_day(tmp_path: Path) -> None:
+    """P7: a 503 on the file, or a connection that drops part way, waits RETRY_AFTER_FAILURE (6 h)
+    like any HTTP or transport failure; only a file received whole and then found damaged waits
+    RETRY_AFTER_BAD_FILE (a day)."""
+
+    def waits(folder: Path) -> float:
+        return PrintingsCopy(folder, lambda: None)._next_try - time.time()  # as a restart reads it
+
+    sf = FakeScryfall()
+    body = _gz(sf.cards)
+    _offer(sf, body)
+
+    def answer_503(request: httpx.Request) -> httpx.Response:
+        if request.url.path == FILE:
+            return httpx.Response(503, json={"object": "error"})
+        return sf.handle(request)
+
+    cases: dict[str, tuple[httpx.AsyncClient, float]] = {
+        "503 on the file": (
+            httpx.AsyncClient(transport=httpx.MockTransport(answer_503)),
+            bulk.RETRY_AFTER_FAILURE,
+        ),
+        "connection reset part way": (_streaming(sf, body, 512, fail_after=2)[0], bulk.RETRY_AFTER_FAILURE),
+    }
+    damaged = FakeScryfall()
+    _offer(damaged, b"<html>not the file</html>")
+    cases["received whole, not a gzip file"] = (damaged.client(), bulk.RETRY_AFTER_BAD_FILE)
+    for why, (client, wait) in cases.items():
+        folder = tmp_path / why.replace(" ", "-")
+        service = _service(sf, folder)
+        service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=client)
+        assert await service.copy.refresh() is False, why
+        assert wait - 60 < waits(folder) <= wait, (why, waits(folder) / 3600)
+        assert sorted(p.name for p in folder.iterdir()) == [COPY_FILE + ".next"], why
+    assert bulk.RETRY_AFTER_FAILURE == 6 * 3600 and bulk.RETRY_AFTER_BAD_FILE == 24 * 3600

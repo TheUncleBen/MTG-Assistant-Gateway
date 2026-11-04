@@ -263,7 +263,7 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   `default_cards`, about 80 MB) and keeps a trimmed copy of it in the data folder,
   `<MTG_DATA_DIR>/scryfall-printings.sqlite`, about 55 MB. While a new copy is built (about
   35 seconds on an x86 machine, longer on a Raspberry Pi) the folder holds the download and the
-  new copy beside the old one (about 190 MB in all), and the build adds about 17 MB to the gateway's memory. The copy is used only
+  new copy beside the old one (up to about 172 MB in all), and the build adds about 17 MB to the gateway's memory. The copy is used only
   when Scryfall can't be reached, is slowing the gateway down or has a problem answering: the
   printing picker and `card_printings` then answer from it and say how old it is ("Printings and
   prices as of 3 Nov"). It is not part of the backup: Scryfall gives it again. Deleting it is
