@@ -784,7 +784,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             notice = _ok("Every assistant was disconnected.")
         csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
         body = assistants.list_html(
-            state.db, sub, state.decks.mode_of(sub), csrf_in, open_box="disconnect_all" in q
+            state.db,
+            sub,
+            state.decks.mode_of(sub),
+            csrf_in,
+            open_box="disconnect_all" in q,
+            back="account" if q.get("from") == "account" else "details",
         )
         return assistants_page("Assistants", notice + body, sub, sid)
 

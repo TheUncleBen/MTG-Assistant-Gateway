@@ -199,4 +199,26 @@
     }
     if (box) busy(box, true);
   }, true);
+
+  // -- the hub: the sections narrow as you type (0.7.46 audit QG-25) -----------------------------
+  var hubSearch = $(".fm .ui-tools input[type=search]");
+  if (hubSearch && $(".fm .fm-group")) {
+    var narrow = function () {
+      var q = hubSearch.value.trim().toLowerCase(), n = 0;
+      Array.prototype.forEach.call(document.querySelectorAll(".fm .fm-group"), function (g) {
+        var shown = 0;
+        Array.prototype.forEach.call(g.querySelectorAll(".tr[data-q]"), function (tr) {
+          var on = !q || tr.getAttribute("data-q").indexOf(q) >= 0;
+          tr.hidden = !on;
+          if (on) shown++;
+        });
+        g.hidden = !shown;
+        n += shown;
+      });
+      var status = $("[data-filter-count]");
+      if (status) status.textContent = !q ? "" : n ? n + " shown." : "No section matches.";
+    };
+    hubSearch.addEventListener("input", narrow);
+    if (hubSearch.value) narrow();
+  }
 })();

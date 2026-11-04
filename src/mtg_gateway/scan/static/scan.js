@@ -116,9 +116,9 @@
 
   async function request(path, method, body, busyRetries) {
     const opts = { method: method || 'GET', credentials: 'same-origin', headers: {} };
+    if (opts.method !== 'GET') opts.headers['X-CSRF-Token'] = cfg.csrf;
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
-      opts.headers['X-CSRF-Token'] = cfg.csrf;
       opts.body = JSON.stringify(body);
     }
     const resp = await fetch(path, opts);
@@ -1807,10 +1807,25 @@
       try {
         note('', 'Saving ' + plural(resolved.length, 'card') + ' to your binder…');
         const out = await api('/collection/api/add', 'POST', { items: resolved.map((it) => ({ card: it.card, quantity: it.quantity, foil: isFoil(it) })), source: 'scan', scan_session: state.sessionId || undefined });
-        const n = (out.added || []).reduce((a, r) => a + (r.quantity || 0), 0);
+        const added = out.added || [];
+        const n = added.reduce((a, r) => a + (r.added_quantity != null ? r.added_quantity : (r.quantity || 0)), 0);
         msg.textContent = '';
-        msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural((out.added || []).length, 'card') + ' (' + n + ' copies) to your binder. ', h('a', { href: '/collection' }, 'Open the binder'),
-          (out.skipped || []).length || resolved.length < state.items.length ? ' Cards Archidekt could not match were left out.' : ''));
+        // Undo takes the copies out again: a new entry is removed, an existing one loses what
+        // this save added (final audit, Scan: undo where something changes)
+        const rows = added.filter((r) => r && r.id != null);
+        const undo = rows.length ? h('button', { type: 'button', class: 'btn small', onclick: async () => {
+          undo.disabled = true;
+          try {
+            for (const r of rows) {
+              const q = r.name ? '?name=' + encodeURIComponent(r.name) : '';
+              if (r.went_to === 'new') await api('/collection/api/rows/' + encodeURIComponent(r.id) + q, 'DELETE');
+              else await api('/collection/api/rows/' + encodeURIComponent(r.id), 'POST', { delta: -(r.added_quantity || 0), name: r.name || undefined });
+            }
+            note('ok', 'Taken out of your binder again.');
+          } catch (err) { undo.disabled = false; note('error', 'Could not undo: ' + why(err)); }
+        } }, 'Undo') : null;
+        msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural(added.length, 'card') + ' (' + n + ' copies) to your binder. ', h('a', { href: '/collection' }, 'Open the binder'),
+          (out.skipped || []).length || resolved.length < state.items.length ? ' Cards Archidekt could not match were left out.' : '', ...(undo ? [' ', undo] : [])));
         if (state.sessionId) { state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); renderBadge(); }
         buzz(30);
       } catch (err) { note('error', 'Could not add to the binder: ' + why(err)); }

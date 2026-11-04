@@ -41,6 +41,28 @@
       .catch(function () { /* the counts stay blank */ });
   }
   var Menu = window.MtgMenu, Box = window.MtgBox;
+  // the hub: the list rows narrow as you type (0.7.46 audit QG-25); a group with no row left
+  // folds away, and New list… stays
+  var hubIn = document.querySelector(".lp-hub") ? document.querySelector(".ui-tools input[type=search]") : null;
+  if (hubIn) {
+    var narrowHub = function () {
+      var q = hubIn.value.trim().toLowerCase(), n = 0;
+      Array.prototype.forEach.call(document.querySelectorAll(".lp-hub .ygrp"), function (g) {
+        var shown = 0;
+        Array.prototype.forEach.call(g.querySelectorAll(".yrow[data-q]"), function (row) {
+          var on = !q || row.getAttribute("data-q").indexOf(q) >= 0;
+          row.hidden = !on;
+          if (on) shown++;
+        });
+        g.hidden = !shown;
+        n += shown;
+      });
+      var status = document.querySelector("[data-filter-count]");
+      if (status) status.textContent = !q ? "" : n ? n + " shown." : "No list matches.";
+    };
+    hubIn.addEventListener("input", narrowHub);
+    if (hubIn.value) narrowHub();
+  }
   var root = document.querySelector(".lp[data-tab]");
   if (!root || !Menu || !Box) return;
   var $ = function (s, r) { return (r || document).querySelector(s); };

@@ -41,10 +41,14 @@
   function typing(t) {
     if (!t || !t.tagName) return false;
     var tag = t.tagName.toLowerCase();
-    return tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+    // a ticked box or a pressed button is not typing: / and ? still work from it (final audit)
+    if (tag === "input") return !/^(checkbox|radio|button|submit|reset|file|range|color)$/i.test(t.type || "text");
+    return tag === "textarea" || tag === "select" || t.isContentEditable;
   }
   function layerOpen() {
-    return !!document.querySelector(".mtgbox[role=dialog]:not([hidden]), .ctxmenu[role=menu], dialog[open]");
+    // a box, a menu or the card viewer open: the keys belong to it, not to the header's search
+    return !!document.querySelector(
+      ".mtgbox[role=dialog]:not([hidden]), .ctxmenu[role=menu], dialog[open], .cardview.open");
   }
   function focusSearch() {
     if (form.offsetParent !== null) { input.focus(); input.select(); return; }

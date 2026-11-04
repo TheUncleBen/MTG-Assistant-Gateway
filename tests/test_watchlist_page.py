@@ -13,12 +13,14 @@ import time
 
 from mtg_gateway import prices, ui
 from mtg_gateway.watchlist_page import (
+    SEARCH_HINT,
     Query,
     alert_label,
     alert_pills,
     alert_text,
     change_html,
     day_text,
+    search_hint,
     watchlist_page_html,
 )
 
@@ -110,6 +112,9 @@ def test_words_for_changes_alerts_and_days() -> None:
     assert alert_label({"alerts": {"pct": 12.5}}) == (
         "<span class='ui-lbl blue' title='Moves more than 12.5%'>" + ui.icon("tag") + "±12.5%</span>"
     )
+    # the Watch a card box's Card search line: no right-click in the app (final audit D33)
+    assert search_hint(False) == SEARCH_HINT and "right-click" in SEARCH_HINT
+    assert search_hint(True) == "You can also watch a card from Card search: press and hold it."
     assert day_text(TODAY, TODAY) == "today" and day_text("2026-10-11", TODAY) == "Oct 11"
     assert day_text("2025-10-11", TODAY) == "Oct 11, 2025"
 

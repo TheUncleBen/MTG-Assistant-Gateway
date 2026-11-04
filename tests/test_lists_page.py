@@ -713,3 +713,16 @@ async def test_my_lists_draws_with_one_read_and_fills_the_other_counts_after(
     assert "Custom cards<span class='n'>1</span>" in again.text and "data-counts" not in again.text
     js = (await member.http.get("/static/lists.js")).text
     assert "data-counts" in js
+
+
+async def test_the_hub_has_a_name_box_that_narrows_the_lists(member: Browser) -> None:
+    """A name box above the hub's rows narrows them as you type (static/lists.js), and on submit
+    without scripts (0.7.46 audit QG-25)."""
+    page = (await member.http.get("/collection/lists")).text
+    assert (
+        "role='search' method='get' action='/collection/lists'" in page and "placeholder='List name'" in page
+    )
+    assert page.count("class='yrow' href='/collection/lists/") >= 1 or "data-q='category templates'" in page
+    assert "data-q='category templates'" in page and "data-q='pinned cards'" in page
+    narrowed = (await member.http.get("/collection/lists?q=pinned")).text
+    assert "data-q='pinned cards'" in narrowed and "data-q='category templates'" not in narrowed

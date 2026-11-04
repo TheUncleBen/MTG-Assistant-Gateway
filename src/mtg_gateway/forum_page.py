@@ -86,6 +86,10 @@ MARKS = {
 ORDERS = (("recent", "Most recent"), ("points", "Points"))
 
 CSS = """
+/* the hub's name box narrows the sections (QG-25): a hidden row or group is gone, the count line
+   only shows with words */
+.fm .fm-group[hidden],.fm .tr[hidden]{display:none}
+.fm .fm-count{margin:-.25rem 0 .5rem}.fm .fm-count:empty{display:none}
 .fm .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 0 .5rem;
   color:var(--text-muted);font-size:.9rem}
 /* the Link Archidekt strip (a member without a link): the words, then the one orange button */
@@ -280,17 +284,23 @@ def changed_html(message: str, *, value: str = "", error: str = "") -> str:
     )
 
 
-def sections_html(got: dict[str, Any]) -> str:
+def sections_html(got: dict[str, Any], q: str = "") -> str:
     """The groups and their sections: a table a group (no chips above it: they named every
-    section a second time, and the tables are short enough to read down)."""
+    section a second time, and the tables are short enough to read down), under a name box that
+    narrows the rows as you type (static/forum.js; ``q`` is the box submitted without scripts:
+    0.7.46 audit QG-25)."""
     groups = got.get("groups") or []
+    needle = q.strip().casefold()
     out = []
     for g in groups:
         rows = []
         for s in g["sections"]:
+            words = f"{s['section']} {s['description'] or ''}".casefold()
+            if needle and needle not in words:
+                continue
             desc = f"<span class='deck'>{esc(s['description'])}</span>" if s["description"] else ""
             rows.append(
-                f"<a class='tr' href='{section_href(g['group'], s['section'])}'>"
+                f"<a class='tr' href='{section_href(g['group'], s['section'])}' data-q='{esc(words)}'>"
                 f"<span class='title'><span class='t'>{esc(s['section'])}</span>{desc}</span>"
                 f"<span class='fm-n'>{s['posts']:,}</span></a>"
             )
@@ -307,8 +317,14 @@ def sections_html(got: dict[str, Any]) -> str:
             + "</div></div>"
         )
     if not out:
-        out.append("<p class='muted'>Archidekt's forum lists no sections right now.</p>")
-    return "".join(out)
+        out.append(
+            "<p class='muted'>No section matches.</p>"
+            if needle
+            else "<p class='muted'>Archidekt's forum lists no sections right now.</p>"
+        )
+    tools = ui.toolbar(PAGE, search_label="Find a section", placeholder="Section name", q=q)
+    status = "<p class='muted small fm-count' data-filter-count aria-live='polite'></p>"
+    return tools + status + "".join(out)
 
 
 def section_label(section: str) -> str:
@@ -838,7 +854,8 @@ def add_forum_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         except DeckError as exc:
             return problem(exc, sub, sid, request=request)
         strip = "" if forum.linked(decks, sub) else link_strip_html()
-        body = ui.page_head(TITLE, SUB) + strip + new_thread_html() + sections_html(got)
+        q = (request.query_params.get("q") or "")[:80]
+        body = ui.page_head(TITLE, SUB) + strip + new_thread_html() + sections_html(got, q)
         return respond(body, sub, sid)
 
     @server.custom_route(PAGE + "/thread", methods=["GET"], include_in_schema=False)

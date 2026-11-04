@@ -1426,7 +1426,10 @@ main.wrap.ui-wide{max-width:1200px}
   .hubbar{display:block}
   /* large text on a narrow phone: a part's name wraps between words, and a word longer than its
      part scrolls the switch sideways instead of the page */
-  .hubseg a,.hubseg > button{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15} }
+  .hubseg a,.hubseg > button{white-space:normal;text-align:center;padding:.3rem .5rem;line-height:1.15}
+  /* the admin switch's parts stay on one line ("Card models"); the strip scrolls with faded edges
+     instead (final audit D11) */
+  .hubseg.adm-nav a{white-space:nowrap} }
 .ui-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem 1rem;margin:0 0 .25rem}
 .ui-head h1{margin:0;min-width:0}
 /* enlarged text on a phone: the heading shrinks with the screen so a short word stays whole
@@ -1496,6 +1499,14 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-chips{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0 0 .6rem;overflow-x:auto;scrollbar-width:none;
   overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-padding:0 1rem;padding:1px 0}
 .ui-chips::-webkit-scrollbar{display:none}
+/* more chips that way (static/topbar.js): the edge fades out instead of cutting a chip (N12) */
+.ui-chips.more-end{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 2.5rem),transparent)}
+.ui-chips.more-start{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to left,#000 calc(100% - 2.5rem),transparent)}
+.ui-chips.more-start.more-end{
+  -webkit-mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent);
+  mask-image:linear-gradient(to right,transparent,#000 2.5rem,#000 calc(100% - 2.5rem),transparent)}
 .spanel .sp-clear[hidden]{display:none}
 .ui-chip{flex:none;white-space:nowrap}
 .ui-chip{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;padding:0 .8rem;

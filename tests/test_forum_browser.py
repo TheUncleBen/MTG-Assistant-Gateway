@@ -216,3 +216,33 @@ def test_the_package_box_color_tag_fills_with_my_tags_as_it_opens(
             assert min(_targets(page, "#package .msel-btn, #package .acts button")) >= 43.5
         browser.close()
     assert errors == []
+
+
+def test_the_hub_narrows_its_sections_as_you_type(server: Server) -> None:
+    """The name box above the sections narrows the rows as you type, a group with no row left
+    folds away, and clearing the box brings everything back (0.7.46 audit QG-25)."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 390, "light", exe)
+        page.goto(f"{server.base}/forum", wait_until="networkidle")
+        rows = page.locator(".fm .fm-group a.tr[data-q]")
+        total = rows.count()
+        assert total >= 2
+        box = page.locator(".fm .ui-tools input[type=search]")
+        box.fill("deck")
+        count = "document.querySelector('[data-filter-count]').textContent"
+        page.wait_for_function(f"() => {count}.includes('shown')")
+        shown = [r for r in rows.all() if r.is_visible()]
+        assert len(shown) == 1 and "Deck Help" in shown[0].inner_text(), [r.inner_text() for r in shown]
+        assert page.url.endswith("/forum")  # nothing was sent
+        box.fill("zzz")
+        page.wait_for_function(f"() => {count} === 'No section matches.'")
+        assert all(not g.is_visible() for g in page.locator(".fm .fm-group").all())
+        box.fill("")
+        page.wait_for_function(f"() => {count} === ''")
+        assert len([r for r in rows.all() if r.is_visible()]) == total
+        assert errors == []
+        browser.close()

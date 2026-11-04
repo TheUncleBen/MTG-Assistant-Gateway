@@ -418,6 +418,16 @@ def build(
         max_rows = int(live.get("auto_apply_max_rows"))
         big_rows = int(live.get("auto_big_edit_rows"))
     folder = _esc(backup_folder)
+    # in the app a card is pressed and held; a browser guide names the mouse first (audit D33)
+    tap = "a tap" if app else "a click"
+    menu_way = "or press and hold" if app else "a right-click, or press and hold on a phone"
+    card_menu_way = (
+        "a press and hold on a card (or <kbd>Shift</kbd>+<kbd>F10</kbd> or the Menu key on a focused card "
+        "with a keyboard)"
+        if app
+        else "a right-click on a card (a press and hold on a phone, <kbd>Shift</kbd>+<kbd>F10</kbd> or the "
+        "Menu key on a focused card)"
+    )
     writes = (
         "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
         "approved proposal from your assistant is applied for you."
@@ -527,7 +537,7 @@ def build(
         "type line; Down and Up move, <kbd>Enter</kbd> adds the highlighted card and keeps the cursor in "
         "the box for the next one. “3 sol ring” adds three. On a wide screen the printings of the "
         "highlighted card show as pictures beside the list, with the set used last on this deck "
-        "pre-selected: a click adds that printing.</span></li>"
+        f"pre-selected: {tap} adds that printing.</span></li>"
         "<li><span>The new row shows under <strong>Pending changes</strong>, with Undo. Nothing has gone "
         "to Archidekt yet.</span></li>"
         f"<li><span>Press <strong>Save changes</strong>. {backup_box} The whole session goes to Archidekt "
@@ -598,8 +608,7 @@ def build(
         f"first. {backup_box}</p>"
         f"{_h4('how-add-page', 'Straight from the deck page')}"
         "<ul>"
-        "<li>On your own deck a right-click on a card (a press and hold on a phone, <kbd>Shift</kbd>+"
-        "<kbd>F10</kbd> or the Menu key on a focused card) opens the site's own card menu: open the card, "
+        f"<li>On your own deck {card_menu_way} opens the site's own card menu: open the card, "
         "one more or one fewer copy, move it to a category or the maybeboard, remove it, or jump to the "
         "editor. The card viewer has the same quantity buttons and Remove. Each change is saved at once as "
         "one proposal (the same path as the editor, with the same “are you sure” for a "
@@ -628,8 +637,8 @@ def build(
         "<li><strong>Deck settings</strong> changes the name, format, bracket, description and whether the "
         "deck is private or unlisted, and also sets the deck's <strong>cover image</strong>, its "
         "<strong>tags</strong> and the <strong>folder</strong> it sits in.</li>"
-        "<li><strong>+ New folder</strong> on My decks makes a folder; a folder tile's menu (its ⋮, a "
-        "right-click, or press and hold on a phone) renames, moves or deletes it.</li>"
+        f"<li><strong>+ New folder</strong> on My decks makes a folder; a folder tile's menu (its ⋮, "
+        f"{menu_way}) renames, moves or deletes it.</li>"
         "<li>Your assistant can propose moving a deck to another folder, changing its tags or its cover "
         "(a settings change you approve, like any other). It can also propose deleting a deck or "
         "creating a folder, but only your own press applies either one (a deletion on its review page "
@@ -1126,8 +1135,12 @@ def build(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(w)}</td><td>{k}</td><td>{d}</td></tr>" for w, k, d in key_rows)
         + "</tbody></table></div>"
-        "<p>With a mouse, a right-click on a card opens the same card menu; on a touch screen, press and "
-        "hold.</p>"
+        + (
+            "<p>A press and hold on a card opens the same card menu.</p>"
+            if app
+            else "<p>With a mouse, a right-click on a card opens the same card menu; on a touch screen, "
+            "press and hold.</p>"
+        )
     )
     ref_syntax = (
         f"{_h4('ref-syntax-bar', 'The search bar')}"
@@ -1138,7 +1151,7 @@ def build(
         "(the category follows the card's type), one of the deck's categories, or the maybeboard. The "
         "chosen chip stays on for the next card.</li>"
         "<li>On a wide screen the <strong>printings</strong> of the highlighted card show as pictures "
-        "beside the list, the set used last on this deck pre-selected; a click adds that printing.</li>"
+        f"beside the list, the set used last on this deck pre-selected; {tap} adds that printing.</li>"
         "</ul>"
         f"{_h4('ref-syntax-list', 'A pasted list')}"
         "<p>The editor's paste box, New deck and the assistant read the shapes people paste from "

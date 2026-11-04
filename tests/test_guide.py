@@ -283,3 +283,13 @@ def test_the_tool_names_are_the_last_reference_topic_with_each_ask_beside_its_na
     assert "watch_card" not in off and "Watch this card's price" not in off
     # no heading inside the topic: the search and the rail index the topics only
     assert not re.search(r"<h[2-4]", body)
+
+
+def test_the_app_guide_says_press_and_hold_not_right_click() -> None:
+    """In the app a card is pressed and held: no "right-click" and no "click adds" where the
+    browser guide names the mouse first (final audit D33)."""
+    web, in_app = _page(), _page(app=True)
+    assert "right-click" in web and "a click adds that printing" in web
+    assert "right-click" not in in_app and "click adds" not in in_app
+    assert "a press and hold on a card" in in_app and "a tap adds that printing" in in_app
+    assert "<kbd>Shift</kbd>+<kbd>F10</kbd>" in in_app  # the keyboard way stays

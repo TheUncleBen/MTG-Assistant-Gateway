@@ -38,7 +38,7 @@ from .deckpage import image_url
 from .history_view import _trend_svg
 from .prices import ALERT_KINDS, MAX_LIST_NAME, NO_LIST, money
 from .reports_page import PHONE_WIDGETS_CSS
-from .theme import esc, icon, natural_key, plural
+from .theme import esc, icon, in_app, natural_key, plural
 
 PAGE = ui.PER_PAGE
 FINISH_WORDS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
@@ -83,6 +83,14 @@ CARD_HINT = (
     "to follow one printing."
 )
 SEARCH_HINT = "You can also watch a card from Card search: press and hold it, or right-click it."
+
+
+def search_hint(app: bool) -> str:
+    """The Watch a card box's line about Card search: in the app a card is pressed and held
+    (no mouse to right-click with: audit D33)."""
+    return "You can also watch a card from Card search: press and hold it." if app else SEARCH_HINT
+
+
 ALERT_HINT = (
     "Checked once a day against the day before. Leave a box empty for no price alert. Price alerts "
     "reach you through push notifications (Account page)."
@@ -910,7 +918,8 @@ def boxes_html(
         + "<label class='check wide'><input type='checkbox' name='remember' value='1' checked>"
         "<span>Use this finish next time, here and in card menus</span></label>"
         f"<p class='ui-hint wide'>Price alert: {esc(default_words)} (your defaults). {CARD_HINT} "
-        f"{SEARCH_HINT} You may watch up to {lim['cards']:,} cards and {lim['decks']:,} decks.</p></form>",
+        f"{search_hint(in_app())} You may watch up to {lim['cards']:,} cards and {lim['decks']:,} decks."
+        "</p></form>",
         actions=[
             ui.box_button("Cancel", cancel=True),
             ui.box_button("Watch card", kind="primary", form="w-add-f"),

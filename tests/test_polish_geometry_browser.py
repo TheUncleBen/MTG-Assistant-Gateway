@@ -321,3 +321,32 @@ def test_the_admin_overview_facts_line_at_desktop_width(server: Server) -> None:
         assert clipped >= 1
         assert errors == []
         browser.close()
+
+
+def test_a_chip_row_that_runs_out_of_room_fades_its_edge(server: Server) -> None:  # noqa: F811
+    """A quick-filter chip row wider than the screen scrolls, and the edge with more chips fades
+    out instead of cutting a chip (final audit N12), as the Binder's switch does."""
+    from playwright.sync_api import sync_playwright
+
+    sid, _pending = _seed(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, exe, server, sid, 412)
+        page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        nav = page.locator("nav.ui-chips").first
+        assert nav.evaluate("n => n.scrollWidth > n.clientWidth + 1"), "the chips run out of room at 412"
+        page.wait_for_function("() => document.querySelector('nav.ui-chips').classList.contains('more-end')")
+        assert nav.evaluate(
+            "n => getComputedStyle(n).maskImage || getComputedStyle(n).webkitMaskImage"
+        ) not in (
+            "none",
+            "",
+        )
+        assert not nav.evaluate("n => n.classList.contains('more-start')")
+        nav.evaluate("n => { n.scrollLeft = n.scrollWidth; }")
+        page.wait_for_function(
+            "() => { const n = document.querySelector('nav.ui-chips');"
+            " return n.classList.contains('more-start') && !n.classList.contains('more-end'); }"
+        )
+        assert errors == []
+        browser.close()

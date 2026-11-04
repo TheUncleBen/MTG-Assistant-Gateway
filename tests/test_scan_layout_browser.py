@@ -14,6 +14,7 @@ import pytest
 
 from .test_cardsearch_browser import _chromium
 from .test_cardview_browser import PNG
+from .test_editor_browser import _link
 from .test_suggest_browser import Server, server  # noqa: F401
 
 pytest.importorskip("playwright")
@@ -650,5 +651,30 @@ def test_type_puts_the_cursor_in_the_name_field(server: Server, app: bool) -> No
         page.wait_for_function("() => window.__scan && window.__scan.showTab")
         if page.locator("#type-input").count():
             assert page.evaluate("() => document.activeElement && document.activeElement.id") != "type-input"
+        assert errors == []
+        browser.close()
+
+
+def test_save_to_binder_offers_undo_that_takes_the_copies_out_again(server: Server) -> None:  # noqa: F811
+    """Save to binder puts the matched cards in the Binder and says so with Undo; Undo removes
+    the entry it made (final audit, Scan: undo where something changes)."""
+    from playwright.sync_api import expect, sync_playwright
+
+    exe = _chromium()
+    with sync_playwright() as p:
+        browser, page, errors, _ = _open(p, exe, server, _link(server), 390, False, "light")
+        page.evaluate(ITEMS)
+        page.get_by_role("button", name="Save to binder").click()
+        note = page.locator("#list-msg .notice.ok")
+        expect(note).to_contain_text("Saved 1 card (2 copies) to your binder", timeout=10_000)
+        rows = server.ark.collections.get("alice", {})
+        assert len(rows) == 1 and next(iter(rows.values()))["quantity"] == 2, rows
+        undo = note.get_by_role("button", name="Undo")
+        assert undo.count() == 1
+        undo.click()
+        expect(page.locator("#list-msg .notice.ok")).to_contain_text(
+            "Taken out of your binder again", timeout=10_000
+        )
+        assert server.ark.collections.get("alice", {}) == {}
         assert errors == []
         browser.close()
