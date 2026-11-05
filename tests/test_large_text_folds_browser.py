@@ -152,3 +152,49 @@ def test_the_new_deck_box_stacks_its_fields_when_the_text_is_large(server: Serve
             ctx.close()
         assert errors == []
         browser.close()
+
+
+# the Users table: its header cells left to right, two that overlap by their words, and its rows
+USERS_TABLE = """() => {
+  const t = document.querySelector('.au .ui-table');
+  const heads = [];
+  for (const th of t.querySelectorAll('.tr.th')) {
+    const cells = [...th.children].filter(c => c.getClientRects().length && c.textContent.trim())
+      .map(c => ({t: c.textContent.trim().slice(0, 20), r: c.getBoundingClientRect()}))
+      .sort((a, b) => a.r.left - b.r.left);
+    for (let i = 1; i < cells.length; i++)
+      if (cells[i].r.left < cells[i - 1].r.right - 1) heads.push(cells[i - 1].t + ' / ' + cells[i].t);
+  }
+  return {heads, rows: t.querySelectorAll('.tr.mem').length,
+    emails: [...t.querySelectorAll('.tr.mem .title .deck')].map(e => e.textContent.trim())};
+}"""
+
+
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_the_users_table_folds_to_rows_when_the_text_is_large(server: Server, zoom: str) -> None:  # noqa: F811
+    """Z2: at 1024 to 1440 px with 200% text the lined-up columns (11, 10 and 6.5 rem beside
+    two fluid ones) left Member and Apps a few em: "MEMBE/R", "APP/S", "alice@e/xample./test",
+    "non/e". At every width and text size no word in the table breaks in two where it would have
+    fitted the row, no two header cells overlap, the ⋮ is a 44 px target and nothing is clipped
+    or scrolls sideways."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, errors, open_at = _contexts(p, server, sid, "light", exe)
+        for width in WIDTHS:
+            ctx, page = open_at(width)
+            page.goto(f"{server.base}/admin/users", wait_until="networkidle")
+            _zoom(page, zoom)
+            got = page.evaluate(USERS_TABLE)
+            assert got["rows"] >= 1 and "alice@example.test" in got["emails"], (width, zoom, got)
+            assert got["heads"] == [], (width, zoom, got["heads"])
+            broken = page.evaluate(BROKEN, [".au .ui-table .tr > span", ".ui-table"])
+            assert broken == [], (width, zoom, broken)
+            short = page.evaluate(SHORT, ".au .ui-table .kebab")
+            assert short == [], (width, zoom, short)
+            assert page.evaluate(MEASURE) == [], (width, zoom)
+            ctx.close()
+        assert errors == []
+        browser.close()
