@@ -300,6 +300,17 @@ NEW_DECK_CSS = """
 @media (max-width:759.98px){ .nd-grid{grid-template-columns:minmax(0,1fr)} .nd-prev{display:none} }
 @media (max-width:599.98px){ .nd-top{grid-template-columns:minmax(0,1fr)}
   .nd-tabs [role=tab] svg.i{display:none} }
+/* The folds follow the text size too (final polish Z1): at 200% text on a 900-1024 px window
+   the tile's 13 rem and Format's 11 rem doubled and left Deck name about 70 px, one letter a
+   line, with "0/120" one character a line. The form and the fields column are containers
+   measured in their own em: below 40 em of form the tile preview goes, as below 760 px; below
+   26 em of fields column (Format's 11 rem, the gap and at least 14 em for the name) Deck name
+   stacks over Format and Folder over Game type, as below 600 px. At 100% the form has 47 em
+   and the fields 33 from 760 px up, so nothing moves there. */
+.nd-form{container:ndform/inline-size}
+.nd-fields{container:ndfields/inline-size}
+@container ndform (max-width:40em){ .nd-grid{grid-template-columns:minmax(0,1fr)} .nd-prev{display:none} }
+@container ndfields (max-width:26em){ .nd-top{grid-template-columns:minmax(0,1fr)} }
 """
 
 

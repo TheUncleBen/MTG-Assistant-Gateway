@@ -694,6 +694,17 @@ ADMIN_CSS = """
 .au .ui-table .labs,.au .ui-table .apps{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
 @media (max-width:899.98px){.au .ui-table .md-hide{display:none}}
 @media (min-width:1100px){.au .with-panel .ui-table .md-hide{display:none}}
+/* The lined-up columns from 900 px (11, 10 and 6.5 rem beside the two fluid ones) doubled at
+   200% text and left Member and Apps a few em at 1024-1440 px: "MEMBE/R", "APP/S",
+   "alice@e/xample./test", "non/e" (final polish Z2). The table is a container measured in its
+   own em: below 51 em (the 27.5 em of sized columns, about 4 em of gaps, padding and the ⋮, and
+   19 em for Member and Apps) the 600-899 px layout stays, Status, Archidekt and Apps in the
+   row's second line, whatever the window's width. At 100% the table has 61 em at 900 px. */
+.au .ui-table{container-type:inline-size}
+@media (min-width:900px){ @container (max-width:51em){
+  .au .ui-table .tr{grid-template-columns:var(--cols-md)}
+  .au .ui-table .md-hide{display:none}
+  .au .ui-table .sub{display:flex} } }
 .au .arch .u{font-size:.86rem;color:var(--text-muted)}
 .au .ui-drawer .ui-actions .btn,.au .ui-drawer .ui-actions button{margin:0}
 .au .au-del{border-top:1px solid var(--border-soft);margin-top:.75rem;padding-top:.75rem}

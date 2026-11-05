@@ -1921,9 +1921,15 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .wdg .lab{display:flex;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;font-weight:700;
   text-transform:uppercase;letter-spacing:.03em}
 .wdg .lab svg.i{width:16px;height:16px}
+/* the big value is one line, the unit beside it or, where the two do not share the line, whole on
+   the next: a row of flex items, the number (never broken: "$310./00" at 200% text, final polish
+   Z5) and the unit, which wraps at its spaces only when wider than the tile ("100 / cards"). A
+   value made of words (the report's "Too few games to tell yet") wraps at its spaces the same
+   way; a label in the value (.ui-lbl) keeps its own one line */
 .wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;min-width:0;
-  overflow-wrap:anywhere}
-.wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted);margin-left:.35rem}
+  display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem;white-space:nowrap}
+.wdg .big > :not(.ui-lbl){white-space:normal}
+.wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted)}
 /* a price nobody knows, wherever one shows (the Binder's Value tile and Price column, the
    Watchlist's change cells, the card search, the deck banner): the word "unknown", muted, in
    normal weight, never louder than a real price, whatever its parent's weight (audit N7, polish
@@ -1949,6 +1955,12 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .ui-widgets{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wdg.wide-sm{grid-column:1 / -1}
 }
+/* the row measured in its own em (final polish Z5): two a row at 600-899 px gave a tile 12 em at
+   200% text on a 720 px window, where a price and its unit no longer fit a line; below 25.75 em
+   (two tiles of 12.5 em and the gap) each tile takes the row. At 100% the row has 40 em at 600 px */
+.ui-widgets{container-type:inline-size}
+@media (min-width:600px) and (max-width:899.98px){
+  @container (max-width:25.75em){ .wdg{grid-column:1 / -1} } }
 @media (max-width:599.98px){
   /* two a row, or one a row when enlarged text leaves a half too narrow for 8.5rem */
   .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5rem,calc(50% - .25rem))),1fr));
