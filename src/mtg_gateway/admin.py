@@ -813,10 +813,13 @@ class _Html(str):
 
 
 def _row(label: str, value: Any, *, note: str = "") -> str:
-    """One lined-up row of a panel (``.ui-row``, as on Settings): the label, then the value."""
+    """One lined-up row of a panel (``.ui-row``, as on Settings): the label, then the value. A
+    label that is a page address (the Speed card's /decks/{deck_id}/export) may break after any
+    of its slashes, so a segment moves down whole; the column's overflow-wrap:anywhere is left
+    for a segment wider than the column (final polish AA1: "expor" then "t" at 1280 px)."""
     shown = value if isinstance(value, _Html) else html.escape(str(value))
     extra = f" <span class='muted'>{html.escape(note)}</span>" if note else ""
-    lab = f"<p class='lab'>{html.escape(label)}{extra}</p>"
+    lab = f"<p class='lab'>{html.escape(label).replace('/', '/<wbr>')}{extra}</p>"
     return f"<div class='ui-row'>{lab}<div class='ctl'>{shown}</div></div>"
 
 
