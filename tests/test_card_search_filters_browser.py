@@ -358,7 +358,8 @@ def test_a_search_that_failed_can_be_asked_again_and_old_tiles_go(server: Server
         server.sf.fail_with = 503
         page.locator("#c-q").fill("sol r")
         page.wait_for_function(
-            "() => /not answering/.test(document.getElementById('cs-status').innerText)", timeout=5000
+            "() => /can't be reached right now/.test(document.getElementById('cs-status').innerText)",
+            timeout=5000,
         )
         assert page.locator("#cardgrid .cc").count() == 0  # the "sol" tiles are not this search's
         assert page.locator("#cs-count").text_content() == "Cards"
@@ -372,7 +373,7 @@ def test_a_search_that_failed_can_be_asked_again_and_old_tiles_go(server: Server
         # the page's own first search failed: Enter asks it again
         server.sf.fail_with = 503
         page.goto(f"{server.base}/cards?q=sol+t", wait_until="networkidle")
-        assert "not answering" in page.locator("#cs-status").inner_text()
+        assert "Scryfall can't be reached right now." in page.locator("#cs-status").inner_text()
         server.sf.fail_with = None
         page.locator("#c-q").press("Enter")
         _wait_count(page, "1 card")

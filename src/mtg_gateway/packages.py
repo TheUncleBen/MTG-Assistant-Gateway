@@ -33,7 +33,7 @@ def _err(text: str) -> Exception:
 def _format_id(name: Any) -> int:
     key = str(name or "").strip().lower().replace(" ", "")
     if key not in FORMAT_IDS:
-        raise _err(f"intended_formats takes format names: {', '.join(sorted(FORMAT_IDS))}")
+        raise _err(f"intended_formats takes format names: {', '.join(sorted(FORMAT_IDS))}.")
     return FORMAT_IDS[key]
 
 
@@ -41,10 +41,10 @@ def parse(raw: Any, *, partial: bool = False) -> dict[str, Any]:
     """A package's settings, checked: ``keywords`` (required unless ``partial``), ``budget`` (1 to
     4, or None for any) and ``intended_formats`` (format names). Returned in Archidekt's names."""
     if not isinstance(raw, dict) or (partial and not raw):
-        raise _err("package must be an object with any of: " + ", ".join(FIELDS))
+        raise _err("package must be an object with any of: " + ", ".join(FIELDS) + ".")
     unknown = sorted(str(k) for k in raw if k not in FIELDS)
     if unknown:
-        raise _err(f"unknown package fields: {', '.join(unknown)}; use {', '.join(FIELDS)}")
+        raise _err(f"Unknown package fields: {', '.join(unknown)}; use {', '.join(FIELDS)}.")
     out: dict[str, Any] = {}
     if "keywords" in raw or not partial:
         words = raw.get("keywords")
@@ -52,20 +52,20 @@ def parse(raw: Any, *, partial: bool = False) -> dict[str, Any]:
         if not words or len(words) > KEYWORDS_MAX:
             raise _err(
                 f"A package needs keywords, 1 to {KEYWORDS_MAX} characters (for example: shocklands, "
-                "fetchlands)"
+                "fetchlands)."
             )
         out["keywords"] = words
     if "budget" in raw:
         b = raw["budget"]
         if b is not None and (isinstance(b, bool) or b not in (1, 2, 3, 4)):
-            raise _err("budget is 1 to 4 ($ to $$$$), or null for any")
+            raise _err("budget is 1 to 4 ($ to $$$$), or null for any.")
         out["budget"] = b
     elif not partial:
         out["budget"] = None
     if "intended_formats" in raw:
         names = raw["intended_formats"] or []
         if not isinstance(names, list) or len(names) > len(FORMAT_NAMES):
-            raise _err("intended_formats is a list of format names")
+            raise _err("intended_formats is a list of format names.")
         ids: list[int] = []
         for n in names:
             fid = _format_id(n)
@@ -201,7 +201,7 @@ def adds(
     if package.id == deck.id:
         raise _err("A package can't be added to itself.")
     if categories not in CATEGORY_CHOICES:
-        raise _err(f"categories must be one of: {', '.join(CATEGORY_CHOICES)}")
+        raise _err(f"categories must be one of: {', '.join(CATEGORY_CHOICES)}.")
     one_each = (deck.format or "") in _SINGLETON_FORMATS if singleton is None else bool(singleton)
     have = {c.name.casefold() for c in deck.cards}
     commanders = [c for c in deck.cards if deck.is_commander(c)]
@@ -308,11 +308,11 @@ async def listing(
     imported first, filtered by name, one intended format and a budget. ``{rows, more}``; each row
     has id, name, owner, url, private, size, settings and imports."""
     if whose not in WHOSE:
-        raise _err(f"whose is one of: {', '.join(WHOSE)}")
+        raise _err(f"whose is one of: {', '.join(WHOSE)}.")
     if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 100:
-        raise _err("page must be a number from 1 to 100")
+        raise _err("page must be a number from 1 to 100.")
     if budget is not None and (isinstance(budget, bool) or budget not in (1, 2, 3, 4)):
-        raise _err("budget is 1 to 4 ($ to $$$$), or null for any")
+        raise _err("budget is 1 to 4 ($ to $$$$), or null for any.")
     name = " ".join(str(name_contains or "").split())[:100]
     fmt = None if not intended_format else _format_id(intended_format)
     import time

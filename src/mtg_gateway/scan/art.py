@@ -561,7 +561,7 @@ class ArtIndex:
             mine = self._recent(self._owner_fetches.get(owner, []), now)
             self._owner_fetches[owner] = mine
             if len(mine) >= self._owner_image_cap():
-                raise ScryfallError("owner_budget", "your share of this hour's image budget is spent")
+                raise ScryfallError("owner_budget", "Your share of this hour's image budget is spent.")
         self._fetch_times = self._recent(self._fetch_times, now)
         if len(self._fetch_times) >= self.s.images_per_hour:
             self.pause(3600 - (now - self._fetch_times[0]))
@@ -595,7 +595,7 @@ class ArtIndex:
                 break
             cards = data.get("data")
             if data.get("object") != "list" or not isinstance(cards, list):
-                raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+                raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
             for c in cards:
                 if not isinstance(c, dict) or c.get("digital") or c.get("lang") != "en":
                     continue
@@ -620,7 +620,7 @@ class ArtIndex:
             if wait > 0:
                 await asyncio.sleep(wait)
             if not self._take_budget(owner):
-                raise ScryfallError("rate_limited", "image budget for this hour is spent")
+                raise ScryfallError("rate_limited", "Image budget for this hour is spent.")
             try:
                 resp = await self.http.get(url, headers={"User-Agent": self.scryfall.headers["User-Agent"]})
             except httpx.HTTPError as exc:

@@ -106,7 +106,7 @@ async def test_resolve_requires_input_and_handles_scryfall_outage(stack: Stack) 
     assert out == {
         "ok": False,
         "error": "invalid",
-        "message": "give `cards` or `text` with at least one card",
+        "message": "Give `cards` or `text` with at least one card.",
         "error_code": "INVALID_ARGUMENT",
         "retryable": False,
     }
@@ -450,7 +450,7 @@ async def test_resolve_caps_names_per_call(stack: Stack) -> None:
     assert out == {
         "ok": False,
         "error": "invalid",
-        "message": f"at most {MAX_RESOLVE_CARDS} cards per call",
+        "message": f"At most {MAX_RESOLVE_CARDS} cards per call.",
         "error_code": "INVALID_ARGUMENT",
         "retryable": False,
     }
@@ -672,7 +672,7 @@ async def test_rate_limit_midway_keeps_resolved_cards_and_defers_the_rest(stack:
     assert (
         out["cards"][2]["note"]
         == "Not looked up yet. Scryfall asked the gateway to slow down, so its requests are paused for "
-        "now. Try again in 30 seconds."
+        "now. Its lookups wait 30 seconds; try again after that."
     )
     assert out["needs_review"] == [2, 3] and "2 of 4 names were not looked up" in out["message"]
     assert seen["n"] == 3  # nothing else was attempted after the 429
@@ -813,7 +813,7 @@ async def test_info_line_resolves_the_printing_and_distrusts_a_conflicting_read(
     assert cards[0]["foil"] is True and cards[0]["input"]["collector_number"] == "365"
     # A printing that is another card is a conflict: kept for review, never ready to use.
     assert cards[1]["status"] == "conflict" and cards[1]["card"]["name"] == "Sol Ring"
-    assert "does not match 'Sol Ring'; matched by name instead" in cards[1]["note"]
+    assert "does not match “Sol Ring”; matched by name instead" in cards[1]["note"]
     assert cards[1]["input"]["lang"] == "en"
     # The single finish wins over the pasted marker, and the note says so.
     assert cards[2]["status"] == "printing" and cards[2]["card"]["set"] == "frc" and cards[2]["foil"] is False
@@ -852,21 +852,21 @@ async def test_printing_needs_the_title_to_agree(stack: Stack) -> None:
     cards = out["cards"]
     assert cards[0]["status"] == "conflict" and cards[0]["card"]["name"] == "Sol Ring"
     assert (
-        "MH2 236 is Sol Talisman, which does not match 'Sol Ring'; matched by name instead"
+        "MH2 236 is Sol Talisman, which does not match “Sol Ring”; matched by name instead"
         in (cards[0]["note"])
     )
     assert cards[0]["input"] == {"name": "Sol Ring", "set": "mh2", "collector_number": "236", "quantity": 1}
     assert cards[1]["status"] == "conflict" and cards[1]["card"]["name"] == "Command Tower"
     assert "TDC 352 is Command Beacon" in cards[1]["note"]
     assert cards[2]["status"] == "printing" and cards[2]["card"]["collector_number"] == "365"
-    assert cards[2]["note"] == "title read as 'Aesi, Tyrant'"
+    assert cards[2]["note"] == "title read as “Aesi, Tyrant”"
     assert cards[3]["status"] == "printing" and cards[3]["card"]["set"] == "dsc"
-    assert cards[3]["note"] == "title read as 'Aesi Tyrant of Gyre Stralt'"
+    assert cards[3]["note"] == "title read as “Aesi Tyrant of Gyre Stralt”"
     assert cards[4]["status"] == "ambiguous" and cards[4]["card"] is None
     assert cards[4]["suggestions"][0] == "Aesi, Tyrant of Gyre Strait"
-    assert "CMR 365 is Aesi, Tyrant of Gyre Strait but the title read 'Xq Zzyx'" in cards[4]["note"]
+    assert "CMR 365 is Aesi, Tyrant of Gyre Strait but the title read “Xq Zzyx”" in cards[4]["note"]
     assert cards[5]["status"] == "conflict" and cards[5]["card"]["name"] == "Mountain"
-    assert "6ED 195 is Mountain Goat, which does not match 'Mountain'" in cards[5]["note"]
+    assert "6ED 195 is Mountain Goat, which does not match “Mountain”" in cards[5]["note"]
     assert cards[6]["status"] == "conflict" and cards[6]["card"]["name"] == "Apocalypse"
     assert "BBD 217 is Apocalypse Hydra" in cards[6]["note"]
 

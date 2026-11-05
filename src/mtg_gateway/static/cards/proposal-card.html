@@ -158,7 +158,7 @@ button:disabled{opacity:1;cursor:wait}
     var l = r.name == null ? "" : String(r.name);
     if (r.printing) l += " " + r.printing;
     if (r.category) l += " [" + r.category + "]";
-    if (r.guessed_from) l += " (name guessed from '" + r.guessed_from + "'; check it)";
+    if (r.guessed_from) l += " (name guessed from “" + r.guessed_from + "”; check it)";
     if (r.missing) l += " (Archidekt doesn't have this card)";
     else if (r.unchecked) l += " (not checked)";
     return l;
@@ -208,7 +208,7 @@ button:disabled{opacity:1;cursor:wait}
       case "companion": return ["Companion", r.name, arrow(r.before, r.after)];
       case "back_face": return ["Show back face", r.name, arrow(r.before, r.after)];
       case "commander": return ["Commander", arrow(r.before, r.after), ""];
-      case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
+      case "clone": return ["Copy", "“" + r.source + "” (" + r.cards + " cards) as “" + r.name + "”", ""];
       case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
       case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
       case "description": return ["Description", r.after_len ? excerpt(r.after_text, r.after_len) : "cleared", ""];

@@ -407,7 +407,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         query = cq.scryfall_query(f)
         if len(query) > cq.MAX_QUERY:
             # refused whole: a cut search would lose its last filters (paper only among them)
-            raise ScanError("too_long", f"the search is {len(query)} characters, over {cq.MAX_QUERY}")
+            raise ScanError("too_long", f"The search is {len(query)} characters, over {cq.MAX_QUERY}.")
         out = await scan.search_cards(query, order=f.order, direction=f.dir, page=page_no, owner=sub)
         if page_no >= SEARCH_PAGES:
             out = {**out, "has_more": False}  # the page number stops here, so no page follows

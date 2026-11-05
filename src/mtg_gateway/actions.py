@@ -159,7 +159,7 @@ def _help_text(value: Any, what: str) -> str:
     text = clean_text(raw)
     low, high = HELP_WORDS
     if not low <= _words(text) <= high:
-        raise DeckError("invalid", f"{what} must be {low} to {high} words (it has {_words(text)})")
+        raise DeckError("invalid", f"{what} must be {low} to {high} words (it has {_words(text)}).")
     return text
 
 
@@ -240,7 +240,7 @@ def _comment_text(text: Any) -> str:
 
 def _vote(value: Any) -> int:
     if str(value) not in VOTES:
-        raise DeckError("invalid", "vote must be up, down or none")
+        raise DeckError("invalid", "Vote must be up, down or none.")
     return VOTES[str(value)]
 
 
@@ -252,7 +252,7 @@ async def _thread_comment(
     decks: DeckService, sub: str, deck_id: str, comment_id: Any, *, keep_doc: bool = False, page: int = 1
 ) -> dict[str, Any]:
     if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
-        raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them)")
+        raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them).")
     found, thread = await _social(decks).find_comment(sub, deck_id, comment_id, page, keep_doc=keep_doc)
     return {**found, "_me": thread.get("me"), "_page": thread["page"]}
 
@@ -262,7 +262,7 @@ def _page(value: Any) -> int:
     if value is None:
         return 1
     if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 1000:
-        raise DeckError("invalid", "page must be the thread page get_deck_comments read (1 or more)")
+        raise DeckError("invalid", "page must be the thread page get_deck_comments read (1 or more).")
     return value
 
 
@@ -281,7 +281,7 @@ async def collaborator_target(
     social = _social(decks)
     want = clean_text(str(username or "")).lstrip("@")
     if not want:
-        raise DeckError("invalid", "username is required: the Archidekt username of the person")
+        raise DeckError("invalid", "username is required: the Archidekt username of the person.")
     current = await social.collaborators(sub, deck.id, owned=True)
     if action == "collaborator_add":
         found = await social.find_followed(sub, want)
@@ -309,12 +309,12 @@ async def collaborator_target(
             )
         user_id, name = found
         if any(c["user_id"] == user_id for c in current):
-            raise DeckError("invalid", f"{name} is already a collaborator on this deck")
+            raise DeckError("invalid", f"{name} is already a collaborator on this deck.")
         return user_id, name
     found = next((c for c in current if c["username"].casefold() == want.casefold()), None)
     if found is None:
         names = ", ".join(c["username"] for c in current) or "none"
-        raise DeckError("not_found", f"{want} is not a collaborator on this deck (collaborators: {names})")
+        raise DeckError("not_found", f"{want} is not a collaborator on this deck (collaborators: {names}).")
     return found["user_id"], found["username"]
 
 
@@ -337,7 +337,7 @@ async def follow_target(decks: DeckService, sub: str, username: Any) -> tuple[in
         raise DeckError(
             "unavailable",
             f"Archidekt's profile page for {want} didn't show the gateway who they are, so they can't be "
-            f"followed from here just now. Their page on Archidekt: {profile_url(want)}",
+            f"followed from here just now. Their page on Archidekt: {profile_url(want)}.",
             follow_url=profile_url(want),
         ) from exc
     name = clean_text(str((found or {}).get("username") or ""))
@@ -378,7 +378,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     """Check the action against Archidekt as it is now, store it as a pending proposal with one
     review row saying exactly what will happen, and return the proposal."""
     if action not in ACTIONS:
-        raise DeckError("invalid", f"unknown action {action!r}")
+        raise DeckError("invalid", f"Unknown action “{action}”.")
     social = (
         _social(decks)
         if action
@@ -449,7 +449,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             who = _owner(deck)
         if owner_id is None:
             raise DeckError(
-                "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow"
+                "unavailable", "Archidekt does not say who owns this deck, so there is no one to follow."
             )
         state = await social.follow_state(sub, owner_id, lookup=True)
         if state["self"]:
@@ -467,7 +467,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         if forum_thread is not None and (forum_thread["locked"] or forum_thread["archived"]):
             raise DeckError("invalid", "This forum thread is locked or archived, so it takes no replies.")
         if forum_thread is None and deck.comment_root is None:
-            raise DeckError("unavailable", "Archidekt reports no comment thread for this deck")
+            raise DeckError("unavailable", "Archidekt reports no comment thread for this deck.")
         target_id = changes["deck_id"]
         on = where if forum_thread is not None else f"on the deck {where}"
         parent = params.get("reply_to")
@@ -571,10 +571,10 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             shown = [f for f in info["folders"] if f["depth"] and not f.get("backup")]
             hits = [f for f in shown if f["name"].casefold() == inside.casefold()]
             if len(hits) != 1:
-                names = ", ".join(f"'{f['name']}'" for f in shown) or "none"
+                names = ", ".join(f"“{f['name']}”" for f in shown) or "none"
                 raise DeckError(
                     "not_found" if not hits else "invalid",
-                    f"inside must name exactly one of your folders (yours: {names})",
+                    f"inside must name exactly one of your folders (yours: {names}).",
                 )
             parent = hits[0]
         else:
@@ -583,14 +583,14 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         decks._not_the_backup_name(name, parent["depth"] + 1)
         siblings = [f["name"].casefold() for f in info["folders"] if f["parent"] == parent["id"]]
         if name.casefold() in siblings:
-            raise DeckError("invalid", f"There is already a folder called '{name}' there.")
+            raise DeckError("invalid", f"There is already a folder called “{name}” there.")
         changes.update(name=name, parent=parent["id"])
         where_to = "your top level" if not parent["depth"] else f"“{parent['name']}”"
         row["text"] = f"Create the folder “{name}” in {where_to}"
     elif action == "deck_help":
         what = str(params.get("help_action") or "post")
         if what not in HELP_ACTIONS:
-            raise DeckError("invalid", "help_action must be post, edit or delist")
+            raise DeckError("invalid", "help_action must be post, edit or delist.")
         current = deck_help_of(deck)
         if what == "post":
             if current is not None and current["active"]:
@@ -626,7 +626,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
     elif action == "report":
         kind = str(params.get("report_kind") or "")
         if kind not in REPORT_KINDS:
-            raise DeckError("invalid", "report_kind must be deck, card, custom_card or comment")
+            raise DeckError("invalid", "report_kind must be deck, card, custom_card or comment.")
         message = clean_text(str(params.get("message") or ""))
         if not message:
             raise DeckError("invalid", "Say what is wrong: a report needs a message.")

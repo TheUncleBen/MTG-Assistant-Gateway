@@ -40,6 +40,7 @@ import httpx
 from .. import dbwait
 from ..busy import outage
 from ..config import USER_AGENT
+from ..refusals import sentence
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +376,8 @@ class ScryfallClient:
         n = max(1, self.retry_in())
         return ScryfallError(
             "rate_limited",
-            f"{outage('slow_down', 'Scryfall')} Try again in {n} second{'' if n == 1 else 's'}.",
+            f"{outage('slow_down', 'Scryfall')} Its lookups wait {n} second{'' if n == 1 else 's'}; "
+            "try again after that.",
         )
 
     async def _request(
@@ -418,9 +420,9 @@ class ScryfallClient:
         try:
             data = resp.json()
         except ValueError as exc:
-            raise ScryfallError("contract", "Scryfall returned a non-JSON body") from exc
+            raise ScryfallError("contract", "Scryfall returned a non-JSON body.") from exc
         if not isinstance(data, dict):
-            raise ScryfallError("contract", "Scryfall returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall returned an unexpected body.")
         return data
 
     def _card_or_error(self, resp: httpx.Response, what: str) -> dict[str, Any]:
@@ -430,12 +432,15 @@ class ScryfallClient:
         data = self._json(resp)
         if resp.status_code == 404:
             kind = "ambiguous" if data.get("type") == "ambiguous" else "not_found"
-            raise ScryfallError(kind, str(data.get("details") or f"No card found for {what}"))
+            # the gateway's own words for an unknown or unclear name, the same everywhere (B-3)
+            if kind == "ambiguous":
+                raise ScryfallError(kind, f"“{what}” could be any of several cards; give more of its name.")
+            raise ScryfallError(kind, f"No card is called “{what}”.")
         if resp.status_code >= 400 or data.get("object") == "error":
             logger.warning("Scryfall answered %d for %s", resp.status_code, what)
             raise ScryfallError("unavailable", SCRYFALL_FAILING)
         if data.get("object") != "card" or not data.get("name"):
-            raise ScryfallError("contract", "Scryfall returned something that is not a card")
+            raise ScryfallError("contract", "Scryfall returned something that is not a card.")
         return data
 
     async def named(self, name: str, *, fuzzy: bool = False, set_code: str | None = None) -> dict[str, Any]:
@@ -472,14 +477,14 @@ class ScryfallClient:
         """GET /cards/{id}/rulings: the card's rulings ({date, text, source} each, oldest first as
         Scryfall lists them). Not cached here; the card viewer keeps them (cardsearch.py)."""
         if not re.fullmatch(r"[0-9a-f-]{36}", card_id or ""):
-            raise ScryfallError("not_found", "No such card ID")
+            raise ScryfallError("not_found", "Scryfall has no card with that ID.")
         resp = await self._request("GET", f"/cards/{card_id}/rulings", interval=self.lookup_interval)
         data = self._json(resp)
         if resp.status_code == 404 or data.get("object") == "error":
-            raise ScryfallError("not_found", str(data.get("details") or "No rulings found"))
+            raise ScryfallError("not_found", sentence(data.get("details") or "No rulings were found."))
         rows = data.get("data")
         if data.get("object") != "list" or not isinstance(rows, list):
-            raise ScryfallError("contract", "Scryfall rulings returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall rulings returned an unexpected body.")
         return [
             {
                 "date": str(r.get("published_at") or ""),
@@ -503,7 +508,7 @@ class ScryfallClient:
         data = self._json(resp)
         names = data.get("data")
         if data.get("object") != "catalog" or not isinstance(names, list):
-            raise ScryfallError("contract", "Scryfall autocomplete returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall autocomplete returned an unexpected body.")
         out = [n for n in names if isinstance(n, str)]
         self.names.put(key, out)
         return out
@@ -516,10 +521,10 @@ class ScryfallClient:
         data = self._json(resp)
         names = data.get("data")
         if data.get("object") != "catalog" or not isinstance(names, list):
-            raise ScryfallError("contract", "Scryfall's card-name catalog has an unexpected shape")
+            raise ScryfallError("contract", "Scryfall's card-name catalog has an unexpected shape.")
         out = [n for n in names if isinstance(n, str) and n]
         if len(out) < 1000:
-            raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)})")
+            raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)}).")
         return out
 
     async def prints(
@@ -548,7 +553,7 @@ class ScryfallClient:
         (Scryfall's ``set:`` and ``cn:``), checked by the caller.
         """
         if order not in PRINT_ORDERS:
-            raise ScryfallError("invalid", "order must be newest, oldest or cheapest")
+            raise ScryfallError("invalid", "order must be newest, oldest or cheapest.")
         terms = " ".join(
             t
             for t in (
@@ -585,9 +590,9 @@ class ScryfallClient:
                 empty: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "page": page}
                 self.prints_cache.put(key, empty)
                 return empty
-            raise ScryfallError("not_found", str(data.get("details") or "no printings found"))
+            raise ScryfallError("not_found", sentence(data.get("details") or "No printings were found."))
         if data.get("object") != "list" or not isinstance(data.get("data"), list):
-            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
         cards = [browse_row(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"]
         total = data.get("total_cards")
         out = {
@@ -626,7 +631,10 @@ class ScryfallClient:
                 if resp.status_code == 404:
                     break  # none of these cards (or a page past the end)
                 if data.get("object") != "list" or not isinstance(data.get("data"), list):
-                    raise ScryfallError("contract", str(data.get("details") or "unexpected search reply"))
+                    raise ScryfallError(
+                        "contract",
+                        sentence(data.get("details") or "Scryfall's search answer was not readable."),
+                    )
                 for c in data["data"]:
                     if not isinstance(c, dict) or c.get("object") != "card":
                         continue
@@ -659,7 +667,7 @@ class ScryfallClient:
         second member's identical search and a reload cost no request."""
         q = query.strip()
         if not q:
-            raise ScryfallError("invalid", "nothing to search for")
+            raise ScryfallError("invalid", "Nothing to search for.")
         key = f"{order}|{direction}|{page}|{q}"
         if (hit := self.search_cache.get(key)) is not None:
             return hit
@@ -673,9 +681,11 @@ class ScryfallClient:
                 out: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "warnings": []}
                 self.search_cache.put(key, out)
                 return out
-            raise ScryfallError("invalid", str(data.get("details") or "Scryfall could not read that search"))
+            raise ScryfallError(
+                "invalid", sentence(data.get("details") or "Scryfall could not read that search.")
+            )
         if data.get("object") != "list" or not isinstance(data.get("data"), list):
-            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
         total = data.get("total_cards")
         warnings = data.get("warnings")
         out = {
@@ -700,7 +710,7 @@ class ScryfallClient:
         data = self._json(resp)
         rows = data.get("data")
         if data.get("object") != "list" or not isinstance(rows, list):
-            raise ScryfallError("contract", "Scryfall's set list has an unexpected shape")
+            raise ScryfallError("contract", "Scryfall's set list has an unexpected shape.")
         out = [
             {
                 "code": str(r["code"]).lower(),
@@ -720,7 +730,7 @@ class ScryfallClient:
     async def catalog(self, name: str) -> list[str]:
         """One of Scryfall's catalogs (``GET /catalog/{name}``, e.g. ``creature-types``); kept a day."""
         if not re.fullmatch(r"[a-z-]{3,40}", name):
-            raise ScryfallError("invalid", "no such catalog")
+            raise ScryfallError("invalid", "No such catalog.")
         key = f"catalog:{name}"
         if (hit := self.catalogs.get(key)) is not None:
             return hit
@@ -728,7 +738,7 @@ class ScryfallClient:
         data = self._json(resp)
         values = data.get("data")
         if data.get("object") != "catalog" or not isinstance(values, list):
-            raise ScryfallError("contract", f"Scryfall's {name} catalog has an unexpected shape")
+            raise ScryfallError("contract", f"Scryfall's {name} catalog has an unexpected shape.")
         out = [v for v in values if isinstance(v, str) and v]
         self.catalogs.put(key, out)
         return out
@@ -752,7 +762,7 @@ class ScryfallClient:
         if resp.status_code == 404 or data.get("object") == "error":
             out: list[str] = []
         elif data.get("object") != "list" or not isinstance(data.get("data"), list):
-            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body.")
         else:
             out = [
                 str(c["name"]) for c in data["data"] if isinstance(c, dict) and isinstance(c.get("name"), str)
@@ -816,7 +826,9 @@ class ScryfallClient:
             )
             data = self._json(resp)
             if data.get("object") != "list" or not isinstance(data.get("data"), list):
-                raise ScryfallError("contract", str(data.get("details") or "unexpected collection reply"))
+                raise ScryfallError(
+                    "contract", sentence(data.get("details") or "Scryfall's card answer was not readable.")
+                )
             for card in data["data"]:
                 if isinstance(card, dict) and card.get("object") == "card":
                     found.append(card)

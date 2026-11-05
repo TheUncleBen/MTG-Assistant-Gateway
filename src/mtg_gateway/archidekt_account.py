@@ -71,13 +71,13 @@ ACCOUNT_SETTING_KEYS = (
 
 def _id(value: Any, what: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ArchidektError("contract", f"{what} is not a number")
+        raise ArchidektError("contract", f"{what} is not a number.")
     return value
 
 
 def _deck(deck_id: Any) -> str:
     if not DECK_ID_RE.fullmatch(str(deck_id)):
-        raise ArchidektError("contract", "deck ID is not a number")
+        raise ArchidektError("contract", "Deck ID is not a number.")
     return str(deck_id)
 
 
@@ -87,7 +87,7 @@ def _rows(body: Any, *keys: str) -> list[dict[str, Any]]:
     if isinstance(body, dict):
         rows = next((body[k] for k in keys if isinstance(body.get(k), list)), None)
     if not isinstance(rows, list):
-        raise ArchidektError("contract", "unexpected list shape")
+        raise ArchidektError("contract", "Unexpected list shape.")
     return [r for r in rows if isinstance(r, dict)]
 
 
@@ -103,10 +103,10 @@ class AccountRequests:
     def _template_body(fields: dict[str, Any]) -> dict[str, Any]:
         name = fields.get("name")
         if not isinstance(name, str) or not name.strip():
-            raise ArchidektError("contract", "template name is empty")
+            raise ArchidektError("contract", "Template name is empty.")
         flags = ("includedInDeck", "includedInPrice", "isPremier")
         if any(not isinstance(fields.get(k), bool) for k in flags):
-            raise ArchidektError("contract", "template switches must be true or false")
+            raise ArchidektError("contract", "Template switches must be true or false.")
         return {"name": name, **{k: fields[k] for k in flags}}
 
     async def create_template(self: ArchidektClient, token: str, fields: dict[str, Any]) -> Any:
@@ -131,7 +131,7 @@ class AccountRequests:
             "GET", "/users/globalCategory/", token=token, params={"page": max(1, int(page))}, fresh=True
         )
         if not isinstance(body, dict) or not isinstance(body.get("cards"), list):
-            raise ArchidektError("contract", "unexpected default categories shape")
+            raise ArchidektError("contract", "Unexpected default categories shape.")
         return body
 
     async def set_default_categories(
@@ -139,7 +139,7 @@ class AccountRequests:
     ) -> Any:
         """The card's whole list, first name = its main category (the site's star)."""
         if not isinstance(names, list) or any(not isinstance(n, str) or not n.strip() for n in names):
-            raise ArchidektError("contract", "category names must be text")
+            raise ArchidektError("contract", "Category names must be text.")
         oid = _id(oracle_card_id, "card ID")
         return await self._request(
             "POST", f"/users/globalCategory/oracleCard/{oid}/", token=token, json_body={"categories": names}
@@ -153,9 +153,9 @@ class AccountRequests:
     @staticmethod
     def _tag_body(name: Any, color: Any) -> dict[str, Any]:
         if not isinstance(name, str) or not name.strip() or len(name) > 32:
-            raise ArchidektError("contract", "color tag name must be 1 to 32 characters")
+            raise ArchidektError("contract", "Color tag name must be 1 to 32 characters.")
         if not isinstance(color, str) or not HEX_COLOR_RE.fullmatch(color):
-            raise ArchidektError("contract", "color must be a hex color like #fa890d")
+            raise ArchidektError("contract", "color must be a hex color like #fa890d.")
         return {"name": name, "color": color}
 
     async def create_color_tag(self: ArchidektClient, token: str, name: str, color: str) -> Any:
@@ -209,7 +209,7 @@ class AccountRequests:
         for c in cards:
             qty = c.get("quantity")
             if isinstance(qty, bool) or not isinstance(qty, int) or qty < 1:
-                raise ArchidektError("contract", "pin quantity must be 1 or more")
+                raise ArchidektError("contract", "Pin quantity must be 1 or more.")
             body.append(
                 {
                     "cardId": _id(c.get("cardId"), "card ID"),
@@ -219,7 +219,7 @@ class AccountRequests:
                 }
             )
         if not body:
-            raise ArchidektError("contract", "no cards to pin")
+            raise ArchidektError("contract", "No cards to pin.")
         return await self._request("POST", "/users/pins/", token=token, json_body={"cards": body})
 
     async def update_pin(
@@ -233,7 +233,7 @@ class AccountRequests:
         modifier: str,
     ) -> Any:
         if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
-            raise ArchidektError("contract", "pin quantity must be 1 or more (remove the pin instead)")
+            raise ArchidektError("contract", "Pin quantity must be 1 or more (remove the pin instead).")
         body = {
             "card": _id(card_id, "card ID"),
             "quantity": quantity,
@@ -264,7 +264,7 @@ class AccountRequests:
         }
         body = await self._request("GET", "/decks/customCards/", token=token, params=params, fresh=True)
         if not isinstance(body, dict) or not isinstance(body.get("results"), list):
-            raise ArchidektError("contract", "unexpected custom card list shape")
+            raise ArchidektError("contract", "Unexpected custom card list shape.")
         return body
 
     @staticmethod
@@ -274,9 +274,9 @@ class AccountRequests:
             if isinstance(v, str) and not v.strip():
                 body[k] = None  # the site sends an empty field as null
         if not body.get("frontName"):
-            raise ArchidektError("contract", "custom cards need a front name")
+            raise ArchidektError("contract", "Custom cards need a front name.")
         if not any(body.get(k) for k in ("frontTypes", "frontSubTypes", "frontSuperTypes")):
-            raise ArchidektError("contract", "custom cards need at least one type")
+            raise ArchidektError("contract", "Custom cards need at least one type.")
         body["hasBack"] = bool(body.get("hasBack"))
         if not body["hasBack"]:
             for k in CUSTOM_CARD_FIELDS:
@@ -323,15 +323,15 @@ class AccountRequests:
         name = fields.get("name")
         pkg = fields.get("cardPackage") or {}
         if not isinstance(name, str) or not name.strip():
-            raise ArchidektError("contract", "package name is empty")
+            raise ArchidektError("contract", "Package name is empty.")
         if not isinstance(pkg.get("keywords"), str) or not pkg["keywords"].strip():
-            raise ArchidektError("contract", "package keywords are required")
+            raise ArchidektError("contract", "Package keywords are required.")
         budget = pkg.get("budget")
         if budget is not None and budget not in (1, 2, 3, 4):
-            raise ArchidektError("contract", "budget must be 1 to 4 or none")
+            raise ArchidektError("contract", "budget must be 1 to 4 or none.")
         formats = pkg.get("intendedFormats") or []
         if any(isinstance(f, bool) or not isinstance(f, int) for f in formats):
-            raise ArchidektError("contract", "intended formats must be format IDs")
+            raise ArchidektError("contract", "Intended formats must be format IDs.")
         body: dict[str, Any] = {
             "name": name,
             "deckFormat": None,
@@ -386,7 +386,7 @@ class AccountRequests:
             params["bookmarks"] = "true"
         body = await self._request("GET", "/decks/v3/", token=token, params=params, fresh=True)
         if not isinstance(body, dict) or not isinstance(body.get("results"), list):
-            raise ArchidektError("contract", "unexpected package list shape")
+            raise ArchidektError("contract", "Unexpected package list shape.")
         return body
 
     async def package_cards(self: ArchidektClient, token: str, package_deck_id: str) -> dict[str, Any]:
@@ -398,7 +398,7 @@ class AccountRequests:
             "GET", f"/decks/{did}/", token=token, params={"incrementPackageImport": "true"}, fresh=True
         )
         if not isinstance(body, dict) or not isinstance(body.get("cards"), list):
-            raise ArchidektError("contract", "unexpected package shape")
+            raise ArchidektError("contract", "Unexpected package shape.")
         return body
 
     # -- deck help requests ----------------------------------------------------------------------
@@ -422,11 +422,11 @@ class AccountRequests:
 
     async def report(self: ArchidektClient, token: str, url: str, kind: str, message: str) -> Any:
         if kind not in REPORT_TYPES:
-            raise ArchidektError("contract", "unknown report kind")
+            raise ArchidektError("contract", "Unknown report kind.")
         if not url.startswith("https://archidekt.com/"):
-            raise ArchidektError("contract", "a report names a page on archidekt.com")
+            raise ArchidektError("contract", "A report names a page on archidekt.com.")
         if not message.strip():
-            raise ArchidektError("contract", "a report needs a message")
+            raise ArchidektError("contract", "A report needs a message.")
         body = {"url": url, "type": kind, "message": message}
         return await self._request("POST", "/users/moderator/report/", token=token, json_body=body)
 
@@ -447,7 +447,7 @@ class AccountRequests:
         uid = _id(user_id, "user ID")
         body = await self._request("GET", f"/users/{uid}/private/", token=token, fresh=True)
         if not isinstance(body, dict):
-            raise ArchidektError("contract", "unexpected profile shape")
+            raise ArchidektError("contract", "Unexpected profile shape.")
         return body
 
     async def patch_user_private(
@@ -464,19 +464,19 @@ class AccountRequests:
         if profile:
             bad = set(profile) - set(PROFILE_KEYS) - set(COLLECTION_KEYS)
             if bad:
-                raise ArchidektError("contract", f"unknown profile keys: {sorted(bad)}")
+                raise ArchidektError("contract", f"Unknown profile keys: {sorted(bad)}.")
             body["profile"] = dict(profile)
         if settings:
             bad = set(settings) - set(ACCOUNT_SETTING_KEYS)
             if bad:
-                raise ArchidektError("contract", f"unknown account setting keys: {sorted(bad)}")
+                raise ArchidektError("contract", f"Unknown account setting keys: {sorted(bad)}.")
             body["accountSettings"] = dict(settings)
         if username is not None:
             if not username.strip():
-                raise ArchidektError("contract", "username is empty")
+                raise ArchidektError("contract", "username is empty.")
             body["username"] = username
         if not body:
-            raise ArchidektError("contract", "nothing to change")
+            raise ArchidektError("contract", "Nothing to change.")
         uid = _id(user_id, "user ID")
         resp = await self._request("PATCH", f"/users/{uid}/private/", token=token, json_body=body)
         return resp if isinstance(resp, dict) else {}
@@ -494,7 +494,7 @@ class AccountRequests:
         body = await self._request("GET", f"/users/{uid}/notificationCount/", token=token, fresh=True)
         n = body.get("notificationCount") if isinstance(body, dict) else None
         if isinstance(n, bool) or not isinstance(n, int) or n < 0:
-            raise ArchidektError("contract", "unexpected notification count shape")
+            raise ArchidektError("contract", "Unexpected notification count shape.")
         return n
 
     async def notifications(self: ArchidektClient, token: str, user_id: int) -> list[dict[str, Any]]:

@@ -314,7 +314,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             want = deck_format.strip().lower()
             if want not in FORMAT_IDS:
                 return _tool_error(
-                    DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
+                    DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}.")
                 )
             name = FORMAT_NAMES[FORMAT_IDS[want]]
             rows = [d for d in rows if str(d.get("format_name") or d.get("format") or "").lower() == name]
@@ -420,7 +420,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         for it in session.get("items", []):
             card = it.get("card") or {}
             if card and it.get("status") == "fuzzy":
-                note = it.get("note") or f"'{card.get('name')}' was matched from a misspelt name"
+                note = it.get("note") or f"“{card.get('name')}” was matched from a misspelt name"
                 out.append(f"{note}; confirm it with the user")
         return out
 
@@ -1074,7 +1074,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             sub = _sub()
             if archidekt:
                 if not deck_id:
-                    raise DeckError("invalid", "archidekt=true needs deck_id: one of your decks.")
+                    raise DeckError("invalid", "Archidekt=true needs deck_id: one of your decks.")
                 from . import archidekt_log
 
                 got = await archidekt_log.read(state.decks, sub, deck_id)
@@ -1293,7 +1293,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     None,
                 )
             if decision not in APPROVE_DECISIONS:
-                raise DeckError("invalid", "decision must be approve or reject")
+                raise DeckError("invalid", "decision must be approve or reject.")
             state.decks.check_approval(sub, proposal_id, approval)
             if decision == "reject":
                 # the reason the member typed on the card, kept with the rejection
@@ -1394,7 +1394,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
 
     def _scan_session(sub: str, ref: str) -> dict[str, Any]:
         if state.scan is None:
-            raise DeckError("unavailable", "card scanning is not configured on this gateway")
+            raise DeckError("unavailable", "Card scanning is not configured on this gateway.")
         from .scan.service import ScanError
 
         try:

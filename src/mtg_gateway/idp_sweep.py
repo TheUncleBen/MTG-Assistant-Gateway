@@ -72,24 +72,24 @@ def members(body: Any, name: str) -> list[dict[str, Any]]:
     ``{"uid", "is_active"}``. Raises SweepRefused unless exactly one group has that name and every
     member entry is well formed."""
     if not isinstance(body, dict) or not isinstance(body.get("results"), list):
-        raise SweepRefused("unexpected answer shape from Authentik")
+        raise SweepRefused("Unexpected answer shape from Authentik.")
     pagination = body.get("pagination")
     if isinstance(pagination, dict) and int(pagination.get("total_pages") or 1) > 1:
-        raise SweepRefused("Authentik's answer was split into pages")
+        raise SweepRefused("Authentik's answer was split into pages.")
     found = [g for g in body["results"] if isinstance(g, dict) and g.get("name") == name]
     if len(found) != 1:
         raise SweepRefused(
-            f"group {name!r} found {len(found)} times (is the name right, and may the token view that group?)"
+            f"Group “{name}” found {len(found)} times (is the name right, and may the token view that group?)"
         )
     users = found[0].get("users_obj")
     if not isinstance(users, list):
-        raise SweepRefused(f"group {name!r} came without its members (users_obj)")
+        raise SweepRefused(f"Group “{name}” came without its members (users_obj).")
     out = []
     for u in users:
         if not isinstance(u, dict) or not isinstance(u.get("uid"), str) or not u["uid"]:
-            raise SweepRefused(f"a member of {name!r} has no uid")
+            raise SweepRefused(f"A member of “{name}” has no uid.")
         if not isinstance(u.get("is_active"), bool):
-            raise SweepRefused(f"a member of {name!r} has no is_active")
+            raise SweepRefused(f"A member of “{name}” has no is_active.")
         out.append({"uid": u["uid"], "is_active": u["is_active"]})
     return out
 
@@ -99,18 +99,18 @@ def plan(groups: dict[str, list[dict[str, Any]]], linked: list[str], known: list
     the gateway has (linked or not). Raises SweepRefused when the answer doesn't make sense."""
     allowed = {m["uid"] for ms in groups.values() for m in ms if m["is_active"]}
     if not allowed:
-        raise SweepRefused("Authentik says nobody is in the groups; not trusting an empty answer")
+        raise SweepRefused("Authentik says nobody is in the groups; not trusting an empty answer.")
     if not allowed.intersection(known):
         raise SweepRefused(
-            "nobody the gateway knows is among the members Authentik lists: check that the "
-            "provider's subject mode is 'Based on the User's hashed ID' and the group names"
+            "Nobody the gateway knows is among the members Authentik lists: check that the "
+            "provider's subject mode is 'Based on the User's hashed ID' and the group names."
         )
     remove = sorted(sub for sub in linked if sub not in allowed)
     if len(remove) > MAX_REMOVALS_ANYWAY and len(remove) > MAX_REMOVED_SHARE * len(linked):
         raise SweepRefused(
-            f"it would delete {len(remove)} of {len(linked)} stored Archidekt sessions at once; "
+            f"It would delete {len(remove)} of {len(linked)} stored Archidekt sessions at once; "
             "check the provider's subject mode and the group names, and use Disable on the admin "
-            "page for people you removed"
+            "page for people you removed."
         )
     return Plan(remove=remove, allowed=len(allowed), linked=len(linked))
 
@@ -250,14 +250,14 @@ class AuthentikSweep:
             )
         except httpx.HTTPError as exc:
             raise SweepRefused(
-                f"{outage('unreachable', 'Authentik').removesuffix('.')} ({type(exc).__name__})"
+                f"{outage('unreachable', 'Authentik').removesuffix('.')} ({type(exc).__name__})."
             ) from exc
         if r.status_code != 200:
-            raise SweepRefused(f"Authentik answered HTTP {r.status_code}")
+            raise SweepRefused(f"Authentik answered HTTP {r.status_code}.")
         try:
             body = r.json()
         except ValueError as exc:
-            raise SweepRefused("Authentik's answer was not JSON") from exc
+            raise SweepRefused("Authentik's answer was not JSON.") from exc
         return members(body, name)
 
     async def run_once(self) -> Plan:

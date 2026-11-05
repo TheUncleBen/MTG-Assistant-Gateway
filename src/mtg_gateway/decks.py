@@ -987,7 +987,7 @@ def row_label(r: dict[str, Any]) -> str:
     if r.get("category"):
         label += f" [{r['category']}]"
     if r.get("guessed_from"):
-        label += f" (name guessed from '{r['guessed_from']}'; check it)"
+        label += f" (name guessed from “{r['guessed_from']}”; check it)"
     if r.get("tag"):  # the colour tag an add puts on its new row
         label += f", color tag {clean_text(str(r['tag']))}"
     if r.get("breaks"):  # a format rule the change would break (DeckService._judge_rules)
@@ -1364,41 +1364,41 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
     Any other caller's flags are dropped, never written: an assistant's proposal reads "+1 Opt" in
     its review and on the chat card, so it must write no more than that."""
     if not isinstance(raw, list) or not raw:
-        raise DeckError("invalid", "changes must be a non-empty list")
+        raise DeckError("invalid", "changes must be a non-empty list.")
     if len(raw) > MAX_CHANGES:
-        raise DeckError("invalid", f"at most {MAX_CHANGES} changes per proposal")
+        raise DeckError("invalid", f"At most {MAX_CHANGES} changes per proposal.")
     out: list[Change] = []
     rels: list[int | None] = []  # each change's row (relation_id), in order
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
-            raise DeckError("invalid", f"change {i} must be an object")
+            raise DeckError("invalid", f"Change {i} must be an object.")
         action = str(item.get("action", "")).strip().lower()
         if action not in ACTIONS:
-            raise DeckError("invalid", f"change {i}: action must be one of {', '.join(ACTIONS)}")
+            raise DeckError("invalid", f"Change {i}: action must be one of {', '.join(ACTIONS)}.")
         name = clean_text(item.get("card_name", ""))
         if not name or len(name) > 200:
-            raise DeckError("invalid", f"change {i}: card_name is required")
+            raise DeckError("invalid", f"Change {i}: card_name is required.")
         zone = str(item.get("zone") or "main").strip().lower()
         if zone not in ZONES:
-            raise DeckError("invalid", f"change {i}: zone must be main or side")
+            raise DeckError("invalid", f"Change {i}: zone must be main or side.")
         rel = item.get("relation_id")
         if rel is not None:
             if action not in ROW_TARGET_ACTIONS:
                 raise DeckError(
-                    "invalid", f"change {i}: relation_id goes with {', '.join(ROW_TARGET_ACTIONS)} only"
+                    "invalid", f"Change {i}: relation_id goes with {', '.join(ROW_TARGET_ACTIONS)} only."
                 )
             if isinstance(rel, str) and rel.isdigit():
                 rel = int(rel)
             if isinstance(rel, bool) or not isinstance(rel, int) or rel <= 0:
                 raise DeckError(
-                    "invalid", f"change {i}: relation_id must be the number of one of the card's rows"
+                    "invalid", f"Change {i}: relation_id must be the number of one of the card's rows."
                 )
         rels.append(rel)
         if action in CATEGORY_ACTIONS:
             ch = _parse_category_change(i, action, name, item)
             if zone == "side" and action == "set_commander":
                 raise DeckError(
-                    "invalid", f"change {i}: set_commander works on the deck proper, not zone side"
+                    "invalid", f"Change {i}: set_commander works on the deck proper, not zone side."
                 )
             out.append(dataclasses.replace(ch, zone=zone))
             continue
@@ -1423,16 +1423,16 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             qty = 1 if action == "add" else None
         if qty is not None:
             if not isinstance(qty, int) or isinstance(qty, bool) or qty < 0 or qty > 99:
-                raise DeckError("invalid", f"change {i}: quantity must be an integer from 0 to 99")
+                raise DeckError("invalid", f"Change {i}: quantity must be an integer from 0 to 99.")
         if action == "set_quantity" and qty is None:
-            raise DeckError("invalid", f"change {i}: set_quantity needs a quantity")
+            raise DeckError("invalid", f"Change {i}: set_quantity needs a quantity.")
         cat = clean_text(item.get("category") or "") or None
         if cat and len(cat) > MAX_CATEGORY:
-            raise DeckError("invalid", f"change {i}: category is longer than {MAX_CATEGORY} characters")
+            raise DeckError("invalid", f"Change {i}: category is longer than {MAX_CATEGORY} characters.")
         cats = _parse_add_categories(i, action, item.get("categories"))
         if cats:
             if cat and cat != cats[0]:
-                raise DeckError("invalid", f"change {i}: category must be the first of categories")
+                raise DeckError("invalid", f"Change {i}: category must be the first of categories.")
             cat = cats[0]
         set_code = str(item.get("set_code") or item.get("set") or "").strip().lower() or None
         number = str(item.get("collector_number") or "").strip() or None
@@ -1441,29 +1441,31 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
             finish_raw = "foil"
         finish = FINISHES.get(str(finish_raw).strip().lower()) if finish_raw else None
         if finish_raw and finish is None:
-            raise DeckError("invalid", f"change {i}: finish must be normal, foil or etched")
+            raise DeckError("invalid", f"Change {i}: finish must be normal, foil or etched.")
         if (set_code or number or finish) and action != "add":
-            raise DeckError("invalid", f"change {i}: set_code, collector_number and finish apply to add only")
+            raise DeckError(
+                "invalid", f"Change {i}: set_code, collector_number and finish apply to add only."
+            )
         if bool(set_code) != bool(number):
-            raise DeckError("invalid", f"change {i}: set_code and collector_number go together")
+            raise DeckError("invalid", f"Change {i}: set_code and collector_number go together.")
         if set_code and not _SET_CODE.fullmatch(set_code):
-            raise DeckError("invalid", f"change {i}: set_code must be a set code such as cmr")
+            raise DeckError("invalid", f"Change {i}: set_code must be a set code such as cmr.")
         if number and not _COLLECTOR_NUMBER.fullmatch(number):
-            raise DeckError("invalid", f"change {i}: collector_number looks wrong")
+            raise DeckError("invalid", f"Change {i}: collector_number looks wrong.")
         flags = {}
         for flag in ("companion", "flipped_default") if row_flags else ():
             given = item.get(flag)
             if given is None:
                 continue
             if not isinstance(given, bool):
-                raise DeckError("invalid", f"change {i}: {flag} must be true or false")
+                raise DeckError("invalid", f"Change {i}: {flag} must be true or false.")
             if given and action != "add":
-                raise DeckError("invalid", f"change {i}: {flag} applies to add only")
+                raise DeckError("invalid", f"Change {i}: {flag} applies to add only.")
             flags[flag] = given
         label = None
         if item.get("label") not in (None, ""):
             if action != "add":
-                raise DeckError("invalid", f"change {i}: label goes with add or set_label only")
+                raise DeckError("invalid", f"Change {i}: label goes with add or set_label only.")
             label = _parse_label_change(i, name, {"label": item["label"], "color": item.get("color")}).label
         out.append(
             Change(
@@ -1486,7 +1488,7 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
     if len(pinned) != len(set(pinned)):
         raise DeckError(
             "invalid",
-            "one pinned printing per card name in each zone (deck or maybeboard/sideboard) per proposal",
+            "One pinned printing per card name in each zone (deck or maybeboard/sideboard) per proposal.",
         )
     # A pinned add next to a remove or set_quantity of the same card in the same zone would make
     # the writes (add that printing, then shrink the rest) differ from the net count the diff shows.
@@ -1502,8 +1504,8 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
         ):
             raise DeckError(
                 "invalid",
-                f"'{ch.card_name}' has a pinned printing added and is also removed or set in the same "
-                "zone in the same proposal; propose the removal and the pinned add separately",
+                f"“{ch.card_name}” has a pinned printing added and is also removed or set in the same "
+                "zone in the same proposal; propose the removal and the pinned add separately.",
             )
 
     # Names compare by front face, as the plans match them, so "Fire" and "Fire // Ice" clash.
@@ -1515,27 +1517,27 @@ def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
 
     categorised = [key(ch) for ch in out if ch.action in CATEGORY_ACTIONS]
     if len(categorised) != len(set(categorised)):
-        raise DeckError("invalid", "one set_category or set_commander per card name per proposal")
+        raise DeckError("invalid", "One set_category or set_commander per card name per proposal.")
     reprinted = [key(ch) for ch in out if ch.action in PRINTING_ACTIONS]
     if len(reprinted) != len(set(reprinted)):
         raise DeckError(
             "invalid",
-            "one set_finish, set_printing, set_label, set_mana_value, set_companion or set_back_face per "
-            "card name per proposal",
+            "One set_finish, set_printing, set_label, set_mana_value, set_companion or set_back_face per "
+            "card name per proposal.",
         )
     counted = {key(ch) for ch in out if ch.action in COUNT_ACTIONS}
     clash = sorted((set(categorised) | set(reprinted)) & counted)
     if clash:
         raise DeckError(
             "invalid",
-            "a card cannot be added, removed or recounted and recategorized or reprinted in the same "
-            "proposal: " + ", ".join(clash),
+            "A card cannot be added, removed or recounted and recategorized or reprinted in the same "
+            "proposal: " + ", ".join(clash) + ".",
         )
     clash = sorted(set(categorised) & set(reprinted))
     if clash:
         raise DeckError(
             "invalid",
-            "a card cannot be recategorized and reprinted in the same proposal: " + ", ".join(clash),
+            "A card cannot be recategorized and reprinted in the same proposal: " + ", ".join(clash) + ".",
         )
     return out
 
@@ -1559,16 +1561,16 @@ def _parse_add_categories(i: int, action: str, raw: Any) -> tuple[str, ...]:
     if raw is None or raw == []:
         return ()
     if action not in ("add", "set_category"):
-        raise DeckError("invalid", f"change {i}: categories apply to add and set_category only")
+        raise DeckError("invalid", f"Change {i}: categories apply to add and set_category only.")
     if not isinstance(raw, list) or len(raw) > MAX_ADD_CATEGORIES or not all(isinstance(c, str) for c in raw):
         raise DeckError(
-            "invalid", f"change {i}: categories must be a list of up to {MAX_ADD_CATEGORIES} names"
+            "invalid", f"Change {i}: categories must be a list of up to {MAX_ADD_CATEGORIES} names."
         )
     out: list[str] = []
     for c in raw:
         cat = clean_text(c)
         if not cat or len(cat) > MAX_CATEGORY:
-            raise DeckError("invalid", f"change {i}: each category is 1 to {MAX_CATEGORY} characters")
+            raise DeckError("invalid", f"Change {i}: each category is 1 to {MAX_CATEGORY} characters.")
         if cat not in out:
             out.append(cat)
     return tuple(out)
@@ -1580,20 +1582,20 @@ def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
     colour as #rrggbb (grey when none is given). An empty label takes the tag off."""
     for key in ("quantity", "category", "set_code", "set", "collector_number", "finish", "modifier", "foil"):
         if item.get(key) not in (None, "", False):
-            raise DeckError("invalid", f"change {i}: set_label takes only card_name, label, color and zone")
+            raise DeckError("invalid", f"Change {i}: set_label takes only card_name, label, color and zone.")
     raw = item.get("label")
     if raw is None:
-        raise DeckError("invalid", f"change {i}: set_label needs a label (an empty one takes the tag off)")
+        raise DeckError("invalid", f"Change {i}: set_label needs a label (an empty one takes the tag off).")
     text = clean_text(str(raw))
     colour = str(item.get("color") or item.get("colour") or "").strip()
     if "," in text and not colour:  # Archidekt's own form, "Have,#37d67a"
         text, colour = text.rsplit(",", 1)[0].strip(), text.rsplit(",", 1)[1].strip()
     if "," in text or len(text) > MAX_LABEL:
-        raise DeckError("invalid", f"change {i}: a label is at most {MAX_LABEL} characters, without commas")
+        raise DeckError("invalid", f"Change {i}: a label is at most {MAX_LABEL} characters, without commas.")
     if not text:
         return Change("set_label", name, label="")
     if colour and not LABEL_COLOUR.fullmatch(colour):
-        raise DeckError("invalid", f"change {i}: color must be a color like #37d67a")
+        raise DeckError("invalid", f"Change {i}: color must be a color like #37d67a.")
     return Change("set_label", name, label=f"{text},{(colour or DEFAULT_LABEL_COLOUR).lower()}")
 
 
@@ -1609,18 +1611,18 @@ def _parse_mana_value_change(i: int, name: str, item: dict[str, Any]) -> Change:
     for key in ("quantity", "category", "set_code", "set", "collector_number", "finish", "label", "color"):
         if item.get(key) not in (None, "", False):
             raise DeckError(
-                "invalid", f"change {i}: set_mana_value takes only card_name, mana_value and zone"
+                "invalid", f"Change {i}: set_mana_value takes only card_name, mana_value and zone."
             )
     if "mana_value" not in item:
         raise DeckError(
-            "invalid", f"change {i}: set_mana_value needs mana_value (null takes the override off)"
+            "invalid", f"Change {i}: set_mana_value needs mana_value (null takes the override off)."
         )
     raw = item.get("mana_value")
     if raw is None or raw == "":
         return Change("set_mana_value", name, mana_value=None)
     if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
         raise DeckError(
-            "invalid", f"change {i}: mana_value must be a whole number from 0 to {MAX_MANA_VALUE}"
+            "invalid", f"Change {i}: mana_value must be a whole number from 0 to {MAX_MANA_VALUE}."
         )
     try:
         value = float(str(raw).strip())
@@ -1628,7 +1630,7 @@ def _parse_mana_value_change(i: int, name: str, item: dict[str, Any]) -> Change:
         value = -1.0
     if not value.is_integer() or not 0 <= value <= MAX_MANA_VALUE:
         raise DeckError(
-            "invalid", f"change {i}: mana_value must be a whole number from 0 to {MAX_MANA_VALUE}"
+            "invalid", f"Change {i}: mana_value must be a whole number from 0 to {MAX_MANA_VALUE}."
         )
     return Change("set_mana_value", name, mana_value=int(value))
 
@@ -1645,9 +1647,9 @@ def _parse_switch_change(i: int, action: str, name: str, item: dict[str, Any]) -
         field,
     }
     if extra:
-        raise DeckError("invalid", f"change {i}: {action} takes only card_name, {field} and zone")
+        raise DeckError("invalid", f"Change {i}: {action} takes only card_name, {field} and zone.")
     if not isinstance(item.get(field), bool):
-        raise DeckError("invalid", f"change {i}: {action} needs {field}: true or false")
+        raise DeckError("invalid", f"Change {i}: {action} needs {field}: true or false.")
     return Change(action, name, on=item[field])
 
 
@@ -1662,25 +1664,25 @@ def _parse_printing_change(i: int, action: str, name: str, item: dict[str, Any])
     finish?}) swaps every copy for that printing (same total, same categories)."""
     for key in ("quantity", "category"):
         if item.get(key) not in (None, "", False):
-            raise DeckError("invalid", f"change {i}: {action} takes no {key}")
+            raise DeckError("invalid", f"Change {i}: {action} takes no {key}.")
     finish_raw = item.get("finish") or item.get("modifier")
     if finish_raw is None and item.get("foil") is True:
         finish_raw = "foil"
     finish = FINISHES.get(str(finish_raw).strip().lower()) if finish_raw else None
     if finish_raw and finish is None:
-        raise DeckError("invalid", f"change {i}: finish must be normal, foil or etched")
+        raise DeckError("invalid", f"Change {i}: finish must be normal, foil or etched.")
     if action == "set_finish":
         if not finish:
-            raise DeckError("invalid", f"change {i}: set_finish needs a finish (normal, foil or etched)")
+            raise DeckError("invalid", f"Change {i}: set_finish needs a finish (normal, foil or etched).")
         return Change(action, name, finish=finish)
     set_code = str(item.get("set_code") or item.get("set") or "").strip().lower() or None
     number = str(item.get("collector_number") or "").strip() or None
     if not (set_code and number):
-        raise DeckError("invalid", f"change {i}: set_printing needs set_code and collector_number")
+        raise DeckError("invalid", f"Change {i}: set_printing needs set_code and collector_number.")
     if not _SET_CODE.fullmatch(set_code):
-        raise DeckError("invalid", f"change {i}: set_code must be a set code such as cmr")
+        raise DeckError("invalid", f"Change {i}: set_code must be a set code such as cmr.")
     if not _COLLECTOR_NUMBER.fullmatch(number):
-        raise DeckError("invalid", f"change {i}: collector_number looks wrong")
+        raise DeckError("invalid", f"Change {i}: collector_number looks wrong.")
     return Change(action, name, set_code=set_code, collector_number=number, finish=finish)
 
 
@@ -1698,7 +1700,7 @@ def target_rows(deck: Deck, changes: list[Change]) -> list[Change]:
             if row is None or front_face(row.name).casefold() != front_face(ch.card_name).casefold():
                 raise DeckError(
                     "invalid",
-                    f"That row of '{ch.card_name}' is no longer in the deck. Reload the deck and try again.",
+                    f"That row of “{ch.card_name}” is no longer in the deck. Reload the deck and try again.",
                 )
             ch = dataclasses.replace(ch, card_name=row.name, zone="main" if deck.in_deck(row) else "side")
         out.append(ch)
@@ -1754,7 +1756,7 @@ def printing_plan_rows(
         if not cards:
             raise DeckError(
                 "invalid",
-                f"'{ch.card_name}' is not in the deck"
+                f"“{ch.card_name}” is not in the deck"
                 + (" (maybeboard or sideboard)" if ch.zone == "side" else "")
                 + (
                     ", so it cannot be tagged"
@@ -1771,11 +1773,11 @@ def printing_plan_rows(
             # zone: a printing or finish for all of them at once is never what was meant
             raise DeckError(
                 "invalid",
-                f"'{ch.card_name}' has more than one maybeboard or sideboard row; "
-                "name the row to change (relation_id)",
+                f"“{ch.card_name}” has more than one maybeboard or sideboard row; "
+                "name the row to change (relation_id).",
             )
         if any(c.relation_id is None or c.card_id is None for c in cards):
-            raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
+            raise DeckError("contract", f"Archidekt did not number the deck rows of “{ch.card_name}”.")
         first = cards[0]
         # One entry per existing row, so a card filed in two categories, a companion or a row
         # with a label keeps each of those on the new printing.
@@ -1802,7 +1804,7 @@ def printing_plan_rows(
         if ch.action in SWITCHES:
             _field, key, _ark, words = SWITCHES[ch.action]
             if ch.action == "set_back_face" and "//" not in first.name:
-                raise DeckError("invalid", f"'{first.name}' has no back face to show.")
+                raise DeckError("invalid", f"“{first.name}” has no back face to show.")
             if all(bool(getattr(c, key)) == ch.on for c in cards):
                 continue
             spec[key] = bool(ch.on)
@@ -1922,7 +1924,7 @@ def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any])
         if item.get(key) not in (None, "", False):
             raise DeckError(
                 "invalid",
-                f"change {i}: {action} takes only card_name"
+                f"Change {i}: {action} takes only card_name"
                 + (" and category" if action == "set_category" else ""),
             )
     # One line, like every other name and category in a diff (no newlines, bidi or control
@@ -1931,14 +1933,14 @@ def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any])
     cats = _parse_add_categories(i, action, item.get("categories"))  # never with set_commander
     if action == "set_commander":
         if cat and cat != COMMANDER:
-            raise DeckError("invalid", f"change {i}: set_commander always files the card under Commander")
+            raise DeckError("invalid", f"Change {i}: set_commander always files the card under Commander.")
         return Change(action, name, category=COMMANDER)
     if cats:
         if cat and cat != cats[0]:
-            raise DeckError("invalid", f"change {i}: category must be the first of categories")
+            raise DeckError("invalid", f"Change {i}: category must be the first of categories.")
         cat = cats[0]
     if not cat or len(cat) > MAX_CATEGORY:
-        raise DeckError("invalid", f"change {i}: set_category needs a category (up to {MAX_CATEGORY} chars)")
+        raise DeckError("invalid", f"Change {i}: set_category needs a category (up to {MAX_CATEGORY} chars).")
     return Change(action, name, category=cat, categories=cats)
 
 
@@ -1982,12 +1984,12 @@ def category_plan_rows(
         rows = rows_by_zone[ch.zone].get(ch.card_name.lower())
         if not rows:
             where = "the deck" if ch.zone == "main" else "the maybeboard or sideboard"
-            raise DeckError("invalid", f"'{ch.card_name}' is not in {where}, so its category cannot be set")
+            raise DeckError("invalid", f"“{ch.card_name}” is not in {where}, so its category cannot be set.")
         rows = list({r.relation_id: r for r in rows}.values())
         if ch.relation_id:  # that row only
             rows = [r for r in rows if r.relation_id == ch.relation_id]
         if any(r.relation_id is None for r in rows):
-            raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
+            raise DeckError("contract", f"Archidekt did not number the deck rows of “{ch.card_name}”.")
         new = list(ch.categories) or [ch.category or COMMANDER]
         if ch.action == "set_commander":
             new_commanders.append(rows[0].name)
@@ -2044,7 +2046,7 @@ def category_plan_rows(
             if c.name.lower() in wanted_lower or c.relation_id in want:
                 continue
             if c.relation_id is None:
-                raise DeckError("contract", f"Archidekt did not number the deck rows of '{c.name}'.")
+                raise DeckError("contract", f"Archidekt did not number the deck rows of “{c.name}”.")
             rest = [cat for cat in c.categories if cat != COMMANDER]
             if not rest and c.default_category and c.default_category != COMMANDER:
                 # archidekt.com never sends an empty list: it falls back to the card's default
@@ -2477,7 +2479,7 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
             if _in_premier(premier, cats) and not is_outside_category(deck, cats[0]):
                 raise DeckError(
                     "invalid",
-                    f"'{ch.card_name}': a card added to the maybeboard or sideboard cannot go in the "
+                    f"“{ch.card_name}”: a card added to the maybeboard or sideboard cannot go in the "
                     f"commander zone in the same step ({', '.join(cats)}). Add it without the commander "
                     "zone; you can then change its categories.",
                 )
@@ -2486,7 +2488,7 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
         if cats and is_outside_category(deck, primary):
             raise DeckError(
                 "invalid",
-                f"'{ch.card_name}': its first category, {primary}, is outside the deck, so the "
+                f"“{ch.card_name}”: its first category, {primary}, is outside the deck, so the "
                 "copies would not count in it. Add it to the maybeboard instead; you can then change "
                 "its categories.",
             )
@@ -2495,7 +2497,7 @@ def _refuse_adds_written_otherwise(deck: Deck, changes: list[Change], main_looku
         if rows and _in_premier(premier, cats) and not any(_in_premier(premier, r.categories) for r in rows):
             raise DeckError(
                 "invalid",
-                f"'{ch.card_name}' is already in the deck, so adding it raises the count of its row "
+                f"“{ch.card_name}” is already in the deck, so adding it raises the count of its row "
                 "there and cannot put it in the commander zone. Set its category to move it.",
             )
 
@@ -2565,8 +2567,8 @@ def plan_zones(
         if (ch.zone, key.lower()) in by_row:
             raise DeckError(
                 "invalid",
-                f"'{ch.card_name}' has a change for one of its rows and another for the card as a whole; "
-                "propose them separately",
+                f"“{ch.card_name}” has a change for one of its rows and another for the card as a whole; "
+                "propose them separately.",
             )
         cur = target.get(key, 0)
         if ch.action == "add":
@@ -2579,10 +2581,10 @@ def plan_zones(
                     copies = f"{had} {'copy' if had == 1 else 'copies'}"
                     raise DeckError(
                         "invalid",
-                        f"'{ch.card_name}' is removed more than once in these changes, and {where} has "
+                        f"“{ch.card_name}” is removed more than once in these changes, and {where} has "
                         f"only {copies}. Remove it once.",
                     )
-                raise DeckError("invalid", f"'{ch.card_name}' is not in {where}, so it cannot be removed")
+                raise DeckError("invalid", f"“{ch.card_name}” is not in {where}, so it cannot be removed.")
             target[key] = max(0, cur - ch.quantity) if ch.quantity else 0
         else:
             target[key] = ch.quantity or 0
@@ -2641,7 +2643,7 @@ def plan_zones(
     lines.extend(row_lines)
     lines.extend(cat_lines)
     if not lines:
-        raise DeckError("invalid", "these changes would leave the deck exactly as it is")
+        raise DeckError("invalid", "These changes would leave the deck exactly as it is.")
     # Cutting the companion card's copies changes the deck's companion as surely as
     # set_companion does, so the row says so and waits in every mode (security review 0.7.42).
     companions = {(c.name.lower(), "main" if deck.in_deck(c) else "side") for c in deck.cards if c.companion}
@@ -2833,7 +2835,7 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
     for c in snapshot.cards:
         if c.card_id is None:
             raise DeckError(
-                "invalid", f"The snapshot does not record which printing of '{c.name}' was in the deck."
+                "invalid", f"The snapshot does not record which printing of “{c.name}” was in the deck."
             )
         key = _rel_key(c)
         want[key] = (c, want.get(key, (c, 0))[1] + c.quantity)
@@ -2995,7 +2997,7 @@ def build_payload(
                 payload.append(_entry("modify" if n > 0 else "remove", c, n))
         rest = sum(c.quantity for c in existing if c not in hit)
         if qty - sum((rows_to or {})[c.relation_id] for c in hit) != rest:
-            raise DeckError("invalid", "a row's count does not match the planned count; nothing was sent")
+            raise DeckError("invalid", "A row's count does not match the planned count; nothing was sent.")
         return True
 
     for name, qty in after.items():
@@ -3114,7 +3116,7 @@ def _pinned_entries(
     if qty < sum(c.quantity for c in rest):
         # parse_changes refuses the combinations that get here; never send writes that
         # shrink other rows below what the reviewed diff says
-        raise DeckError("invalid", f"the pinned add of “{name}” does not match the planned count")
+        raise DeckError("invalid", f"The pinned add of “{name}” does not match the planned count.")
     # whatever the proposal's other changes do to this card's remaining rows
     return qty, rest
 
@@ -3231,25 +3233,25 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
     ``mana_value`` its custom mana value as set_mana_value does (null takes it off): both as
     Archidekt's own card menu sets them on a custom card. Left out, the row keeps its own."""
     if not isinstance(raw, list) or not raw:
-        raise DeckError("invalid", "changes must be a non-empty list")
+        raise DeckError("invalid", "changes must be a non-empty list.")
     if len(raw) > MAX_CUSTOM_CARD_CHANGES:
-        raise DeckError("invalid", f"at most {MAX_CUSTOM_CARD_CHANGES} custom card changes at once")
+        raise DeckError("invalid", f"At most {MAX_CUSTOM_CARD_CHANGES} custom card changes at once.")
     out: list[dict[str, Any]] = []
     seen: set[int] = set()
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
-            raise DeckError("invalid", f"change {i}: must be an object")
+            raise DeckError("invalid", f"Change {i}: must be an object.")
         action = item.get("action")
         if action not in CUSTOM_CARD_ACTIONS:
-            raise DeckError("invalid", f"change {i}: action must be one of {', '.join(CUSTOM_CARD_ACTIONS)}")
+            raise DeckError("invalid", f"Change {i}: action must be one of {', '.join(CUSTOM_CARD_ACTIONS)}.")
         cid = item.get("custom_card_id")
         if isinstance(cid, str) and cid.strip().isdigit():
             cid = int(cid.strip())
         if not isinstance(cid, int) or isinstance(cid, bool) or cid < 1:
-            raise DeckError("invalid", f"change {i}: custom_card_id must be the custom card's ID (a number)")
+            raise DeckError("invalid", f"Change {i}: custom_card_id must be the custom card's ID (a number).")
         if cid in seen:
             raise DeckError(
-                "invalid", f"change {i}: custom card {cid} is named twice; give one change per card"
+                "invalid", f"Change {i}: custom card {cid} is named twice; give one change per card."
             )
         seen.add(cid)
         qty = item.get("quantity")
@@ -3258,7 +3260,7 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
         if action == "remove":
             qty = None
             if item.get("label") is not None or "mana_value" in item:
-                raise DeckError("invalid", f"change {i}: a remove takes no label or mana_value")
+                raise DeckError("invalid", f"Change {i}: a remove takes no label or mana_value.")
         else:
             if item.get("label") is not None:
                 label = _parse_label_change(i, "", {"label": item["label"], "color": item.get("color")}).label
@@ -3274,16 +3276,16 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
         elif action != "remove":
             if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_CUSTOM_COPIES:
                 raise DeckError(
-                    "invalid", f"change {i}: quantity must be a whole number from 1 to {MAX_CUSTOM_COPIES}"
+                    "invalid", f"Change {i}: quantity must be a whole number from 1 to {MAX_CUSTOM_COPIES}."
                 )
         cat = item.get("category")
         if cat is not None and not isinstance(cat, str):
-            raise DeckError("invalid", f"change {i}: category must be text")
+            raise DeckError("invalid", f"Change {i}: category must be text.")
         cat = clean_text(cat or "")
         if len(cat) > 60:
-            raise DeckError("invalid", f"change {i}: a category name is at most 60 characters")
+            raise DeckError("invalid", f"Change {i}: a category name is at most 60 characters.")
         if action == "remove" and cat:
-            raise DeckError("invalid", f"change {i}: a remove takes no category")
+            raise DeckError("invalid", f"Change {i}: a remove takes no category.")
         out.append(
             {
                 "action": action,
@@ -4513,7 +4515,8 @@ class DeckService:
                     raise DeckError(
                         "not_linked",
                         "Archidekt shows this deck to signed-in readers only. "
-                        + refusals.not_linked(self.settings.public_url),
+                        + refusals.not_linked(self.settings.public_url)
+                        + ".",
                     ) from exc
                 raise DeckError(exc.kind, str(exc), retry_after=archidekt_wait(exc)) from exc
 
@@ -4943,7 +4946,7 @@ class DeckService:
     async def user_profile(self, sub: str | None, username: str) -> dict[str, Any] | None:
         username = re.sub(r"[^A-Za-z0-9_.@ -]", "", str(username or "")).strip()[:60]
         if not username:
-            raise DeckError("invalid", "give an Archidekt username")
+            raise DeckError("invalid", "Give an Archidekt username.")
         async with self.archidekt_slot(sub):
             try:
                 return await self.client.user_profile(username)
@@ -5160,7 +5163,7 @@ class DeckService:
             raise DeckError("invalid", f"A deck name is at most 120 characters; this one has {len(name):,}.")
         fmt = str(deck_format or "commander").strip().lower()
         if fmt not in FORMAT_IDS:
-            raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
+            raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}.")
         # the New deck form's Theorycrafted and Game type, checked as deck settings checks them
         extra = parse_details({"theorycrafted": theorycrafted, "game": game or "any"})
         # a card package (packages.py): made with the New package form's request, no format
@@ -5299,7 +5302,7 @@ class DeckService:
         if row.get("kind") != "create_deck":
             raise DeckError(
                 "invalid",
-                "replaces names a waiting new deck or card package only. To change a waiting deck "
+                "Replaces names a waiting new deck or card package only. To change a waiting deck "
                 "edit, use amend_proposal; nothing was proposed.",
             )
         return row
@@ -8278,7 +8281,7 @@ class DeckService:
         self._room_for_proposal(sub)
         tags = tags or []
         if not adds and not removes and not tags:
-            raise DeckError("invalid", "nothing to change: give cards to add, remove or tag")
+            raise DeckError("invalid", "Nothing to change: give cards to add, remove or tag.")
         rows = [
             _row(
                 "add",
@@ -8340,7 +8343,7 @@ class DeckService:
         self, sub: str, row: dict[str, Any], progress: dict[str, Any]
     ) -> dict[str, Any]:
         if self.collection_apply is None:
-            raise DeckError("unavailable", "the binder pages are not loaded on this gateway")
+            raise DeckError("unavailable", "The binder pages are not loaded on this gateway.")
         changes = row.get("changes") or {}
         applied = await self.collection_apply(sub, changes, progress)
         # verified comes from collection_apply's read-back of the records it touched
@@ -8442,7 +8445,8 @@ class DeckService:
             raise DeckError(
                 "verify_mismatch",
                 f"Archidekt made the copy ({result['deck_url']}) but it does not match the source for: "
-                + ", ".join(mismatches),
+                + ", ".join(mismatches)
+                + ".",
             )
         self.record_applied(row["id"], result, progress)
         return self.describe(sub, row["id"])
@@ -8569,7 +8573,7 @@ class DeckService:
                     if leave_out and self._printing_cached(Change(action="add", card_name=c["name"])) == (
                         NOT_ON_ARCHIDEKT
                     ):
-                        raise DeckError("not_found", "")
+                        raise DeckError("not_found", ".")
                     card = await self._call(
                         sub,
                         lambda token, *_, c=c: self.client.resolve_card(
@@ -9030,7 +9034,7 @@ class DeckService:
             )
         why = clean_text(str(reason or ""))[:200]
         if not why:
-            raise DeckError("invalid", "reason is required: why the user's request makes it pointless")
+            raise DeckError("invalid", "reason is required: why the user's request makes it pointless.")
         if not self.db.close_proposal(proposal_id, sub, "withdrawn", why, by={"client": caller}):
             raise self._not_pending(sub, proposal_id, "withdrawn")
         self._audit(
@@ -9082,16 +9086,16 @@ class DeckService:
         """The notes a new proposal will replace (any app's, labelled): waiting, on the
         same deck. Refused before anything is saved."""
         if not isinstance(old_ids, list) or not old_ids or len(old_ids) > MAX_CHANGES:
-            raise DeckError("invalid", "replaces must be a non-empty list of waiting proposal IDs")
+            raise DeckError("invalid", "replaces must be a non-empty list of waiting proposal IDs.")
         out = []
         for pid in dict.fromkeys(str(x) for x in old_ids):
             row = self.db.get_proposal(pid, sub)
             if row is None or row["state"] != "pending" or row["expires_at"] < int(time.time()):
-                raise DeckError("invalid", f"{pid} is not a waiting proposal of this user")
+                raise DeckError("invalid", f"{pid} is not a waiting proposal of this user.")
             if str(row["deck_id"]) != str(deck_id):
                 raise DeckError(
                     "invalid",
-                    f"{pid} is for another deck; a proposal replaces proposals on its own deck only",
+                    f"{pid} is for another deck; a proposal replaces proposals on its own deck only.",
                 )
             out.append(pid)
         return out
@@ -9148,10 +9152,10 @@ class DeckService:
         deck = _clean_deck_id(deck_id)
         old = self.check_replaceable(sub, deck, replaces) if replaces else []
         if depends_on and (not isinstance(depends_on, list) or len(depends_on) > MAX_CHANGES):
-            raise DeckError("invalid", "depends_on must be a list of proposal IDs")
+            raise DeckError("invalid", "depends_on must be a list of proposal IDs.")
         for other in depends_on or []:
             if self.db.get_proposal(str(other), sub) is None:
-                raise DeckError("invalid", f"{other} is not a proposal of this user")
+                raise DeckError("invalid", f"{other} is not a proposal of this user.")
         read: Deck | None = None
         aside = ""
         if not (separate or replaces or depends_on):
@@ -9277,16 +9281,16 @@ class DeckService:
         """One note of several waiting card edits on one deck, their changes oldest first; the old
         ones are marked replaced by it."""
         if not isinstance(proposal_ids, list) or len(set(map(str, proposal_ids))) < 2:
-            raise DeckError("invalid", "proposal_ids must name two or more waiting proposals")
+            raise DeckError("invalid", "proposal_ids must name two or more waiting proposals.")
         self.db.hold_blocked(sub)  # a hold set when read counts here too
         client = current_client.get()
         rows = []
         for pid in dict.fromkeys(str(x) for x in proposal_ids):
             row = self.db.get_proposal(pid, sub)
             if row is None or row["state"] != "pending" or row["expires_at"] < int(time.time()):
-                raise DeckError("invalid", f"{pid} is not a waiting proposal of this user")
+                raise DeckError("invalid", f"{pid} is not a waiting proposal of this user.")
             if (row.get("kind") or "edit") != "edit":
-                raise DeckError("invalid", f"{pid} is not a deck edit; only card edits can be combined")
+                raise DeckError("invalid", f"{pid} is not a deck edit; only card edits can be combined.")
             # Only this app's own waiting changes that no other app changed, and never a held one
             no = f"#{row['board_no']}" if row.get("board_no") else pid
             if row.get("created_by_client") != client or self.rewritten_by_another_app(sub, row):
@@ -9531,10 +9535,10 @@ class DeckService:
         if not others:
             return
         if not isinstance(others, list) or len(others) > MAX_CHANGES:
-            raise DeckError("invalid", "depends_on must be a list of proposal IDs")
+            raise DeckError("invalid", "depends_on must be a list of proposal IDs.")
         for other in dict.fromkeys(str(x) for x in others):
             if not self.db.link_proposals(proposal_id, sub, "depends_on", other):
-                raise DeckError("invalid", f"{other} is not a proposal of this user")
+                raise DeckError("invalid", f"{other} is not a proposal of this user.")
 
     def snapshot(self, sub: str, snapshot_id: str) -> dict[str, Any]:
         """A deck snapshot. A copy of the member's binder (kept before a clear, collection_bulk) is
@@ -9772,7 +9776,7 @@ class DeckService:
             block = packages.block_of(deck)
             if block is None:
                 raise DeckError(
-                    "invalid", "This deck is not a card package; package settings are for packages"
+                    "invalid", "This deck is not a card package; package settings are for packages."
                 )
             new = packages.changed(block, packages.parse(raw["package"], partial=True))
             if new is not None:
@@ -9972,7 +9976,7 @@ class DeckService:
             boards = [u["category"] for u in taken if u["category"].casefold() in SIZE_CATEGORY_NAMES]
             wanted += taken
             if len(wanted) > MAX_CATEGORY_CHANGES:
-                raise DeckError("invalid", f"at most {MAX_CATEGORY_CHANGES} categories can change at once")
+                raise DeckError("invalid", f"At most {MAX_CATEGORY_CHANGES} categories can change at once.")
         plan, rows = category_change_rows(deck, wanted)
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
@@ -10051,7 +10055,7 @@ class DeckService:
                     if landed
                     else " No category was changed."
                 )
-                raise DeckError(exc.kind, _sentence(exc) + note, **exc.extra) from exc
+                raise DeckError(exc.kind, _sentence(exc) + note + ".", **exc.extra) from exc
             saved.append(body["name"] + (" (deleted)" if op == "delete" else ""))
 
     async def _delete_empty_categories(
@@ -11190,45 +11194,45 @@ def parse_details(raw: Any) -> dict[str, Any]:
     each of the right type and range. ``deck_format`` is returned as its FORMAT_IDS key."""
     if not isinstance(raw, dict) or not raw:
         raise DeckError(
-            "invalid", "details must be a non-empty object with any of: " + ", ".join(DETAIL_FIELDS)
+            "invalid", "details must be a non-empty object with any of: " + ", ".join(DETAIL_FIELDS) + "."
         )
     unknown = sorted(str(k) for k in raw if k not in DETAIL_FIELDS)
     if unknown:
         known = ", ".join([*DETAIL_FIELDS, *ORGANISE_FIELDS])
-        raise DeckError("invalid", f"unknown details: {', '.join(unknown)}; use {known}")
+        raise DeckError("invalid", f"Unknown details: {', '.join(unknown)}; use {known}.")
     out: dict[str, Any] = {}
     for key, value in raw.items():
         if key == "name":
             name = clean_text(value) if isinstance(value, str) else ""
             if not name or len(name) > 200:
-                raise DeckError("invalid", "name must be 1 to 200 characters")
+                raise DeckError("invalid", "name must be 1 to 200 characters.")
             out[key] = name
         elif key == "description":
             if not isinstance(value, str) or len(value) > MAX_DESCRIPTION:
                 raise DeckError(
-                    "invalid", f"description must be a string of up to {MAX_DESCRIPTION} characters"
+                    "invalid", f"description must be a string of up to {MAX_DESCRIPTION} characters."
                 )
             # plain text only: a Quill document an assistant sends is kept as its words alone
             out[key] = plain_text(value)
         elif key == "deck_format":
             fmt = str(value or "").strip().lower()
             if fmt not in FORMAT_IDS:
-                raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
+                raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}.")
             out[key] = fmt
         elif key == "edh_bracket":
             if value is not None and (
                 isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 5
             ):
-                raise DeckError("invalid", "edh_bracket must be an integer from 1 to 5, or null to clear it")
+                raise DeckError("invalid", "edh_bracket must be an integer from 1 to 5, or null to clear it.")
             out[key] = value
         elif key == "game":
             game = value.strip().lower() if isinstance(value, str) else None
             if game not in GAME_CHOICES:
-                raise DeckError("invalid", f"game must be one of: {', '.join(GAME_CHOICES)}")
+                raise DeckError("invalid", f"game must be one of: {', '.join(GAME_CHOICES)}.")
             out[key] = game
         else:  # private, unlisted, theorycrafted
             if not isinstance(value, bool):
-                raise DeckError("invalid", f"{key} must be true or false")
+                raise DeckError("invalid", f"{key} must be true or false.")
             out[key] = value
     return out
 
@@ -11240,7 +11244,7 @@ def _names(value: Any, field: str) -> list[str]:
     if isinstance(value, str):
         value = [value]
     if not isinstance(value, list) or len(value) > 20 or not all(isinstance(v, str) for v in value):
-        raise DeckError("invalid", f"{field} must be a list of up to 20 tag names")
+        raise DeckError("invalid", f"{field} must be a list of up to 20 tag names.")
     return value
 
 
@@ -11284,8 +11288,8 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
         if wanted.get("edh_bracket") is not None:
             raise DeckError(
                 "invalid",
-                "only a Commander deck has a bracket (as on archidekt.com); set the format to "
-                "commander, or leave edh_bracket out",
+                "Only a Commander deck has a bracket (as on archidekt.com); set the format to "
+                "commander, or leave edh_bracket out.",
             )
         if "deck_format" in wanted and deck.edh_bracket is not None:
             wanted = {**wanted, "edh_bracket": None}
@@ -11567,9 +11571,9 @@ CATEGORY_NO_RECORD = "“{name}” has no record on Archidekt yet, so there is n
 def _category_name(i: int, raw: Any) -> str:
     new = clean_text(str(raw or ""))
     if not new or len(new) > MAX_CATEGORY:
-        raise DeckError("invalid", f"change {i}: a category name is 1 to {MAX_CATEGORY} characters")
+        raise DeckError("invalid", f"Change {i}: a category name is 1 to {MAX_CATEGORY} characters.")
     if "," in new:  # a card's categories travel as one comma-separated list in exports
-        raise DeckError("invalid", f"change {i}: a category name can't have a comma")
+        raise DeckError("invalid", f"Change {i}: a category name can't have a comma.")
     return new
 
 
@@ -11583,9 +11587,9 @@ def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
     - ``delete``: ``{"action": "delete", "category" or "id", "move_cards_to"?: another category}``.
       Archidekt only deletes an empty category; ``move_cards_to`` moves its cards there first."""
     if not isinstance(raw, list) or not raw:
-        raise DeckError("invalid", "changes must be a non-empty list of category changes")
+        raise DeckError("invalid", "changes must be a non-empty list of category changes.")
     if len(raw) > MAX_CATEGORY_CHANGES:
-        raise DeckError("invalid", f"at most {MAX_CATEGORY_CHANGES} categories can change at once")
+        raise DeckError("invalid", f"At most {MAX_CATEGORY_CHANGES} categories can change at once.")
     out = []
     flag_keys = [f[0] for f in CATEGORY_FLAGS]
     allowed = {
@@ -11595,22 +11599,22 @@ def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
     }
     for i, item in enumerate(raw, 1):
         if not isinstance(item, dict):
-            raise DeckError("invalid", f"change {i}: each change is an object")
+            raise DeckError("invalid", f"Change {i}: each change is an object.")
         action = str(item.get("action") or "change").strip().lower()
         if action not in CATEGORY_ACTIONS_ALL:
-            raise DeckError("invalid", f"change {i}: action must be change, create or delete")
+            raise DeckError("invalid", f"Change {i}: action must be change, create or delete.")
         unknown = {k for k, v in item.items() if v is not None} - allowed[action]
         if unknown:
-            raise DeckError("invalid", f"change {i}: unknown field {sorted(unknown)[0]} for {action}")
+            raise DeckError("invalid", f"Change {i}: unknown field {sorted(unknown)[0]} for {action}.")
         cid = item.get("id")
         if cid is not None and (isinstance(cid, bool) or not isinstance(cid, int)):
-            raise DeckError("invalid", f"change {i}: id must be a whole number")
+            raise DeckError("invalid", f"Change {i}: id must be a whole number.")
         name = clean_text(str(item.get("category") or ""))
         entry: dict[str, Any] = {"action": action, "id": cid, "category": name}
         if action == "create":
             entry["category"] = _category_name(i, item.get("category"))
         elif cid is None and not name:
-            raise DeckError("invalid", f"change {i}: name the category to {action}")
+            raise DeckError("invalid", f"Change {i}: name the category to {action}.")
         if action == "change" and item.get("rename_to") is not None:
             entry["rename_to"] = _category_name(i, item["rename_to"])
         if action == "delete" and item.get("move_cards_to") is not None:
@@ -11618,14 +11622,14 @@ def parse_category_changes(raw: Any) -> list[dict[str, Any]]:
         if action == "delete" and item.get("no_category"):
             # its cards keep no category (the deck page lists them by type) instead of moving
             if not isinstance(item["no_category"], bool):
-                raise DeckError("invalid", f"change {i}: no_category must be true or false")
+                raise DeckError("invalid", f"Change {i}: no_category must be true or false.")
             if entry.get("move_cards_to"):
-                raise DeckError("invalid", f"change {i}: no_category and move_cards_to together")
+                raise DeckError("invalid", f"Change {i}: no_category and move_cards_to together.")
             entry["no_category"] = True
         for key in flag_keys if action != "delete" else ():
             if key in item and item[key] is not None:
                 if not isinstance(item[key], bool):
-                    raise DeckError("invalid", f"change {i}: {key} must be true or false")
+                    raise DeckError("invalid", f"Change {i}: {key} must be true or false.")
                 entry[key] = item[key]
         out.append(entry)
     return out
@@ -11846,7 +11850,7 @@ def category_change_rows(
         counts = s["name"].casefold() in SIZE_CATEGORY_NAMES
         for c in filed:
             if c.relation_id is None:
-                raise DeckError("contract", f"Archidekt did not number the deck rows of '{c.name}'.")
+                raise DeckError("contract", f"Archidekt did not number the deck rows of “{c.name}”.")
             new_cats: list[str] = []
             for x in c.categories:
                 y = move_to if x == s["name"] else renamed.get(x, x)
@@ -12275,7 +12279,7 @@ def _no_such_folder(info: dict[str, Any], name: Any, *, several: bool = False) -
     goes through the owner of the folder helpers."""
     names = ", ".join(sorted({f["name"] for f in _shown_folders(info)})[:30])
     what = "More than one folder" if several else "No folder"
-    return DeckError("invalid", f"{what} is called “{name}”. Your folders: {names}")
+    return DeckError("invalid", f"{what} is called “{name}”. Your folders: {names}.")
 
 
 def _category_mismatches(verified: Deck, want: dict[int, list[str]]) -> list[str]:
@@ -13210,30 +13214,30 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
     set, collector_number, finish, in_deck}``. Only those fields are read; the rest of a deck read
     (stats, prices, text) is ignored. Raises DeckError when the text is not that shape."""
     if len(text) > 4_000_000:
-        raise DeckError("invalid", "deck JSON larger than 4 MB")
+        raise DeckError("invalid", "Deck JSON larger than 4 MB.")
     try:
         data = json.loads(text)
     except ValueError as exc:
-        raise DeckError("invalid", f"deck JSON could not be read: {exc}") from exc
+        raise DeckError("invalid", f"Deck JSON could not be read: {refusals.sentence(exc)}") from exc
     rows = data.get("cards") if isinstance(data, dict) else data
     if not isinstance(rows, list):
         raise DeckError(
-            "invalid", "deck JSON must be an object with a cards list (the gateway's .json export)"
+            "invalid", "Deck JSON must be an object with a cards list (the gateway's .json export)."
         )
     out: list[dict[str, Any]] = []
     for i, row in enumerate(rows):
         if not isinstance(row, dict):
-            raise DeckError("invalid", f"card {i} in the deck JSON must be an object")
+            raise DeckError("invalid", f"Card {i} in the deck JSON must be an object.")
         qty = row.get("quantity", 1)
         if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > 99:
-            raise DeckError("invalid", f"card {i}: quantity must be a whole number from 1 to 99")
+            raise DeckError("invalid", f"Card {i}: quantity must be a whole number from 1 to 99.")
         cats_raw = row.get("categories") or []
         if not isinstance(cats_raw, list) or not all(isinstance(c, str) for c in cats_raw):
-            raise DeckError("invalid", f"card {i}: categories must be a list of names")
+            raise DeckError("invalid", f"Card {i}: categories must be a list of names.")
         name_len = len(str(row.get("name") or ""))
         if name_len > 200 or len(cats_raw) > 10 or any(len(c) > MAX_CATEGORY for c in cats_raw):
             raise DeckError(
-                "invalid", f"card {i}: name (200), categories (10 of up to {MAX_CATEGORY}) too long"
+                "invalid", f"Card {i}: name (200), categories (10 of up to {MAX_CATEGORY}) too long."
             )
         finish = str(row.get("finish") or "").strip().capitalize()
         set_code = str(row.get("set") or row.get("set_code") or "").strip().lower()
@@ -13241,7 +13245,7 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
         if (set_code and not _SET_CODE.fullmatch(set_code)) or (
             number and not _COLLECTOR_NUMBER.fullmatch(number)
         ):
-            raise DeckError("invalid", f"card {i}: set or collector_number looks wrong")
+            raise DeckError("invalid", f"Card {i}: set or collector_number looks wrong.")
         out.append(
             {
                 "name": str(row.get("name") or ""),
@@ -13290,16 +13294,16 @@ def normalise_cards(
     so the proposal counts it apart from the deck proper."""
     for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text), ("json_text", json_text)):
         if value is not None and not isinstance(value, str):
-            raise DeckError("invalid", f"{label} must be a string")
+            raise DeckError("invalid", f"{label} must be a string.")
     given = [x is not None and x != "" and x != [] for x in (cards, decklist_text, csv_text, json_text)]
     if cards == [] and not any(given):
         return []  # an empty deck: the New deck box's Empty tab, as archidekt.com's New deck makes one
     if sum(given) != 1:
-        raise DeckError("invalid", "give exactly one of cards, decklist_text, csv_text or json_text")
+        raise DeckError("invalid", "Give exactly one of cards, decklist_text, csv_text or json_text.")
     if csv_text and len(csv_text) > 2_000_000:
-        raise DeckError("invalid", "CSV export larger than 2 MB")
+        raise DeckError("invalid", "CSV export larger than 2 MB.")
     if decklist_text and len(decklist_text) > 200_000:
-        raise DeckError("invalid", "decklist larger than 200 kB")
+        raise DeckError("invalid", "Decklist larger than 200 kB.")
     out: list[dict[str, Any]] = []
     if json_text:
         out = cards_from_json(json_text)
@@ -13321,7 +13325,7 @@ def normalise_cards(
                     }
                 )
         except CsvError as exc:
-            raise DeckError("invalid", f"CSV export could not be read: {exc}") from exc
+            raise DeckError("invalid", f"CSV export could not be read: {refusals.sentence(exc)}") from exc
     elif decklist_text:
         try:
             for c in parse_decklist(decklist_text):
@@ -13342,29 +13346,29 @@ def normalise_cards(
                     }
                 )
         except DecklistError as exc:
-            raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
+            raise DeckError("invalid", f"Decklist could not be read: {refusals.sentence(exc)}") from exc
     else:
         if not isinstance(cards, list):
-            raise DeckError("invalid", "cards must be a list of {card_name, quantity, category?}")
+            raise DeckError("invalid", "cards must be a list of {card_name, quantity, category?}.")
         for i, item in enumerate(cards):
             if not isinstance(item, dict):
-                raise DeckError("invalid", f"card {i} must be an object")
+                raise DeckError("invalid", f"Card {i} must be an object.")
             name = clean_text(item.get("card_name") or item.get("name") or "")
             qty = item.get("quantity", 1)
             if not name or not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > 99:
-                raise DeckError("invalid", f"card {i}: card_name and a quantity from 1 to 99 are required")
+                raise DeckError("invalid", f"Card {i}: card_name and a quantity from 1 to 99 are required.")
             cat = clean_text(item.get("category") or "")
             if len(name) > 200 or len(cat) > MAX_CATEGORY:
-                raise DeckError("invalid", f"card {i}: card_name (200) or category (60) is too long")
+                raise DeckError("invalid", f"Card {i}: card_name (200) or category (60) is too long.")
             set_code = str(item.get("set_code") or item.get("set") or "").strip().lower()
             number = str(item.get("collector_number") or "").strip()
             if (set_code and not _SET_CODE.fullmatch(set_code)) or (
                 number and not _COLLECTOR_NUMBER.fullmatch(number)
             ):
-                raise DeckError("invalid", f"card {i}: set_code or collector_number looks wrong")
+                raise DeckError("invalid", f"Card {i}: set_code or collector_number looks wrong.")
             finish_raw = str(item.get("finish") or "").strip().lower()
             if finish_raw and finish_raw not in FINISHES:
-                raise DeckError("invalid", f"card {i}: finish must be normal, foil or etched")
+                raise DeckError("invalid", f"Card {i}: finish must be normal, foil or etched.")
             finish = FINISHES.get(finish_raw, "")
             out.append(
                 {
@@ -13381,12 +13385,12 @@ def normalise_cards(
         c["name"] = clean_text(c["name"])
         c["categories"] = [cat for cat in (clean_text(x) for x in c["categories"]) if cat]
         if not c["name"]:
-            raise DeckError("invalid", "every card needs a name")
+            raise DeckError("invalid", "Every card needs a name.")
     if not out:
-        raise DeckError("invalid", "no cards to add")
+        raise DeckError("invalid", "No cards to add.")
     if sum(c["quantity"] for c in out) > 400 or len(out) > 300:
         raise DeckError(
-            "invalid", "that is more cards than a proposal may create at once (300 rows, 400 cards)"
+            "invalid", "That is more cards than a proposal may create at once (300 rows, 400 cards)."
         )
     return out
 

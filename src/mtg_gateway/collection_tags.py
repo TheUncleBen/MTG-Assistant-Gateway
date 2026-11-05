@@ -113,18 +113,18 @@ def clean_names(raw: Any) -> list[str]:
         return []
     items = raw.split(",") if isinstance(raw, str) else raw
     if not isinstance(items, list):
-        raise DeckError("invalid", "tags must be a list of tag names")
+        raise DeckError("invalid", "Tags must be a list of tag names.")
     out: list[str] = []
     for n in items:
         name = clean_text(str(n or ""))
         if not name:
             continue
         if len(name) > TAG_NAME_MAX:
-            raise DeckError("invalid", f"a tag name is at most {TAG_NAME_MAX} characters: “{name[:40]}”")
+            raise DeckError("invalid", f"A tag name is at most {TAG_NAME_MAX} characters: “{name[:40]}”.")
         if not any(same_name(name, x) for x in out):
             out.append(name)
     if len(out) > MAX_TAGS_PER_ENTRY:
-        raise DeckError("invalid", f"at most {MAX_TAGS_PER_ENTRY} tags on one entry")
+        raise DeckError("invalid", f"At most {MAX_TAGS_PER_ENTRY} tags on one entry.")
     return out
 
 

@@ -527,11 +527,13 @@
     if (!err) return "The gateway did not answer.";
     if (err.status === 401) return "You are signed out. Sign in again, then retry.";
     if (busy(err)) return "Your other card lookups are still running. Retry when you’re ready.";
-    if (err.kind === "not_found") return (err.message || "Scryfall does not know this card") + ".";
+    if (err.kind === "not_found") return stop(err.message || "No card is called that");
     if (err.kind === "unavailable") return "Scryfall can't be reached right now.";
     if (!err.status) return "The gateway did not answer. Check the connection, then retry.";
-    return (err.message || "The gateway did not answer") + ".";
+    return stop(err.message || "The gateway did not answer");
   }
+  // the gateway's refusals end with a full stop already: add one only when it is missing
+  function stop(text) { return /[.?!…]$/.test(text) ? text : text + "."; }
   function failed(err) {
     st.status.textContent = "";
     st.status.className = "ppstatus notice error";

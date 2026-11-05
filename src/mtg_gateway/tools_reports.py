@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from pydantic import Field
 
-from . import card_models, card_models_view, deck_stats
+from . import card_models, card_models_view, deck_stats, refusals
 from .app import AppState, _tool_error, token_may_write
 from .archidekt import parse_deck
 from .decklist import DecklistError, clean_text, parse_decklist, to_text
@@ -259,12 +259,12 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
 
         async def load(side: str, ref: str | None, text: str | None) -> tuple[Any, str, str]:
             if ref and text:
-                raise DeckError("invalid", f"give {side} or {side}_list, not both")
+                raise DeckError("invalid", f"Give {side} or {side}_list, not both.")
             if text:
                 return as_list(side, text)
             ref = str(ref or "").strip()
             if not ref:
-                raise DeckError("invalid", f"give {side} (a deck ID, link or snapshot ID) or {side}_list")
+                raise DeckError("invalid", f"Give {side} (a deck ID, link or snapshot ID) or {side}_list.")
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
                 origin[side] = ("snapshot", ref)
@@ -285,7 +285,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             except DeckError as exc:
                 # say which side: "Archidekt could not find that deck" alone leaves a or b to guess
                 raise DeckError(
-                    exc.kind, f"Deck {side}: {exc}", retry_after=exc.retry_after, **exc.extra
+                    exc.kind,
+                    f"Deck {side}: {refusals.sentence(exc)}",
+                    retry_after=exc.retry_after,
+                    **exc.extra,
                 ) from exc
             origin[side] = ("deck", deck_id)
             return deck, deck_to_text(deck), sim_mode(deck_stats.compute(deck))

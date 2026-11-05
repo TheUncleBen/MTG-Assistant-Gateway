@@ -219,7 +219,7 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
         elif action.startswith("contest_"):
             spec = (action, {**deck, "contest": contest or "", "summary": summary})
         if spec is None:
-            return _proposal({"ok": False, "error": "invalid", "message": f"unknown action {action!r}"})
+            return _proposal({"ok": False, "error": "invalid", "message": f"unknown action “{action}”"})
         try:
             out = await state.decks.propose_action(_sub(), spec[0], **spec[1])
             return _proposal({"ok": True, **out})
@@ -273,8 +273,8 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "Step 1 of deleting one of the user's own Archidekt decks, only when the user asked for "
             "this deck to go. Returns a proposal (risk 'destructive') only the user can approve, on "
             "the review page, in every approval mode: never call apply_proposal for it. A snapshot is "
-            "kept, but no backup copy on Archidekt, a snapshot can't be restored onto a deleted deck, "
-            "and Archidekt has no undo. A change to the deck after the proposal stops it. "
+            "kept, but no backup copy is made on Archidekt, a snapshot can't be restored onto a deleted "
+            "deck, and Archidekt has no undo. A change to the deck after the proposal stops it. "
             "removed_card: clear a removed card's row for good instead."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},

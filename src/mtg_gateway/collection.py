@@ -145,11 +145,11 @@ def _wrap(exc: Exception) -> CollectionError:
     if isinstance(exc, (DeckError, ArchidektError)):
         kind = exc.kind
         if kind == "not_found":
-            return CollectionError("not_found", "Archidekt has no such collection record")
+            return CollectionError("not_found", "Archidekt has no such collection record.")
         if kind == "auth":
             return CollectionError("auth", str(exc))
         if kind == "contract":
-            return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
+            return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again.")
         # whole seconds, at least 1: a raw ArchidektError carries a float, which the busy page would
         # otherwise drop for its 60 s default
         err = CollectionError(kind, str(exc), retry_after=archidekt_wait(exc))
@@ -205,15 +205,15 @@ def normalise_items(
     snapshot (a restore), whose Archidekt printing id (``card_id``), tag ids (``tag_ids``) and
     price paid (``purchase_price``) are kept; never anything an assistant or a file sent."""
     if not isinstance(items, list) or not items:
-        raise CollectionError("invalid", "give a non-empty list of cards")
+        raise CollectionError("invalid", "Give a non-empty list of cards.")
     if len(items) > limit:
-        raise CollectionError("invalid", f"at most {limit} cards per call")
+        raise CollectionError("invalid", f"At most {limit} cards per call.")
     out: list[dict[str, Any]] = []
     for i, raw in enumerate(items):
         if isinstance(raw, str):
             raw = {"name": raw}
         if not isinstance(raw, dict):
-            raise CollectionError("invalid", f"card {i} must be an object")
+            raise CollectionError("invalid", f"Card {i} must be an object.")
         card = raw.get("card") if isinstance(raw.get("card"), dict) else raw
         opts = _item_options(raw, i)
         sid = str(card.get("scryfall_id") or "").strip().lower()
@@ -224,7 +224,7 @@ def normalise_items(
             "scryfall_id": sid if _ID.fullmatch(sid) else "",
         }
         if not spec["name"] and not spec["scryfall_id"] and not (spec["set"] and spec["collector_number"]):
-            raise CollectionError("invalid", f"card {i}: give a name, or a set and collector number")
+            raise CollectionError("invalid", f"Card {i}: give a name, or a set and collector number.")
         if not spec["name"] and spec["scryfall_id"]:
             spec["name"] = "?"
         if trusted:
@@ -264,7 +264,7 @@ def _quoted(value: str) -> str:
     message (each refusal is kept for the page, up to IMPORT_RESULTS_MAX of them)."""
     if len(value) > QUOTED_CELL_CHARS:
         value = value[:QUOTED_CELL_CHARS] + "…"
-    return repr(value)
+    return f"“{value}”"
 
 
 def parse_collection_import(text: str) -> list[dict[str, Any]]:
@@ -280,9 +280,9 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
     CollectionError when nothing usable is found or there are more than MAX_IMPORT_ROWS rows."""
     text = text.lstrip("\ufeff")
     if not text.strip():
-        raise CollectionError("invalid", "paste or choose a CSV or a card list first")
+        raise CollectionError("invalid", "Paste or choose a CSV or a card list first.")
     if len(text) > 2_000_000:
-        raise CollectionError("invalid", "that file is larger than 2 MB")
+        raise CollectionError("invalid", "That file is larger than 2 MB.")
     items: list[dict[str, Any]] = []
     reader = csv.reader(io.StringIO(text))
     first: list[str] = []
@@ -302,7 +302,7 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
         try:
             parsed = parse_decklist(text.strip())
         except DecklistError as exc:
-            raise CollectionError("invalid", f"the list could not be read: {exc}") from exc
+            raise CollectionError("invalid", f"The list could not be read: {refusals.sentence(exc)}") from exc
         for c in parsed:
             items.append(
                 {
@@ -315,11 +315,11 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
                 }
             )
     if not items:
-        raise CollectionError("invalid", "no cards were found in that text")
+        raise CollectionError("invalid", "No cards were found in that text.")
     if len(items) > MAX_IMPORT_ROWS:
         raise CollectionError(
             "invalid",
-            f"that is {len(items):,} rows; an import adds at most {MAX_IMPORT_ROWS:,} at a time. Split the "
+            f"That is {len(items):,} rows; an import adds at most {MAX_IMPORT_ROWS:,} at a time. Split the "
             "file and import the rest after.",
         )
     out = normalise_items(items, limit=MAX_IMPORT_ROWS)
@@ -340,7 +340,7 @@ def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -
             if n in first and key not in keys:
                 keys[key] = first.index(n)
     if "name" not in keys:
-        raise CollectionError("invalid", "the CSV needs a Name column")
+        raise CollectionError("invalid", "The CSV needs a Name column.")
 
     def cell(row: list[str], key: str) -> str:
         i = keys.get(key)
@@ -355,8 +355,8 @@ def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -
             # of the rest of the file: named by the line its row starts on
             raise CollectionError(
                 "invalid",
-                f"line {n}: a cell is longer than {csv.field_size_limit():,} characters; "
-                'check for a quotation mark (") that is not closed',
+                f"Line {n}: a cell is longer than {csv.field_size_limit():,} characters; "
+                'check for a quotation mark (") that is not closed.',
             ) from exc
         if row is None:
             break
@@ -364,14 +364,14 @@ def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -
             continue
         name = cell(row, "name")
         if not name:
-            raise CollectionError("invalid", f"line {n}: no card name")
+            raise CollectionError("invalid", f"Line {n}: no card name.")
         qty = cell(row, "quantity") or "1"
         if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
-            raise CollectionError("invalid", f"line {n}: quantity {_quoted(qty)} is not a number")
+            raise CollectionError("invalid", f"Line {n}: quantity {_quoted(qty)} is not a number.")
         # a long digit string is past MAX_QUANTITY anyway, and int() refuses one over 4,300 digits
         if len(qty.lstrip("0")) > len(str(MAX_QUANTITY)) or not 1 <= int(qty) <= MAX_QUANTITY:
             raise CollectionError(
-                "invalid", f"line {n}: quantity {_quoted(qty)} is not from 1 to {MAX_QUANTITY:,}"
+                "invalid", f"Line {n}: quantity {_quoted(qty)} is not from 1 to {MAX_QUANTITY:,}."
             )
         finish_raw = cell(row, "finish").lower()
         finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
@@ -1106,7 +1106,7 @@ class CollectionService:
             for rec in found.records:
                 if rec.get("id") == rid:
                     return rec
-            raise CollectionError("not_found", "no such card in your binder")
+            raise CollectionError("not_found", "Your binder has no card with that ID.")
         page = 1
         while page <= 10:
             body = await self._run(
@@ -1118,7 +1118,7 @@ class CollectionService:
             if not body.get("next"):
                 break
             page += 1
-        raise CollectionError("not_found", "no such card in your binder")
+        raise CollectionError("not_found", "Your binder has no card with that ID.")
 
     async def set_quantity(
         self, sub: str, rid: int, quantity: int | None = None, *, delta: int = 0, name: str = ""
@@ -1190,7 +1190,7 @@ class CollectionService:
                 row = row_out(rec)
                 collection_tags.name_rows([row], [rec], tags)
                 return {"row": row}
-            raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
+            raise CollectionError("invalid", "Nothing to change: give finish, condition, language or price.")
         if not tags and rec.get("tags"):
             # the row's tags by name (the first page is usually still in memory: no read)
             tags = await self.tags(sub)
@@ -1218,7 +1218,7 @@ class CollectionService:
         if wrong and raise_wrong:
             raise CollectionError(
                 "unavailable",
-                "Archidekt accepted the change but answered with other values for: " + ", ".join(wrong),
+                "Archidekt accepted the change but answered with other values for: " + ", ".join(wrong) + ".",
             )
         return {"row": row, "wrong": wrong}
 
@@ -1309,7 +1309,7 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
         qty = int(qty)
     if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > MAX_QUANTITY:
         raise CollectionError(
-            "invalid", f"card {i}: quantity must be a whole number from 1 to {MAX_QUANTITY}"
+            "invalid", f"Card {i}: quantity must be a whole number from 1 to {MAX_QUANTITY}."
         )
     finish = _clean(raw.get("finish"), 10).lower()
     if not finish:
@@ -1317,16 +1317,16 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     if finish == "normal":
         finish = "nonfoil"
     if finish not in FINISHES:
-        raise CollectionError("invalid", f"card {i}: finish must be one of {', '.join(FINISHES)}")
+        raise CollectionError("invalid", f"Card {i}: finish must be one of {', '.join(FINISHES)}.")
     condition = _clean(raw.get("condition"), 4).upper()
     if condition == "D":  # Archidekt's own code for Damaged
         condition = "DMG"
     if condition not in CONDITIONS:
-        raise CollectionError("invalid", f"card {i}: condition must be one of NM, LP, MP, HP, DMG or empty")
+        raise CollectionError("invalid", f"Card {i}: condition must be one of NM, LP, MP, HP, DMG or empty.")
     language = _clean(raw.get("language"), 3).upper() or "EN"
     language = ARCHIDEKT_TO_LANGUAGE.get(language, language)
     if language not in LANGUAGES:
-        raise CollectionError("invalid", f"card {i}: language must be one of " + ", ".join(LANGUAGES))
+        raise CollectionError("invalid", f"Card {i}: language must be one of " + ", ".join(LANGUAGES) + ".")
     return {"quantity": qty, "finish": finish, "condition": condition, "language": language}
 
 
@@ -1430,6 +1430,9 @@ def import_result_html(result: dict[str, Any]) -> str:
     what ``import_result`` found. Everything is escaped."""
     if result.get("refused"):
         reason = str(result["refused"]).strip().rstrip(".")
+        # the parser's refusal is a sentence of its own ("Line 3: ..."); here it goes on after a colon
+        if reason[1:2].islower():
+            reason = reason[:1].lower() + reason[1:]
         return f"<p class='notice error'>{_esc(f'Nothing was imported: {reason}.')}</p>"
 
     def rows(entries: list[dict[str, str]], extra: str = "") -> str:
@@ -1517,7 +1520,7 @@ MAX_PRICE = 99999.0
 def _language(value: Any) -> str:
     code = _clean(value, 3).upper()
     if code not in LANGUAGES:
-        raise CollectionError("invalid", "language must be one of " + ", ".join(LANGUAGES))
+        raise CollectionError("invalid", "language must be one of " + ", ".join(LANGUAGES) + ".")
     return code
 
 
@@ -1529,9 +1532,9 @@ def _price(value: Any) -> float | None:
     try:
         price = round(float(str(value).strip().lstrip("$").replace(",", ".")), 2)
     except ValueError as exc:
-        raise CollectionError("invalid", "price paid must be a number") from exc
+        raise CollectionError("invalid", "Price paid must be a number.") from exc
     if price < 0 or price > MAX_PRICE or price != price:
-        raise CollectionError("invalid", f"price paid must be between 0 and {int(MAX_PRICE)}")
+        raise CollectionError("invalid", f"Price paid must be between 0 and {int(MAX_PRICE)}.")
     return price
 
 
@@ -1562,7 +1565,7 @@ def _finish_label(f: str) -> str:
 def _rid(value: Any) -> int:
     s = str(value or "").strip()
     if not s.isdigit() or len(s) > 12:
-        raise CollectionError("invalid", "that is not a collection record ID")
+        raise CollectionError("invalid", "That is not a collection record ID.")
     return int(s)
 
 
@@ -4082,12 +4085,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 # the stepper: one more or one fewer than Archidekt holds now (two tabs add up)
                 delta = data.get("delta")
                 if not isinstance(delta, int) or isinstance(delta, bool) or abs(delta) > MAX_QUANTITY:
-                    raise CollectionError("invalid", "delta must be a whole number")
+                    raise CollectionError("invalid", "Delta must be a whole number.")
                 out = await service.set_quantity(who[0], rid, delta=delta, name=name)
             elif "quantity" in data:
                 qty = data.get("quantity")
                 if not isinstance(qty, int) or isinstance(qty, bool) or qty < 0 or qty > MAX_QUANTITY:
-                    raise CollectionError("invalid", "quantity must be a whole number")
+                    raise CollectionError("invalid", "quantity must be a whole number.")
                 out = await service.set_quantity(who[0], rid, qty, name=name)
             else:
                 out = await service.update(
@@ -4267,16 +4270,16 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         if remove is None:
             return []
         if not isinstance(remove, list) or len(remove) > 100:
-            raise CollectionError("invalid", "remove must be a list of up to 100 entries")
+            raise CollectionError("invalid", "remove must be a list of up to 100 entries.")
         out: list[dict[str, Any]] = []
         for entry in remove:
             if isinstance(entry, str):
                 entry = {"name": entry}
             if not isinstance(entry, dict):
-                raise CollectionError("invalid", "each remove entry is {id | name, quantity?}")
+                raise CollectionError("invalid", "Each remove entry is {id | name, quantity?}.")
             qty = entry.get("quantity")
             if qty is not None and (not isinstance(qty, int) or isinstance(qty, bool) or qty < 1):
-                raise CollectionError("invalid", "quantity must be a whole number of 1 or more")
+                raise CollectionError("invalid", "quantity must be a whole number of 1 or more.")
             if entry.get("id") is not None and str(entry["id"]).strip():
                 rec = row_out(await service._record(sub, _rid(entry["id"]), _clean(entry.get("name"), 200)))
                 rows = [rec]
@@ -4284,10 +4287,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 rows = await service.find_by_name(sub, str(entry["name"]))
                 if not rows:
                     raise CollectionError(
-                        "not_found", f"no card named '{_clean(str(entry['name']), 60)}' in your binder"
+                        "not_found", f"Your binder has no card called “{_clean(str(entry['name']), 60)}”."
                     )
             else:
-                raise CollectionError("invalid", "each remove entry needs id or name")
+                raise CollectionError("invalid", "Each remove entry needs id or name.")
             left = qty
             for r in rows:
                 if left is not None and left <= 0:
@@ -4314,12 +4317,12 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         if tag is None:
             return []
         if not isinstance(tag, list) or len(tag) > MAX_ITEMS_PER_CALL:
-            raise CollectionError("invalid", f"tag must be a list of up to {MAX_ITEMS_PER_CALL} entries")
+            raise CollectionError("invalid", f"tag must be a list of up to {MAX_ITEMS_PER_CALL} entries.")
         have = await service.tags(sub)
         out: list[dict[str, Any]] = []
         for entry in tag:
             if not isinstance(entry, dict):
-                raise CollectionError("invalid", "each tag entry is {id | name, tags}")
+                raise CollectionError("invalid", "Each tag entry is {id | name, tags}.")
             try:
                 names = collection_tags.clean_names(entry.get("tags"))
             except DeckError as exc:
@@ -4334,10 +4337,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 recs = [r for r in found.records if row_out(r)["name"].casefold() == want]
                 if not recs:
                     raise CollectionError(
-                        "not_found", f"no card named '{_clean(str(entry['name']), 60)}' in your binder"
+                        "not_found", f"Your binder has no card called “{_clean(str(entry['name']), 60)}”."
                     )
             else:
-                raise CollectionError("invalid", "each tag entry needs id or name")
+                raise CollectionError("invalid", "Each tag entry needs id or name.")
             by_id = {t["id"]: t for t in have}
             for rec in recs:
                 r = row_out(rec)
@@ -4355,7 +4358,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                     }
                 )
         if tag and not out:
-            raise CollectionError("invalid", "those entries already have exactly those binder tags")
+            raise CollectionError("invalid", "Those entries already have exactly those binder tags.")
         return out
 
     async def _apply_tags(
@@ -4545,7 +4548,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 ]
             if scan_session:
                 if service.scan is None:
-                    raise CollectionError("unavailable", "scanning is not available on this gateway")
+                    raise CollectionError("unavailable", "Scanning is not available on this gateway.")
                 from .scan.service import ScanError
 
                 try:

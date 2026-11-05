@@ -531,23 +531,23 @@ class PrintingsCopy:
         try:
             resp = await client.http.get(f"{client.base}/bulk-data", headers=client.headers)
         except httpx.HTTPError as exc:
-            raise ScryfallError("unavailable", f"bulk-data index: {exc.__class__.__name__}") from exc
+            raise ScryfallError("unavailable", f"Bulk-data index: {exc.__class__.__name__}.") from exc
         if resp.status_code != 200:
-            raise ScryfallError("unavailable", f"bulk-data index answered {resp.status_code}")
+            raise ScryfallError("unavailable", f"Bulk-data index answered {resp.status_code}.")
         try:
             rows = resp.json().get("data")
         except (ValueError, AttributeError) as exc:
-            raise ScryfallError("contract", "bulk-data index is not JSON") from exc
+            raise ScryfallError("contract", "Bulk-data index is not JSON.") from exc
         entry = next((r for r in rows or [] if isinstance(r, dict) and r.get("type") == BULK_TYPE), None)
         if entry is None:
-            raise ScryfallError("contract", f"bulk-data index has no {BULK_TYPE}")
+            raise ScryfallError("contract", f"Bulk-data index has no {BULK_TYPE}.")
         uri = entry.get("jsonl_download_uri")
         updated = entry.get("updated_at")
         if not isinstance(uri, str) or not isinstance(updated, str) or not updated:
-            raise ScryfallError("contract", f"{BULK_TYPE} has no jsonl_download_uri or updated_at")
+            raise ScryfallError("contract", f"{BULK_TYPE} has no jsonl_download_uri or updated_at.")
         where = urlsplit(uri)
         if where.scheme != "https" or where.hostname not in (*DOWNLOAD_HOSTS, urlsplit(client.base).hostname):
-            raise ScryfallError("contract", f"{BULK_TYPE} is offered from an unexpected address")
+            raise ScryfallError("contract", f"{BULK_TYPE} is offered from an unexpected address.")
         size = entry.get("compressed_size")
         return {"uri": uri, "updated_at": updated, "size": str(size) if isinstance(size, int) else ""}
 
@@ -565,7 +565,7 @@ class PrintingsCopy:
             try:
                 async with client.http.stream("GET", entry["uri"], headers=client.headers) as resp:
                     if resp.status_code != 200:
-                        raise ScryfallError("unavailable", f"bulk file answered {resp.status_code}")
+                        raise ScryfallError("unavailable", f"Bulk file answered {resp.status_code}.")
                     # the file as sent (Scryfall sends it as application/gzip, with no
                     # content-encoding): its length is the one to check against
                     encoded = bool(resp.headers.get("content-encoding"))
@@ -584,7 +584,7 @@ class PrintingsCopy:
                 await asyncio.to_thread(out.close)
             if expected and expected.isdigit() and int(expected) != got:
                 # a transfer cut short is a transport failure, not a damaged file
-                raise ScryfallError("unavailable", f"the download was cut off ({got} of {expected} bytes)")
+                raise ScryfallError("unavailable", f"The download was cut off ({got} of {expected} bytes).")
             if halt.is_set():
                 raise Stopped()
             received["whole"] = True

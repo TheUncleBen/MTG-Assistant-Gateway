@@ -49,7 +49,7 @@ def test_item_options_take_archidekt_codes():
     assert _item_options({"condition": "d", "language": "kr"}, 0)["condition"] == "DMG"
     assert _item_options({"language": "kr"}, 0)["language"] == "KO"
     assert _item_options({}, 0)["language"] == "EN"
-    with pytest.raises(CollectionError, match="card 2: language must be one of EN, ES"):
+    with pytest.raises(CollectionError, match="Card 2: language must be one of EN, ES"):
         _item_options({"language": "PH"}, 2)
 
 

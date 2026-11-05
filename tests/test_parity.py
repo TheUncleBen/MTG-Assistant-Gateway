@@ -774,7 +774,7 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
         return structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
 
     bad = await propose({"deck_format": "modern", "edh_bracket": 2})
-    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+    assert not bad["ok"] and "Only a Commander deck has a bracket" in bad["message"], bad
     p = await propose({"deck_format": "modern"})
     assert p["ok"], p
     assert "Commander bracket: 3 → none" in p["diff"], p["diff"]
@@ -782,7 +782,7 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
     assert a["ok"] and a["result"]["verified"] is True, a
     assert ark.decks[42]["deckFormat"] == 2 and ark.decks[42]["edhBracket"] is None
     bad = await propose({"edh_bracket": 4})  # the deck is Modern now
-    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+    assert not bad["ok"] and "Only a Commander deck has a bracket" in bad["message"], bad
 
     # the settings form: a bracket left picked is dropped for another format, kept for Commander
     b = await _linked_browser(stack)

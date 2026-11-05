@@ -66,7 +66,7 @@ def _words() -> Iterator[tuple[str, int, str]]:
 LOWER_ID = re.compile(r"[A-Za-z,] ids?\b(?!=)")
 # "id" as the name of a field or a column, not the word
 ID_AS_FIELD = {
-    "collection.py": ("each remove entry needs id or name", "each tag entry needs id or name", "scryfall id"),
+    "collection.py": ("Each remove entry needs id or name", "Each tag entry needs id or name", "scryfall id"),
     "archidekt_csv.py": ("scryfall id",),
     "browse.py": ("Each result has an id and url",),
 }
@@ -146,3 +146,234 @@ def test_the_outage_table_has_one_sentence_a_state() -> None:
     assert len(set(OUTAGE.values())) == len(OUTAGE)
     for state, words in OUTAGE.items():
         assert words.startswith("{s} ") and words.endswith("."), state
+
+
+# -- B-2: names in curly quotes ---------------------------------------------------------------------
+
+# Not member words: the operator's configuration, the OAuth protocol's answers to apps, SQL
+OPERATOR_FILES = {"config.py", "cimd.py", "oidc.py", "db.py", "prices.py"}
+# A card's text for the assistant's next turn quotes a value as data, in straight quotes, so the
+# assistant can pass it on as it is (B.quote): the model reads it, the member never does
+FOR_THE_MODEL = {"_bridge.js": ("return '\"' + s + '\"';",), "proposal-card.html": ("(data, quoted)",)}
+# a programmer's mistake, never shown to a member
+PROGRAMMER_ERRORS = {"ValueError", "TypeError", "KeyError", "RuntimeError", "AssertionError"}
+STRAIGHT_NAME = re.compile(r"\{[^{}]*?!r\}|(?<![=(\[,\w])'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'")
+
+
+def _parents(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    return {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+
+def _for_a_programmer(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+    while node in parents:
+        node = parents[node]
+        if (
+            isinstance(node, ast.Raise)
+            and isinstance(node.exc, ast.Call)
+            and isinstance(node.exc.func, ast.Name)
+            and node.exc.func.id in PROGRAMMER_ERRORS
+        ):
+            return True
+        if isinstance(node, ast.FunctionDef) and node.name == "__repr__":
+            return True
+    return False
+
+
+def test_names_in_member_text_sit_in_curly_quotes() -> None:
+    """B-2: about 35 Python strings quoted a name in straight quotes ("no card found for 'X'",
+    "{code!r}") while the house style, and the JS boxes, use “X”; the old guard looked at four JS
+    files only. Every f-string a member or an assistant reads, and every static script and card,
+    is checked here."""
+    found = []
+    for name, tree, text in _sources():
+        if name in OPERATOR_FILES:
+            continue
+        logged, parents = _logged(tree), _parents(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.JoinedStr) or id(node) in logged:
+                continue
+            seg = ast.get_source_segment(text, node) or ""
+            if SQL.search(seg) or _for_a_programmer(node, parents):
+                continue
+            if m := STRAIGHT_NAME.search(seg):
+                found.append(f"{name}:{node.lineno}: {m.group(0)} in {seg[:100]}")
+    js = re.compile(
+        r"\"'\" \+|\+ \"'\"|'\"' \+|\+ '\"'|\"\\\"\" \+|\+ \"\\\"\"|\\\"\$\{|'\$\{[^}]+\}'|\"\$\{[^}]+\}\""
+    )
+    for path in sorted([*PKG.rglob("*.js"), *PKG.rglob("*.html")]):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            # a CSS selector or a Scryfall search (!"name") is code, not words
+            if re.search(r"querySelector|\[[\w-]+=|scryfall\.com|CSS\.escape", line):
+                continue
+            if any(ok in line for ok in FOR_THE_MODEL.get(path.name, ())):
+                continue
+            if m := js.search(line):
+                found.append(f"{path.relative_to(PKG)}:{n}: {m.group(0)} in {line.strip()[:100]}")
+    assert not found, "\n".join(found)
+
+
+# -- B-3: refusals as sentences, one card-not-found, no pydantic words ------------------------------
+
+ERRORS = {
+    "DeckError",
+    "CollectionError",
+    "ScanError",
+    "ArchidektError",
+    "ScryfallError",
+    "ForgeError",
+    "SweepRefused",
+    "LoginError",
+}
+# a refusal may open with the argument it is about, as the tool lists it: "deck_format must be ..."
+AS_ARGUMENT = re.compile(
+    r"^([a-z][\w.\[\]-]*)( must| is | are | takes| needs| has | have | cannot| can't| holds| was "
+    r"| were | should| may | gives|:| \(| and | or |,)"
+)
+SENTENCE_END = re.compile(r"([.?!…]|[.?!…][\"”')\]]|[.?!][”\"]\))$")
+
+
+def _argument_names() -> set[str]:
+    """Every argument a tool takes, and every field of the models in schemas.py."""
+    out = {"bulk-data"}  # Scryfall's endpoint, named as it is
+    for name, tree, _text in _sources():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "tool"
+                for d in node.decorator_list
+            ):
+                out.update(a.arg for a in [*node.args.args, *node.args.kwonlyargs])
+            if name == "schemas.py" and isinstance(node, ast.ClassDef):
+                out.update(
+                    s.target.id
+                    for s in node.body
+                    if isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name)
+                )
+    return out
+
+
+def _messages() -> Iterator[tuple[str, int, ast.expr]]:
+    """(file, line, message) of every refusal the gateway raises: the message of each of
+    ERRORS, and of a file's own helper that wraps one (account_lists._err)."""
+    for name, tree, _text in _sources():
+        if name in OPERATOR_FILES:
+            continue
+        helpers: dict[str, int] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.body and isinstance(node.body[-1], ast.Return):
+                call = node.body[-1].value
+                if (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id in ERRORS
+                    and len(call.args) >= 2
+                    and isinstance(call.args[1], ast.Name)
+                    and call.args[1].id in (params := [a.arg for a in node.args.args])
+                ):
+                    helpers[node.name] = params.index(call.args[1].id)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            called = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+            msg: ast.expr | None = None
+            if called in helpers and len(node.args) > helpers[called]:
+                msg = node.args[helpers[called]]
+            elif called in ERRORS:
+                kw = [k.value for k in node.keywords if k.arg in ("message", "msg")]
+                at = 0 if called == "SweepRefused" else 1
+                msg = kw[0] if kw else node.args[at] if len(node.args) > at else None
+            if msg is not None:
+                yield name, node.lineno, msg
+
+
+def _ends(node: ast.expr, right: bool) -> ast.expr:
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        node = node.right if right else node.left
+    return node
+
+
+def test_every_refusal_is_a_sentence() -> None:
+    """B-3: 356 refusals started lowercase or had no full stop ("no cards found in the text",
+    "give exactly one of cards, ..."). Each refusal a tool or a page gives now starts with a
+    capital (or with the argument it is about, as the tool names it) and ends with a full stop."""
+    arguments = _argument_names()
+    found = []
+    for name, line, msg in _messages():
+        head, tail = _ends(msg, right=False), _ends(msg, right=True)
+        first = (
+            head.value
+            if isinstance(head, ast.Constant)
+            else head.values[0].value
+            if isinstance(head, ast.JoinedStr) and head.values and isinstance(head.values[0], ast.Constant)
+            else None
+        )
+        if isinstance(first, str) and first[:1].islower():
+            m = AS_ARGUMENT.match(first)
+            if not (m and (m.group(1) in arguments or "_" in m.group(1))):
+                found.append(f"{name}:{line}: starts lowercase: {first[:60]!r}")
+        last = (
+            tail.value
+            if isinstance(tail, ast.Constant)
+            else tail.values[-1].value
+            if isinstance(tail, ast.JoinedStr) and tail.values and isinstance(tail.values[-1], ast.Constant)
+            else None
+        )
+        if isinstance(last, str) and not SENTENCE_END.search(last.rstrip()):
+            found.append(f"{name}:{line}: no full stop: …{last[-50:]!r}")
+    assert not found, f"{len(found)} refusals:\n" + "\n".join(found)
+
+
+NOT_A_CARD = re.compile(
+    r"[Nn]o card (named|found)|knows no card|[Nn]o such card|does not know this card|no card by that name"
+)
+
+
+def test_a_name_that_is_no_card_is_said_one_way() -> None:
+    """B-3: "No card is called “X”." (decks.no_card_called), "Scryfall knows no card named “X”.",
+    "no card found for 'X'" and "no card named 'X' in your binder" said one thing four ways. Every
+    surface says "No card is called “X”." (a binder without it: "Your binder has no card called
+    “X”.")."""
+    found = [
+        f"{name}:{line}: {text[:100]!r}"
+        for name, line, text in [*_words(), *_static_texts()]
+        if NOT_A_CARD.search(text)
+    ]
+    assert not found, "\n".join(found)
+
+
+def test_no_answer_carries_pydantics_own_words() -> None:
+    """B-3: a refused argument answered "the arguments do not fit the tool: changes.0.action: Input
+    should be 'add', 'remove' ..." (pydantic's text, straight quotes). The gateway maps each kind of
+    refusal to plain words (app._plain_reason); its own strings never say pydantic's."""
+    from mtg_gateway.app import _schema_problems
+
+    framework = (
+        "Error executing tool propose_deck_changes: 3 validation errors for propose_deck_changesArguments\n"
+        "changes.0.action\n"
+        "  Input should be 'add', 'remove' or 'set_quantity' [type=literal_error, input_value='x', "
+        "input_type=str]\n"
+        "    For further information visit the link pydantic gives\n"
+        "games\n"
+        "  Input should be greater than or equal to 10 [type=greater_than_equal, input_value=3, "
+        "input_type=int]\n"
+        "deck_id\n"
+        "  Field required [type=missing, input_value={}, input_type=dict]\n"
+    )
+    assert _schema_problems(framework) == (
+        "changes[0].action must be add, remove or set_quantity; games must be at least 10; "
+        "deck_id is required"
+    )
+    # a union argument (a list of changes or one object): pydantic tags each branch and refuses
+    # the whole field on the branch that did not fit; the answer names only the real problem
+    union = (
+        "Error executing tool amend_proposal: 2 validation errors for amend_proposalArguments\n"
+        "changes.list[DeckChange].0.action\n"
+        "  Input should be 'add' or 'remove' [type=literal_error, input_value='x', input_type=str]\n"
+        "changes.dict[str,any]\n"
+        "  Input should be a valid dictionary [type=dict_type, input_value=[{}], input_type=list]\n"
+    )
+    assert _schema_problems(union) == "changes[0].action must be add or remove"
+    pydantic = re.compile(r"Input should be|Field required|Extra inputs are not permitted|validation error")
+    found = [f"{name}:{line}: {text[:80]!r}" for name, line, text in _words() if pydantic.search(text)]
+    # app.py reads the framework's text (its head pattern and the fallback), never says it
+    assert all(f.startswith("app.py:") for f in found), "\n".join(found)

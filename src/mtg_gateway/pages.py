@@ -3126,8 +3126,8 @@ def _progress_html(p: dict[str, Any]) -> str:
     text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
     if g.get("waiting_for_archidekt"):
         text += (
-            f" {outage('slow_down')} The gateway carries on by itself in about "
-            f"{int(g['waiting_for_archidekt'])} seconds."
+            f" {outage('slow_down')} The gateway waits about "
+            f"{int(g['waiting_for_archidekt'])} seconds, then carries on by itself."
         )
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 

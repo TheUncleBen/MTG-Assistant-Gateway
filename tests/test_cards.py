@@ -557,7 +557,7 @@ async def test_resolve_cards_asks_a_form_for_ambiguous_names_where_it_can(stack:
     )
     # The row still says what was read, and that the user picked the name from the suggestions.
     assert (
-        row["input"]["name"] == "Cultivatz" and "picked from the suggestions for 'Cultivatz'" in row["note"]
+        row["input"]["name"] == "Cultivatz" and "picked from the suggestions for “Cultivatz”" in row["note"]
     )
     # A failed second pass keeps the first pass (its suggestions reach the assistant as before).
     service = h.app.state.gateway.scan

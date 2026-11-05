@@ -106,7 +106,7 @@ async def test_a_search_scryfall_cannot_read_says_so(stack: Stack) -> None:  # n
     b = await linked(stack)
     try:
         r = await b.http.get("/cards", params={"x": "bad:thing"})
-        assert r.status_code == 200 and "Scryfall could not read that search: unknown keyword bad" in r.text
+        assert r.status_code == 200 and "Scryfall could not read that search: Unknown keyword bad." in r.text
         r = await b.http.get("/cards", params={"q": "okiri"})
         assert r.status_code == 200 and "No card matches these filters" in r.text
     finally:

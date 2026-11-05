@@ -430,7 +430,7 @@ async def test_every_successful_round_logs_one_line_and_the_status_follows_it(
     assert second["state"] == "ok" and second["removed"] == 0
     assert failed["state"] == "failed" and failed["at"]
     assert failed["error"] == (
-        f"group {USERS!r} found 0 times (is the name right, and may the token view that group?)"
+        f"Group “{USERS}” found 0 times (is the name right, and may the token view that group?)"
     )
     assert TOKEN not in json.dumps(statuses) and TOKEN not in caplog.text
 

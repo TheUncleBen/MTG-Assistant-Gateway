@@ -46,10 +46,10 @@ def test_a_plain_list_has_no_line_numbers() -> None:
 @pytest.mark.parametrize(
     ("text", "reason"),
     [
-        ("Quantity,Name\n1,Opt\nx,Sol Ring\n", "line 3: quantity 'x' is not a number"),
-        ("Quantity,Name\n1,Opt\n1,\n", "line 3: no card name"),
+        ("Quantity,Name\n1,Opt\nx,Sol Ring\n", "Line 3: quantity “x” is not a number."),
+        ("Quantity,Name\n1,Opt\n1,\n", "Line 3: no card name."),
         ("Card Name,Quantity\nOpt,1\n", None),  # "card name" is a Name column: no refusal
-        ("   ", "paste or choose a CSV or a card list first"),
+        ("   ", "Paste or choose a CSV or a card list first."),
     ],
 )
 def test_refusal_reasons(text: str, reason: str | None) -> None:
@@ -60,7 +60,9 @@ def test_refusal_reasons(text: str, reason: str | None) -> None:
         parse_collection_import(text)
     assert str(caught.value) == reason
     html = import_result_html({"refused": str(caught.value)})
-    assert html == f"<p class='notice error'>Nothing was imported: {reason.replace(chr(39), '&#x27;')}.</p>"
+    # a sentence of its own, it goes on after "Nothing was imported:" in lower case
+    said = (reason[:1].lower() + reason[1:]).removesuffix(".")
+    assert html == f"<p class='notice error'>Nothing was imported: {said.replace(chr(39), '&#x27;')}.</p>"
 
 
 def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
@@ -158,7 +160,7 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
         r = await import_list(b, {"csrf": csrf, "action": "import", "text": bad})
         assert r.headers["location"].startswith("/collection?err=unreadable&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
-        assert "Nothing was imported: line 3: quantity &#x27;x&#x27; is not a number." in page
+        assert "Nothing was imported: line 3: quantity “x” is not a number." in page
         # nothing found: the plain notice, with the rows not found
         r = await import_list(b, {"csrf": csrf, "action": "import", "text": "1 Foo Bar\n"})
         assert r.headers["location"].startswith("/collection?err=nothingimported&r=")
@@ -207,9 +209,9 @@ def test_lines_count_quoted_line_breaks_and_leading_blank_lines() -> None:
     assert [(i["name"], i["line"]) for i in items] == [("A B", 2), ("Opt", 5)]
     items = parse_collection_import('Quantity,Name,Language\n1,"Opt\u2028X",EN\n1,Y,ZZ\n')
     assert [i["line"] for i in items] == [2, 3]
-    with pytest.raises(CollectionError, match="^line 5: quantity 'x' is not a number$"):
+    with pytest.raises(CollectionError, match="^Line 5: quantity “x” is not a number\\.$"):
         parse_collection_import('Quantity,Name\n1,"A\nB\nC"\nx,Opt\n')
-    with pytest.raises(CollectionError, match="^line 5: no card name$"):
+    with pytest.raises(CollectionError, match="^Line 5: no card name\\.$"):
         parse_collection_import('\nQuantity,Name\n1,"Sol\nRing"\n1,\n')
 
 
@@ -258,7 +260,7 @@ def test_an_unknown_condition_is_near_mint_and_named() -> None:
 def test_a_quoted_cell_in_a_refusal_is_cut() -> None:
     with pytest.raises(CollectionError) as caught:
         parse_collection_import("Quantity,Name\n" + "x" * 131_000 + ",Opt\n")
-    assert str(caught.value) == "line 2: quantity 'xxxxxxxxxxxxxxxxxxxx…' is not a number"
+    assert str(caught.value) == "Line 2: quantity “xxxxxxxxxxxxxxxxxxxx…” is not a number."
 
 
 TOO_LONG = 'a cell is longer than 131,072 characters; check for a quotation mark (") that is not closed'
@@ -269,14 +271,14 @@ TOO_LONG = 'a cell is longer than 131,072 characters; check for a quotation mark
 @pytest.mark.parametrize(
     ("text", "reason"),
     [
-        ("Quantity,Name\n1,Opt\n1," + "x" * 140_000 + "\n", f"line 3: {TOO_LONG}"),
-        ('Quantity,Name\n1,"Opt\n' + "x\n" * 70_000, f"line 2: {TOO_LONG}"),
+        ("Quantity,Name\n1,Opt\n1," + "x" * 140_000 + "\n", f"Line 3: {TOO_LONG}."),
+        ('Quantity,Name\n1,"Opt\n' + "x\n" * 70_000, f"Line 2: {TOO_LONG}."),
         (
             "Quantity,Name\n" + "9" * 5000 + ",Opt\n",
-            "line 2: quantity '99999999999999999999…' is not from 1 to 9,999",
+            "Line 2: quantity “99999999999999999999…” is not from 1 to 9,999.",
         ),
-        ("Quantity,Name\n1,Opt\n0,Opt\n", "line 3: quantity '0' is not from 1 to 9,999"),
-        ("Quantity,Name\n10000,Opt\n", "line 2: quantity '10000' is not from 1 to 9,999"),
+        ("Quantity,Name\n1,Opt\n0,Opt\n", "Line 3: quantity “0” is not from 1 to 9,999."),
+        ("Quantity,Name\n10000,Opt\n", "Line 2: quantity “10000” is not from 1 to 9,999."),
     ],
 )
 def test_huge_cells_are_refused_with_their_line(text: str, reason: str) -> None:
@@ -292,10 +294,10 @@ async def test_huge_cells_and_an_unknown_condition_through_the_page(stack: Stack
         csrf = await b.csrf("/collection")
         for text, said in [
             ("Quantity,Name\n1," + "x" * 140_000 + "\n", "line 2: " + html.escape(TOO_LONG)),
-            ("Quantity,Name\n" + "9" * 5000 + ",Opt\n", "line 2: quantity &#x27;99999999999999999999…&#x27;"),
+            ("Quantity,Name\n" + "9" * 5000 + ",Opt\n", "line 2: quantity “99999999999999999999…”"),
             (
                 "Quantity,Name\n" + "y" * 100_000 + ",Opt\n",
-                "line 2: quantity &#x27;yyyyyyyyyyyyyyyyyyyy…&#x27;",
+                "line 2: quantity “yyyyyyyyyyyyyyyyyyyy…”",
             ),
         ]:
             r = await import_list(b, {"csrf": csrf, "action": "import", "text": text})

@@ -59,7 +59,7 @@ def not_looked_up(name: str, retry_in: int) -> ScanError:
         )
     return ScanError(
         "busy",
-        f"The card lookups took too long, so '{name}' was not looked up yet. Try again.",
+        f"The card lookups took too long, so “{name}” was not looked up yet. Try again.",
         extra={"retry_in": SUGGESTED_WAIT_SECONDS},
     )
 
@@ -168,7 +168,7 @@ def add_scan_tools(
         try:
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
-                raise ScanError("invalid", "give `cards` or `text` with at least one card")
+                raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             waited: list[float] = []
             results = await service.resolve(inputs, owner=_sub(), waited=waited)
             results = await _ask_about_ambiguous(ctx, results)
@@ -190,7 +190,7 @@ def add_scan_tools(
         if not asks:
             return results
         questions = [
-            {"key": f"q{i}", "title": f"Which card is '{r.input.name}'?", "options": list(r.suggestions)[:12]}
+            {"key": f"q{i}", "title": f"Which card is “{r.input.name}”?", "options": list(r.suggestions)[:12]}
             for i, r in asks
         ]
         answers = await ask_choices(
@@ -213,11 +213,11 @@ def add_scan_tools(
         for (i, inp), res in zip(redo, fresh, strict=True):
             if res.status == "deferred":  # Scryfall is backing off: keep the row with its suggestions
                 kept = out[i]
-                note = f"the pick '{inp.name}' could not be checked yet; ask again"
+                note = f"the pick “{inp.name}” could not be checked yet; ask again"
                 out[i] = replace(kept, note=f"{kept.note}; {note}" if kept.note else note)
                 continue
             original = results[i].input
-            picked_note = f"picked from the suggestions for '{original.name}'"
+            picked_note = f"picked from the suggestions for “{original.name}”"
             res = replace(res, input=original, note=f"{res.note}; {picked_note}" if res.note else picked_note)
             out[i] = res
         return out
@@ -249,7 +249,7 @@ def add_scan_tools(
         try:
             if not oracle_id:
                 if not name:
-                    raise ScanError("invalid", "give oracle_id or name")
+                    raise ScanError("invalid", "Give oracle_id or name.")
                 try:
                     results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
                     if results and results[0].status == "deferred":
@@ -266,7 +266,7 @@ def add_scan_tools(
                 if not oracle_id:
                     card = results[0].card if results else None
                     if not card or not card.get("oracle_id"):
-                        raise ScanError("not_found", f"no card found for '{name}'")
+                        raise ScanError("not_found", f"No card is called “{name}”.")
                     oracle_id = str(card["oracle_id"])
                     name = str(card.get("name") or name)
             out = await service.printings(oracle_id, owner=_sub())
@@ -333,7 +333,7 @@ def add_scan_tools(
         try:
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
-                raise ScanError("invalid", "give `cards` or `text` with at least one card")
+                raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             results = await service.resolve(inputs, owner=_sub())
             # A conflict (the printing named is a different card) is saved without a card, so it
             # is listed as unresolved and stays out of the session's changes until someone picks.

@@ -45,16 +45,18 @@ def outage(state: str, service: str = "Archidekt", *, again: bool = False) -> st
 
 
 FINE = "Nothing is wrong with your decks or your account."
+# FINE with the advice joined on, for a text under a page or box that has its own Try again button
+FINE_THEN = "Nothing is wrong with your decks or your account; try again "
 BUSY_TITLE = "Archidekt is busy"
 BUSY_TEXT = (
     "Other work for your account is still running, or one of your account's limits was reached, so "
-    f"this couldn't be done right now. {FINE} {AGAIN}"
+    f"this couldn't be done right now. {FINE_THEN}a little later."
 )
 # The busy text when the refusal says why (DeckError.busy_cause, or Archidekt's own 429 behind it).
 BUSY_TEXTS = {
     "member_slots": (
         "Your account already has several Archidekt actions running or waiting, for example from an "
-        f"assistant, and there was no turn free for this one. {FINE} Try again once some of them have "
+        f"assistant, and there was no turn free for this one. {FINE_THEN}once some of them have "
         "finished."
     ),
     "budget": (
@@ -62,7 +64,7 @@ BUSY_TEXTS = {
         "because an assistant has been busy. It refills a little at a time, and this works again "
         f"once there is room. {FINE}"
     ),
-    "archidekt": f"{outage('slow_down')} {FINE} {AGAIN}",
+    "archidekt": f"{outage('slow_down')} {FINE_THEN}later.",
 }
 # When the member's own allowance or turns ran out (not Archidekt's own pause), the title says so.
 TOO_MANY_TITLE = "Too many requests right now"

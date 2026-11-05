@@ -155,7 +155,7 @@ def _keywords(card: str, value: Any) -> list[str]:
     out = []
     for k in value:
         if not isinstance(k, str) or not _KEYWORD.match(k.strip().lower()):
-            raise ModelError(f"{card}: keyword {str(k)[:40]!r} is not a plain keyword")
+            raise ModelError(f"{card}: keyword “{str(k)[:40]}” is not a plain keyword")
         out.append(k.strip().lower())
     return out
 
@@ -301,7 +301,7 @@ def clean_model(raw: Any, *, card: str) -> dict[str, Any]:
         raise ModelError("a model is an object")
     name = raw.get("name")
     if not isinstance(name, str) or card_key(name) != card_key(card):
-        raise ModelError(f"{str(name)[:60]!r}: the model's name must be the card's own name")
+        raise ModelError(f"“{str(name)[:60]}”: the model's name must be the card's own name")
     out: dict[str, Any] = {"name": card}
     for field, parse in (("triggers", _trigger), ("statics", _static), ("activated", _activated)):
         parts = _parts(card, raw.get(field), field, parse)

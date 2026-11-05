@@ -1058,7 +1058,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
     ) -> dict[str, Any]:
         fmt = FORMAT_IDS.get((format or "").strip().lower()) if format else None
         if format and fmt is None and not str(format).isdigit():
-            return {"ok": False, "error": "invalid", "message": f"unknown format '{format[:30]}'"}
+            return {"ok": False, "error": "invalid", "message": f"unknown format “{format[:30]}”"}
 
         async def run(commander_name: str) -> dict[str, Any]:
             return await decks.search_decks(
@@ -1093,7 +1093,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
                         "decks": [],
                         "count": 0,
                         "commander_suggestions": names,
-                        "message": f"no commander is named exactly '{commander[:60]}'; search again "
+                        "message": f"no commander is named exactly “{commander[:60]}”; search again "
                         "with one of commander_suggestions",
                     }
         except DeckError as exc:
