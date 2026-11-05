@@ -376,7 +376,7 @@ async def test_a_watched_card_the_member_owns_says_so(stack: Stack, monkeypatch)
         page = (await b.http.get("/watchlist")).text
         ids = _ids(stack)
         sol = page.split(f"id='wr-{ids['Sol Ring']}'")[1].split(f"id='wr-{ids['Sol Talisman']}'")[0]
-        assert "In binder\u00a0·\u00a0you own 3</span>" in sol and "class='ui-lbl green owned'" in sol
+        assert "In binder\u00a0·\u00a0you own\u00a03</span>" in sol and "class='ui-lbl green owned'" in sol
         # the label is drawn twice in a row (phone line, desktop column); not on Sol Talisman's
         assert (
             page.count("In binder") == 2

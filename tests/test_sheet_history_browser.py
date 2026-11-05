@@ -14,10 +14,15 @@ showed the sent choice over the unfiltered list.
 
 The rule: every way of closing a sheet leaves the history as it was before the sheet opened, with
 the current filter address; what Show or Clear filters does from the sheet is one entry over
-that, as it is without a sheet; Forward brings the sheet back only after a Back closed it. A page
-reloaded with the sheet open shows the page, not the sheet, on a plain entry: reopening it on load
-and closing it with Back would be a fresh page load in Safari (the iPhone) and Firefox, which lose
-a filter set in the reopened sheet; the price is one Back that stays on the page."""
+that, as it is without a sheet, and nothing when nothing changed (audit L4); Forward brings the
+sheet back only after a Back closed it. After any Back or Forward the address, the list, the
+boxes and the badge agree (SIG below, against a reload): a page landing on an entry with another
+address redraws from it (audit R1, where the Back after a reload with the sheet open left the
+filtered list under the unfiltered address). A page reloaded with the sheet open shows the page,
+not the sheet, on a plain entry: reopening it on load and closing it with Back would be a fresh
+page load in Safari (the iPhone) and Firefox, which lose a filter set in the reopened sheet; the
+price is the entry the reload leaves under the page's (no API removes one), so one Back shows the
+page as before the sheet's filters (a fresh load in Safari, a redraw in Chromium: the same)."""
 
 from __future__ import annotations
 
@@ -47,13 +52,14 @@ RELOADING = [
     ("binder-filters", "/collection", "#sp-filters select"),
     ("precons", "/precons", "#sp-filters select"),
 ]
-# Show in every sheet, with each kind of filter the sheet holds (None: a sheet whose only filter
-# sends the form by itself, or none), and where one Back lands afterwards: "prev" where the
-# filter went into the page's own address, "here" where Show itself asked for the page or the
-# search, which is its own entry over the page's, as a Search press is without a sheet
+# Show in every sheet, with each kind of filter the sheet holds (None: nothing changed, on a sheet
+# whose only filter sends the form by itself or on deck search), and where one Back lands
+# afterwards: "prev" where the filter went into the page's own address or nothing changed (Show
+# only closes the sheet: audit L4), "here" where Show itself asked for the search, which is its
+# own entry over the page's, as a Search press is without a sheet
 SHOWS = [
-    ("binder-view", "/collection", False, None, "here"),
-    ("binder-filters", "/collection", True, None, "here"),
+    ("binder-view", "/collection", False, None, "prev"),
+    ("binder-filters", "/collection", True, None, "prev"),
     ("cards", "/cards?q=sol", False, "box", "prev"),
     ("cards-text", "/cards?q=sol", False, "text:o", "prev"),
     ("decks", "/decks", False, "box", "prev"),
@@ -61,7 +67,8 @@ SHOWS = [
     ("search-box", "/search", False, "box", "here"),
     ("search-text", "/search", False, "text:commander", "here"),
     ("search-select", "/search", False, "select", "prev"),
-    ("precons", "/precons", False, None, "here"),
+    ("search-none", "/search", False, None, "prev"),
+    ("precons", "/precons", False, None, "prev"),
 ]
 # Clear filters as a link in the sheet, after a filter in the address: a box (My decks), a
 # drop-down (deck search: its boxes wait for Search), a set (precons: the set drop-down sends the
@@ -89,6 +96,22 @@ PLAIN = "() => !(history.state && history.state.spsheet)"
 def _settle(page) -> None:  # noqa: ANN001
     page.wait_for_load_state("networkidle")
     page.wait_for_function("() => !document.querySelector('[aria-busy=true]')")
+
+
+def _shows(page, sig: str, where: str) -> None:  # noqa: ANN001
+    """The page shows ``sig`` (its list, boxes, badge and text), once its redraw from the address
+    Back or Forward landed on is done: in place, or as a fresh load of that address (the
+    evaluation fails while the page is on its way)."""
+    from playwright.sync_api import Error
+
+    for _ in range(100):
+        try:
+            if page.evaluate(SIG) == sig:
+                return
+        except Error:
+            pass
+        page.wait_for_timeout(100)
+    assert page.evaluate(SIG) == sig, (where, page.evaluate(SIG), sig)
 
 
 def _arrive(page, base: str, path: str) -> str:  # noqa: ANN001
@@ -275,7 +298,10 @@ def test_forward_brings_the_sheet_back_only_after_a_back_closed_it(
     took), so the next Back closes it and the one after leaves the page. Forward after the sheet
     closed by ×, Escape, the backdrop or the window widening lands on a plain entry of the page,
     without the sheet (L2: the sheet's entry was given back as it was, and Forward reopened the
-    sheet), and Back from there is one press to the page and one more to leave."""
+    sheet), the page as it was, and Back from there is one press to the page and one more to
+    leave. Audit L3: that Forward and that Back show nothing new. The given-back entry stays as
+    a forward entry whatever its state (no API removes one; a pushState would only move the dead
+    press to Back), and the one thing it could show, the sheet again, is L2."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -286,6 +312,7 @@ def test_forward_brings_the_sheet_back_only_after_a_back_closed_it(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 360, "light", exe)
         here = _arrive(page, server.base, path)
+        before = page.evaluate(SIG)
         _open_sheet(page)
         _close(page, way)
         _closed_on(page, here, name, way)
@@ -306,9 +333,11 @@ def test_forward_brings_the_sheet_back_only_after_a_back_closed_it(
             got = page.evaluate(FREE)
             assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (name, way, got)
             assert page.evaluate(PLAIN), (name, way)
+            assert page.evaluate(SIG) == before, (name, way, page.evaluate(SIG), before)
             page.go_back()
             page.wait_for_url(here)
             assert page.locator("#sp-filters.open").count() == 0, (name, way)
+            assert page.evaluate(SIG) == before, (name, way, page.evaluate(SIG), before)
         page.go_back()
         page.wait_for_url(f"{server.base}{PREV}")
         assert errors == []
@@ -322,10 +351,13 @@ def test_a_page_reloaded_with_the_sheet_open_shows_the_page_on_a_plain_entry(
     path: str,
     tags: bool,
 ) -> None:
-    """A reload with the sheet open (the app's pull to refresh) shows the page without the sheet,
-    on a plain entry with the page's address, nothing inert. The sheet opened again works as
-    ever: a filter set in it stays in the address when Back closes it (a reload shows the same
-    list); then one Back stays on the page (the entry the reload doubled) and one leaves."""
+    """A reload with the sheet open (the app's menu Reload) shows the page without the sheet, on
+    a plain entry with the page's address, nothing inert. The sheet opened again works as ever:
+    a filter set in it stays in the address when Back closes it (a reload shows the same list);
+    then one Back lands on the page's own entry under the one the reload left, with the address
+    as before the sheet's filters, and the page shows that address (audit R1: on /cards, /decks
+    and Packages the list, the boxes and the badge kept the filter under the unfiltered address),
+    and one more leaves."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -337,6 +369,7 @@ def test_a_page_reloaded_with_the_sheet_open_shows_the_page_on_a_plain_entry(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 360, "light", exe)
         here = _arrive(page, server.base, path)
+        before = page.evaluate(SIG)
         _open_sheet(page)
         page.reload(wait_until="networkidle")
         _settle(page)
@@ -363,8 +396,9 @@ def test_a_page_reloaded_with_the_sheet_open_shows_the_page_on_a_plain_entry(
             assert page.evaluate(SIG) == sig, (name, page.evaluate(SIG), sig)
         page.go_back()
         page.wait_for_url(here)
+        _shows(page, before, (name, "the page's own entry"))
         _settle(page)
-        assert page.locator("#sp-filters.open").count() == 0, name
+        assert page.url == here and page.locator("#sp-filters.open").count() == 0, (name, page.url)
         page.go_back()
         page.wait_for_url(f"{server.base}{PREV}")
         assert errors == []
@@ -402,11 +436,19 @@ def test_show_results_from_the_sheet_keeps_the_filters_and_leaves_one_entry_at_m
         if kind:
             _tick(page, kind)
             _settle(page)
+        asked: list[str] = []
+        page.on("request", lambda r: asked.append(r.url) if r.resource_type in ("fetch", "xhr") else None)
+        entries = page.evaluate("() => history.length")
+        page.evaluate("() => { window.sameDocument = true; }")
         page.locator("#sp-filters .sp-show").click()
         page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
         _settle(page)
         if kind:
             page.wait_for_url(lambda u: u != here)
+        else:
+            # nothing changed: the sheet closes, nothing is asked for, no entry, no page load
+            assert page.url == here and page.evaluate("() => window.sameDocument === true"), (name, page.url)
+            assert page.evaluate("() => history.length") == entries and asked == [], (name, asked)
         shown = page.url
         sig = page.evaluate(SIG)
         assert (sig != before) == bool(kind), (name, sig, before)
@@ -472,6 +514,52 @@ def test_clear_filters_from_the_sheet_is_one_entry_over_the_filtered_page(
         got = page.evaluate(FREE)
         assert got["inert"] == 0 and got["role"] is None and got["scrim"] == 0, (name, got)
         assert page.evaluate(PLAIN), name
+        page.go_back()
+        page.wait_for_url(f"{server.base}{PREV}")
+        assert errors == []
+        browser.close()
+
+
+# the sheet's own back() held for a while, and every fetch slowed, so a search sent from the
+# sheet lands in the gap between the back() and its popstate
+SLOW = """() => {
+  const back = history.back.bind(history);
+  history.back = () => setTimeout(back, 700);
+  const f = window.fetch.bind(window);
+  window.fetch = (u, o) => new Promise(r => setTimeout(() => r(f(u, o)), 250));
+}"""
+
+
+def test_a_search_landing_while_the_sheets_back_is_on_its_way_keeps_its_address(
+    server: Server,  # noqa: F811
+) -> None:
+    """L5: a drop-down picked in deck search's sheet sends its search; Show pressed at once
+    closes the sheet, whose back() is on its way when the search lands. The landed search's
+    address goes onto the entry the back lands on (before: pushed over the sheet's entry, it was
+    lost under the traversal, and the results showed under the old address). The address names
+    the filter, a reload shows the same results, and one Back leaves the page."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        here = _arrive(page, server.base, "/search")
+        _open_sheet(page)
+        page.evaluate(SLOW)
+        _tick(page, "select")
+        page.locator("#sp-filters .sp-show").click()
+        page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+        page.wait_for_url(lambda u: u != here)
+        page.wait_for_timeout(1500)  # the held back() and its popstate
+        _settle(page)
+        filtered = page.url
+        assert "format=" in filtered and page.evaluate(PLAIN), filtered
+        sig = page.evaluate(SIG)
+        assert sig.split(" | ")[0] != "", sig
+        page.reload(wait_until="networkidle")
+        _settle(page)
+        assert page.url == filtered and page.evaluate(SIG) == sig, (page.url, page.evaluate(SIG), sig)
         page.go_back()
         page.wait_for_url(f"{server.base}{PREV}")
         assert errors == []

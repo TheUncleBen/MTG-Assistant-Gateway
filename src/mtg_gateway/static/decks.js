@@ -260,14 +260,15 @@
     fd.forEach(function (v, k) { if (String(v) !== "") out.append(k, String(v)); });
     return out;
   }
-  function refresh() {
+  // ``keep``: the address stays as it is (a redraw from the address Back landed on)
+  function refresh(keep) {
     var p = params();
     var api = new URLSearchParams(p);
     api.set("shape", "list");
     list.setAttribute("aria-busy", "true");
     load(list, "/api/decks/mine?" + api.toString())
       .then(function (data) {
-        if (!data) return;  // an older load: a newer one draws and sets the address
+        if (!data || keep) return;  // an older load: a newer one draws and sets the address
         setAddress();
       })
       .catch(function () { failed(list); });
@@ -316,7 +317,10 @@
     if (q) q.placeholder = packages ? "Package name" : "Deck name";
     if (lab) lab.textContent = packages ? "Filter package name" : "Filter deck name";
     if (show) show.textContent = packages ? "Show packages" : "Show decks";
-    if (href !== null) history.pushState({ show: packages ? "packages" : "" }, "", href);
+    if (href !== null) {
+      history.pushState({ show: packages ? "packages" : "" }, "", href);
+      if (window.MtgSearchPanel && window.MtgSearchPanel.showing) window.MtgSearchPanel.showing();
+    }
     if (pkgs || pkgFailed) mark(); else readPackages();
   }
   if (seg) {
@@ -328,10 +332,19 @@
       if (a.hasAttribute("aria-current")) return;
       applyShow(isPackages(a.getAttribute("href")), a.getAttribute("href"));
     });
-    window.addEventListener("popstate", function () {
-      applyShow(isPackages(window.location.search), null);
-    });
   }
+  // Back or Forward onto an entry of this page with another address (the other side of the
+  // switch, the page's own entry under the one a reload with the sheet open left: audit R1): the
+  // side, the form's boxes and the list follow the address, in place
+  function fromAddress() {
+    if (seg) applyShow(isPackages(window.location.search), null);
+    var P = window.MtgSearchPanel;
+    if (P && P.setForm) P.setForm(new URLSearchParams(window.location.search));
+    clearTimeout(timer);
+    refresh(true);
+  }
+  if (window.MtgSearchPanel && window.MtgSearchPanel.onAddress) window.MtgSearchPanel.onAddress(fromAddress);
+  else if (seg) window.addEventListener("popstate", function () { applyShow(isPackages(window.location.search), null); });
   form.addEventListener("input", function (e) {
     var t = e.target;
     if (t && t.type === "search") soon();

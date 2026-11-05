@@ -103,16 +103,37 @@ def test_the_watchlist_tables_keep_their_name_column_from_the_fold_to_a_desktop(
         browser.close()
 
 
-# the labels in the rows' facts line: each one's box against its cell's, and whether its words fit
+# the labels in the rows' facts line: each one's box against its cell's, whether its words fit,
+# and whether its last two words ("own 1") share a line
 LABELS = """() => [...document.querySelectorAll('.watch-page .w-t .sub .ui-lbl')].map(l => {
   const r = l.getBoundingClientRect(), c = l.closest('.title').getBoundingClientRect();
+  const w = document.createTreeWalker(l, NodeFilter.SHOW_TEXT);
+  let n, last = null;
+  while ((n = w.nextNode())) if (n.textContent.trim()) last = n;
+  let tail = true;
+  if (last) {
+    const s = last.textContent, m = /(\\S+)\\s+(\\S+)\\s*$/.exec(s);
+    if (m) {
+      const a = document.createRange(), b = document.createRange();
+      a.setStart(last, m.index); a.setEnd(last, m.index + m[1].length);
+      b.setStart(last, m.index + m[0].length - m[2].length); b.setEnd(last, m.index + m[0].length);
+      tail = Math.abs(a.getBoundingClientRect().top - b.getBoundingClientRect().top) < 2;
+    }
+  }
   return {text: l.textContent.trim(), fits: l.scrollWidth <= l.clientWidth + 1,
-    inside: r.left >= c.left - 1 && r.right <= c.right + 1, height: Math.round(r.height)};
+    inside: r.left >= c.left - 1 && r.right <= c.right + 1, height: Math.round(r.height), tail};
 })"""
+# the card pictures and the Card size switch: a picture's width, and whether each shows
+THUMB = """() => {
+  const t = document.querySelector('.watch-page .w-t .tr:not(.th) .thumb');
+  const r = t ? t.getBoundingClientRect() : null, s = document.querySelector('.watch-page .w-size');
+  return {thumb: !!(r && r.width > 0), width: r ? Math.round(r.width) : 0,
+    switch: !!(s && s.getClientRects().length)};
+}"""
 
 
 @pytest.mark.parametrize("zoom", ["none", "browser", "root", "text"])
-@pytest.mark.parametrize("width", [320, 360, 375])
+@pytest.mark.parametrize("width", [320, 360, 375, 390, 412])
 def test_the_watched_rows_labels_fit_a_phone_at_200_percent_text(
     server: Server,  # noqa: F811
     width: int,
@@ -122,10 +143,13 @@ def test_the_watched_rows_labels_fit_a_phone_at_200_percent_text(
     scrolling sideways by 16 px, the bottom bar's More tab pushed out of the window: once the
     Binder had been read (the sweep's earlier pages), each row carried "In binder · you own 1",
     a label kept to one line (polish B8), wider than the Card column at 200% text; its overflow
-    widened the page. Now a label wider than its cell wraps at a space, never inside a word, and
-    the dot keeps its words; at 100% every label is still one line (the rows fold, the name over
-    the whole width, where the thumbnail and the row's end would leave it 55 px: 320 to 390 px),
-    and nothing scrolls."""
+    widened the page. Now a label wider than its cell wraps at a space, never inside a word, the
+    dot keeps its words and the count its "own" (audit W2: "1" alone on a line at 390 and 412 px),
+    and nothing scrolls. At 100% the pictures stay at every width, and the Card size switch
+    changes them (audit W1: the rows folded without them on 320 to 375 px phones, the switch
+    shown and dead); at 320 to 375 px Details and ⋮ go under the name instead, so the name and
+    the labels keep their room (every label one line). Where the rows fold without pictures (200%
+    text), the switch goes with them."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -145,10 +169,21 @@ def test_the_watched_rows_labels_fit_a_phone_at_200_percent_text(
             page.wait_for_timeout(200)
         labels = page.evaluate(LABELS)
         owned = [lb for lb in labels if lb["text"].startswith("In binder")]
-        assert len(owned) == 2 and all(lb["text"].endswith("you own 1") for lb in owned), labels
-        assert all(lb["fits"] and lb["inside"] for lb in labels), (width, zoom, labels)
-        if zoom == "none":  # one line each, the 24 px pill (polish B8)
+        assert len(owned) == 2 and all(lb["text"].endswith("you own\u00a01") for lb in owned), labels
+        assert all(lb["fits"] and lb["inside"] and lb["tail"] for lb in labels), (width, zoom, labels)
+        if zoom == "none" and width <= 375:  # one line each, the 24 px pill (polish B8)
             assert all(lb["height"] <= 26 for lb in labels), labels
+        pics = page.evaluate(THUMB)
+        assert pics["switch"] == pics["thumb"], (width, zoom, pics)
+        if zoom == "none":
+            assert pics["thumb"], (width, pics)
+            page.locator(".watch-page .w-size [data-card-size-set=l]").click()
+            large = page.evaluate(THUMB)["width"]
+            page.locator(".watch-page .w-size [data-card-size-set=s]").click()
+            small = page.evaluate(THUMB)["width"]
+            page.locator(".watch-page .w-size [data-card-size-set=m]").click()
+            assert small < pics["width"] < large, (width, small, pics["width"], large)
+            assert page.evaluate(MEASURE) == [], (width, "after the size switch")
         got = page.evaluate(WATCH_ROWS)
         assert got["rows"] >= 3, got
         assert got["broken"] == [] and got["dangling"] == [], (width, zoom, got)

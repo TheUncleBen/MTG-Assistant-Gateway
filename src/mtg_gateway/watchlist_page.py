@@ -254,12 +254,13 @@ def alert_label(v: dict[str, Any]) -> str:
 
 def owned_label(v: dict[str, Any]) -> str:
     """ "In binder · you own N" when the member's Binder holds the card (any printing). The dot
-    keeps its words (no-break spaces): where the label wraps, on a 320 px phone at 200% text, it
-    breaks before "own", never with the dot at a line's end."""
+    keeps its words and the count its "own" (no-break spaces): where the label wraps (a 390 or
+    412 px phone at 100% text, a 320 px one at 200%) it breaks before "own N", never with the dot
+    at a line's end or the count alone on a line (audit W2)."""
     n = int(v.get("owned") or 0)
     if n <= 0:
         return ""
-    return ui.label(f"In binder\u00a0·\u00a0you own {n}", "green", "collection", cls="owned")
+    return ui.label(f"In binder\u00a0·\u00a0you own\u00a0{n}", "green", "collection", cls="owned")
 
 
 def where_text(v: dict[str, Any]) -> str:
@@ -1373,22 +1374,29 @@ WATCH_PAGE_CSS = (
   .watch-page .w-t .act .more{white-space:nowrap}
   .watch-page .w-t .sub .dl{white-space:normal}
 }
-/* Large text on a narrow phone (independent review 2, M5): the table and the tools row are
-   containers, and under about 20 em of their own text (200% text at 375 px) each picker takes a
-   whole line instead of showing "So…", and under 25 em (that, and 100% text on a 320 to 390 px
-   phone, where the thumbnail and the row's end left the name 55 px at 320 and broke its words,
-   "Banner/keeper") the rows change shape rather than squeeze the name to one letter per line:
-   no thumbnail, the name wraps between its words over the whole width, the row's end (Details,
-   ⋮) takes a line of its own under the name, and a list head's count and value go under the
-   list's name. */
-.watch-page .w-t,.watch-page .ui-tools.w-top{container-type:inline-size}
+/* Large text on a narrow phone (independent review 2, M5): the table, its section and the tools
+   row are containers, and under about 20 em of their own text (200% text at 375 px) each picker
+   takes a whole line instead of showing "So…", and the rows change shape rather than squeeze the
+   name to one letter per line: no thumbnail (and no Card size switch, which would do nothing:
+   audit W1), the name wraps between its words over the whole width, the row's end (Details, ⋮)
+   takes a line of its own under the name, and a list head's count and value go under the list's
+   name. Under 25 em (100% text on a 320 to 375 px phone) only the row's end goes under the name:
+   beside the thumbnail and the row's end the name had 55 px at 320 and broke its words
+   ("Banner/keeper"), and the Binder's label was clipped; the pictures stay, and the switch
+   with them. */
+.watch-page .w-t,.watch-page .w-sec,.watch-page .ui-tools.w-top{container-type:inline-size}
 /* a row narrower than "Watch a card" itself (320 px with the browser's font doubled: final
    audit F02): the button takes the row and wraps its words instead of pushing the page sideways */
 @container (max-width:11em){
   .watch-page .w-top > .btn,.watch-page .w-top > button.w-select{flex:1 1 100%;min-width:0;
     white-space:normal;height:auto} }
-@container (max-width:20em){ .watch-page .w-top .f{flex:1 1 100%} }
 @container (max-width:25em){
+  .watch-page .w-t .tr{grid-template-columns:32px 48px minmax(0,1fr)}
+  .watch-page .w-t .tr > .act{grid-column:3;justify-self:end;margin-top:.25rem}
+}
+@container (max-width:20em){
+  .watch-page .w-top .f{flex:1 1 100%}
+  .watch-page .w-sec .w-size{display:none}
   .watch-page .w-t .tr{grid-template-columns:32px minmax(0,1fr)}
   .watch-page .w-t .tr > .thumb{display:none}
   .watch-page .w-t .tr > .act{grid-column:2;justify-self:end;margin-top:.25rem}
