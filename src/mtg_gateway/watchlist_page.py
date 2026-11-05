@@ -1326,15 +1326,20 @@ WATCH_PAGE_CSS = (
 .watch-page .w-t .sub .kv{color:var(--text-muted);font-size:.84rem}
 /* the alert column from 900 px only: below, the labels sit in the row's .sub line */
 @media (min-width:900px){.watch-page .w-t .lbls{display:flex;flex-wrap:wrap;gap:.25rem}}
-/* 900 to 1100 px: lined up, the fixed price, change, 30 days, alert and action columns left the
+/* From 900 px, lined up, the fixed price, change, 30 days, alert and action columns left the
    Card (and Deck) column the scraps, 40 px at 900 and 164 at 1024, so names broke mid-word and
-   "CMM 1234 · Etched" left its dot at a line's end (final polish W1). The folded layout of
+   "CMM 1234 · Etched" left its dot at a line's end (final polish W1); at 200% text those columns,
+   sized in rem, doubled and left it 0 px at 1100, 1280 and 1440 (audit D3). The folded layout of
    600-899 px (the theme's .ui-table at --cols-md, the low-priority cells in the .sub line) stays
-   until the name column has about 180 px of its own; from 1100 px it has 220 or more */
-@media (min-width:900px) and (max-width:1099.98px){
-  .watch-page .w-t .tr{grid-template-columns:var(--cols-md)}
-  .watch-page .w-t .md-hide{display:none}
-  .watch-page .w-t .sub{display:flex}
+   until the table has the room for the name column's 180 px beside them: 278 px of fixed columns
+   and gaps, 38 rem of sized ones and 20 px of padding, 1010 px at the 14 px root, measured in the
+   table's own em (the container below) so that the fold follows the text size */
+@media (min-width:900px){
+  @container (max-width:72.2em){
+    .watch-page .w-t .tr{grid-template-columns:var(--cols-md)}
+    .watch-page .w-t .md-hide{display:none}
+    .watch-page .w-t .sub{display:flex}
+  }
 }
 .watch-page .none{color:var(--text-muted);font-size:.86rem}
 .watch-page .w-t .spark .tspark{display:block;width:100%;height:36px;color:var(--orange-text)}
