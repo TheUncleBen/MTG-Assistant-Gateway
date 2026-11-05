@@ -805,6 +805,12 @@ INSTALL_CSS = (
     ".inst .drop .list{border-top:1px solid var(--border-soft);padding:.25rem 0}"
     ".inst .card>h2{margin-bottom:.4rem}"
     ".inst p,.inst li{overflow-wrap:anywhere}"
+    # a step's button keeps its words whole and wraps at its spaces, inside its step: the steps'
+    # overflow-wrap above reached the Download button and broke "Downlo/ad" at 200% text (final
+    # polish Z4). Its side padding stops at 14 px (the 1 rem of 100%), so that the icon, the
+    # padding and "Download" fit a 360 px phone's step with the browser's font doubled
+    ".inst .actions .btn{overflow-wrap:normal;max-width:100%;padding-left:min(1rem,14px);"
+    "padding-right:min(1rem,14px)}"
     # a link inside the steps' sentences: the text's colour, bold, underlined in orange (the guide's)
     ".inst :is(p,li) a:not([class]){color:var(--text);font-weight:700;text-decoration:underline;"
     "text-decoration-color:var(--orange);text-underline-offset:2px}"

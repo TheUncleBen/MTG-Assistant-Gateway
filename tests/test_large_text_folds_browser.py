@@ -259,3 +259,46 @@ def test_the_settings_rows_stack_the_label_over_the_control_when_the_text_is_lar
             ctx.close()
         assert errors == []
         browser.close()
+
+
+# the skill page's Download button: its box, its step's box and its words' lines
+DOWNLOAD = """() => {
+  const a = [...document.querySelectorAll('.inst .actions .btn')]
+    .find(b => /Download the skill/.test(b.textContent));
+  if (!a) return null;
+  const li = a.closest('li'), r = a.getBoundingClientRect(), lr = li.getBoundingClientRect();
+  const q = document.createRange(); q.selectNodeContents(a);
+  const lines = new Set([...q.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top))).size;
+  return {text: a.textContent.trim(), height: Math.round(r.height), lines,
+    inside: r.left >= lr.left - 1 && r.right <= lr.right + 1};
+}"""
+
+
+@pytest.mark.parametrize("zoom", [*ZOOMS, "browser"])
+def test_the_skill_download_button_wraps_at_spaces_only(server: Server, zoom: str) -> None:  # noqa: F811
+    """Z4: at 360 and 900 px with 200% text the steps' overflow-wrap:anywhere reached the
+    "Download the skill (ZIP)" button, which broke "Downlo/ad". The audit's shots had the
+    browser's own 16 px default doubled (BROWSER_200, a 32 px root), where the button's padding
+    and icon leave "Download" no room at 360 and 900 px; at the pages' 28 px root this machine's
+    font fits it there and breaks it at 320 px. At 320 px and the usual widths, at 100% and all
+    three kinds of 200% text, the button wraps at spaces only, stays inside its step, is at
+    least 44 px tall and nothing on the page is clipped or scrolls sideways."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, errors, open_at = _contexts(p, server, sid, "light", exe)
+        for width in [320, *WIDTHS]:
+            ctx, page = open_at(width)
+            page.goto(f"{server.base}/skill", wait_until="networkidle")
+            _zoom(page, zoom)
+            got = page.evaluate(DOWNLOAD)
+            assert got and got["text"] == "Download the skill (ZIP)", (width, zoom, got)
+            assert got["inside"] and got["height"] >= 44, (width, zoom, got)
+            broken = page.evaluate(BROKEN, [".inst .actions .btn", "li"])
+            assert broken == [], (width, zoom, broken)
+            assert page.evaluate(MEASURE) == [], (width, zoom)
+            ctx.close()
+        assert errors == []
+        browser.close()
