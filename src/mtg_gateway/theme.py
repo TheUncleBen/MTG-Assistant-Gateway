@@ -367,11 +367,15 @@ main.wrap{flex:1;padding:1rem var(--gutter) 3rem}
    break-word keeps a word's whole width as the heading's least width, which at 200% text on a
    320 px phone pushed the page sideways (re-audit N02) */
 /* a heading follows the viewport at large text (10vw: 2rem at 14px up from 280px wide), so a
-   word such as "Preconstructed" stays whole on a phone at 200% text instead of breaking inside */
-h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:min(1.5rem,7vw);font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
+   word such as "Preconstructed" stays whole on a phone at 200% text instead of breaking inside;
+   where it cannot shrink (a phone's own font scale doubles every font in place) the word breaks
+   with the browser's hyphen at a syllable (hyphens:auto; the pages are lang='en'), not a bare cut */
+h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere;
+  hyphens:auto;-webkit-hyphens:auto}
+h2{font-size:min(1.5rem,7vw);font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere;hyphens:auto;
+  -webkit-hyphens:auto}
 h2:not(:first-child){margin-top:1.25rem}
-h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
+h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem;hyphens:auto;-webkit-hyphens:auto}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
 details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
@@ -383,7 +387,7 @@ ul.plain{list-style:none;margin:0;padding:0}
   padding:1rem var(--gutter);margin:0 0 1rem}  /* the sides as the page's gutters, see .wrap */
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
-.panel h2,.card h2{font-size:min(1.5rem,7vw)}
+.panel h2,.card h2{font-size:min(1.5rem,7vw);hyphens:auto;-webkit-hyphens:auto}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
 code{font-size:.92em;background:var(--surface-2);padding:.1rem .4rem;border-radius:3px;overflow-wrap:anywhere}
 pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(--border-soft);
@@ -1847,7 +1851,8 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-drawer{container-type:inline-size}
 @container (max-width:20em){ .ui-drawer .ui-meta{grid-template-columns:minmax(0,1fr)} }
 .ui-drawer .dh{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .5rem}
-.ui-drawer .dh h2{margin:0;flex:1;font-size:min(1.3rem,6.5vw);overflow-wrap:anywhere}
+.ui-drawer .dh h2{margin:0;flex:1;font-size:min(1.3rem,6.5vw);overflow-wrap:anywhere;hyphens:auto;
+  -webkit-hyphens:auto}
 .ui-drawer .close{min-width:44px;min-height:44px;display:inline-grid;place-items:center;
   background:transparent;
   border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
@@ -1888,7 +1893,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-form{max-width:52rem}
 .ui-card{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
   padding:1rem;margin:0 0 1rem}
-.ui-card > h2{margin:0 0 .25rem;font-size:min(1.15rem,6vw)}  /* 6vw: "Collaborators" whole at 200% */
+/* 6vw: "Collaborators" whole at 200% text */
+.ui-card > h2{margin:0 0 .25rem;font-size:min(1.15rem,6vw);hyphens:auto;-webkit-hyphens:auto}
 .ui-card > .ui-sub{margin:0 0 .75rem}
 .ui-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,16rem);gap:.25rem 1rem;align-items:center;
   padding:.6rem 0;border-top:1px solid var(--border-soft)}
