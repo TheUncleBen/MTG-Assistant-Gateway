@@ -856,3 +856,28 @@ async def test_both_deck_prices_name_their_source(stack: Stack) -> None:
     stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))
     found = stats["stats"]
     assert "Scryfall" in deck["price_source"] and "Archidekt" in found["price_source"], (deck, found)
+
+
+async def test_a_watched_deck_with_no_read_date_is_read_and_the_check_goes_on(stack: Stack, monkeypatch) -> None:
+    """watch_decks.refreshed_at may be NULL (the column allows it). The daily check took
+    day_of(None) and stopped with a TypeError, for every member. A deck with no read date is one
+    never read: it is read first, and the check goes on."""
+    clock = Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        with stack.gw.db.tx() as c:
+            c.execute(
+                "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, created_at) "
+                "VALUES ('user-1', '45', 'Never read', '[]', 0)"
+            )
+        asked: list[str] = []
+
+        async def get_any_deck(sub: str, deck_id: str):  # noqa: ANN202
+            asked.append(deck_id)
+            raise RuntimeError("Archidekt is not asked in this test")
+
+        monkeypatch.setattr(stack.gw.prices.decks, "get_any_deck", get_any_deck)
+        assert await stack.gw.prices._refresh_decks(clock.day) == 0
+        assert asked == ["45"], "a deck with no read date was not read"
+    finally:
+        await b.aclose()

@@ -351,8 +351,8 @@ def _seed(server: Server) -> tuple[str, str]:
                     (f"id-{i}", f"-{d} day", 1234.5 + d),
                 )
         c.execute(
-            "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, created_at) "
-            "VALUES ('user-1', '45', ?, '[]', 0)",
+            "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, refreshed_at, created_at) "
+            "VALUES ('user-1', '45', ?, '[]', 0, 0)",
             (UNBROKEN,),
         )
         for d in range(3):

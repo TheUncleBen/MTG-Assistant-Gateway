@@ -1204,8 +1204,10 @@ class PriceService:
         already read on ``day`` (watched today, or a retry after Scryfall failed) is not read
         again. A deck that cannot be read keeps its last card list."""
         n = 0
+        # a deck with no read date (the column allows it) is one never read: first in line, as
+        # SQLite sorts NULL first
         for d in self._rows("SELECT sub, deck_id, refreshed_at FROM watch_decks ORDER BY refreshed_at"):
-            if day_of(d["refreshed_at"]) == day:
+            if d["refreshed_at"] is not None and day_of(d["refreshed_at"]) == day:
                 continue
             try:
                 deck = await self.decks.get_any_deck(d["sub"], d["deck_id"])
