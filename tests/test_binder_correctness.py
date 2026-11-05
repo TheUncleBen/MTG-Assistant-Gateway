@@ -420,8 +420,10 @@ async def test_the_not_shown_line_is_an_info_notice_that_links_to_recently_added
         assert line, held.text[-3000:]
         assert line.group(1) == "notice", line.group(0)
         assert "2 cards you added aren’t shown in this order." in line.group(0), line.group(0)
-        link = re.search(r"<a href='([^']*)'>Show them first</a>", line.group(0))
+        # the strip's whole body is the link, "Show them first" its underlined words (audit N4)
+        link = re.search(r"<a class='nt' href='([^']*)'>", line.group(0))
         assert link and html.unescape(link.group(1)) == newest, line.group(0)
+        assert "<span class='u'>Show them first</span></a>" in held.text, held.text[-3000:]
         held = await _held(stack, b, html.unescape(link.group(1)))
         rows = _rows(held.text)
         assert [i for i, _ in rows][:2] == ids[1::-1], rows  # the two Forests, newest first
