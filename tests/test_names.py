@@ -11,7 +11,7 @@ from mtg_gateway.scan.names import TOKEN_NAMES, NameCatalog, fold, rank
 from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.scan.service import ScanService
 
-from .fake_scryfall import FakeScryfall
+from .fake_scryfall import EXTRA_LAYOUTS, FakeScryfall
 
 NAMES = [
     "Shelob, Child of Ungoliant",
@@ -288,3 +288,68 @@ def test_a_miss_without_the_catalog_is_forgotten_after_its_time() -> None:
     asked = asyncio.run(run())
     for name in skipped:
         assert any(name.replace(" ", "+") in u for u in asked), (name, asked)
+
+
+def test_unknown_names_without_scryfalls_catalog_use_the_printings_copys_names(tmp_path) -> None:
+    """B-4 of the 0.7.46 sweep: with Scryfall's catalog not loaded, six unknown names still cost 20
+    paced Scryfall requests and 9.5 s, each walking misread variants and shorter prefixes. The
+    printings copy (on by default) holds every card's name, so it stands in for the catalog until
+    Scryfall's own loads: the six cost what they cost with the catalog, one lookup each and no
+    autocomplete, a misread is still recovered, and Scryfall's catalog is tried again later."""
+    import gzip
+    import json
+    import time
+
+    from mtg_gateway.scan.bulk import PrintingsCopy
+    from mtg_gateway.scan.service import CardInput
+
+    sf = FakeScryfall()  # no catalog: /catalog/card-names answers 404
+    body = gzip.compress("".join(json.dumps(c) + "\n" for c in sf.cards).encode())
+    path = "/default-cards/default-cards-20261103220649.jsonl.gz"
+    sf.bulk_files = {path: body}
+    sf.bulk_index = [
+        {
+            "object": "bulk_data",
+            "type": "default_cards",
+            "updated_at": "2026-11-03T22:06:49.499+00:00",
+            "jsonl_download_uri": f"https://data.scryfall.io{path}",
+            "compressed_size": len(body),
+        }
+    ]
+    names = ["Xqzv Plorth", "Blorf Gandu", "Qwmx Tarrel", "Zzyx Vombat", "Hrrk Pellum", "Fnord Quillip"]
+
+    async def run() -> tuple[list[str], list[str], ScanService, list[str], str | None]:
+        service = _service(sf)
+        service.copy = PrintingsCopy(tmp_path, lambda: service.scryfall)
+        service.copy.min_printings = 1
+        assert await service.copy.refresh()
+        listed = service.copy.card_names_now()
+        n0 = len(sf.requests)
+        out = await service.resolve([CardInput(n) for n in names])
+        asked = [u for _m, u in sf.requests[n0:]]
+        misread = await service.resolve([CardInput("Sol Rlng")])
+        got = misread[0].card and misread[0].card.get("name")
+        return [r.status for r in out], asked, service, listed, got
+
+    statuses, asked, service, listed, recovered = asyncio.run(run())
+    assert statuses == ["not_found"] * 6
+    # the copy lists the cards as Scryfall's catalog does: no token, emblem or other extra
+    assert set(listed) == {c["name"] for c in sf.cards if c.get("layout") not in EXTRA_LAYOUTS}
+    assert service.names.loaded and service.names.from_copy
+    lookups = [u for u in asked if "/cards/named" in u or "/cards/autocomplete" in u]
+    assert not any("/cards/autocomplete" in u for u in lookups), lookups
+    assert len(lookups) <= len(names), lookups  # was 20 requests for these six
+    assert sum("/catalog/card-names" in u for u in asked) == 1, asked  # Scryfall's was asked first
+    assert recovered == "Sol Ring"
+    # Scryfall's own catalog is tried again after a failure's wait, and replaces the copy's names
+    sf.catalog = sf.names_catalog()
+    service.names._next_try = time.monotonic() - 1
+
+    async def later() -> bool:
+        service.names.ensure()
+        assert service.names._task is not None
+        await service.names._task
+        return service.names.from_copy
+
+    assert asyncio.run(later()) is False
+    assert service.names.known("Filler Card 3") is True

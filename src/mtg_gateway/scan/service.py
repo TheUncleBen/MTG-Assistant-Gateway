@@ -506,7 +506,7 @@ class ScanService:
         self.db = db
         self.scryfall = scryfall
         self.call_seconds = call_seconds
-        self.names = NameCatalog(lambda: self.scryfall)
+        self.names = NameCatalog(lambda: self.scryfall, local=self._copy_names)
         # names that resolved to nothing, by their folded spelling (NOT_FOUND_TTL)
         self.not_found = _Cache(ttl=NOT_FOUND_TTL, max_items=2000)
         # names that skipped the recovery walk without the catalog (MISS_TTL_WITHOUT_CATALOG)
@@ -1061,6 +1061,10 @@ class ScanService:
                 suggestions[1:],
             )
         return None
+
+    def _copy_names(self) -> list[str]:
+        """The printings copy's card names, for the name catalog while Scryfall can't send its own."""
+        return self.copy.card_names_now() if self.copy is not None else []
 
     def _missed(self, inp: CardInput) -> Resolution | None:
         """The remembered "not found" for this input's name (NOT_FOUND_TTL), as this input's."""

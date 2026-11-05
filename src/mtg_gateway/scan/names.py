@@ -90,9 +90,19 @@ def _sort_key(name: str) -> tuple[str, str]:
 
 
 class NameCatalog:
-    def __init__(self, scryfall: Callable[[], Any], *, ttl: float = CATALOG_TTL):
+    def __init__(
+        self,
+        scryfall: Callable[[], Any],
+        *,
+        ttl: float = CATALOG_TTL,
+        local: Callable[[], list[str]] | None = None,
+    ):
         # A getter, because the scan service's Scryfall client is replaced in tests after construction.
         self._scryfall = scryfall
+        # the printings copy's names (bulk.py), read in a thread when Scryfall's catalog can't be
+        # loaded: without any catalog every unknown name walks paced Scryfall lookups (B-4)
+        self._local = local
+        self.from_copy = False
         self.ttl = ttl
         self._names: list[str] = []
         self._folded: list[str] = []
@@ -124,11 +134,13 @@ class NameCatalog:
         self._hits.clear()
         self._known = None
         self._loaded_at = time.monotonic()
+        self.from_copy = False
 
     def ensure(self) -> None:
         """Start a background (re)load when the catalog is missing or a day old. Never blocks the
         caller; a failed download is retried after ten minutes."""
-        fresh = self._names and self.age < self.ttl
+        # names from the copy stand in only until Scryfall's own catalog loads: it is retried
+        fresh = self._names and self.age < self.ttl and not self.from_copy
         if fresh or time.monotonic() < self._next_try:
             return
         if self._task is not None and not self._task.done():
@@ -164,8 +176,18 @@ class NameCatalog:
         try:
             names = await self._scryfall().catalog_card_names()
         except Exception as exc:  # any failure: keep the old list (or none) and retry later
-            logger.warning("card-name catalog not loaded (%s); suggestions use Scryfall meanwhile", exc)
-            return False
+            names = [] if self._names or self._local is None else await asyncio.to_thread(self._local)
+            if not names:
+                logger.warning("card-name catalog not loaded (%s); suggestions use Scryfall meanwhile", exc)
+                return False
+            self.set_names(names)
+            self.from_copy = True
+            logger.warning(
+                "card-name catalog not loaded (%s); using the %d names of the local printings copy meanwhile",
+                exc,
+                len(names),
+            )
+            return True
         self.set_names(names)
         self._next_try = 0.0
         logger.info("card-name catalog loaded: %d names", len(self._names))

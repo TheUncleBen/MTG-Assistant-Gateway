@@ -268,7 +268,10 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   printing picker and `card_printings` then answer from it and say how old it is ("As of 3 Nov
   2026 · Scryfall can't be reached right now", or "From the gateway's own copy · Scryfall can't
   be reached right now" when the copy's day can't be read); `card_printings` adds "Prices are from that day, not
-  today." It is not part of the backup: Scryfall gives it again. Deleting it is
+  today." When Scryfall's list of card names can't be loaded, the copy's names stand in for it
+  until a later try loads Scryfall's own, so a card name the gateway doesn't know costs one
+  Scryfall lookup instead of a walk through many (the log says "using the N names of the local
+  printings copy meanwhile"). It is not part of the backup: Scryfall gives it again. Deleting it is
   safe; the next daily download makes a new one. To do without it, turn off **Keep a local copy
   of card printings** on the Settings page (General, no stack variable): the copy and anything
   it left are deleted at once, no more is downloaded, and printings answers fail while Scryfall

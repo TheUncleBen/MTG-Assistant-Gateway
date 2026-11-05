@@ -93,6 +93,10 @@ DOWNLOAD_HOSTS = ("data.scryfall.io", "api.scryfall.com")
 PRICE_KEYS = ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
 # printings that are no card to look a name up by (an art card is "Name // Name" with its own id)
 NAMELESS_LAYOUTS = ("art_series",)
+# what Scryfall's card-name catalog leaves out: the copy's own list of names (CARD_NAMES_KEY) leaves
+# them out too, so it can stand in for that catalog (names.py) when Scryfall can't send it
+CATALOG_EXTRAS = ("token", "double_faced_token", "emblem", "art_series", "planar", "scheme", "vanguard")
+CARD_NAMES_KEY = "card_names"
 
 SCHEMA = """
 CREATE TABLE printings (
@@ -232,6 +236,7 @@ def build(
         values: list[tuple[Any, ...]] = []
         full: list[tuple[str, str, str]] = []
         faces: list[tuple[str, str, str]] = []
+        card_names: set[str] = set()
 
         def add(oid: str, row: dict[str, Any]) -> None:
             row["oracle_id"] = oid
@@ -259,6 +264,8 @@ def build(
             if name and row.get("layout") not in NAMELESS_LAYOUTS:
                 full.append((fold(name), oid, name))
                 faces.extend((fold(p), oid, name) for p in name.split(" // ") if " // " in name)
+            if name and row.get("layout") not in CATALOG_EXTRAS:
+                card_names.add(name)
 
         def put() -> int:
             conn.executemany("INSERT INTO printings VALUES (?,?,?,?,?,?,?,?,?)", values)
@@ -290,7 +297,11 @@ def build(
         conn.execute(INDEXES)
         conn.executemany(
             "INSERT INTO meta VALUES (?,?)",
-            [*({**meta, "count": str(count)}.items()), ("zdict", zdict)],
+            [
+                *({**meta, "count": str(count)}.items()),
+                ("zdict", zdict),
+                (CARD_NAMES_KEY, zlib.compress("\n".join(sorted(card_names)).encode(), 6)),
+            ],
         )
         conn.commit()
         conn.close()
@@ -746,3 +757,17 @@ class PrintingsCopy:
 
     async def oracle_of(self, name: str) -> tuple[str, str] | None:
         return await asyncio.to_thread(self.oracle_of_now, name)
+
+    def card_names_now(self) -> list[str]:
+        """Every card's name as Scryfall's card-name catalog lists it (no tokens, emblems or other
+        extras), from the copy: the name catalog's stand-in while Scryfall can't send its own
+        (0.7.46 sweep B-4). Empty without a copy, for one turned off or unreadable, and for a copy
+        built before it kept the list (the next day's copy has it). Blocking: call it in a thread."""
+        return self._reading(self._card_names, [])
+
+    def _card_names(self) -> list[str]:
+        with self._lock:
+            if self._open() is None:
+                return []
+            blob = self._meta.get(CARD_NAMES_KEY)
+            return [n for n in zlib.decompress(blob).decode().split("\n") if n] if blob else []
