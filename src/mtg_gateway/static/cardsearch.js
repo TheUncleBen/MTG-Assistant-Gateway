@@ -181,7 +181,10 @@
     var addr = new URLSearchParams(qs);
     addr.delete("view");
     addr = addr.toString();
-    try { history.replaceState(null, "", "/cards" + (addr ? "?" + addr : "")); } catch (e) { /* a sandboxed frame */ }
+    // through the panel (static/searchpanel.js address): the entry keeps its state, the sheet's
+    // while it is open (audit N1: a null state wiped the sheet's entry)
+    var addrUrl = "/cards" + (addr ? "?" + addr : "");
+    if (Panel && Panel.address) Panel.address(addrUrl); else try { history.replaceState(history.state, "", addrUrl); } catch (e) { /* a sandboxed frame */ }
     if (ctrl) ctrl.abort();
     ctrl = window.AbortController ? new AbortController() : null;
     stopMore();
