@@ -190,6 +190,11 @@ def _plan_clock() -> float:
     return time.monotonic()
 
 
+# check_deck_changes' next step when it found nothing: it reads no deck (0.7.46 sweep B-7)
+SEEN_AT_PROPOSE = (
+    "Nothing found in the list itself. The deck is read only when you propose (that it exists, is the "
+    "user's own and holds each card a change needs), so propose it in one call and that call says so."
+)
 MAX_CHANGES = 40
 MAX_PACKAGE_PAGES = 4  # the member's own card packages read for My decks, 50 a page
 # How long an apply call waits for the apply to finish before it answers "applying". The apply
@@ -9400,7 +9405,7 @@ class DeckService:
                     "error": "missing_on_archidekt",
                     "message": "Archidekt doesn't have "
                     + ", ".join(f"“{n}”" for n in missing)
-                    + ", so a proposal would leave "
+                    + ", so applying the change would leave "
                     + ("it out." if len(missing) == 1 else "them out."),
                     "missing_on_archidekt": missing,
                 }
@@ -9509,11 +9514,14 @@ class DeckService:
                 )
         else:
             out["suggest"] = "propose"
+            # the check reads no deck: it claims only the list, and says what the propose finds
             out["next_step"] = (
-                "Nothing found against it, but other waiting changes share cards with it (overlaps): "
-                "propose it in one call and tell the user."
+                "Nothing found in the list itself, but other waiting changes share cards with it "
+                "(overlaps): tell the user. The deck is read only when you propose (that it exists, is "
+                "the user's own and holds each card a change needs), so propose it in one call and that "
+                "call says so."
                 if others_share
-                else "Nothing found against it: propose it in one call."
+                else SEEN_AT_PROPOSE
             )
         return out
 

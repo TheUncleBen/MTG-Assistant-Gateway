@@ -220,7 +220,10 @@ async def test_another_apps_change_on_the_same_cards_is_named_in_the_next_step(s
     out = await _check(h, other, [*_change("Opt"), *_change("Ponder")])
     assert out["suggest"] == "propose" and "other waiting changes share cards" in out["next_step"]
     # the deck-level checks never ran, so the answer claims only that nothing was found
-    assert out["next_step"].startswith("Nothing found against it") and "Nothing stops" not in out["next_step"]
+    assert (
+        out["next_step"].startswith("Nothing found in the list itself")
+        and "Nothing stops" not in out["next_step"]
+    )
     url = await _check(h, other, _change("Ponder"), deck="https://archidekt.com/decks/42/sample")
     assert url["deck_id"] == "42" and len(url["waiting_on_deck"]) == 1
 
@@ -250,7 +253,7 @@ async def test_a_name_the_catalog_cannot_judge_is_looked_up_and_one_archidekt_la
     missing = next(p for p in out["problems"] if p["error"] == "missing_on_archidekt")
     assert missing["missing_on_archidekt"] == ["Ponderr Xyzzy"], missing
     assert "Archidekt doesn't have “Ponderr Xyzzy”" in missing["message"]
-    assert "Nothing found against it" not in out["next_step"]
+    assert "Nothing found" not in out["next_step"]
     looked = len([c for c in ark.calls if "/cards/" in c[1]])
     assert looked >= 2  # both names were asked
     # the proposal says the same, and asks Archidekt nothing more about those names
@@ -278,7 +281,38 @@ async def test_a_name_nothing_could_check_is_said_and_never_passed(stack: Stack)
             "unchecked_names": ["Islend"],
         }
     ], out
-    assert "Nothing found against it" not in out["next_step"]
+    assert "Nothing found" not in out["next_step"]
     assert "scryfall_named" in out["next_step"] and "high risk" in out["next_step"], out["next_step"]
     p = await _propose(h, token, _change("Islend"))
     assert p["risk"] == "high" and p["unchecked_names"] == ["Islend"], p
+
+
+SEEN_AT_PROPOSE = (
+    "Nothing found in the list itself. The deck is read only when you propose (that it exists, is the "
+    "user's own and holds each card a change needs), so propose it in one call and that call says so."
+)
+
+
+async def test_the_check_claims_only_what_it_looked_at(stack: Stack) -> None:
+    """0.7.46 sweep B-7: check_deck_changes reads no deck, so for a deck that doesn't exist, another
+    member's deck and a card the deck doesn't hold it said "Nothing found against it: propose it",
+    and the propose was then refused. Its next step now says what it checked and what only the
+    propose finds. A card Archidekt lacks is left out when the change is applied (the proposal
+    lists it), not by the proposal."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _mode(h, "manual")
+    out = await _check(h, token, _change("Ponderr Xyzzy"))  # no catalog yet: Archidekt is asked
+    missing = next(p for p in out["problems"] if p["error"] == "missing_on_archidekt")
+    assert (
+        missing["message"]
+        == "Archidekt doesn't have “Ponderr Xyzzy”, so applying the change would leave it out."
+    )
+    _catalog(h)
+    for deck, changes in (
+        ("999999", _change("Opt")),
+        ("43", _change("Opt")),  # another member's deck
+        ("42", _change("Brainstorm", "remove")),  # not in the deck
+    ):
+        out = await _check(h, token, changes, deck=deck)
+        assert out["suggest"] == "propose" and out["next_step"] == SEEN_AT_PROPOSE, (deck, out)
