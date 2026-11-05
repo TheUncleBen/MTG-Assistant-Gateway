@@ -357,6 +357,14 @@ p.set-saved{margin:0} ul.set-saved{margin:.35rem 0 0;padding-left:1.2rem}
   .set-row{grid-template-columns:minmax(0,1fr)}
   .set-save .primary{flex:1 1 100%}
 }
+/* The fold follows the text size too (final polish Z3): at 200% text on a 720 px window the
+   control column's 16 rem doubled, the approval modes' box covered "Approval mode for new
+   members" and the help was one word a line. Each group's form is a container measured in its
+   own em: below 45 em (the 16 em of control, 1.5 of gap and at least 27 for the words) the
+   label stacks over the control, as below 720 px. At 100% a 720 px window gives the form 47 em,
+   so nothing moves there. */
+.set-group form{container-type:inline-size}
+@media (min-width:720px){ @container (max-width:45em){ .set-row{grid-template-columns:minmax(0,1fr)} } }
 """
 
 

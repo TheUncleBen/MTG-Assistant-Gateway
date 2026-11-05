@@ -198,3 +198,64 @@ def test_the_users_table_folds_to_rows_when_the_text_is_large(server: Server, zo
             ctx.close()
         assert errors == []
         browser.close()
+
+
+# every setting's row: its label's box against its control's, what a tap on the label's centre
+# lands on, and the words column's width in its own em
+SETTING_ROWS = """() => [...document.querySelectorAll('.set-row')].filter(r => r.getClientRects().length)
+  .filter(r => !r.closest('details:not([open])'))  // the scan group starts folded away
+  .map(row => {
+    const lab = row.querySelector('.set-label'), ctl = row.querySelector('.set-ctl');
+    const text = row.querySelector('.set-text');
+    row.scrollIntoView({block: 'center', behavior: 'instant'});
+    const lr = lab.getBoundingClientRect(), cr = ctl.getBoundingClientRect();
+    const ox = Math.min(lr.right, cr.right) - Math.max(lr.left, cr.left);
+    const oy = Math.min(lr.bottom, cr.bottom) - Math.max(lr.top, cr.top);
+    const hit = document.elementFromPoint(lr.left + Math.min(lr.width, 20), lr.top + lr.height / 2);
+    return {label: lab.textContent.trim(), overlap: ox > 1 && oy > 1,
+      covered: !(hit && text.contains(hit)),
+      ems: text.getBoundingClientRect().width / parseFloat(getComputedStyle(text).fontSize),
+      rowEms: row.getBoundingClientRect().width / parseFloat(getComputedStyle(text).fontSize)};
+  })"""
+
+
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_the_settings_rows_stack_the_label_over_the_control_when_the_text_is_large(
+    server: Server,  # noqa: F811
+    zoom: str,
+) -> None:
+    """Z3: at 720 px with 200% text the 16 rem control column left the words 144 px: the
+    approval modes' box covered "Approval mode for new members" and the help was one word a
+    line. At every width and text size no setting's control touches or covers its label, the
+    words have at least 12 em (or the whole row, on a phone at 200%), no word breaks in two,
+    every radio and box is a 44 px target and nothing is clipped or scrolls sideways."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, errors, open_at = _contexts(p, server, sid, "light", exe)
+        for width in WIDTHS:
+            ctx, page = open_at(width)
+            page.goto(f"{server.base}/admin/settings", wait_until="networkidle")
+            _zoom(page, zoom)
+            rows = page.evaluate(SETTING_ROWS)
+            assert any(r["label"] == "Approval mode for new members" for r in rows), (width, zoom)
+            for r in rows:
+                assert not r["overlap"] and not r["covered"], (width, zoom, r)
+                assert r["ems"] >= min(12, r["rowEms"] - 0.5), (width, zoom, r)
+            broken = page.evaluate(
+                BROKEN,
+                [".set-row .set-label, .set-row .set-help, .set-choices label, .set-seg label", ".set-row"],
+            )
+            assert broken == [], (width, zoom, broken)
+            short = page.evaluate(
+                SHORT,
+                ".set-choices label, .set-seg label, .set-ctl input:not([type=radio]), .set-ctl select, "
+                ".set-ctl .msel-btn, .set-save button",
+            )
+            assert short == [], (width, zoom, short)
+            assert page.evaluate(MEASURE) == [], (width, zoom)
+            ctx.close()
+        assert errors == []
+        browser.close()
