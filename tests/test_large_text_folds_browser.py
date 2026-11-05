@@ -1,13 +1,16 @@
 """The final polish's batch 8 (Z1 to Z5), measured in headless Chromium: five layouts whose
 columns were sized in rem beside a fluid one, so at 200% text the fluid column got the scraps and
-its words broke inside themselves. Each page is drawn at 360, 412, 720, 900, 1024, 1280 and
-1440 px, at 100% text, at a 28 px root (ROOT_200) and with every font doubled (TEXT_200): no
-word breaks in two where it would have fitted its column, nothing is clipped or scrolls sideways,
-no two controls overlap (MEASURE), every control is a 44 px target and no control covers a
-label. Z1: the New deck box's Deck name beside an 11 rem Format. Z2: Admin › Users' lined-up
-columns. Z3: Admin › Settings' label beside a 16 rem control. Z4: the skill page's Download
-button, breaking "Downlo/ad" under the steps' overflow-wrap. Z5: the report's Deck tile, its
-"$310.00" and "100 cards" broken over the lines."""
+its words broke inside themselves. Each page is drawn at 320, 360, 412, 600, 720, 900, 1024, 1280
+and 1440 px, at 100% text, at a 28 px root (ROOT_200), with every font doubled (TEXT_200) and
+with the browser's own 16 px default doubled (BROWSER_200, a 32 px root): no word breaks in two
+where it would have fitted its column, nothing is clipped or scrolls sideways, no two controls
+overlap (MEASURE), every control is a 44 px target and no control covers a label. Z1: the New
+deck box's Deck name beside an 11 rem Format. Z2: Admin › Users' lined-up columns, and the
+email on a 320 px phone (audit 71911eba). Z3: Admin › Settings' label beside a 16 rem control,
+and the radios' words on a 320 px phone (the audit). Z4: the skill page's Download button,
+breaking "Downlo/ad" under the steps' overflow-wrap. Z5: the report's Deck tile, its "$310.00"
+and "100 cards" broken over the lines; then (audit M1) every widget tile of the site, where the
+Z5 nowrap clipped a value made of words ("Gateway only")."""
 
 from __future__ import annotations
 
@@ -23,8 +26,8 @@ from .test_text_zoom_browser import BROWSER_200, ROOT_200, TEXT_200
 
 pytest.importorskip("playwright")
 
-WIDTHS = [360, 412, 720, 900, 1024, 1280, 1440]
-ZOOMS = ["none", "root", "text"]
+WIDTHS = [320, 360, 412, 600, 720, 900, 1024, 1280, 1440]
+ZOOMS = ["none", "root", "text", "browser"]
 
 # every word (a run without spaces or hyphens: "Deck", "0/120", "$310.00", "(ZIP)"; "low-risk"
 # may break after its hyphen) under the elements `sel` matches that is drawn on more than one
@@ -174,9 +177,10 @@ USERS_TABLE = """() => {
 def test_the_users_table_folds_to_rows_when_the_text_is_large(server: Server, zoom: str) -> None:  # noqa: F811
     """Z2: at 1024 to 1440 px with 200% text the lined-up columns (11, 10 and 6.5 rem beside
     two fluid ones) left Member and Apps a few em: "MEMBE/R", "APP/S", "alice@e/xample./test",
-    "non/e". At every width and text size no word in the table breaks in two where it would have
-    fitted the row, no two header cells overlap, the ⋮ is a 44 px target and nothing is clipped
-    or scrolls sideways."""
+    "non/e"; on a 320 px phone at 200% the email broke inside a word too (audit 71911eba: it may
+    break after its @ or before a dot of its domain, never elsewhere). At every width and text
+    size no word in the table breaks in two where it would have fitted the row, no two header
+    cells overlap, the ⋮ is a 44 px target and nothing is clipped or scrolls sideways."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -207,7 +211,8 @@ SETTING_ROWS = """() => [...document.querySelectorAll('.set-row')].filter(r => r
   .map(row => {
     const lab = row.querySelector('.set-label'), ctl = row.querySelector('.set-ctl');
     const text = row.querySelector('.set-text');
-    row.scrollIntoView({block: 'center', behavior: 'instant'});
+    // the label mid-window (a row is taller than a phone's window at 200%), under no bar
+    lab.scrollIntoView({block: 'center', behavior: 'instant'});
     const lr = lab.getBoundingClientRect(), cr = ctl.getBoundingClientRect();
     const ox = Math.min(lr.right, cr.right) - Math.max(lr.left, cr.left);
     const oy = Math.min(lr.bottom, cr.bottom) - Math.max(lr.top, cr.top);
@@ -226,9 +231,11 @@ def test_the_settings_rows_stack_the_label_over_the_control_when_the_text_is_lar
 ) -> None:
     """Z3: at 720 px with 200% text the 16 rem control column left the words 144 px: the
     approval modes' box covered "Approval mode for new members" and the help was one word a
-    line. At every width and text size no setting's control touches or covers its label, the
-    words have at least 12 em (or the whole row, on a phone at 200%), no word breaks in two,
-    every radio and box is a 44 px target and nothing is clipped or scrolls sideways."""
+    line; on a 320 px phone with the browser's font doubled the radios' air, in rem, left their
+    words 120 px ("change/s", audit 71911eba). At every width and text size no setting's control
+    touches or covers its label, the words have at least 12 em (or the whole row, on a phone at
+    200%), no word breaks in two, every radio and box is a 44 px target and nothing is clipped
+    or scrolls sideways."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -274,7 +281,7 @@ DOWNLOAD = """() => {
 }"""
 
 
-@pytest.mark.parametrize("zoom", [*ZOOMS, "browser"])
+@pytest.mark.parametrize("zoom", ZOOMS)
 def test_the_skill_download_button_wraps_at_spaces_only(server: Server, zoom: str) -> None:  # noqa: F811
     """Z4: at 360 and 900 px with 200% text the steps' overflow-wrap:anywhere reached the
     "Download the skill (ZIP)" button, which broke "Downlo/ad". The audit's shots had the
@@ -289,7 +296,7 @@ def test_the_skill_download_button_wraps_at_spaces_only(server: Server, zoom: st
     sid, _pending = _seed(server)
     with sync_playwright() as p:
         browser, errors, open_at = _contexts(p, server, sid, "light", exe)
-        for width in [320, *WIDTHS]:
+        for width in WIDTHS:
             ctx, page = open_at(width)
             page.goto(f"{server.base}/skill", wait_until="networkidle")
             _zoom(page, zoom)
@@ -332,7 +339,7 @@ KEY_NUMBERS = """() => {
 
 @pytest.mark.parametrize(
     "zoom,theme",
-    [("none", "light"), ("root", "light"), ("text", "light"), ("text", "dark")],
+    [("none", "light"), ("root", "light"), ("text", "light"), ("browser", "light"), ("text", "dark")],
 )
 def test_the_reports_deck_tile_keeps_its_value_and_unit_whole(
     server: Server,  # noqa: F811
@@ -366,6 +373,103 @@ def test_the_reports_deck_tile_keeps_its_value_and_unit_whole(
             broken = page.evaluate(BROKEN, [".rv-page .rv-w .wdg .big", ".wdg"])
             assert broken == [], (width, zoom, broken)
             assert page.evaluate(MEASURE) == [], (width, zoom)
+            ctx.close()
+        assert errors == []
+        browser.close()
+
+
+# the pages with a row of widget tiles (ui.widgets), each with the sweep's data: the admin
+# pages (Overview's System tile says "Gateway only" here, a value made of words; Card models
+# has no tiles without a model), Activity, the Binder (its Value tile is filled by
+# collection.js after the read), History, a comparison, Proposals, a report and Reports
+WIDGET_PAGES = [
+    "/admin",
+    "/admin/users",
+    "/admin/metrics",
+    "/admin/activity",
+    "/activity",
+    "/collection?view=list",
+    "/history",
+    "/decks/42/compare",
+    "/proposals",
+    "/history/reports/r1",
+    "/reports",
+]
+
+# every shown widget tile: its label, its big value's words, whether the value is clipped
+# (wider than its box, or out of the tile) and the lines its number (the text outside a unit)
+# takes: the rows its words' line boxes make, more than 2 px apart (an element's own box is
+# left out: at 200% it sits a few px off its text's line); the phone's fold is opened first so
+# the tiles are drawn
+TILES = """() => {
+  document.querySelectorAll('.glance-tgl').forEach(i => { i.checked = true; });
+  // the number's lines: the words before the first unit (a tile may show two numbers, each
+  // with its unit, as Reports' "0 playing 0 waiting")
+  const lines = (root, unit) => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), tops = [];
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (unit && (unit.contains(n) || unit.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING))
+        break;
+      if (!n.textContent.trim()) continue;
+      const q = document.createRange(); q.selectNodeContents(n);
+      tops.push(...[...q.getClientRects()].filter(r => r.width > 0).map(r => r.top));
+    }
+    tops.sort((a, b) => a - b);
+    return tops.reduce((n, t, i) => n + (i === 0 || t - tops[i - 1] > 2 ? 1 : 0), 0);
+  };
+  return [...document.querySelectorAll('.wdg')].filter(w => w.getClientRects().length).map(w => {
+    const big = w.querySelector('.big'), small = big.querySelector('small');
+    const q = document.createRange(); q.selectNodeContents(big);
+    if (small) q.setEndBefore(small);
+    const wr = w.getBoundingClientRect();
+    const rects = [...big.getClientRects(), ...(small ? small.getClientRects() : [])];
+    return {label: w.querySelector('.lab').textContent.trim(), value: big.textContent.trim(),
+      numberLines: lines(big, small), number: q.toString().trim(),
+      clipped: big.scrollWidth > big.clientWidth + 1
+        || rects.some(r => r.right > wr.right + 1 || r.left < wr.left - 1)};
+  });
+}"""
+
+VALUE_TILE = """() => { const w = [...document.querySelectorAll('.wdg')]
+  .find(x => /^Value/.test(x.querySelector('.lab').textContent.trim()));
+  return !w || w.querySelector('.big').textContent.trim() !== ''; }"""
+
+
+@pytest.mark.parametrize("page_path", WIDGET_PAGES)
+@pytest.mark.parametrize("zoom", ZOOMS)
+def test_every_widget_tile_keeps_its_value_whole_and_unclipped(
+    server: Server,  # noqa: F811
+    zoom: str,
+    page_path: str,
+) -> None:
+    """Audit 71911eba M1: the Z5 fix's nowrap on the widget value stopped a value made of words
+    from wrapping, so Admin › Overview's System tile clipped "Gateway only" at 600-1280 px with
+    200% text. On every page with widget tiles, at 320 to 1440 px and all four text sizes: no
+    value is clipped, no word in a label or value breaks in two where it would have fitted the
+    tile, and a number (the value outside its unit, when it has no space) stays on one line."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, errors, open_at = _contexts(p, server, sid, "light", exe)
+        for width in WIDTHS:
+            ctx, page = open_at(width)
+            page.goto(f"{server.base}{page_path}", wait_until="networkidle")
+            page.wait_for_function(VALUE_TILE, timeout=10_000)
+            _zoom(page, zoom)
+            tiles = page.evaluate(TILES)
+            if page_path != "/decks/42/compare":  # the comparison's tiles need a second deck
+                assert tiles, (page_path, width, zoom)
+            if page_path == "/admin":  # the words value the audit found clipped
+                assert any(t["label"] == "System" and " " in t["value"] for t in tiles), tiles
+            for t in tiles:
+                assert not t["clipped"], (page_path, width, zoom, t)
+                if " " not in t["number"]:
+                    assert t["numberLines"] <= 1, (page_path, width, zoom, t)
+            broken = page.evaluate(BROKEN, [".wdg .lab, .wdg .big", ".wdg"])
+            assert broken == [], (page_path, width, zoom, broken)
+            assert page.evaluate(MEASURE) == [], (page_path, width, zoom)
             ctx.close()
         assert errors == []
         browser.close()

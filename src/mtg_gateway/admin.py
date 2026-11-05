@@ -663,8 +663,12 @@ ADMIN_CSS = """
   .adm .ui-table .sm-only{display:flex;flex-wrap:wrap;gap:.3rem .5rem;align-items:center;flex-basis:100%;
     margin-top:.25rem;color:var(--text-muted);font-size:.86rem;font-weight:400}
 }
-/* Overview: six widgets three a row, then System left, Updates and Activity by day right */
-@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* Overview: six widgets three a row, then System left, Updates and Activity by day right. Three a
+   row gave a tile 10 em at 200% text on a 900-1024 px window, where System's "Gateway" ran out
+   of its tile (audit 71911eba M1); the row is a container (theme .ui-widgets) measured in its own
+   em, and below 39 em (three tiles of 12.5 em and the gaps) each tile takes the row */
+@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}
+  @container (max-width:39em){ .ao .ui-widgets .wdg{grid-column:1 / -1} }}
 .ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
@@ -691,6 +695,10 @@ ADMIN_CSS = """
 .au .ui-table .tr.mem{cursor:pointer}
 .au .ui-table .tr.mem.on{background:var(--orange-tint)}
 .au .ui-table .tr.mem .title .t{font-weight:700}
+/* the email breaks at its <wbr> (after the @, before a dot) when it does not fit, and inside a
+   word only when a piece is wider than the column; the table's overflow-wrap:anywhere (.adm above)
+   broke it "alice@e/xample./test" on a 320 px phone at 200% text (audit 71911eba Z2) */
+.au .ui-table .title .deck{overflow-wrap:break-word}
 .au .ui-table .labs,.au .ui-table .apps{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
 @media (max-width:899.98px){.au .ui-table .md-hide{display:none}}
 @media (min-width:1100px){.au .with-panel .ui-table .md-hide{display:none}}
@@ -1511,8 +1519,10 @@ def _users_body(
         sub = u["sub"]
         status = _status_labels(u, admin_sub, is_admin=sub in admins)
         when = ui.when(_seen_at(u), now=now)
+        # the email may break after its @ and before a dot of its domain when it does not fit
+        # its column (a 320 px phone at 200% text: audit 71911eba Z2), never inside a word
         email = (
-            f"<span class='deck'>{html.escape(u['email'])}</span>"
+            f"<span class='deck'>{_email_html(u['email'])}</span>"
             if u.get("email") and u.get("preferred_username")
             else ""
         )
@@ -1604,6 +1614,14 @@ def _users_body(
         + ui.split(list_html, panel)
         + "</div>"
     )
+
+
+def _email_html(email: str) -> str:
+    """The address with a break opportunity after its @ and before each dot of its domain."""
+    user, at, domain = email.partition("@")
+    if not at:
+        return html.escape(email)
+    return html.escape(user) + "@<wbr>" + html.escape(domain).replace(".", "<wbr>.")
 
 
 def _user_panel(

@@ -1008,7 +1008,8 @@ ACT_CSS = """
 .act-page form.ui-tools .f select:not(.msel-native),.act-page form.ui-tools .f .msel-btn{width:100%}
 .act-table .tr{column-gap:.75rem}
 /* with large text a widget's word can be wider than its half of a phone's row */
-.act-page .wdg .big,.act-page .wdg .lab,.act-page .wdg .det{overflow-wrap:anywhere}
+/* the detail line only: a value or a label never breaks inside a word (audit 71911eba M1) */
+.act-page .wdg .det{overflow-wrap:anywhere}
 @media (max-width:599.98px){
   /* two widgets a row on a phone, one when the text is large */
   .act-page .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}}

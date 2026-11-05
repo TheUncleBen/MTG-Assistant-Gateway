@@ -316,8 +316,10 @@ form > .set-row:first-of-type{border-top:0}
   outline:2px solid var(--focus);outline-offset:-2px}
 .set-choices{display:flex;flex-direction:column;margin:0;padding:0;border:1px solid var(--control-border);
   border-radius:var(--radius);overflow:hidden;min-width:0}
-.set-choices label{position:relative;display:flex;align-items:center;gap:.6rem;min-height:44px;
-  padding:.45rem .75rem;margin:0;cursor:pointer;font-weight:400;background:var(--surface);
+/* the gap and side padding stop at their 100% size (8 and 11 px), so that at 200% text on a
+   320 px phone the words keep a column wide enough for "changes" (audit 71911eba Z3: "change/s") */
+.set-choices label{position:relative;display:flex;align-items:center;gap:min(.6rem,8px);min-height:44px;
+  padding:.45rem min(.75rem,11px);margin:0;cursor:pointer;font-weight:400;background:var(--surface);
   overflow-wrap:anywhere;line-height:1.3}
 .set-choices label + label{border-top:1px solid var(--control-border)}
 .set-choices input{flex:none;margin:0;width:1.1rem;height:1.1rem;accent-color:var(--orange)}
