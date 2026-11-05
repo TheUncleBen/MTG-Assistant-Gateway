@@ -53,18 +53,36 @@ WATCH_ROWS = """() => {
   }
   const names = [...document.querySelectorAll('.watch-page .w-t .tr:not(.th) > .title')]
     .map(t => Math.round(t.getBoundingClientRect().width));
-  return {names, broken, dangling, rows: document.querySelectorAll('.watch-page .w-t .tr:not(.th)').length};
+  // each header row's shown cells, left to right: two that overlap are listed by their words
+  const heads = [];
+  for (const th of document.querySelectorAll('.watch-page .w-t .tr.th')) {
+    const cells = [...th.children].filter(c => c.getClientRects().length && c.textContent.trim())
+      .map(c => ({t: c.textContent.trim().slice(0, 20), r: c.getBoundingClientRect()}))
+      .sort((a, b) => a.r.left - b.r.left);
+    for (let i = 1; i < cells.length; i++)
+      if (cells[i].r.left < cells[i - 1].r.right - 1) heads.push(cells[i - 1].t + ' / ' + cells[i].t);
+  }
+  return {names, broken, dangling, heads,
+    rows: document.querySelectorAll('.watch-page .w-t .tr:not(.th)').length};
 }"""
 
 
-@pytest.mark.parametrize("width", [860, 900, 960, 1024, 1100, 1280])
+@pytest.mark.parametrize(
+    "width,zoom",
+    [(w, "none") for w in (860, 900, 960, 1024, 1100, 1280, 1440)]
+    + [(w, z) for w in (1100, 1280, 1440) for z in ("root", "text")],
+)
 def test_the_watchlist_tables_keep_their_name_column_from_the_fold_to_a_desktop(
     server: Server,  # noqa: F811
     width: int,
+    zoom: str,
 ) -> None:
-    """W1: in the Cards and Decks tables at 860, 900, 960, 1024, 1100 and 1280 px the name column
-    is at least about 180 px, no word breaks in two, no dot is left at a line's end, and nothing
-    scrolls sideways."""
+    """W1: in the Cards and Decks tables at 860, 900, 960, 1024, 1100, 1280 and 1440 px the name
+    column is at least about 180 px, no word breaks in two, no dot is left at a line's end, and
+    nothing scrolls sideways. Audit D3 on 099f600a: the same from 1100 px up at 200% text (a 28 px
+    root, and every font doubled), where the lined-up columns, sized in rem, left the name column
+    0 px and the header cells ran over each other: the folded layout stays until the name column
+    has its room, whatever the width and the text size."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -72,11 +90,15 @@ def test_the_watchlist_tables_keep_their_name_column_from_the_fold_to_a_desktop(
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, "light", exe)
         page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        if zoom != "none":
+            page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+            page.wait_for_timeout(200)
         got = page.evaluate(WATCH_ROWS)
         assert got["rows"] >= 3 and len(got["names"]) == got["rows"], got  # cards and a deck
-        assert min(got["names"]) >= 180, (width, got["names"])
-        assert got["broken"] == [], (width, got["broken"])
-        assert got["dangling"] == [], (width, got["dangling"])
+        assert min(got["names"]) >= 180, (width, zoom, got["names"])
+        assert got["heads"] == [], (width, zoom, got["heads"])
+        assert got["broken"] == [], (width, zoom, got["broken"])
+        assert got["dangling"] == [], (width, zoom, got["dangling"])
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()
 

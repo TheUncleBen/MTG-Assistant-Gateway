@@ -83,8 +83,15 @@ STRIPS = """() => {
         box: box(nb), content: Math.round(content), x: x ? box(x.getBoundingClientRect()) : null,
         nt: nt ? Math.round(nt.clientWidth) : null,
         lines: lines(words.rects), broken: words.broken, btns,
-        links: [...n.querySelectorAll('a:not(.btn)')].filter(shown).map(a => ({text: a.textContent.trim(),
-          box: box(a.getBoundingClientRect())}))};
+        // a link's box, how many pieces it is in, and the words of the other lines its box reaches
+        links: [...n.querySelectorAll('a:not(.btn)')].filter(shown).map(a => {
+          const ab = a.getBoundingClientRect(), own = text(a, () => true).rects;
+          const sameLine = (r) => own.some(o => Math.abs(o.top - r.top) < r.height / 2);
+          const near = text(n, t => !inBtn(t) && !a.contains(t)).rects.filter(r => !sameLine(r))
+            .filter(r => r.left < ab.right && ab.left < r.right && r.top < ab.bottom && ab.top < r.bottom);
+          return {text: a.textContent.trim(), box: box(ab), pieces: a.getClientRects().length,
+            over: near.map(r => box(r))};
+        })};
     })
   };
 }"""
@@ -145,6 +152,9 @@ def _check(where: str, got: dict, *, expect: str, touch: bool) -> None:
                 assert b["natural"] > s["content"], (where, b, s)
             assert bb["width"] >= 44, (where, b)
         for a in s["links"]:
+            # one piece, on its own line's row: its hit box reaches no words of the line above or
+            # below (audit D7 on 099f600a: the inline padding that made it 44 px covered them)
+            assert a["pieces"] == 1 and a["over"] == [], (where, a)
             if a["text"] == "Show them first" and touch:
                 assert a["box"]["height"] >= 44 and a["box"]["width"] >= 44, (where, a)
 
@@ -269,5 +279,23 @@ def test_every_notice_keeps_its_x_its_words_and_its_buttons_in_the_strip(
             look("/forum", "held")
         finally:
             decks.client.pacer._open_until = 0
+        # the strips static/collection.js builds (audit C1 on 099f600a: its × stood alone above
+        # the words with a Sign in or Undo button): Undo after a removal, where the strip stands
+        # in for the shared menus' toast, and Sign in when a change fails because the session
+        # ended. The first seeded card is one copy, so its − removes the row
+        page.goto(f"{server.base}/collection?view=list", wait_until="networkidle")
+        _zoom(page, zoom)
+        page.evaluate("() => { window.MtgMenu.toast = null; }")
+        row = page.locator("li[data-id]").first
+        assert row.locator("form.qty output").inner_text().strip() == "1"
+        row.locator("form.qty button[value=dec]").click()
+        page.locator("#col-notes .notice[data-strip]", has_text="Removed").wait_for()
+        _check(f"Undo @{width} {zoom}", page.evaluate(STRIPS), expect="Removed", touch=touch)
+        page.locator("#col-notes .notice[data-strip] button", has_text="Undo").click()
+        page.locator("#col-notes .notice[data-strip]", has_text="back in your binder").wait_for()
+        page.context.clear_cookies()
+        page.locator("li[data-id]").first.locator("form.qty button[value=inc]").click()
+        page.locator("#col-notes .notice[data-strip]", has_text="signed out").wait_for()
+        _check(f"Sign in @{width} {zoom}", page.evaluate(STRIPS), expect="signed out", touch=touch)
         assert errors == []
         browser.close()

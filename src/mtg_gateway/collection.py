@@ -2603,9 +2603,11 @@ ul.colllist .cardc .tagrow{margin-top:.25rem}
 #col-notes .notice .nt{flex:1 1 0;min-width:0}
 #col-notes .notice p{margin:0}
 /* a link in a strip ("Show them first" on the added-cards line) is a 44 px target that still reads
-   as part of its line: an inline box's padding widens what a finger hits without moving the words
-   or the lines around it (audit C4: 108×19 px) */
-#col-notes .notice a:not(.btn){padding:max(.8rem,calc((44px - 1.15em) / 2)) .25rem;margin:0 -.25rem}
+   as part of its line (audit C4: 108×19 px): an inline-block whose padding makes it 44 px tall on
+   its line, which grows to hold it, so the hit box reaches no words of the line above or below (an
+   inline box's padding did, audit D7) and the link never splits over two lines */
+#col-notes .notice a:not(.btn){display:inline-block;line-height:1.35;
+  padding:calc((44px - 1.35em) / 2) .25rem;margin:0 -.25rem}
 #col-notes .notice ul{margin:.45rem 0 0;padding-left:1.2rem;font-weight:400;line-height:1.45}
 #col-notes .notice li+li{margin-top:.3rem}
 .collection .ui-widgets{margin:0 0 1rem}

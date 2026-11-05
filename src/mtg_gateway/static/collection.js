@@ -37,8 +37,13 @@
     x.type = "button"; x.className = "nx"; x.setAttribute("aria-label", "Close"); x.title = "Close";
     x.setAttribute("data-dismiss", ""); x.innerHTML = ICON_X;
     d.appendChild(x);
-    d.appendChild(document.createTextNode(text));
-    (actions || []).forEach(function (a) { d.appendChild(document.createTextNode(" ")); d.appendChild(a); });
+    /* the words and the buttons in one item beside the × (as the server's strips, collection.py
+       strip()): a direct button would turn the strip's wrap on and drop the words under the × */
+    var body = document.createElement("div");
+    body.className = "nt";
+    body.appendChild(document.createTextNode(text));
+    (actions || []).forEach(function (a) { body.appendChild(document.createTextNode(" ")); body.appendChild(a); });
+    d.appendChild(body);
     notes.insertBefore(d, notes.firstChild);
     return d;
   }
