@@ -253,22 +253,26 @@ def alert_label(v: dict[str, Any]) -> str:
 
 
 def owned_label(v: dict[str, Any]) -> str:
-    """ "In binder · you own N" when the member's Binder holds the card (any printing)."""
+    """ "In binder · you own N" when the member's Binder holds the card (any printing). The dot
+    keeps its words (no-break spaces): where the label wraps, on a 320 px phone at 200% text, it
+    breaks before "own", never with the dot at a line's end."""
     n = int(v.get("owned") or 0)
     if n <= 0:
         return ""
-    return ui.label(f"In binder · you own {n}", "green", "collection", cls="owned")
+    return ui.label(f"In binder\u00a0·\u00a0you own {n}", "green", "collection", cls="owned")
 
 
 def where_text(v: dict[str, Any]) -> str:
     """The printing a row follows: "CMR 472 · Foil", or for a watch by name alone "Cheapest
-    printing (now PLST CMR-365) · Normal"."""
+    printing (now PLST CMR-365) · Normal". The dot keeps its finish (a no-break space): where the
+    line wraps, on a 320 px phone with the browser's font doubled, the dot starts the next line
+    rather than ending one (final polish W1)."""
     where = " ".join(p for p in ((v.get("set") or "").upper(), v.get("collector_number") or "") if p)
     if not where:
         low = v.get("cheapest") or {}
         now_at = " ".join(p for p in ((low.get("set") or "").upper(), low.get("collector_number") or "") if p)
         where = f"Cheapest printing (now {now_at})" if now_at else "Cheapest printing"
-    return f"{where} · {FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
+    return f"{where} ·\u00a0{FINISH_WORDS.get(v.get('finish') or '', v.get('finish') or '')}"
 
 
 def _priced(hist: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1370,19 +1374,21 @@ WATCH_PAGE_CSS = (
   .watch-page .w-t .sub .dl{white-space:normal}
 }
 /* Large text on a narrow phone (independent review 2, M5): the table and the tools row are
-   containers, and under about 20 em of their own text (200% text at 375 px) their rows change
-   shape rather than squeeze the name to one letter per line: no thumbnail, the name wraps between
-   its words over the whole width, the row's end (Details, ⋮) takes a line of its own under the
-   name, a list head's count and value go under the list's name, and each picker takes a whole
-   line instead of showing "So…". */
+   containers, and under about 20 em of their own text (200% text at 375 px) each picker takes a
+   whole line instead of showing "So…", and under 25 em (that, and 100% text on a 320 to 390 px
+   phone, where the thumbnail and the row's end left the name 55 px at 320 and broke its words,
+   "Banner/keeper") the rows change shape rather than squeeze the name to one letter per line:
+   no thumbnail, the name wraps between its words over the whole width, the row's end (Details,
+   ⋮) takes a line of its own under the name, and a list head's count and value go under the
+   list's name. */
 .watch-page .w-t,.watch-page .ui-tools.w-top{container-type:inline-size}
 /* a row narrower than "Watch a card" itself (320 px with the browser's font doubled: final
    audit F02): the button takes the row and wraps its words instead of pushing the page sideways */
 @container (max-width:11em){
   .watch-page .w-top > .btn,.watch-page .w-top > button.w-select{flex:1 1 100%;min-width:0;
     white-space:normal;height:auto} }
-@container (max-width:20em){
-  .watch-page .w-top .f{flex:1 1 100%}
+@container (max-width:20em){ .watch-page .w-top .f{flex:1 1 100%} }
+@container (max-width:25em){
   .watch-page .w-t .tr{grid-template-columns:32px minmax(0,1fr)}
   .watch-page .w-t .tr > .thumb{display:none}
   .watch-page .w-t .tr > .act{grid-column:2;justify-self:end;margin-top:.25rem}
@@ -1398,8 +1404,14 @@ WATCH_PAGE_CSS = (
 .watch-page .w-size .sizeseg{max-width:100%}
 .watch-page .w-size .lbl{color:var(--text-muted);font-size:.9rem}
 .watch-page .w-bulkform{display:none}
-/* a card's alert label is one line ("Moves more than 12.5%"), never two inside its pill (polish B8) */
-.watch-page .w-t .sub .ui-lbl{white-space:nowrap;max-width:100%}
+/* a card's alert label is one line ("±12.5%": the short form, its words in the tooltip, polish B8),
+   and so is the Binder's ("you own 1") while its cell has the room: a label never shrinks for
+   the line's other items. Wider than the cell (a 320 px phone at 200% text) a label wraps at a
+   space, never inside a word, instead of running out of the page: nowrap widened the page by
+   16 px there and pushed the bottom bar's More tab out of the window (the merge 7cd39e30's
+   200% sweep) */
+.watch-page .w-t .sub .ui-lbl{flex:none;white-space:normal;height:auto;min-height:24px;max-width:100%;
+  overflow-wrap:normal;line-height:1.2}
 .watch-page .ui-bar .btn,.watch-page .ui-bar button{display:inline-flex;align-items:center;gap:.35rem}
 .watch-page .wx{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:.75rem 1.5rem;
   padding:.75rem 1rem 1rem;border-bottom:1px solid var(--border-soft)}

@@ -38,14 +38,21 @@ def test_the_summary_keeps_a_day_and_finds_the_slow_pages() -> None:
     assert d["failures"] == 2
 
 
+def _unbroken(html: str) -> str:
+    """The card's text with the break opportunities inside a page address taken out."""
+    return html.replace("<wbr>", "")
+
+
 def test_the_card_says_why_each_slow_page_was_slow() -> None:
     now = time.time()
     card = _speed_card(_log(now).summary(now))
     # a unit never breaks away from its number at large text
     assert "<h2 id='speed-h'>Speed, last 24\u00a0h</h2>" in card
     assert "22, 2 slower than 3\u00a0s" in card
-    assert "/users/{username}" in card and "waiting for a turn with Archidekt" in card
-    assert "/decks/{deck_id}" in card and "mostly Archidekt answering slowly" in card
+    # a page address may break after a slash (a <wbr> there, final polish AA1), nowhere else
+    assert "/users/{username}" not in card and "/users/{username}" in _unbroken(card)
+    assert "waiting for a turn with Archidekt" in card
+    assert "/decks/{deck_id}" in _unbroken(card) and "mostly Archidekt answering slowly" in card
     assert "Archidekt failed or asked to slow down 2 times" in card
     assert "a restart starts it again" in card
     empty = _speed_card(SpeedLog().summary())
@@ -63,7 +70,7 @@ async def test_the_overview_shows_it_with_page_patterns_only(gw: Harness, monkey
         log.add(PageTime(time.time(), "/users/{username}", 5.0, 4.9, 4.0, 0, 200))
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert r.status_code == 200 and "Speed, last 24\u00a0h" in r.text
-        assert "/users/{username}" in r.text
+        assert "/users/{username}" in _unbroken(r.text)
         assert "shared with the same read under way" in r.text
     finally:
         await b.aclose()

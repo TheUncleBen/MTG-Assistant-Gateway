@@ -12,7 +12,7 @@ import time
 import pytest
 
 from .test_cardsearch_browser import _chromium, _page
-from .test_overflow_sweep_browser import MEASURE, _seed, server  # noqa: F401
+from .test_overflow_sweep_browser import CARDS, MEASURE, _seed, server  # noqa: F401
 from .test_suggest_browser import Server
 from .test_text_zoom_browser import BROWSER_200, ROOT_200, TEXT_200
 
@@ -99,6 +99,59 @@ def test_the_watchlist_tables_keep_their_name_column_from_the_fold_to_a_desktop(
         assert got["heads"] == [], (width, zoom, got["heads"])
         assert got["broken"] == [], (width, zoom, got["broken"])
         assert got["dangling"] == [], (width, zoom, got["dangling"])
+        assert page.evaluate(MEASURE) == [] and errors == []
+        browser.close()
+
+
+# the labels in the rows' facts line: each one's box against its cell's, and whether its words fit
+LABELS = """() => [...document.querySelectorAll('.watch-page .w-t .sub .ui-lbl')].map(l => {
+  const r = l.getBoundingClientRect(), c = l.closest('.title').getBoundingClientRect();
+  return {text: l.textContent.trim(), fits: l.scrollWidth <= l.clientWidth + 1,
+    inside: r.left >= c.left - 1 && r.right <= c.right + 1, height: Math.round(r.height)};
+})"""
+
+
+@pytest.mark.parametrize("zoom", ["none", "browser", "root", "text"])
+@pytest.mark.parametrize("width", [320, 360, 375])
+def test_the_watched_rows_labels_fit_a_phone_at_200_percent_text(
+    server: Server,  # noqa: F811
+    width: int,
+    zoom: str,
+) -> None:
+    """On 7cd39e30 (the merge of fin-ui11 and fin-ui12) the 200% sweep found /watchlist at 320 px
+    scrolling sideways by 16 px, the bottom bar's More tab pushed out of the window: once the
+    Binder had been read (the sweep's earlier pages), each row carried "In binder · you own 1",
+    a label kept to one line (polish B8), wider than the Card column at 200% text; its overflow
+    widened the page. Now a label wider than its cell wraps at a space, never inside a word, and
+    the dot keeps its words; at 100% every label is still one line (the rows fold, the name over
+    the whole width, where the thumbnail and the row's end would leave it 55 px: 320 to 390 px),
+    and nothing scrolls."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with server.db.tx() as c:  # the Binder as last read whole: the watched cards, one copy each
+        for i, name in enumerate(CARDS[-2:]):
+            c.execute(
+                "INSERT INTO binder_records (sub, rid, scryfall_id, name, finish, quantity, row_json) "
+                "VALUES ('user-1', ?, '', ?, 'nonfoil', 1, '{}')",
+                (900 + i, name),
+            )
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, "light", exe)
+        page.goto(f"{server.base}/watchlist", wait_until="networkidle")
+        if zoom != "none":
+            page.evaluate({"browser": BROWSER_200, "root": ROOT_200, "text": TEXT_200}[zoom])
+            page.wait_for_timeout(200)
+        labels = page.evaluate(LABELS)
+        owned = [lb for lb in labels if lb["text"].startswith("In binder")]
+        assert len(owned) == 2 and all(lb["text"].endswith("you own 1") for lb in owned), labels
+        assert all(lb["fits"] and lb["inside"] for lb in labels), (width, zoom, labels)
+        if zoom == "none":  # one line each, the 24 px pill (polish B8)
+            assert all(lb["height"] <= 26 for lb in labels), labels
+        got = page.evaluate(WATCH_ROWS)
+        assert got["rows"] >= 3, got
+        assert got["broken"] == [] and got["dangling"] == [], (width, zoom, got)
         assert page.evaluate(MEASURE) == [] and errors == []
         browser.close()
 

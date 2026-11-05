@@ -125,7 +125,7 @@ def test_on_a_phone_the_first_card_is_on_the_first_screen_and_select_works(serve
         assert first.get_attribute("id") == "wr-w_one"  # the list “Meren wants” first, its cards by name
         heads = page.locator(".w-t .tr.group.wgrp b").all_inner_texts()
         assert heads == ["Meren wants", "Not in a list"]
-        assert page.locator("#wr-w_one .ui-lbl.owned").first.inner_text() == "In binder · you own 2"
+        assert page.locator("#wr-w_one .ui-lbl.owned").first.inner_text() == "In binder\u00a0·\u00a0you own 2"
         assert page.locator("#wr-w_two .ui-lbl.owned").count() == 0
         # the group head's ⋮ is a script menu (never the page's drop-down, whose history entry
         # would race the box's): Rename list… opens the box with the name filled in; Delete list…
