@@ -1,13 +1,15 @@
 """The final polish's batch 8 (Z1 to Z5), measured in headless Chromium: five layouts whose
 columns were sized in rem beside a fluid one, so at 200% text the fluid column got the scraps and
-its words broke inside themselves. Each page is drawn at 360, 412, 720, 900, 1024, 1280 and
-1440 px, at 100% text, at a 28 px root (ROOT_200) and with every font doubled (TEXT_200): no
-word breaks in two where it would have fitted its column, nothing is clipped or scrolls sideways,
-no two controls overlap (MEASURE), every control is a 44 px target and no control covers a
-label. Z1: the New deck box's Deck name beside an 11 rem Format. Z2: Admin › Users' lined-up
-columns. Z3: Admin › Settings' label beside a 16 rem control. Z4: the skill page's Download
-button, breaking "Downlo/ad" under the steps' overflow-wrap. Z5: the report's Deck tile, its
-"$310.00" and "100 cards" broken over the lines."""
+its words broke inside themselves. Each page is drawn at 320, 360, 412, 600, 720, 900, 1024, 1280
+and 1440 px, at 100% text, at a 28 px root (ROOT_200), with every font doubled (TEXT_200) and
+with the browser's own 16 px default doubled (BROWSER_200, a 32 px root): no word breaks in two
+where it would have fitted its column, nothing is clipped or scrolls sideways, no two controls
+overlap (MEASURE), every control is a 44 px target and no control covers a label. Z1: the New
+deck box's Deck name beside an 11 rem Format. Z2: Admin › Users' lined-up columns, and the
+email on a 320 px phone (audit 71911eba). Z3: Admin › Settings' label beside a 16 rem control,
+and the radios' words on a 320 px phone (the audit). Z4: the skill page's Download button,
+breaking "Downlo/ad" under the steps' overflow-wrap. Z5: the report's Deck tile, its "$310.00"
+and "100 cards" broken over the lines."""
 
 from __future__ import annotations
 
@@ -23,8 +25,8 @@ from .test_text_zoom_browser import BROWSER_200, ROOT_200, TEXT_200
 
 pytest.importorskip("playwright")
 
-WIDTHS = [360, 412, 720, 900, 1024, 1280, 1440]
-ZOOMS = ["none", "root", "text"]
+WIDTHS = [320, 360, 412, 600, 720, 900, 1024, 1280, 1440]
+ZOOMS = ["none", "root", "text", "browser"]
 
 # every word (a run without spaces or hyphens: "Deck", "0/120", "$310.00", "(ZIP)"; "low-risk"
 # may break after its hyphen) under the elements `sel` matches that is drawn on more than one
@@ -174,9 +176,10 @@ USERS_TABLE = """() => {
 def test_the_users_table_folds_to_rows_when_the_text_is_large(server: Server, zoom: str) -> None:  # noqa: F811
     """Z2: at 1024 to 1440 px with 200% text the lined-up columns (11, 10 and 6.5 rem beside
     two fluid ones) left Member and Apps a few em: "MEMBE/R", "APP/S", "alice@e/xample./test",
-    "non/e". At every width and text size no word in the table breaks in two where it would have
-    fitted the row, no two header cells overlap, the ⋮ is a 44 px target and nothing is clipped
-    or scrolls sideways."""
+    "non/e"; on a 320 px phone at 200% the email broke inside a word too (audit 71911eba: it may
+    break after its @ or before a dot of its domain, never elsewhere). At every width and text
+    size no word in the table breaks in two where it would have fitted the row, no two header
+    cells overlap, the ⋮ is a 44 px target and nothing is clipped or scrolls sideways."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -207,7 +210,8 @@ SETTING_ROWS = """() => [...document.querySelectorAll('.set-row')].filter(r => r
   .map(row => {
     const lab = row.querySelector('.set-label'), ctl = row.querySelector('.set-ctl');
     const text = row.querySelector('.set-text');
-    row.scrollIntoView({block: 'center', behavior: 'instant'});
+    // the label mid-window (a row is taller than a phone's window at 200%), under no bar
+    lab.scrollIntoView({block: 'center', behavior: 'instant'});
     const lr = lab.getBoundingClientRect(), cr = ctl.getBoundingClientRect();
     const ox = Math.min(lr.right, cr.right) - Math.max(lr.left, cr.left);
     const oy = Math.min(lr.bottom, cr.bottom) - Math.max(lr.top, cr.top);
@@ -226,9 +230,11 @@ def test_the_settings_rows_stack_the_label_over_the_control_when_the_text_is_lar
 ) -> None:
     """Z3: at 720 px with 200% text the 16 rem control column left the words 144 px: the
     approval modes' box covered "Approval mode for new members" and the help was one word a
-    line. At every width and text size no setting's control touches or covers its label, the
-    words have at least 12 em (or the whole row, on a phone at 200%), no word breaks in two,
-    every radio and box is a 44 px target and nothing is clipped or scrolls sideways."""
+    line; on a 320 px phone with the browser's font doubled the radios' air, in rem, left their
+    words 120 px ("change/s", audit 71911eba). At every width and text size no setting's control
+    touches or covers its label, the words have at least 12 em (or the whole row, on a phone at
+    200%), no word breaks in two, every radio and box is a 44 px target and nothing is clipped
+    or scrolls sideways."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
@@ -274,7 +280,7 @@ DOWNLOAD = """() => {
 }"""
 
 
-@pytest.mark.parametrize("zoom", [*ZOOMS, "browser"])
+@pytest.mark.parametrize("zoom", ZOOMS)
 def test_the_skill_download_button_wraps_at_spaces_only(server: Server, zoom: str) -> None:  # noqa: F811
     """Z4: at 360 and 900 px with 200% text the steps' overflow-wrap:anywhere reached the
     "Download the skill (ZIP)" button, which broke "Downlo/ad". The audit's shots had the
@@ -289,7 +295,7 @@ def test_the_skill_download_button_wraps_at_spaces_only(server: Server, zoom: st
     sid, _pending = _seed(server)
     with sync_playwright() as p:
         browser, errors, open_at = _contexts(p, server, sid, "light", exe)
-        for width in [320, *WIDTHS]:
+        for width in WIDTHS:
             ctx, page = open_at(width)
             page.goto(f"{server.base}/skill", wait_until="networkidle")
             _zoom(page, zoom)
@@ -332,7 +338,7 @@ KEY_NUMBERS = """() => {
 
 @pytest.mark.parametrize(
     "zoom,theme",
-    [("none", "light"), ("root", "light"), ("text", "light"), ("text", "dark")],
+    [("none", "light"), ("root", "light"), ("text", "light"), ("browser", "light"), ("text", "dark")],
 )
 def test_the_reports_deck_tile_keeps_its_value_and_unit_whole(
     server: Server,  # noqa: F811
