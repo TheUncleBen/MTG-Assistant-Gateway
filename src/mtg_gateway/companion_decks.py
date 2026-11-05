@@ -14,7 +14,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import actions, deck_bulk, deck_extras, deck_stats, prefs, ui
 from .archidekt import format_label
-from .busy import busy_plan, busy_response, same_url
+from .busy import busy_plan, busy_response, outage, same_url
 from .companion import (
     DECK_CSP,
     DECK_ERR_MESSAGES,
@@ -416,7 +416,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         )
         notice = ""
         if qp.get("err") == "bad_ref":
-            notice = "<p class='notice error'>That is not an Archidekt deck link or id.</p>"
+            notice = "<p class='notice error'>That is not an Archidekt deck link or ID.</p>"
         if qp.get("ok") in LIST_OK_MESSAGES:
             notice = f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[qp['ok']])}</p>"
         if "bulk" in (qp.get("ok"), qp.get("err")):  # Select's bar (deck_bulk.py)
@@ -565,7 +565,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         except DeckError as exc:
             rows, problem = None, (exc.kind, str(exc))
         except TimeoutError:
-            rows, problem = None, ("unavailable", "Archidekt did not answer in time.")
+            rows, problem = None, ("unavailable", outage("timeout"))
         else:
             problem = None
         if problem is not None and problem[0] in ("rate_limited", "unavailable"):
@@ -605,6 +605,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 covers,
                 unreadable=bool(getattr(rows, "unreadable", 0)),
                 last_read=last_read,
+                why=problem[1] if problem else None,
             )
             out["count"] = len(recent)
         else:

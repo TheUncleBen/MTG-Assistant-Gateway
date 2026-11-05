@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import ui
+from .busy import outage
 from .clickguard import GUARD_SCRIPT
 from .db import RISK_REASON_KEY
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, UNDO_KINDS
@@ -538,7 +539,7 @@ def _waiting_flags(it: dict[str, Any], now: float) -> str:
     return "".join(out)
 
 
-TRY_AGAIN_FLAG = "Archidekt didn't answer, so nothing was changed."
+TRY_AGAIN_FLAG = outage("stopped")
 
 
 def _try_again(it: dict[str, Any]) -> bool:

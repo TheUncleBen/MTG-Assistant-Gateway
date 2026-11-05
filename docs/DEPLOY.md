@@ -903,5 +903,10 @@ services (`MTG_MYSTIC_FORGE_URL`, `MTG_FORGE_URL`, `MTG_NTFY_URL`) and
 `MTG_FORGE_REPLICAS` (from `FORGE_REPLICAS`). They are not settings: leave
 them as they are.
 
+**Test stack only.** `MTG_ARCHIDEKT_BASE` (default `https://archidekt.com/api`)
+is the Archidekt address the gateway calls. Only the end-to-end test stack sets
+it, to point the gateway at its Archidekt stand-in (`tests/e2e`). The stack
+files never pass it, so a real install always talks to archidekt.com.
+
 The card scanning settings are described in
 [SCANNING.md](SCANNING.md#operator-notes); they are on the Settings page.

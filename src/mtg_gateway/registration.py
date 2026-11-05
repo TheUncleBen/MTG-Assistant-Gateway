@@ -98,10 +98,10 @@ def _text(value: Any, label: str, most: int = TEXT_MAX) -> str:
     if value is None:
         return ""
     if not isinstance(value, str):
-        raise _err(f"{label} must be text")
+        raise _err(f"{label} must be text.")
     value = " ".join(value.split())
     if len(value) > most:
-        raise _err(f"{label} is at most {most} characters")
+        raise _err(f"{label} is at most {most} characters.")
     return value
 
 
@@ -109,10 +109,10 @@ def fields(deck: Deck, details: dict[str, Any], sort: str) -> dict[str, Any]:
     """The flat form the site sends: card_i / card_i_qty, sideboard_i / sideboard_i_qty, the
     sizes, the deck name and the member's details, the DCI number one character a field."""
     if sort not in SORTS:
-        raise _err(f"sort must be one of: {', '.join(SORTS)}")
+        raise _err(f"sort must be one of: {', '.join(SORTS)}.")
     dci = _text(details.get("dci_number"), "The DCI number", DCI_MAX).replace(" ", "")
     if dci and not dci.isdigit():
-        raise _err("The DCI number is digits only")
+        raise _err("The DCI number is digits only.")
     last = _text(details.get("last_name"), "Last name")
     main, side = split(deck)
     out: dict[str, Any] = {

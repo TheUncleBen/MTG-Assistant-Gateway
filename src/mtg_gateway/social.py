@@ -382,14 +382,14 @@ class SocialService:
         self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
-            raise DeckError("invalid", "you own this deck already")
+            raise DeckError("invalid", "You own this deck already.")
         if any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id)):
             return {"added": False, "already": True, "verified": True}
         await self.decks._call(sub, lambda t: self.client.add_deck_editor(t, deck_id, user_id))
         self.state.db.audit("collaborator_added", sub=sub, detail={"deck_id": deck_id, "user_id": user_id})
         if not any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id, owned=True)):
             raise DeckError(
-                "verify_mismatch", "Archidekt accepted the request but the deck does not list them"
+                "verify_mismatch", "Archidekt accepted the request but the deck does not list them."
             )
         return {"added": True, "verified": True}
 
@@ -403,7 +403,9 @@ class SocialService:
         await self.decks._call(sub, lambda t: self.client.remove_deck_editor(t, row["editor_id"]))
         self.state.db.audit("collaborator_removed", sub=sub, detail={"deck_id": deck_id, "user_id": user_id})
         if any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id, owned=True)):
-            raise DeckError("verify_mismatch", "Archidekt accepted the request but the deck still lists them")
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the deck still lists them."
+            )
         return {"removed": True, "verified": True}
 
     async def follow_state(self, sub: str, user_id: int, *, lookup: bool = False) -> dict[str, Any]:
@@ -564,7 +566,7 @@ class SocialService:
         )
         if not ok:
             raise DeckError(
-                "verify_mismatch", "Archidekt accepted the edit but the thread does not show it yet"
+                "verify_mismatch", "Archidekt accepted the edit but the thread does not show it yet."
             )
         return {"comment": after}
 
@@ -583,7 +585,7 @@ class SocialService:
         )
         if not gone:
             raise DeckError(
-                "verify_mismatch", "Archidekt accepted the request but the comment is still there"
+                "verify_mismatch", "Archidekt accepted the request but the comment is still there."
             )
         return {"deleted": comment_id, "count": after["count"]}
 
@@ -610,7 +612,7 @@ class SocialService:
         if parent is None:
             root = await self._root(sub, deck_id, reuse=True)
             if root is None:
-                raise DeckError("unavailable", "Archidekt reports no thread for this deck")
+                raise DeckError("unavailable", "Archidekt reports no thread for this deck.")
             target = root
         else:
             try:
@@ -669,7 +671,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
     def user_id(request: Request) -> int:
         raw = str(request.path_params["user_id"])
         if not raw.isdigit() or len(raw) > 12:
-            raise DeckError("invalid", "user id is not a number")
+            raise DeckError("invalid", "User ID is not a number.")
         return int(raw)
 
     @server.custom_route("/social/api/decks/{deck_id}/vote", methods=["POST"], include_in_schema=False)
@@ -757,7 +759,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return data
         parent = data.get("parent")
         if parent is not None and _int(parent) is None:
-            return _fail("invalid", "parent must be a comment id")
+            return _fail("invalid", "parent must be a comment ID")
         if not isinstance(data.get("text"), str):
             return _fail("invalid", "text must be a string")
         try:
@@ -794,7 +796,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return sub
         cid = comment_id(request)
         if cid is None:
-            return _fail("invalid", "comment id must be a number")
+            return _fail("invalid", "comment ID must be a number")
         data = await body(request)
         if isinstance(data, Response):
             return data
@@ -817,7 +819,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return sub
         cid = comment_id(request)
         if cid is None:
-            return _fail("invalid", "comment id must be a number")
+            return _fail("invalid", "comment ID must be a number")
         data = await body(request)
         if isinstance(data, Response):
             return data
@@ -839,7 +841,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return sub
         cid = comment_id(request)
         if cid is None:
-            return _fail("invalid", "comment id must be a number")
+            return _fail("invalid", "comment ID must be a number")
         try:
             out = await service.delete_comment(sub, deck_id(request), cid, page_of(request))
         except (DeckError, ArchidektError) as exc:

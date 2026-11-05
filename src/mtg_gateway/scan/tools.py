@@ -10,6 +10,7 @@ from mcp.server.mcpserver import Context
 from mcp_types import CallToolResult
 from pydantic import Field
 
+from ..busy import outage
 from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, ask_choices, tool_meta, with_card
 from ..schemas import change_for_assistant
 from . import bulk
@@ -52,13 +53,13 @@ def not_looked_up(name: str, retry_in: int) -> ScanError:
     if retry_in > 0:
         return ScanError(
             "rate_limited",
-            f"Scryfall asked the gateway to wait, so '{name}' was not looked up yet. Try again after "
-            "the wait in retry_in (seconds).",
+            f"{outage('slow_down', 'Scryfall')} “{name}” was not looked up yet. Try again after the "
+            "wait in retry_in (seconds).",
             extra={"retry_in": retry_in},
         )
     return ScanError(
         "busy",
-        f"The card lookups took too long, so '{name}' was not looked up yet. Try again.",
+        f"The card lookups took too long, so “{name}” was not looked up yet. Try again.",
         extra={"retry_in": SUGGESTED_WAIT_SECONDS},
     )
 
@@ -146,15 +147,15 @@ def add_scan_tools(
         name="resolve_cards",
         title="Resolve card names to exact cards",
         description=(
-            "Turn card names from photos, a typed list or a decklist into exact Magic cards via Scryfall: "
-            "cards ({name, set?, collector_number?, quantity?}) or text (one card per line, e.g. '2 Sol Ring "
-            "(CMR) 472'). Each result's status: exact, printing (by set and number), fuzzy (name corrected: "
-            "confirm with the user), ambiguous or not_found (with suggestions), or conflict (the set and "
-            "number are another card, in requested: ask). Without a set a card gets Scryfall's default "
-            "printing when it is on paper, else the newest paper one (newer_printings: those passed over). "
-            "Returns a decklist and changes for propose_deck_changes. In an app that shows cards the user "
-            "confirms the cards first: wait for that. One lookup per account at a time (else busy, with "
-            "suggested_wait). Does not touch Archidekt."
+            "Turn card names (photos, a typed list, a decklist) into exact Magic cards via Scryfall: "
+            "cards ({name, set?, collector_number?, quantity?}) or text (one per line, e.g. '2 Sol "
+            "Ring (CMR) 472'). Status: exact, printing (by set and number), fuzzy (name corrected: "
+            "confirm with the user), ambiguous or not_found (with suggestions), or conflict (set and "
+            "number are another card, in requested: ask). No set: Scryfall's default printing if on "
+            "paper, else the newest paper one (newer_printings: those passed over). Returns a decklist "
+            "and changes for propose_deck_changes. In an app that shows cards the user confirms them "
+            "first: wait. One lookup per account at a time (else busy, suggested_wait). Does not touch "
+            "Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PICKER_CARD_URI) if links is not None else None,
@@ -167,7 +168,7 @@ def add_scan_tools(
         try:
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
-                raise ScanError("invalid", "give `cards` or `text` with at least one card")
+                raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             waited: list[float] = []
             results = await service.resolve(inputs, owner=_sub(), waited=waited)
             results = await _ask_about_ambiguous(ctx, results)
@@ -189,7 +190,7 @@ def add_scan_tools(
         if not asks:
             return results
         questions = [
-            {"key": f"q{i}", "title": f"Which card is '{r.input.name}'?", "options": list(r.suggestions)[:12]}
+            {"key": f"q{i}", "title": f"Which card is “{r.input.name}”?", "options": list(r.suggestions)[:12]}
             for i, r in asks
         ]
         answers = await ask_choices(
@@ -212,11 +213,11 @@ def add_scan_tools(
         for (i, inp), res in zip(redo, fresh, strict=True):
             if res.status == "deferred":  # Scryfall is backing off: keep the row with its suggestions
                 kept = out[i]
-                note = f"the pick '{inp.name}' could not be checked yet; ask again"
+                note = f"the pick “{inp.name}” could not be checked yet; ask again"
                 out[i] = replace(kept, note=f"{kept.note}; {note}" if kept.note else note)
                 continue
             original = results[i].input
-            picked_note = f"picked from the suggestions for '{original.name}'"
+            picked_note = f"picked from the suggestions for “{original.name}”"
             res = replace(res, input=original, note=f"{res.note}; {picked_note}" if res.note else picked_note)
             out[i] = res
         return out
@@ -225,19 +226,19 @@ def add_scan_tools(
         name="card_printings",
         title="List the printings of a card",
         description=(
-            "A Magic card's printings from Scryfall (set, set name, collector number, release date, rarity, "
-            "finishes): released paper printings newest first (the first is the default when no set is "
-            "named), then previews (unreleased) and non-paper printings (paper false). Give oracle_id (from "
-            "resolve_cards) or name; narrow with set_code and finish. matching_total match; returned_count "
-            "are in cards (truncated: limit cut it); sets lists every set it was printed in (sets_total, "
-            "sets_truncated). In an app that shows cards the user taps the printing they mean: wait for that "
-            "pick. Does not touch Archidekt."
+            "A Magic card's printings from Scryfall (set, set name, collector number, release date, "
+            "rarity, finishes): released paper printings newest first (the first is the default when "
+            "no set is named), then previews and non-paper ones (paper false). oracle_id (from "
+            "resolve_cards) or name; narrow with set_code and finish. matching_total match; "
+            "returned_count are in cards (truncated: limit cut it); sets: every set it was printed in "
+            "(sets_total, sets_truncated). In an app that shows cards the user taps the printing: wait "
+            "for that pick. Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,
     )
     async def card_printings(
-        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle id.")] = None,
+        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle ID.")] = None,
         name: Annotated[str | None, Field(description="Or the card's name.")] = None,
         set_code: Annotated[str | None, Field(description="Only printings from this set, e.g. cmr.")] = None,
         finish: Annotated[
@@ -248,7 +249,7 @@ def add_scan_tools(
         try:
             if not oracle_id:
                 if not name:
-                    raise ScanError("invalid", "give oracle_id or name")
+                    raise ScanError("invalid", "Give oracle_id or name.")
                 try:
                     results = await service.resolve(parse_cards([{"name": name}]), owner=_sub())
                     if results and results[0].status == "deferred":
@@ -265,7 +266,7 @@ def add_scan_tools(
                 if not oracle_id:
                     card = results[0].card if results else None
                     if not card or not card.get("oracle_id"):
-                        raise ScanError("not_found", f"no card found for '{name}'")
+                        raise ScanError("not_found", f"No card is called “{name}”.")
                     oracle_id = str(card["oracle_id"])
                     name = str(card.get("name") or name)
             out = await service.printings(oracle_id, owner=_sub())
@@ -332,7 +333,7 @@ def add_scan_tools(
         try:
             inputs = parse_cards(cards) if cards else parse_text(text or "")
             if not inputs:
-                raise ScanError("invalid", "give `cards` or `text` with at least one card")
+                raise ScanError("invalid", "Give `cards` or `text` with at least one card.")
             results = await service.resolve(inputs, owner=_sub())
             # A conflict (the printing named is a different card) is saved without a card, so it
             # is listed as unresolved and stays out of the session's changes until someone picks.
@@ -367,7 +368,7 @@ def add_scan_tools(
         name="get_scan_session",
         title="Get a scan session",
         description=(
-            "One of the user's scan sessions, by id (scan_…) or name: the resolved cards, a decklist text "
+            "One of the user's scan sessions, by ID (scan_…) or name: the resolved cards, a decklist text "
             "and changes (adds) for propose_deck_changes. Items without a card were not resolved: ask the "
             "user about them."
         ),

@@ -40,6 +40,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from . import collection_tags
+from .busy import outage
 from .decks import DeckError, needs_look_error
 
 if TYPE_CHECKING:
@@ -363,7 +364,7 @@ class BulkJobs:
                 str(exc)
                 if isinstance(exc, (CollectionError, DeckError))
                 and exc.kind not in ("unavailable", "rate_limited", "busy")
-                else "Archidekt is not answering right now"
+                else outage("unavailable")
             )
             merged = _merged(result, out)
             merged["stopped"] = reason.rstrip(".")

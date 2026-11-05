@@ -427,7 +427,7 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
         f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so "
         "you can apply it again later."
     ) in page
-    assert "paused after repeated failures" not in page and "new proposal" not in page
+    assert "failed several times in a row" not in page and "new proposal" not in page
 
 
 async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(

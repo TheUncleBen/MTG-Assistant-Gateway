@@ -41,7 +41,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from . import dbwait
+from . import dbwait, refusals
 from .binder_prices import BINDER_PAGE_SIZE, PRICED_FOR_DAYS, BinderStore
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, owns_deck
@@ -686,13 +686,14 @@ class PriceService:
             found, _missing = await self._scry().collection([_ident(row) or {"name": name}])
             card = found[0] if found else None
             if card is None:
-                raise DeckError("not_found", f"Scryfall knows no card {self._label(name, set_code, number)}.")
+                raise DeckError("not_found", f"No card is {self._label(name, set_code, number)}.")
         except DeckError:
             raise
         except Exception as exc:  # ScryfallError: busy or down; the daily check prices it later
             if not name:
                 raise DeckError(
-                    "unavailable", f"Scryfall could not be asked about this printing: {exc}"
+                    "unavailable",
+                    f"Scryfall could not be asked about this printing: {refusals.sentence(exc)}",
                 ) from exc
             # the name is kept as typed: say so, so a misspelt name is not taken for a checked one
             note = (
@@ -840,7 +841,7 @@ class PriceService:
     @staticmethod
     def _label(name: str, set_code: str, number: str) -> str:
         where = " ".join(p for p in (set_code.upper(), number) if p)
-        return f"named “{name}”" + (f" in {where}" if where else "") if name else f"numbered {where}"
+        return f"called “{name}”" + (f" in {where}" if where else "") if name else f"numbered {where}"
 
     def set_alerts(
         self,

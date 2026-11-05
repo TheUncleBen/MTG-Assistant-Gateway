@@ -122,7 +122,7 @@ def bio_words(doc: Any) -> str:
 
 def _onoff(value: Any, what: str) -> bool:
     if not isinstance(value, bool):
-        raise _err(f"{what} takes true or false")
+        raise _err(f"{what} takes true or false.")
     return value
 
 
@@ -155,7 +155,7 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
     if field == "email":
         switch = params.get("switch")
         if switch not in EMAIL_SWITCHES:
-            raise _err(f"switch must be one of: {', '.join(EMAIL_SWITCHES)}")
+            raise _err(f"switch must be one of: {', '.join(EMAIL_SWITCHES)}.")
         group, key, label = EMAIL_SWITCHES[switch]
         on = _onoff(params.get("on"), "on")
         value = (not on) if key == "noArchidektNotifications" else on
@@ -164,11 +164,11 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
     if field == "preference":
         pref = params.get("preference")
         if pref not in PREFERENCES:
-            raise _err(f"preference must be one of: {', '.join(PREFERENCES)}")
+            raise _err(f"preference must be one of: {', '.join(PREFERENCES)}.")
         key, label, choices = PREFERENCES[pref]
         pick = str(params.get("value") or "").strip().lower()
         if pick not in choices:
-            raise _err(f"{pref} takes one of: {', '.join(choices)}")
+            raise _err(f"{pref} takes one of: {', '.join(choices)}.")
         value = choices[pick]
         if pref in PRICE_SLOTS:
             now_list = sett.get(key)
@@ -195,7 +195,7 @@ def plan(field: Any, params: dict[str, Any], now: dict[str, Any]) -> tuple[dict[
             else "Make your binder private on Archidekt",
             "same": prof.get("is_collection_public") == on,
         }
-    raise _err(f"field must be one of: {', '.join(FIELDS)}")
+    raise _err(f"field must be one of: {', '.join(FIELDS)}.")
 
 
 def landed(body: dict[str, Any], now: dict[str, Any]) -> bool:

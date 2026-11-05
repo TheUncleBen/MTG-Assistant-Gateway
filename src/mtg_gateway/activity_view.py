@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from . import tool_labels, ui
+from .busy import outage
 from .companion import EVENT_LABELS, card_model_line, event_label, member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, BROWSER_CLIENT, DECK_LIST_LAST
@@ -169,8 +170,8 @@ ICONS = {
 
 # The error a failed row stores, in words; the code goes only in the row's details.
 ERROR_WORDS = {
-    "rate_limited": "Archidekt asked the gateway to slow down",
-    "unavailable": "Archidekt can't be reached right now",
+    "rate_limited": outage("slow_down").removesuffix("."),
+    "unavailable": outage("unavailable").removesuffix("."),
     "not_found": "Archidekt could not find that deck",
     "forbidden": "Archidekt refused access to that deck",
     "auth": "Archidekt did not accept that username and password",
@@ -1276,7 +1277,7 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     if cid:
         app_detail = f"{esc(app)} <span class='muted'>(<code>{esc(cid)}</code>)</span>"
     else:
-        app_detail = "No app <span class='muted'>(no client id stored)</span>"
+        app_detail = "No app <span class='muted'>(no client ID stored)</span>"
     member_detail = (
         f"{esc(who_name or NO_NAME)} <span class='muted'>(<code>{esc(sub)}</code>)</span>"
         if sub

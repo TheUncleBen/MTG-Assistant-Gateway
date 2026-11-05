@@ -257,7 +257,7 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     )
     out = structured(res)
     assert res.get("isError") is True and out["ok"] is False and out["error"] == "invalid"
-    assert "changes.0.action" in out["message"] and "'set_quantity'" in out["message"]
+    assert "changes[0].action must be" in out["message"] and "set_quantity" in out["message"]
     # a refusal from the tool itself carries the error flag too
     res = await call(stack.h, token, "get_deck", {"deck_ref": "not a deck"})
     assert res.get("isError") is True and structured(res)["ok"] is False
@@ -810,15 +810,13 @@ async def test_a_guessed_name_is_flagged_on_the_proposal_the_review_and_the_card
     )
     assert p["ok"], p
     assert p["guessed_names"] == [{"name": "Sol Ring", "read_as": "Sol Rimg"}], p
-    assert "name guessed from 'Sol Rimg'" in p["diff"]
+    assert "name guessed from “Sol Rimg”" in p["diff"]
     island = next(r for r in p["rows"] if r.get("name") == "Island")
     assert "guessed_from" not in island  # an exact scan match is not flagged
     b = Browser(manual.h)
     await b.login(f"/proposals/{p['proposal_id']}")
     page = await b.http.get(f"/proposals/{p['proposal_id']}")
-    assert (
-        "name guessed from &#x27;Sol Rimg&#x27;" in page.text or "name guessed from 'Sol Rimg'" in page.text
-    )
+    assert "name guessed from “Sol Rimg”" in page.text
 
 
 async def test_a_guessed_name_is_flagged_on_a_new_deck_and_a_collection_proposal(manual: Stack) -> None:

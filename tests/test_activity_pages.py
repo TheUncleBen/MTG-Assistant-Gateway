@@ -154,7 +154,7 @@ async def test_admin_activity_names_labels_apps_and_members(gw: Harness) -> None
             "<span class='ui-app none'><span class='sr-only'>No app</span></span>" in report
             and "ui-lbl" not in report
         )
-        assert "No app <span class='muted'>(no client id stored)</span>" in report
+        assert "No app <span class='muted'>(no client ID stored)</span>" in report
         # an admin action: the shield, no label, written once (the admin's row, from the website)
         assert _table(page).count("title='admin_disable'") == 1
         disable = _row(page, "admin_disable")
@@ -302,7 +302,7 @@ async def test_my_activity_has_every_row_in_words_without_ids(gw: Harness) -> No
         assert "By an administrator" in words and "<span class='nm'>Administrator</span></span>" in table
         assert "During deck sync" in words and "1 card row" in words
         assert "<span class='ui-app none'><span class='sr-only'>No app</span></span>" in table
-        assert "claude-app" not in page and "__browser__" not in page and "client id" not in page
+        assert "claude-app" not in page and "__browser__" not in page and "client id" not in page.casefold()
         assert "Rejected</span>" in table and "ui-lbl grey" in table
         assert "Refused</span>" in table and "Failed</span>" in table
         chips = page.split("<nav class='ui-chips' aria-label='Show'>", 1)[1].split("</nav>", 1)[0]

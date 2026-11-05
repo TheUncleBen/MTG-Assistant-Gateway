@@ -27,7 +27,7 @@ Scryfall and tells the assistant how sure it is:
 | `fuzzy` | the name was corrected (OCR noise, typos); the assistant should check with you |
 | `ambiguous` | more than one card fits, or the closest one isn't a convincing match; `suggestions` lists the candidates |
 | `not_found` | nothing matched; `suggestions` may still help |
-| `deferred` | not looked up yet because Scryfall asked the gateway to wait; `retry_in` says how many seconds, and `complete` is false |
+| `deferred` | not looked up yet because Scryfall asked the gateway to slow down; `retry_in` says how many seconds, and `complete` is false |
 | `conflict` | the set and number are a different card from the name; `card` is what the name matched, `requested` the printing asked for. Left out of the decklist and the changes until you say which card you mean, and `complete` is false |
 
 With no set given, a card keeps Scryfall's own default printing when that
@@ -266,9 +266,12 @@ live on `window.__scan` (`startContinuous()`, `stopContinuous()`,
   new copy beside the old one (up to about 172 MB in all), and the build adds about 17 MB to the gateway's memory. The copy is used only
   when Scryfall can't be reached, is slowing the gateway down or has a problem answering: the
   printing picker and `card_printings` then answer from it and say how old it is ("As of 3 Nov
-  2026 · Scryfall can't be reached", or "From the gateway's own copy · Scryfall can't be reached"
-  when the copy's day can't be read); `card_printings` adds "Prices are from that day, not
-  today." It is not part of the backup: Scryfall gives it again. Deleting it is
+  2026 · Scryfall can't be reached right now", or "From the gateway's own copy · Scryfall can't
+  be reached right now" when the copy's day can't be read); `card_printings` adds "Prices are from that day, not
+  today." When Scryfall's list of card names can't be loaded, the copy's names stand in for it
+  until a later try loads Scryfall's own, so a card name the gateway doesn't know costs one
+  Scryfall lookup instead of a walk through many (the log says "using the N names of the local
+  printings copy meanwhile"). It is not part of the backup: Scryfall gives it again. Deleting it is
   safe; the next daily download makes a new one. To do without it, turn off **Keep a local copy
   of card printings** on the Settings page (General, no stack variable): the copy and anything
   it left are deleted at once, no more is downloaded, and printings answers fail while Scryfall

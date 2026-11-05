@@ -124,7 +124,7 @@ async def test_hand_picked_printing_must_exist_and_match_the_card() -> None:
         await client.resolve_card(
             token, "Island", set_code="m21", collector_number="267", require_printing=True
         )
-    assert other.value.kind == "not_found" and "M21 #267 is Swamp, not 'Island'" in str(other.value)
+    assert other.value.kind == "not_found" and "M21 #267 is Swamp, not “Island”" in str(other.value)
     with pytest.raises(ArchidektError) as missing:  # no such printing: no name-only fallback
         await client.resolve_card(
             token, "Swamp", set_code="m21", collector_number="999", require_printing=True

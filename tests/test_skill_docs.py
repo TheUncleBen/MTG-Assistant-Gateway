@@ -96,7 +96,9 @@ def test_claude_skill_frontmatter_fits_upload_limits() -> None:
 def test_chatgpt_block_fits_custom_instructions() -> None:
     text = CHATGPT.read_text(encoding="utf-8")
     block = text.split("```text\n", 1)[1].split("```", 1)[0]
-    assert len(block) <= 4000  # paid-plan custom instructions take 5,000 characters (reported)
+    # 5% under 4,000, room for new lines (paid-plan custom instructions take 5,000, reported;
+    # 0.7.46 sweep B-5)
+    assert len(block) <= 3800
     # plain words: what to tell the member about the check after an apply
     assert "Report whether the check matched" in block and "Report verified" not in block
 
@@ -195,7 +197,7 @@ def test_chatgpt_block_uses_the_glossary_and_names_the_newer_answers() -> None:
     assert "deck_after" in block and "unpriced_added" in block
     assert "plan_first" in block
     assert "propose_account_action" in block and "propose_delete_deck" in block
-    assert len(block) <= 4000
+    assert len(block) <= 3800
 
 
 async def test_no_guide_describes_the_cards_as_they_were_before_0_7_46(tmp_path: Path, idp: FakeIdP) -> None:

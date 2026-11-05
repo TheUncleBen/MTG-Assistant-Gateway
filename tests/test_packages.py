@@ -35,7 +35,7 @@ def test_settings_are_checked_and_sent_in_archidekts_names() -> None:
         ({"keywords": "x", "budget": 5}, "1 to 4"),
         ({"keywords": "x", "budget": True}, "1 to 4"),
         ({"keywords": "x", "intended_formats": ["chess"]}, "format names"),
-        ({"keywords": "x", "price": 1}, "unknown package fields"),
+        ({"keywords": "x", "price": 1}, "Unknown package fields"),
     ],
 )
 def test_bad_settings_are_refused(raw: dict, says: str) -> None:

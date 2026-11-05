@@ -66,7 +66,7 @@ async def test_entering_rewrites_the_description_after_a_snapshot_and_withdrawin
 async def test_an_entry_needs_a_summary_a_contest_and_the_members_own_deck(stack: Stack) -> None:
     token = await linked_user(stack)
     assert "needs a summary" in (await _propose(stack, token, contest="880"))["message"]
-    assert "contest's id" in (await _propose(stack, token, contest="soon", summary="x"))["message"]
+    assert "contest's ID" in (await _propose(stack, token, contest="soon", summary="x"))["message"]
     other = structured(
         await account_call(
             stack.h, token, "propose_contest_entry", {"deck_id": "43", "contest": "880", "summary": "x"}

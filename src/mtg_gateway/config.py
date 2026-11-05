@@ -20,8 +20,12 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 
+from . import __version__
 from .modes import MODE_LABELS
 from .oidc import TOKEN_AUTH_METHODS, validate_groups_claim
+
+# Sent to Archidekt and Scryfall, as each asks: who calls, which version, and where to read about it
+USER_AGENT = f"mtg-assistant-gateway/{__version__} (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
 
 
 class ConfigError(Exception):
@@ -259,9 +263,7 @@ class Settings:
     # A second folder every database backup is also copied to (another disk or a network share).
     backup_copy_dir: Path | None = None
     archidekt_backup_folder: str = "MTG Gateway Backups"
-    archidekt_user_agent: str = (
-        "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
-    )
+    archidekt_user_agent: str = USER_AGENT
     # Gentle on Archidekt: every request, whoever asks, starts at least archidekt_min_interval
     # after the previous one started, at most two are out at once, and no more than
     # archidekt_max_per_minute start in any 60 seconds, a sixth of them kept for members' pages

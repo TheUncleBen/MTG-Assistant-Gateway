@@ -79,7 +79,7 @@ only at `DEBUG`. Docker keeps at most three 10 MB log files per container
 small disk; raise `max-size` there if you want more history. Nothing is sent
 to any outside error-tracking or analytics service.
 
-If research tools answer "the research service is unavailable right now",
+If research tools answer "The research service can't be reached right now.",
 the gateway is fine but can't reach Mystic Forge. Check that service and its
 logs.
 

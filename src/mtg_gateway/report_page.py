@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from . import card_models, card_models_view, ui
+from .busy import outage
 from .report_view import (
     APPROX_HEADING,
     APPROX_TEXT,
@@ -1457,7 +1458,7 @@ def ab_html(block: Any, a_name: str, b_name: str, *, who: str = "") -> str:
     return names + table + raw
 
 
-RESEARCH_PAIR_FAILED = "The paired test could not run: the research service did not answer."
+RESEARCH_PAIR_FAILED = f"The paired test could not run: {outage('unreachable', 'the research service')}"
 
 
 def paired_section_html(r: dict[str, Any]) -> str:

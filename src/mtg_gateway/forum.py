@@ -59,7 +59,7 @@ def _thread_id(value: Any) -> int:
     if "/forum/thread/" in raw:
         raw = raw.rsplit("/forum/thread/", 1)[1].split("?")[0].split("/")[0]
     if not raw.isdigit() or not 0 < int(raw) < 10**12:
-        raise DeckError("invalid", "thread_id must be a forum thread's number or its link")
+        raise DeckError("invalid", "thread_id must be a forum thread's number or its link.")
     return int(raw)
 
 
@@ -203,7 +203,7 @@ async def threads(
         # a name of dots would lead the page read out of /forum/ (security review F-03)
         raise DeckError("invalid", "Name the forum group and section (get_forum lists them).")
     if order not in ORDERS:
-        raise DeckError("invalid", f"order must be one of: {', '.join(ORDERS)}")
+        raise DeckError("invalid", f"order must be one of: {', '.join(ORDERS)}.")
     page = max(1, min(int(page or 1), MAX_PAGE))
     params: dict[str, Any] = {"page": page, "orderBy": ORDERS[order]}
     if search.strip():

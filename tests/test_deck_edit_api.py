@@ -736,7 +736,7 @@ async def test_save_anyway_applies_only_the_version_the_question_showed(stack: S
         assert r.status_code == 400 and r.json()["error"] == "invalid", r.text
         assert r.json()["message"] == "Send the version of the proposal the page showed."
         r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": "1"})
-        assert r.status_code == 400 and r.json()["message"] == "version must be a whole number", r.text
+        assert r.status_code == 400 and r.json()["message"] == "version must be a whole number.", r.text
         r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": d["proposal_id"], "version": 1})
         assert r.status_code == 409 and r.json()["error"] == "changed", r.text
         assert len(stack.ark.patches) == before

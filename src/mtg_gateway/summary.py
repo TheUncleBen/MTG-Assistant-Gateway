@@ -244,10 +244,10 @@ def add_summary_tool(server: MCPServer, state: AppState) -> None:
         name="get_summary",
         title="Get my summary",
         description=(
-            "The member's plain summary of the last day or week (period): watched card prices that moved "
-            "(cards; cards_unchanged counts the rest), watched deck values, reports finished, proposals "
-            "waiting and applied, and the same as sentences in text, written by the gateway without AI. Put "
-            "it in your own words for the member. Read-only."
+            "The member's plain summary of the last day or week (period): watched card prices that "
+            "moved (cards; cards_unchanged counts the rest), watched deck values, reports finished, "
+            "proposals waiting and applied, and the same as sentences in text, written by the gateway "
+            "without AI. Put it in your own words. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )

@@ -23,10 +23,12 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
 from . import dbwait, deck_stats
+from .busy import AGAIN, outage
 from .decklist import front_faces
 from .decks import DeckError
 from .report_view import found_not_verified
 from .schemas import compact_schema, flatten_params
+from .tool_labels import tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ OWNER_NOTES: dict[str, str] = {
     "run_deck_report": "the gateway's test: it reads the deck, validates it, runs the solo test games "
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
-    "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, include_text for rules text, "
+    "get_deck": "the gateway's deck reader: any Archidekt deck by ID or link, include_text for rules text, "
     "archidekt_text to export in Archidekt's import syntax",
     "search_decks": "public decks by name, commander, format, colors or owner; owner plus order_by "
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
@@ -138,8 +140,8 @@ _OR_TERM = re.compile(r"(?<![\w])or(?![\w])", re.IGNORECASE)
 SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
 PAPER_SEARCH_NOTE = (
     " In a Commander search (a color identity, commander:, f:commander or is:commander) the gateway "
-    "adds game:paper (no Arena or MTGO only cards), and with a color identity and no format f:commander "
-    "(no Un-cards); a game: or format term in the query (game:arena, legal:brawl) chooses otherwise."
+    "adds game:paper (no Arena or MTGO only cards) and, with a color identity and no format, "
+    "f:commander (no Un-cards); a game: or format term (game:arena, legal:brawl) overrides it."
 )
 
 
@@ -173,47 +175,58 @@ TEXT_RESULT_SCHEMA = {"properties": {"result": {"type": "string"}}, "required": 
 # 100 KB (whole-application audit, row 2; tests/test_tool_review.py measures it with the recorded
 # listing). Re-read against tests/fixtures/mystic_forge/tools.json when the pin moves.
 DESCRIPTIONS: dict[str, str] = {
-    "format_archidekt": "Formats a decklist you composed yourself for Archidekt's import dialog (for a "
-    "deck already on Archidekt, get_deck with view 'export' gives the same syntax). Card names are "
-    "checked against Scryfall. Lines look like '1x Card Name [Category]', '1x Commander Name "
-    "[Commander{top}]', '1x Maybe Card [Maybeboard{noDeck}{noPrice}]', '1x Labeled Card [Draw] "
-    "^To Buy,#2ccce4^' and '1x Foil Card (dmr) 281 *F* [Ramp]'. finish 'foil' or 'etched' marks a card "
-    "*F* or *E*: pair it with include_set_codes. Give each card a category for its role in the deck "
-    "(Ramp, Draw, Removal, Protection, Finisher, Lands, ...).",
-    "scryfall_price": "Current market prices for a card, cheapest printing first (printings with no "
-    "price last). set_code restricts to one set, set_code with collector_number to one printing, finish "
-    "to printings that come in it. Arena and MTGO printings are left out unless include_digital (they "
-    "have no paper price). Scryfall updates prices daily.",
-    "scryfall_price_list": "Price a decklist and total it, honoring each line's printing and finish "
-    "('1x Sol Ring (ltc) 284 *F*' is priced as exactly that). Lines naming no set use the newest "
-    "printing out on paper, never a preview, and are listed apart, so the total says what it guessed. "
-    "A finish with no price is reported on its own with the finishes that printing has, never totalled "
-    "at another finish's price.",
-    "goldfish_annotate": "Pre-flight a deck for the solo test: derive what the engine models on its "
-    "own, sort out the cards it can't model, and show oracle text only for the few cards that need an "
-    "annotation. deck is an Archidekt deck id or link, read with the member's own Archidekt access "
-    "(their private decks too) like get_deck, or decklist text with the commander first (or its line "
-    "ending in ' *CMDR*').",
-    "edhrec_precon_upgrade": "How a precon is commonly upgraded, from EDHREC's Precon Upgrade Guide: "
-    "the most-added cards and lands with their inclusion percentages, and the most-cut as a ranked list "
-    "(an unpopularity score, not a percentage). Use it instead of web search or memory for what is cut "
-    "and added. commander picks the face of a precon that builds as several. For exact cut "
-    "percentages against one deck, use compare_decks.",
-    "scryfall_card_text": "Exact oracle text for a list of cards in one call: name, mana cost, type "
-    "line, rules text and P/T. Use it before discussing what cards do and never state rules text from "
-    "memory: similar names are different cards, and text gets errata. Cards it can't match are listed "
-    "under 'Not found'.",
-    "rules_get": "Magic's Comprehensive Rules by rule number or keyword, instead of memory or web "
-    "search. A number gives the exact rule text ('702.2' with its subrules, '702' lists that "
-    "subsection's rules); a keyword or glossary term ('deathtouch') gives its entry and the rules it "
-    "cites. Cite rule numbers in answers.",
-    "rules_search": "Full-text search of the Comprehensive Rules and glossary, instead of memory or web "
-    "search, for a rules question (stack, layers, replacement effects) that doesn't start from a rule "
-    "number; cite the numbers it returns, or open them with rules_get.",
-    "goldfish_odds": "Exact hypergeometric draw odds (closed form, no games played). Flat mode (copies, "
-    "optional min_successes): the chance that at least min_successes of the copies are in the top draws "
-    "of a deck_size-card deck. Joint mode (groups): the chance that every group meets its minimum at "
-    "once, e.g. at least 1 piece A and 1 piece B in the top 12. Give exactly one of copies or groups.",
+    "format_archidekt": (
+        "Format a decklist you composed for Archidekt's import dialog (a deck already on Archidekt: "
+        "get_deck view 'export'). Names are checked against Scryfall. Lines look like '1x Card Name "
+        "[Category]', '1x Commander Name [Commander{top}]', '1x Maybe Card [Maybeboard{noDeck}{noPrice}]', "
+        "'1x Labeled Card [Draw] ^To Buy,#2ccce4^' and '1x Foil Card (dmr) 281 *F* [Ramp]'. finish 'foil' "
+        "or 'etched' marks *F* or *E*: pair it with include_set_codes. Give each card a role category "
+        "(Ramp, Draw, Removal, Lands, ...)."
+    ),
+    "scryfall_price": (
+        "Current market prices for a card, cheapest printing first (unpriced last). set_code: one set; "
+        "with collector_number: one printing; finish: printings in it. Arena and MTGO printings only with "
+        "include_digital (no paper price). Scryfall updates prices daily."
+    ),
+    "scryfall_price_list": (
+        "Price a decklist and total it, honoring each line's printing and finish ('1x Sol Ring (ltc) 284 "
+        "*F*' is priced as exactly that). Lines naming no set use the newest paper printing, never a "
+        "preview, listed apart so the total says what it guessed. A finish with no price is reported on "
+        "its own with the printing's finishes, never totalled at another's price."
+    ),
+    "goldfish_annotate": (
+        "Pre-flight a deck for the solo test: what the engine models on its own, the cards it can't, and "
+        "oracle text only for the few that need an annotation. deck: an Archidekt deck ID or link, read "
+        "with the member's own access (private decks too) like get_deck, or decklist text with the "
+        "commander first (or its line ending ' *CMDR*')."
+    ),
+    "edhrec_precon_upgrade": (
+        "How a precon is commonly upgraded (EDHREC's Precon Upgrade Guide): the most-added cards and lands "
+        "with inclusion percentages, and the most-cut ranked (an unpopularity score, not a percentage). "
+        "Use it, not web search or memory, for what is cut and added. commander picks the face of a precon "
+        "that builds as several. Exact cut percentages against one deck: compare_decks."
+    ),
+    "scryfall_card_text": (
+        "Exact oracle text for a list of cards in one call: name, mana cost, type line, rules text, P/T. "
+        "Use it before discussing what cards do; never state rules text from memory (similar names are "
+        "different cards; text gets errata). Unmatched cards are under 'Not found'."
+    ),
+    "rules_get": (
+        "Magic's Comprehensive Rules by number or keyword, instead of memory or web search. A number gives "
+        "the exact rule ('702.2' with its subrules; '702' lists the subsection); a keyword or glossary "
+        "term ('deathtouch') gives its entry and the rules it cites. Cite rule numbers."
+    ),
+    "rules_search": (
+        "Full-text search of the Comprehensive Rules and glossary, instead of memory or web search, for a "
+        "question (stack, layers, replacement effects) not starting from a rule number; cite the numbers "
+        "it returns, or open them with rules_get."
+    ),
+    "goldfish_odds": (
+        "Exact hypergeometric draw odds (closed form, no games). Flat mode (copies, optional "
+        "min_successes): the chance at least min_successes of the copies are in the top draws of a "
+        "deck_size-card deck. Joint mode (groups): the chance every group meets its minimum at once, e.g. "
+        "1 piece A and 1 piece B in the top 12. Give exactly one of copies or groups."
+    ),
     "edhrec_commander": "EDHREC's top cards for a commander: high synergy cards, top cards, game "
     "changers and cards by type, with inclusion rates and synergy scores.",
     "precon_decklist": "The official decklist of a precon (commander, main deck and sideboard), instead "
@@ -229,16 +242,18 @@ DESCRIPTIONS: dict[str, str] = {
     "scryfall_rulings": "Official rulings for a card, dated: interactions, edge cases and errata.",
     "edhrec_recommendations": "Card suggestions from EDHREC for a commander and the cards a deck already "
     "has.",
-    "scryfall_search": "Search cards with Scryfall's full query syntax: color identity (id<=), oracle "
-    "text (o:), type (t:), set (set:), keywords (kw:), mana cost and boolean operators. `limit` cards a "
-    "page (default 20); page takes the next. Each card is shown in its newest printing out on paper "
-    "(as scryfall_named), unless `printing` asks for another.",
+    "scryfall_search": (
+        "Search cards with Scryfall's full query syntax: color identity (id<=), oracle text (o:), type "
+        "(t:), set (set:), keywords (kw:), mana cost, boolean operators. `limit` cards a page (default "
+        "20); page takes the next. Each card in its newest paper printing (as scryfall_named), unless "
+        "`printing` asks for another."
+    ),
 }
 
 # Added to a listed tool's description: what its own description leaves out.
 DESCRIPTION_NOTES: dict[str, str] = {
-    "edhrec_top_cards": "limit is per section (Top Cards, Creatures, Instants, ...). With color, period "
-    "is ignored: EDHREC's color pages count all decks, with no time period.",
+    "edhrec_top_cards": "limit is per section (Top Cards, Creatures, ...). With color, period is "
+    "ignored: EDHREC's color pages count all decks.",
 }
 
 # A listed tool's parameter whose upstream description says more than the tool does: the new
@@ -248,13 +263,17 @@ PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
     ("edhrec_average_deck", "limit"): "Not used by this tool: the whole average deck (about 100 "
     "cards) is always returned.",
     # shorter, as DESCRIPTIONS
-    ("format_archidekt", "include_set_codes"): "Add each card's set code: its newest printing out on "
-    "paper (not a preview), in its finish when one is given. Slower.",
-    ("scryfall_price_list", "decklist"): "Decklist text, one card per line: plain names or full "
-    "Archidekt/Moxfield lines with a printing and finish ('1x Sol Ring (ltc) 284 *F* [Ramp]'). At most "
-    "500 lines.",
-    ("scryfall_card_text", "cards"): "Cards, one per line: plain names or full Archidekt/Moxfield lines "
-    "(quantity, finish and category are ignored). At most 500 lines.",
+    ("format_archidekt", "include_set_codes"): (
+        "Add each card's set code: its newest paper printing (not a preview), in its finish if given. Slower."
+    ),
+    ("scryfall_price_list", "decklist"): (
+        "One card per line: names or Archidekt/Moxfield lines with printing and finish ('1x Sol Ring (ltc) "
+        "284 *F* [Ramp]'). At most 500."
+    ),
+    ("scryfall_card_text", "cards"): (
+        "One card per line: names or Archidekt/Moxfield lines (quantity, finish, category ignored). At "
+        "most 500."
+    ),
     ("goldfish_annotate", "deck"): "Archidekt deck ID/URL, or decklist text ('1 Card Name' per line).",
     ("rules_get", "ref"): "A rule number at any depth ('702', '702.2b') or a keyword or glossary term.",
     ("rules_search", "query"): "Words to find, in the rules' own wording ('replacement effect order').",
@@ -268,7 +287,42 @@ PARAM_DESCRIPTIONS: dict[tuple[str, str], str] = {
     ("edhrec_precon_upgrade", "commander"): "The commander face, for a precon that builds as several.",
     ("precon_search", "query"): "The deck's name, its set's name or set code (e.g. 'Forces of the "
     "Imperium', 'MKC').",
+    ("format_archidekt", "cards.category"): "Category name (e.g. 'Ramp', 'Lands').",
+    ("format_archidekt", "cards.label"): "Label text (e.g. 'To Buy').",
+    ("format_archidekt", "cards.label_color"): "Label hex color (e.g. '#2ccce4').",
+    ("format_archidekt", "cards.commander"): "The commander (or a partner).",
+    ("format_archidekt", "cards.maybeboard"): "In the maybeboard.",
+    ("scryfall_price", "name"): "The card's name.",
+    ("scryfall_rulings", "name"): "The card's name.",
+    ("spellbook_card_combos", "card"): "The card's name.",
+    ("goldfish_odds", "deck_size"): "Cards in the library drawn from.",
+    ("format_archidekt", "cards.finish"): "'foil' (*F* on the line) or 'etched' (*E*), as Archidekt imports "
+    "it; omit for a normal card. With include_set_codes the printing comes in this finish; a card with "
+    "none in it gets no marker and a warning.",
+    ("scryfall_search", "printing"): "Each card's printing: 'newest_paper' (default, as scryfall_named), "
+    "'scryfall' (Scryfall's choice), 'cheapest' (lowest USD) or 'oldest'. A prefer: term in the query wins.",
+    ("scryfall_named", "set_code"): "A set code (e.g. 'eld'). Without one: the newest printing out on "
+    "paper, not a preview.",
+    ("validate_decklist", "commander"): "The commander, for the color identity check (skipped without one).",
+    (
+        "validate_decklist",
+        "decklist",
+    ): "'1 Card Name' per line; a line starting with // is a category header.",
+    ("precon_decklist", "file_name"): "fileName from precon_search (e.g. 'ForcesOfTheImperium_40K').",
+    ("precon_export", "file_name"): "fileName from precon_search (e.g. 'ForcesOfTheImperium_40K').",
 }
+
+
+def _param_at(schema: dict[str, Any], path: str) -> dict[str, Any] | None:
+    """The parameter a PARAM_DESCRIPTIONS path names: "cards.finish" is the finish of each item
+    of cards."""
+    spot: Any = schema
+    for part in path.split("."):
+        if isinstance(spot, dict) and spot.get("type") == "array":
+            spot = spot.get("items")
+        props = spot.get("properties") if isinstance(spot, dict) else None
+        spot = props.get(part) if isinstance(props, dict) else None
+    return spot if isinstance(spot, dict) else None
 
 
 # Mystic Forge answers a failed upstream request (Scryfall, EDHREC, Archidekt, Commander
@@ -403,7 +457,7 @@ CALL_DEADLINE_SECONDS = 120.0
 LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
 # A call whose shape is unknown because Mystic Forge's tool listing has not succeeded yet.
-NOT_READY_TEXT = "the research service is not ready yet and nothing was sent; try again later"
+NOT_READY_TEXT = f"The research service isn't ready yet, so nothing was sent. {AGAIN}"
 HEALTH_DEADLINE_SECONDS = 3.0  # the health check's own probe: short, so /healthz stays quick
 HEALTH_CACHE_SECONDS = 30.0  # one probe per half minute at most, however often /healthz is asked
 # A failed probe is held for a few seconds only, so a Mystic Forge that was still starting (it
@@ -679,10 +733,9 @@ class MysticForgeProxy:
                 wrapped.add(t.name)
             if t.name in ALLOWED_TOOLS:
                 d["inputSchema"] = compact_schema(flat if flat is not None else d.get("inputSchema") or {})
-                props = d["inputSchema"].get("properties")
                 for (tool, param), text in PARAM_DESCRIPTIONS.items():
-                    if tool == t.name and isinstance(props, dict) and isinstance(props.get(param), dict):
-                        props[param]["description"] = text
+                    if tool == t.name and isinstance(spot := _param_at(d["inputSchema"], param), dict):
+                        spot["description"] = text
                 d["description"] = DESCRIPTIONS.get(t.name, d.get("description"))
                 if isinstance(d.get("description"), str):
                     d["description"] = rewrite_text(d["description"])
@@ -693,6 +746,9 @@ class MysticForgeProxy:
                 # A text answer's output schema ({"result": a string}) says nothing the text doesn't.
                 if compact_schema(d.get("outputSchema")) == TEXT_RESULT_SCHEMA:
                     d.pop("outputSchema")
+                # The title a host shows, as every gateway tool has one: its readable name
+                # (tool_labels), not the raw name (0.7.46 sweep B-6)
+                d["title"] = tool_name(t.name)
                 # Advertise as read-only research tools; none of them writes to Archidekt.
                 d.setdefault("annotations", {}).update({"readOnlyHint": True, "openWorldHint": True})
                 tools.append(d)
@@ -867,9 +923,7 @@ class MysticForgeProxy:
         except Exception as exc:
             logger.warning("Mystic Forge call %s failed: %s", name, exc)
             return types.CallToolResult(
-                content=[
-                    types.TextContent(type="text", text="the research service is unavailable right now")
-                ],
+                content=[types.TextContent(type="text", text=outage("unavailable", "The research service"))],
                 isError=True,
             )
 

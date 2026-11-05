@@ -184,7 +184,7 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
             "Nothing for you to do." in r.text
         )
         assert "&lt;time" not in r.text  # times are markup, never escaped into the text
-        err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
+        err = "group “mtg-users” found 0 times (is the name right, and may the token view that group?)"
         sweep.last.update(ok=False, at=1_800_003_600, error=err)
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert f"Not working. The last check {ui.when(1_800_003_600)} failed and deleted nothing: " in r.text
@@ -258,9 +258,9 @@ _AT = ui.when(1_800_000_000)  # the shared list date ("3 h ago", then "Jan 15, 2
             {
                 "state": "failed",
                 "at": 1_800_000_000,
-                "error": "Authentik could not be reached (ConnectError)",
+                "error": "Authentik couldn't be reached (ConnectError)",
             },
-            f"Not working. The last check {_AT} failed and deleted nothing: Authentik could not be "
+            f"Not working. The last check {_AT} failed and deleted nothing: Authentik couldn't be "
             "reached (ConnectError). To fix: Check that the gateway can reach Authentik at the "
             "issuer's address (MTG_OIDC_ISSUER). It tries again by itself.",
         ),

@@ -1377,7 +1377,7 @@ def custom_tab(got: dict[str, Any], csrf: str, box: dict[str, Any], q: str) -> s
 
 ADD_DEFAULT_CATEGORY = "The deck's default"
 ADD_CUSTOM_NOTE = (
-    "The card goes in by its custom card id, as Archidekt's deck page adds it. With no category, "
+    "The card goes in by its custom card ID, as Archidekt's deck page adds it. With no category, "
     "Archidekt files it itself. The deck is read back to check."
 )
 

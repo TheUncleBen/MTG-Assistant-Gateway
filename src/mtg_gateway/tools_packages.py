@@ -25,11 +25,11 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         name="list_card_packages",
         title="List Archidekt card packages",
         description=(
-            "Archidekt card packages, most imported first, 50 a page, as its Packages page lists them. "
-            "whose: mine (default), followed (bookmarked) or all (everyone's public packages). Filters: "
-            "name_contains, intended_format and budget (1 to 4). Each package: id, name, owner, keywords, "
-            "budget, formats and how often it was added to a deck. limit (default 20) caps the rows; "
-            "left_out counts what it cut. Changes nothing."
+            "Archidekt card packages, most imported first, as its Packages page lists them. whose: "
+            "mine (default), followed (bookmarked) or all (everyone's public ones). Filters: "
+            "name_contains, intended_format, budget (1 to 4). Each: id, name, owner, keywords, budget, "
+            "formats and how often it was added to a deck. limit (default 20) caps the rows; left_out "
+            "counts the rest. Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -65,20 +65,21 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         name="propose_add_package",
         title="Propose adding a card package to a deck (write, two-step)",
         description=(
-            "Step 1 of adding a card package's cards to one of the user's decks, as Archidekt's Add package: "
-            "any package the user can open (list_card_packages, or its id or URL). categories: package "
-            "(default), default (Archidekt files them) or maybeboard. skip_existing and "
-            "skip_outside_identity (default true) leave out cards the deck has or outside the commander's "
-            "colors; singleton (default by format) adds one copy each; color_tag tags every added card (a "
-            "tag's name, or a name with color #rrggbb). Returns a proposal like propose_deck_changes (kind "
-            "'edit'); applying it counts one import of the package. Changes nothing on Archidekt by itself."
+            "Step 1 of adding a card package's cards to one of the user's decks, as Archidekt's Add "
+            "package: any package the user can open (list_card_packages, or its ID or URL). "
+            "categories: package (default), default (Archidekt files them) or maybeboard. "
+            "skip_existing and skip_outside_identity (default true) leave out cards the deck has or "
+            "off the commander's colors; singleton (default by format): one copy each; color_tag tags "
+            "every added card (a tag's name, or with color #rrggbb). Returns a proposal like "
+            "propose_deck_changes (kind 'edit'); applying it counts one import. Changes nothing on "
+            "Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,
     )
     async def propose_add_package(
-        deck_id: Annotated[str, Field(description="The user's own deck: its id or URL.")],
-        package_id: Annotated[str, Field(description="The card package: its id or URL.")],
+        deck_id: Annotated[str, Field(description="The user's own deck: its ID or URL.")],
+        package_id: Annotated[str, Field(description="The card package: its ID or URL.")],
         categories: Literal["package", "default", "maybeboard"] = "package",
         skip_existing: bool = True,
         skip_outside_identity: bool = True,

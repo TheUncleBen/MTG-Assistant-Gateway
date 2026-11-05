@@ -1430,7 +1430,7 @@ async def test_pinned_printing_that_is_missing_or_another_card_refuses_the_edit(
     for change, message in [
         (
             {"action": "add", "card_name": "Island", "set_code": "m21", "collector_number": "267"},
-            "M21 #267 is Swamp, not 'Island'; nothing was added",
+            "M21 #267 is Swamp, not “Island”; nothing was added.",
         ),
         (
             {"action": "add", "card_name": "Swamp", "set_code": "m21", "collector_number": "9999"},
@@ -1555,14 +1555,17 @@ async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None
     bad = [
         ([{"action": "add", "card_name": "Swamp", "set_code": "m21"}], "go together"),
         ([{"action": "remove", "card_name": "Swamp", "finish": "foil"}], "apply to add only"),
-        ([{"action": "add", "card_name": "Swamp", "finish": "glossy"}], "'nonfoil', 'foil' or 'etched'"),
+        (
+            [{"action": "add", "card_name": "Swamp", "finish": "glossy"}],
+            "finish must be nonfoil, foil or etched",
+        ),
         ([{"action": "add", "card_name": "Swamp", "set_code": "m21!", "collector_number": "1"}], "set code"),
         (
             [
                 {"action": "add", "card_name": "Swamp", "set_code": "m21", "collector_number": "267"},
                 {"action": "add", "card_name": "swamp", "set_code": "m21", "collector_number": "268"},
             ],
-            "one pinned printing per card name",
+            "One pinned printing per card name",
         ),
     ]
     for changes, text in bad:
@@ -2070,7 +2073,7 @@ async def test_a_flat_call_is_refused_when_the_tool_listing_failed() -> None:
     assert out.is_error and out.structured_content["error"] == "unavailable", out
     assert out.structured_content["retry_after"] == 60
     assert out.content[0].text == (
-        "the research service is not ready yet and nothing was sent; try again later"
+        "The research service isn't ready yet, so nothing was sent. Try again later."
     )
     assert _ListingDown.forwarded == []
     # once Mystic Forge lists its tools, the same flat call is wrapped and answered

@@ -29,7 +29,7 @@ from starlette.responses import JSONResponse, Response
 from . import prefs, ui
 from . import searchpanel as sp
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
-from .busy import busy_response, held_html, same_url
+from .busy import busy_response, held_html, outage, same_url
 from .deckpage import (
     WRITES_OFF_FOLLOW,
     WRITES_OFF_TITLE,
@@ -686,7 +686,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     def problem(exc: DeckError) -> str:
         text = {
             "rate_limited": str(exc),
-            "unavailable": "Archidekt is not answering right now. Try again later.",
+            "unavailable": outage("unavailable", again=True),
         }.get(exc.kind, "The search could not be run: " + str(exc))
         return f"<p class='notice error'>{_esc(text)}</p>"
 
@@ -1035,11 +1035,12 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         name="search_decks",
         title="Search public Archidekt decks",
         description=(
-            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: name, "
-            "commander (a partial name is looked up; several matching commanders come back as "
-            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their profile's "
-            "decks), format, colors, order_by, page and limit. Each result has an id and url; read one with "
-            "get_deck. list_my_decks lists the member's own decks, private ones included. Read-only."
+            "Search Archidekt's public decks as its deck search page does. Filters, all optional: "
+            "name, commander (a partial name is looked up; several matches come back as "
+            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their "
+            "profile's decks), format, colors, order_by, page and limit. Each result has an id and "
+            "url; read one with get_deck. list_my_decks lists the member's own, private ones too. "
+            "Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -1057,7 +1058,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
     ) -> dict[str, Any]:
         fmt = FORMAT_IDS.get((format or "").strip().lower()) if format else None
         if format and fmt is None and not str(format).isdigit():
-            return {"ok": False, "error": "invalid", "message": f"unknown format '{format[:30]}'"}
+            return {"ok": False, "error": "invalid", "message": f"unknown format “{format[:30]}”"}
 
         async def run(commander_name: str) -> dict[str, Any]:
             return await decks.search_decks(
@@ -1092,7 +1093,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
                         "decks": [],
                         "count": 0,
                         "commander_suggestions": names,
-                        "message": f"no commander is named exactly '{commander[:60]}'; search again "
+                        "message": f"no commander is named exactly “{commander[:60]}”; search again "
                         "with one of commander_suggestions",
                     }
         except DeckError as exc:

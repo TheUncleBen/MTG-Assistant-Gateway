@@ -88,4 +88,4 @@ async def test_a_research_tool_missing_an_argument_names_the_field_as_listed(sta
     token = await linked_user(stack)
     out = structured(await call(h, token, "validate_decklist", {}))
     assert out["ok"] is False and out["error"] == "invalid", out
-    assert "decklist: Field required" in out["message"] and "params." not in out["message"], out
+    assert "decklist is required" in out["message"] and "params." not in out["message"], out

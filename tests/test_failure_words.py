@@ -119,7 +119,7 @@ async def test_member_pages_never_show_archidekts_raw_words(stack: Stack, answer
     [
         (503, "Scryfall had a problem answering. Try again later."),
         (httpx.ConnectError("down"), "Scryfall couldn't be reached. Try again later."),
-        (httpx.ReadTimeout("slow"), "Scryfall couldn't be reached. Try again later."),
+        (httpx.ReadTimeout("slow"), "Scryfall didn't answer in time. Try again later."),
     ],
 )
 async def test_scryfall_failures_are_plain_sentences(answer: object, words: str) -> None:
@@ -138,3 +138,58 @@ async def test_scryfall_failures_are_plain_sentences(answer: object, words: str)
         with pytest.raises(ScryfallError) as err:
             await ask
         assert str(err.value) == words and not any(raw in str(err.value) for raw in RAW), err.value
+
+
+@pytest.mark.parametrize(
+    ("answer", "state"),
+    [
+        ((429, "30"), "slow_down"),
+        ((503, None), "failing"),
+        ((httpx.ConnectError("down"), None), "unreachable"),
+    ],
+)
+async def test_one_outage_reads_the_same_in_the_tools_and_on_the_home_page(
+    stack: Stack, answer: tuple, state: str
+) -> None:
+    """0.7.46 sweep B-1: within one 429, list_my_decks said "slow down; try again later" and
+    get_deck "paused for now. Try again a little later."; the home panel said "Archidekt did not
+    answer in time." for a 429, a 503 and a refused connection alike. Each state now has its one
+    sentence (busy.OUTAGE), and every surface says that one."""
+    import html
+
+    from mtg_gateway.busy import outage
+
+    from .test_decks_and_proxy import call, mcp_token, structured
+
+    b = await _linked(stack)
+    token = await mcp_token(stack.h)
+    svc = stack.h.app.state.gateway.decks
+    sub = svc.db._one("SELECT sub FROM users", ())["sub"]
+    pacer = svc.client.pacer
+    first = outage(state, again=state == "slow_down")
+    # what holds while it lasts: the first refusal's own words, then the pause it opened
+    after = outage("slow_down", again=True) if state == "slow_down" else None
+    try:
+        svc.forget_member(sub)
+        stack.ark.inject = [answer] * 40  # type: ignore[list-item]
+        said = [structured(await call(stack.h, token, "list_my_decks"))["message"]]
+        said.append(structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))["message"])
+        assert said[0] == first, said
+        assert said[1] in {first, after, outage("paused", again=True)}, said
+        if state == "slow_down":
+            assert said == [first, first], said  # one 429, one sentence in every tool
+        pacer._failures = pacer._open_until = pacer._retry_until = 0
+        svc.forget_member(sub)
+        stack.ark.inject = [answer] * 40  # type: ignore[list-item]
+        home = (await b.http.get("/", headers=NAV)).text
+        assert html.escape(first) in home, home.split("<h2>My decks</h2>", 1)[-1][:300]
+        assert "did not answer in time" not in home
+        pacer._failures = pacer._open_until = pacer._retry_until = 0
+        svc.forget_member(sub)
+        stack.ark.inject = [answer] * 40  # type: ignore[list-item]
+        panel = (await b.http.get("/api/decks/mine?shape=recent")).json()
+        assert html.escape(first) in panel["html"], panel
+    finally:
+        stack.ark.inject = []
+        pacer._failures = pacer._open_until = pacer._retry_until = 0
+        await b.aclose()

@@ -405,7 +405,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         # by id only: a name would stop every printing of the card
         if not wid.startswith("w_"):
             return JSONResponse(
-                {"ok": False, "error": "invalid", "message": "Send the watch's id."}, 400, headers=NO_STORE
+                {"ok": False, "error": "invalid", "message": "Send the watch's ID."}, 400, headers=NO_STORE
             )
         try:
             names = state.prices.unwatch_card(sub, wid)
@@ -454,12 +454,12 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         name="watch_card",
         title="Watch a card's price",
         description=(
-            "Add a card to the member's watchlist, or change a watched one's list or named alerts (others "
-            "kept). By name it follows Scryfall's printing for the name; set_code and collector_number "
-            "follow one printing. Alerts: alert_pct, alert_above, alert_below (dollars, or euros when it has "
-            "no dollar price) and alert_drop; a new watch with none gets the member's defaults. Prices are "
-            "checked daily; alerts go out as push notifications. Changes only gateway data. Returns today's "
-            "price when Scryfall answered (printing_now: its printing)."
+            "Add a card to the member's watchlist, or change a watched one's list or named alerts "
+            "(others kept). By name it follows Scryfall's printing for the name; set_code and "
+            "collector_number: one printing. Alerts: alert_pct, alert_above, alert_below (dollars, or "
+            "euros with no dollar price) and alert_drop; a new watch with none gets the member's "
+            "defaults. Checked daily; alerts are push notifications. Changes only gateway data. "
+            "Returns today's price when Scryfall answered (printing_now: its printing)."
         ),
         annotations={
             "readOnlyHint": False,
@@ -469,10 +469,10 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         },
     )
     async def watch_card(
-        name: Annotated[str, Field(description="The card's name.")] = "",
+        name: str = "",
         set_code: Annotated[str | None, Field(description="Set code, such as cmm.")] = None,
         collector_number: Annotated[str | None, Field(description="Collector number in that set.")] = None,
-        finish: Annotated[Literal["nonfoil", "foil", "etched"], Field(description="The finish.")] = "nonfoil",
+        finish: Literal["nonfoil", "foil", "etched"] = "nonfoil",
         alert_pct: Annotated[float | None, Field(description="Alert on a daily move above this %.")] = None,
         alert_above: Annotated[
             float | None, Field(description="Alert when the price rises above this.")
@@ -486,9 +486,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         ] = None,
         list_name: Annotated[
             str | None,
-            Field(
-                description="The watchlist list (group) to put the card in; made when new. Empty: no list."
-            ),
+            Field(description="The watchlist list (group) for it, made when new. Empty: none."),
         ] = None,
         clear_alerts: Annotated[
             bool,
@@ -519,7 +517,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         name="watch_deck",
         title="Watch a deck's value",
         description=(
-            "Add a deck (Archidekt id or link, the member's own or a public one) to the member's watchlist: "
+            "Add a deck (Archidekt ID or link, the member's own or a public one) to the member's watchlist: "
             "the gateway prices its cards once a day and keeps the deck's value over time. Changes only the "
             "member's gateway data, never Archidekt."
         ),
@@ -541,9 +539,9 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         name="unwatch",
         title="Remove from the watchlist",
         description=(
-            "Remove a card (card: its watch_id from list_watchlist, or its name, which removes every "
-            "printing of it) or a deck (deck_id) from the member's watchlist. Its price history stops "
-            "growing; the gateway's stored prices age out on their own."
+            "Remove a card (card: its watch_id from list_watchlist, or its name: every printing) or a "
+            "deck (deck_id) from the member's watchlist. Its price history stops growing; stored "
+            "prices age out on their own."
         ),
         annotations={
             "readOnlyHint": False,

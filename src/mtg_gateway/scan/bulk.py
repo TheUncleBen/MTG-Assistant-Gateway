@@ -64,6 +64,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..busy import outage
 from .names import fold
 from .scryfall import PRINT_ORDERS, PRINT_PAGES, ScryfallError, browse_row
 
@@ -92,6 +93,10 @@ DOWNLOAD_HOSTS = ("data.scryfall.io", "api.scryfall.com")
 PRICE_KEYS = ("usd", "usd_foil", "usd_etched", "eur", "eur_foil", "tix")
 # printings that are no card to look a name up by (an art card is "Name // Name" with its own id)
 NAMELESS_LAYOUTS = ("art_series",)
+# what Scryfall's card-name catalog leaves out: the copy's own list of names (CARD_NAMES_KEY) leaves
+# them out too, so it can stand in for that catalog (names.py) when Scryfall can't send it
+CATALOG_EXTRAS = ("token", "double_faced_token", "emblem", "art_series", "planar", "scheme", "vanguard")
+CARD_NAMES_KEY = "card_names"
 
 SCHEMA = """
 CREATE TABLE printings (
@@ -152,7 +157,7 @@ def as_of_line(as_of: str | None) -> str:
     day can't be read. Never "and prices": the pages show no prices from the copy."""
     day = _day(as_of)
     where = f"As of {day}" if day else "From the gateway's own copy"
-    return f"{where} \u00b7 Scryfall can't be reached"
+    return f"{where} \u00b7 {outage('unavailable', 'Scryfall').removesuffix('.')}"
 
 
 def prices_line(as_of: str | None) -> str:
@@ -231,6 +236,7 @@ def build(
         values: list[tuple[Any, ...]] = []
         full: list[tuple[str, str, str]] = []
         faces: list[tuple[str, str, str]] = []
+        card_names: set[str] = set()
 
         def add(oid: str, row: dict[str, Any]) -> None:
             row["oracle_id"] = oid
@@ -258,6 +264,8 @@ def build(
             if name and row.get("layout") not in NAMELESS_LAYOUTS:
                 full.append((fold(name), oid, name))
                 faces.extend((fold(p), oid, name) for p in name.split(" // ") if " // " in name)
+            if name and row.get("layout") not in CATALOG_EXTRAS:
+                card_names.add(name)
 
         def put() -> int:
             conn.executemany("INSERT INTO printings VALUES (?,?,?,?,?,?,?,?,?)", values)
@@ -289,7 +297,11 @@ def build(
         conn.execute(INDEXES)
         conn.executemany(
             "INSERT INTO meta VALUES (?,?)",
-            [*({**meta, "count": str(count)}.items()), ("zdict", zdict)],
+            [
+                *({**meta, "count": str(count)}.items()),
+                ("zdict", zdict),
+                (CARD_NAMES_KEY, zlib.compress("\n".join(sorted(card_names)).encode(), 6)),
+            ],
         )
         conn.commit()
         conn.close()
@@ -526,27 +538,27 @@ class PrintingsCopy:
     async def _index(self, client: Any) -> dict[str, str]:
         """``default_cards`` in Scryfall's bulk-data index: its ``updated_at`` and download address."""
         if client.retry_in() > 0:
-            raise ScryfallError("rate_limited", "Scryfall asked the gateway to slow down")
+            raise ScryfallError("rate_limited", outage("slow_down", "Scryfall"))
         try:
             resp = await client.http.get(f"{client.base}/bulk-data", headers=client.headers)
         except httpx.HTTPError as exc:
-            raise ScryfallError("unavailable", f"bulk-data index: {exc.__class__.__name__}") from exc
+            raise ScryfallError("unavailable", f"Bulk-data index: {exc.__class__.__name__}.") from exc
         if resp.status_code != 200:
-            raise ScryfallError("unavailable", f"bulk-data index answered {resp.status_code}")
+            raise ScryfallError("unavailable", f"Bulk-data index answered {resp.status_code}.")
         try:
             rows = resp.json().get("data")
         except (ValueError, AttributeError) as exc:
-            raise ScryfallError("contract", "bulk-data index is not JSON") from exc
+            raise ScryfallError("contract", "Bulk-data index is not JSON.") from exc
         entry = next((r for r in rows or [] if isinstance(r, dict) and r.get("type") == BULK_TYPE), None)
         if entry is None:
-            raise ScryfallError("contract", f"bulk-data index has no {BULK_TYPE}")
+            raise ScryfallError("contract", f"Bulk-data index has no {BULK_TYPE}.")
         uri = entry.get("jsonl_download_uri")
         updated = entry.get("updated_at")
         if not isinstance(uri, str) or not isinstance(updated, str) or not updated:
-            raise ScryfallError("contract", f"{BULK_TYPE} has no jsonl_download_uri or updated_at")
+            raise ScryfallError("contract", f"{BULK_TYPE} has no jsonl_download_uri or updated_at.")
         where = urlsplit(uri)
         if where.scheme != "https" or where.hostname not in (*DOWNLOAD_HOSTS, urlsplit(client.base).hostname):
-            raise ScryfallError("contract", f"{BULK_TYPE} is offered from an unexpected address")
+            raise ScryfallError("contract", f"{BULK_TYPE} is offered from an unexpected address.")
         size = entry.get("compressed_size")
         return {"uri": uri, "updated_at": updated, "size": str(size) if isinstance(size, int) else ""}
 
@@ -564,7 +576,7 @@ class PrintingsCopy:
             try:
                 async with client.http.stream("GET", entry["uri"], headers=client.headers) as resp:
                     if resp.status_code != 200:
-                        raise ScryfallError("unavailable", f"bulk file answered {resp.status_code}")
+                        raise ScryfallError("unavailable", f"Bulk file answered {resp.status_code}.")
                     # the file as sent (Scryfall sends it as application/gzip, with no
                     # content-encoding): its length is the one to check against
                     encoded = bool(resp.headers.get("content-encoding"))
@@ -583,7 +595,7 @@ class PrintingsCopy:
                 await asyncio.to_thread(out.close)
             if expected and expected.isdigit() and int(expected) != got:
                 # a transfer cut short is a transport failure, not a damaged file
-                raise ScryfallError("unavailable", f"the download was cut off ({got} of {expected} bytes)")
+                raise ScryfallError("unavailable", f"The download was cut off ({got} of {expected} bytes).")
             if halt.is_set():
                 raise Stopped()
             received["whole"] = True
@@ -745,3 +757,17 @@ class PrintingsCopy:
 
     async def oracle_of(self, name: str) -> tuple[str, str] | None:
         return await asyncio.to_thread(self.oracle_of_now, name)
+
+    def card_names_now(self) -> list[str]:
+        """Every card's name as Scryfall's card-name catalog lists it (no tokens, emblems or other
+        extras), from the copy: the name catalog's stand-in while Scryfall can't send its own
+        (0.7.46 sweep B-4). Empty without a copy, for one turned off or unreadable, and for a copy
+        built before it kept the list (the next day's copy has it). Blocking: call it in a thread."""
+        return self._reading(self._card_names, [])
+
+    def _card_names(self) -> list[str]:
+        with self._lock:
+            if self._open() is None:
+                return []
+            blob = self._meta.get(CARD_NAMES_KEY)
+            return [n for n in zlib.decompress(blob).decode().split("\n") if n] if blob else []

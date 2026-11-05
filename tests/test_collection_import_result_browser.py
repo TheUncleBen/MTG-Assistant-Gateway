@@ -99,13 +99,13 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
         _check(page, "import-result", width, theme)
         _import(page, server, BAD)
         assert page.locator("#col-notes .notice").inner_text() == (
-            "Nothing was imported: line 3: quantity 'x' is not a number."
+            "Nothing was imported: line 3: quantity “x” is not a number."
         )
         _check(page, "import-refused", width, theme)
         # the refusals the review fixes added: a quantity out of range, an unclosed quote
         _import(page, server, "Quantity,Name\n1,Opt\n0,Opt\n")
         assert page.locator("#col-notes .notice").inner_text() == (
-            "Nothing was imported: line 3: quantity '0' is not from 1 to 9,999."
+            "Nothing was imported: line 3: quantity “0” is not from 1 to 9,999."
         )
         _check(page, "import-refused-quantity", width, theme)
         _import(page, server, 'Quantity,Name\n1,"Opt' + "x" * 140_000 + "\n")

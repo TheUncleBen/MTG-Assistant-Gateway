@@ -90,7 +90,7 @@
     // the day in UTC, as the tools' as_of_note gives it (as_of is a UTC stamp of the daily copy),
     // so the picker and an assistant's answer always name the same day
     var opts = { dateStyle: "medium", timeZone: "UTC" };
-    return "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached";
+    return "As of " + new Intl.DateTimeFormat(undefined, opts).format(new Date(t)) + " · Scryfall can't be reached right now";
   }
   function samePrint(p, ref) {
     return !!(ref && p && String(p.set || "").toLowerCase() === String(ref.set || "").toLowerCase() &&
@@ -527,11 +527,13 @@
     if (!err) return "The gateway did not answer.";
     if (err.status === 401) return "You are signed out. Sign in again, then retry.";
     if (busy(err)) return "Your other card lookups are still running. Retry when you’re ready.";
-    if (err.kind === "not_found") return (err.message || "Scryfall does not know this card") + ".";
-    if (err.kind === "unavailable") return "Scryfall is not answering right now.";
+    if (err.kind === "not_found") return stop(err.message || "No card is called that");
+    if (err.kind === "unavailable") return "Scryfall can't be reached right now.";
     if (!err.status) return "The gateway did not answer. Check the connection, then retry.";
-    return (err.message || "The gateway did not answer") + ".";
+    return stop(err.message || "The gateway did not answer");
   }
+  // the gateway's refusals end with a full stop already: add one only when it is missing
+  function stop(text) { return /[.?!…]$/.test(text) ? text : text + "."; }
   function failed(err) {
     st.status.textContent = "";
     st.status.className = "ppstatus notice error";

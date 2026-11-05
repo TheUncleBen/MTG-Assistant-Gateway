@@ -607,7 +607,7 @@ async def test_forge_comparison_reads_the_other_deck_first_on_every_path(stack: 
         )
         assert listed["ok"] is False and listed["message"] == (
             "A pasted list can't be paired for Forge, so compare_with works only when deck_ref is a deck "
-            "id, URL or snapshot id."
+            "ID, URL or snapshot ID."
         )
         # the REST route's compare_with
         auth = {"Authorization": f"Bearer {await mcp_token(h)}"}

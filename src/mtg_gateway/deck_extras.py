@@ -550,7 +550,7 @@ def package_box_html(
         + field(
             "dx-pk",
             "package",
-            "Package link or id",
+            "Package link or ID",
             v.get("package", ""),
             placeholder="Link or ID",
             required=True,
@@ -668,7 +668,7 @@ def contest_box_html(
         + field(
             "dx-ec",
             "contest",
-            "Contest link or id",
+            "Contest link or ID",
             v.get("contest", ""),
             placeholder="https://archidekt.com/contest/discussion/…",
             required=True,
@@ -719,7 +719,7 @@ def withdraw_box_html(
         + field(
             "dx-wc",
             "contest",
-            "Contest link or id",
+            "Contest link or ID",
             v.get("contest", ""),
             placeholder="https://archidekt.com/contest/discussion/…",
             required=True,
@@ -1234,7 +1234,7 @@ def add_deck_extras_routes(server: Any, state: Any, h: SimpleNamespace) -> None:
         try:
             ref = values["package"].strip()
             if not ref:
-                raise DeckError("invalid", "Pick one of your packages, or paste a package link or id.")
+                raise DeckError("invalid", "Pick one of your packages, or paste a package link or ID.")
             cat = values["categories"] if values["categories"] in packages.CATEGORY_CHOICES else "package"
             p = await decks.propose_package(
                 sub,

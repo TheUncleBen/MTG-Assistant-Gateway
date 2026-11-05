@@ -15,9 +15,21 @@ WRITES_OFF_STATE = "Archidekt writes are switched off on this gateway"
 FOLLOW_SELF = "You can't follow yourself on Archidekt."
 
 
+def sentence(text: object) -> str:
+    """A refusal's words (or an exception's) as a whole sentence: a capital first letter and one
+    full stop at the end, never two (0.7.46 sweep B-3)."""
+    words = str(text).strip()
+    if not words:
+        return words
+    words = (
+        words[0].upper() + words[1:] if words[0].islower() and "_" not in words.split(" ", 1)[0] else words
+    )
+    return words if words[-1] in ".!?…" else words + "."
+
+
 # The Archidekt link, one wording for each case (whole-application audit, row 12): no link at all,
 # a link Archidekt no longer accepts (only relinking helps, never waiting), and a link stored
-# without its Archidekt user id. ``public_url`` names the Account page where the reader can't click.
+# without its Archidekt user ID. ``public_url`` names the Account page where the reader can't click.
 def _account(public_url: str) -> str:
     return f"at {public_url.rstrip('/')}/account" if public_url else "on the Account page"
 
@@ -34,7 +46,7 @@ def relink(public_url: str = "") -> str:
 
 
 def no_user_id(public_url: str = "") -> str:
-    return f"The linked Archidekt account is missing its user id. Relink it {_account(public_url)}."
+    return f"The linked Archidekt account is missing its user ID. Relink it {_account(public_url)}."
 
 
 NOT_OWN_COMMENT = "Only your own comments can be changed or deleted."

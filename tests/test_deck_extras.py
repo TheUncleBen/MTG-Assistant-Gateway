@@ -205,7 +205,7 @@ async def test_a_package_is_added_through_the_review_page_and_listed_for_the_box
         assert "More rows than your low-risk limit also wait for your press." in page
         assert "Add a package" in page and "data-open" in page and "Review the cards" in page
         empty = await _post(b, "/decks/42/package", package="")
-        assert empty.status_code == 400 and "paste a package link or id" in empty.text
+        assert empty.status_code == 400 and "paste a package link or ID" in empty.text
         r = await _post(b, "/decks/42/package", package=pkg_id, categories="default", skip_existing="1")
         pid = _pid(r)
         assert "Arcane Signet" not in {c["card"]["oracleCard"]["name"] for c in ark.decks[42]["cards"]}

@@ -24,7 +24,7 @@ import zlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import card_models, dbwait, deck_stats
+from . import card_models, dbwait, deck_stats, refusals
 from . import forge as forge_module
 from .archidekt import Deck, DeckCard
 from .db import Database, _like
@@ -325,7 +325,7 @@ class ReportService:
         before anything is stored, so a deck that can't be read leaves no report behind.
         A ``deck`` given without ``snapshot_id`` is the Archidekt deck already read."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
-            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}.")
         options = sim_options(options)
         if same_opponents_as is not None and pair_with is not None:
             raise DeckError("invalid", BOTH_PAIRINGS)
@@ -418,11 +418,11 @@ class ReportService:
         the member's reports with the source "Pasted list" (filed under no deck, so no deck's trend
         counts it). Its Forge games come as for a stored deck. ``on_stored``: as for ``run``."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
-            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}.")
         try:
             cards = parse_decklist(text)
         except DecklistError as exc:
-            raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
+            raise DeckError("invalid", f"Decklist could not be read: {refusals.sentence(exc)}") from exc
         stats = deck_stats.compute_from_text(cards)
         commander = (stats.get("commanders") or [None])[0]
         name = f"{SOURCE_LIST} ({_front_face(commander)})" if commander else SOURCE_LIST
@@ -469,7 +469,7 @@ class ReportService:
         ``run`` (a pasted list sits there as a deck does); ``source`` None then makes it the pair's
         Head to head report."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
-            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}.")
         if same_opponents_as is not None and pair_with is not None:
             raise DeckError("invalid", BOTH_PAIRINGS)
         shared = self._share_from(sub, same_opponents_as) if same_opponents_as is not None else None
@@ -1561,7 +1561,7 @@ class ReportService:
         opponents themselves are read when this run starts (``_shared_now``), as that run may
         still be waiting for its own."""
         if not isinstance(report_id, str) or not report_id.strip():
-            raise DeckError("invalid", "same_opponents_as must be the id of one of your reports.")
+            raise DeckError("invalid", "same_opponents_as must be the ID of one of your reports.")
         row = self.db._one(
             "SELECT id, deck_name, forge_json FROM reports WHERE id = ? AND owner_sub = ?",
             (report_id.strip(), sub),
@@ -2280,7 +2280,7 @@ class ReportService:
         if self.mf is None:
             return None
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
-            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}.")
         opts = sim_options(options, ab=True)
         refused = next((m for m in modes if m not in SIM_MODES), None)
         if refused is None and modes[0] != modes[1]:
@@ -4158,14 +4158,14 @@ def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str
     if not options:
         return {}
     if not isinstance(options, dict):
-        raise DeckError("invalid", "test options must be an object")
+        raise DeckError("invalid", "Test options must be an object.")
     allowed = (*AB_OPTIONS, *AB_FLAGS) if ab else RUN_OPTIONS
     out = {k: v for k, v in options.items() if v is not None and v != [] and v != {}}
     unknown = sorted(k for k in out if k not in allowed)
     if unknown:
-        raise DeckError("invalid", f"unknown test option(s): {', '.join(unknown)}")
+        raise DeckError("invalid", f"Unknown test option(s): {', '.join(unknown)}.")
     if len(json.dumps(out)) > 60_000:
-        raise DeckError("too_large", "test options larger than 60 kB")
+        raise DeckError("too_large", "Test options larger than 60 kB.")
     for key, low, high in (
         ("opponents", 1, 5),
         ("until_turn", 1, 30),
@@ -4173,14 +4173,14 @@ def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str
         ("forge_seed", -(2**63), 2**63 - 1),
     ):
         if key in out and (not isinstance(out[key], int) or isinstance(out[key], bool)):
-            raise DeckError("invalid", f"test option {key} must be an integer")
+            raise DeckError("invalid", f"Test option {key} must be an integer.")
         if key in out and not low <= out[key] <= high:
-            raise DeckError("invalid", f"test option {key} must be from {low} to {high}")
+            raise DeckError("invalid", f"Test option {key} must be from {low} to {high}.")
     for key in ("annotations", "annotations_a", "annotations_b", "combos"):
         if key in out and not isinstance(out[key], list):
-            raise DeckError("invalid", f"test option {key} must be a list")
+            raise DeckError("invalid", f"Test option {key} must be a list.")
     if "mulligan" in out and not isinstance(out["mulligan"], dict):
-        raise DeckError("invalid", "test option mulligan must be an object")
+        raise DeckError("invalid", "Test option mulligan must be an object.")
     return out
 
 

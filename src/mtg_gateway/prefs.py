@@ -426,7 +426,7 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
             isinstance(page, str) and _PAGE_ID.fullmatch(page) and type(seq) is int and 0 < seq <= _MAX_SEQ
         ):
             return JSONResponse(
-                {"ok": False, "error": "invalid", "message": "page is an id and seq a whole number from 1"},
+                {"ok": False, "error": "invalid", "message": "page is an ID and seq a whole number from 1"},
                 400,
             )
         have = state.db.get_prefs(sub) if copy else {}

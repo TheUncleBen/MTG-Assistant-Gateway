@@ -24,7 +24,7 @@ from starlette.responses import RedirectResponse, Response
 
 from . import deck_stats
 from .archidekt import FORMAT_NAMES, format_label
-from .busy import busy_response
+from .busy import AGAIN, BUSY_TITLE, busy_response, outage
 from .deckpage import (
     LIST_ORDERS,
     money,
@@ -196,8 +196,8 @@ DECK_PROBLEM_TITLES = {
     "not_found": "This deck could not be found.",
     "forbidden": "This deck is private, so it can't be shown here.",
     "auth": "This deck is private, so it can't be shown here.",
-    "unavailable": "Archidekt didn't answer. Try again later.",
-    "rate_limited": "Archidekt didn't answer. Try again later.",
+    "unavailable": outage("unavailable", again=True),
+    "rate_limited": f"{BUSY_TITLE}. {AGAIN}",
 }
 
 
@@ -249,7 +249,7 @@ DECK_ERR_MESSAGES = {
     "not_found": "Archidekt could not find that deck.",
     "rate_limited": "Too many requests for your account are still running. Wait for them to finish "
     "and try again.",
-    "unavailable": "Archidekt or the research service is unavailable right now. Try again later.",
+    "unavailable": outage("unavailable", "Archidekt or the research service", again=True),
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it on the Account page.",
     "forbidden": "Archidekt refused access to that deck.",

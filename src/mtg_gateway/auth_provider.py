@@ -40,6 +40,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
 from . import assistants, dbwait, masked, smallpage
+from .busy import outage
 from .cimd import (
     CimdBusy,
     CimdError,
@@ -792,7 +793,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             raise TokenError("invalid_grant", "this account has been disabled on this gateway")
         outcome = await self.membership.check(sub)
         if outcome is Membership.UNAVAILABLE:
-            raise TokenError("invalid_request", "the identity provider can't be reached; try again later")
+            raise TokenError("invalid_request", outage("unavailable", "The identity provider", again=True))
         if outcome is Membership.SIGN_IN:
             # None of the member's sign-ins is honoured by the provider any more (its refresh
             # token ran out, say): refused until they sign in on the website again, but not

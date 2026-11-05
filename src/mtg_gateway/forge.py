@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from . import dbwait
+from . import dbwait, refusals
 from .decklist import DecklistError, parse_decklist
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def forge_deck(text: str) -> dict[str, Any]:
     try:
         cards = parse_decklist(text)
     except DecklistError as exc:
-        raise ForgeError("invalid", f"decklist could not be read: {exc}") from exc
+        raise ForgeError("invalid", f"Decklist could not be read: {refusals.sentence(exc)}") from exc
     commander: list[str] = []
     main: dict[str, int] = {}
     for c in cards:
@@ -832,7 +832,7 @@ async def start_solo_run(
     time limit (``game_seconds``, else the service's own) stops it; only turns up to
     ``until_turn`` count."""
     if not 1 <= until_turn <= SOLO_MAX_TURN:
-        raise ForgeError("invalid", f"until_turn must be from 1 to {SOLO_MAX_TURN}")
+        raise ForgeError("invalid", f"until_turn must be from 1 to {SOLO_MAX_TURN}.")
     deck = forge_deck(deck_text)
     fmt = "Commander" if deck["commander"] else "Constructed"
     names = list(dict.fromkeys(deck["commander"] + [name for _, name in deck["main"]]))

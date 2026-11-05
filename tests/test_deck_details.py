@@ -99,7 +99,7 @@ async def test_details_noop_and_bad_values_are_refused(stack: Stack) -> None:
     msg = await refused({"name": "Sample Commander Deck", "private": False, "edh_bracket": None})
     assert "already has these details" in msg
     msg = await refused({"deck_format": "cube"})
-    assert "deck_format" in msg and "'commander'" in msg and "'oathbreaker'" in msg
+    assert "deck_format must be" in msg and "commander, " in msg and "oathbreaker" in msg
     assert "edh_bracket" in await refused({"edh_bracket": 6})
     assert "edh_bracket" in await refused({"edh_bracket": True})
     assert "name must be" in await refused({"name": ""})
@@ -533,7 +533,7 @@ async def test_category_changes_are_validated(stack: Stack) -> None:
     assert "always files" in await refused(
         [{"action": "set_commander", "card_name": "Sol Ring", "category": "Ramp"}]
     )
-    assert "one set_category or set_commander per card" in await refused(
+    assert "One set_category or set_commander per card" in await refused(
         [
             {"action": "set_category", "card_name": "Sol Ring", "category": "Ramp"},
             {"action": "set_commander", "card_name": "sol ring"},

@@ -324,8 +324,8 @@ async def test_archidekts_own_slow_down_pauses_a_delete_with_its_seconds(stack: 
     finally:
         watcher.cancel()
     assert (
-        "Archidekt asked the gateway to slow down, so it is pausing the folder delete for 1 second."
-        in seen_steps
+        "Archidekt asked the gateway to slow down, so its requests are paused for now. The folder "
+        "delete goes on in 1 second." in seen_steps
     ), seen_steps
     assert 201 not in stack.ark.decks
 

@@ -254,7 +254,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         a = request.query_params.get("a", "")
         b = request.query_params.get("b", "")
         if not a or not b:
-            raise DeckError("invalid", "give a and b: deck ids or URLs, or snapshot ids")
+            raise DeckError("invalid", "Give a and b: deck IDs or URLs, or snapshot IDs.")
         deck_a = await _deck_or_snapshot(who.sub, a)
         deck_b = await _deck_or_snapshot(who.sub, b)
         return ok({"a": deck_brief(deck_a), "b": deck_brief(deck_b), **deck_stats.compare(deck_a, deck_b)})
@@ -378,7 +378,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # The page's one follow-up after a stale answer: the deck read again, nothing written.
             names = data.get("names")
             if not isinstance(names, list) or len(names) > 40 or not all(isinstance(n, str) for n in names):
-                raise DeckError("invalid", "names must be a list of up to 40 card names")
+                raise DeckError("invalid", "Names must be a list of up to 40 card names.")
             deck = await decks.get_own_deck(who.sub, deck_id)
             return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
         decks.refuse_while_made(deck_id)  # its new-deck apply is still putting the cards in
@@ -391,7 +391,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         answer = pid is not None
         if answer:
             if not isinstance(pid, str) or not pid:
-                raise DeckError("invalid", "proposal_id must be a string")
+                raise DeckError("invalid", "proposal_id must be a string.")
             p = decks.describe(who.sub, pid)
             if p.get("kind") != "edit" or str(p.get("deck_id")) != deck_id.strip():
                 raise DeckError("invalid", "That proposal is not an edit of this deck.")
@@ -411,7 +411,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             # since is refused as changed, so the page asks again
             version = data.get("version")
             if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
-                raise DeckError("invalid", "version must be a whole number")
+                raise DeckError("invalid", "version must be a whole number.")
             if version is None:
                 raise DeckError("invalid", "Send the version of the proposal the page showed.")
         else:
@@ -545,7 +545,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         pid = data.get("proposal_id")
         if pid is not None:
             if not isinstance(pid, str) or not pid:
-                raise DeckError("invalid", "proposal_id must be a string")
+                raise DeckError("invalid", "proposal_id must be a string.")
             p = decks.describe(who.sub, pid)
             if p.get("kind") != "custom_cards" or str(p.get("deck_id")) != deck_id.strip():
                 raise DeckError("invalid", "That proposal is not a custom card change of this deck.")
@@ -684,9 +684,9 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if kind == "clone":
             name = data.get("name")
             if name is not None and not isinstance(name, str):
-                raise DeckError("invalid", "name must be a string")
+                raise DeckError("invalid", "name must be a string.")
             return ok(await decks.propose_clone(who.sub, str(data.get("deck_id", "")), name), 201)
-        raise DeckError("invalid", "kind must be edit, new_deck, restore, details or clone")
+        raise DeckError("invalid", "Kind must be edit, new_deck, restore, details or clone.")
 
     @route("/proposals/{pid}", "GET")
     async def get_proposal(request: Request, who: Caller) -> Response:
@@ -708,7 +708,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             return data
         version = data.get("version")
         if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
-            raise DeckError("invalid", "version must be a whole number")
+            raise DeckError("invalid", "version must be a whole number.")
         if version is None and who.via == "browser":
             decks.describe(who.sub, pid)  # nobody's proposal but the member's: not_found first
             raise DeckError("invalid", "Send the version of the proposal the page showed.")

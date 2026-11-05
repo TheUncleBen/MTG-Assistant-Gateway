@@ -236,7 +236,9 @@ async def test_outside_an_apply_429s_still_count_towards_the_breaker(clock: list
         assert err.value.kind == "rate_limited"
     with pytest.raises(ArchidektError) as err:
         await client.search_decks(name="Sample")
-    assert err.value.kind == "unavailable" and "paused after repeated failures" in str(err.value)
+    assert err.value.kind == "unavailable" and str(err.value) == (
+        "Archidekt failed several times in a row, so its requests are paused for now. Try again later."
+    )
     assert err.value.sent is False  # refused by the pacer: nothing left the gateway
     assert _reads(ark, "/api/decks/v3/") == 5
 
@@ -466,9 +468,8 @@ async def test_outside_an_apply_a_running_pause_refuses_at_once(clock: list[floa
         await client.search_decks(name="Sample")
     # no number of seconds in the words (0.7.46 audit C-15: no time promises); the wait is a field
     assert err.value.kind == "rate_limited" and (
-        "Archidekt asked the gateway to slow down, so its Archidekt requests are paused for now. "
-        "Try again a little later."
-    ) in str(err.value)
+        "Archidekt asked the gateway to slow down, so its requests are paused for now. Try again later."
+    ) == str(err.value)
     assert 20 <= err.value.retry_after <= 21
     assert clock == [] and ark.calls == []
 
@@ -789,3 +790,15 @@ def test_the_review_page_no_longer_blames_another_account_for_a_refusal() -> Non
 
     assert "another Archidekt account" not in ERR_MESSAGES["forbidden"]
     assert "no need to relink" in ERR_MESSAGES["forbidden"]
+
+
+def test_the_user_agent_names_the_running_version() -> None:
+    """0.7.46 sweep B-9: Archidekt and Scryfall are told the version that is running (the package
+    version), not a number from long ago; Scryfall's client says the same thing as Archidekt's."""
+    from mtg_gateway import __version__
+    from mtg_gateway.config import USER_AGENT
+    from mtg_gateway.scan.scryfall import ScryfallClient
+
+    assert USER_AGENT.startswith(f"mtg-assistant-gateway/{__version__} (+https://github.com/")
+    assert Settings.__dataclass_fields__["archidekt_user_agent"].default == USER_AGENT
+    assert ScryfallClient().headers["User-Agent"] == USER_AGENT

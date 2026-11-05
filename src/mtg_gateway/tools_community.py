@@ -26,16 +26,16 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         name="get_registration_pdf",
         title="Make a deck registration sheet (PDF)",
         description=(
-            "Archidekt's Deck Registration PDF for a tournament, for any deck the user can open: pdf_url, "
-            "the sheet Archidekt filled (give it as a link). Main deck: cards whose first category counts in "
-            "the deck; sideboard: first category Sideboard; a Maybeboard is left off. sort: alpha (by name, "
-            "the default), manaValue, color or type. The details are optional and go to Archidekt only: pass "
-            "only what the user gave you for this sheet. Changes nothing in the deck or the account."
+            "Archidekt's Deck Registration PDF for a tournament, for any deck the user can open: "
+            "pdf_url, the sheet Archidekt filled (give it as a link). Main deck: cards whose first "
+            "category counts in the deck; sideboard: first category Sideboard; no Maybeboard. sort: "
+            "alpha (default), manaValue, color or type. The optional details go to Archidekt only: "
+            "pass only what the user gave you for it. Changes nothing in the deck or the account."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
     async def get_registration_pdf(
-        deck_id: Annotated[str, Field(description="The deck: its id or URL.")],
+        deck_id: Annotated[str, Field(description="The deck: its ID or URL.")],
         sort: str = "alpha",
         first_name: str | None = None,
         last_name: str | None = None,
@@ -105,15 +105,15 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         name="propose_profile_change",
         title="Propose a change to my Archidekt profile or settings (two-step)",
         description=(
-            "Step 1 of changing one setting of the user's own Archidekt account, one change a proposal. "
+            "Step 1 of changing one setting of the user's own Archidekt account, one a proposal. "
             "field, then: bio (bio: plain text, at most 1000 characters; empty clears it), username "
-            "(username), email (switch: contactable, newsletter, comment_emails or site_notifications; on), "
-            "preference (preference and value: deck_view card/text/grid/scroll/table/brewer; group_by, "
-            "sort_by: Archidekt's own, in lower case; price_source_1, price_source_2: card kingdom, "
-            "tcgplayer, mana pool, star city games, cardsphere, cardhoarder, cardmarket, card trader, tcg "
-            "land or none; search_game paper/mtgo/arena; unique_search, use_default_categories, "
-            "show_custom_uploads on/off) or collection_public (on). Returns a proposal (kind 'action') that "
-            "only the user's own press applies. Changes nothing on Archidekt by itself."
+            "(username), email (switch: contactable, newsletter, comment_emails or site_notifications; "
+            "on), preference (preference and value: deck_view card/text/grid/scroll/table/brewer; "
+            "group_by, sort_by: Archidekt's own, lower case; price_source_1, price_source_2: card "
+            "kingdom, tcgplayer, mana pool, star city games, cardsphere, cardhoarder, cardmarket, card "
+            "trader, tcg land or none; search_game paper/mtgo/arena; unique_search, "
+            "use_default_categories, show_custom_uploads on/off) or collection_public (on). Only the "
+            "user's press applies it (kind 'action'). Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,

@@ -79,7 +79,7 @@ def test_the_running_report_fits_and_fills_in_by_itself(server: Server) -> None:
                         if rid == "rep_run":
                             assert "The solo test is running on the research service." in state["solo"]
                         else:
-                            assert "the research service did not answer" in state["solo"]
+                            assert "the research service couldn't be reached" in state["solo"]
                             assert "Error executing tool" not in state["solo"]
                             assert state["again"] >= 44, state
                     page.goto(f"{server.base}/reports", wait_until="networkidle")

@@ -47,6 +47,7 @@ from starlette.responses import JSONResponse, Response
 
 from . import refusals
 from .approve import CARD_IMAGE_HOSTS
+from .busy import outage
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -406,7 +407,7 @@ FIXED_MESSAGES = {
     "not_found": "The card behind this link no longer exists.",
     "invalid": "The card behind this link no longer exists.",
     "not_linked": refusals.not_linked(),
-    "rate_limited": "Scryfall asked the gateway to wait. Ask your assistant for the printings again.",
+    "rate_limited": f"{outage('slow_down', 'Scryfall')} Ask your assistant for the printings again.",
     "unavailable": "The data behind this link could not be loaded right now.",
 }
 

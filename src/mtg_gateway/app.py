@@ -343,26 +343,87 @@ def numbers_as_text_middleware(tool_schema: Callable[[str], dict[str, Any] | Non
 _VALIDATION_HEAD = re.compile(r"^Error executing tool (\w+): \d+ validation errors? for \w+\n")
 
 
+_REASON = re.compile(
+    r"^(?P<msg>.*?)\s*\[type=(?P<type>\w+)(?:, input_value=(?P<value>.*?))?(?:, input_type=\w+)?\]$"
+)
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+_UNION_TAG = re.compile(r"\.(?:[a-z-]+\[[^\]]*\]|[A-Z]\w*)(?=\.|$)")
+
+
+def _or_list(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " or " + words[-1]
+
+
+def _plain_reason(field: str, kind: str, msg: str) -> str:
+    """One refused argument in plain words, never pydantic's own ("Input should be ...",
+    "Field required"; 0.7.46 sweep B-3). ``field`` is the argument's path (changes[0].action)."""
+    n = (_NUMBER.findall(msg) or [""])[0]
+    quoted = re.findall(r"'([^']*)'", msg)
+    plain = {
+        "missing": f"{field} is required",
+        "extra_forbidden": f"{field} is not an argument of this tool",
+        "literal_error": f"{field} must be {_or_list(quoted)}" if quoted else "",
+        "enum": f"{field} must be {_or_list(quoted)}" if quoted else "",
+        "int_type": f"{field} must be a whole number",
+        "int_parsing": f"{field} must be a whole number",
+        "int_from_float": f"{field} must be a whole number",
+        "float_type": f"{field} must be a number",
+        "float_parsing": f"{field} must be a number",
+        "bool_type": f"{field} must be true or false",
+        "bool_parsing": f"{field} must be true or false",
+        "string_type": f"{field} must be text",
+        "list_type": f"{field} must be a list",
+        "dict_type": f"{field} must be an object",
+        "model_type": f"{field} must be an object",
+        "model_attributes_type": f"{field} must be an object",
+        "greater_than_equal": f"{field} must be at least {n}",
+        "greater_than": f"{field} must be more than {n}",
+        "less_than_equal": f"{field} must be at most {n}",
+        "less_than": f"{field} must be less than {n}",
+        "string_too_short": f"{field} must have at least {n} character{'' if n == '1' else 's'}",
+        "string_too_long": f"{field} must have at most {n} characters",
+        "too_short": f"{field} must have at least {n} item{'' if n == '1' else 's'}",
+        "too_long": f"{field} must have at most {n} items",
+        "string_pattern_mismatch": f"{field} is not in the form it takes",
+    }.get(kind, "")
+    if plain:
+        return plain
+    # a kind not listed: pydantic's sentence, with its "Input should be" in the tool's words
+    words = re.sub(r"^Input should be ", "must be ", msg).replace("'", "")
+    return f"{field} {words[:1].lower()}{words[1:]}" if field else words
+
+
 def _schema_problems(text: str) -> str | None:
-    """'changes.0.action: Input should be 'add', ...; ...' from the framework's text for arguments
-    the tool's input schema refused, or None when ``text`` is not that."""
+    """'changes[0].action must be add, remove or ...; games must be at least 10' from the
+    framework's text for arguments the tool's input schema refused, or None when ``text`` is not
+    that."""
     m = _VALIDATION_HEAD.match(text)
     if not m:
         return None
-    problems: list[str] = []
+    found: list[tuple[str, str]] = []
     field: str | None = None
     for line in text[m.end() :].splitlines():
         if line.startswith("    For further information"):
             continue
         if line.startswith("  ") and field is not None:
-            reason = re.sub(r"\s*\[type=.*$", "", line.strip())
-            problems.append(f"{field}: {reason}" if field else reason)
+            got = _REASON.match(line.strip())
+            msg, kind = (got.group("msg"), got.group("type")) if got else (line.strip(), "")
+            found.append((field, _plain_reason(field or "the arguments", kind, msg)))
             field = None
         elif not line.startswith(" "):
             # a research tool's arguments arrive wrapped in one "params" object (mf_proxy): the
-            # member's field is the one inside it
-            field = re.sub(r"^params\.", "", line.strip())
-    return "; ".join(problems)[:1500] or None
+            # member's field is the one inside it; a union's branch tags (list[DeckChange],
+            # dict[str,any]) are pydantic's, not the tool's; a list item's index reads as [0]
+            path = _UNION_TAG.sub("", re.sub(r"^params\.", "", line.strip()))
+            field = re.sub(r"\.(\d+)(?=\.|$)", r"[\1]", path)
+    # a union's other branch refuses the whole field ("changes must be an object") beside the
+    # real problem inside it: the inner one is the one that says what to fix
+    problems = [
+        said
+        for at, said in found
+        if not at or not any(other.startswith((at + ".", at + "[")) for other, _ in found)
+    ]
+    return "; ".join(dict.fromkeys(problems))[:1500] or None
 
 
 def _compact_text(data: dict[str, Any], structured: dict[str, Any]) -> dict[str, Any] | None:
@@ -452,7 +513,7 @@ def schema_error_middleware():
         if problems is None:
             return result
         out = _with_error_code(
-            {"ok": False, "error": "invalid", "message": f"the arguments do not fit the tool: {problems}"}
+            {"ok": False, "error": "invalid", "message": f"The arguments do not fit the tool: {problems}."}
         )
         return types.CallToolResult(
             content=[types.TextContent(type="text", text=pydantic_core.to_json(out).decode())],
@@ -639,7 +700,7 @@ def server_instructions(public_url: str) -> str:
         "When the user presses Apply on a proposal card or Apply all, the card tells you the outcome "
         "with their next message; nothing is posted in their name. Carry on from that outcome, and call "
         "proposal_status only when it is unclear (still applying). "
-        "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
+        "Any deck can be ingested with get_deck (Archidekt ID or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
         "the test tools. deck_stats answers "
         "curve, colors, price, legality and bracket questions from one read; run_deck_report stores a "

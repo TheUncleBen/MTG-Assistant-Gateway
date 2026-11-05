@@ -20,35 +20,58 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+# One sentence for each state of a service the gateway asks (Archidekt, Scryfall, Forge, the research
+# service), the same in the tools' answers, the site's pages and notices, the home panel and the
+# cards (0.7.46 sweep B-1). The first three say what went wrong with one request; "unavailable" and
+# the two pauses say what holds right now. AGAIN is the one advice to add where a sentence ends an
+# answer.
+OUTAGE = {
+    "timeout": "{s} didn't answer in time.",
+    "unreachable": "{s} couldn't be reached.",
+    "failing": "{s} had a problem answering.",
+    "unavailable": "{s} can't be reached right now.",
+    "slow_down": "{s} asked the gateway to slow down, so its requests are paused for now.",
+    "paused": "{s} failed several times in a row, so its requests are paused for now.",
+    # an apply that stopped before it changed anything (decks.TRY_AGAIN_KINDS), whatever the cause
+    "stopped": "{s} didn't answer, so nothing was changed.",
+}
+AGAIN = "Try again later."
+
+
+def outage(state: str, service: str = "Archidekt", *, again: bool = False) -> str:
+    """The sentence for ``state`` (a key of OUTAGE) of ``service``, with AGAIN after it if asked."""
+    words = OUTAGE[state].format(s=service)
+    return f"{words} {AGAIN}" if again else words
+
+
+FINE = "Nothing is wrong with your decks or your account."
+# FINE with the advice joined on, for a text under a page or box that has its own Try again button
+FINE_THEN = "Nothing is wrong with your decks or your account; try again "
 BUSY_TITLE = "Archidekt is busy"
 BUSY_TEXT = (
     "Other work for your account is still running, or one of your account's limits was reached, so "
-    "this couldn't be done right now. Nothing is wrong with your decks or your account; try again "
-    "a little later."
+    f"this couldn't be done right now. {FINE_THEN}a little later."
 )
 # The busy text when the refusal says why (DeckError.busy_cause, or Archidekt's own 429 behind it).
 BUSY_TEXTS = {
     "member_slots": (
         "Your account already has several Archidekt actions running or waiting, for example from an "
-        "assistant, and there was no turn free for this one. Nothing is wrong with your decks or "
-        "your account; try again once some of them have finished."
+        f"assistant, and there was no turn free for this one. {FINE_THEN}once some of them have "
+        "finished."
     ),
     "budget": (
         "Your account has used up its Archidekt allowance for the last 10 minutes, for example "
         "because an assistant has been busy. It refills a little at a time, and this works again "
-        "once there is room. Nothing is wrong with your decks or your account."
+        f"once there is room. {FINE}"
     ),
-    "archidekt": (
-        "Archidekt asked the gateway to slow down, so the gateway is pausing its Archidekt requests "
-        "for now. Nothing is wrong with your decks or your account; try again later."
-    ),
+    "archidekt": f"{outage('slow_down')} {FINE_THEN}later.",
 }
 # When the member's own allowance or turns ran out (not Archidekt's own pause), the title says so.
 TOO_MANY_TITLE = "Too many requests right now"
 MEMBER_CAUSES = frozenset({"member_slots", "budget"})
-UNREACHABLE_TITLE = "Archidekt can't be reached right now"
+UNREACHABLE_TITLE = outage("unavailable").removesuffix(".")
 UNREACHABLE_TEXT = (
-    "The gateway could not get an answer from Archidekt (or the research service). This usually "
+    "The gateway couldn't get an answer from Archidekt (or the research service). This usually "
     "clears by itself."
 )
 # The wait to advise when the refusal does not say (a concurrency cap, Archidekt's own 429, an
