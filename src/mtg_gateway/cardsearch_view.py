@@ -465,8 +465,8 @@ def filters_html(f: cq.Filters, *, view: str, total: int | None = None, folded: 
         pref=prefs.CARDS_FILTERS if FOLD_FILTERS_WIDE else "",
     )
     return (
-        f"<form id='cs-form' class='cs' method='get' action='/cards' role='search' data-view='{_esc(view)}' "
-        "data-count-own>"
+        "<form id='cs-form' class='cs' method='get' action='/cards' role='search' autocomplete='off' "
+        f"data-view='{_esc(view)}' data-count-own>"
         + sp.name_row(
             label="Name",
             name="q",

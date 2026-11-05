@@ -3217,7 +3217,7 @@ def deck_list_controls_html(
         clear_html=f"<a class='btn sp-clear clr' href='{esc(here)}'>Clear filters</a>",
     )
     return (
-        "<section class='panel spanel'><form method='get' action='/decks' id='listform' "
+        "<section class='panel spanel'><form method='get' action='/decks' id='listform' autocomplete='off' "
         "data-live>"
         + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
         + ("<input type='hidden' name='show' value='packages'>" if show == "packages" else "")

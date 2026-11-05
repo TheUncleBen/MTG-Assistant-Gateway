@@ -187,8 +187,12 @@
     dismissToast();
     toastEl = el("div", "toast cards-toast" + (opts.error ? " error" : ""));
     toastEl.setAttribute("role", opts.error ? "alert" : "status");
-    if (opts.ok) { var ok = icon("check"); ok.setAttribute("class", "i ok"); toastEl.appendChild(ok); }
-    toastEl.appendChild(el("span", "msg", text));
+    // the check mark is the message's first thing, in its line: at 200% text the message no
+    // longer fits beside an icon of its own and started under it (final polish AA2)
+    var msg = el("span", "msg");
+    if (opts.ok) { var ok = icon("check"); ok.setAttribute("class", "i ok"); msg.appendChild(ok); }
+    msg.appendChild(document.createTextNode(text));
+    toastEl.appendChild(msg);
     (opts.actions || []).forEach(function (a) { toastEl.appendChild(a); });
     var x = el("button", "close icon-only", "×");
     x.type = "button";

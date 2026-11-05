@@ -2525,7 +2525,8 @@ def panel_html(
         clear_html="<a class='btn sp-clear clr' href='/collection'>Clear filters</a>",
     )
     return (
-        "<section class='panel spanel'><form id='listform' method='get' action='/collection'>"
+        "<section class='panel spanel'>"
+        "<form id='listform' method='get' action='/collection' autocomplete='off'>"
         + sp.name_row(
             label="Filter by name",
             name="q",

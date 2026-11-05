@@ -332,7 +332,7 @@ def search_form_html(
     )
     return (
         "<section class='panel spanel'><form method='get' action='/search' id='searchform' "
-        "data-apply='submit'>"
+        "autocomplete='off' data-apply='submit'>"
         + sp.name_row(
             label="Deck name, or an Archidekt link or deck ID",
             name="name",
@@ -565,7 +565,7 @@ def precon_panel_html(listing: dict[str, Any], pq: dict[str, Any], *, view: str,
     )
     return (
         "<section class='panel spanel'>"
-        "<form method='get' action='/precons' id='searchform' data-apply='submit'>"
+        "<form method='get' action='/precons' id='searchform' data-apply='submit' autocomplete='off'>"
         + sp.name_row(
             label="Set or deck name",
             name="q",
@@ -633,7 +633,8 @@ def profile_bar_html(query: dict[str, Any], found: dict[str, Any] | None, *, vie
         cls="pub prof",
     )
     return (
-        "<section class='panel spanel'><form method='get' id='searchform' data-apply='submit'>"
+        "<section class='panel spanel'>"
+        "<form method='get' id='searchform' data-apply='submit' autocomplete='off'>"
         + bar
         + "<noscript><button type='submit' class='btn apply'>Apply</button></noscript></form></section>"
     )
