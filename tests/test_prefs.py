@@ -422,3 +422,99 @@ async def test_an_older_save_from_a_page_that_arrives_after_a_newer_one_is_ignor
         assert db.get_pref(SUB, "card.size.deck") == "m"
     finally:
         await b.aclose()
+
+
+async def test_a_page_id_or_a_choice_with_a_trailing_newline_is_refused(stack: Stack) -> None:
+    """0.7.46 audit (099f600a): the page id and the choices' words are checked whole: "abc\\n"
+    is not "abc" (a ``$`` alone also matches before a last newline)."""
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        r = await api(
+            b, "POST", "/api/v1/prefs", {"page": "abc\n", "seq": 1, "set": {"view.deck": "grid"}}, csrf=csrf
+        )
+        assert r.status_code == 400, r.text
+        assert stack.h.db.get_pref(SUB, "view.deck") is None
+        bad = {"view.deck": "grid\n", "stack:42:category\n": None, "sort.decks": {"sort": "name\n"}}
+        r = await api(b, "POST", "/api/v1/prefs", {"set": bad}, csrf=csrf)
+        assert r.status_code == 200 and sorted(r.json()["refused"]) == sorted(bad), r.text
+        r = await api(
+            b, "POST", "/api/v1/prefs", {"page": "abc", "seq": 1, "set": {"view.deck": "grid"}}, csrf=csrf
+        )
+        assert r.json()["saved"] == ["view.deck"], r.text
+    finally:
+        await b.aclose()
+
+
+AMY = {
+    "sub": "user-2",
+    "email": "amy@example.test",
+    "name": "Amy",
+    "preferred_username": "amy",
+    "groups": ["mtg-users"],
+}
+
+
+async def test_one_members_many_saves_never_push_out_another_members_numbers(stack: Stack) -> None:
+    """0.7.46 audit (099f600a): the save numbers are kept per member, with a small cap each
+    (prefs.SEQ_PER_MEMBER). Amy saving 25,000 names (more than the one shared store of 20,000
+    held before) pushes out only her own oldest numbers: Alice's survives, so Alice's late older
+    save is still dropped."""
+    from .test_decks_and_proxy import Browser
+
+    a = await linked(stack)
+    h = stack.h
+    alice = dict(h.idp.user)
+    try:
+        csrf_a = await a.csrf("/collection")
+        r = await api(
+            a, "POST", "/api/v1/prefs", {"page": "pa", "seq": 2, "set": {"view.deck": "grid"}}, csrf=csrf_a
+        )
+        assert r.json()["saved"] == ["view.deck"], r.text
+        h.idp.user = AMY
+        b = Browser(h)
+        try:
+            await b.login()
+            csrf_b = await b.csrf("/account/details")
+            names = [f"stack:{i}:category" for i in range(25_000)]
+            for n, at in enumerate(range(0, len(names), 400), start=1):
+                body = {"page": "pb", "seq": n, "set": dict.fromkeys(names[at : at + 400])}
+                r = await api(b, "POST", "/api/v1/prefs", body, csrf=csrf_b)
+                assert r.status_code == 200 and not r.json()["superseded"], r.text[:300]
+            # her own: the newest are remembered, her oldest pushed out (her cap, not anyone's)
+            r = await api(
+                b, "POST", "/api/v1/prefs", {"page": "pb", "seq": 1, "set": {names[-1]: None}}, csrf=csrf_b
+            )
+            assert r.json()["superseded"] == [names[-1]], r.text
+            r = await api(
+                b, "POST", "/api/v1/prefs", {"page": "pb", "seq": 1, "set": {names[0]: None}}, csrf=csrf_b
+            )
+            assert r.json()["saved"] == [names[0]], r.text
+        finally:
+            await b.aclose()
+        # Alice's older save, late: still dropped
+        r = await api(
+            a, "POST", "/api/v1/prefs", {"page": "pa", "seq": 1, "set": {"view.deck": "list"}}, csrf=csrf_a
+        )
+        assert r.json()["superseded"] == ["view.deck"], r.text
+        assert h.db.get_pref(SUB, "view.deck") == "grid"
+    finally:
+        h.idp.user = alice
+        await a.aclose()
+
+
+def test_the_save_numbers_keep_a_small_cap_per_member_and_drop_the_least_recent_member() -> None:
+    """The store behind it: each member keeps at most ``per_member`` names (their own oldest go);
+    past ``members`` members, a new member's first save pushes out the member who saved least
+    recently, never a part of anyone's numbers."""
+    nums = prefs.SaveNumbers(per_member=3, members=2)
+    for i in range(5):
+        nums.keep("a", f"n{i}", "p", i + 1)
+    assert [nums.get("a", f"n{i}") for i in range(5)] == [None, None, ("p", 3), ("p", 4), ("p", 5)]
+    nums.keep("b", "x", "q", 1)
+    nums.keep("a", "n5", "p", 6)  # a saved more recently than b
+    nums.keep("c", "y", "r", 1)  # a third member: b, the least recent, goes whole
+    assert nums.get("b", "x") is None and nums.get("c", "y") == ("r", 1)
+    assert [nums.get("a", f"n{i}") for i in (3, 4, 5)] == [("p", 4), ("p", 5), ("p", 6)]
+    assert nums.size() <= 3 * 2
+    assert prefs.SEQ_PER_MEMBER * prefs.SEQ_MEMBERS <= 200_000

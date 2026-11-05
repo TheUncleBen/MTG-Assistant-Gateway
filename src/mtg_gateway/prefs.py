@@ -37,7 +37,7 @@ VIEW = "view."  # + one of theme.VIEW_KINDS
 # audit QG-11): My decks, the Binder and a member's profile open sorted the way they were left
 SORT = "sort."
 SORT_KINDS = ("decks", "collection", "profile")
-_SORT_WORD = re.compile(r"^-?[A-Za-z0-9_]{1,40}$")
+_SORT_WORD = re.compile(r"-?[A-Za-z0-9_]{1,40}")  # each regex here: fullmatch
 # CARD_SIZE: the one size every page used before 2026-10-28, still read by a page without its own;
 # CARD_SIZE + "." + one of theme.CARD_SIZE_PAGES: that page's own size
 CARD_SIZES = ("s", "m", "l")
@@ -71,8 +71,8 @@ CARDS_FILTERS_STATES = ("open", "closed")
 
 CARD_SIZE_NAMES = (CARD_SIZE, *(f"{CARD_SIZE}.{page}" for page in CARD_SIZE_PAGES))
 
-_STACK_NAME = re.compile(r"^stack:(\d{1,12}):([a-z0-9_-]{0,40})$")
-_WORD = re.compile(r"^[a-z0-9_-]{1,40}$")
+_STACK_NAME = re.compile(r"stack:(\d{1,12}):([a-z0-9_-]{0,40})")
+_WORD = re.compile(r"[a-z0-9_-]{1,40}")
 
 
 def valid(name: str, value: Any) -> bool:
@@ -84,11 +84,11 @@ def valid(name: str, value: Any) -> bool:
             and isinstance(value, dict)
             and set(value) <= {"sort", "dir"}
             and isinstance(value.get("sort"), str)
-            and bool(_SORT_WORD.match(value["sort"]))
+            and bool(_SORT_WORD.fullmatch(value["sort"]))
             and (value.get("dir") is None or value["dir"] in ("auto", "asc", "desc"))
         )
     if name.startswith(VIEW):
-        return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.match(value))
+        return name[len(VIEW) :] in VIEW_KINDS and isinstance(value, str) and bool(_WORD.fullmatch(value))
     if name in CARD_SIZE_NAMES:
         return value in CARD_SIZES
     if name == EDHPLAY_STEPS:
@@ -131,12 +131,12 @@ def valid(name: str, value: Any) -> bool:
             and len(value) <= 12
             and all(
                 isinstance(k, str)
-                and _WORD.match(k)
+                and _WORD.fullmatch(k)
                 and (isinstance(v, bool) or (isinstance(v, str) and len(v) <= 40))
                 for k, v in value.items()
             )
         )
-    if _STACK_NAME.match(name):
+    if _STACK_NAME.fullmatch(name):
         return (
             isinstance(value, list)
             and 0 < len(value) <= MAX_STACK_NAMES
@@ -164,7 +164,7 @@ def valid_name(name: str) -> bool:
         or (name.startswith(SORT) and name[len(SORT) :] in SORT_KINDS)
         or name
         in (*CARD_SIZE_NAMES, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO, BINDER_ADD, WATCH_ADD, WATCH_ALERTS)
-        or bool(_STACK_NAME.match(name))
+        or bool(_STACK_NAME.fullmatch(name))
     )
 
 
@@ -335,23 +335,56 @@ def page_prefs(db: Database, sub: str | None, *names: str) -> str:
 # loads, and ``seq``, 1, 2, 3... in the order its choices were made). For each member and name the
 # gateway keeps the page and number of the last save it stored, and drops a save of that name from
 # the same page with a number no higher (0.7.46 audit C7): a request the page cancelled after it
-# reached the gateway, or one that was slow, never lands over a newer choice. Kept in memory for
-# the newest SEQ_KEPT names (a save older than that, or from before a restart, goes as it comes);
-# a save without a number goes as it comes too.
-SEQ_KEPT = 20_000
-_PAGE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# reached the gateway, or one that was slow, never lands over a newer choice. Kept in memory
+# (SaveNumbers), so not across a restart; a save without a number goes as it comes.
+SEQ_PER_MEMBER = 300  # a member's newest names: as many as the account keeps (MAX_PREFS_PER_ACCOUNT)
+SEQ_MEMBERS = 500  # the members who saved most recently
+_PAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # fullmatch: a "$" also matches before a last newline
 _MAX_SEQ = 2**53 - 1  # the largest whole number a page's script counts to exactly
+
+
+class SaveNumbers:
+    """The page and number of each member's last numbered save of each name. Bounded per member
+    (``per_member`` names: past that, that member's own least recently saved name goes) and in
+    members (``members``: a member saving for the first time past that pushes out the member
+    who saved least recently, whole). So one member's saves, however many, never push out a part
+    of another member's numbers (audit of 099f600a): at most ``per_member * members`` names."""
+
+    def __init__(self, *, per_member: int = SEQ_PER_MEMBER, members: int = SEQ_MEMBERS) -> None:
+        from collections import OrderedDict
+
+        self.per_member, self.members = per_member, members
+        # sub -> name -> (page, seq); both least recently saved first
+        self._subs: OrderedDict[str, OrderedDict[str, tuple[str, int]]] = OrderedDict()
+
+    def get(self, sub: str, name: str) -> tuple[str, int] | None:
+        mine = self._subs.get(sub)
+        return mine.get(name) if mine is not None else None
+
+    def keep(self, sub: str, name: str, page: str, seq: int) -> None:
+        from collections import OrderedDict
+
+        mine = self._subs.get(sub)
+        if mine is None:
+            while len(self._subs) >= self.members:
+                self._subs.popitem(last=False)
+            mine = self._subs[sub] = OrderedDict()
+        self._subs.move_to_end(sub)
+        mine[name] = (page, seq)
+        mine.move_to_end(name)
+        while len(mine) > self.per_member:
+            mine.popitem(last=False)
+
+    def size(self) -> int:
+        return sum(len(m) for m in self._subs.values())
 
 
 def add_prefs_routes(server: MCPServer, state: AppState) -> None:
     """GET /api/v1/prefs and POST /api/v1/prefs for the pages' scripts. The member's own browser
     only: an assistant or an app with a token has no business with how the pages look."""
-    from collections import OrderedDict
-
     from .api import caller_for, json_body
 
-    # (sub, name) -> (page, seq) of the last numbered save stored, newest last (SEQ_KEPT)
-    last_seq: OrderedDict[tuple[str, str], tuple[str, int]] = OrderedDict()
+    numbers = SaveNumbers()
 
     async def who(request: Request, *, write: bool) -> str | Response:
         caller = await caller_for(state, request, write=write)
@@ -377,7 +410,7 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
         """``{"set": {name: value or null}}`` saves each (null forgets it); ``{"copy": {...}}``
         saves only the names the account doesn't have yet (the one-time copy from this device).
         ``page`` and ``seq`` (both or neither) number the save: a name a newer save from the same
-        page already stored is left as it is (SEQ_KEPT). Answers which names were saved, which
+        page already stored is left as it is (SaveNumbers). Answers which names were saved, which
         were refused and which were superseded by a newer save."""
         sub = await who(request, write=True)
         if isinstance(sub, Response):
@@ -390,7 +423,7 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
             return JSONResponse({"ok": False, "error": "invalid", "message": "set and copy are objects"}, 400)
         page, seq = data.get("page"), data.get("seq")
         if (page, seq) != (None, None) and not (
-            isinstance(page, str) and _PAGE_ID.match(page) and type(seq) is int and 0 < seq <= _MAX_SEQ
+            isinstance(page, str) and _PAGE_ID.fullmatch(page) and type(seq) is int and 0 < seq <= _MAX_SEQ
         ):
             return JSONResponse(
                 {"ok": False, "error": "invalid", "message": "page is an id and seq a whole number from 1"},
@@ -404,12 +437,11 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
         stale = {
             n
             for n in {*map(str, copy), *map(str, changes)}
-            if seq is not None and (kept := last_seq.get((sub, n))) and kept[0] == page and kept[1] >= seq
+            if seq is not None and (kept := numbers.get(sub, n)) and kept[0] == page and kept[1] >= seq
         }
         saved, refused, superseded = [], [], []
         for name, value in [*((n, v) for n, v in copy.items() if n not in have), *changes.items()]:
             name = str(name)
-            key = (sub, name)
             if name in stale:
                 if name not in superseded:
                     superseded.append(name)  # a newer choice from this page is stored already
@@ -419,10 +451,7 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
                 continue
             saved.append(name)
             if seq is not None:
-                last_seq[key] = (page, seq)
-                last_seq.move_to_end(key)
-                while len(last_seq) > SEQ_KEPT:
-                    last_seq.popitem(last=False)
+                numbers.keep(sub, name, page, seq)
         return JSONResponse(
             {"ok": True, "saved": saved, "refused": refused, "superseded": superseded},
             headers={"Cache-Control": "no-store"},
