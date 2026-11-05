@@ -302,3 +302,70 @@ def test_the_skill_download_button_wraps_at_spaces_only(server: Server, zoom: st
             ctx.close()
         assert errors == []
         browser.close()
+
+
+# the report's key numbers: each tile's width against the row's, its big value's number (the
+# text before the unit) and unit as lines, and whether the value fits its tile
+KEY_NUMBERS = """() => {
+  const row = document.querySelector('.rv-page .rv-w');
+  const rw = row.getBoundingClientRect().width;
+  const lines = (q) =>
+    new Set([...q.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top))).size;
+  return [...row.querySelectorAll('.wdg')].map(w => {
+    const big = w.querySelector('.big'), small = big.querySelector('small');
+    const q = document.createRange(); q.selectNodeContents(big);
+    if (small) q.setEndBefore(small);
+    const wr = w.getBoundingClientRect(), br = big.getBoundingClientRect();
+    const sq = document.createRange(); if (small) sq.selectNodeContents(small);
+    const cs = getComputedStyle(w);
+    const inner = w.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    // the unit's words laid end to end: wider than the tile, and only then, it may wrap
+    const whole = small ? [...sq.getClientRects()].reduce((t, r) => t + r.width, 0) : 0;
+    return {label: w.querySelector('.lab').textContent.trim(), share: wr.width / rw,
+      number: q.toString().trim(), numberLines: lines(q),
+      unit: small ? small.textContent.trim() : '', unitLines: small ? lines(sq) : 1,
+      unitFits: whole <= inner + 1,
+      fits: big.scrollWidth <= big.clientWidth + 1 && br.right <= wr.right + 1 && br.left >= wr.left - 1};
+  });
+}"""
+
+
+@pytest.mark.parametrize(
+    "zoom,theme",
+    [("none", "light"), ("root", "light"), ("text", "light"), ("text", "dark")],
+)
+def test_the_reports_deck_tile_keeps_its_value_and_unit_whole(
+    server: Server,  # noqa: F811
+    zoom: str,
+    theme: str,
+) -> None:
+    """Z5: at 720 to 1024 px with 200% text the report's three-a-row key numbers gave the Deck
+    tile about 10 em: "$310./00", "100 / cards", "2 issues / found". At every width and text
+    size each tile's big value is one line, its unit stays together on one line (it wraps only
+    when wider than the tile), nothing is clipped; at 200% text from 720 to 1024 px the tiles
+    go one a row."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid, _pending = _seed(server)
+    with sync_playwright() as p:
+        browser, errors, open_at = _contexts(p, server, sid, theme, exe)
+        for width in WIDTHS:
+            ctx, page = open_at(width)
+            page.goto(f"{server.base}/history/reports/r1", wait_until="networkidle")
+            _zoom(page, zoom)
+            tiles = page.evaluate(KEY_NUMBERS)
+            deck = next((t for t in tiles if t["label"] == "Deck"), None)
+            assert deck and deck["number"] == "$310.00" and deck["unit"] == "100 cards", (width, zoom, tiles)
+            for t in tiles:
+                assert t["numberLines"] <= 1 and t["fits"], (width, zoom, t)
+                if t["unitFits"]:
+                    assert t["unitLines"] <= 1, (width, zoom, t)
+                if zoom != "none" and 720 <= width <= 1024:
+                    assert t["share"] > 0.99, (width, zoom, t)
+            broken = page.evaluate(BROKEN, [".rv-page .rv-w .wdg .big", ".wdg"])
+            assert broken == [], (width, zoom, broken)
+            assert page.evaluate(MEASURE) == [], (width, zoom)
+            ctx.close()
+        assert errors == []
+        browser.close()
