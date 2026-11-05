@@ -789,3 +789,15 @@ def test_the_review_page_no_longer_blames_another_account_for_a_refusal() -> Non
 
     assert "another Archidekt account" not in ERR_MESSAGES["forbidden"]
     assert "no need to relink" in ERR_MESSAGES["forbidden"]
+
+
+def test_the_user_agent_names_the_running_version() -> None:
+    """0.7.46 sweep B-9: Archidekt and Scryfall are told the version that is running (the package
+    version), not a number from long ago; Scryfall's client says the same thing as Archidekt's."""
+    from mtg_gateway import __version__
+    from mtg_gateway.config import USER_AGENT
+    from mtg_gateway.scan.scryfall import ScryfallClient
+
+    assert USER_AGENT.startswith(f"mtg-assistant-gateway/{__version__} (+https://github.com/")
+    assert Settings.__dataclass_fields__["archidekt_user_agent"].default == USER_AGENT
+    assert ScryfallClient().headers["User-Agent"] == USER_AGENT

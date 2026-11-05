@@ -49,6 +49,7 @@ from urllib.parse import urlparse
 import httpx
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.config import USER_AGENT as _UA
 from mtg_gateway.decks import DeckError, _clean_deck_id
 from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, proposal_stamp, running, sse_json
 
@@ -57,7 +58,7 @@ PREFIX = "MAG-TEST"
 # comma-separated ids in ARCHIDEKT_TEST_NEVER_TOUCH.
 NEVER_TOUCH = {d.strip() for d in os.environ.get("ARCHIDEKT_TEST_NEVER_TOUCH", "").split(",") if d.strip()}
 LIVE_BASE = "https://archidekt.com/api"
-USER_AGENT = "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway) live-check"
+USER_AGENT = f"{_UA} live-check"
 
 # Every card here is also in tests/fake_archidekt.py's CARD_DB, so --offline runs the same plan.
 NEW_DECK_CARDS = [

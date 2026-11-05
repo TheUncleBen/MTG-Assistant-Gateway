@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from .. import dbwait
+from ..config import USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +325,7 @@ class ScryfallClient:
         self,
         base: str = DEFAULT_BASE,
         *,
-        user_agent: str = "mtg-assistant-gateway/0.1",
+        user_agent: str = USER_AGENT,
         min_interval: float = 0.1,
         lookup_interval: float | None = None,
         timeout: float = 15.0,
