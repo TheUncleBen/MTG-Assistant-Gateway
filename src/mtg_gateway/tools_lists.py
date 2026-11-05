@@ -16,8 +16,7 @@ from .decks import DeckError
 
 LIST_FIELD = Field(
     description=(
-        "templates (category templates), default_categories, color_tags, pins, custom_cards or "
-        "collection_tags (binder tags)."
+        "templates, default_categories, color_tags, pins, custom_cards or collection_tags (binder tags)."
     )
 )
 
@@ -32,10 +31,11 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
         name="get_my_lists",
         title="Read one of my Archidekt lists",
         description=(
-            "Read one of the user's account-wide Archidekt lists: category templates (name and the in deck, "
-            "in price and Premier switches), default categories (a card's categories when added to a deck, "
-            "the main one first; 100 cards a page), color tags (name and hex color), pinned cards (printing, "
-            "copies, finish, note) or custom cards (search by name, a page at a time). Changes nothing."
+            "Read one of the user's account-wide Archidekt lists: category templates (name; in deck, "
+            "in price and Premier switches), default categories (a card's categories when added to a "
+            "deck, main first; 100 cards a page), color tags (name, hex color), pinned cards "
+            "(printing, copies, finish, note) or custom cards (search by name, a page at a time). "
+            "Changes nothing."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -56,25 +56,23 @@ def add_list_tools(state: AppState, h: SimpleNamespace) -> None:
         name="propose_list_change",
         title="Propose a change to one of my Archidekt lists (write, two-step)",
         description=(
-            "Step 1 of changing one of the user's account-wide Archidekt lists. changes: changes to that one "
-            "list, each {op, ...} (action is taken for op too):\n"
-            "- templates: create {name, in_deck, in_price, premier} (in deck and in price default on); edit "
-            "{name, new_name?, in_deck?, in_price?, premier?}; delete {name}.\n"
-            "- default_categories: set {card, categories: [template names, the main one first]}; clear "
+            "Step 1 of changing one of the user's account-wide Archidekt lists. changes: to that one "
+            "list, each {op, ...} (or action):\n"
+            "- templates: create {name, in_deck, in_price, premier} (in_deck, in_price default on); "
+            "edit {name, new_name?, in_deck?, in_price?, premier?}; delete {name}.\n"
+            "- default_categories: set {card, categories: [template names, main first]}; clear "
             "{card}.\n"
-            "- color_tags: create {name (at most 32 characters), color (hex, default #fa890d)}; edit {name, "
-            "new_name?, color?}; delete {name}.\n"
-            "- collection_tags (binder tags): as color_tags.\n"
-            "- pins: pin {card, set_code?, collector_number?, finish? (Normal, Foil or Etched), quantity?, "
-            "notes?}; edit {card or pin_id, quantity?, notes?, finish?, set_code?, collector_number?}; unpin "
-            "{card or pin_id}; remove_all {}.\n"
-            "- custom_cards: create {fields}; edit {name, fields}; delete {name}. fields uses Archidekt's "
-            "names (frontName, frontManaCost, frontTypes, frontSubTypes, frontSuperTypes, frontText, "
-            "frontPower, frontToughness, frontLoyalty, frontArtistName, cmc, hasBack and the back* fields, "
-            "setCode, collectorNumber); a name and a type are required. Pictures are uploaded by the user "
-            "on Binder › Lists.\n"
-            "Returns the proposal (kind 'lists'), applied with apply_proposal; a delete (or remove_all "
-            "pins) always waits for the user's own press. Changes nothing on Archidekt by itself."
+            "- color_tags, collection_tags (binder tags): create {name (at most 32 characters), color "
+            "(hex, default #fa890d)}; edit {name, new_name?, color?}; delete {name}.\n"
+            "- pins: pin {card, set_code?, collector_number?, finish? (Normal, Foil, Etched), "
+            "quantity?, notes?}; edit {card or pin_id, and those fields}; unpin {card or pin_id}; "
+            "remove_all {}.\n"
+            "- custom_cards: create {fields}; edit {name, fields}; delete {name}. fields: Archidekt's "
+            "names, as get_my_lists shows them (frontName, frontManaCost, frontTypes, frontText, cmc, "
+            "hasBack, back*, ...); a name and a type are required. Pictures: the user uploads them on "
+            "Binder › Lists.\n"
+            "Returns the proposal (kind 'lists') for apply_proposal; a delete or remove_all waits for "
+            "the user's press. Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=h.card_meta,

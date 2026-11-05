@@ -146,15 +146,15 @@ def add_scan_tools(
         name="resolve_cards",
         title="Resolve card names to exact cards",
         description=(
-            "Turn card names from photos, a typed list or a decklist into exact Magic cards via Scryfall: "
-            "cards ({name, set?, collector_number?, quantity?}) or text (one card per line, e.g. '2 Sol Ring "
-            "(CMR) 472'). Each result's status: exact, printing (by set and number), fuzzy (name corrected: "
-            "confirm with the user), ambiguous or not_found (with suggestions), or conflict (the set and "
-            "number are another card, in requested: ask). Without a set a card gets Scryfall's default "
-            "printing when it is on paper, else the newest paper one (newer_printings: those passed over). "
-            "Returns a decklist and changes for propose_deck_changes. In an app that shows cards the user "
-            "confirms the cards first: wait for that. One lookup per account at a time (else busy, with "
-            "suggested_wait). Does not touch Archidekt."
+            "Turn card names (photos, a typed list, a decklist) into exact Magic cards via Scryfall: "
+            "cards ({name, set?, collector_number?, quantity?}) or text (one per line, e.g. '2 Sol "
+            "Ring (CMR) 472'). Status: exact, printing (by set and number), fuzzy (name corrected: "
+            "confirm with the user), ambiguous or not_found (with suggestions), or conflict (set and "
+            "number are another card, in requested: ask). No set: Scryfall's default printing if on "
+            "paper, else the newest paper one (newer_printings: those passed over). Returns a decklist "
+            "and changes for propose_deck_changes. In an app that shows cards the user confirms them "
+            "first: wait. One lookup per account at a time (else busy, suggested_wait). Does not touch "
+            "Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PICKER_CARD_URI) if links is not None else None,
@@ -225,13 +225,13 @@ def add_scan_tools(
         name="card_printings",
         title="List the printings of a card",
         description=(
-            "A Magic card's printings from Scryfall (set, set name, collector number, release date, rarity, "
-            "finishes): released paper printings newest first (the first is the default when no set is "
-            "named), then previews (unreleased) and non-paper printings (paper false). Give oracle_id (from "
-            "resolve_cards) or name; narrow with set_code and finish. matching_total match; returned_count "
-            "are in cards (truncated: limit cut it); sets lists every set it was printed in (sets_total, "
-            "sets_truncated). In an app that shows cards the user taps the printing they mean: wait for that "
-            "pick. Does not touch Archidekt."
+            "A Magic card's printings from Scryfall (set, set name, collector number, release date, "
+            "rarity, finishes): released paper printings newest first (the first is the default when "
+            "no set is named), then previews and non-paper ones (paper false). oracle_id (from "
+            "resolve_cards) or name; narrow with set_code and finish. matching_total match; "
+            "returned_count are in cards (truncated: limit cut it); sets: every set it was printed in "
+            "(sets_total, sets_truncated). In an app that shows cards the user taps the printing: wait "
+            "for that pick. Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,

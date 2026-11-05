@@ -4193,10 +4193,11 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="list_collection",
         title="List the cards I own",
         description=(
-            "The user's binder, their linked Archidekt collection: one row per printing and finish with a "
-            "quantity, 100 a page, newest first. query filters by card name; sort: added, edition or price "
-            "(highest first, from the daily price check, once the member opened their Binder); page pages; "
-            "tag: one binder tag's cards. Returns cards, count, total_pages and tags. Read-only."
+            "The user's binder, their linked Archidekt collection: one row per printing and finish "
+            "with a quantity, 100 a page, newest first. query filters by card name; sort: added, "
+            "edition or price (highest first, from the daily price check, once the member opened their "
+            "Binder); page; tag: one binder tag's cards. Returns cards, count, total_pages and tags. "
+            "Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -4480,27 +4481,26 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="propose_collection_changes",
         title="Propose changes to my binder",
         description=(
-            "Propose adding cards to, or removing cards from, the user's binder (their Archidekt "
-            "collection): show its diff and review_url; the user applies it, or you do with apply_proposal "
-            "when assistant_may_apply is true. add: cards or names (without set_code and collector_number "
-            "Archidekt picks the printing); text: one card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; "
-            "scan_session: a scan's matched cards (the scan is removed once applied); remove: {id (from "
-            "list_collection) | name, quantity?} (no quantity: every copy); tag: {id | name, tags} sets "
-            "every binder tag of those rows (new names are made). At most 100 cards each way. Once "
-            "applied, each row has quantity (held now), previous_quantity and added_quantity or "
-            "removed_quantity. clear: true, alone, proposes clearing the whole binder (the user applies "
-            "it on its review page)."
+            "Propose adding cards to, or removing them from, the user's binder (their Archidekt "
+            "collection): its diff and review_url; the user applies it, or you do with apply_proposal "
+            "when assistant_may_apply is true. add: cards or names (no set_code and collector_number: "
+            "Archidekt picks the printing); text: one per line, e.g. '2 Sol Ring (CMR) 472 *F*'; "
+            "scan_session: a scan's matched cards (removed once applied); remove: {id "
+            "(list_collection) | name, quantity?} (no quantity: every copy); tag: {id | name, tags} "
+            "sets those rows' binder tags. At most 100 cards each way. Applied rows have quantity, "
+            "previous_quantity and added_ or removed_quantity. clear: true, alone, proposes clearing "
+            "the whole binder."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=dict(CARD_TOOL_META) if in_chat else None,
     )
     async def propose_collection_changes(
-        add: Annotated[list[CollectionAdd | str] | None, Field(description="Cards to add.")] = None,
+        add: list[CollectionAdd | str] | None = None,
         text: Annotated[str | None, Field(description="Or cards to add as text, one per line.")] = None,
         scan_session: Annotated[
             str | None, Field(description="Or a scan session's ID or name to add.")
         ] = None,
-        remove: Annotated[list[CollectionRemove | str] | None, Field(description="Cards to remove.")] = None,
+        remove: list[CollectionRemove | str] | None = None,
         tag: list[dict[str, Any]] | None = None,
         clear: bool = False,
     ) -> Any:

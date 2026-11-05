@@ -535,6 +535,10 @@ def test_the_recorded_research_listing_is_the_pinned_image() -> None:
     assert ALLOWED_TOOLS <= {t["name"] for t in recorded["tools"]}
 
 
+def by_title(tools: list[dict[str, Any]], name: str) -> str:
+    return next(str(t.get("title") or "") for t in tools if t["name"] == name)
+
+
 async def test_the_tool_catalogue_stays_small_and_keeps_what_the_assistant_needs(
     tmp_path: Path, idp: FakeIdP
 ) -> None:
@@ -555,7 +559,15 @@ async def test_the_tool_catalogue_stays_small_and_keeps_what_the_assistant_needs
         tools = sse_json(await stack.h.mcp(token, "tools/list", {}, rid=3))["result"]["tools"]
     assert ALLOWED_TOOLS <= {t["name"] for t in tools}
     size = len(json.dumps(tools, separators=(",", ":"), ensure_ascii=False).encode())
-    assert size <= 100_000, size
+    # hosts refuse a list over 100,000 bytes; at least 5% is left for new words (0.7.46 sweep B-5)
+    assert size <= 95_000, size
+    # every tool has the title a host shows, the passed-through research tools too (sweep B-6)
+    untitled = sorted(t["name"] for t in tools if not str(t.get("title") or "").strip())
+    assert untitled == [], untitled
+    from mtg_gateway.tool_labels import tool_name
+
+    for name in ALLOWED_TOOLS:
+        assert by_title(tools, name) == tool_name(name), name
     by = {t["name"]: t for t in tools}
     report, compare = by["run_deck_report"]["description"], by["compare_decks"]["description"]
     assert len(report) <= 2_600, len(report)

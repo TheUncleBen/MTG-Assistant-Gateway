@@ -1035,11 +1035,12 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         name="search_decks",
         title="Search public Archidekt decks",
         description=(
-            "Search Archidekt's public decks the way its deck search page does. Filters, all optional: name, "
-            "commander (a partial name is looked up; several matching commanders come back as "
-            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their profile's "
-            "decks), format, colors, order_by, page and limit. Each result has an id and url; read one with "
-            "get_deck. list_my_decks lists the member's own decks, private ones included. Read-only."
+            "Search Archidekt's public decks as its deck search page does. Filters, all optional: "
+            "name, commander (a partial name is looked up; several matches come back as "
+            "commander_suggestions), owner (an Archidekt username; with order_by -updatedAt, their "
+            "profile's decks), format, colors, order_by, page and limit. Each result has an id and "
+            "url; read one with get_deck. list_my_decks lists the member's own, private ones too. "
+            "Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
