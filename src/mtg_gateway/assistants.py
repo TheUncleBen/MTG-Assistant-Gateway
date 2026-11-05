@@ -320,7 +320,7 @@ def list_html(
             "<p>Every assistant connected to your account loses access at once, and the modes you "
             "chose for them are forgotten. Each one has to be connected and approved again.</p></form>",
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep them", cancel=True),
                 ui.box_button("Disconnect all", kind="danger-solid", form="discallf"),
             ],
             open=open_box,
@@ -487,7 +487,7 @@ def app_html(
         f"<p>“{name}” can no longer use your account, and the mode you chose for it is forgotten. "
         "To use it again, connect it again and approve it; it then starts with your default.</p></form>",
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Disconnect", kind="danger-solid", form="discf"),
         ],
         open=open_disconnect,

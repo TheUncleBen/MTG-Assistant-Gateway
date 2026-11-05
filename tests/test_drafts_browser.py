@@ -192,3 +192,118 @@ def test_a_draft_put_back_says_so_and_discard_clears_it_while_esc_keeps_it(
             assert errors == [], errors
         finally:
             browser.close()
+
+
+# -- every free-text field (audit F-3): the pre-push check ------------------------------------------
+# Each form the audit listed, and the same class elsewhere: the page it is on, what opens it, and
+# the fields typed in. Typed without leaving the field (nothing auto-saves on the way), reloaded,
+# and the text must be back. A form drawn hidden in a box is opened by its own address, or by the
+# press that opens it (``open``). A fold is opened before its field is typed in.
+FIELDS: list[tuple[str, str, dict[str, str]]] = [
+    # page, what opens the form ("" when it is on the page), the fields with what is typed
+    ("/decks/42/settings", "", {"#name": "Kept name", "#description": "Kept description"}),
+    (
+        "/decks/42/edit",
+        "fold:details.pastebox summary",
+        {"#addname": "Sol Ri", "#pastetext": "2 Lightning Bolt"},
+    ),
+    (
+        "/decks/42/compare",
+        "fold:.cmp-form summary",
+        {"#cmp-with": "9999", ".cmp-form textarea[name=paste]": "1 Sol Ring"},
+    ),
+    ("/decks/42/help", "", {"#dx-hg": "Win by turn six every game", "#dx-hi": "Too slow to start"}),
+    ("/decks/42/report-to-archidekt", "", {"#dx-rm": "Stolen art on the cover"}),
+    ("/decks/42/contest", "", {"#dx-es": "Simic ramp, big sea monsters"}),
+    (
+        "/forum/thread/700007",
+        "click:#fm-contest .btn:has-text('Enter a deck…')",
+        {"#fm-es": "Big sea monsters"},
+    ),
+    ("/forum/thread/700002", "report", {"#dx-rcm": "Spam in the first post"}),
+    ("/reports", "fold:.rp-paste summary", {".rp-paste-f textarea": "1 Sol Ring\n1 Arcane Signet"}),
+    ("/collection/wants", "", {".lp-note textarea": "Trade for it"}),
+]
+
+
+def _open(page, how: str) -> None:
+    if not how:
+        return
+    kind, _, sel = how.partition(":")
+    if kind == "fold":
+        page.locator(sel).click()
+    elif kind == "click":
+        page.locator(sel).click()
+    elif kind == "report":
+        page.locator(".fm-post .kebab").first.click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Report comment…").click()
+        page.locator("#reportcomment").wait_for(state="visible")
+    else:
+        raise AssertionError(how)
+
+
+def _post_reject(page, base: str, csrf: str) -> None:
+    """The Reject confirm page: the checked rows posted to /proposals/select without ``sure``."""
+    page.evaluate(
+        """([base, csrf]) => {
+          const f = document.createElement("form");
+          f.method = "post"; f.action = base + "/proposals/select";
+          const fields = [["csrf", csrf], ["pick", "abc"], ["action", "reject"], ["back", "/proposals"]];
+          for (const [k, v] of fields) {
+            const i = document.createElement("input");
+            i.type = "hidden"; i.name = k; i.value = v;
+            f.appendChild(i);
+          }
+          document.body.appendChild(f); f.submit();
+        }""",
+        [base, csrf],
+    )
+    page.wait_for_selector("form.rejectconfirm")
+
+
+def test_every_free_text_field_keeps_what_was_typed_through_a_reload(server: Server) -> None:
+    """Audit F-3 (0.7.46, eccfa3d9): the deck settings' Name and Description, the editor's add and
+    paste boxes, Compare, the deck's help, report, comment-report and contest boxes, the forum's
+    contest entry, Test a pasted list, a pin's note and the Reject reason all keep what was typed
+    through a reload (static/draft.js). The pre-push check for every free-text field on the site."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_forum_page import _contest, _reply
+
+    ark = server.ark
+    _contest(ark)
+    _reply(ark, 700002, "amy", "Arcane Signet, every time.")
+    acct = ark.account
+    acct.pins["alice"] = [
+        {"id": 31, "card": acct._card(9003), "notes": "", "modifier": "Normal", "quantity": 1}
+    ]
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        try:
+            for path, how, fields in FIELDS:
+                page.goto(f"{server.base}{path}", wait_until="networkidle")
+                _open(page, how)
+                for sel, text in fields.items():
+                    f = page.locator(sel).first
+                    f.wait_for(state="visible")
+                    f.click()
+                    page.keyboard.press("Control+a")
+                    f.press_sequentially(text)
+                page.reload(wait_until="networkidle")
+                _open(page, how)
+                for sel, text in fields.items():
+                    assert page.locator(sel).first.input_value() == text, (path, sel)
+                assert page.locator(".draft-note:visible").count() >= 1, path
+                page.evaluate("() => localStorage.clear()")
+            # the Reject reason: the confirm is the answer to a post, so it is asked again
+            page.goto(f"{server.base}/proposals", wait_until="networkidle")
+            csrf = page.locator("input[name=csrf]").first.input_value()
+            _post_reject(page, server.base, csrf)
+            page.locator("#reject-reason").press_sequentially("Not this week")
+            _post_reject(page, server.base, csrf)
+            assert page.locator("#reject-reason").input_value() == "Not this week"
+            assert errors == [], errors
+        finally:
+            browser.close()

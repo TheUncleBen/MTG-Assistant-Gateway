@@ -24,6 +24,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Annotated, Any
+from urllib.parse import urlencode
 
 from pydantic import Field
 from starlette.requests import Request
@@ -3292,7 +3293,15 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             out = out.replace("<div class='notice", f"<div data-remember='{_esc(remember)}' class='notice", 1)
         return out
 
-    def notice(code: str | None, *, sub: str = "", token: str | None = None, csrf: str = "") -> str:
+    def page_address(qp: Any) -> str:
+        """The Binder's address as looked at (its view, sort and filters), without the notice
+        a redirect put in it: where a form on the page (Undo) comes back to (audit F-9)."""
+        keep = [(k, v) for k, v in qp.multi_items() if k not in ("ok", "err", "t", "r", "add")]
+        return "/collection" + (f"?{urlencode(keep)}" if keep else "")
+
+    def notice(
+        code: str | None, *, sub: str = "", token: str | None = None, csrf: str = "", back: str = ""
+    ) -> str:
         if code == "bulk" and token:
             said = take_result(sub, token)
             if said is None or not said.get("message"):
@@ -3305,6 +3314,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
                     "<input type='hidden' name='action' value='bulk_restore'>"
                     f"<input type='hidden' name='token' value='{_esc(undo)}'>"
+                    f"<input type='hidden' name='next' value='{_esc(back or '/collection')}'>"
                     "<button type='submit' class='btn small'>Undo</button></form>"
                 )
             return strip(text, "ok" if said.get("kind") == "ok" else "error", html=True)
@@ -3522,7 +3532,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "toomany",
             "unreadable",
         )
-        notes = notice(result, sub=sub, token=qp.get("r") or qp.get("t"), csrf=csrf)
+        notes = notice(result, sub=sub, token=qp.get("r") or qp.get("t"), csrf=csrf, back=page_address(qp))
         # prices kept: opening the Binder puts it in the daily price check (binder_prices)
         if priced():
             service.binder.seen(sub, _price_clock())

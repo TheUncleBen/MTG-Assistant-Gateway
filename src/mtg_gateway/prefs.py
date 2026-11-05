@@ -34,9 +34,10 @@ if TYPE_CHECKING:
 
 VIEW = "view."  # + one of theme.VIEW_KINDS
 # SORT + one of SORT_KINDS: the list's sort as last picked, {"sort": word, "dir": word} (0.7.46
-# audit QG-11): My decks, the Binder and a member's profile open sorted the way they were left
+# audit QG-11): My decks, the Binder, a member's profile, card search, deck search and the precons
+# open sorted the way they were left (audit F-10 for the last three)
 SORT = "sort."
-SORT_KINDS = ("decks", "collection", "profile")
+SORT_KINDS = ("decks", "collection", "profile", "cards", "search", "precons")
 _SORT_WORD = re.compile(r"-?[A-Za-z0-9_]{1,40}")  # each regex here: fullmatch
 # CARD_SIZE: the one size every page used before 2026-10-28, still read by a page without its own;
 # CARD_SIZE + "." + one of theme.CARD_SIZE_PAGES: that page's own size

@@ -518,3 +518,32 @@ def test_the_save_numbers_keep_a_small_cap_per_member_and_drop_the_least_recent_
     assert [nums.get("a", f"n{i}") for i in (3, 4, 5)] == [("p", 4), ("p", 5), ("p", 6)]
     assert nums.size() <= 3 * 2
     assert prefs.SEQ_PER_MEMBER * prefs.SEQ_MEMBERS <= 200_000
+
+
+async def test_the_sort_picked_on_card_search_deck_search_and_precons_is_remembered(stack: Stack) -> None:
+    """Audit F-10 (eccfa3d9): card search, deck search and the precons remember their sort as the
+    other lists do (QOL-12): the next visit opens with it, an unknown one is ignored, and Forget
+    my view choices clears them."""
+    b = await linked(stack)
+    try:
+        db = stack.h.db
+        await b.http.get("/cards", params={"q": "sol", "order": "released", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.cards") == {"sort": "released", "dir": "asc"}
+        page = (await b.http.get("/cards", params={"q": "sol"})).text
+        assert "<option value='released' selected>" in page and "<option value='asc' selected>" in page
+        await b.http.get("/search", params={"order": "-size"})
+        assert db.get_pref(SUB, "sort.search") == {"sort": "-size", "dir": "auto"}
+        page = (await b.http.get("/search")).text
+        assert "<option value='-size' selected>" in page
+        await b.http.get("/precons", params={"sort": "name", "dir": "asc"})
+        assert db.get_pref(SUB, "sort.precons") == {"sort": "name", "dir": "asc"}
+        page = (await b.http.get("/precons")).text
+        assert "<option value='name' selected>" in page and "<option value='asc' selected>" in page
+        await b.http.get("/cards", params={"q": "sol", "order": "evil"})
+        assert db.get_pref(SUB, "sort.cards") == {"sort": "released", "dir": "asc"}
+        csrf = await b.csrf("/account/details")
+        r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices", "confirm": "yes"})
+        assert r.status_code == 303, r.text
+        assert all(db.get_pref(SUB, f"sort.{kind}") is None for kind in ("cards", "search", "precons"))
+    finally:
+        await b.aclose()

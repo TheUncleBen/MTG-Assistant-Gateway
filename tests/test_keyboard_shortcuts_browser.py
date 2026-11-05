@@ -104,3 +104,60 @@ def test_the_keys_wait_behind_the_card_viewer_and_work_from_a_ticked_box(server:
             assert errors == [], errors
         finally:
             browser.close()
+
+
+def test_the_keys_do_nothing_under_a_sheet_a_menu_or_a_drop_down_list(server: Server) -> None:
+    """Audit F-6 (eccfa3d9): / and ? acted under an open filter sheet, menu or list (? opened the
+    shortcuts box behind the sheet and moved the focus there; / opened the top search). Under any
+    open layer (static/layers.js) they do nothing, from a button's focus as from anywhere."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360)
+        try:
+
+            def nothing(where: str) -> None:
+                for key in ("/", "?"):
+                    page.keyboard.press(key)
+                    page.wait_for_timeout(200)
+                    focus = page.evaluate("() => document.activeElement && document.activeElement.id")
+                    assert focus != "site-q", (where, key)
+                    assert not page.evaluate("() => document.body.classList.contains('search-open')"), (
+                        where,
+                        key,
+                    )
+                    assert page.locator(".mtgbox[role=dialog]:visible").count() == 0, (where, key)
+
+            page.goto(f"{server.base}/cards", wait_until="networkidle")
+            page.locator(".spanel .sp-open").click()
+            page.locator("#sp-filters.open").wait_for()
+            page.locator("#sp-filters .sp-sheet-head .close").focus()
+            nothing("sheet")
+            assert page.locator("#sp-filters.open").count() == 1
+            page.keyboard.press("Escape")
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+            card = page.locator("[data-card]").first
+            card.scroll_into_view_if_needed()
+            card.evaluate(
+                "c => c.dispatchEvent(new MouseEvent('contextmenu',"
+                " {bubbles: true, cancelable: true, clientX: 40, clientY: 40}))"
+            )
+            page.locator(".ctxmenu[role=menu]").wait_for()
+            nothing("menu")
+            assert page.locator(".ctxmenu[role=menu]").count() == 1
+            page.keyboard.press("Escape")
+            page.wait_for_function("() => !document.querySelector('.ctxmenu[role=menu]')")
+            page.goto(f"{server.base}/decks?view=list", wait_until="networkidle")
+            if page.locator(".msel-btn:visible").count() == 0:
+                page.locator(".spanel .sp-open").click()
+                page.locator("#sp-filters.open").wait_for()
+            page.locator(".msel-btn:visible").first.click()
+            page.locator(".msel-list").wait_for()
+            nothing("list")
+            assert page.locator(".msel-list").count() == 1
+            assert errors == [], errors
+        finally:
+            browser.close()

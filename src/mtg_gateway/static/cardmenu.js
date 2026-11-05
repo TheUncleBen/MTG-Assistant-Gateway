@@ -170,14 +170,6 @@
   var norm = function (n) { return String(n || "").toLowerCase().replace(/\s+/g, " ").trim(); };
   function enabled() { return document.body.hasAttribute("data-watchlist"); }
   function phone() { return window.matchMedia && window.matchMedia("(max-width: 599.98px)").matches; }
-  // Where the phone's Back should close a menu instead of leaving the page: a phone, a touch
-  // screen in the rail range (600 to 1279.98 px, as theme.py draws the rail) and the Android
-  // app at any width (static/deck.js and static/feedback.js ask the same)
-  function backCloses() {
-    return phone() ||
-      (window.matchMedia && window.matchMedia("(max-width: 1279.98px) and ((pointer: coarse) or (hover: none))").matches) ||
-      document.body.classList.contains("app");
-  }
 
   // -- toast: what was done, with its links; errors stay until dismissed -------------------------
   var toastEl = null, toastTimer = null;
@@ -404,34 +396,22 @@
   }
 
   // -- the menu ----------------------------------------------------------------------------------
-  var menu = null, menuBack = null, scrim = null, menuPushed = false, ignorePop = false, menuScroll = [0, 0];
-  // the menu's own back() landed in this task (its popstate handler ran, before the drop-downs'
-  // in static/feedback.js): a drop-down open meanwhile takes the entry again, never a second one
-  var justLanded = false, wantsPush = false;
-  function dropdownsBackPending() {
-    var D = window.MtgDropdowns;
-    return !!(D && D.backPending && D.backPending());
-  }
-  function pushEntry() {
-    try { history.pushState({ mtgmenu: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; }
-  }
+  var menu = null, menuBack = null, scrim = null, menuScroll = [0, 0];
+  // the open menu is a layer (static/layers.js): the phone's Back closes it, and its one history
+  // entry (where the browser needs one) is shared with the boxes and the other menus
+  var Layers = window.MtgLayers, menuLayer = null;
   // until when the scrim ignores a click: the lift of the finger whose hold opened the sheet lands
   // as a click wherever the finger was, and under a phone's bottom sheet that is the scrim, which
   // would close the menu the moment it opened (bind sets it on the lift)
   var scrimGuardUntil = 0;
-  function close(focusBack, fromHistory) {
+  function close(focusBack, fromBack) {
     if (!menu) return;
     menu.remove();
     if (scrim) scrim.remove();
     menu = null; scrim = null;
-    wantsPush = false;
-    if (menuPushed && !fromHistory) {
-      // going back over the menu's entry fires popstate later; that one is ours, not a Back press
-      menuPushed = false;
-      ignorePop = true;
-      try { history.back(); } catch (e) { ignorePop = false; }
-    }
-    menuPushed = false;
+    var layer = menuLayer;
+    menuLayer = null;
+    if (layer && !fromBack && Layers) Layers.release(layer);
     if (focusBack && menuBack && menuBack.isConnected) menuBack.focus();
     menuBack = null;
   }
@@ -465,7 +445,7 @@
     a.appendChild(document.createTextNode(text));
     a.addEventListener("click", function (e) {
       close(false);
-      if (!ignorePop || o.ext || a.hasAttribute("download") || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      if (!backPending() || o.ext || a.hasAttribute("download") || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
       // the menu's own Back is on its way: the link goes once it has landed (whenClosed)
       e.preventDefault();
       // the progress bar, as for any link to another gateway page (static/feedback.js)
@@ -520,8 +500,8 @@
     menuScroll = [window.scrollX, window.scrollY];
     var first = m.querySelector("[role=menuitem]:not([disabled])");
     if (first) first.focus({ preventScroll: true });
-    // a drop-down's own Back still settling: the menu's entry goes on once it has landed
-    if (backCloses()) { if (dropdownsBackPending()) wantsPush = true; else pushEntry(); }
+    // the phone's Back closes the menu (static/layers.js)
+    if (Layers) menuLayer = Layers.open({ name: "menu", close: function () { if (menu === m) close(true, true); } });
     return m;
   }
   document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target) && e.target !== scrim) close(false); }, true);
@@ -532,39 +512,14 @@
     if (!menu || (e.target instanceof Element && menu.contains(e.target))) return;
     if (Math.abs(window.scrollX - menuScroll[0]) > 4 || Math.abs(window.scrollY - menuScroll[1]) > 4) close(false);
   }, { capture: true, passive: true });
-  // Runs go (a change of page) once the menu's own Back has landed. A page change started while
-  // that history.back() is still on its way races it, and the Back can win: a tap on Remove… left
-  // the member on the same page, or took them back to it after the box had opened.
-  var afterPop = [];
-  function flushAfterPop() {
-    var list = afterPop;
-    afterPop = [];
-    list.forEach(function (go) { go(); });
-  }
+  // Runs go (a change of page) once the layers' own Back has landed (static/layers.js). A page
+  // change started while that history.back() is still on its way races it, and the Back can win:
+  // a tap on Remove… left the member on the same page, or took them back to it after the box had
+  // opened.
+  function backPending() { return !!(Layers && Layers.backPending()); }
   function whenClosed(go) {
-    if (!ignorePop) { go(); return; }
-    afterPop.push(go);
-    // a Back that never reports: go anyway (this one only, so an older call's wait never hurries it)
-    setTimeout(function () {
-      var at = afterPop.indexOf(go);
-      if (at >= 0) { afterPop.splice(at, 1); go(); }
-    }, 1500);
+    if (Layers) Layers.settled(go); else go();
   }
-  window.addEventListener("popstate", function () {
-    if (ignorePop) {
-      ignorePop = false;
-      justLanded = true;
-      setTimeout(function () { justLanded = false; }, 0);
-      flushAfterPop();
-      return;
-    }
-    if (dropdownsBackPending()) {
-      // a drop-down's back() landed: a menu opened meanwhile takes the entry now
-      if (menu && wantsPush) { wantsPush = false; pushEntry(); }
-      return;
-    }
-    if (menu && menuPushed) { menuPushed = false; close(true, true); }
-  });
 
   // A ⋮ button for a tile or row; label: "Menu for NAME"
   function kebab(label) {
@@ -681,11 +636,10 @@
     item: item, link: link, sep: sep, kebab: kebab, icon: icon, el: el,
     toast: toast, dismissToast: dismissToast, placeToast: placeToast, post: post, getJSON: getJSON, fail: fail, csrf: csrf, oweReject: oweReject,
     copyText: copyText, copyAndSay: copyAndSay, collect: collect, pin: pin, enabled: enabled, phone: phone, norm: norm,
-    // true while the menu's own history.back() has not landed yet (static/box.js and
-    // static/feedback.js ask), and through the task in which it lands (feedback.js's popstate
-    // handler runs after this one and tells that popstate from a Back press by it)
-    backPending: function () { return ignorePop; },
-    backLanding: function () { return justLanded; },
+    // true while the layers' own history.back() has not landed yet, and through the task in
+    // which it lands (static/layers.js)
+    backPending: function () { return !!(Layers && Layers.inFlight()); },
+    backLanding: function () { return !!(Layers && Layers.landing()); },
     // a page change a menu item starts (a form sent, an address opened) goes through this
     whenClosed: whenClosed
   };

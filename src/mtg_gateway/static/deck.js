@@ -309,16 +309,15 @@
         });
       });
     }
+    // the pop-up box every risky confirm uses (audit F-7: a toast with Save anyway focused): the
+    // safe choice first and focused, the red button last; closing it any other way declines
     return new Promise(function (resolve) {
-      var yes = el("button", "btn-primary", "Save anyway");
-      yes.type = "button";
-      var no = el("button", "", "Cancel");
-      no.type = "button";
-      var done = function (v) { dismissToast(); resolve(v); };
-      yes.addEventListener("click", function () { asking = null; done(true); });
-      no.addEventListener("click", function () { decline(); done(false); });
-      toast(why + " Save anyway?", { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { decline(); resolve(false); } });
-      yes.focus();
+      var answered = false;
+      window.MtgBox.confirm({
+        title: "Save anyway?", text: why, ok: "Save anyway", danger: true, cancel: "Keep it", focus: "cancel",
+        onOk: function () { answered = true; asking = null; resolve(true); },
+        onClose: function () { if (!answered) { decline(); resolve(false); } }
+      });
     });
   }
   /* changes: the proposal's changes; undo: the inverse changes (null when the change cannot be
@@ -1607,17 +1606,15 @@
     });
     if (!noted.length) return Promise.resolve(true);
     return new Promise(function (resolve) {
-      var yes = el("button", "btn-danger", "Remove anyway");
-      yes.type = "button";
-      var no = el("button", "", "Cancel");
-      no.type = "button";
-      var done = function (v) { dismissToast(); resolve(v); };
-      yes.addEventListener("click", function () { done(true); });
-      no.addEventListener("click", function () { done(false); });
-      var who = noted.length === 1 ? noted[0].getAttribute("data-card") + " has a card note" : noted.length + " of these cards have card notes";
-      toast(who + " on Archidekt. Removing deletes the note for good: Undo puts the card back without it (the gateway cannot write notes).",
-        { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { resolve(false); } });
-      no.focus();
+      var one = noted.length === 1, answered = false;
+      var who = one ? "“" + noted[0].getAttribute("data-card") + "” has a card note" : noted.length + " of these cards have card notes";
+      window.MtgBox.confirm({
+        title: one ? "Remove the card and its note?" : "Remove the cards and their notes?",
+        text: who + " on Archidekt. Removing deletes the note for good: Undo puts the card back without it (the gateway cannot write notes).",
+        ok: "Remove anyway", danger: true, cancel: one ? "Keep it" : "Keep them", focus: "cancel",
+        onOk: function () { answered = true; resolve(true); },
+        onClose: function () { if (!answered) resolve(false); }
+      });
     });
   }
   // Quantity steps (the menu's and the viewer's − and +): the count changes at once and a burst
@@ -2007,30 +2004,29 @@
   // -- card menu: right-click, press and hold, Shift+F10 or the Menu key on a focused card -------
   // A themed menu (the shared .menu styling) in place of the browser's; Escape, a click or tap
   // outside, scrolling and the phone's Back button close it, and focus goes back to the card.
-  var menu = null, menuCard = null, menuStack = null, menuPushed = false, menuFocusBack = false, ignorePop = false;
+  var menu = null, menuCard = null, menuStack = null, menuFocusBack = false;
   var menuScrim = null;  // the dimmed page under the phone's sheet
-  function closeMenu(fromHistory) {
+  var Layers = window.MtgLayers, menuLayer = null;  // the open menu is a layer (static/layers.js)
+  function closeMenu(fromBack) {
     if (!menu) return;
-    var m = menu, card = menuCard, stack = menuStack, back = menuFocusBack;
-    menu = null; menuCard = null; menuStack = null; menuFocusBack = false;
+    var m = menu, card = menuCard, stack = menuStack, back = menuFocusBack, layer = menuLayer;
+    menu = null; menuCard = null; menuStack = null; menuFocusBack = false; menuLayer = null;
     m.remove();
     if (menuScrim) { menuScrim.remove(); menuScrim = null; }
     $$(".deck-toast.under-menu").forEach(function (t) { t.classList.remove("under-menu"); });
-    if (menuPushed && !fromHistory) {
-      // going back over the menu's entry fires popstate later; that one is ours, not a Back press
-      menuPushed = false;
-      ignorePop = true;
-      try { history.back(); } catch (e) { ignorePop = false; }
+    if (layer && !fromBack && Layers) {
+      // going back over the layers' entry may put the page's scroll position back too (a menu
+      // opened since stays)
+      scrollGrace = Date.now() + 400;
+      Layers.release(layer);
     }
-    menuPushed = false;
     flushSteps();  // quantity steps made in it go to Archidekt now
     if (!back) return;
     if (card && card.isConnected) { card.focus(); return; }
     focusNear(stack);  // the card was removed
   }
-  // true while the menu's own history.back() has not landed yet: a box the menu opened (Lock
-  // personal categories, Report card…) must not take that popstate for a Back press (static/box.js)
-  window.MtgDeckCardMenu = { backPending: function () { return ignorePop; } };
+  // true while the layers' own history.back() has not landed yet (static/layers.js)
+  window.MtgDeckCardMenu = { backPending: function () { return !!(Layers && Layers.backPending()); } };
   function menuItem(text, ic, onClick, cls) {
     var b = el("button", cls || "", "");
     b.type = "button";
@@ -2343,7 +2339,8 @@
     // with the arrow keys)
     var first = $("[role=menuitem]:not([disabled]):not(.step)", m);
     if (first && !(opts.submenu && own)) first.focus();
-    if (phone()) { try { history.pushState({ menu: 1, card: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; } }
+    // the phone's Back closes the menu (static/layers.js)
+    if (Layers) menuLayer = Layers.open({ name: "menu", close: function () { if (menu === m) closeMenu(true); } });
   }
   function fit(m) {
     if (m.classList.contains("cs-menu")) return;  // the phone's sheet sits at the bottom, its own height
@@ -2396,16 +2393,6 @@
     if (Math.abs(window.scrollX - menuScroll[0]) > 4 || Math.abs(window.scrollY - menuScroll[1]) > 4) closeMenu();
   }, { capture: true, passive: true });
   window.addEventListener("resize", function () { if (menu) closeMenu(); });
-  window.addEventListener("popstate", function () {
-    if (ignorePop) {
-      // going back may put the page's scroll position back too (a menu opened since stays)
-      ignorePop = false;
-      scrollGrace = Date.now() + 400;
-      menuScroll = [window.scrollX, window.scrollY];
-      return;
-    }
-    if (menu) closeMenu(true);
-  });
 
   // -- stacks and grid: tap to fan out, tap a card to open it ----------------------------------
   var isStacks = cards.classList.contains("stacks");
@@ -3587,11 +3574,15 @@
       throw new Error("The deck list couldn't be loaded.");
     });
   }
-  var dialog = null, back = null;
-  function close() {
+  var dialog = null, back = null, dialogLayer = null, Layers = window.MtgLayers;
+  // ``fromBack``: the Back key took the box's layer already (static/layers.js)
+  function close(fromBack) {
     if (!dialog) return;
     dialog.remove();
     dialog = null;
+    var layer = dialogLayer;
+    dialogLayer = null;
+    if (layer && fromBack !== true && Layers) Layers.release(layer);
     document.removeEventListener("keydown", onKey, true);
     if (back && back.isConnected) back.focus();
     back = null;
@@ -3653,6 +3644,8 @@
     box.appendChild(acts);
     dialog.appendChild(box);
     document.body.appendChild(dialog);
+    // the open box is a layer (static/layers.js): on a phone Back closes it, not the page
+    if (Layers) dialogLayer = Layers.open({ name: "box", close: function () { if (dialog === mine) close(true); } });
     document.addEventListener("keydown", onKey, true);
     function waiting(on) {
       if (on) { go.setAttribute("aria-disabled", "true"); go.setAttribute("aria-busy", "true"); }

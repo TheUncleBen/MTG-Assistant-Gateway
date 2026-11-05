@@ -39,10 +39,13 @@
         wrap.appendChild(el("p", "muted", d.done));
       }
       if (first && first.focus) first.focus({ preventScroll: true });
-    }).catch(function () {
+      if (window.MtgLoadMore) window.MtgLoadMore.loaded();
+    }).catch(function (err) {
       a.removeAttribute("aria-busy");
       a.removeAttribute("aria-disabled");
-      toast("No connection; the threads could not be read. Try again.", { error: true });
+      // the one wording every Load more uses (static/loadmore.js)
+      if (window.MtgLoadMore) window.MtgLoadMore.failed(err);
+      else toast("No connection; nothing more could be loaded. Try again.", { error: true });
     });
   }
   document.addEventListener("click", function (e) {

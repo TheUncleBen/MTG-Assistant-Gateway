@@ -260,6 +260,9 @@
     fd.forEach(function (v, k) { if (String(v) !== "") out.append(k, String(v)); });
     return out;
   }
+  // the form as the list on screen was drawn for (audit F-11: Show with nothing changed asked
+  // again and rewrote the address)
+  var shownQ = params().toString();
   // ``keep``: the address stays as it is (a redraw from the address Back landed on)
   function refresh(keep) {
     var p = params();
@@ -268,8 +271,9 @@
     list.setAttribute("aria-busy", "true");
     load(list, "/api/decks/mine?" + api.toString())
       .then(function (data) {
-        if (!data || keep) return;  // an older load: a newer one draws and sets the address
-        setAddress();
+        if (!data) return;  // an older load: a newer one draws and sets the address
+        shownQ = p.toString();
+        if (!keep) setAddress();
       })
       .catch(function () { failed(list); });
   }
@@ -282,7 +286,9 @@
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     clearTimeout(timer);
-    refresh();
+    // Show with the form as the list shows it: the sheet closes, nothing is asked for again
+    if (params().toString() !== shownQ) refresh();
+    else list.removeAttribute("aria-busy");
     if (window.MtgSearchPanel) window.MtgSearchPanel.closeSheet();
   });
 

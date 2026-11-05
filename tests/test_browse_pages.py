@@ -56,6 +56,11 @@ async def test_precons_have_the_shared_panel_set_headings_and_load_more(stack: S
         r = await b.http.get("/precons?sort=name", headers=NAV)
         assert "class='sec'" not in r.text and r.text.count("<ul class='plain decklist") == 1
         assert "All 1 decks shown." in r.text
+        # the sort picked is remembered for the next visit and the page's own asks (audit F-10):
+        # by set again for the rest
+        r = await b.http.get("/precons", headers=NAV)
+        assert "class='sec'" not in r.text, "the sort by name was not remembered"
+        await b.http.get("/precons?sort=set", headers=NAV)
         # the filter: the count says how many of all, every matching set is open
         r = await b.http.get("/precons?q=sample", headers=NAV)
         assert "id='pre-count' aria-live='polite'>1 of 1 decks</h2>" in r.text

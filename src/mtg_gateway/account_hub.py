@@ -11,6 +11,10 @@ from typing import Any
 from . import modes
 from .theme import app_version, current_layout, current_path, current_theme, display_name, icon, in_app
 
+# what a sign-out clears on the device (Clear-Site-Data "storage", pages.logout_post): said on
+# the sign-out page and under this page's Sign out alike (audit F-14)
+DRAFTS_CLEARED = "Unsent drafts, scan drafts and other unsaved work kept on this device are cleared too."
+
 DETAILS = "/account/details"
 
 # What a row is: (label, icon, href or "" for a fold, the value shown at its end, the fold's body,
@@ -190,6 +194,7 @@ def hub_html(state: Any, sub: str, csrf: str, *, admin: bool) -> str:
         f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
         "<button type='submit' class='btn' data-busy-text='Signing out…'>"
         f"{icon('x')}<span>Sign out</span></button>"
+        f"<p class='muted small'>{html.escape(DRAFTS_CLEARED)}</p>"
         "</form></div>"
     )
 

@@ -326,8 +326,10 @@ def test_save_anyway_in_the_add_dialog_sends_the_version_it_was_asked_about(serv
             " s.dispatchEvent(new Event('change', {bubbles: true})); }"
         )
         page.locator(".addsheet.open button[type=submit]").click()
-        yes = page.locator(".addsheet.open button", has_text="Save anyway")
+        # the question is the pop-up box over the sheet (audit F-7), Keep it focused, Save anyway last
+        yes = page.locator(".mtgbox-scrim .mtgbox[role=dialog] .acts button", has_text="Save anyway")
         yes.wait_for(timeout=8000)
+        assert page.evaluate("() => document.activeElement.textContent.trim()") == "Keep it"
         yes.click()
         page.locator(".cards-toast").wait_for(timeout=8000)
         assert errors == [], errors

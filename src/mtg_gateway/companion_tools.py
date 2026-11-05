@@ -256,7 +256,9 @@ def add_deck_tool_routes(
             # One search bar that adds (the "Search bar" option): chips pick where a card goes,
             # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show
             # beside the list on wide screens (static/companion.js).
-            "<section class='panel addbox'><h2>Add a card</h2>" + picker + "<form class='addcard'>"
+            "<section class='panel addbox'><h2>Add a card</h2>"
+            + picker
+            + f"<form class='addcard' data-draft='editor-add:{_esc(deck.id)}'>"
             "<div class='targets' role='group' aria-label='Add to'>"
             "<button type='button' class='tchip on' data-cat='' data-zone='main' aria-pressed='true'>"
             "Auto</button>"
@@ -284,7 +286,8 @@ def add_deck_tool_routes(
             "<p class='muted small addhelp' id='addname-help'>Enter adds one; “3 sol ring” adds three.</p>"
             "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
             "<details class='pastebox'><summary class='fold-btn'>Paste a list</summary>"
-            "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "
+            f"<form class='pastelist' data-draft='editor-paste:{_esc(deck.id)}'>"
+            "<label for='pastetext'>One card per line, with a count in front "
             "(“2 Lightning Bolt”)</label>"
             "<textarea id='pastetext' name='text' rows='6' maxlength='20000' "
             "placeholder='4 Lightning Bolt&#10;1 Sol Ring'></textarea>"

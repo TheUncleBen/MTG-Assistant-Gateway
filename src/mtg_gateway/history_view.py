@@ -612,7 +612,7 @@ def delete_box_html(
             f"<p>{gone} This can't be undone. Nothing changes on Archidekt.</p></form>"
         )
         actions = [
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button(f"Delete {what}", kind="danger-solid", form=f"{box_id}f"),
         ]
     box = ui.box(box_id, f"Delete this {what}?", body, actions=actions, open=open, close_href=close_href)

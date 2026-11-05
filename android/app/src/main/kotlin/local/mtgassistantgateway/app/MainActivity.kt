@@ -137,9 +137,26 @@ class MainActivity : ComponentActivity() {
     private var pendingCamera = false // open the camera as soon as the /scan page is ready
     private var pendingAuto = false // ...with Auto on (the page's Auto switch asked for it)
     private var scanReloaded = false // the /scan page was reloaded once to get its hooks; never loop
+    private var layerOpen = false // the page says a layer (a menu, a box, a sheet) is open over it
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            if (camera != null) closeCamera() else if (web.canGoBack()) web.goBack()
+            if (camera != null) {
+                closeCamera()
+                return
+            }
+            // A layer over the page (a menu, a box, a sheet: static/layers.js) closes first; the
+            // page holds no history entry for it, so Back goes back in the history only when no
+            // layer took it. On the first page with nothing open the system's own back runs.
+            web.evaluateJavascript(BACK_KEY) { closed ->
+                if (closed == "true") return@evaluateJavascript
+                layerOpen = false
+                if (web.canGoBack()) {
+                    web.goBack()
+                } else {
+                    syncBackCallback()
+                    if (!backCallback.isEnabled) onBackPressedDispatcher.onBackPressed()
+                }
+            }
         }
     }
     private val windowInfo = WindowInfoTrackerCallbackAdapter(WindowInfoTracker.getOrCreate(this))
@@ -1050,7 +1067,7 @@ class MainActivity : ComponentActivity() {
      * back on Android 13+) animation runs.
      */
     private fun syncBackCallback() {
-        backCallback.isEnabled = camera != null || web.canGoBack()
+        backCallback.isEnabled = camera != null || web.canGoBack() || layerOpen
     }
 
     /**
@@ -1229,6 +1246,7 @@ class MainActivity : ComponentActivity() {
         override fun onPageFinished(view: WebView, url: String) {
             progress.visibility = View.GONE
             pullDone()
+            layerOpen = false // a new page starts with nothing open over it
             if (url == BLANK) {
                 // Back must not reload the refused page under it; Retry takes the person home.
                 view.clearHistory()
@@ -1428,6 +1446,20 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""
 
+        /**
+         * The page's layers (static/layers.js): true while one is open, so the Back key reaches
+         * the page first (the callback is enabled) even on the first page.
+         */
+        @JavascriptInterface
+        fun layer(open: Boolean) = onGatewayPage {
+            layerOpen = open
+            syncBackCallback()
+        }
+
+        /** Says the Back key asks the page first (MtgBackKey), so a layer needs no history entry. */
+        @JavascriptInterface
+        fun backKey(): Boolean = true
+
         /** The Account page's This app list: the actions the floating button offers elsewhere. */
         @JavascriptInterface
         fun reload() = onGatewayPage { web.reload() }
@@ -1485,6 +1517,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MtgAssistant"
         private const val BLANK = "about:blank"
+
+        /** Asks the page to close its top layer (static/layers.js); "true" when one closed. */
+        private const val BACK_KEY =
+            "(function(){try{return !!(window.MtgBackKey&&window.MtgBackKey());}catch(e){return false;}})();"
         /** Header the gateway's service worker puts on its own offline page (companion.py, /sw.js). */
         private const val OFFLINE_HEADER = "X-MTG-Offline"
         private const val BUSY_HEADER = "X-MTG-Busy"

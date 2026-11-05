@@ -583,6 +583,8 @@
       ? "Added " + parts.qty + " × " + parts.name + " to the copies already listed for " + (zone === "side" || outside(catIn.value) ? "the maybeboard or sideboard" : "the deck") + "; they keep their own printing and finish. Type the next card, or save."
       : "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
+    // the draft (static/draft.js) follows the field: the card is in the pending changes now
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     hidePrints();
     input.focus();
   }
@@ -708,6 +710,7 @@
           });
         });
         area.value = missed.join("\n");
+        area.dispatchEvent(new Event("input", { bubbles: true }));  // the draft keeps only what was missed
         status.textContent = found + " card" + (found === 1 ? "" : "s") + " added to the pending changes" + (missed.length ? "; " + missed.length + " name" + (missed.length === 1 ? " was" : "s were") + " not recognized and stay in the box." : ".");
         btn.disabled = false;
       })
@@ -839,33 +842,34 @@
           root.dataset.leaving = "1";
           window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved";
         } else if (res.ok && d.needs_confirm) {
-          // the proposal exists but nothing was sent: ask, then apply that same proposal
+          // the proposal exists but nothing was sent: ask in the pop-up box every risky confirm
+          // uses (audit F-7: a bar with Save anyway focused), Keep editing first and focused, the
+          // red button last; then apply that same proposal
           status.textContent = "";
-          saving = false;  // the question bar now holds the edits until it is answered
-          var bar = el("div", { class: "confirmbar notice warn", role: "alertdialog" });
-          bar.appendChild(el("span", { text: d.why + " Save anyway?" }));
-          var yes = el("button", { type: "button", class: "btn-primary", text: "Save anyway" });
-          var no = el("button", { type: "button", text: "Keep editing" });
-          bar.appendChild(yes); bar.appendChild(no);
-          root.querySelector(".editbar").appendChild(bar);
-          yes.addEventListener("click", function () {
-            yes.disabled = true;
-            window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
-              method: "POST", csrf: cfg.csrf, what: "nothing was changed",
-              body: JSON.stringify({ version: d.version, archidekt_backup: !(backupBox && !backupBox.checked) })
-            }).then(function (a) {
-              if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
-              bar.remove(); sayProblem(status, a, "nothing was changed", "Archidekt refused the change; nothing was saved."); btn.disabled = false; saving = false;
-            });
+          saving = false;  // the box now holds the edits until it is answered
+          var answered = false;
+          window.MtgBox.confirm({
+            title: "Save anyway?", text: d.why, ok: "Save anyway", danger: true, cancel: "Keep editing", focus: "cancel",
+            onOk: function () {
+              answered = true;
+              return window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
+                method: "POST", csrf: cfg.csrf, what: "nothing was changed",
+                body: JSON.stringify({ version: d.version, archidekt_backup: !(backupBox && !backupBox.checked) })
+              }).then(function (a) {
+                if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return true; }
+                sayProblem(status, a, "nothing was changed", "Archidekt refused the change; nothing was saved."); btn.disabled = false; saving = false;
+                return false;
+              });
+            },
+            onClose: function () {
+              if (answered) return;
+              btn.disabled = false; saving = false;
+              // the proposal made for the check is not wanted: reject it so Proposals stays clean
+              window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
+                method: "POST", csrf: cfg.csrf
+              });  // never rejects; a leftover pending proposal is harmless
+            }
           });
-          no.addEventListener("click", function () {
-            bar.remove(); btn.disabled = false; saving = false;
-            // the proposal made for the check is not wanted: reject it so Proposals stays clean
-            window.MtgFetch.answer("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
-              method: "POST", csrf: cfg.csrf
-            });  // never rejects; a leftover pending proposal is harmless
-          });
-          yes.focus();
         } else if (res.ok && d.proposal_id) {
           // writes are off on this gateway: the proposal is kept for later
           root.dataset.leaving = "1";

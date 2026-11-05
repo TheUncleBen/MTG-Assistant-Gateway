@@ -569,6 +569,7 @@
         ta.removeAttribute("aria-busy");
         if (!d.ok) { Menu.fail(d, "Archidekt refused the note."); return; }
         pinChanged(tr, { notes: text });
+        if (window.MtgDraft) window.MtgDraft.clear(form.getAttribute("data-draft"));
         said(d, "Saved on Archidekt.", form.getAttribute("action"));
       }, function () { ta.removeAttribute("aria-busy"); toast(NO_CONNECTION, { error: true }); });
     };

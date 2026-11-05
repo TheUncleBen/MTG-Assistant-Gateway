@@ -730,14 +730,20 @@
     lastFocus = document.activeElement;
     sheet.classList.add("open");
     document.documentElement.classList.add("cardview-open");
+    // the open sheet is a layer (static/layers.js): on a phone Back closes it, not the page
+    if (!sheetLayer && window.MtgLayers) sheetLayer = window.MtgLayers.open({ name: "addsheet", close: function () { closeSheet(true); } });
     loadDecks();
     if (window.MtgSelect) window.MtgSelect.enhance(sheet);
     setTimeout(function () { var first = $(".msel-btn", sheet) || deckSel; first.focus(); }, 0);
   }
-  function closeSheet() {
+  var sheetLayer = null;
+  function closeSheet(fromBack) {
     if (!sheet) return;
     sheet.classList.remove("open");
     document.documentElement.classList.remove("cardview-open");
+    var l = sheetLayer;
+    sheetLayer = null;
+    if (l && !fromBack && window.MtgLayers) window.MtgLayers.release(l);
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   // a category whose rows sit outside the deck (Sideboard, Considering...) puts the card in the
@@ -786,19 +792,21 @@
         return;
       }
       if (d.ok && d.needs_confirm) {
-        // the hand-edit rule asks first; No rejects the proposal made for the question
+        // the hand-edit rule asks first, in the pop-up box every risky confirm uses (audit F-7:
+        // Save anyway focused in the sheet); Keep it, or closing the box, rejects the proposal
+        // made for the question
         busy(false);
-        setMsg(d.why + " Save anyway?", false);
-        var yes = el("button", "btn-primary", "Save anyway"); yes.type = "button";
-        var no = el("button", "", "No"); no.type = "button";
-        msg.appendChild(document.createTextNode(" "));
-        msg.appendChild(yes); msg.appendChild(document.createTextNode(" ")); msg.appendChild(no);
-        yes.addEventListener("click", function () { save({ proposal_id: d.proposal_id, version: d.version }); });
-        no.addEventListener("click", function () {
-          api("POST", "/api/v1/proposals/" + enc(d.proposal_id) + "/reject", {}).catch(function () {});
-          setMsg("Nothing was changed.");
+        setMsg("");
+        var answered = false;
+        window.MtgBox.confirm({
+          title: "Save anyway?", text: d.why, ok: "Save anyway", danger: true, cancel: "Keep it", focus: "cancel",
+          onOk: function () { answered = true; save({ proposal_id: d.proposal_id, version: d.version }); },
+          onClose: function () {
+            if (answered) return;
+            api("POST", "/api/v1/proposals/" + enc(d.proposal_id) + "/reject", {}).catch(function () {});
+            setMsg("Nothing was changed.");
+          }
         });
-        yes.focus();
         return;
       }
       if (d.ok && d.status === 202 && d.proposal_id) {

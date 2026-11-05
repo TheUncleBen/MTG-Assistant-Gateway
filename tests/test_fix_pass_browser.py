@@ -663,3 +663,136 @@ def test_card_tiles_keep_the_kebab_beside_the_name(
             assert max(t["tyT"] for t in row) - min(t["tyT"] for t in row) < 2, row  # type lines level
         assert errors == [], errors
         browser.close()
+
+
+def test_load_more_decks_pages_come_back_after_back_and_a_reload(server: Server) -> None:
+    """Audit F-4 (eccfa3d9) on deck search's Load more (static/search.js): the second page is back
+    after Back from another page and after a reload."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 1280, touch=False)
+        page.goto(f"{server.base}/search?format=3", wait_until="networkidle")
+        page.locator("#s-more [data-more]").click()
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 24", timeout=5000
+        )
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        page.go_back()
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 24", timeout=5000
+        )
+        page.reload(wait_until="networkidle")
+        page.wait_for_function(
+            "() => document.querySelectorAll('ul.decklist li.deck').length === 24", timeout=5000
+        )
+        assert page.locator("#s-count").inner_text() == "35 decks"
+        assert errors == [], errors
+        browser.close()
+
+
+def test_load_more_decks_that_could_not_be_read_says_so_in_the_one_wording(server: Server) -> None:
+    """Audit F-5 (eccfa3d9): deck search's Load more fails with the same words as every other."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 1280, touch=False)
+        page.goto(f"{server.base}/search?format=3", wait_until="networkidle")
+        how = {"answer": "abort"}
+
+        def answer(route):  # noqa: ANN001
+            if how["answer"] == "abort":
+                route.abort()
+            else:
+                route.fulfill(
+                    status=401,
+                    content_type="application/json",
+                    body='{"ok": false, "error": "unauthenticated"}',
+                )
+
+        page.route(lambda u: "/search/api/decks?" in u and "page=2" in u, answer)
+        page.locator("#s-more [data-more]").click()
+        toast = page.locator(".toast:not(.session-toast)")
+        toast.wait_for(state="visible", timeout=5000)
+        assert (
+            toast.inner_text().strip().startswith("No connection; nothing more could be loaded. Try again.")
+        )
+        assert page.locator("ul.decklist li.deck").count() == 12
+        # signed out meanwhile: the same shape of words, with Sign in
+        how["answer"] = "401"
+        page.evaluate("() => document.querySelectorAll('.toast').forEach(t => t.remove())")
+        page.locator("#s-more [data-more]").click()
+        toast.wait_for(state="visible", timeout=5000)
+        assert (
+            toast.inner_text()
+            .strip()
+            .startswith("You're signed out, so nothing more could be loaded. Try again.")
+        )
+        assert toast.locator("a, button", has_text="Sign in").count() == 1
+        assert errors == [], errors
+        browser.close()
+
+
+def test_rapid_filters_from_the_sheet_leave_one_entry_and_the_address_the_list_shows(server: Server) -> None:
+    """Audit F-12 (eccfa3d9), the stress test: on deck search, a drop-down picked in the sheet and
+    Show pressed at once, with every search and the sheet's own back() slowed, five times over,
+    leaves one entry over the page before (never a second) with the picked filter in the address;
+    on My decks, two boxes ticked at once and Back pressed on the sheet leave the address the
+    list was drawn for, and the page settles (no request stays open)."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_sheet_focus_browser import _open_sheet
+    from .test_sheet_history_browser import SLOW, _settle, _tick
+
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, server, sid, 360, touch=True)
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        page.goto(f"{server.base}/search", wait_until="networkidle")
+        _settle(page)
+        depth = page.evaluate("() => history.length")
+        page.evaluate(SLOW)
+        for i in range(5):
+            _open_sheet(page)
+            page.locator("#sp-filters select:not([name=cm]):not([name=dir])").first.select_option(
+                index=(i % 3) + 1
+            )
+            page.locator("#sp-filters .sp-show").click()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            page.wait_for_timeout(1200)  # the held back() and its popstate
+            _settle(page)
+            assert page.evaluate("() => history.length") == depth + 1, (
+                i,
+                page.evaluate("() => history.length"),
+                depth,
+            )
+            assert "format=" in page.url and page.evaluate(
+                "() => !(history.state && history.state.mtglayer)"
+            ), (i, page.url)
+            chosen = page.evaluate("() => document.querySelector('#sp-filters select[name=format]').value")
+            assert f"format={chosen}" in page.url, (i, chosen, page.url)
+        page.go_back()
+        page.wait_for_url(f"{server.base}/decks")
+        # My decks: two ticks at once, then Back on the sheet; the address names the ticked boxes
+        for i in range(5):
+            page.goto(f"{server.base}/decks", wait_until="networkidle")
+            _settle(page)
+            _open_sheet(page)
+            _tick(page, "box")
+            page.locator("#sp-filters input[type=checkbox]:visible").nth(1).check()
+            page.go_back()
+            page.wait_for_function("() => !document.querySelector('#sp-filters.open')")
+            page.wait_for_load_state("networkidle", timeout=10000)
+            _settle(page)
+            form = page.evaluate(
+                "() => { const fd = new FormData(document.querySelector('.spanel form'));"
+                " const o = new URLSearchParams();"
+                " fd.forEach((v, k) => { if (String(v) !== '') o.append(k, String(v)); });"
+                " return o.toString(); }"
+            )
+            assert parse_qs(urlparse(page.url).query) == parse_qs(form), (i, page.url, form)
+            assert page.evaluate("() => !(history.state && history.state.mtglayer)"), i
+        assert errors == [], errors
+        browser.close()

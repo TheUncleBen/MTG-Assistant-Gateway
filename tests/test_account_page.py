@@ -119,7 +119,8 @@ async def test_labels_wording_and_the_one_orange_button_while_not_linked(gw: Har
             "<label class='check'><input type='checkbox' id='delete-tick' name='confirm' value='yes' "
             "required>" in dbox
         )
-        assert "<button type='button' class='btn-plain' data-cancel>Cancel</button>" in dbox
+        # the way back in a destructive box says Keep it (audit F-8; pages._confirm_box's rule)
+        assert "<button type='button' class='btn-plain' data-cancel>Keep it</button>" in dbox
         assert (
             "<button type='submit' class='danger' form='deletef' data-enabled-by='delete-tick'>Delete my data"
             "</button>" in dbox

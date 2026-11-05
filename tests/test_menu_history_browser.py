@@ -1,5 +1,6 @@
-"""On a phone one history entry stands for "a menu is open" (static/feedback.js for the drop-downs,
-static/cardmenu.js for the shared menu), so Back closes the menu instead of leaving the page.
+"""On a phone one history entry stands for "a layer is open" (static/layers.js, for the drop-downs of
+static/feedback.js and the shared menu of static/cardmenu.js alike), so Back closes the menu instead
+of leaving the page.
 Opening a second menu straight from the first used to leave the second without an entry, and Back
 left the page. The entry has one owner now: the first menu takes it, the last one closing gives
 it back, and a menu opened while that back() is still landing takes it again, whichever of the
@@ -33,7 +34,7 @@ def server(tmp_path: Path):
 # what is open: each open drop-down by its button's words, and the shared menu by its head
 OPEN = "() => [...document.querySelectorAll('details.dd[open]')].map(d => d.querySelector(':scope > summary').getAttribute('aria-label') || d.querySelector(':scope > summary').innerText.trim()).concat([...document.querySelectorAll('.ctxmenu[role=menu]')].map(m => m.getAttribute('aria-label')))"  # noqa: E501
 # the entry (either script's) and how many menus are open
-STATE = "() => ({ menu: !!(history.state && (history.state.menu || history.state.mtgmenu)), open: document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length })"  # noqa: E501
+STATE = "() => ({ menu: !!(history.state && history.state.mtglayer), open: document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length })"  # noqa: E501
 
 
 def _two_menus(page):
@@ -194,7 +195,7 @@ def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(serv
         _tap(page, a)
         # A has taken its entry
         page.wait_for_function(
-            "() => !!(history.state && (history.state.menu || history.state.mtgmenu))"
+            "() => !!(history.state && history.state.mtglayer)"
             " && document.querySelectorAll('details.dd[open], .ctxmenu[role=menu]').length === 1"
         )
         assert page.evaluate("() => history.length") == length + 1

@@ -676,6 +676,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             # the search panel's drop-downs and phone sheet, then Load more and Open this deck
             "<script src='/static/searchpanel.js' defer></script>"
             "<script src='/static/search.js' defer></script>"
+            "<script src='/static/loadmore.js' defer></script>"
             # the user page's Follow button (static/social.js, the social actions' own file)
             + ("<script src='/static/social.js' defer></script>" if social else "")
             + "".join(f"<script src='/static/{name}' defer></script>" for name in scripts),
@@ -711,12 +712,40 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
         return resp
 
+    def search_sort(request: Request, sub: str) -> tuple[str, str]:
+        return prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "search",
+            sorts=SEARCH_ORDERS,
+            default="-viewCount",
+            name="order",
+            dirs=dict(DIRECTIONS),
+            default_dir="auto",
+        )
+
+    def precon_sort(request: Request, sub: str) -> tuple[str, str]:
+        return prefs.sort_choice(
+            state.db,
+            sub,
+            request,
+            "precons",
+            sorts=dict(PRECON_SORTS),
+            default="set",
+            name="sort",
+            dirs=dict(PRECON_DIRS),
+            default_dir="desc",
+        )
+
     @server.custom_route("/search", methods=["GET"], include_in_schema=False)
     async def search_page(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect_here(request)
         query = read_query(request.query_params)
+        # the search opens sorted as it was left (prefs.sort_choice, audit F-10)
+        query["order_by"], query["direction"] = search_sort(request, sub)
         view, remember = view_of(request, sub)
         asked = bool(
             query["name"]
@@ -836,6 +865,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return login_redirect_here(request, "/precons")
         pq = precon_query(request.query_params)
+        pq["sort"], pq["dir"] = precon_sort(request, sub)  # as last left (audit F-10)
         view, remember = view_of(request, sub)
         view_in_link = view if request.query_params.get("view") in VIEWS else None
         head = ui.page_head("Preconstructed decks", PRECON_PURPOSE)
@@ -876,6 +906,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         if not prefs.from_this_site(request):  # it asks Archidekt on the member's own allowance
             return JSONResponse({"ok": False, "error": "cross_site"}, status_code=403, headers=NO_STORE)
         pq = precon_query(request.query_params)
+        pq["sort"], pq["dir"] = precon_sort(request, sub)
         view = request.query_params.get("view") if request.query_params.get("view") in VIEWS else "grid"
         try:
             listing = await decks.precons(sub)

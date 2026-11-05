@@ -80,9 +80,9 @@
     });
     return viewer;
   }
-  /* Opening pushes a history entry so the phone's Back button (and the browser's) closes the
-     viewer instead of leaving the page; closing from the page goes back over that entry. */
-  var pushed = false;
+  /* The open viewer is a layer (static/layers.js): the phone's Back button closes it instead of
+     leaving the page, and closing from the page gives its history entry back where one is held. */
+  var Layers = window.MtgLayers, layer = null;
   function hide() {
     if (!viewer) return;
     viewer.classList.remove("open");
@@ -90,15 +90,13 @@
     document.documentElement.classList.remove("cardview-open");
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
-  function close() {
+  function close(fromBack) {
     if (!viewer || !viewer.classList.contains("open")) return;
-    if (pushed) { pushed = false; history.back(); return; }
+    var l = layer;
+    layer = null;
+    if (l && !fromBack && Layers) Layers.release(l);
     hide();
   }
-  window.addEventListener("popstate", function () {
-    if (history.state && history.state.cardview) return;
-    if (viewer && viewer.classList.contains("open")) { pushed = false; hide(); }
-  });
 
   function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
   // a printing as every screen writes it: "SLD 1074" (the pages' data-set) reads "SLD #1074"
@@ -145,9 +143,7 @@
     var closeBtn = draw(v, card, actions);
     v.classList.add("open");
     document.documentElement.classList.add("cardview-open");
-    if (!pushed) {
-      try { history.pushState({ cardview: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
-    }
+    if (!layer && Layers) layer = Layers.open({ name: "cardview", close: function () { close(true); } });
     closeBtn.focus();
   }
   /* Redraws the open viewer with fuller data (a page that reads the rules text after opening);
@@ -228,7 +224,7 @@
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.setAttribute("title", "Close");
     closeBtn.appendChild(el("span", "x", "×"));
-    closeBtn.addEventListener("click", close);
+    closeBtn.addEventListener("click", function () { close(false); });
     head.appendChild(closeBtn);
     var faces = card.faces && card.faces.length > 1 ? card.faces : [{ type: card.type, text: card.text, pt: card.pt, loyalty: card.loyalty, flavor: card.flavor }];
     var text = el("div", "cardtext");
@@ -631,5 +627,5 @@
       label: node.getAttribute("data-label") || ""
     };
   }
-  window.MtgCardView = { text: extraFor, open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
+  window.MtgCardView = { text: extraFor, open: open, update: update, close: function () { close(false); }, fromElement: fromElement, mana: mana, symbolize: symbolize };
 })();

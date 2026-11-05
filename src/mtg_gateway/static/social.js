@@ -497,6 +497,10 @@
       if (t && h) h.textContent = t.replace("{name}", who || "this");
       var n = reportBox.querySelector(".boxnote"); if (n) { n.hidden = true; n.textContent = ""; }
       var ta = reportBox.querySelector("textarea"); if (ta) ta.value = "";
+      // the one box serves every comment: what was typed is kept per comment (static/draft.js),
+      // so a reload brings back the report being written, and never another comment's
+      var form = reportBox.querySelector("form[data-draft]"), Draft = window.MtgDraft;
+      if (form && Draft) Draft.keep(form, form.getAttribute("data-draft").split("#")[0] + "#" + id);
       Box.openElement(reportBox, { returnFocus: back || null });
     };
     var commentLink = function (id) { return location.origin + location.pathname + "#c" + id; };

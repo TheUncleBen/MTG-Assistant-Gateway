@@ -315,7 +315,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return page(
             "Sign out",
             "<div class='card'><p>Sign out of this gateway on this device?</p>"
-            "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
+            f"<p class='muted small'>{account_hub.DRAFTS_CLEARED}</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
             "<div class='form-actions'>"
@@ -2339,7 +2339,7 @@ def _unlink_box(csrf_in: str, *, open: bool = False) -> str:
         "also stops working on Archidekt's side is not known. Your decks on Archidekt are not "
         "touched.</p></form>",
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Unlink and delete stored session", kind="danger-solid", form="unlinkf"),
         ],
         open=open,
@@ -2485,7 +2485,7 @@ def _forget_choices_card(csrf_in: str) -> str:
             "<p>Every device goes back to the usual views, card size, stats choices and tips. "
             "Light or dark mode stays as it is on each device.</p></form>",
             actions=[
-                ui.box_button("Cancel", cancel=True),
+                ui.box_button("Keep them", cancel=True),
                 ui.box_button("Forget my view choices", kind="danger-solid", form="forgetf"),
             ],
             close_href=section_href("choices"),
@@ -2504,7 +2504,7 @@ def _signout_box(csrf_in: str, *, open: bool = False) -> str:
         "out, this one too. Connected assistants keep working; disconnect them under Assistants.</p>"
         "</form>",
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep them", cancel=True),
             "<button type='submit' class='danger' form='signoutf' name='everywhere' value='1' "
             f"data-busy-text='Signing out…'>{icon('x')}Sign out on all my devices</button>",
         ],
@@ -2533,7 +2533,7 @@ def _delete_box(csrf_in: str, backup_days: int | None = None, *, open: bool = Fa
         "<label class='check'><input type='checkbox' id='delete-tick' name='confirm' value='yes' required>"
         "<span>Yes, delete my data from this gateway</span></label></form>",
         actions=[
-            ui.box_button("Cancel", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             # static/pages.js keeps it disabled until the tick; without scripts `required` holds the form
             ui.box_button(
                 "Delete my data", kind="danger-solid", form="deletef", attrs="data-enabled-by='delete-tick'"
@@ -3925,7 +3925,7 @@ def _reject_confirm(picks: list[str], versions: dict[str, int], back: str, csrf:
     )
     return (
         f"<h1>{html.escape(reject_ask(len(picks)))}</h1><p class='muted'>{REJECT_NOTE}</p>"
-        "<form method='post' action='/proposals/select' class='rejectconfirm'>"
+        "<form method='post' action='/proposals/select' class='rejectconfirm' data-draft='reject'>"
         f"<input type='hidden' name='csrf' value='{html.escape(csrf)}'>"
         f"<input type='hidden' name='back' value='{html.escape(back)}'>"
         "<input type='hidden' name='sure' value='1'>"

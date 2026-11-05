@@ -224,9 +224,13 @@
   var hoverQuery = window.matchMedia ? window.matchMedia("(hover: hover) and (pointer: fine)") : null;
   function wide() { return !!(wideQuery && wideQuery.matches); }
 
+  var Layers = window.MtgLayers, layer = null;  // the open picker is a layer (static/layers.js)
   function isOpen() { return !!(dlg && dlg.classList.contains("open")); }
-  function close() {
+  function close(fromBack) {
     if (!isOpen()) return;
+    var l = layer;
+    layer = null;
+    if (l && !fromBack && Layers) Layers.release(l);
     dlg.classList.remove("open");
     dlg.textContent = "";
     document.documentElement.classList.remove("printpick-open");
@@ -325,7 +329,7 @@
     closeBtn.type = "button";
     closeBtn.setAttribute("aria-label", "Close");
     closeBtn.title = "Close";
-    closeBtn.addEventListener("click", close);
+    closeBtn.addEventListener("click", function () { close(false); });
     head.appendChild(h2);
     head.appendChild(closeBtn);
     box.appendChild(head);
@@ -453,6 +457,8 @@
     dlg.appendChild(box);
     dlg.classList.add("open");
     document.documentElement.classList.add("printpick-open");
+    // the phone's Back closes the picker instead of leaving the page (static/layers.js)
+    if (Layers) layer = Layers.open({ name: "printpick", close: function () { close(true); } });
     if (window.MtgSelect && window.MtgSelect.enhance) window.MtgSelect.enhance(filters);
     closeBtn.focus();
     looking();
@@ -948,7 +954,7 @@
 
   window.MtgPrintPick = {
     open: open,
-    close: close,
+    close: function () { close(false); },
     isOpen: isOpen,
     tile: tile,
     defaults: defaults,

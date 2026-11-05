@@ -213,7 +213,8 @@ def help_box_html(
         else ""
     )
     body = (
-        f"<form id='dx-help-f' method='post' action='/decks/{did}/help' class='stack' novalidate>"
+        f"<form id='dx-help-f' method='post' action='/decks/{did}/help' class='stack' novalidate "
+        f"data-draft='help:{did}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='help_action' value='{'edit' if listed else 'post'}'>"
         f"<p class='muted small'>{esc(HELP_INTRO)}</p>"
@@ -261,7 +262,7 @@ def delist_box_html(deck: Deck, csrf: str, *, open: bool = False, error: str = "
         "Take the request off the board?",
         body,
         actions=[
-            ui.box_button("Keep it listed", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Delist", kind="danger-solid", form="dx-delist-f", icon_name="x"),
         ],
         open=open,
@@ -306,7 +307,7 @@ def report_box_html(
     fid = "dx-rc" if card else "dx-rm"
     body = (
         f"<form id='{box_id}-f' method='post' action='/decks/{did}/report-to-archidekt' class='stack' "
-        "novalidate>"
+        f"novalidate data-draft='{box_id}:{did}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='report_kind' value='{'card' if card else 'deck'}'>"
         + (f"<input type='hidden' name='card' value='{esc(name)}'>" if card else "")
@@ -354,7 +355,8 @@ def report_comment_box_html(
     v = values or {}
     who = v.get("who", "")
     body = (
-        f"<form id='reportcomment-f' method='post' action='{esc(action)}' class='stack' novalidate>"
+        f"<form id='reportcomment-f' method='post' action='{esc(action)}' class='stack' novalidate "
+        f"data-draft='reportcomment:{esc(action)}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='report_kind' value='comment'>"
         f"<input type='hidden' name='comment_id' value='{esc(v.get('comment_id', ''))}'>"
@@ -662,7 +664,8 @@ def contest_box_html(
     v = values or {}
     summary = v.get("summary", "")
     body = (
-        f"<form id='dx-contest-f' method='post' action='/decks/{did}/contest' class='stack' novalidate>"
+        f"<form id='dx-contest-f' method='post' action='/decks/{did}/contest' class='stack' novalidate "
+        f"data-draft='contest:{did}'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         "<input type='hidden' name='entry_action' value='enter'>"
         + field(
@@ -734,7 +737,7 @@ def withdraw_box_html(
         f"Withdraw “{deck_title(deck)}” from a contest?",
         body,
         actions=[
-            ui.box_button("Keep my entry", cancel=True),
+            ui.box_button("Keep it", cancel=True),
             ui.box_button("Withdraw", kind="danger-solid", form="dx-withdraw-f", icon_name="x"),
         ],
         open=open,

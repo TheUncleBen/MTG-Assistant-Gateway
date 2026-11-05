@@ -297,8 +297,10 @@ def test_page_head_takes_the_pages_actions_and_load_more_is_a_real_link() -> Non
     more = ui.load_more("/collection?page=2", shown=25, total=112)
     assert more == (
         "<div class='loadmore'><a class='btn btn-plain' href='/collection?page=2' rel='next' data-load-more>"
-        "Load more</a><p class='muted'>25 of 112</p></div>"
+        "Load more</a><p class='muted'>25 of 112</p></div><script src='/static/loadmore.js' defer></script>"
     )
+    # the button's script (static/loadmore.js, audit F-4: a page loaded again on an entry with
+    # pages added presses its Load more again) comes with the button, not with "all shown"
     assert (
         ui.load_more("/x", done="That is every card.")
         == "<div class='loadmore'><p class='muted'>That is every card.</p></div>"
@@ -314,3 +316,47 @@ def test_no_script_relies_on_has_in_a_selector() -> None:
     static = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "static"
     for js in sorted(static.glob("*.js")):
         assert ":has(" not in js.read_text(encoding="utf-8"), js.name
+
+
+def _functions(text: str) -> list[str]:
+    return re.split(r"\n(?=(?:async )?def )", text)
+
+
+def test_every_destructive_box_says_keep_it_or_keep_them_not_cancel() -> None:
+    """Audit F-8 (eccfa3d9): the safe button of a destructive box said "Cancel" in half the boxes
+    and "Keep it" in the other half. The standard is the review page's confirm box and the
+    guide's word (modes.CATEGORY_WORDS["keep"]): "Keep it", or "Keep them" for several things.
+    Every box with a solid red button, in the pages and in the scripts' confirms, uses it. The
+    Binder's card details box is an edit box with a red Remove beside its Save: its Cancel stays."""
+    root = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway"
+    wrong: list[str] = []
+    for path in sorted(root.glob("*.py")):
+        for fn in _functions(path.read_text()):
+            if "col-details" in fn:
+                continue
+            for danger in re.finditer(r"box_button\([^)]*kind=.danger.", fn):
+                before = fn[: danger.start()]
+                cancels = re.findall(r"box_button\(\s*\"([^\"]+)\"[^)]*cancel=True", before)
+                if cancels and not cancels[-1].startswith("Keep "):
+                    wrong.append(f"{path.name}: {cancels[-1]!r} beside {danger.group(0)[:60]}")
+    for path in sorted((root / "static").glob("*.js")):
+        text = path.read_text()
+        for m in re.finditer(r"confirm\(\{", text):
+            depth, i = 0, m.end() - 1
+            while i < len(text):
+                depth += {"{": 1, "}": -1}.get(text[i], 0)
+                if depth == 0:
+                    break
+                i += 1
+            block = text[m.start() : i + 1]
+            if "danger: true" not in block:
+                continue
+            # the wording on the confirm's own cancel line, or, where that is a variable (admin.js
+            # picks it per action), every cancel wording the script holds
+            line = re.search(r"cancel: (.*?)(?:, [a-z]+:|\n)", block)
+            words = re.findall(r"\"([^\"]+)\"", line.group(1)) if line else []
+            if not words:
+                words = re.findall(r"cancel: \"([^\"]+)\"", text)
+            if not words or not all(w.startswith("Keep ") for w in words):
+                wrong.append(f"{path.name}: {words or 'no cancel wording'} in {block[:50]!r}")
+    assert wrong == [], "\n".join(wrong)

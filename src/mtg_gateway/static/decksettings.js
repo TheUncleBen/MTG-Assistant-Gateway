@@ -163,6 +163,15 @@
           if (d.was) drawWas(d.was);
           if (d.ok && typeof d.title === "string") drawTitle(d.title);
           mainSaved[c.name] = now;
+          // the draft (static/draft.js) holds only what is not saved yet: gone with this save,
+          // unless another field is still being typed in (the description while the name saved)
+          if (window.MtgDraft) {
+            window.MtgDraft.clear(main.getAttribute("data-draft"));
+            var typing = $$("input[name], select[name], textarea[name]", main).some(function (f) {
+              return mainField(f) && fieldValue(f) !== mainSaved[f.name];
+            });
+            if (typing) main.dispatchEvent(new Event("input", { bubbles: true }));
+          }
           if (!d.ok) return;  // back to what was saved: nothing to say
           say(d.message, { ok: true, actions: [button("Undo", function () { setField(c, prev); saveMain(c, now); })] });
           return;
