@@ -15,7 +15,8 @@
    - a form marked data-apply=submit sends itself when a drop-down or the view changes (deck search:
      each search is an Archidekt request, so the text boxes and the colour buttons wait for Search).
    Loaded before the page's own script (cardsearch.js, search.js, decks.js), which may call
-   window.MtgSearchPanel.closeSheet(then), .address(url), .backPending() and .badge(). */
+   window.MtgSearchPanel.closeSheet(then), .address(url), .backPending(), .badge(), .setForm(params),
+   .showing() and .onAddress(fn). */
 (function () {
   "use strict";
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
@@ -97,6 +98,13 @@
   // sheet's, which gets it when the sheet's entry goes
   var pushed = false, ignorePop = false, landing = false, sheetHref = null, carry = null, afterPop = null;
   function ownEntry() { return !!(history.state && history.state.spsheet); }
+  function here() { return location.pathname + location.search; }
+  // what the page shows: the address its list, boxes and badge were drawn for, and the form as
+  // drawn (every field, as the browser would send it). Both follow a filter applied in place
+  // (address) and a redraw from an address (setForm, redraw)
+  var shownAddr = here(), shownForm = formSerial(), onAddr = null;
+  function formSerial() { return form ? new URLSearchParams(new FormData(form)).toString() : ""; }
+  function shownHere() { return here() === shownAddr; }
   // the page's own address for a filter applied in place (static/cardsearch.js, decks.js,
   // precons.js, collection.js, search.js while the sheet is open): the entry keeps its state.
   // While the sheet's own back() is on its way (a Show pressed as a list was still loading),
@@ -105,6 +113,47 @@
     if (ignorePop) { carry = url; return; }
     try { history.replaceState(history.state, "", url); } catch (err) { /* a sandboxed frame */ }
     if (sheetOpen()) sheetHref = location.href;
+    shownAddr = here();
+    shownForm = formSerial();
+  }
+  // a page script's own entry (static/search.js, decks.js push one): the page shows that address
+  function showing() { shownAddr = here(); shownForm = formSerial(); }
+  // Back or Forward landed on an entry of this page with another address than the page shows:
+  // the page redraws from it, in place where its script knows how (onAddress), else as a fresh
+  // load of that address (card search's pickers and rows, the Binder's and precons' sort, view
+  // and drop-downs come from the gateway). Audit R1: after a reload with the sheet open the next
+  // Back is a same-document step onto the page's own entry in Chromium, and the address lost the
+  // filter while the list, the boxes and the badge kept it
+  function redraw() {
+    shownAddr = here();
+    if (onAddr) { onAddr(); shownForm = formSerial(); } else location.reload();
+  }
+  // the panel's form as an address has it (Back, Forward): a box the address does not name is
+  // off, a drop-down it does not name is on its "none" choice (the empty value: Any format) or,
+  // without one (the sort), as the page was drawn; the drop-downs' own labels and the phone's
+  // sort follow, without sending the form (no bubbling)
+  function setForm(p) {
+    if (!form) return;
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name || el.type === "hidden" || el.type === "submit" || el.type === "button") return;
+      if (el.closest(".sortcw")) return;  // the phone's combined sort follows the real boxes
+      if (el.type === "checkbox") el.checked = p.getAll(el.name).indexOf(el.value) >= 0;
+      else if (el.type === "radio") el.checked = p.has(el.name) ? p.get(el.name) === el.value : el.defaultChecked;
+      else if (el.tagName === "SELECT") {
+        var want = p.get(el.name), at = -1, none = -1;
+        Array.prototype.forEach.call(el.options, function (o, i) {
+          if (want !== null ? o.value === want : o.defaultSelected) at = i;
+          if (o.value === "") none = i;
+        });
+        el.selectedIndex = want === null && none >= 0 ? none : at >= 0 ? at : 0;
+        if (window.MtgSelect) window.MtgSelect.refresh(el);
+      } else el.value = p.get(el.name) || "";
+    });
+    $$("details.pickm, .rbar .g.sort .sortf, .rbar .g.sort .dir", form).forEach(function (el) {
+      el.dispatchEvent(new Event("change"));
+    });
+    badge();
+    shownForm = formSerial();
   }
   function setState(state) {
     try { history.replaceState(state, "", location.href); } catch (err) { /* the entry stays */ }
@@ -218,11 +267,21 @@
     }
     if (e.state && e.state.spsheet) {
       // Forward onto the sheet's entry after a Back closed it (audit N3): the entry means the
-      // sheet is open, so it opens again; at a width without a sheet the entry is the page's own
-      if (!sheetOpen()) { if (phoneQuery && phoneQuery.matches && sheet) { pushed = true; openSheet(); } else setState(null); }
+      // sheet is open, so it opens again; at a width without a sheet the entry is the page's own.
+      // An entry with another address than the page shows (a filter applied in place since the
+      // Back) redraws the page first; as a fresh load, the page comes back plain, no sheet
+      if (!sheetOpen()) {
+        if (!shownHere()) { redraw(); if (!onAddr) return; }
+        if (phoneQuery && phoneQuery.matches && sheet) { pushed = true; openSheet(); } else setState(null);
+      }
       return;
     }
-    if (!sheetOpen() || !pushed || otherBackPending()) return;
+    if (!sheetOpen() || !pushed || otherBackPending()) {
+      // not the sheet's Back: Back or Forward landed on an entry of this page (the page's own
+      // entry under the one a reload left, a search's), whose address the page then shows
+      if (!otherBackPending() && !shownHere()) redraw();
+      return;
+    }
     closeSheet(true);
     if (sheetHref) address(sheetHref);
   });
@@ -240,6 +299,10 @@
     if (e.defaultPrevented || e.target !== form || !sheetOpen() || !pushed || !ownEntry()) return;
     e.preventDefault();
     var submitter = e.submitter && e.submitter.form === form ? e.submitter : null;
+    // Show with nothing changed since the page was drawn (the Binder's and precons' only filters
+    // send the form by themselves): the sheet closes, the page is not asked for again (audit L4:
+    // a page load to the same page, and a dead Back)
+    if (submitter && submitter.classList.contains("sp-show") && formSerial() === shownForm) { closeSheet(); return; }
     pushed = false;
     giveBack(function () {
       if (form.requestSubmit) { if (submitter) form.requestSubmit(submitter); else form.requestSubmit(); } else form.submit();
@@ -391,6 +454,11 @@
     openSheet: openSheet,
     // closeSheet(then): ``then`` runs once the sheet's entry has been given back
     closeSheet: function (then) { closeSheet(false, typeof then === "function" ? then : null); },
-    isSheetOpen: sheetOpen, badge: badge, address: address, backPending: backPending
+    isSheetOpen: sheetOpen, badge: badge, address: address, backPending: backPending,
+    // onAddress(fn): the page script redraws in place from the address Back or Forward landed
+    // on; without one the page reloads. showing(): the page script pushed its own entry.
+    // setForm(params): the panel's form as an address has it
+    onAddress: function (fn) { onAddr = typeof fn === "function" ? fn : null; },
+    showing: showing, setForm: setForm
   };
 })();

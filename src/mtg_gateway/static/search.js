@@ -54,42 +54,21 @@
   }
 
   // -- the results in place -----------------------------------------------------------------------
+  var Panel = window.MtgSearchPanel;  // static/searchpanel.js, loaded before this
   if (form.getAttribute("action") === "/search" && typeof fetch === "function" && window.history
-      && typeof history.pushState === "function") {
-    var seq = 0, inflight = null, asked = location.pathname + location.search;
+      && typeof history.pushState === "function" && Panel && Panel.setForm) {
+    var seq = 0, inflight = null, askedQ = null;  // askedQ: the form as the page's results show it
     function params() {
       var fd = new FormData(form), out = new URLSearchParams();
       fd.forEach(function (v, k) { if (k !== "page" && String(v) !== "") out.append(k, String(v)); });
       return out;
     }
-    // the panel's boxes as an address has them (Back and Forward): a box the address does not
-    // name goes back to what the page was drawn with
-    function setForm(p) {
-      Array.prototype.forEach.call(form.elements, function (el) {
-        if (!el.name || el.type === "hidden" || el.type === "submit" || el.type === "button") return;
-        if (el.closest(".sortcw")) return;  // the phone's combined sort follows the real boxes
-        if (el.type === "checkbox") el.checked = p.getAll(el.name).indexOf(el.value) >= 0;
-        else if (el.type === "radio") el.checked = p.has(el.name) ? p.get(el.name) === el.value : el.defaultChecked;
-        else if (el.tagName === "SELECT") {
-          var want = p.get(el.name), at = -1;
-          Array.prototype.forEach.call(el.options, function (o, i) {
-            if (want !== null ? o.value === want : o.defaultSelected) at = i;
-          });
-          el.selectedIndex = at >= 0 ? at : 0;
-          if (window.MtgSelect) window.MtgSelect.refresh(el);
-        } else el.value = p.get(el.name) || "";
-      });
-      // the drop-downs' own labels and the phone's sort, without sending the form (no bubbling)
-      $$("details.pickm, .rbar .g.sort .sortf, .rbar .g.sort .dir", form).forEach(function (el) {
-        el.dispatchEvent(new Event("change"));
-      });
-      if (window.MtgSearchPanel) window.MtgSearchPanel.badge();
-    }
+    // the panel's boxes as an address has them (Back and Forward): the panel's own setForm
+    function setForm(p) { Panel.setForm(p); }
     // Every ask is numbered and only the latest may draw: a slow answer landing after a newer
     // one is dropped, and its request cut off where the browser can do that.
     function draw(url, push) {
       var mine = ++seq, results = $("#s-results");
-      if (push) asked = url;  // the search the address will name
       if (!results) { location.href = url; return; }
       if (inflight) { try { inflight.abort(); } catch (e) { /* an older browser */ } }
       var ctl = typeof AbortController === "function" ? new AbortController() : null;
@@ -109,9 +88,11 @@
           // each search is an entry (Back undoes it); a filter picked in the open phone sheet
           // changes the sheet's own entry instead, as the other panels' live filters do, so Back
           // closes the sheet onto this address (audit N1)
+          // (audit L5: a search landing while the sheet's own back() is on its way, or in its
+          // popstate, goes the same way, onto the entry the back lands on; pushed, it was lost)
           var P = window.MtgSearchPanel;
-          if (push && P && P.isSheetOpen()) P.address(url);
-          else if (push) history.pushState({ search: true }, "", url);
+          if (push && P && (P.isSheetOpen() || P.backPending())) P.address(url);
+          else if (push) { history.pushState({ search: true }, "", url); if (P && P.showing) P.showing(); }
           document.dispatchEvent(new CustomEvent("decks:loaded", { bubbles: true }));  // the tiles' ⋮
         })
         .catch(function (err) {
@@ -127,21 +108,24 @@
       // on the sheet's own entry); its own Show results button closes it, and a search the
       // boxes and text still owe goes once the sheet's history entry has been given back, so
       // it is its own entry over the page's, as a Search press is (audit H1: sent before, it
-      // was caught in that back's popstate and dropped). A search the entry already names
-      // (a drop-down's) is not asked for again
+      // was caught in that back's popstate and dropped). A form the results already show (a
+      // drop-down applied as it was picked, nothing since) is not asked for again (audit L4)
       var show = e.submitter && e.submitter.classList && e.submitter.classList.contains("sp-show");
-      var P = window.MtgSearchPanel;
-      if (show && P && P.isSheetOpen()) P.closeSheet(function () { if (url !== asked) draw(url, true); });
+      var P = window.MtgSearchPanel, q = params().toString(), changed = q !== askedQ;
+      askedQ = q;
+      if (show && P && P.isSheetOpen()) P.closeSheet(function () { if (changed) draw(url, true); });
       else draw(url, true);
     });
-    window.addEventListener("popstate", function () {
-      // the panel's own back() over its sheet's entry is not a Back press (audit H1)
-      var P = window.MtgSearchPanel;
-      if (P && P.backPending && P.backPending()) return;
-      asked = location.pathname + location.search;
+    // Back or Forward onto another search's entry: the form and the results follow the address
+    // (the panel calls this; it knows its own back() over the sheet's entry from a Back press,
+    // audit H1, and whether the address is one the page already shows)
+    function fromAddress() {
       setForm(new URLSearchParams(location.search));
+      askedQ = params().toString();
       draw(location.pathname + location.search, false);
-    });
+    }
+    Panel.onAddress(fromAddress);
+    askedQ = params().toString();
   }
 
   // -- Load more decks ----------------------------------------------------------------------------
