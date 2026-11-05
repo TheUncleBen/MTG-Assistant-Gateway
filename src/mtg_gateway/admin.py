@@ -663,8 +663,12 @@ ADMIN_CSS = """
   .adm .ui-table .sm-only{display:flex;flex-wrap:wrap;gap:.3rem .5rem;align-items:center;flex-basis:100%;
     margin-top:.25rem;color:var(--text-muted);font-size:.86rem;font-weight:400}
 }
-/* Overview: six widgets three a row, then System left, Updates and Activity by day right */
-@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* Overview: six widgets three a row, then System left, Updates and Activity by day right. Three a
+   row gave a tile 10 em at 200% text on a 900-1024 px window, where System's "Gateway" ran out
+   of its tile (audit 71911eba M1); the row is a container (theme .ui-widgets) measured in its own
+   em, and below 39 em (three tiles of 12.5 em and the gaps) each tile takes the row */
+@media (min-width:900px){.ao .ui-widgets{grid-template-columns:repeat(3,minmax(0,1fr))}
+  @container (max-width:39em){ .ao .ui-widgets .wdg{grid-column:1 / -1} }}
 .ao .ao-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;align-items:start}
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}

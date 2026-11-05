@@ -1911,24 +1911,28 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   .glance-tgl:checked + .glance-lbl{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
   .glance-tgl:checked + .glance-lbl svg.i:last-child{transform:rotate(180deg)}
   .glance-tgl:not(:checked) + .glance-lbl + .ui-widgets{display:none}
-  .glance-tgl:checked + .glance-lbl + .ui-widgets{padding:.75rem;margin-bottom:1rem;
+  /* the fold's padding stops at its 100% size (11 px): larger text widens the words, not the
+     frame, so a 320 px phone keeps "Gateway" whole in a tile at 200% (audit 71911eba M1) */
+  .glance-tgl:checked + .glance-lbl + .ui-widgets{padding:min(.75rem,11px);margin-bottom:1rem;
     border:1px solid var(--card-border);
     border-top:0;border-radius:0 0 var(--radius-panel) var(--radius-panel);background:var(--surface-2)} }
 .ui-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;
   margin:0 0 1.25rem}
 .wdg{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:.85rem 1rem;background:var(--surface);
   border:1px solid var(--card-border);border-radius:var(--radius-panel)}
-.wdg .lab{display:flex;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;font-weight:700;
-  text-transform:uppercase;letter-spacing:.03em}
+/* the label wraps at its spaces beside its icon, and a word too wide for the room beside the icon
+   goes whole under it (audit 71911eba M1: "ASSISTAN/TS" on a 320 px phone at 200% text) */
+.wdg .lab{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.85rem;
+  font-weight:700;text-transform:uppercase;letter-spacing:.03em}
 .wdg .lab svg.i{width:16px;height:16px}
-/* the big value is one line, the unit beside it or, where the two do not share the line, whole on
-   the next: a row of flex items, the number (never broken: "$310./00" at 200% text, final polish
-   Z5) and the unit, which wraps at its spaces only when wider than the tile ("100 / cards"). A
-   value made of words (the report's "Too few games to tell yet") wraps at its spaces the same
-   way; a label in the value (.ui-lbl) keeps its own one line */
+/* the big value: a row of flex items, the number and its unit beside it or, where the two do not
+   share the line, the unit whole on the next. The words wrap at their spaces only, never inside
+   a word: a number ("$310.00", "1,234", "0.7.46") has no space and so is never broken ("$310./00"
+   at 200% text, final polish Z5), a unit wraps only when wider than the tile ("100 / cards"), and
+   a value made of words ("Gateway only", "Too few games to tell yet") wraps between them. No
+   nowrap: it clipped "Gateway only" at 200% text (audit 71911eba M1) */
 .wdg .big{font-size:2rem;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;min-width:0;
-  display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem;white-space:nowrap}
-.wdg .big > :not(.ui-lbl){white-space:normal}
+  display:flex;flex-wrap:wrap;align-items:baseline;column-gap:.35rem;overflow-wrap:normal}
 .wdg .big small{font-size:.95rem;font-weight:700;color:var(--text-muted)}
 /* a price nobody knows, wherever one shows (the Binder's Value tile and Price column, the
    Watchlist's change cells, the card search, the deck banner): the word "unknown", muted, in
@@ -1965,7 +1969,7 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
   /* two a row, or one a row when enlarged text leaves a half too narrow for 8.5rem */
   .ui-widgets{grid-template-columns:repeat(auto-fit,minmax(min(100%,max(8.5rem,calc(50% - .25rem))),1fr));
     gap:.5rem}
-  .wdg{padding:.6rem .7rem}
+  .wdg{padding:.6rem min(.7rem,10px)}  /* the side padding stops at its 100% size, as the fold's */
   .wdg .big{font-size:1.5rem}
   .wdg .det{font-size:.82rem}
   .wdg .go .btn,.wdg .go button,.wdg .go a.btn-plain{width:100%;justify-content:center;padding:0 .4rem;
