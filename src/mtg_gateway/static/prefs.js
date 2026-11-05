@@ -21,8 +21,8 @@
   // name, no older save of that name from this page replaces it, whatever order the requests
   // arrive in. Each save carries this page's id and a number (seq: 1, 2, 3... in the order the
   // choices were made), and the gateway drops a save of a name from this page numbered no higher
-  // than the last one it stored (prefs.py; it keeps the numbers in memory, for its newest
-  // SEQ_KEPT names, so not across its own restart). Saves go one at a time, in order, each after
+  // than the last one it stored (prefs.py SaveNumbers; in memory, for each member's newest
+  // SEQ_PER_MEMBER names, so not across its own restart). Saves go one at a time, in order, each after
   // the one before it ended; only a flush (leaving or hiding the page, below) sends at once, beside
   // the save on the wire. Not guaranteed: a save that never reaches the gateway (no network, or no
   // answer within SAVE_WAIT_MS) is lost, not tried again; and between two pages (another tab, or
