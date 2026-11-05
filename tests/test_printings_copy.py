@@ -35,6 +35,7 @@ DAY_A = "2026-11-03T22:06:49.499+00:00"
 AS_OF = "2026-11-03T22:06:49+00:00"  # DAY_A as the answers carry it: ISO 8601, UTC, to the second
 AS_OF_B = "2026-11-04T10:06:49+00:00"
 DAY_B = "2026-11-04T10:06:49.499+00:00"
+LOOP_PRINTINGS = 20000  # the event-loop test's file: about a sixth of Scryfall's
 FILE = "/default-cards/default-cards-20261103220649.jsonl.gz"
 
 
@@ -288,7 +289,9 @@ async def test_the_event_loop_keeps_turning_while_the_copy_builds(tmp_path: Path
     megabyte at a time in one too): other requests are answered meanwhile. The ticker pattern of
     test_db_lock_jobs: the longest the loop went without turning while the copy was built."""
     sf = FakeScryfall()
-    _offer(sf, _gz(_many(sf, 8000)))
+    # big enough that even a fast machine takes well over the 0.5 s floor below (8000 printings
+    # built in 0.48 s on one once the build stopped setting off full collections)
+    _offer(sf, _gz(_many(sf, LOOP_PRINTINGS)))
     service = _service(sf, tmp_path)
     with _Ticker() as ticker:
         started = time.monotonic()
@@ -297,7 +300,7 @@ async def test_the_event_loop_keeps_turning_while_the_copy_builds(tmp_path: Path
         longest = await ticker.done()
     assert took > 0.5, f"the build took {took:.2f} s: too short to say anything about the loop"
     assert longest < 0.25, f"the event loop stalled {longest:.2f} s while the copy was built ({took:.1f} s)"
-    assert service.copy.meta()["count"] == "8000"
+    assert service.copy.meta()["count"] == str(LOOP_PRINTINGS)
 
 
 def test_the_build_leaves_the_garbage_collector_nothing_to_walk(tmp_path: Path) -> None:
