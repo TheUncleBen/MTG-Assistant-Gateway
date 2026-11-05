@@ -1024,6 +1024,12 @@ __all__ = [
 PROPOSALS_CSS = """
 /* a waiting row's cells are labels of its tick box: the whole row is the tap target */
 .pr-table label{margin:0;font-weight:inherit;cursor:pointer}
+/* a list narrow in its own text (under 12em: 200% text on a phone) puts Review and the ⋮ under the
+   change, so its words keep the row's width ("Counterspell," broke beside them at 320 px) */
+.pr-table{container-type:inline-size}
+@container (max-width:12em){
+  .pr-table .tr{grid-template-columns:32px minmax(0,1fr)}
+  .pr-table .tr > .act{grid-column:2;justify-self:end} }
 .pr-table label.title{display:block}
 .pr-table .flag .ui-lbl{height:20px;font-size:.76rem;margin-right:.25rem}
 /* the waiting list's one header row: the check-every box and the word */

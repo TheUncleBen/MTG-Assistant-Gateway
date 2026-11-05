@@ -1895,6 +1895,10 @@ ACCOUNT_CSS = (
     # words start under the row's label
     ".ydetails .yfold{padding:0 1rem .9rem calc(1.8rem + 20px);font-size:.95rem;line-height:1.4}"
     ".ydetails .yfold p{margin:.3rem 0}.ydetails .yfold dl.meta{margin:.2rem 0}"
+    # a fold narrow in its own text (under 15em: 200% text in the two-column list) puts each value
+    # under its key, instead of a 26 px value column (batch 10, AB3)
+    ".ydetails .yfold{container-type:inline-size}"
+    "@container (max-width:15em){.ydetails .yfold dl.meta{grid-template-columns:1fr}}"
     ".ydetails .yfold .ui-caps{margin:.4rem 0}"
     # a row's label and value wrap between their words, never squeezed under their longest word
     # (as on the Account page): when both do not fit one line (large text on a phone) the value
@@ -1913,6 +1917,14 @@ ACCOUNT_CSS = (
     ".ydetails .ycol{display:contents}"
     ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
     ".ydetails .ygrp[data-g='3']{order:3}}"
+    # and the same one column when the list is narrow in its own text (under 44em: 616 px at 14px,
+    # 1232 px at 200%), so each fold keeps room for its words
+    ".ydetails{container-type:inline-size}"
+    "@media (min-width:700px){@container (max-width:44em){"
+    ".ydetails .ycols{display:flex;flex-direction:column;align-items:stretch}"
+    ".ydetails .ycol{display:contents}"
+    ".ydetails .ygrp[data-g='1']{order:1}.ydetails .ygrp[data-g='2']{order:2}"
+    ".ydetails .ygrp[data-g='3']{order:3}}}"
     # a section's page: one card, as wide as the list's column at most; the list itself as wide
     # as the Account page (two columns from 700 px)
     ".acc{max-width:40rem}.acc.acc-list{max-width:62rem}.acc .card{margin-bottom:1rem}"

@@ -162,7 +162,8 @@ details.gnav > summary::-webkit-details-marker{display:none}
 @media (max-width:599px){.gtop{bottom:calc(4.5rem + env(safe-area-inset-bottom))}
   .gpart > header h2{font-size:min(1.6rem,9vw)}}  /* 200% text: a word stays whole */
 @media (min-width:900px){
-  .guide{grid-template-columns:16rem minmax(0,1fr);gap:1.5rem}
+  /* the contents column: 16rem, or 30% at large text, so the topic keeps room for its heading */
+  .guide{grid-template-columns:min(16rem,30%) minmax(0,1fr);gap:1.5rem}
   .guide .gside{position:sticky;top:4rem;max-height:calc(100vh - 5rem);overflow:auto;padding-right:.25rem}
   .gside .gsrow{flex-wrap:wrap}
   .gside .gsrow input[type=search],.gside .gsrow .btn{flex:1 1 100%}

@@ -673,7 +673,14 @@ ADMIN_CSS = """
 .ao .ao-cols > div > .ui-card:last-child{margin-bottom:0}
 .ao .ui-row{grid-template-columns:minmax(0,min(12rem,40%)) minmax(0,1fr);align-items:start}
 .ao .ui-row .ctl .ui-lbl{white-space:normal;height:auto;min-height:22px;padding-top:2px;padding-bottom:2px}
-.ao .ui-row .ctl{overflow-wrap:anywhere;font-size:.95rem}
+/* break-word: a word breaks inside only when wider than the whole control, never because the
+   label took its share ("Not configur/ed", "AUTHENTIK.md."; batch 10, AB7) */
+.ao .ui-row .ctl{overflow-wrap:break-word;font-size:.95rem}
+/* a card narrow in its own text (under 27em: a 378 px card at 14px, never one on a 600 px screen;
+   864 px at 200% text) stacks the label over the control, as a phone does */
+.ao .ui-card{container-type:inline-size}
+@media (min-width:600px){ @container (max-width:27em){
+  .ao .ui-row{grid-template-columns:minmax(0,1fr)} .ao .ui-row .ctl{grid-column:1;grid-row:auto} } }
 .ao .ui-row .lab .muted{font-weight:400;margin-left:.35rem}
 /* the Speed card's labels are page addresses (/history/reports/{rid}/head-to-head): they wrap
    anywhere, so at 200% text on a phone they never push the page wider than the screen */
@@ -720,6 +727,20 @@ ADMIN_CSS = """
 .au .ui-drawer .ui-meta code{font-size:.8rem;overflow-wrap:anywhere}
 @media (min-width:1100px){.au .with-panel .ui-table .tr.mem .arch{display:none}}
 /* Metrics: one table, the share bar, a row opens its details in place */
+/* the counted things' table folds by its own width in its em (as the Users table does): below
+   37 em the 600-899 px layout, below 26 em the phone's one-column rows, whatever the window's
+   width, so the 9.5 and 10 rem columns never leave a name 40 px at 600 px with large text. At
+   100% the table has 38 em at 600 px and 62 em at 900 px. */
+.am .ui-table{container-type:inline-size}
+@media (min-width:900px){ @container (max-width:37em){
+  .am .ui-table .tr{grid-template-columns:var(--cols-md)}
+  .am .ui-table .md-hide{display:none}
+  .am .ui-table .sub{display:flex} } }
+@media (min-width:600px){ @container (max-width:26em){
+  .am .ui-table .tr{grid-template-columns:var(--cols-sm);padding:.55rem 8px}
+  .am .ui-table .th{display:none}
+  .am .ui-table .sm-hide{display:none}
+  .am .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%} } }
 .am .ui-table .tr.mrow{cursor:pointer}
 .am .ui-table .tr.mrow:hover{background:var(--surface-2)}
 .am .ui-table .tr.mrow .title .t{display:inline-block;text-decoration:none;color:var(--text);font-weight:700}

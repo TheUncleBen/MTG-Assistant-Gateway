@@ -127,7 +127,7 @@ BROWSE_CSS = """
 @media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%} }
 .popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
 .popular a{display:inline-flex;align-items:center;min-height:44px;padding:.1rem .7rem;border-radius:15px;
-  max-width:100%;overflow-wrap:anywhere;
+  max-width:100%;overflow-wrap:break-word;
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
     border:1px solid var(--border)}
 .popular a:hover{border-color:var(--orange);color:var(--orange)}

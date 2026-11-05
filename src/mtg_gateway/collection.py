@@ -2680,6 +2680,15 @@ ul.collgrid .nm .kebab{grid-column:3;grid-row:1}
     grid-column:1;grid-row:2}
   html:not([data-card-size=l]) .collection:is(.selecting,:not(.selectable)) ul.collgrid .nm .kebab{
     grid-column:3;grid-row:2} }
+/* and the same on a tile narrow in its own text (under 10.5em: the 140 px tiles of a 320 px phone,
+   where 85 px beside the ⋮ alone broke "Bannerkeeper"; 294 px at 200% text), whatever the Select
+   state: at 412 px the 186 px tiles keep the ⋮ beside the name (polish B7) */
+ul.collgrid > li.cc{container-type:inline-size}
+@container (max-width:10.5em){
+  ul.collgrid .nm{grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto}
+  ul.collgrid .nm .name{grid-column:1 / -1;grid-row:1}
+  ul.collgrid .nm .chk{grid-column:1;grid-row:2}
+  ul.collgrid .nm .kebab{grid-column:3;grid-row:2} }
 #col-notes .notice form.inline{display:inline-flex;margin:0 0 0 .5rem;vertical-align:middle}
 #col-notes .notice form.inline .btn{margin:0}
 ul.collgrid .cc.sel .pic,ul.colllist li.sel{outline:3px solid var(--orange-ctl);outline-offset:-3px}
@@ -2799,7 +2808,9 @@ ul.colllist .th .qc{justify-self:start}
 .collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
 .csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
 .csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
-.csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
+/* break-word: a column is at least its longest word wide and the box scrolls sideways when the
+   columns do not fit, instead of "Conditi/on" (batch 10, AB2) */
+.csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:break-word;
   border-bottom:1px solid var(--border-soft)}
 .csvhelp thead th{background:var(--surface-2)}
 .csvhelp tbody th{font-weight:700}

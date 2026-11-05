@@ -777,7 +777,9 @@ INSTALL_CSS = (
     ".inst{container:inst/inline-size}"
     ".inst .cols{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}"
     ".inst .pick{display:none}"
-    "@container inst (min-width:760px){.inst .cols{grid-template-columns:17rem minmax(0,1fr)}"
+    # 760px at the pages' 14px text (54.29em): at 200% the steps keep the row until 1520px, instead of
+    # a 17rem app list leaving them 258px
+    "@container inst (min-width:54.29em){.inst .cols{grid-template-columns:17rem minmax(0,1fr)}"
     ".inst .drop{display:none}.inst .pick{display:block}}"
     "@supports not (container-type:inline-size){@media (min-width:900px){"
     ".inst .cols{grid-template-columns:17rem minmax(0,1fr)}.inst .drop{display:none}"
@@ -795,10 +797,12 @@ INSTALL_CSS = (
     ".inst .pick .grp{border-top:1px solid var(--border-soft);margin:.4rem 0 0;padding-top:.4rem}"
     ".inst .drop{border:1px solid var(--border);border-radius:var(--radius-panel);background:var(--surface);"
     "margin:0 0 1rem}"
-    ".inst .drop>summary{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:0 .75rem;"
-    "cursor:pointer;list-style:none}"
+    ".inst .drop>summary{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;min-height:44px;"
+    "padding:0 .75rem;cursor:pointer;list-style:none}"
     ".inst .drop>summary::-webkit-details-marker{display:none}"
-    ".inst .drop>summary .v{flex:1;min-width:0;font-weight:700;overflow-wrap:anywhere}"
+    # the picked app is at least its longest word wide; when that does not fit beside "Steps for:"
+    # (200% text on a phone) it takes the line under it instead of breaking "Assistan/t" (batch 10, AB4)
+    ".inst .drop>summary .v{flex:1 1 0%;min-width:min-content;font-weight:700;overflow-wrap:break-word}"
     ".inst .drop>summary .sfk{color:var(--text-muted);font-size:.86rem}"
     ".inst .drop>summary svg{flex:none;transition:transform .15s}"
     ".inst .drop[open]>summary svg{transform:rotate(180deg)}"
