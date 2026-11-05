@@ -56,7 +56,7 @@
   // -- the results in place -----------------------------------------------------------------------
   if (form.getAttribute("action") === "/search" && typeof fetch === "function" && window.history
       && typeof history.pushState === "function") {
-    var seq = 0, inflight = null;
+    var seq = 0, inflight = null, asked = location.pathname + location.search;
     function params() {
       var fd = new FormData(form), out = new URLSearchParams();
       fd.forEach(function (v, k) { if (k !== "page" && String(v) !== "") out.append(k, String(v)); });
@@ -89,6 +89,7 @@
     // one is dropped, and its request cut off where the browser can do that.
     function draw(url, push) {
       var mine = ++seq, results = $("#s-results");
+      if (push) asked = url;  // the search the address will name
       if (!results) { location.href = url; return; }
       if (inflight) { try { inflight.abort(); } catch (e) { /* an older browser */ } }
       var ctl = typeof AbortController === "function" ? new AbortController() : null;
@@ -121,13 +122,23 @@
     form.addEventListener("submit", function (e) {
       if (e.defaultPrevented) return;  // a deck link in the name box opens the deck
       e.preventDefault();
-      draw("/search?" + params().toString(), true);
-      // the phone's Filters sheet stays open while filters are picked (each applies at once);
-      // its own Show results button closes it
+      var url = "/search?" + params().toString();
+      // the phone's Filters sheet stays open while drop-downs are picked (each applies at once,
+      // on the sheet's own entry); its own Show results button closes it, and a search the
+      // boxes and text still owe goes once the sheet's history entry has been given back, so
+      // it is its own entry over the page's, as a Search press is (audit H1: sent before, it
+      // was caught in that back's popstate and dropped). A search the entry already names
+      // (a drop-down's) is not asked for again
       var show = e.submitter && e.submitter.classList && e.submitter.classList.contains("sp-show");
-      if (show && window.MtgSearchPanel) window.MtgSearchPanel.closeSheet();
+      var P = window.MtgSearchPanel;
+      if (show && P && P.isSheetOpen()) P.closeSheet(function () { if (url !== asked) draw(url, true); });
+      else draw(url, true);
     });
     window.addEventListener("popstate", function () {
+      // the panel's own back() over its sheet's entry is not a Back press (audit H1)
+      var P = window.MtgSearchPanel;
+      if (P && P.backPending && P.backPending()) return;
+      asked = location.pathname + location.search;
       setForm(new URLSearchParams(location.search));
       draw(location.pathname + location.search, false);
     });
