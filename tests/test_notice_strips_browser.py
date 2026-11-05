@@ -63,6 +63,8 @@ STRIPS = """() => {
       const cs = getComputedStyle(n), nb = n.getBoundingClientRect();
       const content = n.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
       const x = n.querySelector(':scope > .nx');
+      // the words' own box where they have one (the Binder's strips: .nt beside the ×)
+      const nt = n.querySelector(':scope > .nt');
       const words = text(n, t => !inBtn(t));
       const btns = [...n.querySelectorAll('.btn, button')].filter(b => !b.classList.contains('nx'))
         .filter(shown).map(b => {
@@ -79,6 +81,7 @@ STRIPS = """() => {
         });
       return {cls: n.className, text: n.textContent.trim().replace(/\\s+/g, ' ').slice(0, 60),
         box: box(nb), content: Math.round(content), x: x ? box(x.getBoundingClientRect()) : null,
+        nt: nt ? Math.round(nt.clientWidth) : null,
         lines: lines(words.rects), broken: words.broken, btns,
         links: [...n.querySelectorAll('a:not(.btn)')].filter(shown).map(a => ({text: a.textContent.trim(),
           box: box(a.getBoundingClientRect())}))};
@@ -93,6 +96,25 @@ def _zoom(page, zoom: str) -> None:  # noqa: ANN001
         page.wait_for_timeout(150)
 
 
+def _column(s: dict) -> int:
+    """The width the words are given to wrap in: their own box where they have one, else from
+    their left edge to the strip's content edge, or to a button standing beside the words' block.
+    Not how far the lines happen to reach: where a line breaks depends on the font's word widths,
+    and the test machine's fonts are not the members' (CI drew the same Binder strip's lines
+    153 px wide in DejaVu Sans and 170 px in Inter, in the same 187 px column)."""
+    if s["nt"]:
+        return s["nt"]
+    left = min(ln["left"] for ln in s["lines"])
+    reach = max(ln["right"] for ln in s["lines"])
+    right = s["box"]["left"] + (s["box"]["width"] - s["content"]) / 2 + s["content"]
+    for b in s["btns"]:
+        bb = b["box"]
+        beside = bb["left"] >= reach - 1
+        if beside and any(bb["top"] < ln["bottom"] and ln["top"] < bb["bottom"] for ln in s["lines"]):
+            right = min(right, bb["left"])
+    return round(right - left)
+
+
 def _check(where: str, got: dict, *, expect: str, touch: bool) -> None:
     """One page's strips: no sideways scroll and every strip inside the window, the words' column
     at least about 10 em when they wrap, the × on the words' first line, every button inside its
@@ -105,9 +127,8 @@ def _check(where: str, got: dict, *, expect: str, touch: bool) -> None:
         assert s["box"]["left"] >= -1 and s["box"]["right"] <= got["vw"] + 1, (where, s["box"])
         assert s["lines"], (where, s)
         assert s["broken"] == [], (where, s["broken"], s["text"])
-        col = max(ln["right"] for ln in s["lines"]) - min(ln["left"] for ln in s["lines"])
         if len(s["lines"]) > 1:
-            assert col >= TEN_EM, (where, col, s)
+            assert _column(s) >= TEN_EM, (where, _column(s), s)
         if s["x"]:
             first = s["lines"][0]
             # the × shares the words' first line: beside it, not on a row of its own above
