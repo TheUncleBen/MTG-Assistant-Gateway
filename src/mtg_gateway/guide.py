@@ -70,10 +70,21 @@ GUIDE_CSS = """
    phone instead of being squeezed beside it (re-audit N02) */
 .gmain .ui-head h1{display:block}
 .gmain .ui-head h1 svg{color:var(--orange);width:28px;height:28px;vertical-align:-.2em;margin-right:.4rem}
-.gturn{display:flex;justify-content:space-between;gap:.75rem;margin:1.5rem 0 0;padding-top:1rem;
+.gturn{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.75rem;margin:1.5rem 0 0;
+  padding-top:1rem;
   border-top:1px solid var(--border-soft)}
-.gturn .btn{margin:0;max-width:48%;display:inline-flex;align-items:center;gap:.4rem;min-height:44px}
-.gturn .btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a title wraps inside its button; each button needs 14em beside the other, or takes a row of
+   its own (final polish P-4: titles cut with … on every phone) */
+.gturn .btn{margin:0;flex:1 1 14em;max-width:100%;display:inline-flex;align-items:center;gap:.4rem;
+  min-height:44px;
+  min-width:0}
+.gturn .btn span{min-width:0;overflow-wrap:break-word}
+.gturn a[rel=next]{justify-content:flex-end;text-align:end}
+/* a step too narrow for its words beside the arrow (a phone at 200% browser zoom): the words take
+   the row, the arrow its own */
+.gturn{container-type:inline-size}
+@container (max-width:16em){ .gturn .btn{flex-wrap:wrap;justify-content:center;padding-left:.5em;
+  padding-right:.5em} }
 .gturn a[rel=prev] svg{transform:rotate(90deg)}
 .gturn a[rel=next] svg{transform:rotate(-90deg)}
 .gresults .where{display:block;color:var(--orange-text);font-size:.8rem;font-weight:700}

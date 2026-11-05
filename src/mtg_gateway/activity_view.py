@@ -996,7 +996,7 @@ def _spark(values: list[int]) -> str:
 
 ACT_CSS = """
 .act-page .ui-chip svg.i{width:15px;height:15px;margin-right:.3rem;vertical-align:-2px}
-.act-page .wdg .det .ui-lbl{height:22px;font-size:.78rem}
+.act-page .wdg .det .ui-lbl{min-height:22px;font-size:.78rem}
 .act-page .spark{flex:1 1 100%;display:flex;align-items:flex-end;gap:3px;height:36px;margin:.1rem 0 0}
 .act-page .spark i{flex:1;display:block;min-height:2px;background:var(--text-muted);border-radius:2px 2px 0 0}
 .act-page .spark i:last-child{background:var(--text)}

@@ -202,11 +202,11 @@ HUB_CSS = """
 /* the words go under the picture when they have less than 12em beside it (200% text on a phone) */
 .yhub .yme{flex-wrap:wrap}
 .yhub .yme .who{display:flex;flex-direction:column;gap:.2rem;min-width:0;flex:1 1 12em}
-.yhub .yme b{font-size:1.15rem;overflow-wrap:anywhere}
+.yhub .yme b{font-size:1.15rem;overflow-wrap:break-word}
 .yhub .yme .sub{color:var(--text-muted);font-size:.9rem;overflow-wrap:anywhere}
 .ycols{display:grid;gap:0 1.5rem;align-items:start}
 @media (min-width:700px){ .ycols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-  .ylone{max-width:calc(50% - .75rem);margin:0 auto} }
+  .ylone{max-width:calc(50% - .75rem);margin:0} }
 .ycol{display:flex;flex-direction:column;min-width:0}
 .ygrp{margin:0 0 1.25rem}
 /* a group with no row left (This app in an app without the bridge, or an older one) shows no
@@ -260,10 +260,10 @@ HUB_CSS = """
   .ygrp a.yrow:hover,.ygrp button.yrow:hover,.ygrp details.yrow > summary:hover,
   .ygrp .yfold button:hover{background:var(--surface-2)} }
 /* Sign out: a real button, alone in the middle at the foot, its icon and words centred together */
-.ysignout{display:flex;justify-content:center;margin:.5rem 0 1rem}
+.ysignout{display:flex;justify-content:flex-start;margin:.5rem 0 1rem}
 .ysignout .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;
   min-width:min(16rem,100%);padding:0 1.5rem;border-radius:14px;background:var(--surface);
-  border:1px solid var(--border);color:var(--danger-text);font-weight:700;line-height:1}
+  border:1px solid var(--border);color:var(--danger-text);font-weight:700;line-height:1.2}
 .ysignout .btn svg.i{width:18px;height:18px}
 .ysignout .btn:hover{background:var(--surface-2);color:var(--danger-text)}
 """

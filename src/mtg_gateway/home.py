@@ -325,7 +325,7 @@ def recent_html(decks: list[dict[str, Any]], covers: dict[str, dict[str, Any]]) 
         name = _esc(d.get("name") or "Unnamed deck")
         out.append(
             f"<a href='/decks/{did}' data-deck-id='{did}' data-deck-name='{name}'{style}>"
-            f"<span>{name}</span></a>"
+            f"<span title='{name}'>{name}</span></a>"
         )
     return "<div class='recent'>" + "".join(out) + "</div>"
 

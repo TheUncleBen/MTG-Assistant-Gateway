@@ -355,12 +355,12 @@ FOLDER_CSS = """
 /* My decks' Show filter (Decks and packages, Decks only, Packages only), the package tiles
    static/decks.js marks (the package icon in place of the initial, a Package label in the
    detail line) and the tiles it hides */
-.spanel .fgrid > .showf{--gw:200px}
+.spanel .fgrid > .showf{--gw:14.286em}
 ul.decklist li.deck.sh-off{display:none}
 ul.decklist .deck.pkg .thumb .ini svg.i{width:3.5rem;height:3.5rem;color:rgba(255,255,255,.45);
   stroke-width:1.6}
 ul.decklist.list .deck.pkg .thumb .ini svg.i{width:1.6rem;height:1.6rem}
-ul.decklist .info .fmt .ui-lbl{height:20px;font-size:.78rem;padding:0 .45rem 0 .35rem;vertical-align:-5px}
+ul.decklist .info .fmt .ui-lbl{min-height:20px;font-size:.78rem;padding:0 .45rem 0 .35rem;vertical-align:-5px}
 ul.decklist .deck.pkg-extra .info.plain{min-height:75px}
 #pk-note{margin:0 0 8px}
 #pk-note[hidden]{display:none}

@@ -149,7 +149,7 @@ async def test_route_serves_this_gateways_plugin_without_sign_in(
         link = f"[Download the ChatGPT plugin (ZIP)]({GATEWAY}/plugin/deck-helper-chatgpt.zip)"
         assert link in md
         # Labelled for Business/Enterprise admins, with Plus and Pro sent to the connector
-        assert "**ChatGPT plugin file (Business/Enterprise admins only)**" in md
+        assert "**ChatGPT plugin file (Business and Enterprise admins only)**" in md
         assert "Plus and Pro accounts likely have no plugin upload" in md and "use the connector" in md
         assert md.index("12. Sign in") < md.index(link)  # not one of the numbered connector steps
         b = Browser(h)
@@ -160,7 +160,7 @@ async def test_route_serves_this_gateways_plugin_without_sign_in(
             await b.aclose()
         assert "href='/plugin/deck-helper-chatgpt.zip'" in page
         assert "Download the ChatGPT plugin (ZIP)" in page
-        assert "<h2>ChatGPT plugin file (Business/Enterprise admins only)</h2>" in page
+        assert "<h2>ChatGPT plugin file (Business and Enterprise admins only)</h2>" in page
 
 
 async def test_route_gives_503_without_the_plugin_folder(

@@ -458,7 +458,7 @@ def section(key: str, ctx: Context) -> Section:
                     ),
                 ),
                 Block(
-                    "ChatGPT plugin file (Business/Enterprise admins only)",
+                    "ChatGPT plugin file (Business and Enterprise admins only)",
                     paras=(
                         "The connector and the MTG skill in one file, for ChatGPT Business and Enterprise "
                         "workspace owners and admins only: it should upload under **Plugins** in the admin "
@@ -802,7 +802,7 @@ INSTALL_CSS = (
     ".inst .drop>summary::-webkit-details-marker{display:none}"
     # the picked app is at least its longest word wide; when that does not fit beside "Steps for:"
     # (200% text on a phone) it takes the line under it instead of breaking "Assistan/t" (batch 10, AB4)
-    ".inst .drop>summary .v{flex:1 1 0%;min-width:min-content;font-weight:700;overflow-wrap:break-word}"
+    ".inst .drop>summary .v{flex:1 1 12em;min-width:min-content;font-weight:700;overflow-wrap:break-word}"
     ".inst .drop>summary .sfk{color:var(--text-muted);font-size:.86rem}"
     ".inst .drop>summary svg{flex:none;transition:transform .15s}"
     ".inst .drop[open]>summary svg{transform:rotate(180deg)}"

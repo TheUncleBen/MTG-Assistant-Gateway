@@ -44,7 +44,7 @@ NEW_THREAD_WHY = (
     "Archidekt. Replies work here."
 )
 OPEN_LABEL = "Open a thread by its link or number"
-OPEN_PLACEHOLDER = "https://archidekt.com/forum/thread/… or the number"
+OPEN_PLACEHOLDER = "Link or number"
 OPEN_BUTTON = "Open thread"
 OPEN_BAD = "That is not a thread: give the thread's number or its link."
 LOCKED = "This thread is locked on Archidekt, so it takes no new replies."

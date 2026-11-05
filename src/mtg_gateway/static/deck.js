@@ -3941,8 +3941,9 @@
     testBtn.type = "button";
     testBtn.setAttribute("aria-haspopup", "menu");
     testBtn.appendChild(Menu.icon("play"));
-    testBtn.appendChild(document.createTextNode(" Test"));
-    testBtn.appendChild(el("span", "lg", "and play"));  // the long label, on wide screens
+    var testLbl = el("span", "", "Test");
+    testLbl.appendChild(el("span", "lg", " and play"));  // the long label, on wide screens
+    testBtn.appendChild(testLbl);
     testDd.parentNode.insertBefore(testBtn, testDd);
     testBtn.addEventListener("click", function () {
       var id = enc(d.id), t = [head("On the gateway"), link("Goldfish", "layers", "/decks/" + id + "/goldfish")];

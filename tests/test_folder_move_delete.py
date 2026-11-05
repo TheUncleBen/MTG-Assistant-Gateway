@@ -89,7 +89,7 @@ async def test_a_folder_moves_with_everything_inside_and_is_read_back(stack: Sta
         assert back.status_code == 200 and _parent(stack, ids["commander"]) == _root(stack)
         listed = (await b.http.get("/decks/api/folders")).json()
         names = [f["name"] for f in listed["folders"]]
-        assert names[0] == "Top level (no folder)" and "Archive" in names
+        assert names[0] == "No folder" and "Archive" in names
         assert stack.h.app.state.gateway.decks.settings.archidekt_backup_folder not in names
     finally:
         await b.aclose()

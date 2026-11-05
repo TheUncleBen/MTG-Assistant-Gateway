@@ -262,7 +262,8 @@ NEW_DECK_CSS = """
 .mtgbox .body .nd-tabs{display:flex;width:100%;margin:0}
 .mtgbox .body .nd-tabs [role=tab]{flex:1 1 0;min-width:0;gap:.35rem;display:inline-flex;align-items:center;
   justify-content:center}
-.nd-tabs [role=tab] span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.nd-tabs [role=tab] span{white-space:normal;overflow-wrap:normal;overflow:hidden;text-overflow:ellipsis;
+  min-width:0}
 @media (max-width:759.98px){ .mtgbox .body .nd-tabs [role=tab]{flex:1 1 auto} }
 .nd-tabs [role=tab] svg.i{width:16px;height:16px;flex:none}
 .nd-src{display:grid;grid-template-columns:minmax(0,1fr);gap:.6rem}
@@ -288,7 +289,7 @@ NEW_DECK_CSS = """
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
 .ndtile .ini{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:3rem;
   font-weight:900;color:rgba(255,255,255,.25)}
-.ndtile .views{position:absolute;right:.5rem;top:.5rem;font-size:12px;color:#fff;background:rgba(0,0,0,.55);
+.ndtile .views{position:absolute;left:.5rem;top:.5rem;font-size:.857rem;color:#fff;background:rgba(0,0,0,.55);
   padding:.1rem .4rem;border-radius:3px}
 .ndtile .info{display:flex;flex-direction:column;gap:.1rem;padding:.5rem .75rem;min-width:0}
 .ndtile .name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

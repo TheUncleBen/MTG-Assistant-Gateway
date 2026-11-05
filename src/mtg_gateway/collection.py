@@ -2721,7 +2721,7 @@ ul.colllist{list-style:none;margin:0 0 1rem;padding:0;container-type:inline-size
 ul.colllist .tr{padding:.45rem .75rem}
 ul.colllist .cardc{display:flex;align-items:center;gap:.6rem;min-width:0}
 ul.colllist .cardc .tx{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
-ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
+ul.colllist .cardc .name{font-weight:700;overflow-wrap:anywhere}
 ul.colllist .s{display:block;color:var(--text-muted);font-size:.84rem;overflow-wrap:anywhere}
 ul.colllist .smline{display:none}
 ul.colllist .thumbbtn{all:unset;cursor:pointer;display:flex;align-items:center;justify-content:center;

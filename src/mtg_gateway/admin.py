@@ -653,7 +653,7 @@ ADMIN_CSS = """
 .adm .wdg .go .btn,.adm .wdg .go a.btn-plain{white-space:normal;overflow-wrap:anywhere;height:auto;
   text-align:center}
 .adm .ui-table .title .labs{display:inline-flex;flex-wrap:wrap;gap:.3rem;align-items:center}
-.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{height:22px;font-size:.78rem}
+.adm .ui-table .title .sub .ui-lbl,.adm .ui-table .title .sm-only .ui-lbl{min-height:22px;font-size:.78rem}
 .adm .ui-table .sm-only{display:none}
 .adm .ui-table .sub{font-weight:400;color:var(--text-muted);font-size:.86rem}
 .adm .ui-table .tr > span{min-width:0;overflow-wrap:anywhere}
@@ -743,7 +743,9 @@ ADMIN_CSS = """
   .am .ui-table .sm-only{display:inline;color:var(--text-muted);font-size:.84rem;flex-basis:100%} } }
 .am .ui-table .tr.mrow{cursor:pointer}
 .am .ui-table .tr.mrow:hover{background:var(--surface-2)}
-.am .ui-table .tr.mrow .title .t{display:inline-block;text-decoration:none;color:var(--text);font-weight:700}
+/* the row's toggle is the title's whole line (block): its 44 px finger height then pushes the
+   line under it down instead of lying over it */
+.am .ui-table .tr.mrow .title .t{display:block;text-decoration:none;color:var(--text);font-weight:700}
 .am .am-bar{display:inline-block;width:6rem;max-width:40vw;height:8px;border-radius:4px;
   background:var(--surface-3,var(--surface-2));vertical-align:middle;overflow:hidden}
 .am .am-bar i{display:block;height:100%;background:var(--orange)}
@@ -1185,7 +1187,7 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
     if u["check"] == "off":
-        state: Any = "off (MTG_UPDATE_CHECK=false)"
+        state: Any = _Html("off (<code>MTG_<wbr>UPDATE_<wbr>CHECK=false</code>)")
     elif u.get("error"):
         state = f"last check failed ({u['error']}), trying again within the hour"
     elif u.get("latest"):
@@ -1210,14 +1212,16 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
     steps = (
         f"<details id='how-to-update'><summary class='fold-btn'>How to update</summary>"
         "<p>The gateway never updates itself. An update is a fresh install on top of your data "
-        "(docs/UPGRADING.md has every step): take the newest stack file and the newest example "
+        "(<code>docs/<wbr>UPGRADING.md</code> has every step): take the newest stack file and the newest "
+        "example "
         "variables file, copy your own values into the example, and deploy. Your data, backups and "
         "Docker secrets stay as they are. There is no backup to take first: before the new version "
         "upgrades the database, the gateway saves a copy of it in the before-upgrade folder, inside "
         "your backup folder.</p>"
         "<p><strong>Portainer (Swarm stack)</strong>: copy your values into the newest "
         f"<code>deploy/stack.env.example</code> (with <code>MTG_TAG</code> at <code>{tag}</code>, or "
-        "<code>latest</code>), and create any secret docs/DEPLOY.md step 4 lists that you don't have "
+        "<code>latest</code>), and create any secret <code>docs/<wbr>DEPLOY.md</code> step 4 lists that you "
+        "don't have "
         "yet. Then Stacks, your stack, Editor: replace the text with the newest "
         "<code>deploy/portainer-stack.yml</code>, unchanged (with the Repository build method, the "
         "update brings it), and the environment variables (Advanced mode) with your new file. Then "
@@ -1227,12 +1231,14 @@ def _updates_card(u: dict[str, Any], *, now: float | None = None) -> str:
         "<strong>Update</strong>.</p>"
         "<p><strong>Swarm without Portainer</strong>: <code>git pull</code> in your copy of the "
         "repository, copy your values into a new copy of <code>deploy/stack.env.example</code>, "
-        "create any missing secret (docs/DEPLOY.md step 4), load the variables into a new shell as "
-        "in docs/DEPLOY.md, then run <code>docker stack deploy -c deploy/portainer-stack.yml "
+        "create any missing secret (<code>docs/<wbr>DEPLOY.md</code> step 4), load the variables into a new "
+        "shell as in <code>docs/<wbr>DEPLOY.md</code>, then run "
+        "<code>docker stack deploy -c deploy/portainer-stack.yml "
         "mtg</code> again (your stack's name in place of <code>mtg</code>).</p>"
         "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, get "
         "the newest <code>docker-compose.yml</code>, <code>make-secrets.sh</code> and "
-        "<code>.env.example</code> (docs/UPGRADING.md has the commands), copy your values from "
+        "<code>.env.example</code> (<code>docs/<wbr>UPGRADING.md</code> has the commands), copy your values "
+        "from "
         f"<code>.env</code> into the example and save it as <code>.env</code> (<code>MTG_TAG={tag}</code> "
         "or <code>latest</code>), run <code>./make-secrets.sh</code>, then "
         "<code>docker compose pull</code> and <code>docker compose up -d</code>.</p>"

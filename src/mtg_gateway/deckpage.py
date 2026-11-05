@@ -695,7 +695,7 @@ def folder_options_html(folders: dict[str, Any] | None, chosen: str) -> str:
     level, then the member's folders indented by depth, the backup folder left out. ``folders``:
     decks.folders' flattened tree, or None when it could not be read (the top level is then the
     only choice). ``chosen``: the picked folder's id, "" for the top level."""
-    opts = "<option value=''" + (" selected" if not chosen else "") + ">Top level (no folder)</option>"
+    opts = "<option value=''" + (" selected" if not chosen else "") + ">No folder</option>"
     for f in (folders or {}).get("folders", []):
         if f.get("backup") or not f.get("depth"):
             continue  # the backup folder is no place for a new deck; the root is the top level
@@ -930,7 +930,12 @@ DECK_CSS_A = (
   justify-content:flex-start;text-align:left;text-decoration:none}
 .sharebox .sharerow + .sharerow{border-top:1px solid var(--border-soft)}
 .sharebox .sharerow svg{width:20px;height:20px;flex:none;color:var(--orange-text)}
-.sharebox .sharerow .t{flex:1;min-width:0}
+.sharebox .sharerow .t{flex:1 1 auto;min-width:0}
+.sharebox .sharerow small{min-width:0}
+@container (max-width:17em){
+  .sharebox .sharerow{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.8rem;row-gap:0}
+  .sharebox .sharerow svg{grid-row:1 / span 2}
+  .sharebox .sharerow .t,.sharebox .sharerow small{grid-column:2} }
 .sharebox .sharerow small{color:var(--text-muted)}
 .sharebox .sharerow:hover{background:var(--surface-2)}
 .banner h1.deckname.unnamed > span{color:#cfcfcf;font-style:italic}
@@ -1017,7 +1022,7 @@ def toolbar_html(
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
         + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
-        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Find in deck' "
+        f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Find' "
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
         "</span></div><noscript><button type='submit' class='apply'>Apply</button></noscript>"
@@ -1335,7 +1340,7 @@ def custom_image_card(card: CustomDeckCard, *, deck: Deck) -> str:
     shows until the picture is there and stays when there is none."""
     body = (
         "<span class='ph'><span class='t'>"
-        f"<span class='nm'>{esc(card.name)}</span></span>"
+        f"<span class='nm' title='{esc(card.name)}'>{esc(card.name)}</span></span>"
         f"<span class='ty'>{esc(card.type_line)}</span></span>"
     ) + (
         f"<img class='pic' src='{custom_picture_url(deck, card)}' alt='{esc(card.name)}' loading='lazy'>"
@@ -1370,7 +1375,8 @@ def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = Non
         if img
         else (
             "<span class='ph'><span class='t'>"
-            f"<span class='nm'>{esc(card.name)}</span>{mana_html(card.mana_cost)}</span>"
+            f"<span class='nm' title='{esc(card.name)}'>{esc(card.name)}</span>"
+            f"{mana_html(card.mana_cost)}</span>"
             f"<span class='ty'>{esc(' '.join(card.types) or '')}</span></span>"
         )
     )
@@ -2856,10 +2862,14 @@ html[data-card-size=s] .gf-c .kebab{display:none}
   background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
   user-select:none;-webkit-touch-callout:none;transition:transform .15s}
 .gf-card img{width:100%;height:100%;object-fit:cover;display:block}
-.gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;height:100%;padding:.35rem;
+.gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;min-height:100%;padding:.35rem;
   font-size:.78rem;text-align:left;line-height:1.2}
-.gf-card .ph .nm{overflow-wrap:break-word;hyphens:auto}
-.gf-card .ph .ty{color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gf-card .ph .nm{overflow-wrap:break-word}
+.gf-card .ph .ty{color:var(--text);overflow-wrap:break-word}
+/* a placeholder tile (no picture) grows taller than the card's ratio when its words need it
+   (200% text), instead of clipping them (final polish P-12) */
+.gf-card:has(> .ph){min-height:auto;overflow:visible;display:flex;flex-direction:column}
+.gf-card:has(> .ph) > .ph{flex:1 1 auto}
 .gf-card:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 /* a tapped permanent turns sideways inside its cell */
 .gf-card.tapped{transform:rotate(90deg) scale(.72)}
@@ -3247,6 +3257,9 @@ DECK_CSS = (
     """
 /* deck banner (cardBanner / deckHeaderInfo) */
 .banner{position:relative;margin:0 calc(-1 * var(--gutter)) 1rem;color:#fff;isolation:isolate;z-index:2}
+/* from 600 px the banner meets the top bar (the 0.7.46 Fold mockup; a phone's header is a card
+   with the page's colour above it, mockup screen 5): it takes back the page's top padding */
+@media (min-width:600px){ .banner{margin-top:calc(-1 * var(--main-top,1rem))} }
 /* the toolbar below is positioned too; while a banner menu is open the banner must win */
 .banner:has(details[open]){z-index:6}
 /* no featured art: no empty grey band on phones */
@@ -3261,13 +3274,13 @@ DECK_CSS = (
 .banner .controls details.dd .menu{z-index:40}
 .banner .content{display:flex;justify-content:space-between;gap:1rem;max-width:2300px;margin:0 auto}
 .banner .info{min-width:0;flex:1}
-.banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:28px;
-  font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.banner h1.deckname > span{overflow:hidden;text-overflow:ellipsis}
+.banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:min(2rem,5vw);
+  font-weight:700;color:#fff;overflow-wrap:break-word;line-height:1.2}
+.banner h1.deckname > span{min-width:0}
 /* the banner's grey text: #d6d6d6 reads at 4.5:1 over the whole shade (theme.py --banner-a/b)
    in both themes; the list date in the first row takes this colour, not its muted grey */
 .banner .privacy{color:#d6d6d6;display:inline-flex}
-.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:16px;color:#d6d6d6;
+.banner .row{display:flex;flex-wrap:wrap;column-gap:1rem;row-gap:.2rem;font-size:1.143rem;color:#d6d6d6;
   margin:.15rem 0;align-items:center}
 .banner .row b.orange{color:#ffa94d;font-weight:700}  /* 4.5:1 on the banner's grey (audit D14) */
 /* muted words on the banner ("unknown" for a price nobody knows): the page's muted grey is 1.5:1
@@ -3295,7 +3308,11 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* a phone (mockup screen 5): the chips on one row, each its icon and count, the words for a
    screen reader; a confirmation (social.js) takes the row under them */
 @media (max-width:599.98px){
-  .banner .social{display:flex;flex-wrap:wrap;gap:.4rem;margin:0;flex:1 1 auto;order:5;align-items:center}
+  .banner .social{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:.4rem;margin:0;
+    flex:1 1 auto;order:5;align-items:center}
+  /* the chips' row narrower than 20em (large text): two and two, never three and one (P-17) */
+  .banner .info{container-type:inline-size}
+  @container (max-width:20em){ .banner .social{grid-template-columns:repeat(2,minmax(0,1fr))} }
   .banner .social .soc{justify-content:center;min-width:44px;height:36px;padding:0 .6rem;gap:.3rem}
   .banner .social .soc > span:not(.nb){position:absolute;width:1px;height:1px;overflow:hidden;
     clip:rect(0 0 0 0);white-space:nowrap;padding:0;margin:0;line-height:1}
@@ -3303,9 +3320,10 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
      centring the box centres the ink (a digit's ink sits above its line box's centre: polish B1) */
   .banner .social .soc .n{text-box:trim-both cap alphabetic}
   .banner .social .confirm{flex-basis:100%} }
-.banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
+.banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;min-height:34px;height:auto;
+  padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
-  font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1}
+  font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1.2}
 .banner .social .soc:hover,.banner .social .soc:focus-visible{border-color:var(--orange);color:var(--orange)}
 /* dark text on orange (white on Archidekt's orange is 2.4:1) */
 .banner .social .soc.on{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
@@ -3383,8 +3401,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;
   background:var(--surface-3);color:var(--text);font-weight:900;border:1px solid var(--border);flex:none}
 .banner .avatar{background:#3a3a3a;color:#fff;border-color:rgba(255,255,255,.4)}
-.avatar.lg{width:50px;height:50px;font-size:1.4rem} .avatar.sm{width:40px;height:40px;font-size:1.1rem}
-.avatar.xl{width:80px;height:80px;font-size:2rem}
+.avatar.lg{width:2.55em;height:2.55em;font-size:1.4rem} .avatar.sm{width:2.6em;height:2.6em;font-size:1.1rem}
+.avatar.xl{width:2.86em;height:2.86em;font-size:2rem}
 /* the wide banner: no thumbnail, the long labels, the three fact rows as they were */
 .banner .thumb,.banner .sm{display:none}
 .banner .top,.banner .titles,.banner .rows{display:contents}
@@ -3402,10 +3420,10 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .thumb{display:block;width:64px;height:64px;border-radius:8px;object-fit:cover;flex:none;
     background:var(--surface-2);border:1px solid rgba(255,255,255,.25)}
   .banner .titles{display:block;min-width:0;flex:1 1 auto}
-  .banner h1.deckname{font-size:19px;margin:0 0 .15rem;line-height:1.25}
+  .banner h1.deckname{font-size:min(1.357rem,6vw);margin:0 0 .15rem;line-height:1.25}
   /* the facts flow as one wrapping text (inline rows, each part spaced by a margin), so 200% text
      wraps rather than widens the page; each row keeps a box of its own (the contrast checks) */
-  .banner .rows{display:block;font-size:13px;color:#d6d6d6;line-height:1.5;min-width:0}
+  .banner .rows{display:block;font-size:.929rem;color:#d6d6d6;line-height:1.5;min-width:0}
   .banner .rows .row{display:inline;margin:0}
   /* each part its own inline block: a line can break between parts that the markup does not
      separate with a space */
@@ -3421,7 +3439,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .rows .owner-sm:hover,.banner .rows .owner-sm:focus-visible{color:var(--orange);
     text-decoration:underline}
   .banner .lg{display:none} .banner .sm{display:inline}
-  .banner .tags{margin:0 0 0 auto;order:6;font-size:13px}
+  .banner .tags{margin:0 0 0 auto;order:6;font-size:.929rem}
   .banner .controls{flex-basis:100%;margin:0;order:4}
   .banner .controls .primary{display:grid;width:100%;gap:.4rem;
     grid-template-columns:repeat(auto-fit,minmax(min(100%,4.6rem),1fr))}
@@ -3505,15 +3523,23 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.field .sel > svg ~ select,.field .sel > svg ~ .msel-btn{padding-left:2.1rem}
+.field .sel > svg ~ select,.field .sel > svg ~ .msel-btn{padding-left:calc(.75rem + 20px)}
 .field .search{margin:0}
 .toolbar .apply{margin-top:.5rem}
-@media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
+.toolbar{container-type:inline-size}
+@container (max-width:80em){ .toolbar .controls{grid-template-columns:1fr}
   .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))}
   .toolbar .views:has(.cardsize){grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr))}
   .toolbar .views .field.cardsize .sizeseg{width:100%}
   .toolbar .views .field.cardsize .sizeseg button{flex:1 1 0}
   .toolbar .filter{grid-column:1 / -1} }
+/* three selects need 9em each (Categories, with its icon): two to a row under that, one under 18em */
+@container (max-width:30em){ .toolbar .controls .views{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .toolbar .controls .views:has(.cardsize){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .toolbar .controls .views .field:nth-child(3){grid-column:1 / -1} }
+@container (max-width:18em){ .toolbar .controls .views,.toolbar .controls .views:has(.cardsize){
+    grid-template-columns:1fr}
+  .toolbar .controls .views .field:nth-child(3){grid-column:auto} }
 @media (max-width:600px){ .toolbar{padding:.5rem .75rem .75rem}
   .toolbar .views{grid-template-columns:1fr 1fr}
   .toolbar .views .field:nth-child(3){grid-column:1 / -1}
@@ -3525,13 +3551,15 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 
 /* category (stack) headers */
 .stackhead{padding-top:.5rem;margin-bottom:.25rem}
-.stackhead h2{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:14px;
+.stackhead h2{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:1rem;
   font-weight:700;min-height:28px;margin:0}
 /* min-width 0: a long unbroken name shortens with … instead of widening the stack past the screen */
 .stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .stackhead .title.strike{text-decoration:line-through;color:var(--text-muted)}
-.stackhead .meta{font-size:12px;color:var(--text-muted);display:block}
-.stackhead summary.icon-only{width:28px;height:28px;border:0;background:transparent;color:var(--text-muted)}
+.stackhead .meta{font-size:.857rem;color:var(--text-muted);display:block}
+.stackhead summary.icon-only{min-width:28px;min-height:28px;width:auto;height:auto;border:0;
+  background:transparent;
+  color:var(--text-muted)}
 .stackhead summary.icon-only:hover{color:var(--orange)}
 /* the category's ⋮ (deck.js puts it in place of the no-script drop-down): a finger-sized button
    that sits in the 28 px head (negative margins), the icon muted until hovered or focused */
@@ -3544,8 +3572,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 /* a press and hold on a category's head opens its menu: no text selection under the finger */
 .deckview[data-catinfo] .stackhead h2{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 /* "+ Add category" after the last stack: a dashed outline, the width of a stack */
-.deckview .addcat{display:flex;align-items:center;justify-content:center;gap:.4rem;width:100%;
-  min-height:var(--ctl);margin:.5rem 0 0;border:2px dashed var(--control-border);background:transparent;
+.deckview .addcat{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.4rem;
+  width:100%;min-height:var(--ctl);margin:.5rem 0 0;padding-left:min(1rem,6%);padding-right:min(1rem,6%);
+  border:2px dashed var(--control-border);background:transparent;
   color:var(--text);font-weight:700;text-decoration:none;break-inside:avoid;page-break-inside:avoid}
 .deckview .addcat:hover,.deckview .addcat:focus-visible{border-color:var(--orange-text);
   color:var(--orange-text)}
@@ -3588,17 +3617,18 @@ ul.rows .q{color:var(--text-muted);text-align:right;font-variant-numeric:tabular
 ul.rows .n{display:flex;align-items:center;gap:.35rem;min-width:0}
 /* the category and owned dots follow the name, so every name starts at the same x (polish B2) */
 ul.rows .n > .tagdot,ul.rows .n > .owned{order:1}
-ul.rows .n .name{font-weight:700;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto;min-width:0}
+ul.rows .n .name{font-weight:700;overflow-wrap:anywhere;min-width:0}
 ul.rows .mc{min-width:0}
 ul.rows .set{font-size:.78rem;color:var(--text-muted);text-align:center}
 ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-variant-numeric:tabular-nums}
-.finish{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;
-  border-radius:3px;
-  font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
+.finish{display:inline-flex;align-items:center;justify-content:center;min-width:16px;min-height:16px;
+  width:auto;height:auto;padding:0 .15em;border-radius:3px;
+  font-size:.714rem;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
 /* one of the member's custom cards in the deck (deckpage.custom_card_row): a small Custom mark */
-.custom-badge{display:inline-flex;align-items:center;height:16px;padding:0 .35rem;border-radius:3px;
-  font-size:10px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;flex:none;
+.custom-badge{display:inline-flex;align-items:center;min-height:16px;height:auto;padding:0 .35rem;
+  border-radius:3px;
+  font-size:.714rem;font-weight:900;letter-spacing:.02em;text-transform:uppercase;flex:none;
   background:var(--orange-tint);color:var(--orange-text);border:1px solid var(--orange-text)}
 .deckview .c .custom-badge{position:absolute;right:6px;bottom:6px;background:#fff3e0;color:#7a3d00;
   border-color:#7a3d00}
@@ -3634,7 +3664,7 @@ ul.rows .hover img{width:100%;height:100%;display:block}
    keeps the row's width, so a name wraps between words and never inside one (re-audit, 320 px) */
 ul.rows{container-type:inline-size}
 @container (max-width:22em){
-  ul.rows .row:not(.brew){grid-template-columns:1.6rem minmax(0,1fr)}
+  ul.rows .row:not(.brew){grid-template-columns:minmax(1.6rem,max-content) minmax(0,1fr)}
   ul.rows .row:not(.brew) > .mc{grid-column:2;grid-row:2;justify-self:start;margin:-.1rem 0 .3rem}
   ul.rows .row:not(.brew) > .mc:empty{display:none}
   /* the name first, the category and owned dots after it: a name wider than the cell takes the
@@ -3706,7 +3736,11 @@ ul.rows{container-type:inline-size}
 ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padding:.4rem 0}
 .row.brew .art{width:56px;aspect-ratio:63/88;border-radius:4px;object-fit:cover;flex:none;
   background:var(--surface-2)}
-.row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1}
+.row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1;
+  container-type:inline-size}
+/* a column too narrow for the quantity and the cost beside a long name (a phone at 200% text):
+   the name takes a line of its own, whole words */
+@container (max-width:12em){ .row.brew .n{flex-wrap:wrap} .row.brew .n .name{flex:1 1 100%} }
 .row.brew .n .q{min-width:1.6rem;text-align:right}
 .row.brew .n .mc{margin-left:auto;flex:none}
 .row.brew .ty{font-size:.82rem;color:var(--text-muted)}
@@ -3726,8 +3760,10 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview .c{position:relative;aspect-ratio:5/7;border-radius:4.5%;border:2px solid var(--card-border);
   overflow:hidden;background:var(--surface-2);transition:transform .3s ease-in-out}
 .deckview .c img{width:100%;height:100%;display:block;object-fit:cover}
-.deckview .c .qty{position:absolute;top:0;left:0;width:38px;height:38px;clip-path:polygon(0 0,0 100%,100% 0);
-  border-radius:11px 0 0 0;background:#3a3a3a;color:#fff;font-size:12px;font-weight:700;padding:5px 0 0 7px}
+.deckview .c .qty{position:absolute;top:0;left:0;width:3.17em;height:3.17em;
+  clip-path:polygon(0 0,0 100%,100% 0);
+  border-radius:11px 0 0 0;background:#3a3a3a;color:#fff;font-size:.857rem;font-weight:700;
+  padding:.42em 0 0 .58em}
 .deckview .c .finish{position:absolute;right:6px;bottom:6px}
 .deckview .c .corner{position:absolute;top:0;right:0;width:30px;height:30px;
   clip-path:polygon(100% 0,0 0,100% 100%)}
@@ -3735,15 +3771,23 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 /* a tile without a picture: its name starts below the 38 px quantity corner (and clear of the
    30 px companion corner), and its type line sits above the owned dot and the finish badge in the
    bottom corners, at every card size (0.7.43: the dot sat on "Artifact") */
-.deckview .c .ph{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
-  padding:max(12%,34px) 8% max(8%,26px);background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
+.deckview .c .ph{position:relative;min-height:100%;display:flex;flex-direction:column;
+  justify-content:space-between;
+  padding:max(12%,3.04em) 8% max(8%,2.33em);
+  background:linear-gradient(160deg,var(--surface-3),var(--surface-2));
   font-size:.8rem}
+/* a tile without a picture is as tall as the card's ratio, or taller when its words need more
+   (200% text): the ratio's automatic minimum height applies only with overflow visible */
+.deckview .c:has(> .ph){overflow:visible;display:flex;flex-direction:column}
+.deckview .c:has(> .ph) > .ph{flex:1 1 auto}
 .deckview .c .ph .t{display:flex;justify-content:space-between;gap:.3rem;align-items:flex-start}
-.deckview .c .ph .nm{font-weight:700;overflow-wrap:break-word}
-.deckview .c .ph .ty{color:var(--text-muted);font-size:.72rem}
+.deckview .c .ph .nm{font-weight:700;overflow-wrap:anywhere;min-width:0}
+.deckview .c .ph .ty{color:var(--text);font-size:.72rem;overflow-wrap:anywhere;min-width:0}
 .deckview.stacks .cards{display:flex;flex-direction:column}
 .deckview.stacks .c + .c{margin-top:-123%}
 .deckview.stacks .c .ph{padding:3% 6% max(8%,26px) 42px}
+.deckview{container-type:inline-size}
+@container (max-width:16em){ .deckview.stacks .addcat{grid-column:1 / -1} }
 .deckview.stacks .c:has(.corner) .ph .t{padding-right:26px}
 .deckview.stacks .c .ph .t{align-items:center;min-height:0}
 .deckview.stacks .c .ph .nm{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;
@@ -3897,7 +3941,7 @@ html.cardview-open{overflow:hidden}
   .ctxmenu .sub button,.ctxmenu .finsub button{min-height:44px}
   .ctxmenu .mvform input,.ctxmenu .mvform .acts .btn{min-height:44px}
   /* the viewer's × and its − / + steppers: finger-sized (set after their own rules, so this wins) */
-  .cardview .close{width:44px;height:44px;min-height:44px}
+  .cardview .close{width:max(44px,2.4rem);height:max(44px,2.4rem);min-height:44px}
   .cardview .acts .qtyctl button{width:44px;min-width:44px;min-height:44px}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
@@ -3926,7 +3970,8 @@ html.cardview-open{overflow:hidden}
 .edhplay-dialog details.disclosure{margin:0;padding-top:.15rem}
 /* finger-sized (44 px): the fold's summary and the box's x */
 .edhplay-dialog details.disclosure > summary{min-height:44px}
-.picker.edhplay-dialog .pickbox .close{width:44px;min-height:44px;height:44px;margin:-.2rem -.35rem 0 0}
+.picker.edhplay-dialog .pickbox .close{width:max(44px,2.4rem);min-height:44px;height:max(44px,2.4rem);
+  margin:-.2rem -.35rem 0 0}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
 .edhplay-dialog .edhplay-state{display:flex;flex-direction:column;gap:.5rem}
@@ -3985,7 +4030,7 @@ html.cardview-open{overflow:hidden}
 .curve{display:flex;align-items:flex-end;gap:min(.5rem,2.1vw);height:9rem;padding:.25rem 0;
   border-bottom:1px solid var(--border)}
 .curve .bar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:flex-end;height:100%;font-size:min(.75rem,3.5vw)}
+  justify-content:flex-end;height:100%;font-size:.75rem}
 .curve .bar .col{display:flex;flex-direction:column-reverse;width:70%;gap:2px;border-radius:2px 2px 0 0;
   overflow:hidden}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
@@ -4011,7 +4056,7 @@ html.cardview-open{overflow:hidden}
    growing at a share of the screen width (min(), so 100% text is unchanged) */
 .curveaxis{display:flex;gap:min(.5rem,2.1vw)}
 .curveaxis .mv{flex:1;min-width:0;min-height:28px;padding:0;border:0;background:none;font-weight:700;
-  font-size:min(.8rem,3.8vw);color:var(--text)}
+  font-size:.8rem;color:var(--text)}
 .curveaxis .mv:hover:not(:disabled),.slegend button:hover,.rowbtn:hover{background:var(--surface-2)}
 .slegend{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem .5rem;margin:.5rem 0 0;padding:0}
 .slegend button{min-height:28px;padding:0 .4rem;border:0;background:none;font-size:.85rem;gap:.35rem;
@@ -4085,7 +4130,7 @@ table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
 
-.description{font-size:16px} .description .empty{color:var(--text-muted)}
+.description{font-size:1.143rem} .description .empty{color:var(--text-muted)}
 
 /* deck list (deckLink grid: thumbnail with colour bar, info block, tags strip) */
 .listbar .controls{display:grid;grid-template-columns:1fr repeat(2,minmax(140px,auto)) auto;gap:1rem;
@@ -4113,14 +4158,14 @@ ul.decklist .deck a{display:flex;flex-direction:column;color:var(--text);text-de
 ul.decklist .deck.selected a{outline:2px solid var(--orange)}
 /* the picture's height, S 140, M 175, L 220 px (theme.py); the ⋮ is placed under it (menus.py) */
 ul.decklist{--deck-thumb:175px}
-ul.decklist .thumb{position:relative;display:block;height:var(--deck-thumb);
+ul.decklist .thumb{position:relative;display:block;height:var(--deck-thumb);container-type:size;
   background:var(--surface-3) center/cover no-repeat;
   overflow:hidden;transition:transform .2s ease}
 ul.decklist .thumb::after{content:'';position:absolute;inset:0;
   background:linear-gradient(to bottom,rgba(0,0,0,0) 55%,var(--surface) 100%)}
 ul.decklist .deck a:hover .thumb{transform:scale(1.02)}
 ul.decklist .thumb .ini{display:none;position:absolute;inset:0;align-items:center;justify-content:center;
-  font-size:4rem;font-weight:900;color:rgba(255,255,255,.6)}
+  font-size:min(4rem,60cqb);font-weight:900;color:rgba(255,255,255,.6)}
 ul.decklist .thumb.noart .ini{display:flex}
 ul.decklist .thumb.noart{background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
 /* the initial and the card count read at 4.5:1 or better over both ends of the gradient and over
@@ -4128,7 +4173,7 @@ ul.decklist .thumb.noart{background:linear-gradient(135deg,#3a3a3a,#1f1f1f)}
    fade to the page starts lower, under the initial: in the light theme it fades to near white,
    and the initial's lower half sat on it */
 ul.decklist .thumb.noart::after{background:linear-gradient(to bottom,rgba(0,0,0,0) 72%,var(--surface) 100%)}
-ul.decklist .thumb .views{position:absolute;right:.5rem;top:.5rem;font-size:12px;color:#fff;
+ul.decklist .thumb .views{position:absolute;left:.5rem;top:.5rem;font-size:.857rem;color:#fff;
   background:rgba(0,0,0,.65);padding:.1rem .4rem;border-radius:3px;z-index:1}
 ul.decklist .thumb .cbar{position:absolute;left:0;right:0;bottom:0;height:15px;border-radius:0;z-index:1;
   gap:0}
@@ -4138,12 +4183,12 @@ ul.decklist .info{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;min-h
 ul.decklist .info .text{display:flex;flex-direction:column;min-width:0;gap:.1rem;flex:1 1 8rem}
 /* a deck's name: up to two lines, then an ellipsis (one line cut "Meren Graveyard Value" to
    "Meren Grave…" on a computer's tiles) */
-ul.decklist .info .name{font-size:16px;font-weight:700;overflow:hidden;overflow-wrap:anywhere;
+ul.decklist .info .name{font-size:1.143rem;font-weight:700;overflow:hidden;overflow-wrap:anywhere;
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 ul.decklist .deck a:hover .name{text-decoration:underline}
 ul.decklist .info .fmt,ul.decklist .info .sub{font-size:.86rem;color:var(--text-muted);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}
-ul.decklist .info .name{hyphens:auto;-webkit-hyphens:auto}
+ul.decklist .info .name{overflow-wrap:anywhere}
 /* a tile narrow in its own text (200% text on a 320 px phone): the ⋮ goes onto the picture's
    corner (as Home's covers draw it) and the words keep the tile's width, so a deck's name wraps
    between words */
@@ -4152,7 +4197,7 @@ ul.decklist{container-type:inline-size}
   ul.decklist.grid .deck .info{padding-right:.75rem}
   ul.decklist.grid .deck > .kebab{top:.25rem;right:.25rem;transform:none;color:#fff;
     background:rgba(0,0,0,.55)} }
-ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;
+ul.decklist .tags{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem .75rem;min-width:0;
   border-top:1px solid var(--border-soft);
   font-size:.86rem;color:var(--text-muted);min-height:2rem;align-items:center}
 /* a tag longer than the row ends in an ellipsis (its name is the hover text), never cut at the
@@ -4161,7 +4206,7 @@ ul.decklist .tags .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;wh
   display:inline-block;vertical-align:middle}
 ul.decklist.list .deck a{flex-direction:row;align-items:center}
 ul.decklist.list .thumb{width:90px;height:60px;flex:none}
-ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
+ul.decklist.list .thumb .ini{font-size:min(1.5rem,55cqb)} ul.decklist.list .thumb .views{display:none}
 /* the words ask for 12 em of their own text: at 200% text on a phone they go under the picture
    and keep the row's width, so a deck's name wraps between words (re-audit, 320 px) */
 ul.decklist.list .info{flex:1 1 12em;min-height:0}
@@ -4175,14 +4220,14 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .editor .edithead .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 .editor .edithead .kicker{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;
   color:var(--text-muted)}
-.editor .edithead h1.deckname{margin:0;font-size:24px}
+.editor .edithead h1.deckname{margin:0;font-size:min(1.714rem,5vw)}
 /* the name's box gives up its least width, so an unbroken name wraps inside the row instead of
    running the page wide (638 px at 360) */
 .editor .edithead .info{min-width:0}
 .editor .edithead .btn{margin:0}
 /* a phone's heading is the deck page's size (19px), so at 200% text a ten-letter word in the
    name ("Commander", "categories") still fits the head's row whole */
-@media (max-width:599.98px){ .editor .edithead h1.deckname{font-size:19px;line-height:1.25} }
+@media (max-width:599.98px){ .editor .edithead h1.deckname{font-size:min(1.357rem,6vw);line-height:1.25} }
 /* the save bar sticks just under the site's top bar (theme.py: sticky, 50px tall, plus the safe
    area in the app), never over it */
 .editbar{position:sticky;top:50px;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
@@ -4238,7 +4283,8 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
     margin-bottom:.5rem}
   .addprints .head b{overflow-wrap:anywhere}
-  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem;margin:0;
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,6.5em),1fr));
+    gap:.4rem;margin:0;
     padding:0;list-style:none}
   .addprints .pgrid li{min-width:0}
   .addprints .hint{margin:.5rem 0 0}
@@ -4254,7 +4300,7 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}
 details.cat summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;
-  font-weight:700;font-size:14px;list-style:none;padding:.25rem 0}
+  font-weight:700;font-size:1rem;list-style:none;padding:.25rem 0}
 details.cat summary::-webkit-details-marker{display:none}
 details.cat summary b{color:var(--text-muted);font-weight:400;flex:none}
 details.cat summary .cname{min-width:0;overflow-wrap:anywhere}
@@ -4316,7 +4362,8 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .erow .thumb{width:40px;height:56px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)}
 .erow .main{display:flex;flex-direction:column;min-width:0;gap:.1rem}
-.erow .name{font-weight:700;display:flex;align-items:center;gap:.4rem;min-width:0}
+.erow .name{font-weight:700;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;min-width:0;
+  overflow-wrap:anywhere}
 .erow .name .mana{flex:none}
 .erow .name:not(:has(.mana)){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .erow .meta{font-size:.8rem;color:var(--text-muted)}
@@ -4326,7 +4373,7 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .erow .qty input{width:min(3.4rem,18vw);height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
   font-variant-numeric:tabular-nums}
 .erow .qty button.mini{margin:0}
-.erow .sel select,.erow .sel .msel-btn{height:2.25rem}
+.erow .sel select{height:2.25rem} .erow .sel .msel-btn{min-height:2.25rem}
 .erow details.dd summary.mini{display:inline-flex;align-items:center;justify-content:center;width:2.25rem;
   height:2.25rem;padding:0;margin:0}
 .erow .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.5rem .75rem}
@@ -4359,12 +4406,15 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 html.printpick-open{overflow:hidden}
 .printpick .ppbox{position:relative;width:min(100%,76rem);height:min(100%,56rem);display:flex;
   flex-direction:column;gap:.6rem;background:var(--surface);color:var(--text);border:1px solid var(--border);
-  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;
-  animation:cardin .16s ease-out}
+  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:auto;
+  animation:cardin .16s ease-out;container-type:inline-size}
 @media (prefers-reduced-motion:reduce){ .printpick .ppbox{animation:none} }
 .printpick .pphead{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;min-width:0;
   flex:none}
-.printpick .pphead h2{margin:0;font-size:1.3rem;line-height:1.25;overflow-wrap:anywhere;min-width:0}
+/* the heading shrinks towards 1rem (never under it) where the box is narrow for its words (a
+   phone at 200% text), so a word such as Printings stays whole beside the × */
+.printpick .pphead h2{margin:0;font-size:min(1.3rem,max(1rem,8cqi));line-height:1.25;overflow-wrap:anywhere;
+  min-width:0}
 .printpick .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .printpick .pptools{display:flex;flex-direction:column;gap:.5rem;flex:none;min-width:0}
@@ -4383,7 +4433,7 @@ html.printpick-open{overflow:hidden}
 .printpick .ppsearch{flex-wrap:wrap}
 .printpick .ppsearch input{flex-basis:10rem}
 .printpick .ppsearch .sizeseg{flex:none}
-.printpick .ppfilters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:.5rem;
+.printpick .ppfilters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8em),1fr));gap:.5rem;
   align-items:center;min-width:0}
 .printpick .ppfilters select,.printpick .ppfilters .msel-btn{width:100%;min-width:0;margin:0}
 .printpick .ppall{margin:0;font-size:.93rem;line-height:1.3}
@@ -4397,10 +4447,10 @@ html.printpick-open{overflow:hidden}
   padding:.5rem .75rem}
 .printpick .ppasof[hidden]{display:none}
 .printpick .ppmain{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 21rem;
-  gap:1rem}
+  grid-template-rows:minmax(0,1fr);gap:1rem;min-height:12rem}
 .printpick .ppscroll{overflow:auto;min-height:0;overscroll-behavior:contain;padding:3px}
 .printpick .ppgrid{list-style:none;margin:0;padding:0;display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.75rem}
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,10.7em),1fr));gap:.75rem}
 .printpick .ppgrid li,.addprints .pgrid li{min-width:0;display:flex}
 .pptile{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;
   gap:.4rem;width:100%;height:auto;min-width:0;margin:0;padding:.4rem;border:2px solid var(--border-soft);
@@ -4416,8 +4466,7 @@ html.printpick-open{overflow:hidden}
 .pptile .ph,.pppreview .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;
   padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);overflow-wrap:anywhere}
 .pptile .ppcap{display:flex;flex-direction:column;gap:.2rem;min-width:0}
-.pptile .ppsetname{font-weight:700;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pptile .ppsetname{font-weight:700;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere}
 .pptile .ppcode{font-size:.82rem;color:var(--text-muted);font-variant-numeric:tabular-nums;
   overflow-wrap:anywhere}
 .pptile .ppprice{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
@@ -4482,7 +4531,7 @@ html.printpick-open{overflow:hidden}
   .printpick .ppbox{width:100%;height:94vh;height:94dvh;
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:.5rem} }
+  .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,9.9em),1fr));gap:.5rem} }
 @media (max-width:599.98px){
   .printpick .ppfiltbtn{display:inline-flex}
   .printpick .ppfilters:not(.open){display:none} }
@@ -4493,18 +4542,21 @@ html.printpick-open{overflow:hidden}
   .rowbtn,.curveaxis .mv,.slegend button{min-height:44px}
   .rowbtn,.statctl button{min-width:44px}
   .statctl button{min-height:44px}
-  /* the curve's eight axis buttons share the box's width with no gap: 44 px wide from a 412 px
-     phone; on a narrower one (360 px: 8 x 44 is more than the box) each is an eighth of the box,
-     as wide as the box allows without a sideways scroll */
+  /* the curve's eight axis buttons share the box's width with no gap, each at least 44 px wide:
+     on a phone too narrow for eight of them (320 and 360 px) the curve scrolls inside its box,
+     the axis with it (final polish P-11) */
   .curveaxis{gap:0}
-  .curveaxis .mv{min-width:min(44px,12.5%)}
+  .curveaxis .mv{min-width:44px}
+  .curvebox [data-curve]{overflow-x:auto;scrollbar-width:thin}
+  .curvebox .curve,.curvebox .curveaxis{min-width:calc(8 * 44px)}
   /* the curve's axis buttons share the box's width (a phone's 320 px holds no eight 44 px
      columns without a sideways scroll): 44 px high, as wide as the box lets them; the stack
      handle keeps its 28 px drawing inside the 44 px finger area its ::before draws */
   .deck-toast .acts button,.deck-toast .acts .btn{min-height:44px}
   .deck-toast .close{width:44px;height:44px;min-height:44px}
-  .printpick .close{width:44px;min-height:44px;height:44px}
-  .printpick input[type=search],.printpick .msel-btn,.printpick select{height:44px;min-height:44px}
+  .printpick .close{width:max(44px,2.4rem);min-height:44px;height:max(44px,2.4rem)}
+  .printpick input[type=search],.printpick select{height:44px;min-height:44px}
+  .printpick .msel-btn{min-height:44px}
   .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,
   .printpick .ppstatus .btn{min-height:44px}
   .printpick .ppall{min-height:44px}
@@ -4514,7 +4566,7 @@ html.printpick-open{overflow:hidden}
   .erow details.dd summary.mini{width:44px;height:44px;min-height:44px}
   .erow{grid-template-columns:44px minmax(0,1fr) auto minmax(7rem,10rem) auto}
   .erow .thumbbtn{min-width:44px;display:flex;justify-content:center}
-  .erow .sel select,.erow .sel .msel-btn{height:44px;min-height:44px}
+  .erow .sel select{height:44px;min-height:44px} .erow .sel .msel-btn{min-height:44px}
   .erow button.remove{width:44px;min-width:44px;height:44px;min-height:44px}
   .editbar .backup,.addbox form.addcard .go .foil{min-height:44px;padding:0 .25rem}
   .editbar .backup input,.addbox form.addcard .go .foil input{width:22px;height:22px;margin:0}
@@ -4569,10 +4621,12 @@ ul.erows{container-type:inline-size}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }
-@container (max-width:20rem){
-  .erow .qty{grid-column:2 / -1;grid-row:2}
-  .erow .sel{grid-row:3}
-  .erow details.dd,.erow button.remove{grid-row:3}
+@container (max-width:23rem){
+  .erow{grid-template-rows:auto auto auto}
+  .erow > .main{grid-column:2 / -1;grid-row:1}
+  .erow .qty{grid-column:1 / 3;grid-row:2;justify-self:start}
+  .erow details.dd,.erow button.remove{grid-column:3;grid-row:2}
+  .erow .sel,.erow > .s{grid-column:1 / -1;grid-row:3}
 }
 /* The phone's one-row save bar wraps with large text rather than run off the screen. */
 .editor{container-type:inline-size}

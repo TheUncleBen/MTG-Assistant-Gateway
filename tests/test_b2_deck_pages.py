@@ -32,7 +32,7 @@ async def test_the_deck_page_holds_its_boxes_and_one_orange_button(stack: Stack)
         assert "href='/decks/42/delete' data-box-open='delete'" in page
         assert "Delete “Sample Commander Deck”?" in page and "data-typed='Sample Commander Deck'" in page
         assert "value='Copy of - Sample Commander Deck'" in page
-        assert "Top level (no folder)" in page
+        assert "No folder" in page
         assert "Clone deck…" not in page  # the banner button keeps its old words
         assert "Deck stats" in page and "Open on Archidekt" in page
     finally:

@@ -55,7 +55,7 @@ CARDS_CSS = """
 .spanel .fmtrow .add-row{flex:none;margin:0;display:inline-flex;align-items:center;gap:.3rem;
   height:var(--ctl)}
 .spanel .fmtrow .row2{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto}
-.spanel .fgrid > .cs-pick{--gw:220px}
+.spanel .fgrid > .cs-pick{--gw:15.714em}
 .spanel .fgrid > .fg.mv{--gw:12em}
 /* pickers: chosen values as chips (with IS / NOT where Scryfall has it) above a search box */
 .cs .cs-pick{position:relative;min-width:0}
@@ -86,6 +86,8 @@ CARDS_CSS = """
 .cs .opts li[aria-selected=true],.cs .opts li.opt:hover{background:var(--surface-2)}
 .cs .opts li.none{cursor:default;color:var(--text-muted)}
 .cs .checks{display:flex;flex-wrap:wrap;gap:.5rem 1.25rem}
+/* each tick a 44 px row of its own words (a finger's target, P-11) */
+.cs .checks label{display:inline-flex;align-items:center;gap:.4rem;min-height:44px;margin:0;font-weight:400}
 /* More filters: opened from the results bar (its own summary shows without scripts and on phones) */
 details.cs-more{margin:0;border-top:1px solid var(--border-soft);padding-top:.25rem}
 details.cs-more > .cs-grid{margin:.5rem 0 0}
@@ -137,8 +139,7 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .cardgrid .add,.cardlist .add{margin:0;min-width:0}
 /* every card of a row is as tall as the tallest, its Add to deck on the row's bottom edge */
 .cardgrid .add{width:100%;margin-top:auto}
-.cardgrid .add > span,.cardlist .add > span{min-width:0;overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
+.cardgrid .add > span,.cardlist .add > span{min-width:0}
 /* the list view: one row a card, columns that fold under the name on narrow screens */
 .cardlist{list-style:none;margin:0 0 1rem;padding:0;border:1px solid var(--border);
   border-radius:var(--radius);
@@ -172,8 +173,21 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 /* phones: the stat rows keep three boxes a row; the Games toggles form a grid */
 @media (max-width:599.98px){
   .cs .row3{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,5rem) auto}
-  .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.6rem,1fr))}
+  .cs .toggles{display:grid;grid-template-columns:repeat(auto-fill,minmax(8em,1fr))}
 }
+/* rows too narrow for their controls side by side (a phone, or large text): the first control
+   with Remove, the others under it, each as wide as the row (the comparison "less than or equal
+   to" and the format names need the room) */
+.cs .rows{container-type:inline-size}
+@container (max-width:30em){
+  .cs .rows .row3{grid-template-columns:minmax(0,1fr) auto}
+  .cs .rows .row3 > .rm{grid-column:2;grid-row:1}
+  .cs .rows .row3 > select + select{grid-column:1 / -1}
+  .cs .rows .row3 > input{grid-column:1;max-width:10em} }
+@container (max-width:26em){
+  .cs .rows .row2{grid-template-columns:minmax(0,1fr) auto}
+  .cs .rows .row2 > .rm{grid-column:2;grid-row:1}
+  .cs .rows .row2 > select + select{grid-column:1 / -1} }
 /* Add to deck: a small dialog over the page (a bottom sheet on phones), themed like the card viewer */
 .addsheet{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
   background:var(--scrim-strong,rgba(0,0,0,.72));padding:1rem}
@@ -185,11 +199,15 @@ details.cs-more > .cs-grid{margin:.5rem 0 0}
 .addsheet .head{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;min-width:0}
 .addsheet h3{margin:0;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere;min-width:0;display:flex;
   flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
-.addsheet .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
-  line-height:1;font-weight:400;border-radius:50%}
+.addsheet .close{flex:none;margin:0;width:max(2.4rem,44px);min-height:44px;height:max(2.4rem,44px);
+  font-size:1.5rem;line-height:1.25;font-weight:400;border-radius:50%}
+.addsheet .close .x{line-height:1.25}
 .addsheet .field{margin:0}
 .addsheet .field > label{margin:0}
 .addsheet .two{display:grid;grid-template-columns:6rem minmax(0,1fr);gap:.9rem}
+/* a box too narrow for the count beside the category (a phone at 200% text): one under the other */
+.addsheet .box{container-type:inline-size}
+@container (max-width:20em){ .addsheet .two{grid-template-columns:1fr} }
 .addsheet .msg{margin:0;font-size:.93rem;color:var(--text-muted);min-height:1.2em}
 .addsheet .msg.err{color:var(--red-text);font-weight:700}
 .addsheet .note{margin:0;font-size:.9rem;color:var(--text-muted)}
@@ -221,6 +239,8 @@ html[data-card-size=s] .cardgrid .wbtn{width:44px}
    The Watch pill is icon only on those narrow tiles, as at S (its words stay for a screen reader) */
 @media (max-width:420px){
   html:not([data-card-size=l]) .cardgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  /* a page too narrow for two cards with their words (200% text): one a row */
+  @container (max-width:20em){ html:not([data-card-size=l]) .cardgrid{grid-template-columns:1fr} }
   html:not([data-card-size=l]) .cardgrid .wbtn span{position:absolute;width:1px;height:1px;
     overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   html:not([data-card-size=l]) .cardgrid .wbtn{padding:0;justify-content:center;width:32px}}

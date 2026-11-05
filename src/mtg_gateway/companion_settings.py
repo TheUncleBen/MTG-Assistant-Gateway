@@ -113,7 +113,7 @@ SETTINGS_CSS = """
 .ds .ui-row label{font-weight:700}
 .ds .ui-row.plain .lab{font-weight:400}
 .ds .ui-row.plain .ctl{justify-self:end}
-.ds .ui-row.wctl{grid-template-columns:minmax(0,1fr) minmax(0,26rem)}
+.ds .ui-row.wctl{grid-template-columns:minmax(0,1fr) minmax(0,min(26rem,100% - 9em))}
 .ds .ui-row.full{grid-template-columns:1fr}
 .ds .ui-row.full .ctl{grid-column:1;grid-row:auto}
 .ds .ui-row .ctl input,.ds .ui-row .ctl select:not(.msel-native),.ds .ui-row .ctl textarea{width:100%;
@@ -146,7 +146,7 @@ SETTINGS_CSS = """
 .ds ul.ds-cats li{display:grid;grid-template-columns:minmax(0,1fr) 4.5em 44px;gap:.25rem .75rem;
   align-items:center;padding:.35rem 0;container-type:inline-size}
 .ds ul.ds-cats li .nm{grid-column:1;grid-row:1;min-width:0}
-.ds .ds-cats .nm input{width:100%;min-height:44px;font-weight:700}
+.ds .ds-cats .nm input{width:100%;min-width:0;min-height:44px;font-weight:700}
 .ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{display:flex;flex-wrap:wrap;gap:0 1rem;flex:0 1 auto}
 .ds .ds-cats .ds-sw{grid-column:1/-1}
 .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{min-height:44px;margin:0;padding:0;border:0;
@@ -155,11 +155,17 @@ SETTINGS_CSS = """
   padding:0 .6rem}
 .ds ul.ds-cats li .cnt{grid-column:2;grid-row:1;min-width:4.5em;justify-content:flex-end;
   color:var(--text-muted);font-size:.9rem;min-height:44px;display:inline-flex;align-items:center}
+@container (max-width:16em){
+  .ds ul.ds-cats li{grid-template-columns:minmax(0,1fr) 44px}
+  .ds ul.ds-cats li .del{grid-column:2}
+  .ds ul.ds-cats li .cnt{grid-column:1;grid-row:2;justify-content:flex-start;min-width:0;min-height:0}
+  .ds .ds-cats .ds-sw{grid-row:3} }
 /* Delete unused categories: its own right-aligned line under the list, apart from Save and Undo */
 .ds .acts.ds-unused{justify-content:flex-end;border-top:0;padding-top:0;margin-top:.5rem}
 .ds form.catnew{margin-top:1rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
 .ds form.catnew h3{margin:0 0 .5rem;font-size:1rem}
 .ds form.catnew .row{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center}
+.ds form.catnew{container-type:inline-size}
 .ds form.catnew .row input[type=text]{flex:1 1 14rem;min-height:44px;margin:0}
 .ds form.catnew .row .btn{flex:0 0 auto;width:auto;margin:0}
 .ds .confirmform label.mv{display:block;font-weight:700;margin:.75rem 0 .25rem}
@@ -172,7 +178,8 @@ SETTINGS_CSS = """
   .ds .ds-cats .switch.ds-flag,.ds form.catnew .switch.ds-flag{margin:-6px 0}}
 /* a row too narrow for the three switches on one line (a phone) has them one under the other,
    never two and one (polish B9) */
-@container (max-width:26.5em){ .ds .ds-cats .ds-sw{flex-direction:column;align-items:flex-start;gap:0} }
+@container (max-width:26.5em){ .ds .ds-cats .ds-sw,.ds form.catnew .ds-sw{flex-direction:column;
+  align-items:flex-start;gap:0} }
 .ds form.catnew .row .btn{max-width:100%;white-space:normal}
 .ds .ds-cover{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:1rem;align-items:center}
 .ds .ds-cover .pv{width:100%;max-width:none;aspect-ratio:4/3;border-radius:var(--radius-panel);
