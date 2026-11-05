@@ -136,8 +136,10 @@ VIZ_CSS = """
 .bars .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
   min-width:0;font-size:.75rem}
 .bars .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
-.bars .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
-.bars .bar em{font-style:normal;font-weight:700;margin-top:.3rem;overflow-wrap:anywhere;text-align:center}
+/* a bar's count and label are numbers ("7+"): never broken over two lines, even in a bar narrower
+   than them at 200% text on a phone */
+.bars .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem;white-space:nowrap}
+.bars .bar em{font-style:normal;font-weight:700;margin-top:.3rem;white-space:nowrap;text-align:center}
 .twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem}
 .twocol h3{margin-top:0}
 .pips li{display:flex;align-items:center;gap:.5rem;padding:.25rem 0;flex-wrap:wrap}
@@ -364,10 +366,16 @@ main.wrap{flex:1;padding:1rem var(--gutter) 3rem}
    word only when the word alone is wider than the line: "anywhere", not "break-word", since
    break-word keeps a word's whole width as the heading's least width, which at 200% text on a
    320 px phone pushed the page sideways (re-audit N02) */
-h1{font-size:2rem;font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere}
-h2{font-size:1.5rem;font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere}
+/* a heading follows the viewport at large text (10vw: 2rem at 14px up from 280px wide), so a
+   word such as "Preconstructed" stays whole on a phone at 200% text instead of breaking inside;
+   where it cannot shrink (a phone's own font scale doubles every font in place) the word breaks
+   with the browser's hyphen at a syllable (hyphens:auto; the pages are lang='en'), not a bare cut */
+h1{font-size:min(2rem,10vw);font-weight:700;line-height:1.2;margin:.5rem 0 1rem;overflow-wrap:anywhere;
+  hyphens:auto;-webkit-hyphens:auto}
+h2{font-size:min(1.5rem,7vw);font-weight:700;margin:0 0 .6rem;overflow-wrap:anywhere;hyphens:auto;
+  -webkit-hyphens:auto}
 h2:not(:first-child){margin-top:1.25rem}
-h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
+h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem;hyphens:auto;-webkit-hyphens:auto}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
 details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
@@ -379,7 +387,7 @@ ul.plain{list-style:none;margin:0;padding:0}
   padding:1rem var(--gutter);margin:0 0 1rem}  /* the sides as the page's gutters, see .wrap */
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
-.panel h2,.card h2{font-size:1.5rem}
+.panel h2,.card h2{font-size:min(1.5rem,7vw);hyphens:auto;-webkit-hyphens:auto}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
 code{font-size:.92em;background:var(--surface-2);padding:.1rem .4rem;border-radius:3px;overflow-wrap:anywhere}
 pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(--border-soft);
@@ -1047,7 +1055,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
 .home .hero > div{flex:1 1 14rem;min-width:0}
-.home .hero h1{margin:0;font-size:1.6rem}
+.home .hero h1{margin:0;font-size:min(1.6rem,8vw)}
 .home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
 .home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
   margin:0 0 1rem}
@@ -1075,7 +1083,7 @@ form.guarded button[data-guard]:disabled{pointer-events:none}
   overflow:hidden;text-overflow:ellipsis}
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
   align-items:baseline}
-.home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
+.home details.connect summary .addr{font-weight:400;font-size:.9rem;overflow-wrap:anywhere}
 .home details.connect .addrline{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .home details.connect .addrline code{word-break:break-all;font-size:.9rem}
 /* the keyboard shortcuts box (static/sitesearch.js) */
@@ -1462,7 +1470,7 @@ main.wrap.ui-wide{max-width:1200px}
 .ui-head h1{margin:0;min-width:0}
 /* enlarged text on a phone: the heading shrinks with the screen so a short word stays whole
    (overflow-wrap still breaks a word too long for any screen) */
-@media (max-width:599.98px){.ui-head h1{font-size:min(2rem,14vw)}}
+@media (max-width:599.98px){.ui-head h1{font-size:min(2rem,10vw)}}
 .ui-sub{color:var(--text-muted);margin:.1rem 0 1rem;font-size:.93rem}
 
 /* labels: a word, a colour and an icon */
@@ -1838,8 +1846,13 @@ main.wrap.ui-wide{max-width:1200px}
   .ui-split.with-panel .ui-drawer{display:block}
   .ui-split.with-panel .panel-only{display:none}
 }
+/* a drawer narrow in its own text (under 20em: 200% text on a phone) puts each fact under its
+   key: "Proposed by" and "An assistant" do not fit side by side at 320 px (batch 10, AB6) */
+.ui-drawer{container-type:inline-size}
+@container (max-width:20em){ .ui-drawer .ui-meta{grid-template-columns:minmax(0,1fr)} }
 .ui-drawer .dh{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .5rem}
-.ui-drawer .dh h2{margin:0;flex:1;font-size:1.3rem;overflow-wrap:anywhere}
+.ui-drawer .dh h2{margin:0;flex:1;font-size:min(1.3rem,6.5vw);overflow-wrap:anywhere;hyphens:auto;
+  -webkit-hyphens:auto}
 .ui-drawer .close{min-width:44px;min-height:44px;display:inline-grid;place-items:center;
   background:transparent;
   border:1px solid var(--control-border);padding:0;color:var(--text);text-decoration:none}
@@ -1848,10 +1861,11 @@ main.wrap.ui-wide{max-width:1200px}
    app's name wraps instead of pushing the list, and the page, past the window's edge. The label
    column takes at most half the width (its words wrap past that), so a value kept on one line,
    such as a time, still has room beside it */
-.ui-meta{display:grid;grid-template-columns:fit-content(50%) minmax(0,1fr);gap:.35rem 1rem;margin:0 0 1rem;
+.ui-meta{display:grid;grid-template-columns:fit-content(40%) minmax(0,1fr);gap:.35rem 1rem;margin:0 0 1rem;
   font-size:.95rem}
 .ui-meta dt{color:var(--text-muted)} .ui-meta dd{margin:0;overflow-wrap:anywhere}
-.ui-meta dd .ui-app{white-space:normal}
+/* the app's name goes under its icon when it has no room beside it (200% text on a phone) */
+.ui-meta dd .ui-app{white-space:normal;flex-wrap:wrap}
 .ui-why{color:var(--text-muted);font-size:.88rem}
 /* a proposal's changes: ADD / REMOVE / QTY, the card and the count */
 ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radius-panel);
@@ -1879,7 +1893,8 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .ui-form{max-width:52rem}
 .ui-card{border:1px solid var(--card-border);border-radius:var(--radius-panel);background:var(--surface);
   padding:1rem;margin:0 0 1rem}
-.ui-card > h2{margin:0 0 .25rem;font-size:1.15rem}
+/* 6vw: "Collaborators" whole at 200% text */
+.ui-card > h2{margin:0 0 .25rem;font-size:min(1.15rem,6vw);hyphens:auto;-webkit-hyphens:auto}
 .ui-card > .ui-sub{margin:0 0 .75rem}
 .ui-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,16rem);gap:.25rem 1rem;align-items:center;
   padding:.6rem 0;border-top:1px solid var(--border-soft)}
@@ -1993,8 +2008,10 @@ ul.ui-chg{padding:0;border:1px solid var(--card-border);border-radius:var(--radi
 .act-table .gone{font-style:italic}
 .act-table .evt{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .45rem;min-width:0}
 .act-table .evt .ui-lbl{height:22px;font-size:.78rem;flex:none}
+/* break-word, not anywhere: the name's longest word is its column's least width (its min-content),
+   so a layout never squeezes "Archidekt" into one letter a line (batch 10, AB1) */
 .act-table .evt .en{display:inline-flex;align-items:flex-start;gap:.35rem;font-weight:700;font-size:.92rem;
-  line-height:1.3;overflow-wrap:anywhere;min-width:0}
+  line-height:1.3;overflow-wrap:break-word;min-width:0}
 .act-table .evt .en svg.i{width:16px;height:16px;margin-top:.1rem;color:var(--text-muted)}
 """
 CSS += UI_CSS
@@ -2504,11 +2521,12 @@ CSS += """
 html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,.7,.3,1) forwards}
 @keyframes navprogress{from{transform:scaleX(.08)}to{transform:scaleX(.92)}}
 @media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
-/* enlarged text on a phone: a heading shrinks with the screen, so a long word ("Winterbourne-")
-   stays whole at 200% text on a 320 px phone instead of breaking letter by letter (last, after
-   the headings' own sizes above) */
-@media (max-width:599.98px){h1{font-size:min(2rem,14vw)} h2{font-size:min(1.5rem,9.5vw)}
-  .home .hero h1{font-size:min(1.6rem,10vw)} .mtgbox .bh h2{font-size:min(1.25rem,9vw)}}
+/* enlarged text on a phone: a heading shrinks with the screen, so a long word ("Winterbourne-",
+   "Preconstructed") stays whole at 200% text on a 320 px phone instead of breaking letter by
+   letter (last, after the headings' own sizes above; the same bounds as the headings' own, so a
+   412 px phone at 200% keeps "Preconstructed" whole too, batch 10 AB5) */
+@media (max-width:599.98px){h1{font-size:min(2rem,10vw)} h2{font-size:min(1.5rem,7vw)}
+  .home .hero h1{font-size:min(1.6rem,8vw)} .mtgbox .bh h2{font-size:min(1.25rem,9vw)}}
 """
 
 

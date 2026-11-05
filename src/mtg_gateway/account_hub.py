@@ -199,7 +199,9 @@ HUB_CSS = """
 .yhub .yme{display:flex;align-items:center;gap:1rem;padding:.9rem 1rem;margin:0 0 1.25rem;border-radius:14px;
   background:var(--surface);border:1px solid var(--border-soft);color:var(--text);text-decoration:none}
 .yhub .yme img.av{width:56px;height:56px;border-radius:50%;object-fit:cover;flex:none}
-.yhub .yme .who{display:flex;flex-direction:column;gap:.2rem;min-width:0;flex:1}
+/* the words go under the picture when they have less than 12em beside it (200% text on a phone) */
+.yhub .yme{flex-wrap:wrap}
+.yhub .yme .who{display:flex;flex-direction:column;gap:.2rem;min-width:0;flex:1 1 12em}
 .yhub .yme b{font-size:1.15rem;overflow-wrap:anywhere}
 .yhub .yme .sub{color:var(--text-muted);font-size:.9rem;overflow-wrap:anywhere}
 .ycols{display:grid;gap:0 1.5rem;align-items:start}

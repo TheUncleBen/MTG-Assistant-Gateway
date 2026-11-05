@@ -3563,7 +3563,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 
 /* text view rows (textViewCard: 30px, bold name, mana column): the categories flow down
    columns like a newspaper, so a short category leaves no hole under it */
-.deckview.text{columns:300px;column-gap:2rem}
+.deckview.text{columns:max(300px,21.4286em);column-gap:2rem}  /* 300px at 14px: wider with the text */
 .deckview.text .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:.75rem}
 /* each stack clips its own overflow, which makes it one unbreakable piece for the column layout
    (it never split across columns anyway: break-inside): a change to one row (the Companion word,
@@ -3686,6 +3686,12 @@ ul.rows{container-type:inline-size}
 .deckview.table ul.rows .mv{text-align:center;font-variant-numeric:tabular-nums}
 .deckview.table ul.rows .set{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:700px){
+  .deckview.table ul.rows .row,.deckview.table ul.rows .th{
+    grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
+  .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
+/* the same fold by the list's own width in its text (under 47.7em: a 668 px list at 14px, 1336 px at
+   200%), so the rem-sized columns never leave the name 157 px at 900 px with large text */
+@container (max-width:47.7em){
   .deckview.table ul.rows .row,.deckview.table ul.rows .th{
     grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
   .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
@@ -4098,7 +4104,7 @@ table.qty td:last-child,table.qty th:last-child{width:1%;white-space:nowrap}
 .decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
-ul.decklist.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:25px;
+ul.decklist.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,max(220px,14em)),1fr));gap:25px;
   margin-bottom:1.25rem}
 @media (max-width:600px){ ul.decklist.grid{gap:1rem} }
 ul.decklist .deck,ul.decklist .deck a,ul.decklist .info{min-width:0}

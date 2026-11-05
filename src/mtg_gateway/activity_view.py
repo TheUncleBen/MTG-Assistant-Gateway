@@ -1057,7 +1057,8 @@ ADMIN_CSS = (
 @container (max-width:40em){
   .act-admin .act-table .tr.ev{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;
     position:relative;padding-right:92px}
-  .act-admin .act-table .c-ev{flex:0 0 calc(100% - 6.5rem);order:1}
+  /* at least its longest word wide (min-content): When goes under a name that leaves it no room */
+  .act-admin .act-table .c-ev{flex:0 0 calc(100% - 6.5rem);min-width:min-content;max-width:100%;order:1}
   .act-admin .act-table .c-when{flex:0 0 6rem;order:2;text-align:right;font-size:.86rem}
   .act-admin .act-table .c-who{order:3;font-size:.9rem}
   .act-admin .act-table .c-app{order:4;font-size:.86rem}
