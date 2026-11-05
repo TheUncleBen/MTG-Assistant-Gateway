@@ -3241,7 +3241,7 @@ def parse_custom_card_changes(raw: Any) -> list[dict[str, Any]]:
         if isinstance(cid, str) and cid.strip().isdigit():
             cid = int(cid.strip())
         if not isinstance(cid, int) or isinstance(cid, bool) or cid < 1:
-            raise DeckError("invalid", f"change {i}: custom_card_id must be the custom card's id (a number)")
+            raise DeckError("invalid", f"change {i}: custom_card_id must be the custom card's ID (a number)")
         if cid in seen:
             raise DeckError(
                 "invalid", f"change {i}: custom card {cid} is named twice; give one change per card"
@@ -4909,12 +4909,12 @@ class DeckService:
                 raise DeckError(
                     "not_found",
                     f"Archidekt shows no deck {deck_id} to your linked account "
-                    f"({link['archidekt_username']}) or to the public: the id is wrong, or the deck is "
+                    f"({link['archidekt_username']}) or to the public: the ID is wrong, or the deck is "
                     "someone else's private deck, which only its owner can read.",
                 ) from exc
             raise DeckError(
                 "not_found",
-                f"Archidekt has no public deck {deck_id}: the id is wrong, or the deck is private. If it "
+                f"Archidekt has no public deck {deck_id}: the ID is wrong, or the deck is private. If it "
                 f"is your own private deck, link your Archidekt account at {self.settings.public_url}"
                 "/account and try again.",
             ) from exc
@@ -5335,7 +5335,7 @@ class DeckService:
                     "versions_full",
                     f"This proposal already keeps {MAX_PROPOSAL_VERSIONS} earlier versions, so it cannot "
                     "be amended again. Call propose_new_deck with the whole new deck and pass replaces "
-                    "with this one's id; nothing was changed.",
+                    "with this one's ID; nothing was changed.",
                     proposal_id=pid,
                 ) from None
             made = await self._save_new_deck(sub, plan)
@@ -8938,7 +8938,7 @@ class DeckService:
                 f"This proposal already keeps {MAX_PROPOSAL_VERSIONS} earlier versions, so it cannot "
                 "be amended again. "
                 + (
-                    "Make a new proposal with propose_deck_changes and pass replaces with this one's id"
+                    "Make a new proposal with propose_deck_changes and pass replaces with this one's ID"
                     if kind == "edit"
                     else "Withdraw it with withdraw_proposal and make a new one with propose_deck_details"
                 )
@@ -9073,7 +9073,7 @@ class DeckService:
         """The notes a new proposal will replace (any app's, labelled): waiting, on the
         same deck. Refused before anything is saved."""
         if not isinstance(old_ids, list) or not old_ids or len(old_ids) > MAX_CHANGES:
-            raise DeckError("invalid", "replaces must be a non-empty list of waiting proposal ids")
+            raise DeckError("invalid", "replaces must be a non-empty list of waiting proposal IDs")
         out = []
         for pid in dict.fromkeys(str(x) for x in old_ids):
             row = self.db.get_proposal(pid, sub)
@@ -9139,7 +9139,7 @@ class DeckService:
         deck = _clean_deck_id(deck_id)
         old = self.check_replaceable(sub, deck, replaces) if replaces else []
         if depends_on and (not isinstance(depends_on, list) or len(depends_on) > MAX_CHANGES):
-            raise DeckError("invalid", "depends_on must be a list of proposal ids")
+            raise DeckError("invalid", "depends_on must be a list of proposal IDs")
         for other in depends_on or []:
             if self.db.get_proposal(str(other), sub) is None:
                 raise DeckError("invalid", f"{other} is not a proposal of this user")
@@ -9519,7 +9519,7 @@ class DeckService:
         if not others:
             return
         if not isinstance(others, list) or len(others) > MAX_CHANGES:
-            raise DeckError("invalid", "depends_on must be a list of proposal ids")
+            raise DeckError("invalid", "depends_on must be a list of proposal IDs")
         for other in dict.fromkeys(str(x) for x in others):
             if not self.db.link_proposals(proposal_id, sub, "depends_on", other):
                 raise DeckError("invalid", f"{other} is not a proposal of this user")
@@ -10460,7 +10460,7 @@ class DeckService:
             try:
                 url = art_url(uid, card.image_hash)
             except ArchidektError as exc:
-                raise DeckError("invalid", "That card has no usable art id.") from exc
+                raise DeckError("invalid", "That card has no usable art ID.") from exc
         else:
             url = ""
         # The chosen cover is customFeatured, as archidekt.com's own "Set Deck Image" sends it;

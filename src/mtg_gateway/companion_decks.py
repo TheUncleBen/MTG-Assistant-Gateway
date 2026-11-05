@@ -416,7 +416,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         )
         notice = ""
         if qp.get("err") == "bad_ref":
-            notice = "<p class='notice error'>That is not an Archidekt deck link or id.</p>"
+            notice = "<p class='notice error'>That is not an Archidekt deck link or ID.</p>"
         if qp.get("ok") in LIST_OK_MESSAGES:
             notice = f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[qp['ok']])}</p>"
         if "bulk" in (qp.get("ok"), qp.get("err")):  # Select's bar (deck_bulk.py)

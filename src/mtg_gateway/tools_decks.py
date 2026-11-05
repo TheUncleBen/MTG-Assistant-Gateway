@@ -69,7 +69,7 @@ class CategoryChange(BaseModel):
     category: str | None = Field(
         None, description="The category's name as the deck has it now (for create: the new name)."
     )
-    id: int | None = Field(None, description="Or the category's id, as get_deck lists it.")
+    id: int | None = Field(None, description="Or the category's ID, as get_deck lists it.")
     rename_to: str | None = Field(None, description="A new name, 1 to 60 characters, not one the deck has.")
     move_cards_to: str | None = Field(
         None, description="delete only: the category its cards move to before it is deleted."
@@ -91,7 +91,7 @@ class CustomCardChange(BaseModel):
         description="add one of the user's custom cards, remove one, or set its count."
     )
     custom_card_id: int = Field(
-        description=("The custom card's id (get_my_lists for an add, get_deck's custom_cards otherwise).")
+        description=("The custom card's ID (get_my_lists for an add, get_deck's custom_cards otherwise).")
     )
     quantity: int | None = Field(
         None,
@@ -333,7 +333,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         name="get_deck",
         title="Get any Archidekt deck",
         description=(
-            "Read an Archidekt deck by id or URL: any public or unlisted deck, and the member's own private "
+            "Read an Archidekt deck by ID or URL: any public or unlisted deck, and the member's own private "
             "decks once linked. Every view has the name, owner (compare with account_status to tell whether "
             "it is the member's), format, bracket, counts and commanders. view: 'text' (default: "
             "stats_brief, decklist_text with categories, for the research and test tools, and "
@@ -346,7 +346,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def get_deck(
         deck_ref: Annotated[
-            str, Field(description="Archidekt deck id (the number in the deck URL) or the URL.")
+            str, Field(description="Archidekt deck ID (the number in the deck URL) or the URL.")
         ],
         view: Annotated[
             DeckView, Field(description="What to return besides the header (see above).")
@@ -510,7 +510,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         game: Annotated[
             Literal["any", "paper", "mtgo", "arena"], Field(description="Game type (default any).")
         ] = "any",
-        scan_session: Annotated[str | None, Field(description="Or a scan session's id or name.")] = None,
+        scan_session: Annotated[str | None, Field(description="Or a scan session's ID or name.")] = None,
         package: Annotated[
             PackageSettings | None, Field(description="Make a card package with these settings instead.")
         ] = None,
@@ -520,7 +520,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         replaces: Annotated[
             str | None,
             Field(
-                description="A waiting new deck or package's id that this one replaces (updated in place)."
+                description="A waiting new deck or package's ID that this one replaces (updated in place)."
             ),
         ] = None,
     ) -> CallToolResult:
@@ -587,7 +587,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         game: Annotated[
             Literal["any", "paper", "mtgo", "arena"], Field(description="Game type (default any).")
         ] = "any",
-        scan_session: Annotated[str | None, Field(description="Or a scan session's id or name.")] = None,
+        scan_session: Annotated[str | None, Field(description="Or a scan session's ID or name.")] = None,
         package: Annotated[
             PackageSettings | None, Field(description="Check a card package with these settings instead.")
         ] = None,
@@ -706,7 +706,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def propose_deck_changes(
         deck_id: Annotated[
-            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+            str, Field(description="The Archidekt deck ID (the number in the deck URL) or URL.")
         ],
         changes: Annotated[
             list[DeckChange] | None,
@@ -715,7 +715,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 max_length=MAX_CHANGES,
             ),
         ] = None,
-        scan_session: Annotated[str | None, Field(description="A scan session's id or name to add.")] = None,
+        scan_session: Annotated[str | None, Field(description="A scan session's ID or name to add.")] = None,
         replaces: Annotated[
             list[str] | None, Field(description="Waiting proposals on this deck that this one replaces.")
         ] = None,
@@ -757,7 +757,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def check_deck_changes(
         deck_id: Annotated[
-            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+            str, Field(description="The Archidekt deck ID (the number in the deck URL) or URL.")
         ],
         changes: Annotated[
             list[DeckChange],
@@ -1154,7 +1154,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def propose_deck_categories(
         deck_id: Annotated[
-            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+            str, Field(description="The Archidekt deck ID (the number in the deck URL) or URL.")
         ],
         changes: Annotated[
             list[CategoryChange] | None,
@@ -1192,7 +1192,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def propose_custom_card_changes(
         deck_id: Annotated[
-            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+            str, Field(description="The Archidekt deck ID (the number in the deck URL) or URL.")
         ],
         changes: Annotated[
             list[CustomCardChange],
@@ -1448,7 +1448,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def get_snapshot(
-        snapshot_id: Annotated[str, Field(description="The snapshot id from list_snapshots.")],
+        snapshot_id: Annotated[str, Field(description="The snapshot ID from list_snapshots.")],
         view: Annotated[DeckView, Field(description="What to return, as get_deck's view.")] = "text",
     ) -> CallToolResult:
         try:

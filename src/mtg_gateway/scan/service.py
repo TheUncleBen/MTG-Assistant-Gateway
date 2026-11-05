@@ -1127,7 +1127,7 @@ class ScanService:
         """
         oid = str(oracle_id or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", oid):
-            raise ScanError("invalid", "oracle_id must be a Scryfall oracle id")
+            raise ScanError("invalid", "oracle_id must be a Scryfall oracle ID")
         num = str(page if page not in (None, "") else 1).strip()
         if not (num.isascii() and num.isdigit()) or not 1 <= int(num) <= PRINT_PAGES:
             raise ScanError("invalid", f"page must be a whole number from 1 to {PRINT_PAGES}")

@@ -322,7 +322,7 @@ class CollectionAdd(_Card):
 
 class CollectionRemove(BaseModel):
     model_config = ConfigDict(extra="allow")
-    id: StrictInt | str | None = Field(default=None, description="The binder row id from list_collection.")
+    id: StrictInt | str | None = Field(default=None, description="The binder row ID from list_collection.")
     name: str | None = Field(default=None, description="Or the card's name: every row of it.")
     quantity: StrictInt | None = Field(
         default=None, ge=1, description="Copies to remove; omit to remove every copy."

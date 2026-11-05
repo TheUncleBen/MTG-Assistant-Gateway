@@ -469,7 +469,7 @@ class ScryfallClient:
         """GET /cards/{id}/rulings: the card's rulings ({date, text, source} each, oldest first as
         Scryfall lists them). Not cached here; the card viewer keeps them (cardsearch.py)."""
         if not re.fullmatch(r"[0-9a-f-]{36}", card_id or ""):
-            raise ScryfallError("not_found", "No such card id")
+            raise ScryfallError("not_found", "No such card ID")
         resp = await self._request("GET", f"/cards/{card_id}/rulings", interval=self.lookup_interval)
         data = self._json(resp)
         if resp.status_code == 404 or data.get("object") == "error":

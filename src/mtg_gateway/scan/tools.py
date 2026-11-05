@@ -237,7 +237,7 @@ def add_scan_tools(
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,
     )
     async def card_printings(
-        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle id.")] = None,
+        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle ID.")] = None,
         name: Annotated[str | None, Field(description="Or the card's name.")] = None,
         set_code: Annotated[str | None, Field(description="Only printings from this set, e.g. cmr.")] = None,
         finish: Annotated[
@@ -367,7 +367,7 @@ def add_scan_tools(
         name="get_scan_session",
         title="Get a scan session",
         description=(
-            "One of the user's scan sessions, by id (scan_…) or name: the resolved cards, a decklist text "
+            "One of the user's scan sessions, by ID (scan_…) or name: the resolved cards, a decklist text "
             "and changes (adds) for propose_deck_changes. Items without a card were not resolved: ask the "
             "user about them."
         ),

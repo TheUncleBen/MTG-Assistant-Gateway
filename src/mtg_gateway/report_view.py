@@ -110,7 +110,7 @@ def plain_words(text: str) -> str:
     """The simulator's text without the assistant tool names it mentions (``goldfish_report``,
     ``goldfish_annotate``): the page speaks to a person, not to an assistant."""
     text = found_not_verified(text)
-    text = re.sub(r'Full report: goldfish_report\("([^"]*)"\)', r"Run id: \1", text)
+    text = re.sub(r'Full report: goldfish_report\("([^"]*)"\)', r"Run ID: \1", text)
     text = re.sub(r"\s*\(candidates for annotation; see goldfish_annotate\)", " (could be annotated)", text)
     text = re.sub(r"goldfish_report\((\"?)([^)\"]*)\1\)", r"run \2", text)
     text = UNDERPERFORMS.sub("", text)

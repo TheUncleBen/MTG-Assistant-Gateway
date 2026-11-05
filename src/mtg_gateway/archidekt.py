@@ -313,7 +313,7 @@ def art_url(scryfall_uid: str, image_hash: str = "") -> str:
     (its image URL helper, bundle read 2026-10-14), so the same is sent here."""
     uid = str(scryfall_uid or "").lower()
     if not re.fullmatch(r"[0-9a-f-]{36}", uid):
-        raise ArchidektError("invalid", "not a Scryfall card id")
+        raise ArchidektError("invalid", "not a Scryfall card ID")
     version = str(image_hash or "")
     if not re.fullmatch(r"[0-9A-Za-z]{1,32}", version):
         version = "11"
@@ -770,7 +770,7 @@ _SET_CODE_RE = re.compile(r"[A-Za-z0-9]{2,6}")
 def _printing(card: dict[str, Any], *, exact: bool) -> dict[str, Any]:
     cid = card.get("id")
     if isinstance(cid, bool) or not isinstance(cid, int):
-        raise ArchidektError("contract", "card search result has no integer id")
+        raise ArchidektError("contract", "card search result has no integer ID")
     edition = card.get("edition") if isinstance(card.get("edition"), dict) else {}
     oracle = card.get("oracleCard") if isinstance(card.get("oracleCard"), dict) else {}
     options = card.get("options")
@@ -1997,7 +1997,7 @@ class ArchidektClient(AccountRequests):
             or not DECK_ID_RE.fullmatch(str(new_id))
         ):
             keys = sorted(body)[:20] if isinstance(body, dict) else type(body).__name__
-            raise ArchidektError("contract", f"deck create response has no deck id (fields: {keys})")
+            raise ArchidektError("contract", f"deck create response has no deck ID (fields: {keys})")
         return Deck(id=str(new_id), name=name, owner="", updated_at="", cards=[], categories=[], raw=body)
 
     # -- backups ------------------------------------------------------------
@@ -2054,7 +2054,7 @@ class ArchidektClient(AccountRequests):
         so it is set afterwards with PATCH /decks/{id}/update/; a failure there leaves a valid,
         named backup and is not raised."""
         if not DECK_ID_RE.fullmatch(str(folder_id)):
-            raise ArchidektError("contract", "backup folder id is not a number")
+            raise ArchidektError("contract", "backup folder ID is not a number")
         body = await self._request(
             "POST",
             "/decks/copy/",
@@ -2078,7 +2078,7 @@ class ArchidektClient(AccountRequests):
         )
         new_id = body.get("id") if isinstance(body, dict) else None
         if isinstance(new_id, bool) or not isinstance(new_id, int):
-            raise ArchidektError("contract", "deck copy response has no deck id")
+            raise ArchidektError("contract", "deck copy response has no deck ID")
         if description:
             try:
                 await self._request(
@@ -2103,7 +2103,7 @@ class ArchidektClient(AccountRequests):
                 raise ArchidektError("contract", "unexpected folder tree shape")
             folder_id = str(tree["id"])
         if not DECK_ID_RE.fullmatch(str(folder_id)):
-            raise ArchidektError("contract", "folder id is not a number")
+            raise ArchidektError("contract", "folder ID is not a number")
         body = await self._request(
             "POST",
             "/decks/copy/",
@@ -2127,7 +2127,7 @@ class ArchidektClient(AccountRequests):
         )
         new_id = body.get("id") if isinstance(body, dict) else None
         if isinstance(new_id, bool) or not isinstance(new_id, int):
-            raise ArchidektError("contract", "deck copy response has no deck id")
+            raise ArchidektError("contract", "deck copy response has no deck ID")
         return {"id": str(new_id), "url": f"https://archidekt.com/decks/{new_id}", "name": name}
 
     # -- writes -------------------------------------------------------------
@@ -2271,7 +2271,7 @@ class ArchidektClient(AccountRequests):
         """One page of the member's own collection: {"results": [...], "count", "page",
         "totalPages", "next", "previous", "tags", "isPublic", "owner"}."""
         if not str(user_id).isdigit():
-            raise ArchidektError("contract", "the linked account has no Archidekt user id; relink")
+            raise ArchidektError("contract", "the linked account has no Archidekt user ID; relink")
         params: dict[str, Any] = {"page": max(1, int(page)), "pageSize": max(1, min(int(page_size), 500))}
         if card_name:
             params["cardName"] = card_name
@@ -2325,11 +2325,11 @@ class ArchidektClient(AccountRequests):
         (tag ids)."""
         rid = record.get("id")
         if isinstance(rid, bool) or not isinstance(rid, int):
-            raise ArchidektError("contract", "collection record has no integer id")
+            raise ArchidektError("contract", "collection record has no integer ID")
         card = record.get("card") if isinstance(record.get("card"), dict) else {}
         card_id = card.get("id", record.get("card"))
         if isinstance(card_id, bool) or not isinstance(card_id, int):
-            raise ArchidektError("contract", "collection record has no card id")
+            raise ArchidektError("contract", "collection record has no card ID")
         body: dict[str, Any] = {
             "game": record.get("game") or 1,
             "id": rid,
@@ -2392,7 +2392,7 @@ class ArchidektClient(AccountRequests):
         """PUT /decks/{id}/vote/ {up, remove}: the deck page's like button. Taking a vote back
         sends ``remove`` with ``up`` naming the vote taken back, as the site does."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         return await self._request(
             "PUT", f"/decks/{deck_id}/vote/", token=token, json_body={"up": up, "remove": remove}
         )
@@ -2405,7 +2405,7 @@ class ArchidektClient(AccountRequests):
 
     async def bookmark_deck(self, token: str, deck_id: str, *, on: bool) -> Any:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         if on:
             return await self._request("POST", f"/decks/{deck_id}/bookmarks/", token=token, json_body={})
         return await self._request("DELETE", f"/decks/{deck_id}/bookmarks/", token=token)
@@ -2436,7 +2436,7 @@ class ArchidektClient(AccountRequests):
     # it can recognise (log_entry). Not exercised live by the gateway yet: the owner's live check.
     async def deck_logs(self, token: str, deck_id: str, page: int = 1) -> dict[str, Any]:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         body = await self._request(
             "GET", f"/decks/{deck_id}/logs/", token=token, params={"page": max(1, int(page))}, fresh=True
         )
@@ -2467,7 +2467,7 @@ class ArchidektClient(AccountRequests):
 
     async def deck_editors(self, token: str, deck_id: str) -> list[dict[str, Any]]:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         body = await self._request("GET", f"/decks/{deck_id}/editors/", token=token)
         rows = body.get("results") if isinstance(body, dict) else body
         if not isinstance(rows, list):
@@ -2476,7 +2476,7 @@ class ArchidektClient(AccountRequests):
 
     async def add_deck_editor(self, token: str, deck_id: str, user_id: int) -> Any:
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         return await self._request(
             "POST", f"/decks/{deck_id}/editors/", token=token, json_body={"user": int(user_id)}
         )
@@ -2488,7 +2488,7 @@ class ArchidektClient(AccountRequests):
         """GET /users/{id}/following/: {"count", "next", "previous", "results": [{id, username,
         avatar, following}]} (checked live 2026-10-07)."""
         if not str(user_id).isdigit():
-            raise ArchidektError("contract", "user id is not a number")
+            raise ArchidektError("contract", "user ID is not a number")
         body = await self._request(
             "GET", f"/users/{user_id}/following/", token=token, params={"page": max(1, int(page))}
         )
@@ -2597,7 +2597,7 @@ class ArchidektClient(AccountRequests):
         the deck afterwards and compare every field rather than trusting the response, which only
         has to be a JSON object."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         allowed = (
             "name",
             "description",
@@ -2637,10 +2637,10 @@ class ArchidektClient(AccountRequests):
         Account category templates (``/users/category/``) are a different route, used only by
         account_lists.py."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         cid = category.get("id")
         if isinstance(cid, bool) or not isinstance(cid, int) or cid <= 0:
-            raise ArchidektError("contract", "category id is not a number")
+            raise ArchidektError("contract", "category ID is not a number")
         name = category.get("name")
         if not isinstance(name, str) or not name.strip():
             raise ArchidektError("contract", "category name is empty")
@@ -2665,7 +2665,7 @@ class ArchidektClient(AccountRequests):
         by name. The caller refuses a name the deck already has before anything is sent, as the
         site's own form does ("Deck already has category named ...")."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         name = category.get("name")
         if not isinstance(name, str) or not name.strip():
             raise ArchidektError("contract", "category name is empty")
@@ -2691,9 +2691,9 @@ class ArchidektClient(AccountRequests):
         only for a category with no card filed under it. ``deck_id`` is not part of the route; it
         is checked so a call always names its deck."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         if isinstance(category_id, bool) or not isinstance(category_id, int) or category_id <= 0:
-            raise ArchidektError("contract", "category id is not a number")
+            raise ArchidektError("contract", "category ID is not a number")
         await self._request("DELETE", f"/decks/category/{category_id}/", token=token)
 
     # -- a member's own hand actions on their decks: delete, folders, tags, comments ---------------
@@ -2705,7 +2705,7 @@ class ArchidektClient(AccountRequests):
     async def delete_deck(self, token: str, deck_id: str) -> None:
         """DELETE /decks/{id}/ (the site's "Delete deck", reported)."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
+            raise ArchidektError("contract", "deck ID is not a number")
         await self._request("DELETE", f"/decks/{deck_id}/", token=token)
 
     async def folder_tree(self, token: str) -> dict[str, Any]:

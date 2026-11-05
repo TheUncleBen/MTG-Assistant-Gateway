@@ -669,7 +669,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
     def user_id(request: Request) -> int:
         raw = str(request.path_params["user_id"])
         if not raw.isdigit() or len(raw) > 12:
-            raise DeckError("invalid", "user id is not a number")
+            raise DeckError("invalid", "user ID is not a number")
         return int(raw)
 
     @server.custom_route("/social/api/decks/{deck_id}/vote", methods=["POST"], include_in_schema=False)
@@ -757,7 +757,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return data
         parent = data.get("parent")
         if parent is not None and _int(parent) is None:
-            return _fail("invalid", "parent must be a comment id")
+            return _fail("invalid", "parent must be a comment ID")
         if not isinstance(data.get("text"), str):
             return _fail("invalid", "text must be a string")
         try:
@@ -794,7 +794,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return sub
         cid = comment_id(request)
         if cid is None:
-            return _fail("invalid", "comment id must be a number")
+            return _fail("invalid", "comment ID must be a number")
         data = await body(request)
         if isinstance(data, Response):
             return data
@@ -817,7 +817,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return sub
         cid = comment_id(request)
         if cid is None:
-            return _fail("invalid", "comment id must be a number")
+            return _fail("invalid", "comment ID must be a number")
         data = await body(request)
         if isinstance(data, Response):
             return data
@@ -839,7 +839,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return sub
         cid = comment_id(request)
         if cid is None:
-            return _fail("invalid", "comment id must be a number")
+            return _fail("invalid", "comment ID must be a number")
         try:
             out = await service.delete_comment(sub, deck_id(request), cid, page_of(request))
         except (DeckError, ArchidektError) as exc:

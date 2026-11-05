@@ -1276,7 +1276,7 @@ def _admin_row(r: dict[str, Any], log: Log, names: Names, query: Query, path: st
     if cid:
         app_detail = f"{esc(app)} <span class='muted'>(<code>{esc(cid)}</code>)</span>"
     else:
-        app_detail = "No app <span class='muted'>(no client id stored)</span>"
+        app_detail = "No app <span class='muted'>(no client ID stored)</span>"
     member_detail = (
         f"{esc(who_name or NO_NAME)} <span class='muted'>(<code>{esc(sub)}</code>)</span>"
         if sub

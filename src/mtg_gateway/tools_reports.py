@@ -65,7 +65,7 @@ FORGE_PAIR_NOTE = (
 # A reference that is neither names both kinds it may be.
 NOT_DECK_OR_SNAPSHOT = (
     "That is not an Archidekt deck or one of your snapshots: give the deck's number, its archidekt.com "
-    "link, or a snapshot id from list_snapshots."
+    "link, or a snapshot ID from list_snapshots."
 )
 
 
@@ -114,8 +114,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "changers, tutors, extra turns, mass land denial, salt, archidekt_bracket (the bracket set on "
             "the deck), bracket_estimate (Archidekt's Estimated Bracket from card flags: what the cards "
             "suggest, not how the deck plays) and stats.checks, legality as archidekt.com checks it (legal; "
-            "legal_problems names each failing rule with its cards). deck_ref: an Archidekt id or URL, a "
-            "snapshot id, or a pasted decklist (counts and structural checks only; unread_lines lists lines "
+            "legal_problems names each failing rule with its cards). deck_ref: an Archidekt ID or URL, a "
+            "snapshot ID, or a pasted decklist (counts and structural checks only; unread_lines lists lines "
             "that are not cards). When a bracket is set, call it the deck's bracket and never present the "
             'estimate as a second bracket; quote "Archidekt\'s estimate from cards" only when none is set '
             "or the checks report a bracket mismatch."
@@ -124,7 +124,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def deck_stats_tool(
         deck_ref: Annotated[
-            str, Field(description="Archidekt deck id or URL, a snapshot id, or pasted decklist text.")
+            str, Field(description="Archidekt deck ID or URL, a snapshot ID, or pasted decklist text.")
         ],
     ) -> dict[str, object]:
         if _looks_like_list(deck_ref):
@@ -210,7 +210,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         description=(
             "Cards added, removed and changed from deck a to deck b (names matched by front face), a summary "
             "(cut, added and kept, basic lands apart, with percentages) and, for two Archidekt decks or "
-            "snapshots, stats_delta. Each side once: a or b is an Archidekt deck id or URL or a snapshot id; "
+            "snapshots, stats_delta. Each side once: a or b is an Archidekt deck ID or URL or a snapshot ID; "
             "a_list or b_list is pasted decklist text (the commander marked [Commander] or *CMDR*). "
             "unread_lines lists lines that are not cards: tell the user. simulate=true adds a paired solo "
             "test A/B: both decks played game for game under the same seeds, with per-metric deltas, "
@@ -225,10 +225,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
     )
     async def compare_decks(
         a: Annotated[
-            str | None, Field(description="Deck a: Archidekt deck id or URL, or snapshot id.")
+            str | None, Field(description="Deck a: Archidekt deck ID or URL, or snapshot ID.")
         ] = None,
         b: Annotated[
-            str | None, Field(description="Deck b: Archidekt deck id or URL, or snapshot id.")
+            str | None, Field(description="Deck b: Archidekt deck ID or URL, or snapshot ID.")
         ] = None,
         a_list: Annotated[str | None, Field(description="Or deck a as pasted decklist text.")] = None,
         b_list: Annotated[str | None, Field(description="Or deck b as pasted decklist text.")] = None,
@@ -267,7 +267,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                 return as_list(side, text)
             ref = str(ref or "").strip()
             if not ref:
-                raise DeckError("invalid", f"give {side} (a deck id, link or snapshot id) or {side}_list")
+                raise DeckError("invalid", f"give {side} (a deck ID, link or snapshot ID) or {side}_list")
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
                 origin[side] = ("snapshot", ref)
@@ -465,7 +465,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "(games against opponents who do nothing, default 300) and, for Commander decks, a legality "
             "check. A deck with a commander plays from the command zone at 40 life; a deck of 60 or "
             "more cards without one plays a 60-card game (20 life, on the play, sideboard left out). "
-            "deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (the commander "
+            "deck_ref is an Archidekt ID or URL, a snapshot ID, or a pasted decklist (the commander "
             "marked [Commander] or *CMDR*); or give proposal_id to test one of the user's "
             "proposals as it would be (or was) once applied. Every report is stored for the user "
             "(list_deck_reports, the Reports and History pages). Reads the deck and changes nothing on "
@@ -488,7 +488,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         deck_ref: Annotated[
             str,
             Field(
-                description="Archidekt deck id or URL, one of your snapshot ids (list_snapshots), or "
+                description="Archidekt deck ID or URL, one of your snapshot IDs (list_snapshots), or "
                 "pasted decklist text. Leave it empty with proposal_id."
             ),
         ] = "",
@@ -502,14 +502,14 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         same_opponents_as: Annotated[
             str | None,
             Field(
-                description="Another of your report ids (with Forge games): play against its Forge "
+                description="Another of your report IDs (with Forge games): play against its Forge "
                 "opponents (the second report of a compare_with pair)."
             ),
         ] = None,
         compare_with: Annotated[
             str | None,
             Field(
-                description="The other deck of a Forge comparison (deck id or URL, or a snapshot id): "
+                description="The other deck of a Forge comparison (deck ID or URL, or a snapshot ID): "
                 "precons of the higher of the two brackets."
             ),
         ] = None,
@@ -532,7 +532,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     raise DeckError(
                         "invalid",
                         f"A proposal's deck can't be paired for Forge, so {pairing} works only when "
-                        "deck_ref is a deck id, URL or snapshot id.",
+                        "deck_ref is a deck ID, URL or snapshot ID.",
                     )
                 report = await state.reports.run_proposal(
                     _sub(), proposal_id, simulate=simulate, games=games, options=options, forge=forge
@@ -542,7 +542,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     raise DeckError(
                         "invalid",
                         f"A pasted list can't be paired for Forge, so {pairing} works only when deck_ref "
-                        "is a deck id, URL or snapshot id.",
+                        "is a deck ID, URL or snapshot ID.",
                     )
                 report = await state.reports.run_text(
                     _sub(), deck_ref, simulate=simulate, games=games, options=options, forge=forge

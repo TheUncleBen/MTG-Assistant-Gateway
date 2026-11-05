@@ -254,7 +254,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         a = request.query_params.get("a", "")
         b = request.query_params.get("b", "")
         if not a or not b:
-            raise DeckError("invalid", "give a and b: deck ids or URLs, or snapshot ids")
+            raise DeckError("invalid", "give a and b: deck IDs or URLs, or snapshot IDs")
         deck_a = await _deck_or_snapshot(who.sub, a)
         deck_b = await _deck_or_snapshot(who.sub, b)
         return ok({"a": deck_brief(deck_a), "b": deck_brief(deck_b), **deck_stats.compare(deck_a, deck_b)})

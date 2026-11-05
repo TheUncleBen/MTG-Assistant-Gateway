@@ -1562,7 +1562,7 @@ def _finish_label(f: str) -> str:
 def _rid(value: Any) -> int:
     s = str(value or "").strip()
     if not s.isdigit() or len(s) > 12:
-        raise CollectionError("invalid", "that is not a collection record id")
+        raise CollectionError("invalid", "that is not a collection record ID")
     return int(s)
 
 
@@ -4498,7 +4498,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         add: Annotated[list[CollectionAdd | str] | None, Field(description="Cards to add.")] = None,
         text: Annotated[str | None, Field(description="Or cards to add as text, one per line.")] = None,
         scan_session: Annotated[
-            str | None, Field(description="Or a scan session's id or name to add.")
+            str | None, Field(description="Or a scan session's ID or name to add.")
         ] = None,
         remove: Annotated[list[CollectionRemove | str] | None, Field(description="Cards to remove.")] = None,
         tag: list[dict[str, Any]] | None = None,

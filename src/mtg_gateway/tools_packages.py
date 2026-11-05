@@ -66,7 +66,7 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Propose adding a card package to a deck (write, two-step)",
         description=(
             "Step 1 of adding a card package's cards to one of the user's decks, as Archidekt's Add package: "
-            "any package the user can open (list_card_packages, or its id or URL). categories: package "
+            "any package the user can open (list_card_packages, or its ID or URL). categories: package "
             "(default), default (Archidekt files them) or maybeboard. skip_existing and "
             "skip_outside_identity (default true) leave out cards the deck has or outside the commander's "
             "colors; singleton (default by format) adds one copy each; color_tag tags every added card (a "
@@ -77,8 +77,8 @@ def add_package_tools(state: AppState, h: SimpleNamespace) -> None:
         meta=h.card_meta,
     )
     async def propose_add_package(
-        deck_id: Annotated[str, Field(description="The user's own deck: its id or URL.")],
-        package_id: Annotated[str, Field(description="The card package: its id or URL.")],
+        deck_id: Annotated[str, Field(description="The user's own deck: its ID or URL.")],
+        package_id: Annotated[str, Field(description="The card package: its ID or URL.")],
         categories: Literal["package", "default", "maybeboard"] = "package",
         skip_existing: bool = True,
         skip_outside_identity: bool = True,

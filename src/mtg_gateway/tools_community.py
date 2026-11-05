@@ -35,7 +35,7 @@ def add_community_tools(state: AppState, h: SimpleNamespace) -> None:
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
     async def get_registration_pdf(
-        deck_id: Annotated[str, Field(description="The deck: its id or URL.")],
+        deck_id: Annotated[str, Field(description="The deck: its ID or URL.")],
         sort: str = "alpha",
         first_name: str | None = None,
         last_name: str | None = None,

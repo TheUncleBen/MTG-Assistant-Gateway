@@ -639,7 +639,7 @@ def server_instructions(public_url: str) -> str:
         "When the user presses Apply on a proposal card or Apply all, the card tells you the outcome "
         "with their next message; nothing is posted in their name. Carry on from that outcome, and call "
         "proposal_status only when it is unclear (still applying). "
-        "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
+        "Any deck can be ingested with get_deck (Archidekt ID or URL), parse_decklist (pasted text) or "
         "parse_deck_export (CSV); each returns decklist_text for "
         "the test tools. deck_stats answers "
         "curve, colors, price, legality and bracket questions from one read; run_deck_report stores a "

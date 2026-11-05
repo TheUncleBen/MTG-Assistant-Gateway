@@ -1561,7 +1561,7 @@ class ReportService:
         opponents themselves are read when this run starts (``_shared_now``), as that run may
         still be waiting for its own."""
         if not isinstance(report_id, str) or not report_id.strip():
-            raise DeckError("invalid", "same_opponents_as must be the id of one of your reports.")
+            raise DeckError("invalid", "same_opponents_as must be the ID of one of your reports.")
         row = self.db._one(
             "SELECT id, deck_name, forge_json FROM reports WHERE id = ? AND owner_sub = ?",
             (report_id.strip(), sub),

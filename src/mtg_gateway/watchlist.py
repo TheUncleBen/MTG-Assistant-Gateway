@@ -405,7 +405,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         # by id only: a name would stop every printing of the card
         if not wid.startswith("w_"):
             return JSONResponse(
-                {"ok": False, "error": "invalid", "message": "Send the watch's id."}, 400, headers=NO_STORE
+                {"ok": False, "error": "invalid", "message": "Send the watch's ID."}, 400, headers=NO_STORE
             )
         try:
             names = state.prices.unwatch_card(sub, wid)
@@ -519,7 +519,7 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
         name="watch_deck",
         title="Watch a deck's value",
         description=(
-            "Add a deck (Archidekt id or link, the member's own or a public one) to the member's watchlist: "
+            "Add a deck (Archidekt ID or link, the member's own or a public one) to the member's watchlist: "
             "the gateway prices its cards once a day and keeps the deck's value over time. Changes only the "
             "member's gateway data, never Archidekt."
         ),

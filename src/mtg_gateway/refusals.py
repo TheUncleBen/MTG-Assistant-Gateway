@@ -34,7 +34,7 @@ def relink(public_url: str = "") -> str:
 
 
 def no_user_id(public_url: str = "") -> str:
-    return f"The linked Archidekt account is missing its user id. Relink it {_account(public_url)}."
+    return f"The linked Archidekt account is missing its user ID. Relink it {_account(public_url)}."
 
 
 NOT_OWN_COMMENT = "Only your own comments can be changed or deleted."

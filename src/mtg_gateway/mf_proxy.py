@@ -78,7 +78,7 @@ OWNER_NOTES: dict[str, str] = {
     "run_deck_report": "the gateway's test: it reads the deck, validates it, runs the solo test games "
     "with the same options (annotations, combos, seed, until_turn, opponents, mulligan) and stores the "
     "report; compare_decks with simulate=true is the paired A/B of two decks",
-    "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, include_text for rules text, "
+    "get_deck": "the gateway's deck reader: any Archidekt deck by ID or link, include_text for rules text, "
     "archidekt_text to export in Archidekt's import syntax",
     "search_decks": "public decks by name, commander, format, colors or owner; owner plus order_by "
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
@@ -191,7 +191,7 @@ DESCRIPTIONS: dict[str, str] = {
     "at another finish's price.",
     "goldfish_annotate": "Pre-flight a deck for the solo test: derive what the engine models on its "
     "own, sort out the cards it can't model, and show oracle text only for the few cards that need an "
-    "annotation. deck is an Archidekt deck id or link, read with the member's own Archidekt access "
+    "annotation. deck is an Archidekt deck ID or link, read with the member's own Archidekt access "
     "(their private decks too) like get_deck, or decklist text with the commander first (or its line "
     "ending in ' *CMDR*').",
     "edhrec_precon_upgrade": "How a precon is commonly upgraded, from EDHREC's Precon Upgrade Guide: "

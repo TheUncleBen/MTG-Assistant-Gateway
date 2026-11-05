@@ -674,7 +674,7 @@ def _pinned(items: list[dict[str, Any]], c: dict[str, Any]) -> dict[str, Any]:
         raise DeckError("not_found", f"“{want}” is not in your pinned cards.")
     if len(hits) > 1:
         raise _err(
-            f"“{want}” is pinned {len(hits)} times (pin ids "
+            f"“{want}” is pinned {len(hits)} times (pin IDs "
             + ", ".join(str(p["id"]) for p in hits)
             + "): give pin_id to pick one"
         )

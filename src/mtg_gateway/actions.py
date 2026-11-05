@@ -111,12 +111,12 @@ def contest_thread(value: Any) -> int:
 
     m = re.search(r"(\d{1,12})/?$", str(value or "").strip())
     if not m or int(m.group(1)) <= 0:
-        raise DeckError("invalid", "Give the contest's id or its page address.")
+        raise DeckError("invalid", "Give the contest's ID or its page address.")
     return int(m.group(1))
 
 
 CONTEST_MISSING = (
-    "Archidekt has no forum thread {thread}, so there is no contest to enter. Check the contest's id "
+    "Archidekt has no forum thread {thread}, so there is no contest to enter. Check the contest's ID "
     "or page address (get_forum lists the forum's threads). Nothing was proposed."
 )
 

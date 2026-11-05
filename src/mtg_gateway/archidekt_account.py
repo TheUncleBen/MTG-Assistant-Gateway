@@ -77,7 +77,7 @@ def _id(value: Any, what: str) -> int:
 
 def _deck(deck_id: Any) -> str:
     if not DECK_ID_RE.fullmatch(str(deck_id)):
-        raise ArchidektError("contract", "deck id is not a number")
+        raise ArchidektError("contract", "deck ID is not a number")
     return str(deck_id)
 
 
@@ -116,12 +116,12 @@ class AccountRequests:
     async def update_template(
         self: ArchidektClient, token: str, template_id: int, fields: dict[str, Any]
     ) -> Any:
-        tid = _id(template_id, "template id")
+        tid = _id(template_id, "template ID")
         body = {**AccountRequests._template_body(fields), "id": tid}
         return await self._request("PATCH", f"/users/category/{tid}/", token=token, json_body=body)
 
     async def delete_template(self: ArchidektClient, token: str, template_id: int) -> None:
-        await self._request("DELETE", f"/users/category/{_id(template_id, 'template id')}/", token=token)
+        await self._request("DELETE", f"/users/category/{_id(template_id, 'template ID')}/", token=token)
 
     # -- personal default categories: /users/globalCategory/ ------------------------------------
 
@@ -140,7 +140,7 @@ class AccountRequests:
         """The card's whole list, first name = its main category (the site's star)."""
         if not isinstance(names, list) or any(not isinstance(n, str) or not n.strip() for n in names):
             raise ArchidektError("contract", "category names must be text")
-        oid = _id(oracle_card_id, "card id")
+        oid = _id(oracle_card_id, "card ID")
         return await self._request(
             "POST", f"/users/globalCategory/oracleCard/{oid}/", token=token, json_body={"categories": names}
         )
@@ -164,12 +164,12 @@ class AccountRequests:
 
     async def update_color_tag(self: ArchidektClient, token: str, tag: dict[str, Any]) -> Any:
         """The whole tag object with its new name and color, as the site patches it."""
-        tid = _id(tag.get("id"), "color tag id")
+        tid = _id(tag.get("id"), "color tag ID")
         body = {**tag, **AccountRequests._tag_body(tag.get("name"), tag.get("color")), "id": tid}
         return await self._request("PATCH", f"/decks/colorTags/{tid}/", token=token, json_body=body)
 
     async def delete_color_tag(self: ArchidektClient, token: str, tag_id: int) -> None:
-        await self._request("DELETE", f"/decks/colorTags/{_id(tag_id, 'color tag id')}/", token=token)
+        await self._request("DELETE", f"/decks/colorTags/{_id(tag_id, 'color tag ID')}/", token=token)
 
     # -- the collection's own tags and clearing it (0.7.46, Archidekt parity release 3) -----------
     # The routes are archidekt.com's (its _app script, parity research 2026-10-22: POST
@@ -184,13 +184,13 @@ class AccountRequests:
         return await self._request("POST", "/collection/tags/", token=token, json_body=body)
 
     async def update_collection_tag(self: ArchidektClient, token: str, tag: dict[str, Any]) -> Any:
-        tid = _id(tag.get("id"), "collection tag id")
+        tid = _id(tag.get("id"), "collection tag ID")
         body = {**tag, **AccountRequests._tag_body(tag.get("name"), tag.get("color")), "id": tid}
         return await self._request("PATCH", f"/collection/modifyTag/{tid}/", token=token, json_body=body)
 
     async def delete_collection_tag(self: ArchidektClient, token: str, tag_id: int) -> None:
         await self._request(
-            "DELETE", f"/collection/modifyTag/{_id(tag_id, 'collection tag id')}/", token=token
+            "DELETE", f"/collection/modifyTag/{_id(tag_id, 'collection tag ID')}/", token=token
         )
 
     async def clear_collection(self: ArchidektClient, token: str) -> None:
@@ -212,7 +212,7 @@ class AccountRequests:
                 raise ArchidektError("contract", "pin quantity must be 1 or more")
             body.append(
                 {
-                    "cardId": _id(c.get("cardId"), "card id"),
+                    "cardId": _id(c.get("cardId"), "card ID"),
                     "notes": str(c.get("notes") or ""),
                     "modifier": str(c.get("modifier") or "Normal"),
                     "quantity": qty,
@@ -235,17 +235,17 @@ class AccountRequests:
         if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
             raise ArchidektError("contract", "pin quantity must be 1 or more (remove the pin instead)")
         body = {
-            "card": _id(card_id, "card id"),
+            "card": _id(card_id, "card ID"),
             "quantity": quantity,
             "notes": str(notes),
             "modifier": modifier,
         }
         return await self._request(
-            "PATCH", f"/users/pins/{_id(pin_id, 'pin id')}/", token=token, json_body=body
+            "PATCH", f"/users/pins/{_id(pin_id, 'pin ID')}/", token=token, json_body=body
         )
 
     async def delete_pin(self: ArchidektClient, token: str, pin_id: int) -> None:
-        await self._request("DELETE", f"/users/pins/{_id(pin_id, 'pin id')}/", token=token)
+        await self._request("DELETE", f"/users/pins/{_id(pin_id, 'pin ID')}/", token=token)
 
     async def delete_all_pins(self: ArchidektClient, token: str) -> None:
         await self._request("DELETE", "/users/pins/deleteAll/", token=token)
@@ -284,7 +284,7 @@ class AccountRequests:
                     body[k] = None
         cmc = body.get("cmc")
         body["cmc"] = cmc if isinstance(cmc, (int, float)) and not isinstance(cmc, bool) and cmc >= 0 else 0
-        body["owner"] = _id(owner, "user id")
+        body["owner"] = _id(owner, "user ID")
         return body
 
     async def create_custom_card(self: ArchidektClient, token: str, card: dict[str, Any], owner: int) -> Any:
@@ -299,12 +299,12 @@ class AccountRequests:
     async def update_custom_card(
         self: ArchidektClient, token: str, card_id: int, card: dict[str, Any], owner: int
     ) -> Any:
-        cid = _id(card_id, "custom card id")
+        cid = _id(card_id, "custom card ID")
         body = {**AccountRequests._custom_body(card, owner), "id": cid}
         return await self._request("PATCH", f"/decks/customCards/{cid}/", token=token, json_body=body)
 
     async def delete_custom_card(self: ArchidektClient, token: str, card_id: int) -> None:
-        await self._request("DELETE", f"/decks/customCards/{_id(card_id, 'custom card id')}/", token=token)
+        await self._request("DELETE", f"/decks/customCards/{_id(card_id, 'custom card ID')}/", token=token)
 
     async def upload_image(self: ArchidektClient, token: str, png: bytes) -> str:
         """PUT /users/uploadImage/ with the picture as the raw body, named tmp.png as the site
@@ -331,7 +331,7 @@ class AccountRequests:
             raise ArchidektError("contract", "budget must be 1 to 4 or none")
         formats = pkg.get("intendedFormats") or []
         if any(isinstance(f, bool) or not isinstance(f, int) for f in formats):
-            raise ArchidektError("contract", "intended formats must be format ids")
+            raise ArchidektError("contract", "intended formats must be format IDs")
         body: dict[str, Any] = {
             "name": name,
             "deckFormat": None,
@@ -342,10 +342,10 @@ class AccountRequests:
             "cardPackage": {"keywords": pkg["keywords"], "budget": budget, "intendedFormats": list(formats)},
         }
         if fields.get("parent_folder") is not None:
-            body["parent_folder"] = _id(fields["parent_folder"], "folder id")
+            body["parent_folder"] = _id(fields["parent_folder"], "folder ID")
         resp = await self._request("POST", "/decks/packages/", token=token, json_body=body)
         if not isinstance(resp, dict) or not str(resp.get("id") or "").isdigit():
-            raise ArchidektError("contract", "Archidekt did not answer with the new package's id")
+            raise ArchidektError("contract", "Archidekt did not answer with the new package's ID")
         return resp
 
     async def update_package(
@@ -353,7 +353,7 @@ class AccountRequests:
     ) -> Any:
         """PATCH /decks/packages/{cardPackage id}/ with the whole block (the id is the package
         block's own, not the deck's)."""
-        pid = _id(package_id, "package id")
+        pid = _id(package_id, "package ID")
         return await self._request("PATCH", f"/decks/packages/{pid}/", token=token, json_body=block)
 
     async def packages_list(
@@ -415,7 +415,7 @@ class AccountRequests:
         """Edit, or delist with ``active`` false, as the site does (it never sends its DELETE)."""
         body = {"active": bool(active), "goals": rich_doc(goals), "issues": rich_doc(issues)}
         return await self._request(
-            "PATCH", f"/decks/help/{_id(help_id, 'help request id')}/", token=token, json_body=body
+            "PATCH", f"/decks/help/{_id(help_id, 'help request ID')}/", token=token, json_body=body
         )
 
     # -- reports to Archidekt's moderators -------------------------------------------------------
@@ -444,7 +444,7 @@ class AccountRequests:
     # -- the member's private profile: /users/{id}/private/ ------------------------------------
 
     async def user_private(self: ArchidektClient, token: str, user_id: int) -> dict[str, Any]:
-        uid = _id(user_id, "user id")
+        uid = _id(user_id, "user ID")
         body = await self._request("GET", f"/users/{uid}/private/", token=token, fresh=True)
         if not isinstance(body, dict):
             raise ArchidektError("contract", "unexpected profile shape")
@@ -477,20 +477,20 @@ class AccountRequests:
             body["username"] = username
         if not body:
             raise ArchidektError("contract", "nothing to change")
-        uid = _id(user_id, "user id")
+        uid = _id(user_id, "user ID")
         resp = await self._request("PATCH", f"/users/{uid}/private/", token=token, json_body=body)
         return resp if isinstance(resp, dict) else {}
 
     async def upload_avatar(
         self: ArchidektClient, token: str, user_id: int, picture: bytes, name: str
     ) -> Any:
-        uid = _id(user_id, "user id")
+        uid = _id(user_id, "user ID")
         return await self._request("PUT", f"/users/uploadAvatar/{uid}/", token=token, upload=(picture, name))
 
     # -- notifications (reads only: no mark-as-read request was seen in its scripts) ----------------
 
     async def notification_count(self: ArchidektClient, token: str, user_id: int) -> int:
-        uid = _id(user_id, "user id")
+        uid = _id(user_id, "user ID")
         body = await self._request("GET", f"/users/{uid}/notificationCount/", token=token, fresh=True)
         n = body.get("notificationCount") if isinstance(body, dict) else None
         if isinstance(n, bool) or not isinstance(n, int) or n < 0:
@@ -498,7 +498,7 @@ class AccountRequests:
         return n
 
     async def notifications(self: ArchidektClient, token: str, user_id: int) -> list[dict[str, Any]]:
-        uid = _id(user_id, "user id")
+        uid = _id(user_id, "user ID")
         body = await self._request("GET", f"/users/{uid}/notifications/", token=token, fresh=True)
         return _rows(body, "notifications")
 
@@ -507,7 +507,7 @@ class AccountRequests:
     async def contest_entries(
         self: ArchidektClient, token: str | None, thread_id: int
     ) -> list[dict[str, Any]]:
-        tid = _id(thread_id, "thread id")
+        tid = _id(thread_id, "thread ID")
         body = await self._request(
             "GET", f"/comments/contestSubmission/decks/{tid}/", token=token, fresh=True
         )
@@ -517,12 +517,12 @@ class AccountRequests:
         self: ArchidektClient, token: str, owner: int, thread_id: int, deck_id: str
     ) -> Any:
         body = {
-            "owner": _id(owner, "user id"),
-            "parentPost": _id(thread_id, "thread id"),
+            "owner": _id(owner, "user ID"),
+            "parentPost": _id(thread_id, "thread ID"),
             "deck": int(_deck(deck_id)),
         }
         return await self._request("POST", "/comments/contestSubmission/", token=token, json_body=body)
 
     async def contest_withdraw(self: ArchidektClient, token: str, submission_id: int) -> None:
-        sid = _id(submission_id, "entry id")
+        sid = _id(submission_id, "entry ID")
         await self._request("DELETE", f"/comments/contestSubmission/delete/{sid}/", token=token)
